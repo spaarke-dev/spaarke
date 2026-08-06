@@ -133,6 +133,13 @@ public sealed class ComposeSummaryPageSeamTests
         }
         body.Descendants<InsertedRun>().Count().Should().Be(CountInsertedRuns(original),
             $"the Summary Page must NOT be emitted as a tracked w:ins insertion for '{docName}' (ADR-049 — this is not a ComposeShadowPatchEngine operation); pre-existing document redlines are untouched");
+        // 027 review F3: the subset oracle - NO appended paragraph carries a tracked insertion. Immune to
+        // the net-zero hole (one removed + one added) the count comparison alone would miss.
+        paragraphs
+            .Where(p => !string.IsNullOrEmpty(p.ParagraphId?.Value)
+                && !originalParagraphIds.Contains(p.ParagraphId!.Value!, StringComparer.OrdinalIgnoreCase))
+            .SelectMany(p => p.Descendants<InsertedRun>())
+            .Should().BeEmpty($"no APPENDED Summary Page paragraph may carry a tracked insertion for '{docName}'");
 
         // NFR-01 (reused comparer, task 004): every package part OTHER than document.xml — styles,
         // numbering, headers/footers, theme, media, ... — is byte-identical. AppendSection only opens

@@ -61,7 +61,7 @@ public sealed class ComposeFidelityRoundTripSeamTests : IClassFixture<ComposeFid
 {
     /// <summary>The `name` claim ComposeFidelitySeamFakeAuthHandler stamps — the save-path revision
     /// author (ComposeService.ResolveRevisionAuthor) every NEW tracked edit must be attributed to.</summary>
-    private const string SaveAuthor = "Spaarke Fidelity Seam Test User";
+    private const string SaveAuthor = ComposeFidelitySeamFixture.AuthenticatedUserName;
 
     private readonly ComposeFidelitySeamFixture _fixture;
 
@@ -178,12 +178,12 @@ public sealed class ComposeFidelityRoundTripSeamTests : IClassFixture<ComposeFid
                 "thin model cannot carry them, the carrier contributes them");
         }
 
-        var footerContents = archive.Entries
-            .Where(e => e.FullName.StartsWith("word/footer", StringComparison.Ordinal))
-            .Select(e => { using var r = new StreamReader(e.Open()); return r.ReadToEnd(); })
-            .ToList();
-        footerContents.Any(c => c.Contains("<w:sdt>", StringComparison.Ordinal)
-                && c.Contains("PAGE", StringComparison.Ordinal))
+        // Review F6: assert the SEMANTIC (an SDT wrapping a PAGE field) via the SDK, not raw markup
+        // text - immune to legitimate re-serialization (attributes on the tag, prefix changes).
+        using var persistedDoc = OpenPersisted(result.PersistedBytes);
+        persistedDoc.MainDocumentPart!.FooterParts
+            .Any(fp => fp.Footer!.Descendants<SdtElement>()
+                .Any(sdt => sdt.Descendants<FieldCode>().Any(f => f.Text.Contains("PAGE", StringComparison.Ordinal))))
             .Should().BeTrue("the footer page-number SDT (w:sdt wrapping a PAGE field) must survive");
     }
 
@@ -301,6 +301,13 @@ public sealed class ComposeFidelityRoundTripSeamTests : IClassFixture<ComposeFid
         doc.MainDocumentPart.Document!.Body!.Descendants<CommentReference>()
             .Any(r => r.Id?.Value == "1")
             .Should().BeTrue("the body must still ANCHOR comment id 1 (w:commentReference) after reopen");
+
+        // Review F5: the RANGE markers must survive too - dropping them collapses the comment from a
+        // text range to a point anchor (a silent fidelity loss the reference assert alone misses).
+        doc.MainDocumentPart.Document.Body.Descendants<CommentRangeStart>()
+            .Should().ContainSingle(r => r.Id!.Value == "1", "the commentRangeStart must survive");
+        doc.MainDocumentPart.Document.Body.Descendants<CommentRangeEnd>()
+            .Should().ContainSingle(r => r.Id!.Value == "1", "the commentRangeEnd must survive");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -366,6 +373,24 @@ public sealed class ComposeFidelityRoundTripSeamTests : IClassFixture<ComposeFid
             .ToList();
         revisionIds.Should().NotBeEmpty();
         revisionIds.Should().OnlyHaveUniqueItems("all revision w:id values must be unique after the render");
+
+        // Review F1: the FORMATTING-change history the fixture was purpose-built to carry must survive -
+        // without these, a silent rPrChange/pPrChange drop round-trips green on the asserts above.
+        body.Descendants<RunPropertiesChange>()
+            .Should().Contain(c => c.Author!.Value == "Alice Chen",
+                "the w:rPrChange (bold added by Alice) must survive the round trip");
+        body.Descendants<Paragraph>()
+            .Any(p => p.InnerText.Contains("irreparable harm", StringComparison.Ordinal)
+                && p.Descendants<RunPropertiesChange>().Any())
+            .Should().BeTrue("the format-change record must stay on the 'irreparable harm' paragraph");
+        body.Descendants<ParagraphPropertiesChange>()
+            .Should().Contain(c => c.Author!.Value == "Bob Rivera",
+                "the w:pPrChange (centered by Bob) must survive the round trip");
+        body.Descendants<Paragraph>()
+            .Any(p => p.InnerText.Contains("Governing Law", StringComparison.Ordinal)
+                && p.ParagraphProperties?.Justification?.Val != null
+                && p.ParagraphProperties.Justification.Val.Value == JustificationValues.Center)
+            .Should().BeTrue("the Governing Law paragraph must stay centered (current formatting stands)");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -518,6 +543,26 @@ public sealed class ComposeFidelityRoundTripSeamTests : IClassFixture<ComposeFid
         reopenResponse.StatusCode.Should().Be(HttpStatusCode.OK,
             $"[{speId}] the reopen load of the persisted bytes must succeed — body: {reopenBody}");
         var reopenRoot = JsonNode.Parse(reopenBody)!.AsObject();
+
+        // Review F2: SELF-PROOF of the reopen leg - the reopened model must contain the text the mutation
+        // ADDED. Had the re-arm silently served the ORIGINAL bytes (dropped/misordered re-arm, speId typo),
+        // every reopen-side oracle in the slices would pass vacuously against the original; this converts
+        // mock-arrangement trust into wire proof.
+        reopenRoot["contentModel"].Should().NotBeNull($"[{speId}] the reopened persisted bytes must project");
+        var originalText = string.Concat(EnumerateModelRuns(loadRoot["contentModel"]!.AsObject())
+            .Select(r => r["text"]?.GetValue<string>() ?? string.Empty));
+        var addedTexts = EnumerateModelRuns(editedModel)
+            .Select(r => r["text"]?.GetValue<string>() ?? string.Empty)
+            .Where(t => t.Length > 0 && !originalText.Contains(t, StringComparison.Ordinal))
+            .ToList();
+        addedTexts.Should().NotBeEmpty($"[{speId}] every driver slice mutates by ADDING visible text");
+        var reopenText = string.Concat(EnumerateModelRuns(reopenRoot["contentModel"]!.AsObject())
+            .Select(r => r["text"]?.GetValue<string>() ?? string.Empty));
+        foreach (var added in addedTexts)
+        {
+            reopenText.Should().Contain(added,
+                $"[{speId}] the reopen must serve the PERSISTED bytes, not the original");
+        }
 
         return new WireRoundTrip(loadRoot, saveRoot, persisted!, reopenRoot);
     }
