@@ -80,6 +80,7 @@ export type {
   DocumentViewerTabWidgetData,
   DashboardTabWidgetData,
   TableTabWidgetData,
+  EmailTabWidgetData,
   WorkspaceTabSourceProvenance,
   WorkspaceTabMatterContext,
 } from './types/WorkspaceTab';

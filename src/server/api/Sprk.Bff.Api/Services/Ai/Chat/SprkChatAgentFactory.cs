@@ -1588,16 +1588,13 @@ public class SprkChatAgentFactory
     internal const string ComposeDefaultFilename = "Compose document";
 
     /// <remarks>
-    /// <b>task 041 escalation (2026-08-06, spaarkeai-assistant-enhancements-r2, CLAUDE.md
-    /// §6)</b>: this switch has NO case for an Email-shaped <see cref="WorkspaceTabWidgetData"/>
-    /// because no such subtype exists today — the union is closed to Summary / DocumentViewer /
-    /// Dashboard / Table (see <c>WorkspaceTabWidgetData.cs</c>). Real email fields
-    /// (subject/from/date/threadId) live only in the client's <c>useEmailWorkspaceRecord</c>
-    /// hook and have no persisted server-side carrier yet (deferred producer wiring: task 042 /
-    /// FR-C1). An "email"-widgetType tab therefore falls through the default arm below and
-    /// returns <c>null</c> (same FR-59 privacy-default outcome as any tab with unrecognized
-    /// widget data) until that producer lands and adds the matching case. The output shape is
-    /// ready: <see cref="WorkspaceTabVisibleState.Email"/>.
+    /// <b>task 041b (2026-08-06, spaarkeai-assistant-enhancements-r2, "Path 1: persisted
+    /// Email carrier")</b>: resolves the task 041 escalation. <see cref="EmailTabWidgetData"/>
+    /// (added by 041b) is the persisted server-side carrier for real email fields
+    /// (subject/from/date/threadId/snippet), populated client-side from
+    /// <c>useEmailWorkspaceRecord</c> at tab open/update (task 042a). Email now behaves like
+    /// the other 4 widgets: content persisted in <c>widgetData</c>, both derivations
+    /// structurally enforced, ADR-015-authoritative.
     /// </remarks>
     internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
     {
@@ -1640,6 +1637,16 @@ public class SprkChatAgentFactory
                 SortColumn: t.SortColumn,
                 FilteredColumns: t.FilteredColumns,
                 SelectedRows: t.SelectedRows?.Count ?? 0),
+
+            // task 041b ("Path 1: persisted Email carrier"). EmlDocumentId is deliberately
+            // NOT projected — it is a fetch handle for on-demand eml-render (FR-C4), not
+            // prompt content, mirroring DocumentViewer's DocumentId omission.
+            EmailTabWidgetData em => new WorkspaceTabVisibleState.Email(
+                Subject: em.Subject,
+                From: em.From,
+                Date: em.Date,
+                ThreadId: em.ThreadId,
+                Snippet: TruncateEmailSnippet(em.Snippet)),
 
             // Unknown / null widget data → no visible state (privacy default).
             _ => null,
@@ -1721,6 +1728,19 @@ public class SprkChatAgentFactory
     {
         if (!hasSelection || string.IsNullOrWhiteSpace(selection)) return null;
         var trimmed = selection.Trim();
+        if (trimmed.Length <= SelectionTextMaxChars) return trimmed;
+        return trimmed[..SelectionTextMaxChars] + "…";
+    }
+
+    /// <summary>
+    /// task 041b — cap an Email tab's snippet at the same <see cref="SelectionTextMaxChars"/>
+    /// bound <see cref="TruncateSelection"/> applies to DocumentViewer's selectionText. The
+    /// snippet is the sole content-bearing Email field per ADR-015.
+    /// </summary>
+    private static string? TruncateEmailSnippet(string? snippet)
+    {
+        if (string.IsNullOrWhiteSpace(snippet)) return null;
+        var trimmed = snippet.Trim();
         if (trimmed.Length <= SelectionTextMaxChars) return trimmed;
         return trimmed[..SelectionTextMaxChars] + "…";
     }

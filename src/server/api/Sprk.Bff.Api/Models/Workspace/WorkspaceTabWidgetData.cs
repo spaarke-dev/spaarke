@@ -28,6 +28,7 @@ namespace Sprk.Bff.Api.Models.Workspace;
 [JsonDerivedType(typeof(DocumentViewerTabWidgetData), typeDiscriminator: "DocumentViewer")]
 [JsonDerivedType(typeof(DashboardTabWidgetData), typeDiscriminator: "Dashboard")]
 [JsonDerivedType(typeof(TableTabWidgetData), typeDiscriminator: "Table")]
+[JsonDerivedType(typeof(EmailTabWidgetData), typeDiscriminator: "Email")]
 public abstract class WorkspaceTabWidgetData
 {
     /// <summary>
@@ -161,4 +162,60 @@ public sealed class TableTabWidgetData : WorkspaceTabWidgetData
     /// <summary>Optional stable data-source id (e.g. FetchXML id) for re-fetch on restore.</summary>
     [JsonPropertyName("dataSourceId")]
     public string? DataSourceId { get; init; }
+}
+
+/// <summary>
+/// Widget data for an <c>Email</c> tab (spaarkeai-assistant-enhancements-r2 task 041b,
+/// FR-C1/FR-C2 — "Path 1: persisted Email carrier"). Pillar 9 visible state:
+/// <c>{ widgetType, subject, from, date, threadId?, snippet? }</c>.
+///
+/// <para>
+/// <b>ADR-015 BINDING</b>: this is a compact metadata snapshot, mirroring
+/// <see cref="DocumentViewerTabWidgetData"/>'s "persist a snapshot + a fetch handle,
+/// don't persist the heavy body" pattern. <see cref="Snippet"/> is the SOLE
+/// content-bearing field — capped to 200 chars by
+/// <c>SprkChatAgentFactory.SelectionTextMaxChars</c> at derivation time (see
+/// <c>SprkChatAgentFactory.TryDeriveVisibleState</c>), the same cap
+/// <see cref="DocumentViewerTabWidgetData.SelectionText"/> uses. <see cref="EmlDocumentId"/>
+/// is a fetch HANDLE for on-demand <c>.eml</c> rendering (FR-C4) — it is never emitted
+/// into agent-visible state (mirrors <see cref="DocumentViewerTabWidgetData.DocumentId"/>
+/// being omitted from <c>WorkspaceTabVisibleState.DocumentViewer</c>).
+/// </para>
+/// </summary>
+public sealed class EmailTabWidgetData : WorkspaceTabWidgetData
+{
+    /// <inheritdoc/>
+    [JsonIgnore]
+    public override string Kind => "Email";
+
+    /// <summary>
+    /// <c>.eml</c> document handle for on-demand eml-render (FR-C4). Null when no
+    /// <c>.eml</c> artifact exists for this email. A fetch handle only — NOT prompt
+    /// content; never surfaced via <c>TryDeriveVisibleState</c>.
+    /// </summary>
+    [JsonPropertyName("emlDocumentId")]
+    public string? EmlDocumentId { get; init; }
+
+    /// <summary>Email subject line — identity/metadata field, always emitted.</summary>
+    [JsonPropertyName("subject")]
+    public required string Subject { get; init; }
+
+    /// <summary>Sender display/address — identity/metadata field, always emitted.</summary>
+    [JsonPropertyName("from")]
+    public required string From { get; init; }
+
+    /// <summary>Email date, ISO-8601 string — identity/metadata field, always emitted.</summary>
+    [JsonPropertyName("date")]
+    public required string Date { get; init; }
+
+    /// <summary>Conversation/thread id. Optional identity field.</summary>
+    [JsonPropertyName("threadId")]
+    public string? ThreadId { get; init; }
+
+    /// <summary>
+    /// Short body snippet / current selection. The SOLE content-bearing field on this
+    /// type — capped at 200 chars when projected into agent-visible state.
+    /// </summary>
+    [JsonPropertyName("snippet")]
+    public string? Snippet { get; init; }
 }

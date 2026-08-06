@@ -106,17 +106,12 @@ public abstract record WorkspaceTabVisibleState
     /// background tabs (only the active tab emits it — FR-A4).
     /// </summary>
     /// <remarks>
-    /// <b>task 041 escalation (2026-08-06, CLAUDE.md §6)</b>: no
-    /// <see cref="WorkspaceTabWidgetData"/> subtype exists yet that carries
-    /// subject/from/date/threadId for a real email tab — the compact email fields live
-    /// only in the client's <c>useEmailWorkspaceRecord</c> hook (deferred producer
-    /// wiring: task 042 / FR-C1). Adding that producer type was judged out of this
-    /// task's scope per its own explicit escalation instruction ("if the WidgetData
-    /// subtype does not carry these fields, stop and escalate rather than inventing
-    /// data"). This shape (the OUTPUT contract) is defined now so
-    /// <see cref="SprkChatAgentFactory.FormatVisibleStateFields"/> can emit it, and so a
-    /// future <c>TryDeriveVisibleState</c> case has a ready target once the producer
-    /// lands. See task 041 completion report for the full field-availability finding.
+    /// <b>task 041b (2026-08-06, "Path 1: persisted Email carrier")</b>: resolves the task
+    /// 041 escalation. <see cref="EmailTabWidgetData"/> is now the persisted producer for
+    /// this shape — <see cref="SprkChatAgentFactory.TryDeriveVisibleState"/> maps it to this
+    /// record via a first-class switch case (no fallback, no Dashboard masquerade). See
+    /// <c>projects/spaarkeai-assistant-enhancements-r2/notes/c-architecture-gap.md</c> for
+    /// the full resolution rationale.
     /// </remarks>
     public sealed record Email(
         string Subject,

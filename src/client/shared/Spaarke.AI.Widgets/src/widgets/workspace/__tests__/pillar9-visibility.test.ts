@@ -593,6 +593,50 @@ describe('registry wiring (task 072 + 073)', () => {
     expect(typeof getWorkspaceWidgetVisibleStateFn('work-assignments-list')).toBe('function');
   });
 
+  test('Email registration (task 042a/042c) exposes a getVisibleState fn that narrows on kind === "Email" and delegates to emailWidgetVisibility', async () => {
+    await import('../register-workspace-widgets');
+    const { getWorkspaceWidgetVisibleStateFn } = await import('../../../registry/WorkspaceWidgetRegistry');
+
+    const getEmailVisibleState = getWorkspaceWidgetVisibleStateFn('email');
+    expect(typeof getEmailVisibleState).toBe('function');
+
+    // A persisted EmailTabWidgetData carrier (Path 1 — notes/c-architecture-gap.md)
+    // yields the same capped SerializedEmailState emailWidgetVisibility (task
+    // 040) produces — reused, not duplicated. emlDocumentId is a fetch handle
+    // only and must NOT leak into the derived state.
+    const longSnippet = 'x'.repeat(EMAIL_SNIPPET_CAP_CHARS + 50);
+    const emailTabWidgetData = {
+      kind: 'Email' as const,
+      emlDocumentId: 'doc-123',
+      subject: 'Re: Engagement Letter',
+      from: 'jane@example.com',
+      date: '2026-08-06T12:00:00Z',
+      threadId: 'thread-abc',
+      snippet: longSnippet,
+    };
+
+    const result = getEmailVisibleState!(emailTabWidgetData) as SerializedEmailState;
+    expect(result).toEqual({
+      widgetType: 'Email',
+      subject: 'Re: Engagement Letter',
+      from: 'jane@example.com',
+      date: '2026-08-06T12:00:00Z',
+      threadId: 'thread-abc',
+      snippet: longSnippet.slice(0, EMAIL_SNIPPET_CAP_CHARS),
+    });
+    expect(result.snippet).toHaveLength(EMAIL_SNIPPET_CAP_CHARS);
+    // emlDocumentId (fetch handle, FR-C4) must never appear on the derived state.
+    expect(result).not.toHaveProperty('emlDocumentId');
+
+    // Non-Email widgetData (e.g. a Dashboard tab's payload, or an unpopulated
+    // email tab predating task 042b's population work) returns null — the
+    // kind-guard, not the field-shape check, is what gates this.
+    expect(getEmailVisibleState!({ kind: 'Dashboard', dashboardName: 'Corporate Workspace' })).toBeNull();
+    expect(getEmailVisibleState!({ subject: 'no kind field', from: 'a@b.com', date: '2026-08-06' })).toBeNull();
+    expect(getEmailVisibleState!(null)).toBeNull();
+    expect(getEmailVisibleState!(undefined)).toBeNull();
+  });
+
   test('opt-out invariant: widgets that did not register a visibility function return undefined', async () => {
     // Force registry load chain via the same import path the previous test
     // used (registration is first-wins, so subsequent imports are no-ops).

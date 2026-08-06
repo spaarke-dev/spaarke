@@ -863,31 +863,76 @@ public class SprkChatAgentFactoryWorkspaceStateTests
     }
 
     [Fact]
-    public void TryDeriveVisibleState_EmailWidgetType_FallsThroughToDashboard_PendingWidgetDataProducer()
+    public void TryDeriveVisibleState_EmailWidgetData_DerivesEmailVisibleState_WithCappedSnippet()
     {
-        // task 041 escalation (CLAUDE.md §6): no WorkspaceTabWidgetData subtype exists yet
-        // that carries subject/from/date/threadId for a real email tab — that data lives
-        // only in the client's useEmailWorkspaceRecord hook (deferred producer wiring:
-        // task 042 / FR-C1). Because TryDeriveVisibleState switches on the WidgetData's
-        // CLR type (not tab.WidgetType — there is no "email" special case, unlike the
-        // "compose" pre-switch check above), an "email"-widgetType tab whose persisted
-        // WidgetData happens to be Dashboard-shaped (the pre-task-041 fallback the
-        // orchestrator's contract describes) derives a name-only Dashboard state, NOT
-        // null and NOT an Email state. This test documents the CURRENT gap and is the
-        // regression trip-wire for the follow-up: once a producer type + a
-        // TryDeriveVisibleState case for it exist, this test must be updated to assert a
-        // real WorkspaceTabVisibleState.Email result instead.
-        var tab = MakeTab("email-1", widgetType: "email",
-            widgetData: new DashboardTabWidgetData
+        // task 041b ("Path 1: persisted Email carrier") resolves the task 041 escalation.
+        // A tab whose persisted WidgetData is EmailTabWidgetData must derive a real
+        // WorkspaceTabVisibleState.Email — never the pre-041b Dashboard-shaped fallback.
+        // Snippet must be capped at SprkChatAgentFactory.SelectionTextMaxChars (200), the
+        // same bound DocumentViewer.SelectionText respects.
+        var longSnippet = new string('a', 250);
+        var tab = MakeTab("email-1", widgetType: "Email",
+            widgetData: new EmailTabWidgetData
             {
-                LayoutId = string.Empty,
-                DashboardName = "Email",
+                EmlDocumentId = "eml-doc-999",
+                Subject = "Re: NDA review",
+                From = "alice@acme.com",
+                Date = "2026-08-01T10:00:00Z",
+                ThreadId = "thread-123",
+                Snippet = longSnippet,
             });
 
         var state = SprkChatAgentFactory.TryDeriveVisibleState(tab);
 
-        state.Should().BeOfType<WorkspaceTabVisibleState.Dashboard>();
-        state.Should().NotBeOfType<WorkspaceTabVisibleState.Email>();
+        state.Should().BeOfType<WorkspaceTabVisibleState.Email>();
+        state.Should().NotBeOfType<WorkspaceTabVisibleState.Dashboard>();
+        var email = (WorkspaceTabVisibleState.Email)state!;
+        email.Subject.Should().Be("Re: NDA review");
+        email.From.Should().Be("alice@acme.com");
+        email.Date.Should().Be("2026-08-01T10:00:00Z");
+        email.ThreadId.Should().Be("thread-123");
+        email.Snippet.Should().HaveLength(201); // 200 chars + ellipsis
+        email.Snippet.Should().StartWith(new string('a', 200));
+
+        // FormatVisibleStateFields emits the derived state's fields end-to-end.
+        var formatted = SprkChatAgentFactory.FormatVisibleStateFields(state!, contentVisible: true);
+        formatted.Should().Contain("subject: Re: NDA review");
+        formatted.Should().Contain("from: alice@acme.com");
+        formatted.Should().Contain("date: 2026-08-01T10:00:00Z");
+        formatted.Should().Contain("threadId: thread-123");
+        formatted.Should().Contain($"snippet: {email.Snippet}");
+    }
+
+    [Fact]
+    public void EmailTabWidgetData_JsonRoundTrip_KindDiscriminatorDeserializesToEmailTabWidgetData()
+    {
+        // ADR-015 / closed-union contract: the persisted "kind":"Email" discriminator must
+        // round-trip through the polymorphic WorkspaceTabWidgetData base type — no fallback,
+        // no throw, no silent loss of the concrete subtype.
+        WorkspaceTabWidgetData original = new EmailTabWidgetData
+        {
+            EmlDocumentId = "eml-doc-999",
+            Subject = "Re: NDA review",
+            From = "alice@acme.com",
+            Date = "2026-08-01T10:00:00Z",
+            ThreadId = "thread-123",
+            Snippet = "Please review the attached draft.",
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(original);
+        json.Should().Contain("\"kind\":\"Email\"");
+
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<WorkspaceTabWidgetData>(json);
+
+        roundTripped.Should().BeOfType<EmailTabWidgetData>();
+        var email = (EmailTabWidgetData)roundTripped!;
+        email.Kind.Should().Be("Email");
+        email.EmlDocumentId.Should().Be("eml-doc-999");
+        email.Subject.Should().Be("Re: NDA review");
+        email.From.Should().Be("alice@acme.com");
+        email.Date.Should().Be("2026-08-01T10:00:00Z");
+        email.ThreadId.Should().Be("thread-123");
+        email.Snippet.Should().Be("Please review the attached draft.");
     }
 
     // ---------------------------------------------------------------------
