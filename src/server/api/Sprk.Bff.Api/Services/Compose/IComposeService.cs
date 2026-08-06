@@ -733,6 +733,17 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     public ReanchorSummary? ReanchorSummary { get; init; }
 
     /// <summary>
+    /// Task 026 (FR-04 graceful degradation — success-with-warnings): the render-side DEGRADATION
+    /// warnings this save produced (codes + counts only, no document content) — content the authoring
+    /// engine had to simplify or drop (filtered comment anchors, failed tracked-format-change parse
+    /// gates, unresolvable hyperlink targets). Populated on the born-in-editor render path
+    /// (ContentModel present); null/empty = nothing degraded. The save still SUCCEEDS — a hard-tier
+    /// construct is never a 422 (the graceful-degradation guarantee); the prior version remains
+    /// retrievable via SPE version history (FR-07 safety net).
+    /// </summary>
+    public IReadOnlyList<ComposeProjectionWarning>? DegradationWarnings { get; init; }
+
+    /// <summary>
     /// Prong 1 (task 055 — keep-edits graceful degradation). Populated ONLY when the loaded-doc apply
     /// hit an op-level anchoring refusal and the service fell back to best-effort per-paragraph recovery:
     /// the resolvable paragraph-units were applied and the unresolvable ops are surfaced here (never

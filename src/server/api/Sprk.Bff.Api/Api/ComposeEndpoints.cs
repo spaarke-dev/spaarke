@@ -1464,7 +1464,9 @@ public static class ComposeEndpoints
                 // clean-apply engine mode selection without a follow-up Load).
                 Origin: result.Origin,
                 // Prong 1 (task 055): best-effort partial-apply outcome (null on the clean path).
-                PartialApply: result.PartialApply));
+                PartialApply: result.PartialApply,
+                // Task 026 (FR-04): success-with-warnings degradation surface.
+                DegradationWarnings: result.DegradationWarnings));
         }
         catch (ArgumentException ex)
         {
@@ -2238,7 +2240,12 @@ public sealed record SaveComposeDocumentResponse(
     // unresolvable ops are listed here so the client can prompt the user to redo just those edits (never
     // silently applied, never silently dropped). Null on the common path (clean batch apply) and on a
     // batch-level refusal (which still fails hard). Optional/trailing so existing callers are unaffected.
-    [property: JsonPropertyName("partialApply")] PartialApplySummary? PartialApply = null);
+    [property: JsonPropertyName("partialApply")] PartialApplySummary? PartialApply = null,
+    // Task 026 (FR-04 graceful degradation): render-side degradation warnings (codes + counts) — content
+    // the authoring engine simplified/dropped on this save (success-with-warnings; NEVER a 422 for a
+    // hard-tier construct). Null/absent when nothing degraded. Optional/trailing so existing callers
+    // deserializing this response are unaffected.
+    [property: JsonPropertyName("degradationWarnings")] IReadOnlyList<ComposeProjectionWarning>? DegradationWarnings = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(

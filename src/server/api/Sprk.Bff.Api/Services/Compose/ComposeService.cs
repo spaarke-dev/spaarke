@@ -681,7 +681,7 @@ public class ComposeService : IComposeService
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
 
-        byte[] contentToPersist = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
+        (byte[] contentToPersist, var renderDegradationWarnings) = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
 
         // FR-06 (task 032, the write-path cutover): apply the client's ordered, rebased task-003 operation log
@@ -1170,6 +1170,8 @@ public class ComposeService : IComposeService
             ReanchorSummary = reanchorSummary,
             PartialApply = partialApplySummary,
             Origin = origin,
+            // Task 026 (FR-04): success-with-warnings — render-side degradations surfaced, never a 422.
+            DegradationWarnings = renderDegradationWarnings,
         };
     }
 
@@ -1197,7 +1199,7 @@ public class ComposeService : IComposeService
     /// fast-path + versionId cover every real save case.
     /// </para>
     /// </summary>
-    private async Task<byte[]> ResolveSaveBaselineAsync(
+    private async Task<(byte[] Bytes, IReadOnlyList<ComposeProjectionWarning>? RenderDegradations)> ResolveSaveBaselineAsync(
         SaveComposeDocumentRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken)
@@ -1212,13 +1214,19 @@ public class ComposeService : IComposeService
         //      BaselineVersionId (a born-in-editor doc has no baseline to delta onto).
         if (request.ContentModel is not null)
         {
-            return _documentRenderer.SynthesizeDocument(request.ContentModel, ResolveRevisionAuthor(httpContext));
+            // Task 026 (FR-04): collect the render-side degradation warnings (dropped anchors /
+            // format-change records / hrefs) so the save can report SUCCESS-WITH-WARNINGS — a degraded
+            // construct is surfaced to the user, never a 422 and never silent.
+            var renderDegradations = new List<ComposeProjectionWarning>();
+            var rendered = _documentRenderer.SynthesizeDocument(
+                request.ContentModel, ResolveRevisionAuthor(httpContext), renderDegradations);
+            return (rendered, renderDegradations.Count > 0 ? renderDegradations : null);
         }
 
         // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
         if (!request.Content.IsEmpty)
         {
-            return request.Content.ToArray();
+            return (request.Content.ToArray(), null);
         }
 
         // (b) FR-06 primary: re-fetch the LOAD-TIME SPE version by versionId (task 002), behind the
@@ -1237,7 +1245,7 @@ public class ComposeService : IComposeService
                 {
                     using var buffer = new MemoryStream();
                     await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-                    return buffer.ToArray();
+                    return (buffer.ToArray(), null);
                 }
             }
 

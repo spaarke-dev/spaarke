@@ -100,7 +100,7 @@ public sealed partial class ComposeDocumentRenderer
     /// <param name="author">Document author, written to core properties (<c>dc:creator</c>). A blank value
     /// falls back to a stable product label.</param>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
-    public byte[] SynthesizeDocument(ComposeContentModel model, string author)
+    public byte[] SynthesizeDocument(ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         var creator = string.IsNullOrWhiteSpace(author) ? "Spaarke Compose" : author.Trim();
@@ -112,23 +112,28 @@ public sealed partial class ComposeDocumentRenderer
             mainPart.Document = new Document();
             var body = mainPart.Document.AppendChild(new Body());
 
+            // A NumberingPlan accumulates the ordered/bullet num instances the body render allocates, so the
+            // numbering part authored afterwards references exactly the ids the body used. (Blank package —
+            // no carrier numbering exists, so source NumIds map to allocated instances; see ListRenderState.)
+            // Task 026: the state is ALSO the render-side degradation sink (state.Warn), so every silent
+            // render drop — filtered anchors, dropped format-change records, unresolvable hrefs — is
+            // counted and surfaced through the optional `degradations` out-collection.
+            var plan = new NumberingPlan();
+            var state = new ListRenderState(plan);
+
             // Step-9.5 F2: anchors may only reference ids the AUTHORED part will contain (deduped model
             // ids) — unmatched/out-of-range anchors drop rather than dangle as corrupting references.
             var renderBlocks = model.Blocks;
             if (ModelContainsCommentAnchor(renderBlocks))
             {
-                renderBlocks = FilterCommentAnchors(renderBlocks, new HashSet<int>(model.Comments.Select(c => c.Id)));
+                renderBlocks = FilterCommentAnchors(renderBlocks, new HashSet<int>(model.Comments.Select(c => c.Id)), state);
             }
 
-            // A NumberingPlan accumulates the ordered/bullet num instances the body render allocates, so the
-            // numbering part authored afterwards references exactly the ids the body used. (Blank package —
-            // no carrier numbering exists, so source NumIds map to allocated instances; see ListRenderState.)
-            var plan = new NumberingPlan();
-            RenderBlocks(body, renderBlocks, new ListRenderState(plan));
+            RenderBlocks(body, renderBlocks, state);
 
             // G5 (FR-05, task 033): swap each BuildRun href-sentinel for a real EXTERNAL hyperlink
             // relationship on the main part (the part is in scope here; BuildRun was not). Before save.
-            ResolveHyperlinkRelationships(body, mainPart);
+            ResolveHyperlinkRelationships(body, mainPart, state);
 
             // Word requires a trailing sectPr for a valid single-section document.
             body.AppendChild(new SectionProperties(
@@ -145,6 +150,8 @@ public sealed partial class ComposeDocumentRenderer
 
             AddCoreProperties(document, creator);
             mainPart.Document.Save();
+
+            state.CopyDegradationsTo(degradations);
         }
 
         return stream.ToArray();
@@ -383,7 +390,7 @@ public sealed partial class ComposeDocumentRenderer
     /// <exception cref="ArgumentException"><paramref name="carrierBytes"/> is null/empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <exception cref="ComposePatchException">The carrier is not a readable package or has no main part/body.</exception>
-    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author)
+    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null)
     {
         if (carrierBytes is null || carrierBytes.Length == 0)
         {
@@ -470,11 +477,11 @@ public sealed partial class ComposeDocumentRenderer
                 {
                     validCommentIds = new HashSet<int>(model.Comments.Select(c => c.Id));
                 }
-                renderBlocks = FilterCommentAnchors(renderBlocks, validCommentIds);
+                renderBlocks = FilterCommentAnchors(renderBlocks, validCommentIds, state);
             }
 
             RenderBlocks(body, renderBlocks, state);
-            ResolveHyperlinkRelationships(body, mainPart);
+            ResolveHyperlinkRelationships(body, mainPart, state);
 
             if (mainPart.StyleDefinitionsPart is null)
             {
@@ -528,6 +535,8 @@ public sealed partial class ComposeDocumentRenderer
             }
 
             mainPart.Document!.Save();
+
+            state.CopyDegradationsTo(degradations);
         }
 
         return buffer.ToArray();
@@ -569,10 +578,12 @@ public sealed partial class ComposeDocumentRenderer
             {
                 comment.Initials = SanitizeText(model.Initials);
             }
-            if (!string.IsNullOrEmpty(model.Date)
-                && DateTime.TryParse(model.Date, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out _))
+            // Task 026 (025-F3 same-class fix): the xsd:dateTime LEXICAL gate — a TryParse-able culture
+            // date ("08/01/2026") is still a schema-invalid @w:date and must be omitted, exactly like the
+            // revision-date gate.
+            if (NormalizeXsdDateTime(model.Date) is { } validCommentDate)
             {
-                comment.Date = new DateTimeValue { InnerText = model.Date };
+                comment.Date = new DateTimeValue { InnerText = validCommentDate };
             }
             var text = model.Text.Replace("\r\n", "\n").Replace('\r', '\n'); // F10: normalize client CRLF
             foreach (var line in text.Split('\n'))
@@ -625,8 +636,10 @@ public sealed partial class ComposeDocumentRenderer
 
     /// <summary>Step-9.5 F2: drops anchor marker runs whose id is not in <paramref name="validIds"/> or
     /// whose Kind is out of range (JsonStringEnumConverter accepts raw integers). Returns the SAME
-    /// instances when nothing needs filtering.</summary>
-    private static IReadOnlyList<ComposeBlock> FilterCommentAnchors(IReadOnlyList<ComposeBlock> blocks, IReadOnlySet<int> validIds)
+    /// instances when nothing needs filtering. Task 026: every dropped anchor is COUNTED on
+    /// <paramref name="state"/> (<c>comment-anchor-dropped</c> — the 024-routed loud counter); null state
+    /// (AppendSection's by-design strip of anchors its callers never send) records nothing.</summary>
+    private static IReadOnlyList<ComposeBlock> FilterCommentAnchors(IReadOnlyList<ComposeBlock> blocks, IReadOnlySet<int> validIds, ListRenderState? state = null)
     {
         static bool IsInvalid(ComposeInlineRun run, IReadOnlySet<int> valid) =>
             run.CommentAnchor is { } anchor
@@ -638,8 +651,10 @@ public sealed partial class ComposeDocumentRenderer
         {
             var block = blocks[i];
             var filtered = block;
-            if (block.Runs.Any(r => IsInvalid(r, validIds)))
+            var invalidCount = block.Runs.Count(r => IsInvalid(r, validIds));
+            if (invalidCount > 0)
             {
+                state?.Warn("comment-anchor-dropped", invalidCount);
                 filtered = block with { Runs = block.Runs.Where(r => !IsInvalid(r, validIds)).ToList() };
             }
             if (block.Table is { } table)
@@ -652,7 +667,7 @@ public sealed partial class ComposeDocumentRenderer
                     for (var cellIndex = 0; cellIndex < row.Cells.Count; cellIndex++)
                     {
                         var cell = row.Cells[cellIndex];
-                        var newBlocks = FilterCommentAnchors(cell.Blocks, validIds);
+                        var newBlocks = FilterCommentAnchors(cell.Blocks, validIds, state);
                         var newCell = ReferenceEquals(newBlocks, cell.Blocks) ? cell : cell with { Blocks = newBlocks };
                         if (!ReferenceEquals(newCell, cell) && newCells is null)
                         {
@@ -943,16 +958,23 @@ public sealed partial class ComposeDocumentRenderer
 
         // Paragraph-formatting change: w:pPrChange (LAST in CT_PPr). Schema requires the previous-pPr
         // child, so the whole record is dropped when the opaque carry is missing or fails the SDK parse
-        // gate (client junk never reaches the package; the current formatting simply stands).
-        if (block.PropertiesChange is { } propsChange
-            && TryParsePreviousProperties<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
+        // gate (client junk never reaches the package; the current formatting simply stands) — counted
+        // on the render degradation sink (task 026; was render-silent, 025-F4/F7 routing).
+        if (block.PropertiesChange is { } propsChange)
         {
-            pPr.AppendChild(new ParagraphPropertiesChange(previousPPr)
+            if (TryParsePreviousProperties<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
             {
-                Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture),
-                Author = SanitizeRevisionAuthor(propsChange.Author),
-                Date = TryValidRevisionDate(propsChange.Date),
-            });
+                pPr.AppendChild(new ParagraphPropertiesChange(previousPPr)
+                {
+                    Id = state.NextRevisionId().ToString(CultureInfo.InvariantCulture),
+                    Author = SanitizeRevisionAuthor(propsChange.Author),
+                    Date = TryValidRevisionDate(propsChange.Date),
+                });
+            }
+            else
+            {
+                state.Warn("tracked-format-change-dropped");
+            }
         }
 
         var paragraph = new Paragraph();
@@ -1061,10 +1083,15 @@ public sealed partial class ComposeDocumentRenderer
 
         var element = new Run();
         // Task 025: a tracked run-formatting change (w:rPrChange) forces an rPr even on an unmarked run —
-        // the change record lives inside it (LAST in CT_RPr order).
+        // the change record lives inside it (LAST in CT_RPr order). A record whose opaque carry fails the
+        // parse gate drops — counted on the render degradation sink (task 026).
         var formatChange = run.FormatChange is { } change
             ? (Change: change, Previous: TryParsePreviousProperties<PreviousRunProperties>(change.PreviousPropertiesXml))
             : ((ComposeFormatChange Change, PreviousRunProperties? Previous)?)null;
+        if (formatChange is { Previous: null })
+        {
+            state.Warn("tracked-format-change-dropped");
+        }
         if (run.Bold || run.Italic || run.Underline || formatChange?.Previous is not null)
         {
             var rPr = new RunProperties();
@@ -1111,7 +1138,7 @@ public sealed partial class ComposeDocumentRenderer
     /// A malformed href that cannot form a Uri is unwrapped to its inner run (never a broken relationship,
     /// never a silent drop of the run's text — the text survives, only the link is dropped).
     /// </summary>
-    private static void ResolveHyperlinkRelationships(Body body, MainDocumentPart mainPart)
+    private static void ResolveHyperlinkRelationships(Body body, MainDocumentPart mainPart, ListRenderState? state = null)
     {
         foreach (var hyperlink in body.Descendants<Hyperlink>().ToList())
         {
@@ -1129,7 +1156,9 @@ public sealed partial class ComposeDocumentRenderer
             else
             {
                 // Unrepresentable target (not an absolute Uri): keep the run's TEXT (no silent loss) by
-                // replacing the hyperlink wrapper with its inline children, and drop only the link.
+                // replacing the hyperlink wrapper with its inline children, and drop only the link —
+                // counted on the render degradation sink (task 026; was render-silent).
+                state?.Warn("hyperlink-target-dropped");
                 var parent = hyperlink.Parent;
                 if (parent is not null)
                 {
@@ -1908,6 +1937,27 @@ public sealed partial class ComposeDocumentRenderer
         /// revisions never collide with ids in preserved parts (headers/footers). ALWAYS server-minted —
         /// the model deliberately carries no revision id (client input never reaches <c>w:id</c>).</summary>
         public int NextRevisionId() => ++_revisionId;
+
+        // Task 026: the render-side DEGRADATION SINK — the renderer's analog of the projection's
+        // ctx.AddWarning (codes + counts only; Tier-1 safe, no document content). Anything the render
+        // DROPS (filtered anchors, failed format-change parse gates, unresolvable hrefs) is counted here
+        // and surfaced through the public methods' optional out-collection, so a save can report
+        // success-with-warnings instead of degrading silently.
+        private readonly Dictionary<string, int> _degradations = new();
+
+        public void Warn(string code, int count = 1)
+        {
+            _degradations[code] = _degradations.TryGetValue(code, out var existing) ? existing + count : count;
+        }
+
+        public void CopyDegradationsTo(ICollection<ComposeProjectionWarning>? sink)
+        {
+            if (sink is null) return;
+            foreach (var (code, count) in _degradations)
+            {
+                sink.Add(new ComposeProjectionWarning(code, count));
+            }
+        }
 
         /// <summary>Effective instance id for an ordered item carrying <paramref name="sourceNumId"/> at
         /// <paramref name="level"/>: carrier-direct when the id exists there AND its level classifies as

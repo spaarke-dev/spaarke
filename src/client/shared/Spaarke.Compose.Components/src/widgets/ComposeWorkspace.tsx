@@ -1541,6 +1541,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             appliedCount: number;
             unresolvedCount: number;
           } | null;
+          // Task 026 (FR-04 graceful degradation): render-side degradation warnings — content the server
+          // simplified/dropped while authoring this save (success-with-warnings, never a 422). Fed to the
+          // existing dismissible import-warnings banner below.
+          degradationWarnings?: Array<{ code: string; count: number }> | null;
         };
 
         // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
@@ -1573,6 +1577,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // recovered — a clean batch omits it (→ null → clears any prior partial-apply banner).
           partialApply: payload.partialApply && payload.partialApply.unresolvedCount > 0 ? payload.partialApply : null,
         });
+        // Task 026 (FR-04): surface save-time degradation warnings through the SAME dismissible
+        // banner the import warnings use — the save succeeded, but the server had to simplify content
+        // (e.g. a dropped comment anchor or tracked-format-change record). Honest, non-blocking.
+        if (payload.degradationWarnings && payload.degradationWarnings.length > 0) {
+          dispatch({
+            kind: 'importWarnings',
+            warnings: payload.degradationWarnings.map(w => ({
+              type: w.code,
+              message: `Some content was simplified when saving (${w.code}${w.count > 1 ? ` ×${w.count}` : ''}).`,
+            })),
+          });
+        }
+
         // Clear the local dirty flag so the Save button disables until the
         // next edit. ComposeEditor's internal dirtyRef also resets on the
         // next load; here we mirror that for post-save.

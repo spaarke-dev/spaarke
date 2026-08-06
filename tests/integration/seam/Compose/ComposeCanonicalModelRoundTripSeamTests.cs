@@ -91,8 +91,11 @@ public sealed class ComposeCanonicalModelRoundTripSeamTests
         // FLATTEN with counted warnings — the accept-flatten posture — never a hard-fail/refusal.
         projection.Status.Should().Be(ComposeProjectionStatus.Partial,
             "the NDA carries hard-tier constructs that must flatten with warnings, not fail");
-        projection.Warnings.Should().Contain(w => w.Code == "complex-object-dropped",
-            "the NDA's 12 w:txbxContent text boxes live inside drawing/AlternateContent runs — dropped with a counted warning until task 026 widens the surface");
+        // Task 026: the text boxes' VISIBLE TEXT is now extracted (accept-flatten) — the counted code for
+        // a text-carrying box is `text-box-flattened`; `complex-object-dropped` remains for text-free
+        // constructs. Full 026 coverage: ComposeHardTierDegradationSeamTests.
+        projection.Warnings.Should().Contain(w => w.Code == "text-box-flattened",
+            "the NDA's signature text boxes accept-flatten with a counted warning (task 026)");
         projection.Model.Blocks.Should().NotBeEmpty("the NDA's editable prose must survive projection");
     }
 

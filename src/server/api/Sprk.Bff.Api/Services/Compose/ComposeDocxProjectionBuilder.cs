@@ -1900,11 +1900,28 @@ public sealed class ComposeDocxProjectionBuilder
                     // (the comment itself stays in ComposeContentModel.Comments; 026-shaped if it surfaces).
                     ctx.AddWarning("comment-anchor-flattened", 1);
                     break;
-                case AlternateContent:
-                    // A block-level mc:AlternateContent (markup-compatibility wrapper — floating shapes,
-                    // newer constructs): no model representation — dropped LOUDLY (F-1), like the run-level
-                    // case in ProjectRun. Its nested paragraphs surface via the unrendered-paragraphs guard.
-                    ctx.AddWarning("complex-object-dropped", 1);
+                case AlternateContent blockAlternate:
+                    // Task 026 (FR-04): a block-level mc:AlternateContent (floating shapes/text boxes)
+                    // ACCEPT-FLATTENS: the visible text of ONE branch is preserved as a degraded plain
+                    // paragraph — counted `text-box-flattened`; text-free wrappers keep the loud drop.
+                    var blockBoxText = ExtractTextBoxDisplayText(blockAlternate, ctx);
+                    if (blockBoxText.Length > 0)
+                    {
+                        var clamped = ctx.ClampText(blockBoxText);
+                        if (clamped.Length > 0)
+                        {
+                            sink.Add(new ComposeBlock
+                            {
+                                Kind = ComposeBlockKind.Paragraph,
+                                Runs = new[] { new ComposeInlineRun { Text = clamped } },
+                            });
+                        }
+                        ctx.AddWarning("text-box-flattened", 1);
+                    }
+                    else
+                    {
+                        ctx.AddWarning("complex-object-dropped", 1);
+                    }
                     break;
                 default:
                     // sectPr, bookmarks, and other non-block markup: nothing to model. (Text-box paragraphs
@@ -2401,10 +2418,21 @@ public sealed class ComposeDocxProjectionBuilder
                     }
                     if (IsComplexObjectRun(r))
                     {
-                        // Drawings / OLE objects / VML pictures — and the text boxes nested inside them —
-                        // have no model representation: dropped with a counted warning (the accept-flatten
-                        // baseline task 026 builds the user-visible warning surface on).
-                        ctx.AddWarning("complex-object-dropped", 1);
+                        // Task 026 (FR-04): a TEXT-CARRYING complex object (DrawingML/VML text box — the
+                        // NDA's signature blocks) ACCEPT-FLATTENS: its visible text is preserved as a
+                        // degraded plain run at the anchor position, only the box chrome is lost —
+                        // counted `text-box-flattened`. A text-free object (image/OLE/shape) keeps the
+                        // established loud drop.
+                        var runBoxText = ExtractTextBoxDisplayText(r, ctx);
+                        if (runBoxText.Length > 0)
+                        {
+                            AddPlainRun(sink, runBoxText, href, ctx, revision);
+                            ctx.AddWarning("text-box-flattened", 1);
+                        }
+                        else
+                        {
+                            ctx.AddWarning("complex-object-dropped", 1);
+                        }
                         break;
                     }
                     ProjectRun(r, sink, href, ctx, revision);
@@ -2494,12 +2522,22 @@ public sealed class ComposeDocxProjectionBuilder
                         if (sdtContent is not null) ProjectInline(sdtContent, sink, href, ctx, revision);
                     }
                     break;
-                case AlternateContent:
-                    // Inline mc:AlternateContent (the NDA's text-box signature blocks live here — task
-                    // 004's confirmed breaker): a markup-compatibility wrapper around drawing/shape
-                    // content with no model representation. Dropped LOUDLY (F-1), never silently; nested
-                    // paragraphs surface via the unrendered-paragraphs guard. Task 026 widens this surface.
-                    ctx.AddWarning("complex-object-dropped", 1);
+                case AlternateContent inlineAlternate:
+                    // Task 026 (FR-04): inline mc:AlternateContent (the NDA's text-box signature blocks —
+                    // task 004's confirmed breaker) ACCEPT-FLATTENS: the visible text of ONE branch
+                    // (Choice preferred; the Fallback duplicates it) is preserved as a degraded plain run
+                    // at the anchor position — counted `text-box-flattened`. Text-free wrappers keep the
+                    // established loud drop.
+                    var inlineBoxText = ExtractTextBoxDisplayText(inlineAlternate, ctx);
+                    if (inlineBoxText.Length > 0)
+                    {
+                        AddPlainRun(sink, inlineBoxText, href, ctx, revision);
+                        ctx.AddWarning("text-box-flattened", 1);
+                    }
+                    else
+                    {
+                        ctx.AddWarning("complex-object-dropped", 1);
+                    }
                     break;
                 case CustomXmlRun cxr:
                     // w:customXml inline wrapper: transparent — nested runs are ordinary editable prose;
@@ -2545,6 +2583,47 @@ public sealed class ComposeDocxProjectionBuilder
     /// renderer's wrapper-grouping key) is not split by empty-vs-null noise.</summary>
     private static ComposeRevision CaptureRevision(ComposeRevisionKind kind, string? author, string? date) =>
         new() { Kind = kind, Author = author ?? string.Empty, Date = ComposeDocumentRenderer.NormalizeXsdDateTime(date) };
+
+    /// <summary>
+    /// Task 026 (FR-04 graceful degradation — the NDA breaker): the visible TEXT inside a text-box
+    /// construct (DrawingML <c>wps:txbx</c>, VML <c>v:textbox</c>, or an <c>mc:AlternateContent</c>
+    /// wrapper), extracted for ACCEPT-FLATTEN — the box chrome is unrepresentable, but its text is
+    /// user-visible legal content (the NDA's signature blocks) and MUST NOT drop with it.
+    /// <c>mc:AlternateContent</c> duplicates the SAME box across the Choice (DrawingML) and Fallback
+    /// (VML) branches — exactly ONE branch is extracted (Choice preferred) or the text (and its
+    /// duplicated <c>w14:paraId</c>s — the NDA's dup-id class) would double. Box paragraphs join with a
+    /// single space (paragraph structure inside the box is part of the degraded chrome — counted via the
+    /// call site's <c>text-box-flattened</c>). Extracted paragraphs count as VISITED so the
+    /// unrendered-paragraphs guard does not double-report content that IS (degradedly) represented.
+    /// </summary>
+    private static string ExtractTextBoxDisplayText(OpenXmlElement construct, ModelWalkContext ctx)
+    {
+        var scope = construct;
+        if (construct is AlternateContent)
+        {
+            var choice = construct.Elements<AlternateContentChoice>()
+                .FirstOrDefault(c => c.Descendants<TextBoxContent>().Any());
+            var fallback = construct.Elements<AlternateContentFallback>()
+                .FirstOrDefault(f => f.Descendants<TextBoxContent>().Any());
+            scope = (OpenXmlElement?)choice ?? fallback ?? construct;
+        }
+
+        if (!scope.Descendants<TextBoxContent>().Any())
+        {
+            return string.Empty; // not a text-carrying construct (pure image/shape/OLE)
+        }
+
+        var sb = new StringBuilder();
+        foreach (var paragraph in scope.Descendants<Paragraph>())
+        {
+            ctx.VisitedParagraphs++;
+            var text = ExtractRunsDisplayText(paragraph.Descendants<Run>());
+            if (text.Length == 0) continue;
+            if (sb.Length > 0) sb.Append(' ');
+            sb.Append(text);
+        }
+        return sb.ToString();
+    }
 
     private void ProjectRun(Run run, List<ComposeInlineRun> sink, string? href, ModelWalkContext ctx, ComposeRevision? revision = null)
     {
@@ -2656,11 +2735,22 @@ public sealed class ComposeDocxProjectionBuilder
                 case EndnoteReference:
                     ctx.AddWarning("unrepresented-endnote-reference", 1);
                     break;
-                case AlternateContent:
-                    // A run-nested mc:AlternateContent (drawing/shape wrapper — IsComplexObjectRun only
-                    // sees a DIRECT w:drawing/w:object/w:pict child, so the wrapped form lands here):
-                    // dropped LOUDLY, same code as the direct case.
-                    ctx.AddWarning("complex-object-dropped", 1);
+                case AlternateContent runAlternate:
+                    // Task 026 (FR-04): run-nested mc:AlternateContent (IsComplexObjectRun only sees a
+                    // DIRECT w:drawing/w:object/w:pict child, so the wrapped form lands here) — same
+                    // accept-flatten as the inline case: text preserved at the anchor position, chrome
+                    // dropped loudly.
+                    FlushText();
+                    var nestedBoxText = ExtractTextBoxDisplayText(runAlternate, ctx);
+                    if (nestedBoxText.Length > 0)
+                    {
+                        AddPlainRun(sink, nestedBoxText, href, ctx, revision);
+                        ctx.AddWarning("text-box-flattened", 1);
+                    }
+                    else
+                    {
+                        ctx.AddWarning("complex-object-dropped", 1);
+                    }
                     break;
                 default:
                     break;
