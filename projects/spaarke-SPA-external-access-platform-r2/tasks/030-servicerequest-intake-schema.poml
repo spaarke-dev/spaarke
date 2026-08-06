@@ -1,42 +1,45 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="030" project="spaarke-SPA-external-access-platform-r2">
   <metadata>
-    <title>Extend sprk_servicerequest with requester/type/status/document-linkage</title>
+    <title>Extend sprk_servicerequest: intake (requester/type/status/doc-linkage) + FR-24 feedback (decision/outcome, response text, response-doc) + thread-on-request linkage</title>
     <phase>P3 Legal Front Door intake MVP</phase>
     <gate>blocked-until:020</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Dataverse schema change to a shared entity that blocks 031/032/033/034/035; new surface (extends stub) — FULL per CLAUDE.md §8 (architecture/schema, deps on 3+ downstream tasks).</rigor-reason>
+    <rigor-reason>Dataverse schema change to a shared entity that blocks 031/032/034/035/036/037; new surface (extends stub) — FULL per CLAUDE.md §8 (architecture/schema, deps on 3+ downstream tasks).</rigor-reason>
     <model-tier>sonnet</model-tier>
-    <model-tier-reason>Well-specified schema extension over a known stub; no architectural ambiguity once owner signs off the option set + status model.</model-tier-reason>
+    <model-tier-reason>Well-specified additive schema extension over a known stub; no architectural ambiguity once the owner signs off the option set + status model + feedback shape.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Schema base that 031, 032, 033, 034, 035 all read; must land before any downstream task and must not race another schema editor.</parallel-reason>
+    <parallel-reason>Schema base that 031, 032, 034, 035, 036, 037 all read; must land before any downstream task and must not race another schema editor.</parallel-reason>
     <deps>020</deps>
     <tags>dataverse</tags>
-    <estimated-effort>3-5 hours</estimated-effort>
+    <estimated-effort>4-6 hours</estimated-effort>
   </metadata>
-  <prompt>Extend the existing sprk_servicerequest STUB entity (currently name/statecode/regarding only) with the intake fields the Legal Front Door needs: a requester Contact lookup, an extensible request-type option set (NDA, PolicyProcedures + a stable seam for more), a status workflow, and submitted-document linkage — while preserving the polymorphic regarding per ADR-024. This is the Dataverse data contract every P3 module builds on (FR-13).</prompt>
+  <prompt>Extend the existing sprk_servicerequest STUB entity (currently name/statecode/regarding only) with: (1) intake fields — a requester Contact lookup, an extensible request-type option set (NDA, PolicyProcedures, PolicyQuestion + a stable seam for more), a status workflow, and submitted-document linkage; (2) FR-24 feedback fields — a decision/outcome option set, a response-text field, and a response-document linkage DISTINCT from the submitted-document linkage; (3) a thread-on-request linkage to the messaging thread (sprk_communicationthread). Preserve the polymorphic regarding per ADR-024. This is the Dataverse data contract every P3 module builds on (FR-13 + FR-24 + the shared thread-on-request spine).</prompt>
   <role>SPAARKE platform developer. Follow ADRs strictly. Dataverse schema authoring via Web API + PowerShell (dataverse-create-schema); disciplined about option-set integer values and lookup relationship naming.</role>
-  <goal>sprk_servicerequest carries: sprk_requester (Contact lookup), sprk_requesttype (option set incl. NDA + PolicyProcedures with reserved extensible values), a status model (statuscode option-set values covering the NDA + P&amp;P lifecycle up to "ready for signature"), and submitted-document linkage — deployed to dev, with the existing polymorphic regarding untouched. A request record can persist requester + type + status and still resolve its regarding target.</goal>
+  <goal>sprk_servicerequest carries: sprk_requester (Contact lookup); sprk_requesttype (option set incl. NDA + PolicyProcedures + PolicyQuestion with reserved extensible values); a status model (statuscode values covering the NDA + P&amp;P lifecycle up to "ready for signature"); submitted-document linkage; sprk_decision (decision/outcome option set); sprk_responsetext (multiline text); a response-document linkage distinct from the submitted-doc linkage; and a thread linkage to sprk_communicationthread — deployed to dev, with the existing polymorphic regarding untouched. A request record can persist requester + type + status + a decision + response text + a response doc + a thread reference, and still resolve its regarding target.</goal>
   <context>
-    <background>FR-13: Extend sprk_servicerequest (stub today) with requester, request type, status workflow, and submitted-document linkage; polymorphic regarding preserved (ADR-024). The stub has only name/statecode/regarding. This schema is the base for the typed-intake framework (031), the NDA module (032), P&amp;P module (033), submitter authz + upload (034), and my-requests UI (035). Spec Owner Clarifications: request types in R2 = NDA (full) + Policy &amp; Procedures; App Role granularity says "don't foreclose" future per-module — mirror that mindset for request types (extensible option set). NDA status stops at "approved + ready for signature" (FR-15); e-signature deferred.</background>
+    <background>FR-13: extend sprk_servicerequest (stub today) with requester, request type, status workflow, submitted-document linkage; polymorphic regarding preserved (ADR-024). FR-24: additive schema for the feedback loop — a decision/outcome field + response text + a RESPONSE-document linkage distinct from the submitted-doc linkage (legal's answer documents flow back to the requester). §12(D): FR-24 (feedback) + FR-27 (messaging) share ONE thread-on-request model — a request carries a conversation thread with the law department; add the thread linkage here so both 037 (feedback render) and 052 (messaging) read one spine. The stub has only name/statecode/regarding. This schema is the base for the typed-intake framework (031), NDA module (032), submitter authz + upload (036), my-requests + feedback + thread (037), and P&amp;P PolicyQuestion (035). NDA status stops at "approved + ready for signature" (FR-15); e-signature deferred.</background>
     <relevant-files>
-      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-13, FR-14, FR-15, FR-16, ADR-024 constraint, Owner Clarifications: Front Door first cut / NDA depth)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-13, FR-14, FR-15, FR-16, FR-24, FR-25 PolicyQuestion type, FR-27 thread; ADR-024 constraint; Owner Clarifications: Front Door first cut / NDA depth)</file>
       <file>.claude/skills/dataverse-create-schema/SKILL.md (canonical procedure — Web API + PowerShell; PAC CLI cannot create tables/columns)</file>
       <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md (polymorphic regarding must be preserved)</file>
+      <file>Dataverse: existing sprk_communicationthread entity (thread-on-request target — inspect its logical name + primary key before authoring the lookup)</file>
       <file>docs/data-model/ (existing entity schemas + ERD — align field naming conventions)</file>
       <file>Dataverse: existing sprk_servicerequest stub (name/statecode/regarding); Contact entity (sprk_externalobjectid oid field already present)</file>
     </relevant-files>
-    <dependencies>020 (P2 entitlement primitives) must be complete. Requires owner sign-off on the request-type option set and status model before creating fields — see escalation.</dependencies>
+    <dependencies>020 (P2 entitlement primitives) must be complete. Requires owner sign-off on the request-type option set, status model, and feedback/decision shape before creating fields — see escalation.</dependencies>
   </context>
   <constraints>
-    <constraint source="ADR-024">The polymorphic regarding on sprk_servicerequest MUST remain intact — do NOT drop, replace, or narrow the existing regarding lookup/relationship when adding new fields; new fields are additive only.</constraint>
-    <constraint source="project">The sprk_requesttype option set MUST be authored so a new request type is added by adding an option-set value + a form (config/schema), NOT by schema redesign — reserve integer values and document the numbering convention in the task notes.</constraint>
+    <constraint source="ADR-024">The polymorphic regarding on sprk_servicerequest MUST remain intact — do NOT drop, replace, or narrow the existing regarding lookup/relationship when adding new fields; all new fields are additive only.</constraint>
+    <constraint source="project">The sprk_requesttype option set MUST be authored so a new request type is added by adding an option-set value + a form (config/schema), NOT by schema redesign — reserve integer values and document the numbering convention in the task notes. Include NDA + PolicyProcedures + PolicyQuestion in the first cut (PolicyQuestion is consumed by 035/FR-25).</constraint>
     <constraint source="project">sprk_requester MUST be a Contact lookup (not a systemuser lookup) — internal workforce users are attributed via a lazily-created Contact bound by oid (FR-11); the schema must not assume a licensed systemuser requester.</constraint>
-    <constraint source="ADR-038">Do NOT hand-author ctor-null / DI-registration / Mock&lt;HttpMessageHandler&gt; tests for this schema task; schema verification is a deploy-and-query check, not a unit test.</constraint>
+    <constraint source="project">The response-document linkage MUST be DISTINCT from the submitted-document linkage (FR-24) — a request has both a submitted doc (from the requester) and a response doc (from legal). Do NOT overload one linkage for both.</constraint>
+    <constraint source="project">The thread linkage MUST target the existing sprk_communicationthread entity (a single lookup) — do NOT create a new thread entity; FR-24 + FR-27 share this one thread-on-request spine (§12 D). If sprk_communicationthread's exact logical name differs, use the verified name.</constraint>
     <constraint source="project">Status model MUST cover the NDA lifecycle up to "approved + ready for signature" and the P&amp;P submit/read lifecycle — do NOT model e-signature or post-signature states (FR-15 defers e-signature beyond R2).</constraint>
+    <constraint source="ADR-038">Do NOT hand-author ctor-null / DI-registration / Mock&lt;HttpMessageHandler&gt; tests for this schema task; schema verification is a deploy-and-query check, not a unit test.</constraint>
   </constraints>
   <knowledge>
     <files>
@@ -54,18 +57,18 @@
     </patterns>
   </knowledge>
   <steps mode="directional">
-    <step order="1">Load spec.md FR-13/14/15/16 + ADR-024 + the dataverse-create-schema skill. Inventory the current sprk_servicerequest stub via Web API metadata query (confirm name/statecode/regarding and the exact regarding relationship name).</step>
-    <step order="2">Draft the proposed schema: sprk_requester (Contact lookup + relationship), sprk_requesttype (global-or-local option set with values NDA + PolicyProcedures and a documented reserved-value convention for future types), the status model (statuscode option-set values for NDA lifecycle ending at "ready for signature" + P&amp;P submit/read), and the submitted-document linkage (decide: file column vs related sprk_document — align with how R1 links documents; document the choice in notes).</step>
-    <step order="3">ESCALATE the drafted request-type option set + status model to the owner for sign-off (spec Dependency: "Legal Front Door intake schema sign-off"). Do NOT create fields until confirmed. See &lt;escalation&gt;.</step>
-    <step order="4">After sign-off, create the attributes/option sets/relationship via Web API + PowerShell per the skill. Preserve the existing regarding relationship (additive only).</step>
-    <step order="5">Publish customizations. Verify via a metadata query that all new fields exist with correct types + option-set integer values, and that the polymorphic regarding relationship is intact.</step>
-    <step order="6">Create a test sprk_servicerequest record (Web API) setting requester + requesttype + status + a regarding target; query it back to confirm all fields persist and regarding still resolves.</step>
-    <step order="7">Record the final option-set integer values, the reserved-value numbering convention, and the document-linkage decision in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+    <step order="1">Load spec.md FR-13/14/15/16/24/25/27 + ADR-024 + the dataverse-create-schema skill. Inventory the current sprk_servicerequest stub via Web API metadata query (confirm name/statecode/regarding + the exact regarding relationship name). Confirm the exact logical name + primary key of sprk_communicationthread for the thread lookup.</step>
+    <step order="2">Draft the proposed schema in two groups. INTAKE: sprk_requester (Contact lookup + relationship); sprk_requesttype (option set with values NDA + PolicyProcedures + PolicyQuestion and a documented reserved-value convention); the status model (statuscode values for NDA lifecycle ending at "ready for signature" + P&amp;P submit/read + PolicyQuestion answered); submitted-document linkage (file column vs related sprk_document — align with how R1 links documents). FEEDBACK + THREAD (FR-24 + §12 D): sprk_decision (option set — e.g. Approved / MinorEdits / NeedsReview / Answered / Rejected — align with the NDA 3-outcome + PolicyQuestion answer); sprk_responsetext (multiline); a response-document linkage DISTINCT from the submitted-doc linkage; a lookup to sprk_communicationthread (thread-on-request). Document all option-set integers.</step>
+    <step order="3">ESCALATE the drafted request-type option set + status model + decision/outcome option set + document-linkage shape to the owner for sign-off (spec Dependency: "Legal Front Door intake schema sign-off"). Do NOT create fields until confirmed. See &lt;escalation&gt;.</step>
+    <step order="4">After sign-off, create the attributes/option sets/relationships via Web API + PowerShell per the skill. Preserve the existing regarding relationship (additive only). Create the thread lookup against the verified sprk_communicationthread name.</step>
+    <step order="5">Publish customizations. Verify via a metadata query that all new fields exist with correct types + option-set integer values, that the submitted-doc and response-doc linkages are separate, that the thread lookup targets sprk_communicationthread, and that the polymorphic regarding relationship is intact.</step>
+    <step order="6">Create a test sprk_servicerequest record (Web API) setting requester + requesttype + status + a regarding target + a decision + response text; query it back to confirm all fields persist and regarding still resolves.</step>
+    <step order="7">Record the final option-set integer values, the reserved-value numbering convention, and the two-document-linkage + thread decision in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
     <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
     <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
   </steps>
   <escalation>
-    <trigger>The request-type option set values AND the status workflow model require owner sign-off (spec Dependency "Legal Front Door intake schema sign-off"). Before creating any fields, present the drafted option-set values (NDA, PolicyProcedures + reserved seam) and the status lifecycle to the owner via 🔔 Human Input Required (CLAUDE.md §6) and STOP until confirmed — a wrong option-set/status shape ripples into 031–035.</trigger>
+    <trigger>The request-type option set values, the status workflow model, AND the decision/outcome option set (FR-24) require owner sign-off (spec Dependency "Legal Front Door intake schema sign-off"). Before creating any fields, present the drafted option-set values (request types NDA/PolicyProcedures/PolicyQuestion + reserved seam; status lifecycle; decision/outcome values) and the two-document-linkage + thread-on-request shape to the owner via 🔔 Human Input Required (CLAUDE.md §6) and STOP until confirmed — a wrong option-set/status/decision shape ripples into 031–037.</trigger>
   </escalation>
   <tools>
     <tool name="terminal">PowerShell for Dataverse Web API calls + publish</tool>
@@ -73,24 +76,26 @@
     <tool name="npm">Not required for this schema task</tool>
   </tools>
   <outputs>
-    <output type="code">Dataverse schema changes on sprk_servicerequest (sprk_requester, sprk_requesttype, status model, submitted-document linkage) deployed to dev</output>
-    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ — option-set integer values, reserved-value convention, document-linkage decision</output>
+    <output type="code">Dataverse schema changes on sprk_servicerequest (intake: sprk_requester, sprk_requesttype, status model, submitted-document linkage; feedback: sprk_decision, sprk_responsetext, response-document linkage; thread: sprk_communicationthread lookup) deployed to dev</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ — option-set integer values, reserved-value convention, two-document-linkage decision, thread-on-request note</output>
   </outputs>
   <acceptance-criteria>
     <criterion testable="true">Given the deployed schema, when a sprk_servicerequest is created with requester (Contact), requesttype=NDA, and a status value, then all three persist and query back correctly.</criterion>
     <criterion testable="true">Given the deployed schema, when the same record sets a polymorphic regarding target, then the regarding still resolves (ADR-024 preserved — the pre-existing relationship is unchanged).</criterion>
+    <criterion testable="true">Given the feedback fields, when a request sets sprk_decision + sprk_responsetext + a response-document linkage, then all persist AND the response-document linkage is a distinct field from the submitted-document linkage (both resolvable independently on one record).</criterion>
+    <criterion testable="true">Given the thread linkage, when a request references a sprk_communicationthread, then the lookup resolves to that thread entity — one shared thread-on-request field consumed by both 037 (feedback) and 052 (messaging).</criterion>
     <criterion testable="true">Given the request-type option set, when a hypothetical new type is needed, then it can be added as a new option-set value + form (config/schema) without redesigning the entity — verified by the documented reserved-value convention.</criterion>
     <criterion testable="true">Negative: the status model contains NO e-signature or post-signature states — NDA lifecycle terminates at "approved + ready for signature" (FR-15).</criterion>
     <criterion testable="true">Negative: sprk_requester is a Contact lookup, NOT a systemuser lookup — creating a request does not require a licensed systemuser as requester.</criterion>
   </acceptance-criteria>
   <justification>
-    <existing>sprk_servicerequest exists as a STUB (name/statecode/regarding only) per spec Placement table; grep of docs/data-model confirms no intake fields today. Closest neighbor sprk_externalrecordaccess is record-participation-only and cannot express intake/requester/type/status.</existing>
-    <extension>Yes — extend the existing stub entity additively (new attributes + one option set + one lookup relationship). No new entity is introduced.</extension>
-    <cost-of-doing-nothing>Without these fields there is no way to persist who requested what, of which type, at what status — the entire Legal Front Door intake (031–035) has no data contract to write to; a request cannot be created, routed to legal (FR-21), or filtered to its owner (FR-17).</cost-of-doing-nothing>
+    <existing>sprk_servicerequest exists as a STUB (name/statecode/regarding only) per spec Placement table; grep of docs/data-model confirms no intake or feedback fields today. Closest neighbor sprk_externalrecordaccess is record-participation-only and cannot express intake/requester/type/status/decision. sprk_communicationthread exists but nothing links a service request to a thread.</existing>
+    <extension>Yes — extend the existing stub entity additively (new attributes + option sets + lookup relationships, including a single reused lookup to the existing sprk_communicationthread). No new entity is introduced.</extension>
+    <cost-of-doing-nothing>Without the intake fields there is no data contract to persist who requested what, of which type, at what status — the entire Legal Front Door (031/036) has nothing to write. Without the FR-24 feedback fields, legal's decision/response cannot flow back to the requester (037 has nothing to render, FR-24 fails). Without the shared thread lookup, FR-24 feedback and FR-27 messaging would each invent a thread linkage (§12 D one-spine violated).</cost-of-doing-nothing>
   </justification>
-  <notes>Spec FR-13/14/15/16, Owner Clarifications (Front Door first cut = NDA + P&amp;P; NDA depth = stop at ready-for-signature; App Role granularity = don't foreclose — apply same extensibility mindset to request types). Use dataverse-create-schema (NOT PAC CLI — no table/column create). Submitted-document linkage: align with how R1 external-spa links documents (documentId keying, no Graph pointer exposure) — the actual app-only upload is task 034; here just the schema seam. Requester Contact is populated lazily by oid on first submission (FR-11), implemented in 034 — 030 only creates the field.</notes>
+  <notes>Spec FR-13/14/15/16/24/25/27; §12(D) shared thread-on-request. Use dataverse-create-schema (NOT PAC CLI — no table/column create). Submitted vs response document linkage MUST be two fields (FR-24). The thread lookup reuses the existing sprk_communicationthread (do not create a thread entity). Requester Contact is populated lazily by oid on first submission (FR-11), implemented in 036 — 030 only creates the field. The actual app-only upload is task 036; the email/in-app feedback render is 037; the messaging thread group is 052 — 030 supplies only the schema seams.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
-    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor level; ESCALATE the option-set + status model before creating fields.</protocol>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor level; ESCALATE the option-set + status + decision model before creating fields.</protocol>
   </execution>
 </task>

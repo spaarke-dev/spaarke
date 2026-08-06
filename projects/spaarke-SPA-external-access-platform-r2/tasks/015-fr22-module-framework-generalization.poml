@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="015" project="spaarke-SPA-external-access-platform-r2">
   <metadata>
-    <title>Generalize CallerPrincipalResolver into module framework (register per-module strategy/predicate)</title>
+    <title>Generalize CallerPrincipalResolver into the module/widget framework + wire the BffDataverseClient widget-data seam (register per-module strategy/predicate)</title>
     <phase>P1 Module-host foundation</phase>
     <gate>blocked-until:010</gate>
     <status>not-started</status>
@@ -19,19 +19,24 @@
   </metadata>
 
   <prompt>
-    Generalize the delivered CallerPrincipalResolver into a module framework: introduce a per-module registration
-    seam so each module registers its ICallerPrincipalStrategy (plane) and its Tier-2 record predicate, using the
-    ready third-plane seam (one AddScoped&lt;ICallerPrincipalStrategy&gt; + a DeterminePlane branch). Handlers + the
-    group filter stay untouched; the CIAM path is preserved byte-for-byte.
+    Generalize the delivered CallerPrincipalResolver into a module/widget framework: introduce a per-module registration
+    seam so each module (widget) registers its ICallerPrincipalStrategy (plane) and its Tier-2 record predicate, using the
+    ready third-plane seam (one AddScoped&lt;ICallerPrincipalStrategy&gt; + a DeterminePlane branch). Also wire the
+    BffDataverseClient widget-data seam: ensure each module's read-data endpoint group (the app-only, participation-scoped
+    read path the client-side read-only BffDataverseClient IDataverseClient impl calls) routes through the generalized
+    resolver + the module's Tier-2 predicate, so widgets get participation-scoped data without OBO. Handlers + the group
+    filter stay untouched; the CIAM path is preserved byte-for-byte.
   </prompt>
 
   <role>SPAARKE platform developer + BFF auth engineer. Follow ADRs strictly. Minimal-API DI + endpoint-filter specialist; disciplined at brownfield generalization without regressing shipped behavior.</role>
 
   <goal>
-    A module-framework registration point in the BFF that lets each module register { plane strategy, Tier-2
+    A module-framework registration point in the BFF that lets each module (widget) register { plane strategy, Tier-2
     predicate } over the existing CallerPrincipalResolver / CallerPrincipalAuthorizationFilter / ExternalCollaboration
-    dual-scheme, without touching handlers or the filter. The CIAM path is byte-for-byte preserved; the full BFF
-    suite stays green; publish stays ≤60 MB.
+    dual-scheme, without touching handlers or the filter — AND the per-module read-data endpoint path consumed by the
+    client-side read-only BffDataverseClient (IDataverseClient impl) routes through that generalized resolver + the
+    module's Tier-2 predicate (app-only, participation-scoped, no OBO). The CIAM path is byte-for-byte preserved; the
+    full BFF suite stays green; publish stays ≤60 MB.
   </goal>
 
   <context>
@@ -51,6 +56,7 @@
       <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs</file>
       <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
       <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/BffDataverseClient.ts (read-only IDataverseClient broker impl the widgets call — the client contract this BFF read path must satisfy; do NOT fork it)</file>
       <file>tests/unit/Sprk.Bff.Api.Tests/</file>
     </relevant-files>
     <dependencies>010 (ADR-028 A3 — the canonical rule set for principal-agnostic module endpoints this framework implements).</dependencies>
@@ -93,7 +99,8 @@
     <step order="2">Read the shipped resolver + strategies + filter + ExternalCollaboration policy; map exactly how DeterminePlane selects a strategy today.</step>
     <step order="3">Introduce a per-module registration seam: a way for each module to register its plane strategy (ICallerPrincipalStrategy) + its Tier-2 predicate (over AccessibleRecordSetService.ComposeAsync), wired via ExternalAccessModule DI — using the existing third-plane seam shape, not a rewrite.</step>
     <step order="4">Keep CallerPrincipalAuthorizationFilter + handlers untouched; the framework registers strategies/predicates, it does not change the group filter contract.</step>
-    <step order="5">Add unit + KEEP-path integration tests for the registration seam (per-module strategy resolves; Tier-2 predicate applied; CIAM path unchanged incl. a negative Tier-2 case) in tests/unit/Sprk.Bff.Api.Tests/.</step>
+    <step order="4.5">Wire the BffDataverseClient widget-data seam: confirm/register that each module's read-data endpoint group (the app-only, participation-scoped read path the client-side read-only BffDataverseClient IDataverseClient impl consumes) resolves the CallerPrincipal via the generalized resolver and scopes rows through the module's Tier-2 predicate — no OBO, no Graph-pointer exposure, keyed on documentId/record id. Do NOT fork BffDataverseClient (client contract stays stable).</step>
+    <step order="5">Add unit + KEEP-path integration tests for the registration seam (per-module strategy resolves; Tier-2 predicate applied; a widget read via the BffDataverseClient path returns ONLY the participation-scoped set; CIAM path unchanged incl. a negative Tier-2 case) in tests/unit/Sprk.Bff.Api.Tests/.</step>
     <step order="6">Run dotnet build + dotnet test (full BFF suite must stay green); verify no new HIGH CVE (dotnet list package --vulnerable --include-transitive).</step>
     <step order="7">Run dotnet publish -c Release; record compressed size + delta vs 46.90 MB baseline in notes; escalate if ≥+5 MB single-task delta.</step>
     <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
@@ -112,13 +119,15 @@
   <outputs>
     <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ (module-framework registration seam)</output>
     <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</output>
-    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (registration seam + Tier-2 tests)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ (per-module read-data endpoint group satisfying the BffDataverseClient read contract, resolver+Tier-2-scoped)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (registration seam + Tier-2 + BffDataverseClient-path scoping tests)</output>
   </outputs>
 
   <acceptance-criteria>
     <criterion testable="true">Given a module registered with its plane strategy + Tier-2 predicate, when a request hits its endpoint group, then the correct strategy resolves the CallerPrincipal and the module's Tier-2 predicate scopes the record set — handlers + the group filter unchanged.</criterion>
     <criterion testable="true">Given the CIAM path, when a CIAM caller resolves, then behavior is byte-for-byte identical to the teams-app-r1 baseline (CiamContactPrincipalStrategy unchanged) — regression test green.</criterion>
     <criterion testable="true">Negative Tier-2: a workforce caller who merely authenticates receives ONLY their composed accessible-record-set (not all records) — negative test green.</criterion>
+    <criterion testable="true">Given a widget read issued through the client-side BffDataverseClient read path, when the module's read-data endpoint group handles it, then rows are resolved via the generalized resolver and scoped by the module's Tier-2 predicate app-only (no OBO, no Graph pointers) — a non-participant caller receives an empty/denied set (negative test green); BffDataverseClient is not forked.</criterion>
     <criterion testable="true">The full BFF suite is green; no new HIGH CVE; publish ≤60 MB compressed with delta vs 46.90 MB reported.</criterion>
     <criterion testable="true">D1 (role→level grading) is NOT implemented here — P1 keeps flat Collaborate; the framework leaves the grading extension point in place for F3/F5.</criterion>
   </acceptance-criteria>

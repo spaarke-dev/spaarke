@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Extract the workspace-shell from external-spa (branded portal header + tab host + pane layout + dockable left/right assistant pane + sessionStorage)</title>
+    <phase>P1 Workspace-shell foundation</phase>
+    <gate>blocked-until:004,010</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend chassis refactor of the external-spa (modifying .tsx); the shell is the base every P1/P3/P5 widget mounts on; visual + theme correctness (dark + Teams) + CIAM sessionStorage preservation are load-bearing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified frontend build over an approved prototype + existing chassis components; Sonnet 5 @ high per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>This is the shell base — task 012 (widget registry/workspace) and every widget task build directly on the extracted shell; concurrent shell edits would collide. Must land before its dependents.</parallel-reason>
+    <deps>004,010</deps>
+    <tags>frontend, refactoring</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend src/client/external-spa into the reusable SpaarkeAi-style WORKSPACE SHELL per design.md §12 + notes/workspace-shell-foundation.md:
+    a branded portal header ("Legal Department Service Portal"), a tab host, a pane layout, and a dockable (left OR right)
+    assistant pane, plus a PINNED "Quick Start" first-tab slot. Reuse the SpaarkeAi workspace chassis (Xrm-free) and the
+    Spaarke.UI.Components primitives; do NOT fork the Xrm-bound LegalWorkspaceApp. Preserve the CIAM per-tab sessionStorage
+    isolation (NFR-05). Build to the approved prototype (spaarke-prototype/projects/2026-08-external-access-module-host).
+  </prompt>
+
+  <role>SPAARKE platform developer + Fluent v9 / React 18 frontend engineer. Follow ADRs strictly. Skilled at extending an existing MSAL SPA into a reusable shell chassis without regressing auth/session behavior.</role>
+
+  <goal>
+    A workspace-shell scaffold in src/client/external-spa: ShellChrome (taller branded portal header "Legal Department Service
+    Portal"), a tab host (tab strip with a pinned non-closable "Quick Start" first-tab slot + closable widget tabs using the
+    SpaarkeAi corner-× close control), a pane layout (header → tab strip → active-tab body), and an assistant pane docked to a
+    side that can toggle LEFT or RIGHT. Widget mounting itself is task 012 — 011 delivers the empty chassis with a Quick Start
+    placeholder + an assistant-pane placeholder. CIAM sessionStorage per-tab isolation is preserved; build + Teams/dark theme green.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §12(A) (Foundation = WORKSPACE SHELL, reframes FR-01/FR-02) + spec.md FR-01/FR-02 (reframed to the shell) +
+      FR-06 (shell extracted from external-spa) + notes/workspace-shell-foundation.md (UX model: Quick Start pinned first tab =
+      "do"/wizards; widgets = "see/manage"/data; assistant dockable left/right; corner-× close on tabs; taller intranet header;
+      single-header assistant with input at bottom). The chassis is Xrm-free + reusable: adopt the SpaarkeAi WorkspacePane /
+      WorkspaceTabManager / assistant-dock pattern. This task is the shell base; task 012 adds the widget registry + tabbed
+      role-defaulted workspace + widget library on top. Anchor the visual direction in the approved P0 prototype.
+    </background>
+    <relevant-files>
+      <file>src/client/external-spa/src/App.tsx (extend this SPA into the shell)</file>
+      <file>src/client/external-spa/src/pages/WorkspaceHomePage.tsx (current home — becomes the shell workspace host)</file>
+      <file>src/client/external-spa/src/components/AppHeader.tsx (extend into the branded portal ShellChrome header)</file>
+      <file>src/client/external-spa/src/auth/ (CIAM MSAL + sessionStorage — PRESERVE; do not switch storage)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (chassis reference — pane layout)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts (chassis reference — tab host + tab lifecycle)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManagerComponent.tsx (chassis reference — tab strip + corner-× close)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ (ActionCard/ActionCardRow/WorkspaceShell/SectionPanel primitives)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (assistant pane component — placeholder mount only in 011)</file>
+      <file>spaarke-prototype/projects/2026-08-external-access-module-host/src/components/WorkspaceShell.tsx (approved prototype — visual target: ShellChrome, TabStrip, assistant dock)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md (locked UX north-star)</file>
+    </relevant-files>
+    <dependencies>004 (P0 prototype visual-review gate — the approved shell design this task builds to). 010 (ADR-028 A3 — the dual-plane auth rule set the shell bootstrap must honor; the shell scaffold must not regress it).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + React 18; semantic tokens ONLY; zero hardcoded hex; correct light/dark + Teams-theme parity in the Teams host (scope: all shell chrome — header, tab strip, panes, assistant dock).</constraint>
+    <constraint source="ADR-022">React 18 + platform-library discipline for all UI (scope: the shell + reused shared components).</constraint>
+    <constraint source="NFR-05">Preserve the external-SPA per-tab sessionStorage isolation for the CIAM sign-in path (documented ADR-028 exception); do NOT switch the CIAM path to localStorage or @spaarke/auth (scope: auth bootstrap only).</constraint>
+    <constraint source="project">MUST NOT fork LegalWorkspaceApp (Xrm-bound); adopt the SpaarkeAi chassis PATTERN and reuse Spaarke.UI.Components primitives — no hand-rolled shell chrome where a shared component exists (§11).</constraint>
+    <constraint source="project">Extend src/client/external-spa in place (do not create a parallel SPA); keep the Teams host adapter + MSAL v5 NAA path intact (teams-app-r1 delivered).</constraint>
+    <constraint source="ADR-050">Any dialog opened by the shell (e.g. More Services) uses SprkModal + presets — no hand-rolled dialogs (scope: shell-level modals; the widget library modal itself is task 012).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/workspace-shell-foundation.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="SpaarkeAi workspace chassis (Xrm-free)" location="src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx">Adopt the pane layout + WorkspaceTabManager tab host + corner-× close + assistant dock pattern; do NOT re-host LegalWorkspaceApp.</pattern>
+      <pattern name="WorkspaceShell primitives" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx">Reuse ActionCard/ActionCardRow for the Quick Start card slot; SprkModal for More Services.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the approved prototype WorkspaceShell/ShellChrome/TabStrip + the SpaarkeAi chassis (WorkspacePane, WorkspaceTabManager, WorkspaceTabManagerComponent) + ux-brief.md; map the shell regions to reusable components.</step>
+    <step order="2">Extend AppHeader into a taller branded ShellChrome portal header ("Legal Department Service Portal") per §12(A) + ux refinement 1 (intranet/website feel, semantic tokens only).</step>
+    <step order="3">Build the tab host: a tab strip with a PINNED non-closable "Quick Start" first-tab slot + closable widget-tab slots using the SpaarkeAi corner-× (circle-in-upper-corner) close control; back it with the WorkspaceTabManager pattern.</step>
+    <step order="4">Assemble the pane layout: header → tab strip → active-tab body, with an assistant pane docked to a side that toggles LEFT or RIGHT (default left per the AI-maturity theory); assistant = single header + input at bottom; mount a SprkChat placeholder (no tools/wiring — that is FR-26 later).</step>
+    <step order="5">Populate the Quick Start pinned tab with a placeholder (ActionCard slot + "More Services" SprkModal placeholder); widget registry + role-defaulted tabs + real widgets are task 012 — leave clean extension points.</step>
+    <step order="6">Verify the CIAM MSAL + per-tab sessionStorage path is untouched (NFR-05) and the Teams host adapter / NAA path still bootstraps; do not change the dual-plane authority selection (ADR-028 A3 / task 010).</step>
+    <step order="7">Run npm run build:prod (external-spa); confirm green + zero console errors; run the ui-tests below.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the external-spa (npm run build:prod — NOT npm run build)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/ (workspace-shell scaffold: ShellChrome header, tab host with pinned Quick Start slot, pane layout, dockable assistant pane)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the shell loads, when rendered, then a branded portal header reads "Legal Department Service Portal", a tab strip shows a pinned non-closable "Quick Start" first tab, and an assistant pane is docked to one side — with zero console errors.</criterion>
+    <criterion testable="true">Given the assistant dock toggle, when the user docks left then right, then the assistant pane moves to that side and the tab/body layout reflows correctly (both positions render clean).</criterion>
+    <criterion testable="true">Given a widget tab (placeholder), when the user activates its corner-× close control, then that tab closes while the pinned Quick Start tab has NO close control and cannot be closed.</criterion>
+    <criterion testable="true">Given dark mode AND the Teams theme, when toggled, then all shell chrome adapts via semantic tokens with zero hardcoded hex (ADR-021).</criterion>
+    <criterion testable="true">Given the CIAM sign-in path, when a user authenticates, then per-tab sessionStorage isolation is preserved (NFR-05) — the auth/storage path is unchanged from the delivered external-spa; the Teams NAA path still bootstraps.</criterion>
+    <criterion testable="true">LegalWorkspaceApp is NOT forked/imported; the shell reuses the SpaarkeAi chassis pattern + Spaarke.UI.Components primitives (negative: no Xrm dependency introduced).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Renders"><steps><step>Load the external-spa shell (mock/dev auth)</step><step>Observe header, pinned Quick Start tab, assistant pane</step></steps><expected>no console errors; header text "Legal Department Service Portal"; pinned Quick Start first tab present</expected></test>
+    <test name="Assistant dock left/right"><steps><step>Toggle assistant dock to LEFT</step><step>Toggle assistant dock to RIGHT</step></steps><expected>pane moves side; layout reflows clean in both positions</expected></test>
+    <test name="Dark+Teams theme (ADR-021)"><steps><step>Toggle dark mode</step><step>Toggle the Teams theme in the Teams host</step></steps><expected>tokens adapt; zero hardcoded hex; Teams-theme parity</expected></test>
+  </ui-tests>
+
+  <notes>
+    Shell BASE task — parallel-safe:false because task 012 and every widget task build on the extracted shell. This delivers the
+    empty chassis (header + tab host + pane layout + dockable assistant + pinned Quick Start slot); task 012 adds the widget
+    registry, role-defaulted widget tabs, the widget library, and populates Quick Start; the assistant tools are FR-26 (later,
+    gated by the P5 security spike). Anchor visuals to the approved P0 prototype; further pixel refinement is deferred to the project.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist. Build with npm run build:prod.</protocol>
+  </execution>
+</task>

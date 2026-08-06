@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>P&amp;P document architecture: sprk_documentcategory + governance fields on sprk_document + type-routed indexing + Policy Library grid config + governance-state index trim</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse schema + AI-Search index change + BFF index-routing wire-up that blocks 035 (and grounds 051); new surface (category discriminator + governance trim); tags dataverse/bff-api — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Must design the category→index routing + governance-state trim as a GENERAL "typed document → typed RAG index → typed grid" mechanism (Reference-Golden reuses it) while building only Policy in R2 — cross-cutting design judgment across schema, index lifecycle, and the DataGrid framework.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Schema + shared index-lifecycle change (Services/Jobs/Handlers + SearchIndexNameResolver) + AI-Search schema; blocks 035; must not race another schema/index editor; conflict-check with teams-app-r1 + AI cluster.</parallel-reason>
+    <deps>020</deps>
+    <tags>dataverse, bff-api</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+  <prompt>Build the P&amp;P document architecture on sprk_document (NO new sprk_policy entity): add a sprk_documentcategory optionset discriminator (Operational/Policy/Reference-Golden — do NOT overload the AI-populated sprk_documenttype) + governance fields (status/effective/expiration) on sprk_document; wire category→index routing through the existing multi-index, per-record-routable lifecycle (sprk_ai_search_index lookup + SearchIndexNameResolver + allow-list); author a Policy Library sprk_gridconfiguration (entity=sprk_document, filter category=Policy) read via BffDataverseClient; and add governance-state index-trim fields (status/effective/published) + a query-time filter so retrieval never surfaces an unpublished/expired policy. Design the mechanism GENERAL (Reference-Golden reuses it via sprk_analysisknowledge→ReferenceIndexingService→spaarke-rag-references) but BUILD only Policy in R2 (FR-25).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Dataverse schema (dataverse-create-schema — Web API + PowerShell); AI-Search index lifecycle (multi-index, per-record-routable); the DataGrid framework (sprk_gridconfiguration + BffDataverseClient); ASP.NET Minimal API (ADR-008/019) for any BFF index-routing/query change.</role>
+  <goal>sprk_document carries a sprk_documentcategory optionset (Operational/Policy/Reference-Golden) + governance fields (status/effective/expiration); a Policy-category document is (re)indexed to a policy AI-Search index via the existing category→index routing (SearchIndexNameResolver + sprk_ai_search_index + allow-list); the policy index schema carries governance-trim fields (status/effective/published) with a query-time filter so unpublished/expired/restricted policies never surface; a Policy Library sprk_gridconfiguration (entity=sprk_document, filter category=Policy) exists and reads read-only via BffDataverseClient. The routing + trim mechanism is authored generally (Reference-Golden documented as reusing it) but only Policy is built + wired in R2.</goal>
+  <context>
+    <background>FR-25 (spec.md line 257): P&amp;P library reuses sprk_document (NOT a new sprk_policy entity — eliminated 2026-08-06 per grounding) + a new sprk_documentcategory discriminator (Operational/Policy/Reference-Golden; do NOT overload the single-valued AI-populated sprk_documenttype) + governance fields (status/effective/expiration) + SPE storage + the existing document→AI-Search indexing lifecycle, which is already multi-index + per-record-routable (sprk_ai_search_index lookup + SearchIndexNameResolver + allow-list, shipped by multi-container-multi-index-r1) — so routing Policy docs to a policy index is a small category→index wire-up, not new plumbing. Golden/Reference RAG docs reuse the SAME mechanism (category=Reference-Golden → sprk_analysisknowledge delivery=RagIndex → ReferenceIndexingService → spaarke-rag-references). Two read roles kept separate: (a) grounding — Ask Legal policy_search (FR-26/051) hits the AI-Search policy index; (b) browse — the Policy Library grid reads sprk_document via sprk_gridconfiguration + BffDataverseClient. GENUINELY NEW: governance-state trim fields (status/effective/published) are not on any index schema today → add index fields + a query-time filter (§12 C folds this into the P5 assistant spike's trim item; build the schema + trim here). §12(C): a general "typed document → typed RAG index → typed grid" capability, not a policy one-off. Authoring is by the law department as core users in the MDA (external portal is read-only on P&amp;P) — reuse the existing document upload wizard + SPE + the sprk_document-search-index-lifecycle; do NOT build new authoring plumbing.</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-25 line 257 — full architecture + §11 schema decision; §12 C)</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md (add sprk_documentcategory optionset + governance fields via Web API + PowerShell)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs:115-165 (the per-record index routing + allow-list — where category→index wires in)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/**/RagIndexingPipeline.cs (indexing pipeline)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/**/SearchIndexNameResolver.cs (index-name resolution — route Policy category → policy index)</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs (index doc schema — trim is tenantId + privilege_group_ids today; ADD status/effective/published governance-trim fields here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs (category=Reference-Golden → spaarke-rag-references — document the general reuse; do NOT build Reference in R2)</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md + docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (author the Policy Library sprk_gridconfiguration; BffDataverseClient read-only broker)</file>
+      <file>Dataverse: sprk_document + sprk_documenttype (existing; ADD sprk_documentcategory alongside — do NOT overload documenttype); sprk_ai_search_index lookup</file>
+      <file>.claude/constraints/bff-extensions.md (binding BFF governance — Placement Justification + publish size)</file>
+    </relevant-files>
+    <dependencies>020 (P2 entitlement schema) must be complete. 035 (Review Policy Question + Policy Library browse) consumes the sprk_gridconfiguration + governance fields this task creates. 051 (Ask Legal policy_search) grounds on the policy index + governance trim this task builds; the P5 security spike (050) resolves the trim's security requirements — this task builds the trim fields + query filter mechanism.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Reuse sprk_document — do NOT create a sprk_policy entity (eliminated 2026-08-06). A policy = a sprk_document of category=Policy. Add sprk_documentcategory as a NEW discriminator optionset (Operational/Policy/Reference-Golden); do NOT overload the single-valued AI-populated sprk_documenttype.</constraint>
+    <constraint source="project">Design the category→index routing + governance-state trim as a GENERAL mechanism (typed document → typed RAG index → typed grid) that Reference-Golden reuses via sprk_analysisknowledge→ReferenceIndexingService→spaarke-rag-references — but BUILD + wire ONLY Policy in R2 (§11: build one excellent path, document the general seam; do not build Reference).</constraint>
+    <constraint source="project">Governance-state trim (status/effective/published) MUST be enforced at QUERY time on the index — add the index fields + a query-time filter so an unpublished/expired/restricted policy NEVER surfaces in retrieval. This is the one genuinely-new plumbing piece; the security requirements are refined by the P5 spike (050) but the field + filter mechanism is built here.</constraint>
+    <constraint source="project">The Policy Library grid MUST be a sprk_gridconfiguration record (entity=sprk_document, filter category=Policy) read read-only via BffDataverseClient — do NOT hand-roll a grid or a new read endpoint (reuse the DataGrid framework).</constraint>
+    <constraint source="ADR-024">Do NOT disturb existing sprk_document relationships/regarding — all additions are additive (new optionset attribute + governance scalar fields).</constraint>
+    <constraint source="project">BFF addition (index-routing/query change): state the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); run dotnet publish -c Release and report compressed size + delta vs baseline 46.90 MB incl PDBs (ceiling ≤60 MB); run /conflict-check before the BFF PR (teams-app-r1 shares external-access; AI/indexing cluster shares Services/Jobs + Services/Ai).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-013-openai-facade.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/review-additions-analysis.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Per-record index routing" location="src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs:115-165">Route by record metadata (add category→index) through SearchIndexNameResolver + the allow-list — no new pipeline.</pattern>
+      <pattern name="Typed grid config" location="docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md">Author a sprk_gridconfiguration (entity=sprk_document, filter category=Policy); external read via BffDataverseClient (read-only broker).</pattern>
+      <pattern name="Governance trim" location="src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs">Add status/effective/published index fields + a query-time filter so retrieval never surfaces unpublished/expired content.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-25 (line 257) + §12 C + review-additions-analysis.md item 5 + the DataGrid framework docs + the indexing-lifecycle code (RagIndexingJobHandler:115-165, SearchIndexNameResolver, KnowledgeDocument). Run /conflict-check for the external-access + indexing BFF surfaces.</step>
+    <step order="2">Schema: add sprk_documentcategory optionset (Operational/Policy/Reference-Golden, documented integers) + governance fields (status optionset Draft/InReview/Published/Retired-Expired; effective date; expiration date) on sprk_document via dataverse-create-schema. Additive only. Publish; verify via metadata query.</step>
+    <step order="3">Indexing: wire category=Policy → a policy AI-Search index through SearchIndexNameResolver + sprk_ai_search_index + the allow-list in RagIndexingJobHandler (route by category). Design the routing generally (Reference-Golden documented as reusing it) but wire ONLY Policy. Do NOT build Reference indexing.</step>
+    <step order="4">Governance trim: add status/effective/published fields to the policy index schema (KnowledgeDocument) + a query-time filter so an unpublished/expired policy never surfaces in retrieval. Verify with a negative retrieval test (an unpublished/expired policy is excluded).</step>
+    <step order="5">Policy Library grid: author a sprk_gridconfiguration record (entity=sprk_document, filter category=Policy + published) read-only via BffDataverseClient. Do NOT hand-roll a grid.</step>
+    <step order="6">Tests: KEEP-path integration tests in tests/unit/Sprk.Bff.Api.Tests/ for category→index routing + the governance-trim query filter (published surfaces, unpublished/expired excluded — negative). NO Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests (ADR-038).</step>
+    <step order="7">Build: dotnet publish -c Release — report compressed size + delta vs 46.90 MB. State the Placement Justification in the task notes / PR body.</step>
+    <step order="8">Document the category integers, the general typed-document→typed-index→typed-grid mechanism (how Reference-Golden reuses it), and the governance-trim schema in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="terminal">PowerShell for Dataverse Web API + publish; /conflict-check</tool>
+    <tool name="npm">Not required for this task</tool>
+  </tools>
+  <outputs>
+    <output type="code">Dataverse schema on sprk_document (sprk_documentcategory optionset + governance fields) deployed to dev</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/** — category=Policy → policy-index routing (SearchIndexNameResolver/RagIndexingJobHandler) + governance-trim index fields + query-time filter</output>
+    <output type="code">sprk_gridconfiguration record (entity=sprk_document, filter category=Policy) for the Policy Library grid</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** — category-routing + governance-trim (published in / unpublished-expired out) KEEP-path integration tests</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ — category integers, general mechanism (Reference-Golden reuse), governance-trim schema</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed schema, when a sprk_document is set to category=Policy with governance fields (status/effective/expiration), then all persist and category is a distinct field from the AI-populated sprk_documenttype (not overloaded).</criterion>
+    <criterion testable="true">Given a Published policy document, when the indexing lifecycle runs, then it is routed to the policy AI-Search index via SearchIndexNameResolver + the allow-list (category→index) with no new pipeline.</criterion>
+    <criterion testable="true">Negative (governance trim): given an unpublished or expired policy, when retrieval queries the policy index, then the query-time filter excludes it — it never surfaces (verified by a negative test).</criterion>
+    <criterion testable="true">Given the Policy Library grid, when it loads, then it reads sprk_document via a sprk_gridconfiguration (entity=sprk_document, filter category=Policy) through BffDataverseClient read-only — no hand-rolled grid in the diff.</criterion>
+    <criterion testable="true">Given the routing + trim mechanism, when reviewed, then it is authored generally (Reference-Golden documented as reusing sprk_analysisknowledge→ReferenceIndexingService→spaarke-rag-references) but only Policy is built + wired in R2 (no Reference indexing in the diff).</criterion>
+    <criterion testable="true">Negative: no sprk_policy entity is created — the diff extends sprk_document only.</criterion>
+    <criterion testable="true">Given the BFF build, when dotnet publish -c Release runs, then compressed size is reported with delta vs 46.90 MB and is ≤60 MB.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>sprk_document + sprk_documenttype (AI-populated picklist) exist; the indexing lifecycle is already multi-index + per-record-routable (RagIndexingJobHandler:115-165 + SearchIndexNameResolver + sprk_ai_search_index allow-list, shipped by multi-container-multi-index-r1); the DataGrid framework + BffDataverseClient exist. What does NOT exist: a category discriminator, governance fields, governance-state index trim (KnowledgeDocument has only tenantId + privilege_group_ids today — no status/effective), and a Policy Library grid config.</existing>
+    <extension>Yes — extend sprk_document (additive optionset + governance fields), extend the existing routing (add a category branch), extend the index schema (governance-trim fields), and author a grid CONFIG record (not new grid code). No new entity, no new pipeline, no new grid component.</extension>
+    <cost-of-doing-nothing>Without the category discriminator + governance fields + trim, there is no way to store, route, or safely surface policies: FR-25's browse library has no filtered data source, and FR-26/051's policy_search would ground on unpublished/expired content (a data-leakage/compliance failure). Overloading sprk_documenttype would collide with the AI-populated type and break classification.</cost-of-doing-nothing>
+  </justification>
+  <notes>Spec FR-25 (line 257) + §12(C). NO sprk_policy entity. Category discriminator separate from AI-populated sprk_documenttype. Governance-state trim (status/effective/published) is the one genuinely-new plumbing piece — build the fields + query filter here; the P5 spike (050) refines its security requirements for the assistant. Design general (typed doc → typed index → typed grid) but build only Policy. §10 BFF: Placement Justification + publish size + conflict-check mandatory. Authoring is by law-dept core users in the MDA (external portal read-only) — reuse the existing upload wizard + lifecycle, no new authoring plumbing.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; run /conflict-check + code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

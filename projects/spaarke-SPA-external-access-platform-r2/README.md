@@ -134,6 +134,7 @@ The project is considered **complete** when:
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-08-06 | 1.0 | Project initialized via `/project-pipeline` (INITIALIZE-ONLY) | Claude Code |
+| 2026-08-06 | 1.1 | P0 prototype complete + signed off; foundation pivoted card-launcher → **workspace shell**; FR-23–27 added; P&P = `sprk_document`+category (no `sprk_policy`); Ask Legal bounded; 2 spikes; tasks re-decomposed to 40 (see `design.md` §12) | Claude Code |
 
 ---
 

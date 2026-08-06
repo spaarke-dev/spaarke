@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>SPIKE: evaluate the business-user NDA redline surface (reuse all NDA plumbing)</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:032</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Planning spike — investigation + options + recommendation + decision record; NO production code (rigor STANDARD per kit spike rule). Gates the outcome-(b) redline build (a follow-on).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded evaluation of existing plumbing (ReviewMemo* / ComposeShadowPatchEngine / app-only decoupling) against a defined persona; produces a decision doc, no architecture invention.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 032's outcome-(b) mock boundary; produces a decision doc that gates the redline build — sequential after 032.</parallel-reason>
+    <deps>032</deps>
+    <tags>testing</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>SPIKE (no production code): evaluate the best business-user NDA redline surface for the non-attorney SPA persona (distinct from the full Compose/agreement-review attorney surface), reusing ALL existing NDA plumbing. Compare surface options — Review Summary Memo (ReviewMemoDocumentBuilder + IExportService) vs a tracked-change DOCX (ComposeShadowPatchEngine) vs an inline edit list — and resolve the app-only decoupling from the OBO/Compose-save path. Produce a decision doc notes/nda-redline-surface-decision.md that sets the FR-23 outcome-(b) production contract. Do NOT write production code.</prompt>
+  <role>SPAARKE platform developer + solution architect. Follow ADRs strictly. Evaluate reuse of the Compose redline engine + agreements-r1 advisory-only posture against the SPA business-user persona; app-only (no OBO) constraints (ADR-028/A3).</role>
+  <goal>A decision doc projects/spaarke-SPA-external-access-platform-r2/notes/nda-redline-surface-decision.md exists that: (1) states the recommended business-user redline surface + artifact for outcome (b); (2) names exactly which existing plumbing to expose (ReviewMemo* vs ComposeShadowPatchEngine vs inline list) and why; (3) resolves app-only decoupling from the OBO/Compose-save path; (4) surfaces the ADR tension (agreement-review is advisory-only / MUST NOT auto-apply redlines) and the resolution path (A exception / B amendment / C comply per §6.5); (5) defines the FR-23 (b) production contract + a follow-on build task recommendation. No production code is written.</goal>
+  <context>
+    <background>FR-23 outcome (b) — minor/low-risk NDA → an edit list + a redlined version to download/email. Per spec.md line 253: the outcome-(b) auto-generated redlined DOCX is the genuinely novel/hard piece — the agreement-review Action is prompt-FORBIDDEN from proposing replacement text, and agreements-r1/nda-r1 posture as advisory-only ("MUST NOT auto-apply redlines"). What exists is a Review Summary Memo (before/after table, downloadable/emailable via ReviewMemoDocumentBuilder + IExportService), NOT a tracked-change redline. A true auto-redline needs a new finding→edit synthesizer feeding ComposeShadowPatchEngine — an ADR tension with the advisory-only posture. Owner decision (2026-08-06): reuse ALL existing NDA plumbing; the open question is the redline SURFACE for the non-attorney SPA persona (intentionally different from the attorney's full Compose surface). Owner preference: mock-in-prototype (done in 032) + spike-in-planning (this task). This spike's outcome sets the FR-23 (b) production contract; the real build is a follow-on (NOT in R2 unless the spike says so). §12(E) names this spike explicitly.</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-23 line 253 — the outcome-(b) ADR tension + owner decision + spike mandate)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/**/ReviewMemoDocumentBuilder.cs + IExportService (the existing Review Summary Memo — before/after table, downloadable/emailable; the advisory-only artifact that exists today)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Compose/**/ComposeShadowPatchEngine.cs (the byte-author redline engine — reuse candidate for a true tracked-change redline; ADR-049)</file>
+      <file>infra/dataverse/actions/agreement-review.action.json (the advisory-only Action prompt-forbidden from proposing replacement text — the source of the ADR tension)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/032-nda-ai-assessment.poml (the outcome-(b) MOCK boundary this spike resolves)</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md (Compose write/save posture — OBO/Compose-save path the SPA surface must decouple from)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md (broker-only/app-only, no OBO — the decoupling constraint)</file>
+    </relevant-files>
+    <dependencies>032 (NDA AI assessment) must be complete — it defines the outcome-(b) mock this spike replaces with a production contract. This spike GATES the outcome-(b) redline build (a follow-on task, not in R2 unless the spike recommends it).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">NO production code — this is a planning spike (kit spike rule). The only artifact is the decision doc in notes/. Do NOT modify ComposeShadowPatchEngine, ReviewMemo*, the agreement-review Action, or any client/BFF source.</constraint>
+    <constraint source="project">The evaluation MUST reuse existing plumbing (owner decision) — options are which EXISTING surface/engine to expose (ReviewMemo memo vs ComposeShadowPatchEngine tracked-change vs inline edit list), not a from-scratch redline builder. Any new work must be scoped as the minimal synthesizer/adapter on top of existing engines.</constraint>
+    <constraint source="project">The recommendation MUST resolve app-only decoupling from the OBO/Compose-save path (ADR-028/A3: no OBO on the SPA plane) — a business-user surface that requires OBO or the Compose-save write path is not viable and must be flagged.</constraint>
+    <constraint source="project">The ADR tension (agreement-review advisory-only / MUST NOT auto-apply redlines) MUST be surfaced with an explicit §6.5 resolution path (A/B/C) — the spike does not silently pick a path; it recommends one for owner sign-off.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-013-openai-facade.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spike decision record" location="projects/spaarke-SPA-external-access-platform-r2/notes/">Investigate → options → recommendation → decision record; no production code; gate the downstream build.</pattern>
+      <pattern name="ADR conflict resolution" location="CLAUDE.md §6.5">Surface the advisory-only tension with an explicit A/B/C path for owner sign-off.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Investigate: read ReviewMemoDocumentBuilder + IExportService (what the memo artifact is + how it's exported), ComposeShadowPatchEngine (what a true tracked-change redline would take + its ADR-049 write/save posture), and the agreement-review Action's advisory-only prompt constraint. Confirm the app-only vs OBO/Compose-save boundary for each.</step>
+    <step order="2">Options: enumerate the candidate business-user redline surfaces — (i) Review Summary Memo (before/after table, download/email; advisory, exists today), (ii) tracked-change DOCX via a finding→edit synthesizer feeding ComposeShadowPatchEngine (novel/hard; ADR-tensioned), (iii) inline edit list only (no artifact). For each: reuse cost, app-only viability, fidelity to the non-attorney persona, ADR-tension exposure.</step>
+    <step order="3">Recommend: pick the surface + artifact for the non-attorney SPA persona; name exactly which plumbing to expose + the minimal new adapter/synthesizer (if any); resolve the app-only decoupling from OBO/Compose-save; state the §6.5 resolution path (A/B/C) for the advisory-only tension.</step>
+    <step order="4">Define the FR-23 (b) production contract (what the endpoint returns for outcome (b) once the mock is replaced) + a follow-on build-task recommendation (scope, effort, whether it belongs in R2).</step>
+    <step order="5">Write the decision doc to projects/spaarke-SPA-external-access-platform-r2/notes/nda-redline-surface-decision.md.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="terminal">Shell for code inspection (read-only)</tool>
+    <tool name="dotnet">Not required — no code changes</tool>
+    <tool name="npm">Not required — no code changes</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/nda-redline-surface-decision.md — options, recommendation, app-only decoupling, ADR-tension path, FR-23 (b) production contract, follow-on build recommendation</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the spike completes, when notes/nda-redline-surface-decision.md is read, then it recommends ONE business-user redline surface + artifact for the non-attorney SPA persona and names the exact existing plumbing to expose (ReviewMemo* / ComposeShadowPatchEngine / inline list).</criterion>
+    <criterion testable="true">Given the recommendation, when reviewed, then it resolves app-only decoupling from the OBO/Compose-save path — a surface requiring OBO is explicitly ruled out or flagged.</criterion>
+    <criterion testable="true">Given the advisory-only ADR tension, when reviewed, then the doc surfaces it with an explicit §6.5 A/B/C resolution path for owner sign-off (not a silent pick).</criterion>
+    <criterion testable="true">Given the doc, when reviewed, then it defines the FR-23 (b) production contract + a follow-on build-task recommendation (scope + whether it belongs in R2).</criterion>
+    <criterion testable="true">Negative: no production code is changed — the diff contains only the decision doc + TASK-INDEX/notes updates (no src/** changes).</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-23 line 253 + §12(E). SPIKE — no production code; the artifact is the decision doc. 032 mocks outcome (b); this spike sets its production contract and gates the real redline build (a follow-on, not in R2 unless the spike says so). Owner preference: mock-in-prototype (done) + spike-in-planning (this).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; produce the decision doc; write no production code.</protocol>
+  </execution>
+</task>

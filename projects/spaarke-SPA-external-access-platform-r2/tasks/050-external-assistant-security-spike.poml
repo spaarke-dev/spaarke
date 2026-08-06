@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>SECURITY SPIKE: External Assistant Access &amp; Permission Model (gates 051)</title>
+    <phase>P5 Collaboration Surfaces</phase>
+    <gate>blocked-until:034</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive spike (tags auth): defines the server-side access/permission boundary for an app-only (no-OBO) AI assistant on the external module framework; a single design omission = cross-user/cross-matter data leak. Human sign-off required (root CLAUDE.md §6).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Threat-modeling an app-only AI attack surface (grounding trim, tool-catalog escape, injection boundary, legal-advice guardrail) is high-blast-radius security reasoning — opus per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Security spike requiring main-session judgment + human sign-off; gates 051; not a parallel-safe build task.</parallel-reason>
+    <deps>034</deps>
+    <tags>testing, auth</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Produce a security design decision document (NO production code) that resolves the access/permission model for
+    the "Ask Legal" external assistant (FR-26), which runs app-only (no OBO, backend sees everything). The document
+    MUST resolve four items: (a) P&amp;P RAG grounding entitlement/status trim (published / not-restricted / effective,
+    using the governance-state index fields from task 034); (b) prove the exactly-two-tool catalog cannot be escaped
+    via prompt-injection (server-side boundary, not a system prompt); (c) prove launch_wizard routing is safe (only
+    defined wizards reachable); (d) audit-logging design. This spike GATES the FR-26 build task 051 and requires human
+    sign-off before 051 starts.
+  </prompt>
+
+  <role>SPAARKE platform developer + application-security / AI-safety engineer. Follow ADRs strictly. Expert in app-only broker security, RAG security-trim, closed agent tool catalogs (ADR-039), and threat-modeling LLM tool surfaces.</role>
+
+  <goal>
+    A signed-off decision document at projects/spaarke-SPA-external-access-platform-r2/notes/external-assistant-security-design.md
+    that specifies the server-side enforcement design for the app-only Ask Legal assistant — grounding security-trim contract,
+    the two-tool-catalog escape-proof boundary, launch_wizard routing safety, per-tool authz, injection boundary, legal-advice
+    guardrail, and audit logging — with negative "no cross-scope leakage" test obligations per tool + for grounding. NO production
+    code is written. The doc is the binding contract task 051 implements and MUST carry human sign-off.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-26 (refined 2026-08-06) + NFR-EXT-AI + design.md §12 (B)/(E). Ask Legal runs on the WORKFORCE plane,
+      entitlement-scoped, APP-ONLY (no OBO) — the core /api/ai/chat is OBO/core-user and unusable. Because app-only means the
+      backend has full data access, EVERY retrieval and tool call must be explicitly re-scoped to the caller's Tier-1
+      (entitlement) + Tier-2 (record) scope. The scope was NARROWED by the owner (2026-08-06): Ask Legal does EXACTLY TWO
+      things — policy_search (RAG over the P&amp;P library) + launch_wizard (route to a defined wizard). No file-ingest tool,
+      no data tools, no chat upload affordance. This narrowing shrinks the spike to four items (a)-(d). Settled enforcement
+      seams to REUSE (not redesign): ADR-039 AgentToolCatalogProjector (closed tool catalog / whitelist subset), persona
+      system-prompt (sprk_aipersona), ChatKnowledgeScope (knowledge-grounding scope). Task 034 delivers the governance-state
+      index fields (status/effective/published) the grounding trim depends on. This is the input note: notes/external-assistant-access-model.md.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/external-assistant-access-model.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/design.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+    </relevant-files>
+    <dependencies>034 (P&amp;P document architecture — delivers the governance-state index fields status/effective/published that the grounding security-trim (a) filters on).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">NO production code. This is a spike: output is a decision document in notes/ only; the FR-26 build (task 051) implements it after human sign-off.</constraint>
+    <constraint source="NFR-EXT-AI">The design MUST enforce that the assistant never grounds on or returns content outside the caller's Tier-1 (entitlement) + Tier-2 (record) scope; enforcement is SERVER-SIDE (tool catalog + grounding security-trim + per-tool authz), NOT prompt-based; a negative "no cross-scope leakage" test is required per tool + for grounding.</constraint>
+    <constraint source="ADR-039">Reuse the AgentToolCatalogProjector closed-catalog mechanism; the external assistant catalog is EXACTLY TWO tools (policy_search, launch_wizard) — no core-user tools, no file-ingest tool reachable. The boundary is the server-side projection, not the persona system prompt.</constraint>
+    <constraint source="project">Security-sensitive per root CLAUDE.md §6 — the document MUST end with an explicit Human-Sign-Off section that a human owner completes before task 051 may start. Do NOT self-approve.</constraint>
+    <constraint source="project">Reuse settled seams (ADR-039 AgentToolCatalogProjector, ChatKnowledgeScope, sprk_aipersona persona prompt); do NOT propose new AI-internal abstractions — the spike designs enforcement over existing seams.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/external-assistant-access-model.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Closed tool catalog" location=".claude/adr/ADR-039-grounded-execution-closed-catalogs.md">AgentToolCatalogProjector projects a whitelisted subset by capability set; the external projection is the exactly-two-tool boundary — design escape-proofing around this server-side projection.</pattern>
+      <pattern name="App-only re-scope" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">CallerPrincipalResolver yields the Tier-1/Tier-2 caller scope; app-only grounding + per-tool authz must explicitly consume this (no OBO token to inherit).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read notes/external-assistant-access-model.md + FR-26 + NFR-EXT-AI + design.md §12(B)/(E); restate the four items to resolve (a) grounding trim, (b) tool-catalog escape-proof, (c) launch_wizard routing safety, (d) audit.</step>
+    <step order="2">Investigate the settled seams: ADR-039 AgentToolCatalogProjector, ChatKnowledgeScope, the KnowledgeDocument trim fields, and the task-034 governance-state index fields (status/effective/published). Map what exists vs what the design must add.</step>
+    <step order="3">Design (a): the P&amp;P RAG grounding security-trim — how retrieval is filtered per caller to published + not-restricted + effective-dated policies within the caller's Tier-1 entitlement, app-only (no OBO RetrievePrincipalAccess). Options considered (index partition / per-chunk metadata ACL / query-time filter injection) with a recommendation + negative-test obligation.</step>
+    <step order="4">Design (b): threat-model a hostile workforce user and prove the exactly-two-tool catalog cannot be escaped via prompt-injection — the boundary is the server-side AgentToolCatalogProjector projection + per-tool authz, NEVER the system prompt. Enumerate the attack attempts and why each fails server-side.</step>
+    <step order="5">Design (c): launch_wizard routing safety — the tool can route ONLY to a defined allow-list of wizards via the surface-launch spine; an unknown/injected wizard id is rejected server-side. Cite ASSISTANT-SURFACE-LAUNCH-MECHANISM.md.</step>
+    <step order="6">Design (d): audit logging — what is logged per interaction (asks, answers, tools invoked, grounding sources) for compliance; and the legal-advice guardrail (structural: retrieve+route, not advise) beyond the system prompt.</step>
+    <step order="7">Specify the negative-test obligations task 051 MUST satisfy: no cross-scope grounding leakage; catalog excludes all core-user tools; launch_wizard rejects undefined wizards; app-only never OBO. Write these as the acceptance contract for 051.</step>
+    <step order="8">Write the decision document to notes/external-assistant-security-design.md with a Recommendation + explicit STOP condition (if grounding cannot be entitlement-trimmed app-only) + a Human-Sign-Off section (owner completes before 051 starts).</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations / open questions in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>This spike IS a stop-for-human-sign-off gate: on completion, STOP and request human sign-off per root CLAUDE.md §6 before task 051 may start. Additionally, if the investigation concludes the P&amp;P RAG grounding CANNOT be entitlement/status-trimmed app-only (no server-side filter guarantees no cross-scope leakage), STOP and escalate — do NOT let task 051 proceed.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Shell for reading code + seams</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/external-assistant-security-design.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The decision doc resolves item (a): a concrete server-side grounding security-trim contract that limits retrieval to published + not-restricted + effective-dated P&amp;P within the caller's Tier-1 entitlement, app-only (no OBO), using the task-034 governance-state index fields — with a negative "ask about out-of-entitlement content → no grounded leakage" test obligation.</criterion>
+    <criterion testable="true">The doc resolves item (b): a threat model proving the exactly-two-tool catalog cannot be escaped via prompt-injection because the boundary is the server-side AgentToolCatalogProjector projection + per-tool authz, not the system prompt — enumerating attempted escapes and why each fails.</criterion>
+    <criterion testable="true">The doc resolves item (c): launch_wizard can route ONLY to an allow-listed set of defined wizards via the surface-launch spine; an undefined/injected wizard id is rejected server-side (negative).</criterion>
+    <criterion testable="true">The doc resolves item (d): the audit-logging design (asks/answers/tools/grounding-sources) + the structural legal-advice guardrail (retrieve+route, not advise) enforced beyond the system prompt.</criterion>
+    <criterion testable="true">NO production code is written; the only artifact is notes/external-assistant-security-design.md.</criterion>
+    <criterion testable="true">The doc ends with an explicit Human-Sign-Off section (unsigned by the agent) and a STOP condition; task 051 remains gated until a human signs off.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Gates 051 (Ask Legal build). Security-sensitive → human sign-off (root CLAUDE.md §6). Scope narrowed by owner 2026-08-06
+    (two tools, no file ingest) — the spike is small: four items (a)-(d) over settled seams. Reuse ADR-039
+    AgentToolCatalogProjector + ChatKnowledgeScope + persona prompt; do not design new AI-internal abstractions.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist. Spike = investigate → options → recommend → decision-record in notes/; NO production code; STOP for human sign-off at the end.</protocol>
+  </execution>
+</task>

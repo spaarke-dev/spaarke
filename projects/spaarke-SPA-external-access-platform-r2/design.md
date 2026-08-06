@@ -178,3 +178,50 @@ entitlement/participation-scoped, app-only, no OBO) — not a from-scratch build
 absorbs FR-23 (NDA AI auto-fill), FR-24 (feedback loop), FR-25 (P&P library+request); a new **P5
 (Collaboration Surfaces)** carries FR-26 (Q&A assistant) + FR-27 (cross-boundary messaging). Prototype
 extended to cover all five for the task-004 visual gate.
+
+---
+
+## 12. P0 Outcome — Foundation & Architecture Decisions (2026-08-06, owner-approved)
+
+P0 (prototype-first, `spaarke-prototype/projects/2026-08-external-access-module-host`) is complete and
+signed off. The following decisions supersede the earlier card-launcher framing in §4 (F1) and are
+detailed in `spec.md` (FR-01/02 reframed; FR-23–27) + the `notes/` records cited.
+
+**(A) Foundation = WORKSPACE SHELL (not card-launcher).** Reframes FR-01/FR-02. The external portal is
+a SpaarkeAi-style **workspace**: branded header ("Legal Department Service Portal") + a **pinned
+"Quick Start" first tab** (role-relevant action cards + "More Services") + a **tabbed, role-defaulted
+widget workspace** + an **entitlement-gated widget library** + a **dockable (left/right) assistant
+pane**. Rationale: balance of AI-directed chat + deterministic widget data; assistant-central; unifies
+the internal-SpaarkeAi + external-portal model (new capability = register a widget). Feasibility
+grounded: the shell **chassis** (`WorkspaceWidgetRegistry`, tab host, pane layout, assistant dock) is
+Xrm-free + reusable; new external widgets ride the existing injectable **`BffDataverseClient`** seam.
+Do NOT re-host the Xrm-bound `LegalWorkspaceApp`. See `notes/workspace-shell-foundation.md`.
+- **Quick Start cards = "do" (wizards)** vs **widgets = "see/manage" (data)**.
+- **Role-defaulted widgets** — workforce: My Requests · Inventions · Messages · Policy Library;
+  outside-counsel: Projects · Matters · Work Assignments · Documents · Invoices; admin: Access Admin.
+
+**(B) Assistant ("Ask Legal") is NARROWLY BOUNDED (FR-26).** Exactly two tools: **P&P semantic search**
++ **wizard routing**. **No file-upload affordance in the chat at all**; no summarize/analyze (file
+analysis only inside wizards). Workforce-internal only. This narrow scope IS the primary security
+control. Gated by a **P5 security design spike** ("External Assistant Access & Permission Model") —
+security-sensitive, human sign-off (§6). See `notes/external-assistant-access-model.md`.
+
+**(C) P&P / documents = `sprk_document` + `sprk_documentcategory` (NO `sprk_policy` entity).** Policies
+are `sprk_document` category=Policy; reuse SPE + the **multi-index, per-record-routable** search-index
+lifecycle + the DataGrid framework (Policy Library grid via `sprk_gridconfiguration`, external-read via
+`BffDataverseClient`). **Golden/Reference RAG docs reuse the SAME mechanism** (category=Reference-Golden
+→ `sprk_analysisknowledge`→`ReferenceIndexingService`→`spaarke-rag-references`) — a general "typed
+document → typed RAG index → typed grid" capability, not a policy one-off. NOT Knowledge Articles
+(restricted-table licensing landmine). Governance-state index trim (status/effective/published) is the
+one genuinely-new piece (folded into the P5 assistant spike's trim item).
+
+**(D) FR-24 (feedback) + FR-27 (messaging) share ONE thread-on-request model** — a request carries a
+conversation thread with the law department (interaction happens via messages on the request); the
+cross-boundary messaging spine (ConversationView + external thread endpoint) serves both.
+
+**(E) Two planning spikes gate their builds**: (1) **NDA-redline-surface spike** (FR-23 (b) — reuse all
+NDA plumbing; evaluate the business-user redline surface, distinct from the attorney's); (2)
+**External-Assistant Access & Permission spike** (FR-26 — gates the assistant build). Both are
+"mock-in-prototype + spike-in-planning" per owner preference.
+
+**UI**: further UI refinement deferred to the project (P0 validated the model, not the pixels).

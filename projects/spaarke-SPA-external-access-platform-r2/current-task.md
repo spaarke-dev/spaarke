@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-06
+> **Last Updated**: 2026-08-06 (session handoff — P0 complete + design locked + tasks re-decomposed)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,124 +10,76 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 004 - Owner visual-approval gate (P0 exit) |
-| **Step** | AWAITING OWNER — P0 prototype fully built (001/002/003 ✅) |
-| **Status** | blocked (owner action) |
-| **Next Action** | OWNER: run the prototype (`cd c:/code_files/spaarke-prototype/projects/2026-08-external-access-module-host && npm install --legacy-peer-deps --no-audit --no-fund && npm run dev` → :5175), review against ux-brief §4 checklist, sign off. On approval: mark 004 ✅, produce component map, then P0 exits → P1 build (task 010 ADR-028 A3 first). |
+| **Task** | none active — P0 ✅ complete; P1 not started |
+| **Step** | — |
+| **Status** | not-started (design phase closed; ready for implementation) |
+| **Next Action** | Begin **task 010 (ADR-028 Amendment A3)** — main-session-only, first, before P1 auth. Then P1 waves per TASK-INDEX. |
 
 ### Files Modified This Session
-- All project artifacts + 34 POMLs committed (08a9b5c8a); merged master (b85e3f9a4)
-- Task 001 build happens in `c:/code_files/spaarke-prototype` (separate repo) via delegated agent
+- `spec.md` (FR-01/02 reframed to workspace shell; FR-23–27 amendment; document architecture; assistant bounding + NFR-EXT-AI)
+- `design.md` §12 (P0 outcome — foundation & architecture decisions)
+- `tasks/` re-decomposed to 40 tasks (workspace-shell P1 + expanded P3 + new P5 + 2 spikes); `TASK-INDEX.md` rewritten
+- `notes/`: `workspace-shell-foundation.md`, `review-additions-analysis.md`, `external-assistant-access-model.md`, `prototype-findings.md`
+- Prototype (separate repo): `spaarke-prototype/projects/2026-08-external-access-module-host` (committed `3832580`)
 
-### Critical Context
-RIGOR: STANDARD (prototype repo = non-production; ADR-021 token check applied explicitly). Task 001 is
-the P0 prototype base (shell chrome + card launcher + realm chooser) built in `spaarke-prototype` via
-`/prototype-experiment-init`, consuming `@spaarke/ui-components` (ActionCardRow/ActionCard,
-ThemeToggle). Owner visual-approval is task 004, not 001. teams-app-r1 is now CLOSED (merged PR #723) —
-its external-access surface is a stable base, not a concurrent-collision risk; R2's P1 prerequisite
-(teams-app-r1 BFF redeploy + live Teams E2E) is CLEARED.
+### Critical Context (READ before starting implementation)
+**P0 is done + owner-signed-off.** The prototype validated the FOUNDATION MODEL, not pixels (UI refinements deferred to the project). Key decisions (all in `design.md` §12 + `spec.md` amendment):
+1. **Foundation = WORKSPACE SHELL** (not card-launcher): branded portal + pinned Quick Start tab + tabbed role-defaulted **widgets** + entitlement-gated widget library + dockable(left/right) assistant. Reuse the SpaarkeAi workspace **chassis** (Xrm-free) + `BffDataverseClient` widget-data seam; do NOT fork `LegalWorkspaceApp`.
+2. **Ask Legal assistant** = EXACTLY 2 tools (P&P `policy_search` + `launch_wizard`); **no file-upload in the chat at all**; workforce-only; **gated by the task-050 security spike (human sign-off)**.
+3. **P&P = `sprk_document` + `sprk_documentcategory`** (NO `sprk_policy` entity) + type-routed indexing + Policy Library grid (`sprk_gridconfiguration`). Golden/Reference RAG docs reuse the SAME mechanism. NOT Knowledge Articles.
+4. **FR-24 (feedback) + FR-27 (messaging) share ONE thread-on-request** model.
+5. **Two spikes gate their builds**: 033 (NDA-redline surface), 050 (external-assistant security — human sign-off).
+- teams-app-r1 is **COMPLETE/merged** (external-access surface is a stable base; still `/conflict-check` before BFF PRs).
 
 ---
 
 ## Active Task (Full Details)
-
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
-
----
-
-## Progress
-
-### Completed Steps
-
-*No steps completed yet*
-
-### Current Step
-
-*No active task*
-
-### Files Modified (All Task)
-
-*No files modified yet*
-
-### Decisions Made
-
-*No decisions recorded yet — see CLAUDE.md "Decisions Made" for project-level decisions*
+| **Task ID** | none (next: 010) |
+| **Task File** | `tasks/010-adr-028-amendment-a3.poml` |
+| **Title** | ADR-028 Amendment A3 |
+| **Phase** | P1 |
+| **Status** | not-started |
 
 ---
 
 ## Next Action
+**Next**: `task-execute` on **010** (ADR-028 A3 — main-session-only, reads existing A2 first). Then P1
+per TASK-INDEX: 011 (shell scaffold) → Group B {012,014,017} → 013 → 015 → 016 → 018 → 019.
 
-**Next Step**: Owner reviews `tasks/TASK-INDEX.md`, then begins P0 prototype.
-
-**Pre-conditions**:
-- `dotnet build src/server/api/Sprk.Bff.Api/` green (verify the merged external-access baseline before any BFF wave)
-- `/conflict-check` before any BFF PR
-
-**Expected Output**:
-- P0 prototype approved → P1 production build begins
+**Pre-conditions**: `dotnet build src/server/api/Sprk.Bff.Api/` green; `/conflict-check` before any BFF PR.
 
 ---
 
 ## Blockers
-
-**Status**: None (project initialized; awaiting owner-gated execution)
+**Status**: None — awaiting owner-gated execution start.
 
 ---
 
 ## Session Notes
-
-### Current Session
-- Started: 2026-08-06
-- Focus: Project initialization via `/project-pipeline` (INITIALIZE-ONLY)
-
-### Key Learnings
-- Everything the spec references exists in the worktree (R1 + teams-app-r1 code) — R2 lifts + generalizes.
-- ADR-028 A2 already taken (teams-app-r1) → R2 authors A3.
-
-### Handoff Notes
-*No handoff notes*
+### Key learnings
+- Prototype-first P0 caught a foundation pivot (card-launcher → workspace-shell) BEFORE any production code — the intended value of P0.
+- Most additions (FR-23–27) turned out to be **reuse** of existing Spaarke capabilities re-hosted on the external framework; P&P generalized into a reusable "typed document → typed RAG index → typed grid" capability.
+### Handoff notes
+All design decisions are durable in `spec.md` + `design.md` §12 + `notes/`. The 40-task set is in `TASK-INDEX.md`. Start a fresh session with `/project-continue` or "work on task 010".
 
 ---
 
 ## Quick Reference
-
-### Project Context
-- **Project**: spaarke-SPA-external-access-platform-r2
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
-### Applicable ADRs
-- ADR-028 (+A1/A2/A3): external identity/auth — dual-plane, broker-only
-- ADR-008: per-endpoint authz filters
-- ADR-009: Redis-first cache for `/me`
-- ADR-050: canonical SprkModal shell
-
-### Knowledge Files Loaded
-- `notes/ux-brief.md` — UX north-star
-- `.claude/constraints/bff-extensions.md` — BFF governance
+- **Project**: spaarke-SPA-external-access-platform-r2 · **CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md) · **Tasks**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
+- **Prototype**: `c:/code_files/spaarke-prototype/projects/2026-08-external-access-module-host` (`npm run dev` → :5175)
+- **ADRs**: ADR-028(+A1/A2/A3), ADR-008/009/007/001/010/019/021/022/024/034/038/039/050
+- **Design outcome**: `design.md` §12
 
 ---
 
 ## Recovery Instructions
-
-**To recover context after compaction or new session:**
-1. **Quick Recovery**: Read the "Quick Recovery" section above
-2. **If more context needed**: Read CLAUDE.md + plan.md
-3. **Load task file**: `tasks/{task-id}-*.poml`
-4. **Load knowledge files**: from task's `<knowledge>` section
-5. **Resume**: from "Next Action"
-
-**Commands**: `/project-continue` · `/context-handoff` · "where was I?"
-
-**For full protocol**: See [docs/procedures/context-recovery.md](../../docs/procedures/context-recovery.md)
+1. Read Quick Recovery + Critical Context above.
+2. Read `design.md` §12 + `spec.md` amendment for the locked design.
+3. `task-execute` on task 010, then P1 per TASK-INDEX.
+**Commands**: `/project-continue` · `/context-handoff` · "work on task 010"
 
 ---
 
-*This file is the primary source of truth for active work state. Keep it updated.*
+*Primary source of truth for active work state. Keep updated.*

@@ -3,7 +3,7 @@
   <metadata>
     <title>Project Wrap-up — quality gates, cleanup, close-out</title>
     <phase>Wrap-up</phase>
-    <gate>blocked-until:043</gate>
+    <gate>blocked-until:043,053</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Runs code-review + adr-check across all project code; test-diet reconciliation (test-modifying override + project-close diet gate).</rigor-reason>
