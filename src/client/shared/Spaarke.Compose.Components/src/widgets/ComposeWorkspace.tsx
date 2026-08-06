@@ -164,6 +164,9 @@ import type {
   ComposeServerProjection,
   // G7 (task 022): the Save split-button choice threaded into triggerSave.
   ComposeSaveMode,
+  // task 012 (r6, render-on-save cutover): the canonical content model retained from the mount
+  // door's response (state.loadedContentModel) and sent on the imported model-path save shape.
+  ComposeContentModel,
 } from '../types/compose-contracts';
 // R4 FR-06 (task 032, the write-path cutover): the op-log schema constant stamped on the operation log
 // `triggerSave` sends — the server (ComposeShadowPatchEngine) validates it against the version it compiles
@@ -242,6 +245,56 @@ function arrayBufferToBase64(buf: ArrayBuffer): string {
   let binary = '';
   for (let i = 0; i < view.length; i++) binary += String.fromCharCode(view[i]);
   return btoa(binary);
+}
+
+/** Inverse of {@link arrayBufferToBase64} — decodes an ASP.NET Core base64 byte[] response field.
+ * task 012 (r6): the Browse `/project` response echoes `content` back ONLY when server-side paraId
+ * minting mutated the caller's bytes; the client must adopt that echo as the retained mount bytes
+ * so editor/model/carrier share ONE paraId universe. */
+function base64ToArrayBuffer(b64: string): ArrayBuffer {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+/**
+ * task 012 (r6) — the editor-handle surface the sibling ComposeEditor task is adding for the
+ * render-on-save cutover. Typed STRUCTURALLY here (intersected at the call sites) so this file
+ * compiles and its tests run before the handle lands; once `ComposeEditorHandle` declares these
+ * members this local type is satisfied by it and adds nothing. Both members are optional-called
+ * (typeof / `?.()` guards) — an older editor build without them falls back to the transitional
+ * op-log save shape, mirroring the existing `getAnchoredComments` guard convention.
+ */
+interface ComposeEditorImportedModelHandle {
+  /** Folds the editor's edits + session/advisory comment threads onto the loaded canonical model;
+   * resets the editor dirty flag. Null when the editor is unavailable → op-log fallback. */
+  buildImportedContentModel?: (
+    loadedModel: ComposeContentModel,
+    opts: { trackChanges: boolean }
+  ) => { model: ComposeContentModel; warnings: Array<{ code: string; count: number }> } | null;
+  /** Recaptures the editor's baseline snapshot after a confirmed model-path save so subsequent
+   * edits diff against the just-saved state. */
+  recaptureBaselineSnapshot?: () => void;
+}
+
+/**
+ * 026-F5 (task 012, r6): merge the SERVER's render-side `degradationWarnings` with the client
+ * mapper's own warnings (`buildImportedContentModel(...).warnings`) into ONE save-warning set,
+ * summing counts on duplicate codes. Defensive against malformed entries (skipped, never thrown);
+ * a missing/non-finite count contributes 1.
+ */
+function mergeDegradationWarnings(
+  serverWarnings: ReadonlyArray<{ code: string; count: number }>,
+  mapperWarnings: ReadonlyArray<{ code: string; count: number }>
+): Array<{ code: string; count: number }> {
+  const byCode = new Map<string, number>();
+  for (const w of [...serverWarnings, ...mapperWarnings]) {
+    if (!w || typeof w.code !== 'string' || w.code.length === 0) continue;
+    const count = typeof w.count === 'number' && Number.isFinite(w.count) && w.count > 0 ? w.count : 1;
+    byCode.set(w.code, (byCode.get(w.code) ?? 0) + count);
+  }
+  return Array.from(byCode.entries()).map(([code, count]) => ({ code, count }));
 }
 
 /** Raw wire shape of a `projection` field on a Compose bytes->response payload (Load / Upload /
@@ -975,6 +1028,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // undefined/null normalize to `null` below — the BINDING null-handling contract treats
           // that the SAME as 'imported', never strict-equal to 'authored'.
           origin?: 'authored' | 'imported' | null;
+          // task 012 (r6): the canonical ComposeContentModel (additive since commit 70be80006).
+          // Typed loosely + parsed defensively — undefined/null (older BFF, or a failed canonical
+          // projection) → null → the save falls back to the transitional op-log shape.
+          contentModel?: ComposeContentModel | null;
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -1015,6 +1072,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           importedRevisions: hydratedImportedRevisions,
           importedComments: hydratedImportedComments,
           projection: hydratedProjection,
+          // task 012 (r6): retain the canonical model atomically with the projection (same response).
+          contentModel: payload.contentModel ?? null,
           // G1 (FR-01, task 020): normalize undefined (older BFF / Path B continuation) to `null`.
           origin: payload.origin ?? null,
         });
@@ -1363,6 +1422,39 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // `arrayBufferToBase64` above — also used by the FR-03/task 011 browse->project round-trip).
         const encodeRetained = arrayBufferToBase64;
 
+        // ── task 012 (r6, render-on-save cutover): the IMPORTED model-path probe ──
+        // An imported/loaded doc (retained bytes present) whose mount captured the canonical model
+        // (`state.loadedContentModel` — Load/Upload/Project responses, commit 70be80006) now saves by
+        // sending the MERGED content model: `buildImportedContentModel` folds the editor's edits AND
+        // the session+advisory comment threads onto the loaded model (so the model shape sends NO
+        // separate `comments` field) and resets the editor dirty flag. Guards, in order:
+        //   • `state.docxBytes` — both imported branches hold retained bytes; born-in-editor stays out.
+        //   • `state.loadedContentModel` — legacy session / older BFF / failed canonical projection
+        //     → null → the transitional op-log shape below runs completely unchanged.
+        //   • typeof check — an older editor build without the handle method → same op-log fallback
+        //     (mirrors the `getAnchoredComments` guard convention).
+        // `trackChanges`: BINDING null-handling — null/undefined origin → imported → tracked (true);
+        // only a durable 'authored' marker saves clean.
+        // Op-log discipline: `serializeOperationLog()` is called FIRST (result discarded) so the
+        // high-water mark is recorded and `commitSaved()` after a 200 drops the batch — prevents
+        // unbounded op accumulation on the model path. A dirty save already recorded the mark via the
+        // `opLogSnapshot` read above; only the clean case needs the extra call.
+        const importedModelHandle = editorRef.current as ComposeEditorHandle & ComposeEditorImportedModelHandle;
+        let importedBuilt: { model: ComposeContentModel; warnings: Array<{ code: string; count: number }> } | null =
+          null;
+        if (
+          state.docxBytes &&
+          state.loadedContentModel &&
+          typeof importedModelHandle.buildImportedContentModel === 'function'
+        ) {
+          const trackChanges = state.origin !== 'authored';
+          if (!opLogSnapshot) importedModelHandle.serializeOperationLog();
+          importedBuilt = importedModelHandle.buildImportedContentModel(state.loadedContentModel, { trackChanges });
+        }
+        // Non-null ⇔ THIS save posts the imported model shape (a null return = editor unavailable →
+        // the existing op-log shape below, unchanged).
+        const usedModelPath = importedBuilt !== null;
+
         // FR-05 (task 100): the create-on-save route carries no id in the path (the draft has no drive-item
         // yet) and sends `containerId`; the replace route carries the SPE id + driveId. Both hit
         // ComposeService.SaveAsync — the server branches on DocumentSpeId presence.
@@ -1370,50 +1462,58 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           ? `${bffBaseUrl}/api/compose/documents/create-on-save`
           : `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
 
-        // Four structured cases (the client authors NO bytes):
-        //  1. Loaded + dirty       → { editedParagraphs, baselineVersionId, content?(retained fast-path) }
-        //  2. Loaded + clean       → { content: retained byte-identical } (FR-06a)
-        //  3. Born-in-editor        → { contentModel } (AI-draft/blank/edited-browse-local → server renders)
-        //  4. Unedited browse-local → { content: retained byte-identical } (FR-06a)
-        // Task 040: session + advisory comments ride `comments` (ComposeAnchoredComment[]) in every case;
-        // redlines ride the ID-anchored `operationLog` (case 1 only — see below).
+        // Save shapes (the client authors NO bytes) — task 012 (r6) render-on-save cutover:
+        //  1. Born-in-editor (create OR re-save)     → { contentModel } (buildContentModel — the editor
+        //     folds session+advisory comments INTO the model now; no separate `comments` field, and
+        //     NEVER a baselineVersionId — a born-in-editor doc's stored versionId is the drive-ITEM id
+        //     and would 404 the server's version fetch).
+        //  2. Imported + canonical model retained    → { contentModel: built.model, content (retained
+        //     bytes) OR baselineVersionId } — the MODEL shape. No operationLog (ignored server-side on
+        //     this shape), no paraIdMap (the model carries the id universe), no `comments` (folded in).
+        //  3. Imported, NO canonical model (legacy session / older BFF / editor build without the
+        //     mapper / mapper returned null) → the TRANSITIONAL op-log shape, completely unchanged:
+        //     { content/baselineVersionId, operationLog?, comments, paraIdMap }.
         let requestBody: Record<string, unknown>;
         if (isTransientCreate) {
           // UAT #1A fix (task 050): the born-in-editor discriminant is retained-bytes presence ONLY — the SAME
-          // signal the replace path uses (`bornInEditor = !state.docxBytes`). Previously this ALSO OR'd in
-          // `editorIsDirty`, so a DIRTY imported transient (Browse/upload mount WITH original bytes) rendered from
-          // the content model → plain untracked runs → NO redline in Word, and the server stamped it Authored
-          // (which then forced every later reopen-save onto the clean branch). Now an imported transient (has
-          // bytes) sends its retained original + the tracked op-log so the engine applies w:ins/w:del
-          // (create-on-save carries no DocumentRecordId → cleanApply is false → trackChanges true). Only a TRUE
-          // born-in-editor doc (no retained bytes) renders from the content model.
+          // signal the replace path uses (`bornInEditor = !state.docxBytes`). Only a TRUE born-in-editor doc
+          // (no retained bytes) renders from the authored content model; an imported transient (has bytes)
+          // takes the model shape (task 012) or the transitional op-log shape.
           const bornInEditorRender = !state.docxBytes;
-          requestBody = {
+          // G7 (task 022): `transientKey` = the transient dedup key (repeated create-on-save → ONE record);
+          // `forkNew` = the Save-New fork flag (skips dedup → a deliberately new record).
+          const createCommon = {
             containerId: saveContainerId,
             tenantId,
             sessionId: state.sessionId,
             displayName: state.documentRef.fileName ?? null,
-            comments: anchoredComments,
-            // C2: the baseline paraId map — needed on the imported-transient op-log branch so the server can stamp
-            // client-minted ids onto the retained baseline before the engine resolves anchors (harmless on the
-            // born-in-editor render branch — the server skips the stamp when ContentModel is present).
-            paraIdMap,
-            // G7 (task 022): the transient dedup key (repeated create-on-save → ONE record) + the Save-New
-            // fork flag (forkNew=true skips dedup → a deliberately new record). effectiveTransientKey is the
-            // mount-time key for a normal transient save, or a freshly-minted one for a fork.
             transientKey: effectiveTransientKey,
             forkNew,
-            ...(bornInEditorRender
-              ? { contentModel: editorRef.current.buildContentModel() }
-              : {
-                  // Imported transient (Browse/upload-mounted, has original bytes): send the retained ORIGINAL
-                  // bytes as the baseline + the tracked op-log so the server applies redlines via
-                  // ComposeShadowPatchEngine — NOT the renderer. operationLog is undefined on a clean mount →
-                  // the server persists the retained bytes byte-identical (FR-06a).
-                  content: encodeRetained(state.docxBytes!),
-                  operationLog,
-                }),
           };
+          if (bornInEditorRender) {
+            // Shape 1 — born-in-editor create-on-save. task 012 amendment: `buildContentModel()` now folds
+            // session+advisory comment threads into the model itself (the server removed the engine
+            // comment-bake for ALL ContentModel saves), so the separate `comments` field is GONE here.
+            // paraIdMap stays (existing field; empty for a born-in-editor doc anyway).
+            requestBody = { ...createCommon, paraIdMap, contentModel: editorRef.current.buildContentModel() };
+          } else if (usedModelPath && importedBuilt) {
+            // Shape 2 — imported transient create-on-save, MODEL shape: the merged model + the retained
+            // ORIGINAL bytes as the render carrier.
+            requestBody = { ...createCommon, contentModel: importedBuilt.model, content: encodeRetained(state.docxBytes!) };
+          } else {
+            // Shape 3 — transitional op-log create-on-save (unchanged): retained ORIGINAL bytes as the
+            // baseline + the tracked op-log so the server applies redlines via ComposeShadowPatchEngine —
+            // NOT the renderer. operationLog is undefined on a clean mount → the server persists the
+            // retained bytes byte-identical (FR-06a). C2: paraIdMap lets the server stamp client-minted
+            // ids onto the retained baseline before the engine resolves anchors.
+            requestBody = {
+              ...createCommon,
+              comments: anchoredComments,
+              paraIdMap,
+              content: encodeRetained(state.docxBytes!),
+              operationLog,
+            };
+          }
         } else {
           // task 039 (UAT round 1+2, born-in-editor 2nd-save fix): a BORN-IN-EDITOR doc (blank page / AI-draft)
           // holds NO retained original bytes (`!state.docxBytes`, the SAME discriminant the create path's
@@ -1441,37 +1541,49 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // ORIGINATION through the renderer (the two-byte-author split), never authored EDITING through the op
           // log; both stay clean.
           const bornInEditor = !state.docxBytes;
-          requestBody = {
-            // UAT 2026-07-19 P2: the drive the doc lives in (documentRef.driveId after a create-on-save),
-            // falling back to the host default — so a born-in-editor doc's second save + baseline re-fetch
-            // target the correct drive.
+          // UAT 2026-07-19 P2: `driveId` = the drive the doc lives in (documentRef.driveId after a
+          // create-on-save), falling back to the host default — so a born-in-editor doc's second save +
+          // baseline re-fetch target the correct drive. G2: `documentRecordId` MUST ride every
+          // reopened-doc save — the server reads the durable sprk_composeorigin marker for THIS record.
+          const replaceCommon = {
             driveId: saveDriveId,
             tenantId,
             sessionId: state.sessionId,
-            // G2: the server reads the durable sprk_composeorigin marker for THIS record to pick clean-vs-
-            // tracked apply — so documentRecordId MUST ride every reopened-doc save (already sent since G1).
             documentRecordId: state.documentRef.sprkDocumentId ?? null,
             displayName: state.documentRef.fileName ?? null,
-            comments: anchoredComments,
-            // C2: the baseline paraId map so the server can stamp minted ids before the engine resolves anchors
-            // (harmless on the contentModel branch — the server skips the stamp when ContentModel is present).
-            paraIdMap,
-            ...(bornInEditor
-              ? // In-session born-in-editor re-save: re-author from the content model (no retained baseline to
-                // delta onto — task 039). The renderer authors clean bytes; no op-log.
-                { contentModel: editorRef.current.buildContentModel() }
-              : {
-                  // Loaded/imported OR reopened-authored dirty save. The load-time version id = the op-log's BASE
-                  // VERSION; lets the server re-fetch the baseline even without the client bytes. The server
-                  // applies the op-log tracked (imported) or CLEAN (authored, per the durable marker) — REQ-1/REQ-2.
-                  baselineVersionId: state.versionId ?? undefined,
-                  // Same-session fast-path: still holding the retained original → send it (byte-identical).
-                  content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
-                  // R4 FR-06 (task 032): the ordered, rebased operation log the server applies via the Patch
-                  // Engine onto the resolved baseline (undefined on a clean save → baseline persists byte-identical).
-                  operationLog,
-                }),
           };
+          if (bornInEditor) {
+            // Shape 1 — in-session born-in-editor re-save: re-author from the content model (no retained
+            // baseline to delta onto — task 039). NEVER sends baselineVersionId (the stored versionId is
+            // the drive-ITEM id — a real version fetch would 404). task 012 amendment: no separate
+            // `comments` field — `buildContentModel()` folds the threads into the model.
+            requestBody = { ...replaceCommon, paraIdMap, contentModel: editorRef.current.buildContentModel() };
+          } else if (usedModelPath && importedBuilt) {
+            // Shape 2 — loaded/imported OR reopened-authored replace save, MODEL shape: the merged model
+            // + the baseline source (retained bytes when still held — the same-session case — else the
+            // load-time versionId so the server re-fetches the baseline).
+            requestBody = {
+              ...replaceCommon,
+              contentModel: importedBuilt.model,
+              ...(state.docxBytes
+                ? { content: encodeRetained(state.docxBytes) }
+                : { baselineVersionId: state.versionId ?? undefined }),
+            };
+          } else {
+            // Shape 3 — transitional op-log replace save (unchanged). The load-time version id = the
+            // op-log's BASE VERSION; lets the server re-fetch the baseline even without the client bytes.
+            // The server applies the op-log tracked (imported) or CLEAN (authored, per the durable
+            // marker) — REQ-1/REQ-2. C2: paraIdMap lets the server stamp minted ids before the engine
+            // resolves anchors. operationLog undefined on a clean save → baseline persists byte-identical.
+            requestBody = {
+              ...replaceCommon,
+              comments: anchoredComments,
+              paraIdMap,
+              baselineVersionId: state.versionId ?? undefined,
+              content: state.docxBytes ? encodeRetained(state.docxBytes) : undefined,
+              operationLog,
+            };
+          }
         }
 
         const response = await authenticatedFetch(url, {
@@ -1542,9 +1654,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             unresolvedCount: number;
           } | null;
           // Task 026 (FR-04 graceful degradation): render-side degradation warnings — content the server
-          // simplified/dropped while authoring this save (success-with-warnings, never a 422). Fed to the
-          // existing dismissible import-warnings banner below.
+          // simplified/dropped while authoring this save (success-with-warnings, never a 422). task 012
+          // (r6, 026-F5): routed into the SEPARATE `saveDegradationWarnings` state/banner family below —
+          // NO longer merged into `importWarnings` (which the workspace suppresses via hideImportWarnings).
           degradationWarnings?: Array<{ code: string; count: number }> | null;
+          // task 012 (r6): the POST-SAVE content model on render-path saves — adopted as the new merge
+          // base for the next model-path save. Optional/null (older BFF, or a non-render-path save).
+          contentModel?: ComposeContentModel | null;
         };
 
         // #1(b): the persisted document id drives the Assistant's persistent "Saved to the DMS" chat
@@ -1576,19 +1692,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // so the banner prompts the user to redo just those edits. Only carried when the server actually
           // recovered — a clean batch omits it (→ null → clears any prior partial-apply banner).
           partialApply: payload.partialApply && payload.partialApply.unresolvedCount > 0 ? payload.partialApply : null,
+          // task 012 (r6): on a MODEL-PATH save, adopt the post-save model as the new merge base —
+          // prefer the server's returned model; when the server omitted it, keep the model we POSTED
+          // (never regress to null on success). Omitted on op-log / born-in-editor saves → the reducer
+          // keeps whatever base it had.
+          contentModel: usedModelPath && importedBuilt ? (payload.contentModel ?? importedBuilt.model) : undefined,
         });
-        // Task 026 (FR-04): surface save-time degradation warnings through the SAME dismissible
-        // banner the import warnings use — the save succeeded, but the server had to simplify content
-        // (e.g. a dropped comment anchor or tracked-format-change record). Honest, non-blocking.
-        if (payload.degradationWarnings && payload.degradationWarnings.length > 0) {
-          dispatch({
-            kind: 'importWarnings',
-            warnings: payload.degradationWarnings.map(w => ({
-              type: w.code,
-              message: `Some content was simplified when saving (${w.code}${w.count > 1 ? ` ×${w.count}` : ''}).`,
-            })),
-          });
-        }
+        // 026-F5 (task 012, r6): save-time degradation warnings are their OWN warning family — the old
+        // dispatch into `importWarnings` both clobbered the load-time import warnings AND never rendered
+        // (the workspace passes `hideImportWarnings` to the banner stack per UAT round-7 #8). Merge the
+        // server's render-side warnings with the imported-model mapper's own (summing counts on duplicate
+        // codes) and REPLACE; a clean save dispatches null so a stale banner CLEARS (026-F5 second half).
+        const mergedSaveWarnings = mergeDegradationWarnings(
+          payload.degradationWarnings ?? [],
+          usedModelPath && importedBuilt ? importedBuilt.warnings : []
+        );
+        dispatch({
+          kind: 'saveDegradationWarnings',
+          warnings: mergedSaveWarnings.length > 0 ? mergedSaveWarnings : null,
+        });
 
         // Clear the local dirty flag so the Save button disables until the
         // next edit. ComposeEditor's internal dirtyRef also resets on the
@@ -1605,7 +1727,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // during the in-flight save) is the last writer and leaves the Save state correct. Gated on having
         // actually SENT an op-log: the born-in-editor create-on-save path re-derives its whole content model
         // each save (buildContentModel), so it needs no op-log commit.
-        if (operationLog) {
+        //
+        // task 012 (r6): the MODEL path sent NO operationLog (so the pre-existing `if (operationLog)`
+        // commit cannot double-fire on it) but DID record the op-log high-water mark via the
+        // serializeOperationLog call in the probe above — commit it now so the superseded batch drops
+        // (prevents unbounded op accumulation across model-path saves), and recapture the editor's
+        // baseline snapshot so subsequent edits diff against the just-saved state. Exactly ONE
+        // commitSaved fires per successful save on every path.
+        if (usedModelPath) {
+          (editorRef.current as (ComposeEditorHandle & ComposeEditorImportedModelHandle) | null)
+            ?.recaptureBaselineSnapshot?.();
+          editorRef.current?.commitSaved?.();
+        } else if (operationLog) {
           editorRef.current?.commitSaved?.();
         }
 
@@ -1631,6 +1764,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       state.documentRef,
       state.docxBytes,
       state.sessionId,
+      // task 012 (r6): the model-path probe reads the retained canonical model, the origin marker
+      // (trackChanges), and the load-time versionId (the model shape's baseline fallback).
+      state.loadedContentModel,
+      state.origin,
+      state.versionId,
       bffBaseUrl,
       effectiveDriveId,
       tenantId,
@@ -2510,6 +2648,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // degraded editor.
         void (async () => {
           let projection: ComposeServerProjection | null = null;
+          let projectContentModel: ComposeContentModel | null = null;
+          // task 012 (r6): the retained mount bytes. Default = the local file bytes; REPLACED by the
+          // server's `content` byte echo when present — `/project` returns it ONLY when server-side
+          // paraId minting mutated the caller's bytes, and adopting the echo keeps editor/model/
+          // carrier in ONE paraId universe (the minted ids exist in all three).
+          let retainedBytes: ArrayBuffer = result;
           if (bffBaseUrl) {
             try {
               const response = await authenticatedFetch(`${bffBaseUrl}/api/compose/project`, {
@@ -2518,14 +2662,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 body: JSON.stringify({ content: arrayBufferToBase64(result), fileName: file.name }),
               });
               if (response.ok) {
-                const payload = (await response.json()) as { projection?: RawComposeProjectionPayload };
+                const payload = (await response.json()) as {
+                  projection?: RawComposeProjectionPayload;
+                  // task 012 (r6): canonical model + optional minted-byte echo (commit 70be80006).
+                  contentModel?: ComposeContentModel | null;
+                  content?: string | null;
+                };
                 projection = normalizeProjection(payload.projection);
+                projectContentModel = payload.contentModel ?? null;
+                if (typeof payload.content === 'string' && payload.content.length > 0) {
+                  retainedBytes = base64ToArrayBuffer(payload.content);
+                }
               }
             } catch {
               // Network/parse failure — fall through with projection: null. The MOUNT itself still
               // proceeds (dispatch below), but per task 013 (F-2) the editor renders the explicit
               // error/unavailable state rather than a degraded render — there is no fallback reader.
               projection = null;
+              projectContentModel = null;
+              retainedBytes = result;
             }
           }
 
@@ -2533,11 +2688,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // knows which SPE container to mint the new sprk_document's drive-item in.
           dispatch({
             kind: 'mountTransient',
-            docxBytes: result,
+            docxBytes: retainedBytes,
             fileName: file.name,
             containerId: containerIdRef.current,
             sessionId: browseDocumentSessionId,
             projection,
+            // task 012 (r6): retain the canonical model atomically with the projection.
+            contentModel: projectContentModel,
             // G7 (task 022): mint the transient dedup key once for this Browse mount → every create-on-save
             // sends it so repeated saves target ONE record (no duplicate mint).
             transientKey: mintTransientKey(),
@@ -2552,8 +2709,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // the PaneEventBus (ADR-015 keeps the bus content-free).
           // Wave 3 Part 2: thread the tab's minted document session id so the server sets
           // ActiveDocument.DocumentSessionId → a typed revise/draft (TEXT path) routes into THIS doc session.
+          // task 012 (r6): register the RETAINED bytes (the server's minted-id echo when present) so
+          // the chat-session copy shares the mount's paraId universe.
           void registerActiveDocumentRef.current?.({
-            docxBytes: result,
+            docxBytes: retainedBytes,
             fileName: file.name,
             documentSessionId: browseDocumentSessionId,
           });
@@ -2829,6 +2988,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             warnings?: { code: string; count: number }[];
             schemaVersion?: string;
           };
+          // task 012 (r6): the canonical ComposeContentModel (additive on the upload response since
+          // commit 70be80006). Undefined/null → null → op-log fallback save shape.
+          contentModel?: ComposeContentModel | null;
         };
 
         // ASP.NET Core serializes byte[] as a base64 string (NOT a JSON number
@@ -2855,6 +3017,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // FR-05 (task 100): thread the host-resolved BU container for create-on-save.
           containerId: containerIdRef.current,
           projection: hydratedUploadProjection,
+          // task 012 (r6): retain the canonical model atomically with the projection (same response).
+          contentModel: payload.contentModel ?? null,
           // G7 (task 022): transient dedup key for this assistant-upload mount.
           transientKey: mintTransientKey(),
         });
@@ -3239,6 +3403,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             importWarnings={state.importWarnings}
             // UAT round-7 #8 — suppress the "Some formatting was simplified" banner per reviewer request.
             hideImportWarnings
+            // 026-F5 (task 012, r6): SAVE-time degradation warnings — a SEPARATE banner family that is
+            // NOT gated by hideImportWarnings (that suppression covers only the load-time import-
+            // fidelity banner). null (a clean save) clears the banner.
+            saveDegradationWarnings={state.saveDegradationWarnings}
             pendingAssistantInsert={state.pendingAssistantInsert}
             saveSuccessToken={state.saveSuccessToken}
             // Prong 1 (task 055): when the last save could only anchor PART of the batch, show the honest

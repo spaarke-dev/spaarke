@@ -9,8 +9,8 @@
 |-------|-------|
 | **Task** | **012 — Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from the save path** (`tasks/012-retire-surgical-save-path.poml`) |
 | **Rigor** | FULL · sonnet@high (running Fable main-session) · directional |
-| **Status** | in-progress — design phase (architecture locked below; implementation not yet started) |
-| **Next Action** | Execute Phase A (server: expose canonical contentModel on load/project responses) per the phase plan below |
+| **Status** | in-progress — Phases A (70be80006) + C (2fc8ff530) + P-2/FR-08 (3e4a9f456) COMMITTED; mapper agent DONE (docxBridge mapper 18/18 + ComposeEditor handle + born-in-editor folding); routing agent (ComposeWorkspace/types/BannerStack) IN FLIGHT |
+| **Next Action** | On routing-agent completion: integrate (client typecheck/tests incl. cross-agent handle wiring), commit client cutover, then notes §18 + acceptance criteria + Step 9.5 two-agent review on the committed SHA + clean-worktree publish |
 
 ### Conflict-check (Step 0.5) — done 2026-08-06
 No open PR touches Services/Compose (PR 690 = CI LFS only). Sibling branches: architecture-redesign-r2 =

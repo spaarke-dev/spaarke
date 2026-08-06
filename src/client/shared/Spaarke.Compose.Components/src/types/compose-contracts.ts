@@ -500,6 +500,10 @@ export interface ComposeInlineRun {
   revision?: ComposeRevisionFact;
   /** Server task 025: a tracked run-formatting change (`w:rPrChange`). Server-set; preserve untouched. */
   formatChange?: ComposeFormatChangeFact;
+  /** Mirrors server `ComposeInlineRun.Href` (G5, task 033) — the hyperlink target this run is wrapped
+   * in. Set by the server projection for imported docs AND by the client mapper from the TipTap `link`
+   * mark; the renderer wraps the run in `w:hyperlink`. */
+  href?: string;
 }
 
 /** A table cell — nested block content (mirrors the server `ComposeTableCell`).

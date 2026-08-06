@@ -22,6 +22,7 @@ import type {
   ImportedComment,
   ComposeServerProjection,
   ComposeDocumentOrigin,
+  ComposeContentModel,
 } from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,26 @@ export interface ComposeWorkspaceState {
    * projection now renders an explicit error/unavailable state instead.
    */
   projection: ComposeServerProjection | null;
+  /**
+   * task 012 (spaarkeai-compose-r6, render-on-save cutover): the retained CANONICAL content model
+   * from the mount door's server response (Load / Upload / Browse->project all carry the additive
+   * `contentModel` field since commit 70be80006) — the imported save mapper's MERGE BASE
+   * (`ComposeEditorHandle.buildImportedContentModel(loadedContentModel, …)` folds the editor's edits
+   * + comment threads onto it). Set ATOMICALLY wherever `projection` is set (same clear-rather-than-
+   * inherit discipline). `null` = legacy session / older BFF / failed canonical projection → the save
+   * falls back to the transitional op-log request shape (unchanged behavior). Replaced by the
+   * post-save model on a successful model-path save (`saveSucceeded.contentModel`).
+   */
+  loadedContentModel: ComposeContentModel | null;
+  /**
+   * 026-F5 (task 012, r6): SAVE-time degradation warnings — content the server (and/or the client
+   * imported-model mapper) simplified/dropped while authoring the LAST successful save. A SEPARATE
+   * warning family from `importWarnings` (load-time import fidelity): the workspace suppresses the
+   * import banner (`hideImportWarnings`, UAT round-7 #8) but save warnings MUST still render.
+   * REPLACED wholesale on every successful save — `null` (a clean save) clears any stale banner
+   * (026-F5's second half). Never merged into `importWarnings` (that was the bug).
+   */
+  saveDegradationWarnings: Array<{ code: string; count: number }> | null;
   /** User-facing error message (NOT a Tier 3 sink). */
   errorMessage: string | null;
   /** UAT #10/#11 (task 052): true when the last save failed with HTTP 423 (the doc is open in Word — a
@@ -250,6 +271,10 @@ export type ComposeWorkspaceAction =
       // older BFF both omit it). Normalized to `null` in the reducer (BINDING null-handling contract —
       // treated the same as 'imported').
       origin?: ComposeDocumentOrigin | null;
+      // task 012 (r6): the canonical content model from the Load response (additive since commit
+      // 70be80006). Undefined/null (older BFF, or projection failure) → null → the save falls back
+      // to the transitional op-log shape. Set atomically with `projection`.
+      contentModel?: ComposeContentModel | null;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -280,6 +305,10 @@ export type ComposeWorkspaceAction =
       containerId?: string;
       sessionId?: string;
       projection?: ComposeServerProjection | null;
+      // task 012 (r6): the canonical content model from the Upload / Browse->project response (same
+      // additive field as `loadSucceeded.contentModel`). Undefined/null normalizes to null → op-log
+      // fallback save shape. Set atomically with `projection`.
+      contentModel?: ComposeContentModel | null;
       // G7 (FR-06, task 022): the client-minted stable transient-draft dedup key
       // (mintTransientKey). Carried onto documentRef.transientKey so every create-on-save sends it →
       // repeated saves dedup to ONE record. Omitted by an older caller → no dedup (unchanged behavior).
@@ -324,10 +353,18 @@ export type ComposeWorkspaceAction =
       // Prong 1 (task 055): best-effort partial-apply summary when some ops couldn't be anchored server-side
       // (null/omitted on the common clean-batch path). Drives the honest "N edits couldn't be saved" banner.
       partialApply?: ComposePartialApplyInfo | null;
+      // task 012 (r6): the post-save content model adopted as the NEW merge base after a successful
+      // MODEL-PATH save (the server's returned model, or — when the server omitted it — the model
+      // the client POSTed; the caller resolves that fallback). Omitted on op-log / born-in-editor
+      // saves → the reducer keeps the existing `loadedContentModel` (never regresses to null).
+      contentModel?: ComposeContentModel | null;
     }
   | { kind: 'saveFailed'; errorMessage: string; isLock?: boolean }
   | { kind: 'reset' }
   | { kind: 'importWarnings'; warnings: Array<{ type: string; message: string }> }
+  // 026-F5 (task 012, r6): REPLACE the save-time degradation-warning set. Dispatched on EVERY
+  // successful save: warnings present → set; none → null (a clean save clears the stale banner).
+  | { kind: 'saveDegradationWarnings'; warnings: Array<{ code: string; count: number }> | null }
   | { kind: 'pendingAssistantInsert'; payload: ComposeAssistantToWorkspaceFlow }
   | { kind: 'clearPendingAssistantInsert' }
   // ── Task 050 (Spike #3 §9): SPE check-out lifecycle actions ───────────────
@@ -361,6 +398,8 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   importedRevisions: [],
   importedComments: [],
   projection: null,
+  loadedContentModel: null,
+  saveDegradationWarnings: null,
   errorMessage: null,
   saveErrorIsLock: false,
   partialApply: null,
@@ -406,6 +445,9 @@ export function composeWorkspaceReducer(
         importedComments: action.importedComments ?? [],
         // The server projection (null for an older BFF → task 013/F-2 error-unavailable state).
         projection: action.projection ?? null,
+        // task 012 (r6): the canonical content model — set ATOMICALLY with projection (same source
+        // response). Omitted (older BFF / failed canonical projection) → null → op-log fallback save.
+        loadedContentModel: action.contentModel ?? null,
         // G1 (FR-01, task 020): normalize an omitted/undefined field (Path B continuation, or an
         // older BFF) to `null` — the BINDING null-handling contract treats null as 'imported'.
         origin: action.origin ?? null,
@@ -479,6 +521,12 @@ export function composeWorkspaceReducer(
         // caller's projection round-trip failed/was unreachable — task 013 (F-2): the editor now
         // renders an explicit error/unavailable state for that case (no client fallback reader).
         projection: action.projection ?? null,
+        // task 012 (r6): set atomically with projection — SAME clear-rather-than-inherit discipline
+        // (a new transient mount over a prior loaded doc must never keep the prior doc's model).
+        loadedContentModel: action.contentModel ?? null,
+        // 026-F5 (task 012, r6): a fresh mount has no save history — clear any stale save-warning
+        // banner from a prior document mounted in this same tab.
+        saveDegradationWarnings: null,
         // G1 (FR-01, task 020): a fresh transient mount has no persisted origin yet (this doc has
         // never been saved) — explicitly clear rather than inheriting a PRIOR document's origin from
         // an earlier mount in the same tab (same "clear rather than inherit" rationale as
@@ -517,6 +565,12 @@ export function composeWorkspaceReducer(
         // editor seeds directly from `initialHtml`), so the editor's docx-mount branch (projection /
         // error-unavailable) is never reached here — this was never a mammoth consumer (task 012 audit).
         projection: null,
+        // task 012 (r6): a born-in-editor seed has no loaded/imported baseline model — its saves
+        // author the whole document via `buildContentModel()`, never the imported-model merge path.
+        loadedContentModel: null,
+        // 026-F5 (task 012, r6): clear any stale save-warning banner from a prior mount (same
+        // clear-rather-than-inherit rationale as mountTransient).
+        saveDegradationWarnings: null,
         // G1 (FR-01, task 020): same rationale as mountTransient — a fresh AI-drafted seed has no
         // persisted origin yet.
         origin: null,
@@ -549,6 +603,10 @@ export function composeWorkspaceReducer(
         // one; otherwise keep whatever state already had (never regress a known origin to null just
         // because an older BFF response omitted the field).
         origin: action.origin ?? state.origin,
+        // task 012 (r6): a successful MODEL-PATH save adopts the post-save model as the new merge
+        // base. Omitted (op-log / born-in-editor save, or a caller without one) → keep the existing
+        // base — NEVER regress a known model to null on success.
+        loadedContentModel: action.contentModel ?? state.loadedContentModel,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
@@ -572,6 +630,10 @@ export function composeWorkspaceReducer(
       return INITIAL_STATE;
     case 'importWarnings':
       return { ...state, importWarnings: action.warnings };
+    // 026-F5 (task 012, r6): wholesale REPLACE of the save-warning family — every successful save
+    // dispatches this; null (a clean save) clears the stale banner.
+    case 'saveDegradationWarnings':
+      return { ...state, saveDegradationWarnings: action.warnings };
     case 'pendingAssistantInsert':
       return { ...state, pendingAssistantInsert: action.payload };
     case 'clearPendingAssistantInsert':

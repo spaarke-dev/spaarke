@@ -686,4 +686,96 @@ Publish clean-worktree **46.90 MB, ±0.00**. No packages touched.
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010 records. Checkpoint in `current-task.md`.*
+## 18. Task 012 — Retire the surgical save path + THE CLIENT CUTOVER (2026-08-06)
+
+**Commits `70be80006` (Phase A) + `2fc8ff530` (Phase C) + `3e4a9f456` (P-2/FR-08) + client cutover commit(s).**
+Spec FR-02 + the five accumulated obligations (010/026 reviews). Completes the render-on-save pivot
+end-to-end: post-cutover clients NEVER reach the engine or the count-gate on any save.
+
+### Static reachability proof (POML step 3 — acceptance criterion 1)
+
+Engine/count-gate call sites reachable from `SaveAsync` (line numbers at `3e4a9f456`):
+
+| Site | Line | Guard |
+|---|---|---|
+| `_baselineParaIdStamper.Stamp` (COUNT-GATE) | :873 | inside `request.ContentModel is null && (hasOperations \|\| hasComments)` + `ParaIdMap` present |
+| `_patchEngine.Apply` (op-log) | :892 | same ContentModel-null block |
+| `Stamp` ×2 + `Apply` (stale-base re-anchor) | :1633/:1634/:1725 | `ReanchorStaleSaveAsync`, called ONLY from the stale-base block gated `request.ContentModel is null && (hasOperations \|\| hasComments)` |
+| `Apply` (best-effort per-paragraph) | :1957 | `ApplyBestEffortByParagraph`, called ONLY from the op-log block's catch |
+| ~~comments-bake `Apply`~~ (was :905) | REMOVED | was the LAST engine caller reachable with a ContentModel (010 adr-check residual) — retired; ContentModel+separate-comments now warns `comments-ignored` (wire-visible) |
+
+`MintAndPersist` (:248 ProjectForMount, :318 LoadAsync) is the LOAD-side ingest stamp (fill-gaps mint,
+fail-open) — not the count-gate; it is what makes paraIds durable for the model path. **Every remaining
+engine/count-gate site is inside the ContentModel-null TRANSITIONAL shape** (ADR-049 R6 amendment §4's
+sole permitted caller: reopened-authored clean-apply + pre-cutover clients), now logged at Warning
+(`TRANSITIONAL op-log save shape`) for retirement telemetry. Post-cutover client shapes — model+bytes
+(a1), model+versionId (a1), model-only (a0), bytes-only clean — never enter it. The P-10 write-path
+text-search audit (`ComposeWritePathTextSearchAuditTests`) is GREEN over the widened SaveAsync slice —
+no carve-out needed (the 020-ledger concern did not materialize; the render path adds no text-search).
+
+### THE CLIENT CUTOVER (obligation 1)
+
+- **Server model delivery (Phase A)**: every editable mount door (Load / upload / browse-project) returns
+  the canonical `contentModel` built from the SAME paraId-minted bytes as the HTML projection — one mint
+  (`ProjectForMount` / LoadAsync ingest), two walks, ids agree by construction (the builder mints from a
+  crypto RNG per walk, so unminted bytes would desync editor-node ids from model-block ids).
+  `/project` echoes minted bytes ONLY when minting mutated them (client adopts them as the retained mount
+  baseline); upload returns minted bytes as its existing `content`.
+- **Client mapper (docxBridge `buildImportedContentModel`)** — merge-with-loaded-model + diff redlining:
+  untouched paragraphs pass the loaded block through VERBATIM (every server-set field preserved exactly —
+  numId 021 · table facts 022 · pageBreakBefore/isPageBreak 023 · comments+anchors 024 ·
+  revision/formatChange/markRevision/propertiesChange 025); edited paragraphs rebuild runs from the editor
+  (marks → facts; imported ins/del marks keep author/date; AI marks → 'Spaarke Assistant') with user
+  edits redlined via the EXISTING `diffTokens` word-LCS (the live Track-Changes overlay's engine — the
+  preview and the persisted redline share one diff); deleted paragraphs → all-runs-Deleted + markRevision
+  Deleted (trackChanges) or omitted (authored clean, REQ-1); new paragraphs → Inserted (+ client-minted
+  paraId — the pre-existing `COMPOSE_R3_PARAID` unique-id extension mints for every new/split paragraph).
+  Comment folding: session/advisory threads → model.comments + Start/End anchor runs (ids allocated past
+  the loaded max); imported anchors keep their ids. Also folds on the BORN-IN-EDITOR build (a0) — the
+  NDA-review advisory flow keeps working with the bake retired. `href` added to the client run mirror.
+- **Save routing**: imported dirty saves (transient + replace) post `{contentModel, content|baselineVersionId}`;
+  no op-log / paraIdMap / separate comments on model shapes. `trackChanges = origin !== 'authored'`
+  (binding null→imported). Fallback to the transitional op-log shape when no loadedContentModel
+  (legacy session / failed canonical projection). Born-in-editor branches keep omitting baselineVersionId
+  (drive-item-id-as-versionId would 404 the version fetch).
+- **Post-save re-baseline**: render-path saves return the POST-SAVE model (`SaveComposeDocumentResult.ContentModel`,
+  projected from the FINAL persisted bytes); the client adopts it + `recaptureBaselineSnapshot()` — without
+  this the next save would re-diff the stale load-time baseline and DOUBLE-EMIT the same revisions.
+- **Revision-author fallback (server)**: user-edit revision facts arrive author-less BY DESIGN; the
+  renderer attributes the save-time authenticated author (`ListRenderState.DefaultRevisionAuthor`);
+  facts carrying an author (imported revisions) keep it; control-junk authors sanitize FIRST then fall
+  back (never client-spoof-attributed, never a needless "Unknown").
+
+### Comments through the model (obligation 2) + carrier append
+
+`RenderIntoCarrier` now APPENDS model comments whose ids the carrier part lacks (new session/advisory
+comments) — append-only, existing comment elements never edited/removed; anchor-validity set = carrier
+ids ∪ appended ids. **The 024 whole-part byte-identity contract NARROWS to no-new-comments saves** (an
+append necessarily re-serializes the part; existing comment CONTENT preserved either way). A carrier with
+no part gets one authored from the model (unchanged 024 behavior). `BuildCommentElement` extracted.
+
+### Warning-family separation (obligation 3, 026-F5)
+
+Save degradations now ride their own state (`saveDegradationWarnings`) + their own banner — NOT the
+`importWarnings` slot (which the UAT round-7 #8 suppression hid, so 026's save warnings were stored but
+NEVER rendered). Clean save clears; friendly per-code copy; server + mapper warnings merged.
+
+### Ledger items (obligations 4+5)
+
+- **FR-08**: recorded in the ADR-049 R6 amendment (§ Impact) — stale-base re-anchor is
+  transitional-shape-only; render-path concurrency = last-writer-wins + version history by design.
+- **P-10**: audit green over the widened slice — carve-out NOT needed (verified, not assumed).
+- **P-2**: `ScanCarrierBytes<T>` extraction (the triple-duplicated read-only side-open preamble);
+  exception policy deliberately stays per-caller.
+
+### Tests
+
+Server: ComposeServiceImportedRenderSaveTests 11/11 (5 new: post-save model · clean-save null ·
+comments-ignored + no bake · carrier comment append preserving existing · author fallback vs carried
+author); 025 hostile-input seam updated to fallback semantics; Compose suite 979/982 (the 3 pre-existing
+NDA reds — 013/027 own them). Client: docxBridge.importedModel.test.ts 18/18 + workspace routing tests
+(see the cutover commit).
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010/012 records. Checkpoint in `current-task.md`.*
