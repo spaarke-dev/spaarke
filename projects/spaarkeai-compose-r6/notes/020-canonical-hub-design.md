@@ -859,4 +859,40 @@ corpus fixture (025-F6).
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010/012/013 records. Checkpoint in `current-task.md`.*
+## 20. Task 027 — Fidelity seam suite across the corpus (2026-08-06)
+
+**Spec FR-03/FR-04 (the Phase-2 fidelity DoD) + the four 013-routed obligations.**
+
+- **ComposeFidelityRoundTripSeamTests** (11 slices, one shared wire driver mirroring RenderOnSaveSeamTests):
+  per-feature load→edit→save→reopen THROUGH THE WIRE — numbering continuity (interrupted clauses "1."-"6."
+  CONTINUOUS across heading/body/table; multilevel goldens incl. the level reset; style-linked headings
+  incl. the FR-12 "4.2" acceptance example — **no 020-R7 gap surfaced**, style identity survives as
+  authored), tables (block + w:tbl cell text), headers/footers (all 6 CIPO carrier parts + the footer
+  page-number SDT survive), page breaks (Break Type=Page + isPageBreak run), hyperlinks (relationship
+  resolves to the same URL + href on reopen), comments (part + body anchor survive), tracked changes on
+  the NEW fixture (both authors' ins/del with dates, delText, paragraph-mark deletion, hyperlink⊃ins
+  never inverted, new edit attributed to the save author, all w:id unique), hard-tier warns-not-fails
+  (text-box-flattened wire-visible at load + save 200 + signature text), and the duplicate-paraId LOAD
+  probe (first-wins pre-first-save posture pinned — 013 adr-check residual 1). Computed labels asserted
+  from `paraIdMap[].computedNumber` (R4.5 F-4 wire field). ZERO adapter gaps — nothing weakened.
+- **The multi-author redline corpus fixture** (obligation 025-F6): `multi-author-redline-synthetic.docx`
+  (manifest §1.7 row 15; raw-OOXML method mirroring §1.5; OpenXmlValidator 0 errors; projector captures
+  4 revision runs both authors + mark-del + rPrChange + pPrChange + tracked hyperlink). Row-4 OWNER
+  placeholder stays OPEN by design. The AppendSection w:ins oracle re-baselined to COUNT-UNCHANGED
+  (the corpus now legitimately carries live redlines).
+- **T-2 narrative refreshed** (COMPOSE-READ-REFERENCE-FIDELITY.md): /project stays stateless but now
+  paraId-mints in-memory, returns the canonical model + flatten warnings, and echoes minted bytes only
+  when minting mutated them.
+- **OPERATIONS NOTES (for 014 deploy + dashboards)**: (1) the `TRANSITIONAL op-log save shape` Warning
+  log will be NOISY until pre-cutover clients drain — it is retirement telemetry, not a fault; dashboard
+  owners should chart its decay, and its hitting zero is the signal that the transitional path (and the
+  engine/count-gate with it) can be deleted. (2) PERF WATCH: render-path saves run a second full
+  BuildContentModel projection over the persisted bytes (the post-save model return) — watch save
+  latency on very large documents at UAT; if material, make the post-save projection conditional on a
+  client hint.
+
+**Suites**: fidelity suite 11/11; full Compose filter **1020/1020, zero reds**.
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010/012/013/027 records. Checkpoint in `current-task.md`.*

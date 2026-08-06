@@ -146,6 +146,21 @@ inferring it from the absence of reference elements alone.
 
 ---
 
+## 1.7. R6 multi-author redline exemplar (task 027 — SYNTHETIC)
+
+**SYNTHETIC** — authored by `spaarkeai-compose-r6` task 027 via the same raw-OOXML-parts method as §1.5
+(no owner-supplied redlined document exists; row 4's owner placeholder remains OPEN — this exemplar does
+NOT close it, mirroring the §2 row-7/row-11 note). Fills the 025-F6 gap: the corpus previously carried
+ZERO live revision markup, so the task-025 tracked-changes capture/render path had no corpus exercise.
+Schema-validated (OpenXmlValidator Office2019: 0 errors) and projection-verified (all revision facts
+captured) at authoring.
+
+| # | Filename | Track Changes | Authors | Constructs | Known Defect(s) Exercised | Status |
+|---|---|---|---|---|---|---|
+| 15 | `multi-author-redline-synthetic.docx` | **Yes — live** | 2 (`Alice Chen` 2026-08-01, `Bob Rivera` 2026-08-02) | `w:ins` (mid-paragraph insert, Alice) · `w:del`/`w:delText` + adjacent `w:ins` (replace pair, Bob) · `w:rPrChange` (bold added, Alice) · `w:pPrChange` (center alignment, Bob) · paragraph-MARK deletion `w:pPr/w:rPr/w:del` (merge case, Alice) · tracked-inserted hyperlink `w:hyperlink ⊃ w:ins ⊃ w:r` (Word-canonical nesting, Bob) — unique `w14:paraId` per paragraph (0A100001–0A100008), unique revision `w:id` (101–107), xsd:dateTime dates | Task-025 tracked-changes round-trip through the canonical model (capture → model facts → render as real `w:ins`/`w:del` with preserved authorship); multi-author attribution preservation; the 025 revision-grouping + hyperlink-outside-wrapper invariants at seam level (task 027 fidelity suite) | Synthetic |
+
+---
+
 ## 2. Owner-supplied worst-offenders (Phase 0 intake — PLACEHOLDER rows)
 
 Per spec Unresolved Question ("Corpus documents — owner to supply the worst-offender set"), the following rows

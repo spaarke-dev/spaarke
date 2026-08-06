@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. **013 COMPLETE**: the NDA 422 is a permanent CI regression (through-the-wire seam + regression tests); the suite floor is ZERO expected reds (987/987); F6/F7 review fixes shipped. |
-| **Next task** | **027 — Fidelity seam tests across the corpus** (`tasks/027-*.poml`; deps 021-026 + 012 all ✅). 014 (deploy/UAT) needs BOTH 013 ✅ and 027 — so 027 is the sole critical-path next step. |
-| **Status** | 013 closed at `06631ba57` (+ this close-out commit); to be pushed |
-| **Next Action** | On "continue": invoke task-execute for task 027 — read the 027 OBLIGATIONS below FIRST. |
+| **Task** | **027 — Fidelity seam tests across the corpus** (`tasks/027-fidelity-seam-tests.poml`) — IN PROGRESS |
+| **Status** | Done so far (UNCOMMITTED): multi-author redline fixture `multi-author-redline-synthetic.docx` GENERATED (raw-OOXML method; 0 validator errors; projector captures 4 revision runs both authors + mark-del + rPrChange + pPrChange + tracked hyperlink) + manifest §1.7 row 15 (row-4 owner placeholder stays OPEN) + AppendSection w:ins oracle re-baselined to count-unchanged (corpus now has live redlines). Suite 1009/1009. |
+| **Agents** | fidelity-suite agent (resumed tests-013) authoring ComposeFidelityRoundTripSeamTests — per-feature wire round-trips + golden labels + hard-tier warns-not-fails + dup-paraId probe |
+| **Next Action** | On agent completion: integrate + run suite, doc residuals (T-2 refresh · dashboards note · perf note), commit, Step 9.5 two-agent review + clean-worktree publish, close out |
 
 ### Critical Context (3 sentences)
 013 commits: e2adc5130 (RenderOnSaveSeamTests wire round-trip + NdaSaveNo422RegressionTests + the 3

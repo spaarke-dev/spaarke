@@ -122,9 +122,17 @@ public sealed class ComposeSummaryPageSeamTests
         appendedIds.Should().NotBeEmpty($"the appended Summary Page paragraphs must carry minted paraIds for '{docName}'");
         appendedIds.Should().OnlyHaveUniqueItems($"every appended paraId must be unique for '{docName}'");
 
-        // No tracked-change marks — the Summary Page is server-authored FINAL content, not a proposed edit.
-        body.Descendants<InsertedRun>().Should().BeEmpty(
-            $"the Summary Page must NOT be emitted as a tracked w:ins insertion for '{docName}' (ADR-049 — this is not a ComposeShadowPatchEngine operation)");
+        // No NEW tracked-change marks — the Summary Page is server-authored FINAL content, not a proposed
+        // edit. Task 027 re-baseline: the corpus now contains a live-redline exemplar (manifest §1.7,
+        // multi-author-redline-synthetic.docx) whose BODY legitimately carries w:ins — so the oracle is
+        // "AppendSection ADDS none" (count unchanged), not "the document contains none".
+        int CountInsertedRuns(byte[] bytes)
+        {
+            using var probe = WordprocessingDocument.Open(new MemoryStream(bytes, writable: false), isEditable: false);
+            return probe.MainDocumentPart!.Document!.Body!.Descendants<InsertedRun>().Count();
+        }
+        body.Descendants<InsertedRun>().Count().Should().Be(CountInsertedRuns(original),
+            $"the Summary Page must NOT be emitted as a tracked w:ins insertion for '{docName}' (ADR-049 — this is not a ComposeShadowPatchEngine operation); pre-existing document redlines are untouched");
 
         // NFR-01 (reused comparer, task 004): every package part OTHER than document.xml — styles,
         // numbering, headers/footers, theme, media, ... — is byte-identical. AppendSection only opens
