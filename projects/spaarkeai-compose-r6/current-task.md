@@ -34,7 +34,10 @@ AppendSection + Stamper dup-paraId — the SURGICAL-path artifacts 010/012 retir
    warnings share one reducer slot; clean save doesn't clear; friendly copy).
 
 ### Standing items
-- Operator sign-offs PENDING: R4 "barfoo" (025 nested-revision warned baseline) · R5 U+FFFD.
+- Operator sign-offs RESOLVED 2026-08-06: R4 "barfoo" stacked-revision → KEEP warned innermost-wins
+  baseline; R5 U+FFFD unmapped-symbol → KEEP warned baseline, extend KnownSymbolGlyphMap only when a real
+  document surfaces an unmapped sym. Operator principle: "best fidelity, but not pursuing one rare
+  instance at the expense of others" — common cases are exact; rare shapes degrade LOUDLY, never silently.
 - Fidelity-widener backlog recorded in notes §16 (style identity, bookmarks, typed move/table-revision
   carry, hMerge/tblLayout, pageBreakBefore tri-state, field-result box text) — post-R6 or 027-adjacent.
 - Before the eventual PR: merge origin/master (~67 behind; Crypto.Xml HIGH patched there) + /conflict-check.

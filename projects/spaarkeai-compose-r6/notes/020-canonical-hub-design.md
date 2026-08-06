@@ -624,7 +624,10 @@ passed on re-run) · ArchTests same 4 pre-existing · client tsc 28 before/after
   custom-style-linked numbering (020-R7) · localized heading ids (011-P8) · hMerge/tblLayout typed carry
   (022-F2) · bookmarks + internal links (024) · typed move + table-revision carry (025) · pageBreakBefore
   tri-state (023-F2) · field-result box text + SmartArt doc note (026-F4).
-- **Operator sign-offs still pending**: R4 "barfoo" (025 warned baseline) · R5 U+FFFD.
+- **Operator sign-offs RESOLVED (2026-08-06)**: R4 "barfoo" stacked-revision → warned innermost-wins
+  baseline CONFIRMED; R5 U+FFFD → warned baseline CONFIRMED (extend the glyph map only when a real
+  document surfaces an unmapped symbol). Principle: best fidelity on the common cases; rare shapes
+  degrade loudly, never silently — no complexity spent on one rare instance at the expense of others.
 
 ---
 
