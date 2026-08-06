@@ -13,6 +13,8 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -237,6 +239,19 @@ public static class CommunicationEndpoints
             .Produces<SuggestAssociationsResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+
+        // POST /api/communications/{id}/confirm-affinity — FR-A4 affinity confirmation-write (R-1). The confirm
+        // surface calls this FIRE-AND-FORGET after a human confirms this communication is regarding {target},
+        // recording the (signal → target) frequency so AffinityRung can SUGGEST that target for future untagged
+        // messages with matching signals. Learns from HUMAN confirmations only (not the engine's auto-files).
+        // Best-effort / non-fatal (NFR-04): a disabled tenant, unmapped target, or store failure is a no-op that
+        // still returns 200 — it MUST NOT fail the user's confirmation (the regarding write already succeeded
+        // client-side via Xrm.WebApi, ADR-024). Auth-scoped via the endpoint filter (NFR-07).
+        group.MapPost("/{id:guid}/confirm-affinity", RecordAffinityConfirmationAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("RecordCommunicationAffinityConfirmation")
+            .WithDescription("FR-A4 affinity learning: record that a human confirmed this communication is regarding {targetEntityType}:{targetRecordId}, incrementing the per-(signal, target) confirmation frequency the deterministic AffinityRung reads. Signals are computed with the SAME AffinityRung.ExtractSignals the read path uses (read/write canonicalization parity). Best-effort — never fails the confirmation; disabled-tenant / unmapped-target / store-failure are no-ops.")
+            .Produces<RecordAffinityConfirmationResult>(StatusCodes.Status200OK);
 
         // GET /api/communications/queue-feed?regarding=&top= — the FR-17 ranked-exceptions queue-feed (task 032).
         // Surface-agnostic: r1 supplies the feed ONLY, r5 builds the Exceptions Queue surface on top of it (C-3).
@@ -863,6 +878,30 @@ public static class CommunicationEndpoints
         var (message, context) = await communicationService.ReconstructEnvelopeAsync(id, ct);
         var decision = await associationResolver.EvaluateAsync(message, context, ct);
         return TypedResults.Ok(SuggestAssociationsResponse.FromDecision(id, decision));
+    }
+
+    /// <summary>
+    /// FR-A4 affinity confirmation-write (email-communication-intelligence-r2, R-1). Records that a HUMAN
+    /// confirmed communication <paramref name="id"/> is regarding the requested target, incrementing the
+    /// per-(signal, target) affinity frequency so <see cref="AffinityRung"/> can SUGGEST that target for future
+    /// untagged messages with matching signals. Computes the SAME signals the read rung uses
+    /// (<see cref="AffinityRung.ExtractSignals"/> over the reconstructed envelope) — keeping read/write
+    /// canonicalization identical. Learns from HUMAN confirmations only (the client calls it after the user's
+    /// regarding write), never the engine's deterministic auto-files, so affinity does not self-reinforce.
+    /// <para>
+    /// Best-effort / non-fatal (NFR-04): an invalid/unmapped target, a disabled tenant, or any store failure is a
+    /// no-op that STILL returns 200 — this MUST NOT fail the user's confirmation (the regarding write already
+    /// committed client-side via Xrm.WebApi per ADR-024; this is a fire-and-forget learning signal on top).
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> RecordAffinityConfirmationAsync(
+        Guid id,
+        RecordAffinityConfirmationRequest request,
+        AffinityConfirmationRecorder recorder,
+        CancellationToken ct)
+    {
+        var recorded = await recorder.RecordAsync(id, request?.TargetEntityType, request?.TargetRecordId, ct);
+        return TypedResults.Ok(new RecordAffinityConfirmationResult(recorded));
     }
 
     /// <summary>

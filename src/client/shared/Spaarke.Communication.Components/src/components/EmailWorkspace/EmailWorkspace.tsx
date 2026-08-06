@@ -408,7 +408,24 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   regardingRecordNumber={record.recordState?.regardingRecordNumber ?? null}
                   regardingRecordType={record.recordState?.regardingRecordType ?? null}
                   filedAssociations={filedAssociations}
-                  writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
+                  writeContext={{
+                    webApi,
+                    hostEntity: COMMUNICATION_ENTITY,
+                    hostRecordId: id,
+                    // FR-A4 (R-1): after a human confirms, record affinity to the BFF so the AffinityRung
+                    // learns this email's signals → this record. Fire-and-forget + best-effort — the .catch
+                    // swallows failures so a learning signal never affects the confirmation (mirrors the
+                    // archive POST above, ADR-028 authenticatedFetch).
+                    recordAffinity: (targetEntityType, targetRecordId) => {
+                      void authenticatedFetch(`/communications/${id}/confirm-affinity`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ targetEntityType, targetRecordId }),
+                      }).catch(() => {
+                        /* best-effort learning signal — never surfaced to the user */
+                      });
+                    },
+                  }}
                   pickerWebApi={webApi}
                   linkAnotherCatalog={linkAnotherCatalog}
                   onAssociationsChanged={record.reload}

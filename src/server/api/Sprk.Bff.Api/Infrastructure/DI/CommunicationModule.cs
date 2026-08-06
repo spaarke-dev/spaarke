@@ -223,6 +223,9 @@ public static class CommunicationModule
         // Communication:Affinity:Enabled (per-tenant). AffinityStore takes the singleton IGenericEntityService.
         services.AddSingleton<AffinityStore>();
         services.AddSingleton<IAssociationRung, AffinityRung>();               // rung 3 (tier) — affinity learning
+        // FR-A4 R-1: the human-confirmation→affinity write orchestration behind POST /{id}/confirm-affinity.
+        // Singleton (its deps — ICommunicationEnvelopeReader, AffinityStore, IOptionsMonitor — are all singletons).
+        services.AddSingleton<AffinityConfirmationRecorder>();
         // rung 4 — semantic record match (FR-14). AI-tier: the engine evaluates it only when the
         // deterministic pass did not auto-file, and the mapper caps it to Suggested (never auto-files).
         // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,
