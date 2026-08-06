@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Unblock wave DONE: 014 ✅ 058 ✅ 041 ✅ + KV ✅ + 020 ✅ + 023 ✅ (schema) + 016-schema ✅ + 034 no-schema. |
-| **Step** | — |
-| **Status** | KV `footer-hmac-key` created in `spaarke-spekvcert` (MI has access). **020 unique key ACTIVE** (13 dup test rows deleted w/ approval; dup error = HTTP 412 / 0x80060892 → for 021). 023 column + 016 `sprk_affinity` table created by operator. 034 needs NO schema (sprk_event type=task; base/final-due exist) — code must target sprk_event not OOB task. |
-| **Next Action** | NOW UNBLOCKED (agent code work): **021** (race-proof dedup, catch 412/0x80060892) → 022/025; **024** (SPE detector, deps 023); **016** AffinityRung code (schema ready, opus); **010** HMAC signer (KV ready) → 012/013. Still gated: 004 Entra (→040), Pillar E sequential. |
+| **Task** | 021 — race-proof internet-message-id dedup. **Investigation DONE; turnkey plan written** (notes/021-implementation-plan.md). Code deferred to fresh session (opus·xhigh, 1-2 day, contended path — needs full context budget). |
+| **Step** | Investigation complete (call-site map + escalation gate identified). Implementation pending. |
+| **Status** | 020 key ACTIVE; dup fault = FaultException OrganizationServiceFault ErrorCode 0x80060892 (SDK) / HTTP 412 (WebApi). Conflict-check clean. Plan = 7 steps: Dataverse seam methods → CreateCommunicationDedupedAsync (catch 0x80060892 → reconcile) → wire capture path → SB idempotency on internet-msg-id → seam+unit tests → verify → 9.5. Scope guard: upload→communication dedup is task 043, NOT 021. |
+| **Next Action** | Fresh session: execute notes/021-implementation-plan.md step 1 (Dataverse seam methods). ⚠️ Step-2 escalation gate: confirm GenericEntityService.CreateAsync propagates a catchable deterministic dup-key fault before building on it. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
