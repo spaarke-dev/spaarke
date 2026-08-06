@@ -675,21 +675,22 @@ public sealed partial class ComposeDocumentRenderer
     {
         try
         {
-            using var stream = new MemoryStream(carrierBytes, writable: false);
-            using var doc = WordprocessingDocument.Open(stream, isEditable: false);
-            var ids = new HashSet<int>();
-            var comments = doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments;
-            if (comments is not null)
+            return ScanCarrierBytes(carrierBytes, doc =>
             {
-                foreach (var comment in comments.Elements<Comment>())
+                var ids = new HashSet<int>();
+                var comments = doc.MainDocumentPart?.WordprocessingCommentsPart?.Comments;
+                if (comments is not null)
                 {
-                    if (int.TryParse(comment.Id?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+                    foreach (var comment in comments.Elements<Comment>())
                     {
-                        ids.Add(id);
+                        if (int.TryParse(comment.Id?.Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var id))
+                        {
+                            ids.Add(id);
+                        }
                     }
                 }
-            }
-            return ids;
+                return ids;
+            });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -1902,6 +1903,18 @@ public sealed partial class ComposeDocumentRenderer
         }
     }
 
+    /// <summary>P-2 (020-review ledger, extracted at task 012): the ONE read-only side-open every
+    /// carrier scan uses — never the editable package, whose parts would be marked for autoSave
+    /// re-serialization by the mere read (the 011-T2 preserve-parts hazard). Exception POLICY deliberately
+    /// stays with each caller (fallback-to-empty vs typed <see cref="ComposePatchException"/>): the
+    /// duplication this removes is the open preamble, not the divergent failure semantics.</summary>
+    private static T ScanCarrierBytes<T>(byte[] carrierBytes, Func<WordprocessingDocument, T> scan)
+    {
+        using var stream = new MemoryStream(carrierBytes, writable: false);
+        using var doc = WordprocessingDocument.Open(stream, isEditable: false);
+        return scan(doc);
+    }
+
     /// <summary>Whether any block carries task-025 revision facts (triggers the carrier revision-id seed
     /// scan — a revision-free render skips it entirely).</summary>
     private static bool ModelContainsRevision(IReadOnlyList<ComposeBlock> blocks) =>
@@ -1920,8 +1933,8 @@ public sealed partial class ComposeDocumentRenderer
     {
         try
         {
-            using var stream = new MemoryStream(carrierBytes, writable: false);
-            using var doc = WordprocessingDocument.Open(stream, isEditable: false);
+            return ScanCarrierBytes(carrierBytes, doc =>
+            {
             var main = doc.MainDocumentPart;
             if (main is null)
             {
@@ -1972,6 +1985,7 @@ public sealed partial class ComposeDocumentRenderer
             // byte-identically (task 024), so its ids join the collision base too.
             Scan(main.WordprocessingCommentsPart?.Comments);
             return max;
+            });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -2190,8 +2204,8 @@ public sealed partial class ComposeDocumentRenderer
     {
         try
         {
-            using var stream = new MemoryStream(carrierBytes, writable: false);
-            using var doc = WordprocessingDocument.Open(stream, isEditable: false);
+            return ScanCarrierBytes(carrierBytes, doc =>
+            {
             var scan = new CarrierNumberingScan();
             var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
             if (numbering is null)
@@ -2208,6 +2222,7 @@ public sealed partial class ComposeDocumentRenderer
                 scan.RecordInstance(instance);
             }
             return scan;
+            });
         }
         catch (Exception ex) when (ex is not ComposePatchException and not OutOfMemoryException)
         {
