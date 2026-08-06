@@ -631,4 +631,59 @@ passed on re-run) · ArchTests same 4 pre-existing · client tsc 28 before/after
 
 ---
 
-*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026 records. Checkpoint in `current-task.md`.*
+## 17. Task 010 — THE CUTOVER: imported saves render from the canonical model (2026-08-06)
+
+**Commits `ef9ee7feb` + Step-9.5 fixes `dfc3af983`.** Spec FR-01/FR-02 — the pivot the whole project
+exists for: the anchor-reconciliation 422 class is now unreachable on the normal save path.
+
+**Routing (`ResolveSaveBaselineAsync`):**
+- **(a1) IMPORTED RENDER-ON-SAVE (new)**: ContentModel + a resolvable baseline (retained Content bytes,
+  or BaselineVersionId+coordinates after a page refresh) → `RenderIntoCarrier` — the model (projected at
+  load through the 020-026 hub, edited in TipTap, re-posted) is the authoring source; the carrier
+  contributes styles/numbering/headers/footers/theme/comments parts. NO stamper, NO patch engine, NO
+  count-gate — the 422 chain (count mismatch → nothing stamped → zero anchorable ops → hard refusal)
+  cannot begin. Render degradations surface as success-with-warnings (the 026 obligation, WIRED).
+- **(a0) born-in-editor**: ContentModel with NO baseline source → `SynthesizeDocument`, unchanged.
+- **Transitional op-log path**: ContentModel-null saves keep the stamper+engine (reopened-authored
+  clean-apply + pre-cutover clients) — exactly the ADR-049 amendment's permitted shape; 012 retires it.
+- Origin hardened: Authored ⇔ ContentModel AND no baseline SOURCE (bytes OR version coordinates) — a
+  post-refresh imported save can no longer mis-stamp Authored. Mixed ContentModel+op-log → ops ignored
+  LOUDLY (server log + `op-log-ignored` degradation warning on the wire; never half-applied).
+
+**DEVIATION (directional, documented + adr-check-ratified)**: POML criterion 1 says "via
+SynthesizeDocument" — authored before 011 delivered `RenderIntoCarrier`. Satisfied IN SUBSTANCE via the
+carrier renderer (blank-package synthesize would drop carrier parts — the UAT #1A SEV-1 class). No §6.5
+escalation: no ADR conflict, an intra-POML mechanism substitution under mode=directional.
+
+**Client-shape verification (main-session trace + reviewer-confirmed)**: every CURRENT client request
+shape keeps its exact behavior — born-in-editor create + re-save send contentModel ONLY
+(ComposeWorkspace bornInEditor branch spreads `{contentModel}` alone, :1459-1462); imported/reopened
+dirty saves send bytes/versionId + op-log with NO contentModel (transitional path). The a1 path fires
+only for the 012-cutover request shape. The one label change (ContentModel+coordinates replace save:
+Authored→Imported) is the intended hardening; no deployed client emits it and origin persists only at
+create-on-save.
+
+**Step 9.5**: adr-check **PASS 8/8** (line-40/I-4 superseded by the merged amendment for the save path;
+carrier-part preservation EXCEEDS the amendment's minimum; origin NFR-02 clean; deviation legitimate).
+code-review **APPROVE-WITH-MINORS** (born-in-editor flows empirically traced safe; error surface
+preserved — version-not-found still 404, carrier-render failure 400 via MalformedDocument, never the
+422 catch-all). Minors fixed in `dfc3af983`: op-log-ignored on the wire + ignore-semantics test; stale
+G1 comment; a1 boundary notes (born-in-editor versionId trap; FR-08 skip design-accepted).
+
+**Tests**: ComposeServiceImportedRenderSaveTests 6 green — carrier routing (styles-part oracle,
+ParaIdMap ignored), version-fetch carrier, **the REAL NDA through the REAL projector+renderer via
+SaveAsync: no 422, unique paraIds, signature text preserved**, degradations surfaced, clean-render null,
+op-log ignore semantics. Suite 9793/9897 (same 3 pre-existing surgical/read-path reds — 012/013/027).
+Publish clean-worktree **46.90 MB, ±0.00**. No packages touched.
+
+**ROUTED → 012 (in addition to its scope):**
+- Retire or re-justify the comments-baking `_patchEngine.Apply` at ComposeService.cs:893-903 — the LAST
+  engine caller reachable with a ContentModel (adr-check residual).
+- Client cutover: imported dirty saves post contentModel (+ preserved server-set fields per the
+  Phase-2 ledger) + baseline source; route comments through the model (024 Comments) not the bake;
+  warning-family separation (026-F5).
+- Record the FR-08 imported-coverage change in ADR-049/design notes at retirement time (review F3).
+
+---
+
+*Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010 records. Checkpoint in `current-task.md`.*

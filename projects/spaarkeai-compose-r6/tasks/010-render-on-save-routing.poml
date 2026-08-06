@@ -4,7 +4,7 @@
     <title>Route Imported docs through render-from-model in SaveAsync; drop count-gate from save path</title>
     <phase>1 Render-on-save core</phase>
     <gate>blocked — requires 011 (generalized render-from-model renderer) + 026 (hard-tier accept-flatten) [transitively 001 amendment + 020 canonical-model hub + 004 NDA fixture]. RE-SEQUENCED 2026-08-05: 010 now FINALIZES the Imported cutover AFTER the model hub (020) + renderer (011) + hard-tier degradation (026) exist — building it before 026 would re-ship the UAT #1A SEV-1 regression / re-422 the NDA. See notes/task-010-resequence-decision.md. Run /conflict-check before the BFF PR.</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core BFF code change to ComposeService save path (tags bff/compose); the 422-kill pivot with high blast radius — FULL per root §8.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -95,6 +95,24 @@
     <criterion testable="true">Negative: ComposeShadowPatchEngine and ComposeBaselineParaIdStamper remain in the codebase (retained for transitional clean-apply) and docxBridge.ts is not deleted.</criterion>
     <criterion testable="true">Publish size ≤60 MB with absolute + delta reported vs the task-003 baseline; no new HIGH CVE; BFF builds green.</criterion>
   </acceptance-criteria>
+
+  <completion-note>
+    COMPLETED 2026-08-06 (commits ef9ee7feb + Step-9.5 fixes dfc3af983). ResolveSaveBaselineAsync (a1):
+    ContentModel + baseline source (Content bytes OR BaselineVersionId coordinates) -> RenderIntoCarrier;
+    born-in-editor (no baseline source) -> a0 SynthesizeDocument unchanged; transitional op-log path
+    (stamper + engine) retained per the ADR-049 amendment — 012 retires. The 422 chain is UNREACHABLE on
+    the render path (no stamper/engine/count-gate). Origin: Authored requires NO baseline source
+    (post-refresh imported saves no longer mis-stamp). Mixed model+op-log -> ops ignored LOUDLY (wire-
+    visible op-log-ignored). Degradations surface as success-with-warnings (026 obligation wired).
+    CRITERION-1 NOTE: "via SynthesizeDocument" satisfied IN SUBSTANCE via RenderIntoCarrier (documented
+    directional mechanism substitution, adr-check-ratified — POML predates 011s carrier renderer; blank-
+    package synthesize would re-ship the UAT #1A SEV-1 part-drop). Client shapes verified unchanged
+    (bornInEditor branch sends contentModel only). Tests: 6 green incl. THE NDA THROUGH SaveAsync WITH NO
+    422 (real projector + renderer, unique paraIds, signature text preserved). Suite 9793/9897 (same 3
+    pre-existing reds). adr-check PASS 8/8; code-review APPROVE-WITH-MINORS (all fixed). Publish 46.90 MB
+    (+-0.00). ROUTED to 012: comments-baking engine caller (ComposeService:893) retire/re-justify; client
+    cutover + mapper preservation; FR-08 note at retirement. Full record: notes §17.
+  </completion-note>
 
   <notes>The pivot; critical path 001→010→011→012→013→014. Coordinate tightly with 011 (SynthesizeDocument generalization) — 010 wires routing, 011 generalizes the renderer input. Placement Justification per root §10 in the PR. spec FR-01/FR-02.</notes>
 

@@ -7,33 +7,37 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. **PHASE 2 COMPLETE**: 020/011/021/022/023/024/025/026 ALL DONE + pushed |
-| **Next task** | **010 — Imported save-path cutover through render-from-model; drop count-gate** (`tasks/010-*.poml`; deps 011+026 satisfied) |
-| **Status** | 026 closed at `3857ce542`; branch `work/spaarkeai-compose-r6` pushed; working tree clean |
-| **Next Action** | On "continue": invoke task-execute for task 010 — ⚠️ POML declares **opus/xhigh** model tier (Step 0.5: verify session model ≥ opus before executing; Fable OK, Sonnet must escalate). FULL rigor. Read the 010 CUTOVER OBLIGATIONS below FIRST. |
+| **Task** | NONE ACTIVE — clean boundary. **010 THE CUTOVER COMPLETE** (+ all of Phase 2: 020/011/021-026) |
+| **Next task** | **012 — Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from the save path** (`tasks/012-retire-surgical-save-path.poml`; dep 010 satisfied) |
+| **Status** | 010 closed at `dfc3af983`; branch pushed; working tree clean |
+| **Next Action** | On "continue": invoke task-execute for task 012 — FULL rigor, sonnet/high tier. Read the 012 OBLIGATIONS below FIRST (they accumulated from 010/026 reviews). |
 
 ### Critical Context (3 sentences)
-Phase-2 fidelity widening is COMPLETE (021 numbering · 022 tables · 023 headers/page-breaks · 024
-hyperlinks/comments · 025 tracked-changes · 026 hard-tier degradation) — the canonical model +
-render-on-save engine is ready for the 010 cutover of IMPORTED saves. Established execution shape per
-task: model widening → projector LOUD capture → renderer emission → seam slice → commit → Step 9.5
-two-agent review on the SHA + clean-worktree publish (46.90 MB, ±0.00 across the whole phase) → fix
-commit → close-out. Suite floor: 3 pre-existing NDA reds (read-harness TextExactness + Summary-Page
-AppendSection + Stamper dup-paraId — the SURGICAL-path artifacts 010/012 retire; 013/027 re-baseline).
+The 010 cutover is IN: SaveAsync routes ContentModel+baseline saves through RenderIntoCarrier (carrier
+parts preserved, degradations surfaced, NO stamper/engine/count-gate — the NDA saves without a 422,
+pinned by ComposeServiceImportedRenderSaveTests). Born-in-editor (a0 synthesize) and the transitional
+op-log path (stamper+engine, reopened-authored clean-apply) are UNCHANGED — every current client request
+shape behaves identically; the a1 path fires only for the 012-cutover client shape. Execution shape per
+task unchanged (implement → seam/unit slice → commit → Step 9.5 two-agent review + clean-worktree publish
+46.90 MB ±0.00 → fix commit → close-out); suite floor 3 pre-existing reds (surgical/read-path artifacts
+that 012/013/027 own).
 
-### 010 CUTOVER OBLIGATIONS (accumulated — BINDING)
-1. Route imported saves through RenderIntoCarrier (render-from-model); retire the
-   ComposeBaselineParaIdStamper count-gate (the 422 root) from the save path.
-2. **Wire the `degradations` out-collection into RenderIntoCarrier from SaveAsync** and surface via
-   DegradationWarnings (026 adr-check obligation — otherwise imported-save warnings silently regress).
-3. Client mapper MUST preserve ALL server-set model fields on re-post or fidelity silently regresses:
-   numId (021) · table facts (022) · pageBreakBefore/isPageBreak (023) · comments+commentAnchor (024) ·
-   revision/formatChange/markRevision/propertiesChange (025 — dropping = silently SETTLES redlines) ·
-   P-10 audit carve-out · P-2 preamble extraction.
-4. 012 additionally owes: client warning-family separation (026-F5: save degradations vs load import
-   warnings share one reducer slot; clean save doesn't clear; friendly copy).
+### 012 OBLIGATIONS (accumulated — BINDING)
+1. CLIENT CUTOVER: imported dirty saves post contentModel (built from the editor, PRESERVING every
+   server-set field: numId 021 · table facts 022 · pageBreakBefore/isPageBreak 023 · comments+anchors
+   024 · revision/formatChange/markRevision/propertiesChange 025) + baseline source (retained bytes or
+   baselineVersionId). Born-in-editor branch MUST keep omitting baselineVersionId (drive-item id would
+   404 the version fetch — documented in the a1 comment).
+2. Retire stamper+engine from the save path; ALSO retire or re-justify the comments-baking
+   _patchEngine.Apply at ComposeService.cs:893-903 — the LAST engine caller reachable with a
+   ContentModel (010 adr-check residual); route comments through the model (024 Comments list) instead.
+3. Client warning-family separation (026-F5): save degradations vs load import warnings share one
+   reducer slot; clean save doesn't clear; friendly copy for codes.
+4. Record the FR-08 imported-coverage change (model-path saves skip stale-base re-anchor;
+   last-writer-wins + version history) in ADR-049/design notes at retirement time.
+5. P-10 audit carve-out + P-2 preamble extraction (long-standing ledger items — verify at cutover).
 
-### Standing items
+### Standing items### Standing items
 - Operator sign-offs RESOLVED 2026-08-06: R4 "barfoo" stacked-revision → KEEP warned innermost-wins
   baseline; R5 U+FFFD unmapped-symbol → KEEP warned baseline, extend KnownSymbolGlyphMap only when a real
   document surfaces an unmapped sym. Operator principle: "best fidelity, but not pursuing one rare
