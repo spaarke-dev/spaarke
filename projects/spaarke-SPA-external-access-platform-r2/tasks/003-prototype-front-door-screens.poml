@@ -4,7 +4,7 @@
     <title>Prototype Legal Front Door screens (typed intake WizardModal, my-requests, NDA status, upload)</title>
     <phase>P0 UX Design + Prototype</phase>
     <gate>blocked-until:002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Extends the task-001 experiment with new prototype screens (NOT production code); frontend/fluent-ui surface, no ADR-graded blast radius. FULL gates skipped per §8 STANDARD row.</rigor-reason>
     <model-tier>sonnet</model-tier>

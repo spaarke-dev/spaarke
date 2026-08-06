@@ -8,9 +8,9 @@ Legend: 🔲 not-started · 🔄 in-progress · ✅ completed · ⛔ blocked · 
 
 | ID | Title | Phase | Status | Deps | Tier/Eff | Rigor | Parallel |
 |----|-------|-------|--------|------|----------|-------|----------|
-| 001 | Scaffold module-host prototype (shell + launcher + realm chooser) | P0 | 🔲 | none | S/h | STANDARD | — (base) |
-| 002 | Extend prototype seed (servicerequest + entitlement factories + 3-persona preset) | P0 | 🔲 | 001 | S/m | STANDARD | — |
-| 003 | Prototype Legal Front Door screens (intake/my-requests/NDA/upload) | P0 | 🔲 | 002 | S/h | STANDARD | — |
+| 001 | Scaffold module-host prototype (shell + launcher + realm chooser) | P0 | ✅ | none | S/h | STANDARD | — (base) |
+| 002 | Extend prototype seed (servicerequest + entitlement factories + 3-persona preset) | P0 | ✅ | 001 | S/m | STANDARD | — |
+| 003 | Prototype Legal Front Door screens (intake/my-requests/NDA/upload) | P0 | ✅ | 002 | S/h | STANDARD | — |
 | 004 | Owner visual-approval gate + component map | P0 | 🔲 | 003 | S/m | MINIMAL | — (gate) |
 | 010 | Author ADR-028 Amendment A3 | P1 | 🔲 | none | O/h | FULL | — (.claude/ main-session) |
 | 011 | Module-host shell scaffold (extract from external-spa) | P1 | 🔲 | 004,010 | S/h | FULL | — (base) |

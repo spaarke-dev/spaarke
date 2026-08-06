@@ -164,3 +164,17 @@ Recommend design-to-spec phase R2, e.g.: **P1** module-host foundation (F1–F4:
 - Data models: `docs/data-model/sprk_servicerequest.md` (stub — needs intake schema), `sprk_invoice.md` (R3), `sprk_externalrecordaccess` (`src/solutions/SpaarkeCore/entities/sprk_externalrecordaccess/`)
 - Teams: Teams JS SDK + Teams SSO (workforce identity), personal-tab manifest pointing at the SWA content URL
 - North-star for a future public router: `projects/spaarke-self-service-registration-app`
+
+---
+
+## 11. R2 Scope Amendment — Post-P0-Review Additions (2026-08-06)
+
+During the P0 prototype review the owner added five capabilities, all approved **into R2** (P&P = both
+library + request). See `spec.md` **FR-23–FR-27** + ADR Tensions, and `notes/review-additions-analysis.md`
+for the grounded feasibility investigation. **Unifying principle**: each is an existing Spaarke capability
+(AI pre-fill, `SprkChat`, communication/notification, messaging `ConversationView`+ACS, SPE+RAG) re-hosted
+on the R2 external module framework + `CallerPrincipalResolver` (broker-only, dual-scheme,
+entitlement/participation-scoped, app-only, no OBO) — not a from-scratch build. **Plan restructure**: P3
+absorbs FR-23 (NDA AI auto-fill), FR-24 (feedback loop), FR-25 (P&P library+request); a new **P5
+(Collaboration Surfaces)** carries FR-26 (Q&A assistant) + FR-27 (cross-boundary messaging). Prototype
+extended to cover all five for the task-004 visual gate.

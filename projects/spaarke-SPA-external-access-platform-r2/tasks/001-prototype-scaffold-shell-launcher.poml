@@ -4,7 +4,7 @@
     <title>Scaffold module-host prototype (shell chrome + card launcher + realm chooser)</title>
     <phase>P0 UX Design + Prototype</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation in the spaarke-prototype repo (NOT production code); frontend/fluent-ui prototype surface with no ADR-graded blast radius. FULL gates skipped per §8 STANDARD row.</rigor-reason>
     <model-tier>sonnet</model-tier>

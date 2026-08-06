@@ -4,7 +4,7 @@
     <title>Extend prototype seed: sprk_servicerequest + module-entitlement factories + 3-persona preset</title>
     <phase>P0 UX Design + Prototype</phase>
     <gate>blocked-until:001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New factory + preset files in the spaarke-prototype seed system (NOT production code); data-scaffolding with a §11 justification, no ADR-graded blast radius. FULL gates skipped per §8 STANDARD row.</rigor-reason>
     <model-tier>sonnet</model-tier>
