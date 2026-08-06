@@ -1145,12 +1145,6 @@ public static class ComposeEndpoints
 
     /// <summary>
     /// Maps a <see cref="ComposeDocxProjection"/> (the service-level shape both <c>LoadAsync</c> and
-    /// <summary>Task 013 (012-review F7): maps service-layer projection warnings onto the wire DTO
-    /// (code + count only - the Detail never crosses the wire). Null-propagating.</summary>
-    private static IReadOnlyList<ComposeProjectionWarningResponse>? MapWarningResponses(
-        IReadOnlyList<ComposeProjectionWarning>? warnings)
-        => warnings?.Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count)).ToList();
-
     /// <c>ProjectDocument</c> return) onto its wire DTO. FR-01 (task 010, spaarkeai-compose-fidelity-r4.5):
     /// extracted from the Load response construction so the Upload endpoint reuses the IDENTICAL
     /// mapping — one wire shape for every entry path (F-2 one reader), not a forked projection type.
@@ -1169,6 +1163,12 @@ public static class ComposeEndpoints
                 .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
                 .ToList(),
             SchemaVersion: projection.SchemaVersion);
+
+    /// <summary>Task 013 (012-review F7): maps service-layer projection warnings onto the wire DTO
+    /// (code + count only — the Detail never crosses the wire). Null-propagating.</summary>
+    private static IReadOnlyList<ComposeProjectionWarningResponse>? MapWarningResponses(
+        IReadOnlyList<ComposeProjectionWarning>? warnings)
+        => warnings?.Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count)).ToList();
 
     private static async Task<IResult> Load(
         string documentSpeId,

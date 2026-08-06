@@ -179,6 +179,9 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'op-log-ignored': 'Some pending edit operations were superseded by the saved document state.',
   'text-box-flattened': 'A text box was converted to regular text.',
   'complex-object-dropped': 'A drawing or embedded object could not be carried over.',
+  // Task 013 (012-review F6): an id collision is not a "simplification" - the comment kept the
+  // document's own version rather than the posted one.
+  'comment-id-collision': "A comment could not be matched to its original; the document's version was kept.",
   'tracked-move-downgraded': 'A tracked move was saved as delete + insert.',
   'tracked-nested-revision-simplified': 'A nested tracked change was simplified.',
   'edited-paragraph-page-break-dropped': 'A page break inside an edited paragraph was dropped.',

@@ -316,7 +316,11 @@ public sealed partial class ComposeDocumentRenderer
                 body.AppendChild(trailingSectPr);
             }
 
-            // E2 substrate: mint a fresh w14:paraId for every appended paragraph; every existing id untouched.
+            // E2 substrate: mint a fresh w14:paraId for every appended paragraph. An existing UNIQUE id is
+            // never touched; a SOURCE-DUPLICATED id (e.g. identical ids in a construct's mc:Choice and
+            // mc:Fallback copies - the NDA class) keeps its FIRST occurrence and re-mints the later ones,
+            // so every package this method returns is anchorable (no duplicate splice keys) - the
+            // dedup invariant ComposeSummaryPageSeamTests' ids-stripped exemption documents.
             AssignParaIds(body);
 
             mainPart.Document!.Save();
@@ -497,6 +501,10 @@ public sealed partial class ComposeDocumentRenderer
                     var knownText = carrierText.Trim();
                     if (modelText.Length > 0 && !knownText.StartsWith(modelText, StringComparison.Ordinal))
                     {
+                        // NOTE (review P4): this also fires when a model comment EXTENDS the carrier's text.
+                        // Comment-text editing does not exist in the editor today (the carrier part is
+                        // authoritative for existing comments); if editing ever lands, this check must learn
+                        // an identity-diff re-authoring path (notes S14.1) instead of warn-and-discard.
                         state.Warn("comment-id-collision");
                     }
                 }
@@ -692,9 +700,6 @@ public sealed partial class ComposeDocumentRenderer
     /// <c>w:commentReference</c> would corrupt the document (Word repair prompt). Comparison is by
     /// PARSED value (OOXML <c>w:id</c> is ST_DecimalNumber — integer value semantics; "01" == "1").
     /// </summary>
-    private static HashSet<int> ScanCarrierCommentIds(byte[] carrierBytes)
-        => new(ScanCarrierComments(carrierBytes).Keys);
-
     /// <summary>Task 013 (012-review F6): the carrier comments scan also carries each comment's plain
     /// text (paragraphs joined by <c>\n</c> - the SAME join the projection uses for
     /// <c>ComposeComment.Text</c>) so the collision check can compare a model comment against the
@@ -1956,7 +1961,7 @@ public sealed partial class ComposeDocumentRenderer
     /// Task 025: the collision base for re-authored revision ids — the max revision <c>w:id</c> across the
     /// carrier's parts (body included: preserved headers/footers/notes may carry revisions, and seeding
     /// above the old body's ids costs nothing). READ-ONLY side open of the bytes, same discipline as
-    /// <see cref="ScanCarrierNumbering"/> / <see cref="ScanCarrierCommentIds"/>. Mirrors the R5 engine's
+    /// <see cref="ScanCarrierNumbering"/> / <see cref="ScanCarrierComments"/>. Mirrors the R5 engine's
     /// <c>SeedRevisionId</c>. Unreadable carrier → 0 (blank-package posture).
     /// </summary>
     private static int ScanCarrierRevisionIdSeed(byte[] carrierBytes)

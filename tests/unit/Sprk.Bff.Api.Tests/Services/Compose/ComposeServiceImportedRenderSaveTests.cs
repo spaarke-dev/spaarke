@@ -480,6 +480,79 @@ public sealed class ComposeServiceImportedRenderSaveTests
         body.Descendants<CommentRangeStart>().Should().ContainSingle(a => a.Id!.Value == "2",
             "the new comment's anchor survives the anchor-validity filter (carrier ids ∪ appended ids)");
         body.Descendants<CommentReference>().Should().ContainSingle(r => r.Id!.Value == "2");
+
+        // Task 013 (F6): the loaded comment (id 1, same text) is the normal round-trip - it must NOT
+        // false-positive the collision warn.
+        (result.DegradationWarnings ?? Array.Empty<ComposeProjectionWarning>())
+            .Should().NotContain(w => w.Code == "comment-id-collision",
+                "a same-text loaded round-trip is not a collision");
+    }
+
+    [Fact]
+    public async Task SaveAsync_ModelCommentIdCollidingWithDifferentCarrierComment_WarnsLoudly()
+    {
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        // The F6 case: the model claims comment id 1 with text the carrier's comment 1 does NOT start
+        // with - a client-allocated id landed on a carrier comment the loaded model never carried
+        // (e.g. one the projection flattened). The anchor still binds to the carrier comment
+        // (behavior unchanged), but the collision must be WIRE-VISIBLE, never silent.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun { Text = string.Empty, CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.Start, Id = 1 } },
+                        new ComposeInlineRun { Text = "Colliding anchor text." },
+                        new ComposeInlineRun { Text = string.Empty, CommentAnchor = new ComposeCommentAnchor { Kind = ComposeCommentAnchorKind.End, Id = 1 } },
+                    },
+                },
+            },
+            Comments = new[]
+            {
+                new ComposeComment { Id = 1, Author = "Session Reviewer", Text = "Entirely different session comment" },
+            },
+        };
+
+        var request = ReplaceRequest(model, content: BuildCarrierBytesWithComment());
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        result.VersionId.Should().NotBeNullOrEmpty("a collision warns - it never fails the save");
+        result.DegradationWarnings.Should().NotBeNull();
+        result.DegradationWarnings!.Should().Contain(w => w.Code == "comment-id-collision",
+            "a model comment id pointing at a different-text carrier comment must be wire-visible");
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        doc.MainDocumentPart!.WordprocessingCommentsPart!.Comments!.Elements<Comment>()
+            .Should().ContainSingle(c => c.Id!.Value == "1",
+                "the carrier's comment is authoritative - the colliding model comment is NOT appended");
+    }
+
+    [Fact]
+    public async Task SaveAsync_ModelCommentTextClampedPrefix_DoesNotWarnCollision()
+    {
+        ArrangeReplaceExisting(out _);
+        var sut = CreateSut();
+
+        // The projection clamps long comment text, so the loaded model's text may be a PREFIX of the
+        // carrier's - that is the normal round-trip, not a collision.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[] { new ComposeBlock { Kind = ComposeBlockKind.Paragraph, Runs = new[] { new ComposeInlineRun { Text = "Body." } } } },
+            Comments = new[] { new ComposeComment { Id = 1, Author = "Carrier Author", Text = "Original carrier" } },
+        };
+
+        var request = ReplaceRequest(model, content: BuildCarrierBytesWithComment());
+        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+
+        (result.DegradationWarnings ?? Array.Empty<ComposeProjectionWarning>())
+            .Should().NotContain(w => w.Code == "comment-id-collision",
+                "a clamped-prefix model text is the normal round-trip, not a collision");
     }
 
     [Fact]
