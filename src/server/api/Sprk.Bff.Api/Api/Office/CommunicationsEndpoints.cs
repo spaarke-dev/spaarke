@@ -3,6 +3,8 @@ using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Api.Office;
 
@@ -77,6 +79,28 @@ public static class OfficeCommunicationsEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        // GET /api/office/communications/by-message-id/{internetMessageId}/suggestions
+        // Task 042 (FR-B2) — the Outlook add-in "Save to Spaarke" picker + ribbon
+        // quick-save use this to pre-select the Association Engine's predicted record.
+        // Resolves the open email's internetMessageId → the captured sprk_communication,
+        // then runs the SAME read-only evaluate path as
+        // POST /api/communications/{id}/suggest-associations (CommunicationService.
+        // ReconstructEnvelopeAsync + IncomingAssociationResolver.EvaluateAsync,
+        // projected via SuggestAssociationsResponse.FromDecision) — no forked candidate
+        // model (ADR-045 / §11). 404 when the email is not yet captured: the client then
+        // opens the picker with NO pre-selection (FR-B2 no-prediction fallback).
+        group.MapGet("/by-message-id/{internetMessageId}/suggestions", GetSuggestionsByMessageIdAsync)
+            .WithName("GetCommunicationSuggestionsByMessageId")
+            .WithDescription(
+                "Resolve an email's RFC-5322 internetMessageId to its captured sprk_communication " +
+                "and return the Association Engine's read-only regarding suggestions (predicted " +
+                "record + alternates + confidence + provenance). 404 when the email is not yet captured.")
+            .Produces<CommunicationSuggestionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
         // GET /api/office/communications/{commId:guid}/linked-todos
         // Task 071 — Outlook taskpane banner uses this to display the count of
         // linked sprk_todo records and (capped) projections.
@@ -133,23 +157,9 @@ public static class OfficeCommunicationsEndpoints
 
         try
         {
-            // Query sprk_communication where sprk_internetmessageid = id. Mirrors
-            // DataverseServiceClientImpl.GetCommunicationByInternetMessageIdAsync but
-            // returns a richer column set (incl. sprk_subject).
-            var query = new QueryExpression("sprk_communication")
-            {
-                ColumnSet = new ColumnSet(
-                    "sprk_communicationid",
-                    "sprk_subject",
-                    "sprk_internetmessageid"),
-                TopCount = 1
-            };
-            query.Criteria.AddCondition(
-                "sprk_internetmessageid", ConditionOperator.Equal, internetMessageId);
+            var entity = await QueryCommunicationByMessageIdAsync(entityService, internetMessageId, ct);
 
-            var results = await entityService.RetrieveMultipleAsync(query, ct);
-
-            if (results.Entities.Count == 0)
+            if (entity is null)
             {
                 logger.LogInformation(
                     "No sprk_communication found for internetMessageId, " +
@@ -166,7 +176,6 @@ public static class OfficeCommunicationsEndpoints
                     });
             }
 
-            var entity = results.Entities[0];
             var communicationId = entity.GetAttributeValue<Guid>("sprk_communicationid");
             // Use sprk_subject if present, otherwise fall back to the empty string. The
             // client tolerates a missing subject (see communicationLookupService.ts L99).
@@ -192,6 +201,124 @@ public static class OfficeCommunicationsEndpoints
             return Results.Problem(
                 title: "Lookup Failed",
                 detail: "An unexpected error occurred while looking up the communication.",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_INTERNAL",
+                    ["correlationId"] = traceId
+                });
+        }
+    }
+
+    /// <summary>
+    /// Query <c>sprk_communication</c> by <c>sprk_internetmessageid</c>, returning the single matching
+    /// row (id + subject) or <c>null</c>. Shared by the by-message-id lookup and the suggestions handler
+    /// so both resolve the email identically (task 042). Mirrors
+    /// <c>DataverseServiceClientImpl.GetCommunicationByInternetMessageIdAsync</c> but selects the richer
+    /// column set the callers need.
+    /// </summary>
+    private static async Task<Entity?> QueryCommunicationByMessageIdAsync(
+        IGenericEntityService entityService,
+        string internetMessageId,
+        CancellationToken ct)
+    {
+        var query = new QueryExpression("sprk_communication")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_communicationid",
+                "sprk_subject",
+                "sprk_internetmessageid"),
+            TopCount = 1
+        };
+        query.Criteria.AddCondition(
+            "sprk_internetmessageid", ConditionOperator.Equal, internetMessageId);
+
+        var results = await entityService.RetrieveMultipleAsync(query, ct);
+        return results.Entities.Count == 0 ? null : results.Entities[0];
+    }
+
+    /// <summary>
+    /// Handler for <c>GET /api/office/communications/by-message-id/{internetMessageId}/suggestions</c>.
+    /// Resolves the email to its captured <c>sprk_communication</c> then reuses the read-only Association
+    /// Engine evaluate path (identical to <c>CommunicationEndpoints.SuggestAssociationsAsync</c>) — never
+    /// writes the record, never forks the candidate model (ADR-045 / §11). 404 when the email is not yet
+    /// captured so the client opens the picker with no pre-selection (FR-B2 fallback).
+    /// </summary>
+    private static async Task<IResult> GetSuggestionsByMessageIdAsync(
+        string internetMessageId,
+        IGenericEntityService entityService,
+        CommunicationService communicationService,
+        IncomingAssociationResolver associationResolver,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var traceId = context.TraceIdentifier;
+        var userId = context.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)
+            ?? context.User.FindFirstValue("oid");
+
+        if (string.IsNullOrWhiteSpace(internetMessageId))
+        {
+            return Results.Problem(
+                title: "Invalid internetMessageId",
+                detail: "internetMessageId is required.",
+                statusCode: StatusCodes.Status400BadRequest,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_VALIDATION",
+                    ["correlationId"] = traceId
+                });
+        }
+
+        try
+        {
+            var entity = await QueryCommunicationByMessageIdAsync(entityService, internetMessageId, ct);
+            if (entity is null)
+            {
+                // Not captured yet — the client opens the picker with NO pre-selection (FR-B2 fallback).
+                logger.LogInformation(
+                    "No sprk_communication for internetMessageId (suggestions), " +
+                    "UserId={UserId}, CorrelationId={CorrelationId}",
+                    userId, traceId);
+                return Results.Problem(
+                    title: "Communication Not Found",
+                    detail: "No sprk_communication exists for the provided internetMessageId.",
+                    statusCode: StatusCodes.Status404NotFound,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_COMM_NOT_FOUND",
+                        ["correlationId"] = traceId
+                    });
+            }
+
+            var communicationId = entity.GetAttributeValue<Guid>("sprk_communicationid");
+            var subject = entity.GetAttributeValue<string>("sprk_subject") ?? string.Empty;
+
+            // SAME read-only evaluate path as the Communication-group suggest endpoint — reuse, not fork.
+            var (message, associationContext) = await communicationService.ReconstructEnvelopeAsync(communicationId, ct);
+            var decision = await associationResolver.EvaluateAsync(message, associationContext, ct);
+
+            logger.LogInformation(
+                "Returning engine suggestions for sprk_communication {CommunicationId}, " +
+                "UserId={UserId}, CorrelationId={CorrelationId}",
+                communicationId, userId, traceId);
+
+            return Results.Ok(new CommunicationSuggestionsResponse
+            {
+                CommunicationId = communicationId,
+                Subject = subject,
+                Suggestions = SuggestAssociationsResponse.FromDecision(communicationId, decision)
+            });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Error building engine suggestions for internetMessageId, " +
+                "UserId={UserId}, CorrelationId={CorrelationId}",
+                userId, traceId);
+            return Results.Problem(
+                title: "Suggestions Failed",
+                detail: "An unexpected error occurred while building association suggestions.",
                 statusCode: StatusCodes.Status500InternalServerError,
                 extensions: new Dictionary<string, object?>
                 {
@@ -296,6 +423,26 @@ public sealed class CommunicationLookupResponse
 
     /// <summary>The sprk_subject of the matching record (empty string if unset).</summary>
     public required string Subject { get; init; }
+}
+
+/// <summary>
+/// Response DTO for <c>GET /api/office/communications/by-message-id/{internetMessageId}/suggestions</c>
+/// (task 042 / FR-B2). Carries the resolved communication identity plus the read-only Association Engine
+/// suggestion projection (<see cref="SuggestAssociationsResponse"/>) the add-in reconstructs into a
+/// <c>ProvenanceDoc</c> and feeds to the shared <c>derivePrimaryReview</c> — the SAME candidate model the
+/// code-page review surface uses (ADR-045; no fork). Default camelCase serialization yields
+/// <c>communicationId</c>, <c>subject</c>, <c>suggestions</c> — matches the client.
+/// </summary>
+public sealed class CommunicationSuggestionsResponse
+{
+    /// <summary>The resolved sprk_communicationid GUID.</summary>
+    public required Guid CommunicationId { get; init; }
+
+    /// <summary>The sprk_subject of the resolved record (empty string if unset).</summary>
+    public required string Subject { get; init; }
+
+    /// <summary>The Association Engine's read-only regarding suggestions (candidates + signals + status).</summary>
+    public required SuggestAssociationsResponse Suggestions { get; init; }
 }
 
 /// <summary>

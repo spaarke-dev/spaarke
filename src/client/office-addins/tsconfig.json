@@ -23,7 +23,10 @@
     "paths": {
       "@shared/*": ["shared/*"],
       "@outlook/*": ["outlook/*"],
-      "@word/*": ["word/*"]
+      "@word/*": ["word/*"],
+      "@spaarke/communication-components/logic/connections/provenance": [
+        "../shared/Spaarke.Communication.Components/src/logic/connections/provenance"
+      ]
     },
     "types": ["office-js", "node", "jest"]
   },

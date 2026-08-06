@@ -39,6 +39,12 @@ module.exports = {
     // transforms `.ts` (see `transform` below), so this sidesteps the ESM/CJS
     // mismatch without widening the transform to arbitrary `.js` in node_modules.
     '^@spaarke/auth$': '<rootDir>/../shared/Spaarke.Auth/src/index.ts',
+    // Task 042 (FR-B2 / ADR-045): reuse the code page's EXACT `derivePrimaryReview`
+    // candidate model — map straight to the pure `provenance.ts` source (ts-jest
+    // transforms it) so the add-in shares the identical function without forking it
+    // or pulling the React-bearing components barrel.
+    '^@spaarke/communication-components/logic/connections/provenance$':
+      '<rootDir>/../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
   },
   // Ignore transforming node_modules except for specific packages
