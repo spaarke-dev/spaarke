@@ -24,7 +24,7 @@ import {
   MessageBarBody,
   MessageBarActions,
 } from "@fluentui/react-components";
-import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-icons";
+import { ChatRegular, ChatAddRegular, DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
@@ -885,14 +885,17 @@ export function ConversationPane(): React.JSX.Element {
   // protocol. Fire-and-forget + best-effort: any failure is swallowed (a proactive surface must never
   // disrupt the chat). `acceptChips` does NOT cap, so we slice to ≤3 before handing it the array.
   const fireProactiveSuggestion = React.useCallback(
-    (focusStamp: ActiveTabFocusStamp) => {
+    (focusStamp: ActiveTabFocusStamp, force = false) => {
       const tabId = focusStamp.tabId;
       const contextType = focusStamp.contextType;
       const sessionId = getSessionId();
       // No tab identity, no context type (can't scope), or no session ⇒ skip WITHOUT marking the tab,
       // so a later focus that DOES carry a contextType can still fire once.
       if (!tabId || !contextType || !sessionId) return;
-      if (suggestedTabIdsRef.current.has(tabId)) return; // once per tab — never on switch-back
+      // task 023 (FR-B4): `force` (the manual "refresh suggestions" control) is the ONLY re-fire path
+      // besides first-open — it bypasses the once-per-tab guard for the active tab. The automatic
+      // first-open path (force=false) still fires at most once per tab (NFR-02).
+      if (!force && suggestedTabIdsRef.current.has(tabId)) return;
       suggestedTabIdsRef.current.add(tabId);
 
       const url = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/chat/sessions/${encodeURIComponent(
@@ -918,6 +921,15 @@ export function ConversationPane(): React.JSX.Element {
     },
     [authenticatedFetch, bffBaseUrl, getSessionId]
   );
+
+  // task 023 (FR-B4) — manual "refresh suggestions" affordance. Re-runs the 022 grounded turn for the
+  // CURRENTLY focused tab (read from the focus-stamp ref) with force=true, bypassing the once-per-tab
+  // guard; the returned chips replace the cached strip via acceptChips. This is the ONLY re-fire path
+  // besides first-open (NFR-02) — no automatic re-fire is introduced.
+  const handleRefreshSuggestions = React.useCallback(() => {
+    const stamp = activeTabFocusRef.current;
+    if (stamp) fireProactiveSuggestion(stamp, true);
+  }, [fireProactiveSuggestion]);
 
   // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the stateful gate
   // controller. Declared AFTER `chips` (needs `chips.dispatchBinding`/`chips.acceptChips`) and
@@ -2520,10 +2532,38 @@ export function ConversationPane(): React.JSX.Element {
             floating pinned at the top of the pane (the owner's round-6 complaint). Renders nothing until
             a quick run arms it; single-slot (never stacks). */}
         {rerunFullAnalysisCard.cardSlot}
-        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : chips.consumerChipsSlot}
+        {reviseChipsPending ? (
+          <ComposeDocActionChips onAction={handleDocAction} />
+        ) : (
+          <>
+            {chips.consumerChipsSlot}
+            {/* task 023 (FR-B4) — manual "refresh suggestions" affordance. Shown only when the strip
+                currently has chips (so there is something to refresh); re-runs the 022 grounded turn for
+                the active tab (force, bypassing the once-per-tab guard) and replaces the chips. Subtle +
+                icon-led; Fluent tokens/currentColor → ADR-021 dark-mode safe. */}
+            {chips.hasChips && (
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<ArrowClockwiseRegular />}
+                onClick={handleRefreshSuggestions}
+                aria-label="Refresh suggestions"
+              >
+                Refresh suggestions
+              </Button>
+            )}
+          </>
+        )}
       </>
     ),
-    [rerunFullAnalysisCard.cardSlot, reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
+    [
+      rerunFullAnalysisCard.cardSlot,
+      reviseChipsPending,
+      handleDocAction,
+      chips.consumerChipsSlot,
+      chips.hasChips,
+      handleRefreshSuggestions,
+    ]
   );
 
   // task 042 (FR-F3) — My Assistant questionnaire: open-state, cold-start gate, write/erase path.

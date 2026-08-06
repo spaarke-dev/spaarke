@@ -10,10 +10,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **022** (FR-B3/B5) — **✅ COMPLETE + DEPLOYED** (2026-08-06). Both BFF + code page live on spaarkedev1. **9 tasks done.** Next: **023** (FR-B4 manual refresh). |
-| **Step** | Done. Ready for 023. |
+| **Task** | **023** (FR-B4) — **✅ COMPLETE** (2026-08-06, built + committed; deploy deferred to 025). **10 tasks done.** Next: **024** (FR-B6 dev trace). |
+| **Step** | Done. Ready for 024. |
 | **Status** | completed |
-| **Next Action** | Start **task 023** (FR-B4 — manual "refresh suggestions" affordance; ConvPane spine; sonnet/high). It reuses 022's `POST …/suggest` + `fireProactiveSuggestion` (add a manual re-trigger that bypasses the `suggestedTabIdsRef` guard for the active tab). Then 024 (dev trace, reuses the `reason` field already on ChatSuggestChip), 025 (deploy B). |
+| **Next Action** | Start **task 024** (FR-B6 — dev-visible proactive-selection trace; ConvPane spine; sonnet/high; STANDARD rigor). The BFF already returns the `reason` per chip (`ChatSuggestChip.Reason`, from the Action's output schema) — 024 surfaces it in a dev-only trace view. Then 025 (deploy + verify B — deploys the accumulated 022/023/024 client changes + verifies). |
+
+### Task 023 — DONE (2026-08-06). Deploy deferred to 025.
+- Manual "Refresh suggestions" control in `transcriptFooter`, gated on `chips.hasChips` (new reactive flag on `useConsumerChips`). Click → `handleRefreshSuggestions` → `fireProactiveSuggestion(stamp, force=true)` re-runs the 022 turn for the active tab, bypassing the once-per-tab guard (the ONLY re-fire path besides first-open, NFR-02). Fluent subtle Button + `ArrowClockwiseRegular` (dark-mode safe, ADR-021).
+- Files: `ConversationPane.tsx` (force param + refresh handler + control), `useConsumerChips.tsx` (`hasChips` on `ConsumerChipsController`). Tests: `ConversationPane.refresh-suggestions.e2e.test.tsx` (2). typecheck Surface-owned:0; build clean; 022 seam test still green.
+- **Code page NOT redeployed** (022 is live; 023's refresh button lands with the 025 deploy, after 024).
 
 ### Task 022 — BFF DONE (2026-08-06). Seeded IDs + deployed.
 - **Action** `suggest-followups` = `64505c5b-5191-f111-b8db-7ced8ddc4cc6` (kind=Prompted, tier=Fast, temp=0.2, prompt 3620ch, schema 1411ch).

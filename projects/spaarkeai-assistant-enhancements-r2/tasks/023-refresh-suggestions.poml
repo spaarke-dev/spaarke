@@ -4,7 +4,7 @@
     <title>Manual 'refresh suggestions' affordance (FR-B4)</title>
     <phase>3 B — Proactive follow-ons</phase>
     <gate>blocked until 022</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend .tsx affordance + re-run wiring</rigor-reason>
     <model-tier>sonnet</model-tier>
