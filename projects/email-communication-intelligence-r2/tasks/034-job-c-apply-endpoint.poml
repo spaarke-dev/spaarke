@@ -4,7 +4,7 @@
     <title>Job C apply endpoint — create-task queue-feed discriminator + task fields + confirm/apply path (sibling of CommunicationProposalApplyService)</title>
     <phase>3 Pillar D — R1 carry-overs</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF endpoint + new queue-feed discriminator on the audited apply/write path; caller impersonation + citation re-verify + ADR-015 no-auto-finalize. Correctness/security critical (Opus tier).</rigor-reason>
     <model-tier>opus</model-tier>

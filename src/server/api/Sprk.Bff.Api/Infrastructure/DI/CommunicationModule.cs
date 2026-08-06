@@ -389,6 +389,15 @@ public static class CommunicationModule
         // Registered UNCONDITIONALLY (ADR-010/ADR-032 — the apply endpoint maps unconditionally).
         services.AddScoped<ICommunicationProposalApplyService, CommunicationProposalApplyService>();
 
+        // Job C APPLY (email-communication-intelligence-r2 task 034 / FR-D5, backs FR-E5). Sibling of the Job B apply
+        // above: creates the sprk_event (type=task) a CONFIRMED create-task proposal describes via the blessed
+        // IActionSeam.CreateTaskAsync, PATCHes the human-supplied FR-E5 fields (status/completed-date/base-date/
+        // final-due-date) UNDER THE CONFIRMING USER'S MSCRMCallerID impersonation, and writes ONE append-only Applied
+        // audit row (Path B — facade unchanged per ADR-013). SCOPED (consumes the Scoped ICallerSystemUserResolver,
+        // same as the Job B apply + queue feed). Registered UNCONDITIONALLY (ADR-010/ADR-032 — the apply endpoint maps
+        // unconditionally).
+        services.AddScoped<ICommunicationCreateTaskApplyService, CommunicationCreateTaskApplyService>();
+
         // Layer-C fan-out targeting (spaarke-notification-spine-r1 task 023 / FR-08 / NFR-07). Given a persisted
         // sprk_communication + its thread, returns the systemuserids eligible to receive a Layer-C ping (task 024's
         // producer loops them into SignalRDeliveryService.PingUserAsync). Placement Justification (root §10 / §11):

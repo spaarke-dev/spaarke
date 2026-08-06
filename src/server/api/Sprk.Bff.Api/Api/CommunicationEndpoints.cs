@@ -287,6 +287,25 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
 
+        // POST /api/communications/proposals/{reviewLogId}/create-task/apply — Job C APPLY (task 034 / FR-D5, backs
+        // FR-E5). Sibling of the Job B apply above. r5's Tasks reconcile tab (task 056) POSTs a confirmed create-task
+        // proposal's ReviewLogId here on Approve, with the human-supplied FR-E5 fields in the body. The service
+        // CREATES the sprk_event (type=task) via the blessed IActionSeam.CreateTaskAsync write core, PATCHes the
+        // remaining FR-E5 fields (status/completed-date/base-date/final-due-date) under the confirming user's
+        // MSCRMCallerID impersonation, and writes ONE append-only Applied audit row (Path B — the facade is unchanged
+        // per ADR-013; see CommunicationCreateTaskApplyService remarks). Caller resolved server-side (403 fail-closed);
+        // a non-create-task/unverifiable-citation proposal (422), an already-resolved proposal (409), or a failed
+        // create/patch (422) are refused. Registered unconditionally (ADR-010/ADR-032). r1 builds no UI.
+        group.MapPost("/proposals/{reviewLogId:guid}/create-task/apply", ApplyCreateTaskProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ApplyCommunicationCreateTaskProposal")
+            .WithDescription("Job C apply (FR-D5): create the sprk_event (type=task) a confirmed create-task proposal describes via IActionSeam.CreateTaskAsync, PATCH the human-supplied FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-create-task/unverifiable-citation (422), already-resolved (409), or failed create/patch (422) are refused.")
+            .Produces<ApplyCreateTaskResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("VerifyCommunicationAccount")
@@ -931,6 +950,21 @@ public static class CommunicationEndpoints
         CancellationToken ct)
     {
         var result = await applyService.ApplyAsync(reviewLogId, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job C apply (task 034 / FR-D5). The caller is resolved server-side inside the service (fail-closed 403); the
+    // sprk_event is created via IActionSeam.CreateTaskAsync and its FR-E5 fields PATCHed under that caller's
+    // MSCRMCallerID impersonation; failures surface as RFC 7807 ProblemDetails via SdapProblemException
+    // (403/404/409/422/500). The request body (optional) carries the human-supplied FR-E5 fields from the reconcile tab.
+    private static async Task<IResult> ApplyCreateTaskProposalAsync(
+        Guid reviewLogId,
+        [FromBody] ApplyCreateTaskRequest? request,
+        ICommunicationCreateTaskApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
         return TypedResults.Ok(result);
     }
 
