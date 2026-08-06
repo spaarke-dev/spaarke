@@ -2,23 +2,26 @@
  * @spaarke/ai-widgets — Pillar 9 widget-visibility derivations (task 073, D-C-28)
  *
  * One pure derivation per `WorkspaceTabWidgetType` category — Summary,
- * DocumentViewer, Dashboard, Table. Each function takes the live tab's
+ * DocumentViewer, Dashboard, Table, Email. Each function takes the live tab's
  * `widgetData` payload and returns the matching `SerializedWidgetState`
  * variant (or `null` to opt out for this invocation).
  *
- * These four derivations are wired into the `WorkspaceWidgetRegistry` via
+ * The first four derivations are wired into the `WorkspaceWidgetRegistry` via
  * each widget's `register-*.ts` file (per task 072 / D-C-27 extension). The
  * registrations carry the derivation as the 4th argument of
  * `registerWorkspaceWidget`; the Pillar 9 prompt builder (task 074) reads
- * them back via `getWorkspaceWidgetVisibleStateFn(type)`.
+ * them back via `getWorkspaceWidgetVisibleStateFn(type)`. `emailWidgetVisibility`
+ * (R2 task 040, FR-C2) is added here as the pure derivation function; wiring
+ * it into the email widget's registry entry (replacing today's Dashboard
+ * fallthrough) is a downstream R2 task (FR-C1/C-adjacent, not task 040).
  *
  * ## Category → concrete widget mapping (Pillar 9 design)
  *
- * The `WorkspaceTabWidgetType` union (4 variants: Summary, DocumentViewer,
- * Dashboard, Table) is intentionally DISTINCT from the registry's widget-type
- * strings (16+ entries like `'document-viewer'`, `'workspace'`,
- * `'documents-list'`, `'structured-output-stream'`, etc.) — see
- * `WorkspaceTab.ts` design notes. The four categories drive **agent-visible
+ * The `WorkspaceTabWidgetType` union (5 variants: Summary, DocumentViewer,
+ * Dashboard, Table, Email) is intentionally DISTINCT from the registry's
+ * widget-type strings (16+ entries like `'document-viewer'`, `'workspace'`,
+ * `'documents-list'`, `'structured-output-stream'`, `'email'`, etc.) — see
+ * `WorkspaceTab.ts` design notes. The categories drive **agent-visible
  * state shape**; registered widgets MAP to one of these categories. The
  * mapping applied here:
  *
@@ -35,9 +38,13 @@
  *     WorkAssignments share this same component via per-registration
  *     `configId`; all five table-shaped registrations reuse the same
  *     derivation).
+ *   - **Email**                → the email direct widget (registry type
+ *     `'email'`, contextType `'email'`) — today falls through to the
+ *     `Dashboard` category (name-only); a downstream R2 task wires this
+ *     derivation into that registration.
  *
  * Future Pillar 9 mappings: when a new widget contributes to one of these
- * four categories, extend its own `register-*.ts` to attach the matching
+ * categories, extend its own `register-*.ts` to attach the matching
  * derivation. When a brand-new category is needed, BOTH `WorkspaceTab.ts`
  * AND `SerializedWidgetState.ts` AND this file must be updated in a
  * coordinated change (the `_DiscriminatorAlignment` type-level guard in
@@ -66,6 +73,11 @@
  *     • Table          — exposes structural state (`rowCount`, `sortColumn`,
  *       `filteredColumns`, `selectedRows` AS A COUNT). NEVER row payloads or
  *       row IDs — counts only per `SerializedTableState` contract.
+ *     • Email          — exposes `subject`/`from`/`date`/`threadId` (identity
+ *       fields) + a single capped `snippet` (short body excerpt or the
+ *       user's current selection). Withholds the full email body — the
+ *       ONLY content-bearing field is `snippet`, **capped at 200
+ *       characters** (R2 task 040 acceptance, FR-C2).
  *
  * ## Self-limiting (per FR-55 token budget)
  *
@@ -75,6 +87,7 @@
  *   - `summary`        — capped at 500 chars (~125 tokens for English text)
  *   - `tldr`           — capped at 5 entries × 200 chars each
  *   - `selectionText`  — capped at 200 chars (per FR-57 acceptance + task POML)
+ *   - `snippet` (Email) — capped at 200 chars (per FR-C2 acceptance + task 040 POML)
  *
  * @see SerializedWidgetState.ts — per-variant rationale + privacy classes
  * @see WorkspaceTab.ts          — discriminator union + widget-data shapes
@@ -86,6 +99,7 @@ import type { RegistryGetAgentVisibleState } from '../../registry/WorkspaceWidge
 import type {
   SerializedDashboardState,
   SerializedDocumentViewerState,
+  SerializedEmailState,
   SerializedSummaryState,
   SerializedTableState,
 } from '../../types/SerializedWidgetState';
@@ -96,6 +110,15 @@ import type {
 
 /** Per FR-57 acceptance + task 073 POML: cap selectionText at 200 chars. */
 export const SELECTION_TEXT_CAP_CHARS = 200;
+
+/**
+ * Per R2 task 040 (FR-C2): cap the Email `snippet` at 200 chars — the same
+ * cap `SELECTION_TEXT_CAP_CHARS` uses for `DocumentViewer.selectionText`.
+ * Kept as a distinct named constant (rather than reusing
+ * `SELECTION_TEXT_CAP_CHARS` directly) so each variant's cap can evolve
+ * independently without an implicit coupling.
+ */
+export const EMAIL_SNIPPET_CAP_CHARS = 200;
 
 /** Self-limit for Summary `summary` field (~125 tokens for English text). */
 export const SUMMARY_TEXT_CAP_CHARS = 500;
@@ -422,4 +445,74 @@ export const tableWidgetVisibility: RegistryGetAgentVisibleState = (
   }
 
   return result;
+};
+
+// ---------------------------------------------------------------------------
+// Email derivation — R2 Workstream C (task 040, FR-C2)
+//
+// The widget data is expected to carry `{ subject, from, date, threadId?,
+// snippet? }` (or `selectionText` as an alternate source for `snippet` —
+// mirrors the DocumentViewer "current selection" precedent). Per
+// SerializedEmailState's privacy contract, `snippet` is the ONLY
+// content-bearing field and is CAPPED at 200 chars.
+//
+// Returns `null` when the minimum identity fields (`subject`, `from`,
+// `date`) are not all present as non-empty strings — cannot construct a
+// meaningful agent-visible record without them.
+// ---------------------------------------------------------------------------
+
+/**
+ * Derive `SerializedEmailState` from an email widget's live data payload.
+ *
+ * - Reads `subject`, `from`, `date` (required identity fields).
+ * - Reads `threadId` when present (Class 1 identifier per ADR-015);
+ *   otherwise `null`.
+ * - Reads `snippet` (short body excerpt) OR falls back to `selectionText`
+ *   (the user's current selection) when `snippet` is absent — mirrors the
+ *   `DocumentViewer` "current selection" precedent. TRUNCATED to
+ *   {@link EMAIL_SNIPPET_CAP_CHARS} (200 chars) when present; `null` when
+ *   neither source yields a non-empty string (privacy default per ADR-015).
+ * - Returns `null` when `subject`, `from`, or `date` is missing/empty —
+ *   cannot construct a meaningful agent-visible record without the identity
+ *   fields.
+ *
+ * @see SerializedEmailState — exact output shape
+ * @see FR-C2 — `{ widgetType, subject, from, date, threadId, snippet }`
+ * @see ADR-015 — data minimization: identifiers + derived metadata OK;
+ *      content capped to a bounded snippet only
+ */
+export const emailWidgetVisibility: RegistryGetAgentVisibleState = (
+  widgetData: unknown
+): SerializedEmailState | null => {
+  if (!isObject(widgetData)) return null;
+
+  const subjectRaw = widgetData.subject;
+  const fromRaw = widgetData.from;
+  const dateRaw = widgetData.date;
+
+  if (!isString(subjectRaw) || subjectRaw.length === 0) return null;
+  if (!isString(fromRaw) || fromRaw.length === 0) return null;
+  if (!isString(dateRaw) || dateRaw.length === 0) return null;
+
+  const threadIdRaw = widgetData.threadId;
+  const threadId = isString(threadIdRaw) && threadIdRaw.length > 0 ? threadIdRaw : null;
+
+  // `snippet` — prefer the widget's own snippet field; fall back to
+  // `selectionText` (current selection), mirroring the DocumentViewer
+  // precedent for the "content the user is currently looking at" signal.
+  const snippetRaw = isString(widgetData.snippet) && widgetData.snippet.length > 0
+    ? widgetData.snippet
+    : isString(widgetData.selectionText) && widgetData.selectionText.length > 0
+      ? widgetData.selectionText
+      : null;
+  const snippet = snippetRaw !== null ? truncate(snippetRaw, EMAIL_SNIPPET_CAP_CHARS) : null;
+
+  return {
+    widgetType: 'Email',
+    subject: subjectRaw,
+    from: fromRaw,
+    date: dateRaw,
+    threadId,
+    snippet,
+  };
 };

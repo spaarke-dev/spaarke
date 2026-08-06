@@ -4,7 +4,7 @@
     <title>Add the Email variant to the client SerializedWidgetState union + discriminator guard (FR-C2 client)</title>
     <phase>5 C — Email visibility</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Shared-lib TypeScript union + compile-guard change</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -66,7 +66,9 @@
     <criterion testable="true">Caps applied.</criterion>
     <criterion testable="true">Shared lib builds.</criterion>
   </acceptance-criteria>
-  <notes>FR-C2 client half; coordinate the exact field set with the server variant (041).</notes>
+  <notes>FR-C2 client half; coordinate the exact field set with the server variant (041).
+
+DONE (2026-08-06, subagent, FULL rigor). Added `SerializedEmailState { widgetType: 'Email'; subject: string; from: string; date: string; threadId: string | null; snippet: string | null }` to the closed `SerializedWidgetState` union (SerializedWidgetState.ts); added `'Email'` to `WorkspaceTabWidgetType` (WorkspaceTab.ts); added `emailWidgetVisibility` derivation + `EMAIL_SNIPPET_CAP_CHARS=200` constant to pillar9-visibility.ts (returns null unless subject+from+date all non-empty; snippet sourced from `snippet` or falls back to `selectionText`, truncated to 200 chars, null when absent); barrel-exported `SerializedEmailState` from index.ts. `_DiscriminatorAlignment` verified resolving to `true` via a scratch `const _check: _DiscriminatorAlignment = true` compile check (both directions — union↔type). Build (`tsc`) + typecheck both exit 0. Added 8 new unit tests for `emailWidgetVisibility` (mirrors documentViewerWidgetVisibility conventions; includes explicit ADR-015 negative assertion that full body/attachments never leak) — pillar9-visibility.test.ts now 37/37 green (was 29). Step 9.5 gates: code-review found one Warning (missing test coverage for the new derivation) — resolved by adding the 8 tests; no Critical issues. adr-check: ADR-015 compliant (identifiers/derived metadata only + single capped content field, verified by negative test); no other ADR triggers (client-only shared-lib change, no BFF/DI/auth surface). Files: SerializedWidgetState.ts, WorkspaceTab.ts, pillar9-visibility.ts, index.ts, pillar9-visibility.test.ts (new test coverage, not in original &lt;outputs&gt; but added to close the code-review gap). No deployment performed (implementation + build/typecheck only per orchestrator scope). TASK-INDEX.md and current-task.md intentionally NOT updated here (parallel-group C1 race avoidance with task 041; main session updates both after both C1 tasks finish).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

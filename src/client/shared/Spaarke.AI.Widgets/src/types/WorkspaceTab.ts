@@ -84,11 +84,15 @@
  *                        (deliberately NOT chart data — payload minimization per NFR-10).
  *   - `Table`          — tabular data with sort/filter (e.g. matter list, document grid).
  *                        Pillar 9 visible state: `{ widgetType, rowCount, sortColumn, filteredColumns, selectedRows[] }`.
+ *   - `Email`          — email message / thread view (R2 Workstream C, FR-C2).
+ *                        Pillar 9 visible state: `{ widgetType, subject, from, date, threadId, snippet }`
+ *                        (compact shape per ADR-015; `snippet` is the sole content-bearing
+ *                        field, capped at 200 chars — mirrors `DocumentViewer.selectionText`).
  *
  * @see FR-31 — interface contract (widgetType + widgetData typed)
  * @see CLAUDE.md project file §9 "Pillar 9 (Widget Visibility Contract)" for per-variant prompt shapes
  */
-export type WorkspaceTabWidgetType = 'Summary' | 'DocumentViewer' | 'Dashboard' | 'Table';
+export type WorkspaceTabWidgetType = 'Summary' | 'DocumentViewer' | 'Dashboard' | 'Table' | 'Email';
 
 // ---------------------------------------------------------------------------
 // Per-variant widgetData shapes (discriminated union narrowed by widgetType)

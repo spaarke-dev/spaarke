@@ -1587,6 +1587,18 @@ public class SprkChatAgentFactory
     /// </summary>
     internal const string ComposeDefaultFilename = "Compose document";
 
+    /// <remarks>
+    /// <b>task 041 escalation (2026-08-06, spaarkeai-assistant-enhancements-r2, CLAUDE.md
+    /// §6)</b>: this switch has NO case for an Email-shaped <see cref="WorkspaceTabWidgetData"/>
+    /// because no such subtype exists today — the union is closed to Summary / DocumentViewer /
+    /// Dashboard / Table (see <c>WorkspaceTabWidgetData.cs</c>). Real email fields
+    /// (subject/from/date/threadId) live only in the client's <c>useEmailWorkspaceRecord</c>
+    /// hook and have no persisted server-side carrier yet (deferred producer wiring: task 042 /
+    /// FR-C1). An "email"-widgetType tab therefore falls through the default arm below and
+    /// returns <c>null</c> (same FR-59 privacy-default outcome as any tab with unrecognized
+    /// widget data) until that producer lands and adds the matching case. The output shape is
+    /// ready: <see cref="WorkspaceTabVisibleState.Email"/>.
+    /// </remarks>
     internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
     {
         // spaarkeai-compose-r2 ("the flip"): a first-class Compose Direct widget
@@ -1766,6 +1778,20 @@ public class SprkChatAgentFactory
                 if (t.FilteredColumns is { Count: > 0 })
                     sb.Append($"  filteredColumns: [{string.Join(", ", t.FilteredColumns)}]\n");
                 sb.Append($"  selectedRows: {t.SelectedRows}\n");
+                break;
+
+            case WorkspaceTabVisibleState.Email em:
+                // subject/from/date/threadId are identity/metadata fields — always emitted
+                // (background tabs included), mirroring DocumentViewer's filename/mimeType.
+                sb.Append($"  subject: {em.Subject}\n");
+                sb.Append($"  from: {em.From}\n");
+                sb.Append($"  date: {em.Date}\n");
+                if (!string.IsNullOrWhiteSpace(em.ThreadId))
+                    sb.Append($"  threadId: {em.ThreadId}\n");
+                // snippet is the only content-bearing Email field — active-tab only (FR-A4),
+                // same gating as DocumentViewer.selectionText / Summary.tldr+summary.
+                if (contentVisible && !string.IsNullOrWhiteSpace(em.Snippet))
+                    sb.Append($"  snippet: {em.Snippet}\n");
                 break;
         }
         return sb.ToString();

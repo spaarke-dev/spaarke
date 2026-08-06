@@ -1,8 +1,9 @@
 /**
- * Pillar 9 widget-visibility derivations — unit tests (task 073, D-C-28)
+ * Pillar 9 widget-visibility derivations — unit tests (task 073, D-C-28;
+ * extended R2 task 040 for the Email derivation)
  *
- * Verifies each of the four `getAgentVisibleState` derivations
- * (Summary / DocumentViewer / Dashboard / Table):
+ * Verifies each `getAgentVisibleState` derivation
+ * (Summary / DocumentViewer / Dashboard / Table / Email):
  *
  *   - Returns a variant whose `widgetType` discriminator matches the
  *     category (FR-57 shape conformance).
@@ -11,9 +12,12 @@
  *   - Self-limits per FR-55:
  *       • Summary    — `summary` ≤ 500 chars, `tldr` ≤ 5 entries × 200 chars.
  *       • DocumentViewer — `selectionText` ≤ 200 chars when present.
+ *       • Email      — `snippet` ≤ 200 chars when present (FR-C2).
  *   - Withholds protected fields per ADR-015:
  *       • Dashboard  — NEVER chart data / section payloads.
  *       • Table      — `selectedRows` is a COUNT, NEVER row IDs / content.
+ *       • Email      — NEVER the full body; `snippet` is the ONLY
+ *         content-bearing field.
  *
  * Covers FR-57 acceptance criteria + the task 073 POML ui-tests:
  *
@@ -53,16 +57,19 @@ import {
   documentViewerWidgetVisibility,
   dashboardWidgetVisibility,
   tableWidgetVisibility,
+  emailWidgetVisibility,
   SELECTION_TEXT_CAP_CHARS,
   SUMMARY_TEXT_CAP_CHARS,
   TLDR_MAX_BULLETS,
   TLDR_BULLET_CAP_CHARS,
+  EMAIL_SNIPPET_CAP_CHARS,
 } from '../pillar9-visibility';
 import type {
   SerializedSummaryState,
   SerializedDocumentViewerState,
   SerializedDashboardState,
   SerializedTableState,
+  SerializedEmailState,
 } from '../../../types/SerializedWidgetState';
 
 // ---------------------------------------------------------------------------
@@ -392,6 +399,125 @@ describe('tableWidgetVisibility', () => {
     expect(tableWidgetVisibility({ rowCount: 'not-a-number' })).toBeNull();
     expect(tableWidgetVisibility({ rowCount: NaN })).toBeNull();
     expect(tableWidgetVisibility(null)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Email derivation (R2 task 040, FR-C2)
+// ---------------------------------------------------------------------------
+
+describe('emailWidgetVisibility', () => {
+  test('FR-C2 shape: emits widgetType + subject + from + date + threadId + snippet', () => {
+    const result = emailWidgetVisibility({
+      subject: 'RE: Engagement Letter — Acme Holdings',
+      from: 'jane.doe@example.com',
+      date: '2026-08-06T14:30:00.000Z',
+      threadId: 'thread-guid-1',
+      snippet: 'Please see the attached redline for your review.',
+    });
+
+    expect(result).not.toBeNull();
+    const typed = result as SerializedEmailState;
+    expect(typed.widgetType).toBe('Email');
+    expect(typed.subject).toBe('RE: Engagement Letter — Acme Holdings');
+    expect(typed.from).toBe('jane.doe@example.com');
+    expect(typed.date).toBe('2026-08-06T14:30:00.000Z');
+    expect(typed.threadId).toBe('thread-guid-1');
+    expect(typed.snippet).toBe('Please see the attached redline for your review.');
+
+    // FR-C2 shape conformance — assert exact keys.
+    expect(Object.keys(typed).sort()).toEqual(['date', 'from', 'snippet', 'subject', 'threadId', 'widgetType']);
+  });
+
+  test('threadId defaults to null when absent', () => {
+    const result = emailWidgetVisibility({
+      subject: 'No thread',
+      from: 'sender@example.com',
+      date: '2026-08-06T00:00:00.000Z',
+    });
+    expect((result as SerializedEmailState).threadId).toBeNull();
+  });
+
+  test('snippet defaults to null when absent', () => {
+    const result = emailWidgetVisibility({
+      subject: 'No snippet',
+      from: 'sender@example.com',
+      date: '2026-08-06T00:00:00.000Z',
+      threadId: 'thread-guid-2',
+    });
+    expect((result as SerializedEmailState).snippet).toBeNull();
+  });
+
+  test('snippet is truncated to EMAIL_SNIPPET_CAP_CHARS (200) when input exceeds cap (ADR-015)', () => {
+    const longSnippet = 'a'.repeat(EMAIL_SNIPPET_CAP_CHARS + 500);
+    const result = emailWidgetVisibility({
+      subject: 'Long body',
+      from: 'sender@example.com',
+      date: '2026-08-06T00:00:00.000Z',
+      snippet: longSnippet,
+    });
+    const typed = result as SerializedEmailState;
+    expect(typed.snippet).not.toBeNull();
+    expect(typed.snippet!.length).toBe(EMAIL_SNIPPET_CAP_CHARS);
+    expect(typed.snippet).toBe('a'.repeat(EMAIL_SNIPPET_CAP_CHARS));
+  });
+
+  test('NEVER exposes content beyond the capped snippet (ADR-015 binding — no full body)', () => {
+    // Even when the input carries a full-body-shaped field, the derivation
+    // MUST NOT propagate anything beyond the capped snippet.
+    const result = emailWidgetVisibility({
+      subject: 'Full body present upstream',
+      from: 'sender@example.com',
+      date: '2026-08-06T00:00:00.000Z',
+      snippet: 'Short excerpt only.',
+      body: 'This is the FULL EMAIL BODY containing sensitive-attorney-client-content that must never reach the prompt.',
+      attachments: [{ name: 'contract.pdf', content: 'base64-should-not-appear' }],
+    });
+    const typed = result as SerializedEmailState;
+    const serialized = JSON.stringify(typed);
+    expect(serialized).not.toContain('FULL EMAIL BODY');
+    expect(serialized).not.toContain('sensitive-attorney-client-content');
+    expect(serialized).not.toContain('base64-should-not-appear');
+    expect(typed).toEqual({
+      widgetType: 'Email',
+      subject: 'Full body present upstream',
+      from: 'sender@example.com',
+      date: '2026-08-06T00:00:00.000Z',
+      threadId: null,
+      snippet: 'Short excerpt only.',
+    });
+  });
+
+  test('falls back to selectionText for snippet when snippet field is absent', () => {
+    const result = emailWidgetVisibility({
+      subject: 'Selection fallback',
+      from: 'sender@example.com',
+      date: '2026-08-06T00:00:00.000Z',
+      selectionText: 'The text the user currently has selected.',
+    });
+    expect((result as SerializedEmailState).snippet).toBe('The text the user currently has selected.');
+  });
+
+  test('prefers snippet over selectionText when both are present', () => {
+    const result = emailWidgetVisibility({
+      subject: 'Both present',
+      from: 'sender@example.com',
+      date: '2026-08-06T00:00:00.000Z',
+      snippet: 'Snippet wins.',
+      selectionText: 'Selection loses.',
+    });
+    expect((result as SerializedEmailState).snippet).toBe('Snippet wins.');
+  });
+
+  test('opts out (returns null) when subject, from, or date is missing or empty', () => {
+    expect(emailWidgetVisibility({})).toBeNull();
+    expect(emailWidgetVisibility({ subject: '', from: 'a@b.com', date: '2026-08-06' })).toBeNull();
+    expect(emailWidgetVisibility({ subject: 'S', from: '', date: '2026-08-06' })).toBeNull();
+    expect(emailWidgetVisibility({ subject: 'S', from: 'a@b.com', date: '' })).toBeNull();
+    expect(emailWidgetVisibility({ subject: 'S', from: 'a@b.com' })).toBeNull();
+    expect(emailWidgetVisibility(null)).toBeNull();
+    expect(emailWidgetVisibility(undefined)).toBeNull();
+    expect(emailWidgetVisibility('not-an-object')).toBeNull();
   });
 });
 
