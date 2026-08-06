@@ -4,7 +4,7 @@
     <title>Proactive suggestion turn — grounded, contextType-filtered, once-per-tab, ≤3 content-specific chips (FR-B3/B5) — Option B (BFF suggest path + client)</title>
     <phase>3 B — Proactive follow-ons</phase>
     <gate>blocked until 020,021</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF endpoint + service (new grounded-turn path) AND client .tsx spine (cache/lifecycle). bff-api + react + .cs/.tsx → FULL.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -614,6 +614,12 @@ export function ConversationPane(): React.JSX.Element {
   // than inventing a value ahead of that closed union landing.
   const activeTabFocusRef = React.useRef<ActiveTabFocusStamp | null>(null);
 
+  // task 022 (FR-B3/B5) — once-per-tab guard for the proactive suggestion turn. A tab's FIRST focus
+  // fires exactly one POST /suggest; switching away and back never re-fires (the tabId stays in the
+  // Set for the pane's lifetime). Ref (not state) — the fetch is a side effect, not a render input.
+  // Mirrors the `wizardAutoRunHandledRef` once-per-key idiom above.
+  const suggestedTabIdsRef = React.useRef<Set<string>>(new Set());
+
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
 
@@ -870,6 +876,48 @@ export function ConversationPane(): React.JSX.Element {
     }, [dispatch]),
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // task 022 (FR-B3/B5) — proactive suggestion turn. On a workspace tab's FIRST focus, fire ONE
+  // grounded server call (POST /suggest); the BFF deterministically pre-filters candidate capabilities
+  // to the tab's contextType, runs ONE grounded turn that selects + phrases ≤3 content-specific chips,
+  // and returns them. The chips feed the SAME reactive surface (`chips.acceptChips`) the dispatch path
+  // uses, and dispatch via the existing Click path on user click — no SprkChat fork, no second dispatch
+  // protocol. Fire-and-forget + best-effort: any failure is swallowed (a proactive surface must never
+  // disrupt the chat). `acceptChips` does NOT cap, so we slice to ≤3 before handing it the array.
+  const fireProactiveSuggestion = React.useCallback(
+    (focusStamp: ActiveTabFocusStamp) => {
+      const tabId = focusStamp.tabId;
+      const contextType = focusStamp.contextType;
+      const sessionId = getSessionId();
+      // No tab identity, no context type (can't scope), or no session ⇒ skip WITHOUT marking the tab,
+      // so a later focus that DOES carry a contextType can still fire once.
+      if (!tabId || !contextType || !sessionId) return;
+      if (suggestedTabIdsRef.current.has(tabId)) return; // once per tab — never on switch-back
+      suggestedTabIdsRef.current.add(tabId);
+
+      const url = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/chat/sessions/${encodeURIComponent(
+        sessionId
+      )}/suggest`;
+      void (async () => {
+        try {
+          const response = await authenticatedFetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contextType, activeContext: focusStamp }),
+          });
+          if (!response.ok) return;
+          const data = (await response.json()) as { chips?: unknown[] };
+          const top = Array.isArray(data?.chips) ? data.chips.slice(0, 3) : [];
+          if (top.length > 0) {
+            acceptChipsRef.current(top);
+          }
+        } catch {
+          // best-effort proactive surface — swallow (never disrupt the chat).
+        }
+      })();
+    },
+    [authenticatedFetch, bffBaseUrl, getSessionId]
+  );
 
   // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the stateful gate
   // controller. Declared AFTER `chips` (needs `chips.dispatchBinding`/`chips.acceptChips`) and
@@ -2338,6 +2386,9 @@ export function ConversationPane(): React.JSX.Element {
     const focusStamp = deriveActiveTabFocusStamp(event);
     if (focusStamp) {
       activeTabFocusRef.current = focusStamp;
+      // task 022 (FR-B3/B5) — fire the proactive suggestion turn on this tab's FIRST focus
+      // (once-per-tabId guarded inside; best-effort fire-and-forget).
+      fireProactiveSuggestion(focusStamp);
       return;
     }
 

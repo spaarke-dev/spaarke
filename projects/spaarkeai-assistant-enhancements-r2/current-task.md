@@ -10,10 +10,30 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **022** (FR-B3/B5) — **Option B chosen** (owner 2026-08-06). POML re-scoped to BFF suggest path + client. Ready to build (unblocked). (021 complete + deployed; 8 tasks done.) |
-| **Step** | Not started (re-scoped). |
-| **Status** | not-started (ready) |
-| **Next Action** | Build 022 Option B via task-execute. **BFF**: contextType pre-filter over `Binding.ContextTypeTags` (ConsumerRoutingService) + a grounded suggest service reusing SprkChatAgentFactory (selects/phrases ≤3 content-specific chips) + `POST /api/ai/chat/sessions/{id}/suggest` (no transcript pollution) + DI/test/deploy. **Client**: once-per-tab trigger in the `usePaneEvent("workspace")` handler (ConversationPane.tsx:2331; Set<string> ref like `wizardAutoRunHandledRef` :596; render via `chips.acceptChips` :550 → `transcriptFooter` :2472). Full design + anchors in the re-scoped POML + `notes/deviations.md` §"Task 022 Option B". |
+| **Task** | **022** (FR-B3/B5) — **✅ COMPLETE + DEPLOYED** (2026-08-06). Both BFF + code page live on spaarkedev1. **9 tasks done.** Next: **023** (FR-B4 manual refresh). |
+| **Step** | Done. Ready for 023. |
+| **Status** | completed |
+| **Next Action** | Start **task 023** (FR-B4 — manual "refresh suggestions" affordance; ConvPane spine; sonnet/high). It reuses 022's `POST …/suggest` + `fireProactiveSuggestion` (add a manual re-trigger that bypasses the `suggestedTabIdsRef` guard for the active tab). Then 024 (dev trace, reuses the `reason` field already on ChatSuggestChip), 025 (deploy B). |
+
+### Task 022 — BFF DONE (2026-08-06). Seeded IDs + deployed.
+- **Action** `suggest-followups` = `64505c5b-5191-f111-b8db-7ced8ddc4cc6` (kind=Prompted, tier=Fast, temp=0.2, prompt 3620ch, schema 1411ch).
+- **Binding** `assistant-suggest` = `c58b1b57-5191-f111-b8db-7ced8ddc4a05` (enabled, →Action).
+- BFF deployed to `spaarke-bff-dev`; publish 48.33 MB (baseline; +~1.3MB incl PDBs); healthz OK; `POST …/suggest` → 401 (route live). Build clean; 14 new unit tests pass.
+- Files: `ConsumerRoutingService.FilterByContextType` + `Binding.ContextTypeTags` filter; `AssistantSuggestionService.cs` (Services/Ai/Chat); `ChatEndpoints.cs` suggest endpoint + `ChatSuggestRequest/Response/Chip`; `ConsumerTypes.AssistantSuggest`; DI in `AnalysisServicesModule.cs`; `infra/dataverse/actions/suggest-followups.action.json`; tests `ConsumerRoutingServiceContextFilterTests.cs` + `AssistantSuggestionServiceTests.cs`.
+
+### Task 022 — LOCKED DESIGN (feasibility confirmed 2026-08-06, no escalation)
+**Mechanism chosen** (refines POML's illustrative "SprkChatAgentFactory" — step mode is directional): the grounded turn is a **catalog-authored Action `suggest-followups` run via `IActionRunner`**, mirroring `CommunicationProposeAi` — NOT a SprkChatAgentFactory fork. This is the ADR-039-cleanest grounded one-shot (prompt+schema = maker-editable catalog DATA, invariant (a)+(4)). Confirmed clean vs all 3 escalation triggers: (1) no SprkChat fork; (2) no 2nd dispatch protocol — chips ride the existing Click path, suggest is a *proposer*; (3) no new store — the suggest turn consumes NO tool reads (just pre-filtered candidates + server-derived compact content), so there is nothing to ledger (ADR-040 vacuously satisfied).
+
+**Content-specificity is REAL** (feasibility gate passed): the active tab's server-derived compact state (`SprkChatAgentFactory.TryDeriveVisibleState` + `FormatVisibleStateFields(contentVisible:true)`) yields DocumentViewer→`filename`+`mimeType`+`selectionText`, Summary→`tldr`+`summary`. Enough for NDA≠invoice chips, inside the ADR-015 Path A bounded shape. Source content server-side (NOT client `CompactState`) via `ISessionPersistenceService.LoadSessionAsync(tenantId,sessionId).Tabs` + `.ActiveTabId`.
+
+**BFF work items:**
+1. `ConsumerRoutingService`: add `internal static IReadOnlyList<Binding> FilterByContextType(candidates, contextType)` — keep bindings whose `ContextTypeTags` contain contextType OR are empty (=any). Deterministic pre-filter (ADR-039-permitted). Candidate source = REUSE existing `ListTextProjectableBindingsAsync` (the loop-projectable capability catalog) — no new Dataverse query.
+2. New facade `AssistantSuggestionService` (Services/Ai/Chat) mirroring `CommunicationProposeAi`: deps `IActionResolver`, `IActionRunner`, `IConsumerRoutingService`, `ISessionPersistenceService`. Resolve consumerType `assistant-suggest` → Action; operand `{ contextType, activeTab:{widgetType,displayName,compactContent}, candidates:[{bindingId,label}] }`; `RunAsync`→JsonElement; parse `{suggestions:[{targetBindingId,label,prefillArgs?}]}` cap 3, validate targetBindingId ∈ candidate ids (drop hallucinations), best-effort (null on any failure, never throw).
+3. Endpoint `POST /api/ai/chat/sessions/{sessionId}/suggest`, req `{contextType, activeContext}` (reuse `ChatActiveContext`), resp `{chips:[≤3]}`. RequireAuthorization. No transcript injection. DI + contract test.
+4. **Catalog seed**: author `infra/dataverse/actions/suggest-followups.action.json` (template = `create-task-from-email.action.json`); seed the `sprk_analysisaction` row + a `sprk_playbookconsumer` Binding row (`sprk_consumertype='assistant-suggest'`, `sprk_action`→the Action, `sprk_enabled=true`) in spaarkedev1 (MCP/WebAPI, like 021).
+5. Build + publish-size (≤60MB, baseline ~48.25) + `Deploy-BffApi.ps1` + /healthz.
+
+**Client** (Explore agent mapping current seams — agent running): once-per-tab `Set<string>` ref trigger in `usePaneEvent("workspace")` handler; POST /suggest once per tabId; `chips.acceptChips(≤3)`; no re-fire on switch-back. typecheck (Surface-owned:0) + seam test. Deploy code page.
 
 ### Task 022 Option B (design locked)
 Server-side contextType filtering (CapabilityDto exposure NOT needed). ADR-039 clean: deterministic pre-filter + ONE grounded turn. `useSuggestionCards` deleted (no resurrection); `SuggestionCard.tsx` retained (do not re-wire). Client seam fully mapped in POML. Large BFF+client build — consider `/compact` for a fresh context before starting.

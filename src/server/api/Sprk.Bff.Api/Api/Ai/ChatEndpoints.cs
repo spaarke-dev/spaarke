@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -202,6 +203,26 @@ public static class ChatEndpoints
             .WithSummary("Retrieve persisted workspace tabs and active tab id for a session")
             .WithDescription("Returns the most recently persisted non-Home tabs and active tab id. Empty list for sessions that have never persisted tabs.")
             .Produces<SessionTabsResponse>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404)
+            .ProducesProblem(429);
+
+        // POST /api/ai/chat/sessions/{sessionId}/suggest — proactive follow-on suggestions
+        // (spaarkeai-assistant-enhancements-r2 FR-B3/B5, task 022). ONE grounded, contextType-
+        // pre-filtered suggestion turn (AssistantSuggestionService) returning ≤3 content-specific
+        // chips for the focused tab. PROPOSER only — the chips ride the existing Click path when
+        // clicked; this endpoint never dispatches, injects a transcript message, or writes a ledger
+        // entry (ADR-039/040). Best-effort: returns an empty chip list (never 5xx) on any
+        // upstream failure or when the AI feature is disabled. Same auth as the sibling session
+        // endpoints.
+        group.MapPost("/sessions/{sessionId}/suggest", SuggestFollowupsAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-stream")
+            .WithName("SuggestFollowups")
+            .WithSummary("Proactive follow-on suggestions for the focused workspace tab (FR-B3/B5)")
+            .WithDescription("Runs one grounded, context-type-pre-filtered suggestion turn over the focused tab's compact server-derived visible state and returns up to 3 content-specific follow-on chips (targetBindingId + label). A proposer only — chips dispatch via the existing Click path on user click. Returns an empty list when nothing is relevant or the feature is disabled; never injects a transcript message.")
+            .Produces<ChatSuggestResponse>()
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(404)
@@ -2176,6 +2197,56 @@ public static class ChatEndpoints
         return Results.Ok(new SessionTabsResponse(wireTabs, session.ActiveTabId));
     }
 
+    /// <summary>
+    /// POST /api/ai/chat/sessions/{sessionId}/suggest
+    /// spaarkeai-assistant-enhancements-r2 FR-B3/B5 (task 022) — run the ONE grounded proactive-
+    /// suggestion turn for the focused workspace tab and return ≤3 content-specific follow-on chips.
+    /// Proposer only: the returned chips ride the existing Click path when clicked; this endpoint never
+    /// dispatches, injects a transcript message, or writes a ledger entry. Best-effort — returns an
+    /// empty chip list (200) rather than an error when the context type is absent, no candidates match,
+    /// the model proposes nothing, or the AI feature is disabled.
+    /// </summary>
+    private static async Task<IResult> SuggestFollowupsAsync(
+        string sessionId,
+        ChatSuggestRequest request,
+        AssistantSuggestionService suggestions,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatEndpoints.Suggest");
+
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        // A proactive surface degrades silently: a request with no context type yields no chips
+        // (200 empty), not a 400 — the client fires this fire-and-forget on tab open.
+        if (request is null || string.IsNullOrWhiteSpace(request.ContextType))
+        {
+            return Results.Ok(new ChatSuggestResponse(Array.Empty<ChatSuggestChip>()));
+        }
+
+        var chips = await suggestions.SuggestAsync(
+            sessionId,
+            tenantId,
+            request.ContextType,
+            request.ActiveContext?.TabId,
+            cancellationToken);
+
+        logger.LogDebug(
+            "Suggest endpoint: session={SessionId}, contextType={ContextType}, chipCount={ChipCount}",
+            sessionId, request.ContextType, chips.Count);
+
+        return Results.Ok(new ChatSuggestResponse(
+            chips.Select(c => new ChatSuggestChip(c.TargetBindingId, c.Label, c.Reason)).ToList()));
+    }
+
     // =========================================================================
     // Private Helpers
     // =========================================================================
@@ -3260,6 +3331,34 @@ public record ChatActiveContext(
     string? TabId = null,
     string? DisplayName = null,
     JsonElement? CompactState = null);
+
+/// <summary>
+/// Request body for <c>POST /sessions/{id}/suggest</c> (spaarkeai-assistant-enhancements-r2 FR-B3/B5, task 022).
+/// </summary>
+/// <param name="ContextType">The focused tab's context type (closed FR-B1 set: email | document | compose-doc | matter-grid | dashboard | calendar). Required — a blank value yields an empty chip list. Deterministically pre-filters the candidate capabilities (task 021 <c>Binding.ContextTypeTags</c>).</param>
+/// <param name="ActiveContext">The focused tab's identity/compact stamp (reuses <see cref="ChatActiveContext"/>). Only <see cref="ChatActiveContext.TabId"/> is load-bearing server-side — the active tab's compact content is derived SERVER-SIDE from persisted state (ADR-015), never from the client-supplied <see cref="ChatActiveContext.CompactState"/>.</param>
+public record ChatSuggestRequest(
+    string ContextType,
+    ChatActiveContext? ActiveContext = null);
+
+/// <summary>Response body for <c>POST /sessions/{id}/suggest</c> — up to 3 proactive follow-on chips (empty when nothing fits).</summary>
+/// <param name="Chips">The proposed chips (≤3), ranked most-useful first.</param>
+public record ChatSuggestResponse(
+    [property: JsonPropertyName("chips")] IReadOnlyList<ChatSuggestChip> Chips);
+
+/// <summary>
+/// One proactive follow-on chip. Field names match the client <c>parseConsumerChips</c> contract
+/// (<c>targetBindingId</c> + <c>label</c>) so the client feeds the array straight to
+/// <c>useConsumerChips.acceptChips</c>. The chip dispatches via the existing deterministic Click path
+/// (<c>invoke(targetBindingId, args)</c>) on user click — this record is a proposal, never a dispatch.
+/// </summary>
+/// <param name="TargetBindingId">The proposed capability's <c>sprk_playbookconsumer</c> id (always one of the pre-filtered candidates).</param>
+/// <param name="Label">Short, content-specific chip label.</param>
+/// <param name="Reason">Developer-facing selection-trace rationale (FR-B6/task 024); not shown to the end user.</param>
+public record ChatSuggestChip(
+    [property: JsonPropertyName("targetBindingId")] string TargetBindingId,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("reason")] string? Reason);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).
