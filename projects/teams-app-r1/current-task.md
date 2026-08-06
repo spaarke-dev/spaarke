@@ -11,10 +11,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ✅ **025 COMPLETE** (principal-agnostic /external, Option A). Live Teams E2E PASSED (operator-verified 2026-08-06 — "the teams app opens", workspace loads). |
-| **Step** | Next work: **080** (full E2E graduation-criteria verification) → **090** (project wrap-up: gates + /test-diet + docs + deferrals). |
-| **Status** | 🟢 Shipped + deployed + live-verified: dual-scheme `/api/v1/external` serves CIAM + workforce via `CallerPrincipalResolver`; workforce scoped to accessible-record-set (NFR-08); CIAM byte-for-byte. BFF live on `spaarke-bff-dev`. R2 coordination note delivered. |
-| **Next Action** | Run **080** (verify all 7 graduation criteria), then **090** wrap-up. Deferrals for 090: 041 internal-notify Path A/C; pre-existing `System.Security.Cryptography.Xml 8.0.3` HIGH CVE; `Spaarke.Auth` node_modules gap; `AzureAd__ClientSecret` plaintext→KV-ref (ops); §7/§8-D2 cleanup (delete `/collab` transitional group + inert `ExternalCallerAuthorizationFilter`). |
+| **Task** | **none** — ✅ **PROJECT COMPLETE (2026-08-06)**. All 26 tasks ✅; merged to master (PR #723). |
+| **Step** | — |
+| **Status** | 🟢 Shipped + deployed to `spaarke-bff-dev` + live-verified in Teams. 080: 6/7 graduation criteria verified (criterion 6-live = accepted Path A go-live item). 090 wrap-up done: gates clean, README/plan → Complete, `notes/{integration-verification-report,test-diet-report,lessons-learned}.md`. |
+| **Next Action** | Project complete. **Go-live checklist** (customer-tenant org-catalog install + admin consent + `sprk_primarycontact` linkage) is operator/ops. Open cleanup deferrals (non-blocking, tracked): delete `/api/v1/collab` transitional group + inert `ExternalCallerAuthorizationFilter` (§7/§8-D2); 041 internal-notify Path A/C; `AzureAd__ClientSecret` plaintext→KV-ref (ops). CVE deferral RESOLVED (Xml→8.0.4 via master sync). |
 
 ### Task 025 BFF deploy (2026-08-06)
 - **Deployed** via `scripts/Deploy-BffApi.ps1` → `spaarke-bff-dev` / `rg-spaarke-dev`. Package 48.27 MB; 4 critical files SHA-256 verified; `/healthz` 200.
