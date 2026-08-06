@@ -11,9 +11,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 021 — race-proof internet-message-id dedup. **Investigation DONE; turnkey plan written** (notes/021-implementation-plan.md). Code deferred to fresh session (opus·xhigh, 1-2 day, contended path — needs full context budget). |
-| **Step** | Investigation complete (call-site map + escalation gate identified). Implementation pending. |
-| **Status** | 020 key ACTIVE; dup fault = FaultException OrganizationServiceFault ErrorCode 0x80060892 (SDK) / HTTP 412 (WebApi). Conflict-check clean. Plan = 7 steps: Dataverse seam methods → CreateCommunicationDedupedAsync (catch 0x80060892 → reconcile) → wire capture path → SB idempotency on internet-msg-id → seam+unit tests → verify → 9.5. Scope guard: upload→communication dedup is task 043, NOT 021. |
-| **Next Action** | Fresh session: execute notes/021-implementation-plan.md step 1 (Dataverse seam methods). ⚠️ Step-2 escalation gate: confirm GenericEntityService.CreateAsync propagates a catchable deterministic dup-key fault before building on it. |
+| **Step** | Escalation gate RESOLVED (GREEN). Seam foundation DONE + building. Capture-path wiring + tests pending. |
+| **Status** | Branch synced to master (merged 30 commits clean, 9 ahead). **021 step 1 done**: `CreateCommunicationRaceProofAsync` in ICommunicationDataverseService + DataverseServiceClientImpl (catch FaultException<OrganizationServiceFault> ErrorCode 0x80060892 → reconcile via existing GetCommunicationByInternetMessageIdAsync) + IsAlternateKeyDuplicate walker + WebApi stub. BFF builds 0 err. |
+| **Next Action** | 021 next increment (fresh session, notes/021-implementation-plan.md steps 3-7): wire IncomingCommunicationProcessor.CreateCommunicationRecordAsync (L~598) through CreateCommunicationRaceProofAsync + internetmessageid fast-path; re-key SB idempotency on internet-message-id; seam+unit tests; verify+9.5. Scope guard: upload→communication dedup = task 043. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.

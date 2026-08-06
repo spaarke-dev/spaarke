@@ -24,6 +24,21 @@
 - `OfficeService.GenerateIdempotencyKey` (L423-429) **already** includes `request.Email?.InternetMessageId` in the SB idempotency key ✅ (upload SB-layer dedup mostly satisfied; verify + tighten to internet-message-id-primary).
 - `OfficeDocumentPersistence` L109 `updateRequest.EmailMessageId = request.Email.InternetMessageId`; L179 `GetProcessingJobByIdempotencyKeyAsync`. **Check**: does the office save create a `sprk_communication` (vs only `sprk_document`)? From task 041 investigation, `OfficeService.SaveAsync` creates a `sprk_document` (no communication) — so the FR-B3 "upload dedups against capture via internet-message-id at the COMMUNICATION level" is really task 043's unification. For 021 scope: ensure the SB idempotency key on the upload path is internet-message-id-derived (it is) and document that communication-level upload dedup lands with 043. **Do NOT build the office→communication create here** (that's 043).
 
+## ✅ PROGRESS (2026-08-06)
+
+- **Escalation gate RESOLVED — GREEN.** `DataverseServiceClientImpl.CreateAsync` wraps everything in
+  `InvalidOperationException`, but `ServiceClient.CreateAsync` surfaces the alternate-key duplicate as a
+  `FaultException<OrganizationServiceFault>` (`Detail.ErrorCode == 0x80060892`) — catchable at the seam BEFORE
+  wrapping. The codebase already uses this idiom (`AssociateAsync` L1864 duplicate-association → idempotent).
+- **Step 1 DONE (seam foundation, committed):** added `CreateCommunicationRaceProofAsync(Entity, string?
+  internetMessageId, ct) → (Guid Id, bool WasDuplicate)` to `ICommunicationDataverseService` + implemented in
+  `DataverseServiceClientImpl` (raw `_serviceClient.CreateAsync` → `catch when (IsAlternateKeyDuplicate(ex))` →
+  reconcile via existing `GetCommunicationByInternetMessageIdAsync`) + `IsAlternateKeyDuplicate` chain-walker
+  (typed ErrorCode 0x80060892 first, message fallback) + `using System.ServiceModel;` + NotImplemented WebApi
+  stub. Null/blank internetMessageId → unguarded create (nulls excluded from the key). BFF builds 0 errors.
+  The reconcile-query method (`GetCommunicationByInternetMessageIdAsync`) ALREADY EXISTED — no new query needed.
+- **REMAINING (next increment):** steps 3-7 below — wire the capture path, SB idempotency, tests, verify, 9.5.
+
 ## Implementation steps (execute in fresh session)
 
 1. **Dataverse seam** — add to `ICommunicationDataverseService`:

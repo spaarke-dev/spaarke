@@ -1,3 +1,4 @@
+using System.ServiceModel;
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Configuration;
@@ -2287,6 +2288,76 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             graphMessageId, exists);
 
         return exists;
+    }
+
+    /// <inheritdoc />
+    public async Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRaceProofAsync(
+        Entity communication, string? internetMessageId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(communication);
+
+        // No canonical key → the task-020 alternate key does not apply (multiple null-keyed rows are
+        // permitted). Create unguarded via the raw client; the caller keeps its NFR-04 non-fatal wrapper.
+        if (string.IsNullOrWhiteSpace(internetMessageId))
+        {
+            var plainId = await _serviceClient.CreateAsync(communication, ct);
+            return (plainId, false);
+        }
+
+        try
+        {
+            var id = await _serviceClient.CreateAsync(communication, ct);
+            _logger.LogInformation(
+                "[DATAVERSE] Created sprk_communication {Id} (first writer for internetMessageId)", id);
+            return (id, false);
+        }
+        catch (Exception ex) when (IsAlternateKeyDuplicate(ex))
+        {
+            // Another writer won the race for this internet-message-id — the task-020 UNIQUE alternate key
+            // rejected our insert (0x80060892). Reconcile to the canonical row instead of throwing (NFR-02:
+            // structural dedup closes the check-then-insert race window app-level pre-checks cannot).
+            _logger.LogInformation(
+                "[DATAVERSE] sprk_communication create lost the race for internetMessageId {InternetMessageId} " +
+                "(alternate-key duplicate) — reconciling to the canonical row", internetMessageId);
+
+            var existing = await GetCommunicationByInternetMessageIdAsync(internetMessageId, ct);
+            if (existing is not null)
+                return (existing.Id, true);
+
+            // Very rare: the key reported a duplicate but the canonical row can't be re-read (e.g. deleted
+            // between the fault and the reconcile query). Surface a wrapped failure so the caller's NFR-04
+            // non-fatal wrapper logs + degrades rather than silently dropping the message.
+            throw new InvalidOperationException(
+                $"sprk_communication alternate-key duplicate for internetMessageId '{internetMessageId}', " +
+                "but the canonical row could not be reconciled.");
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="ex"/> (or any inner exception) is the Dataverse alternate-key duplicate
+    /// fault raised by the task-020 UNIQUE key on <c>sprk_internetmessageid</c>. Walks the exception chain
+    /// because <c>ServiceClient.CreateAsync</c> may surface the fault directly OR wrapped
+    /// (<c>DataverseOperationException</c> / a re-thrown <c>InvalidOperationException</c>). Matches the typed
+    /// <c>OrganizationServiceFault.ErrorCode</c> <c>0x80060892</c> first (deterministic), with a message
+    /// fallback mirroring the existing duplicate-association idiom in <see cref="AssociateAsync"/>.
+    /// </summary>
+    private static bool IsAlternateKeyDuplicate(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is FaultException<OrganizationServiceFault> fault
+                && fault.Detail?.ErrorCode == unchecked((int)0x80060892))
+                return true;
+
+            var m = e.Message;
+            if (!string.IsNullOrEmpty(m) && (
+                m.Contains("0x80060892", StringComparison.OrdinalIgnoreCase) ||
+                m.Contains("Entity Key", StringComparison.OrdinalIgnoreCase) ||
+                (m.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+                 && m.Contains("already exists", StringComparison.OrdinalIgnoreCase))))
+                return true;
+        }
+        return false;
     }
 
     // ========================================

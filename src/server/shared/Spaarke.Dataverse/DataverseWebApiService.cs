@@ -2649,6 +2649,15 @@ public class DataverseWebApiService : IDataverseService
             "Configure DI to use ServiceClient implementation for communication dedup queries.");
     }
 
+    public Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRaceProofAsync(
+        Entity communication, string? internetMessageId, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "CreateCommunicationRaceProofAsync is implemented in DataverseServiceClientImpl (needs the SDK " +
+            "OrganizationServiceFault to catch the alternate-key duplicate). Configure DI to use the " +
+            "ServiceClient implementation for communication dedup writes.");
+    }
+
     public Task<Entity?> GetCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default)
     {
         throw new NotImplementedException(
