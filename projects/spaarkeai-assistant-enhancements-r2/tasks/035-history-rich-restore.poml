@@ -4,7 +4,7 @@
     <title>Route History through the rich restore path, clearing/remounting the workspace first (FR-D1)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 031</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend resume routing with a known overwrite hazard + regression test</rigor-reason>
     <model-tier>opus</model-tier>

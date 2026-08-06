@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-06 (task 033 DONE — safe per-doc TTL + warm-reload durability fix; both quality gates PASS; next: Phase D wave D3)
+> **Last Updated**: 2026-08-06 (wave D3 DONE — 035 rich-restore + 037 HistoryOverlay; both gates PASS; next: wave D4 = 036)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Wave D2 COMPLETE** — **032 ✅**, **033 ✅ (safe per-doc TTL, owner-approved + built + gates PASS)**. Also fixed task-022 eval-catalog gap (GU-141). **16 tasks done** (deploy deferred to 039). |
-| **Step** | Wave D2 done. Next: Phase D wave **D3** (035 rich-restore ∥ 037 HistoryOverlay). |
-| **Status** | in-progress (D3 not started) |
-| **Next Action** | **Phase D wave D3** (concurrency 2, diff files): **035** (route History through rich restore + clear/remount FIRST so tab restore isn't overwritten, FR-D1 — **opus/xhigh, overwrite hazard**; ConversationPane spine) ∥ **037** (HistoryOverlay rebuild: row=open, ⋮ menu Open/Rename/Set-related/Delete, preview+tab-summary, Today/Yesterday/This-week grouping + search, FR-D6/7/8 — sonnet/high; HistoryOverlay.tsx, separate file). 035 & 037 are different files → parallel-safe. Deps satisfied (031 ✓, 032 ✓). Then D4 (036 attach-chip rehydrate, dep 035), D5 (038 Reanalyze chip), D6 (034 Set-related rename, dep 037), D7 (039 deploy+verify D). |
+| **Task** | **Wave D3 COMPLETE** — **035 ✅** (rich History restore + overwrite-hazard fix) ∥ **037 ✅** (HistoryOverlay rebuild). **18 tasks done** (deploy deferred to 039). |
+| **Step** | Wave D3 done + committed. Next: Phase D wave **D4** (036, dep 035). |
+| **Status** | in-progress (D4 not started) |
+| **Next Action** | **Phase D wave D4**: **036** (FR-D5 — rehydrate the attachment chip on restore from the server `UploadedFiles` manifest; sonnet/high; ConversationPane spine, AFTER 035 ✓). Then D5 (**038** Reanalyze chip on document context, dep 021/022/036), D6 (**034** "Set related record" rename + prompt, opus/high, dep 037 — wires the menu slot 037 left), D7 (**039** deploy+verify D — also lands DI-01 FR-D7 BFF projection + deploys all of Phase D). |
+| **Wave D3 outcome** | **035** (opus/xhigh): `handleSelectHistorySession` now drives the rich `/tabs` restore; the fix lives in **WorkspacePane.tsx** (clear-before-restore, synchronous debounced-PATCH cancellation so an empty set never overwrites the reopened session's store). **2 independent opus reviews**: core fix verified airtight; caught+fixed a compose-adoption **marker-leak** (Finding 1) that could re-expose the hazard on a rapid-switch path + a **test gap** (Finding 3 — now asserts B never gets a `tabs:[]` PATCH) + a non-compose-tab leak on adoption (Finding 2 — now `clearAllTabs({preserveWidgetTypes:['compose']})`). `onSelectSession` contract unchanged (composes with 037). **037** (sonnet): HistoryOverlay rebuilt — up-arrow gone, row-click opens, ⋮ Popover menu (Open/Rename/Set-related-slot/Delete via existing endpoints), Today/Yesterday/This-week grouping + search; fixed a real Fluent nested-Menu-as-submenu bug. typecheck Surface-owned 0; **85/85** SpaarkeAi tests green. Gates PASS both. **Deferred**: DI-01 (FR-D7 preview/count/tab-summary needs a BFF sessions-projection extension → fold into 039), DI-02 (TipTap-flush residual). See notes/defer-issues.md. |
 | **033 outcome** | SAFE per-doc TTL path built (owner "continue" = go-ahead). `StoredSession.Ttl` (int?, -1=never-expire) DERIVED from filed-state (`HostContext.EntityType=="sprk_analysisoutput"`) on every write-through; unfiled→null (90-day container default). **Code-review Critical caught+fixed**: filed-state (HostContext) now persists+restores through the Cosmos warm tier so a Redis-eviction+reload+next-turn can't silently revert a filed doc to 90 days (ADR-040 warm-restore-survival pattern). 5 new tests incl. warm-reload regression; 744 Chat/Sessions/persistence/restore tests green; publish 52.37 MB (<60, delta 0). Both gates PASS. Full record: notes/d10-ttl-spike.md "IMPLEMENTATION". Risky fallback (container-TTL removal + cleanup job) NOT built — escalation trigger did not fire (spike conclusive). |
 
 ### Task 032 — DONE (2026-08-06, subagent + orchestrator). Deploy deferred to 039.

@@ -4,7 +4,7 @@
     <title>Rebuild HistoryOverlay: overflow menu, delete, remove up-arrow, preview + tab summary, grouping + search (FR-D6/D7/D8)</title>
     <phase>4 D — History &amp; true resume</phase>
     <gate>blocked until 032</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend component rebuild (Fluent v9)</rigor-reason>
     <model-tier>sonnet</model-tier>

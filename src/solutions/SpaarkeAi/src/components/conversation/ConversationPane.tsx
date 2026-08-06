@@ -2385,6 +2385,22 @@ export function ConversationPane(): React.JSX.Element {
   // re-read it, so nothing happened. Adopt the selected id AND remount SprkChat (bump the
   // remount key) so its mount-effect resumes THIS session (resumeSession → loadHistory fetches
   // the transcript). Same remount seam as handleNewSession, minus the clear.
+  //
+  // FR-D1 (spaarkeai-assistant-enhancements-r2) — RICH resume, not a text-only reload.
+  // Setting chatSessionId here does double duty: it (1) remounts SprkChat to resume THIS
+  // session's transcript (the chat leg) AND (2) re-keys WorkspacePane's chatSessionId-scoped
+  // `/tabs` restore effect (the workspace leg). That effect now CLEARS the prior session's
+  // tabs BEFORE restoring the reopened session's stored tab set (see WorkspacePane's
+  // `lastRestoredSessionIdRef` / clear-before-restore block), so reopening restores chat +
+  // its tabs + document reference, and the reopened session's stored tabs are never
+  // overwritten by the previous session's. The workspace-clear intent lives in WorkspacePane
+  // (the pane that owns tab state) rather than a cross-pane bus event: `tabs_clear` already
+  // carries compose-PRESERVE semantics (exclusive-playbook path) and a full History-reopen
+  // clear must not preserve the prior session's compose tab, so reusing it would corrupt the
+  // reopened set. This SAME entry point is reused by the compose/wizard/analysis session
+  // adoptions below; those are excluded from the clear by WorkspacePane's
+  // `composeAdoptionSessionRef` marker (they show the adopted document, not a full tab set).
+  // External contract is unchanged: `HistoryMenu`'s `onSelectSession(sessionId: string)`.
   const handleSelectHistorySession = React.useCallback(
     (sessionId: string) => {
       setChatSessionId(sessionId);

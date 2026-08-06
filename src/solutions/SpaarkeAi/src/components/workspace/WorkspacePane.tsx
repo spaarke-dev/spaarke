@@ -640,6 +640,28 @@ export function WorkspacePane(): React.JSX.Element {
 
   const [tabRestoreSettled, setTabRestoreSettled] = React.useState(false);
 
+  // FR-D1 (spaarkeai-assistant-enhancements-r2) — in-place SESSION SWITCH support.
+  //
+  // `lastRestoredSessionIdRef` holds the id of the session whose tabs this manager
+  // currently reflects. It distinguishes the initial cold-load restore (null → first
+  // session — nothing to clear) from a genuine in-place session SWITCH (session A →
+  // session B, i.e. reopening a History entry). On a switch the manager still holds
+  // the PRIOR session's tabs, so the restore effect below must clear them FIRST —
+  // otherwise `restoreFromPersistence()` no-ops (its hasNonHomeTab guard), the prior
+  // tabs stay visible on the reopened session AND get PATCHed onto the reopened
+  // session's /tabs store (the overwrite hazard FR-D1 fixes).
+  const lastRestoredSessionIdRef = React.useRef<string | null>(null);
+
+  // FR-D1: set when a compose `widget_load` ADOPTS a session (the wizard→review
+  // hand-off, or the cold-load compose re-adoption — both carry `composeSessionId`
+  // and drive `ConversationPane.handleSelectHistorySession` to change chatSessionId
+  // to that same session). Those flows intentionally show JUST the adopted document,
+  // not the session's full stored tab set (mirroring the analysis-existing skip
+  // above), so the session-switch clear below must NOT wipe the just-opened compose
+  // tab. This is a precise causal marker written by WorkspacePane's own compose
+  // widget_load handler — not a timing heuristic.
+  const composeAdoptionSessionRef = React.useRef<string | null>(null);
+
   // Task 025 (FR-09): the BFF (chatSessionId-keyed) restore remains the durable,
   // cross-device path once a session exists — UNCHANGED below. It is no longer the
   // ONLY restore path: when there is no session yet (pre-session/ribbon-compose tab)
@@ -660,6 +682,75 @@ export function WorkspacePane(): React.JSX.Element {
     if (analysisLaunch?.mode === 'existing') {
       setTabRestoreSettled(true);
       return;
+    }
+
+    // FR-D1 (spaarkeai-assistant-enhancements-r2) — clear-before-restore on an
+    // in-place SESSION SWITCH (reopening a History entry via
+    // ConversationPane.handleSelectHistorySession → setChatSessionId).
+    //
+    // A switch is chatSessionId changing FROM a previously-restored session TO a
+    // different one. The manager still holds the prior session's tabs;
+    // restoreFromPersistence() (below) is a no-op while any non-Home tab exists, so
+    // without clearing first (a) the prior session's tabs remain visible on the
+    // reopened session and (b) they get PATCHed onto the reopened session's /tabs
+    // store — corrupting it (the overwrite hazard). Clear FIRST so the GET+restore
+    // below repopulates from the reopened session's OWN store.
+    //
+    // EXCLUDED — compose adoption: when the switch's target session was just adopted
+    // by a compose widget_load (composeAdoptionSessionRef), the just-opened compose
+    // tab must survive (the wizard/re-adoption flows show the adopted document, not
+    // the session's full stored set). Same intent as the analysis-existing early
+    // return above.
+    //
+    // ESCALATION (POML <escalation>): compose tabs on a real History switch ARE
+    // cleared. This does NOT silently discard unsaved work: the compose document is
+    // server-authoritative (ADR-049 — OOXML byte-store on the server, TipTap is a
+    // lossy view) and, on the home surface, additionally persisted in localStorage
+    // (composeRunPersistence — removal is explicit-close only). Clearing the TAB
+    // therefore never destroys the document; it is re-restored from the reopened
+    // session's own store. No in-flight UNSAVED artifact is silently lost, so the
+    // "risk losing an in-flight unsaved tab" trigger is evaluated-and-not-fired (the
+    // residual editor-flush-cadence question is surfaced to the orchestrator).
+    const isSessionSwitch =
+      !!chatSessionId &&
+      lastRestoredSessionIdRef.current !== null &&
+      lastRestoredSessionIdRef.current !== chatSessionId;
+    const isComposeAdoption =
+      !!chatSessionId && composeAdoptionSessionRef.current === chatSessionId;
+    if (isSessionSwitch) {
+      const manager = managerRef.current;
+      const priorTabs = manager.getSnapshot().tabs;
+      if (!isComposeAdoption) {
+        // History reopen — FULL clear (incl. any compose tab; the document survives
+        // per the ADR-049 rationale above). Only touch the store if there is
+        // something to clear.
+        if (priorTabs.some((t) => t.kind === 'widget')) {
+          manager.clearAllTabs();
+          // clearAllTabs() just scheduled a debounced PATCH of the now-EMPTY tab set
+          // against the NEW chatSessionId. Cancel it SYNCHRONOUSLY (before any await
+          // below) so an empty set is never written over the reopened session's
+          // stored tabs; the GET+restore below repopulates from that same store.
+          if (persistTimerRef.current !== null) {
+            window.clearTimeout(persistTimerRef.current);
+            persistTimerRef.current = null;
+          }
+          pendingSnapshotRef.current = null;
+          syncState();
+        }
+      } else if (priorTabs.some((t) => t.kind === 'widget' && t.widgetType !== 'compose')) {
+        // Compose adoption (Finding 2 guard): the adoption skips the FULL clear so the
+        // just-opened compose tab survives — but the manager may still hold NON-compose
+        // tabs from the PRIOR session (e.g. the home default layout at a cold-load
+        // re-adoption, or whatever the user had open before an in-session wizard→review
+        // hand-off). Those do NOT belong to the adopted session and would otherwise
+        // ride onto it on the next write-through. Clear them while PRESERVING compose
+        // (the adopted document + any compose work-product) — the same preserve
+        // semantics the exclusive-playbook path uses. The resulting snapshot
+        // ([compose…]) is the correct state for the adopted session, so the debounced
+        // write-through is left in place (NOT cancelled) to record it.
+        manager.clearAllTabs({ preserveWidgetTypes: ['compose'] });
+        syncState();
+      }
     }
 
     let cancelled = false;
@@ -719,6 +810,14 @@ export function WorkspacePane(): React.JSX.Element {
           tabCount: snap.tabs.length,
         });
 
+        // FR-D1: record the session we just settled on so a later chatSessionId
+        // change is recognized as a switch (clear-before-restore above). Consume the
+        // one-shot compose-adoption marker now that this session's restore settled.
+        lastRestoredSessionIdRef.current = chatSessionId ?? null;
+        if (composeAdoptionSessionRef.current === chatSessionId) {
+          composeAdoptionSessionRef.current = null;
+        }
+
         // R3-3: settle on EVERY terminal path (server success, local fallback,
         // no anchor at all, or error) so the auto-install-default + pin
         // auto-open effects below can proceed.
@@ -728,6 +827,18 @@ export function WorkspacePane(): React.JSX.Element {
 
     return () => {
       cancelled = true;
+      // FR-D1 (Finding 1 — leak-proof marker): the compose-adoption marker is a
+      // one-shot consumed at settle (above). If THIS run was a compose adoption whose
+      // restore is CANCELLED before it settles (the user switches again before the
+      // async GET resolves), the settle-consume never runs and the marker would leak —
+      // a later genuine History reopen of this same session would then see
+      // isComposeAdoption===true, SKIP the overwrite clear, and let the prior session's
+      // tabs corrupt it. Reset the marker here (guarded to THIS run's session so a
+      // newer adoption's marker for a DIFFERENT session is never wiped) so a cancelled
+      // adoption can't suppress a later clear.
+      if (composeAdoptionSessionRef.current === chatSessionId) {
+        composeAdoptionSessionRef.current = null;
+      }
     };
     // authenticatedFetch is a stable module-level function from @spaarke/auth
     // (returned by useAiSession() but identical reference across renders).
@@ -1678,6 +1789,18 @@ export function WorkspacePane(): React.JSX.Element {
       // keep the 'workspace' LAYOUT door and flow through the generic addTab
       // path below, unchanged.
       if (effectiveWidgetType === 'compose') {
+        // FR-D1 (spaarkeai-assistant-enhancements-r2): a compose open that ADOPTS a
+        // session (wizard→review hand-off / cold-load compose re-adoption — seed
+        // carries `composeSessionId`) will imminently change chatSessionId to that
+        // session. Mark it so the restore effect's session-switch clear does NOT wipe
+        // this just-opened compose tab (those flows show the adopted document, not the
+        // session's full stored tab set — the analysis-existing skip, applied to the
+        // in-place compose door).
+        {
+          const adoptSid = (widgetData as { compose?: { composeSessionId?: string } } | null)
+            ?.compose?.composeSessionId;
+          if (adoptSid) composeAdoptionSessionRef.current = adoptSid;
+        }
         // FR-34 D-F3 (task 071): a CONTENT-bearing open carries a full-document
         // draft SEED (widgetData.compose.draft.ledgerRef — DEF-08 Part A). When
         // present, the ack is DEFERRED until ComposeWorkspace signals the draft
