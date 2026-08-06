@@ -38,7 +38,7 @@ Tier: model-tier @ effort (dispatch each subagent at these per root CLAUDE.md §
 | 070 | Teams manifest v1.29 + M365 Agents Toolkit packaging | 7 | ✅ | 061,062 | sonnet@high | STANDARD | ✅ | F |
 | 071 | New Teams-app CI deploy workflow | 7 | ✅ | 070 | sonnet@high | FULL | ✅ (⚠️ ci-workflows hot-path — /conflict-check) | F |
 | 072 | Org-catalog distribution + Publisher Attestation prep | 7 | ✅ | 070 | sonnet@high | MINIMAL | ✅ | F |
-| 080 | End-to-end integration verification (graduation criteria) | 8 | 🔲 | 045,065,072,051 | opus@high | FULL | ❌ (needs all phases) | G |
+| 080 | End-to-end integration verification (graduation criteria) | 8 | ✅ | 045,065,072,051 | opus@high | FULL | ❌ (needs all phases) | G |
 | 090 | Project wrap-up (gates, cleanup, docs, test-diet) | 8 | 🔲 | 080 | sonnet@high | FULL | ❌ (final; edits README/plan + .claude gates) | G |
 
 ## Critical Path (longest dependency chain)
