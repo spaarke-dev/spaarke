@@ -1,16 +1,16 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-07 (by context-handoff — clean boundary post-Phase-4-build + FULL master sync PR #747; next 042)
+> **Last Updated**: 2026-08-07 (by context-handoff — clean boundary: 042 ✅ + 052 ✅, ALL build tasks done; next 090 wrap-up)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. This session closed **040 ✅ + 041 ✅ + B-MED-3 ✅** (PDF intake end-to-end, both Step 9.5 reviews triaged to zero open HIGH/MED, association inheritance per operator option C) **and ran /worktree-sync FULL: PR #747 MERGED** — ALL R6 work (Phases 0–6 incl. 030-033, 040/041, 050/051, 060/061) is now ON MASTER. Branch = master = main-repo master = `7335a71d1` (verified 0/0/0/0). One merge conflict (ComposeService.cs, FR-C3 dedup vs B-MED-3 inheritance) resolved as union-of-both; post-merge suites 404/404. |
+| **Task** | NONE ACTIVE — clean boundary. **EVERY build task is ✅; only 090 wrap-up remains.** This session closed **042 ✅** (PDF-intake round-trip seam + client suites; Step 9.5 PASS-WITH-FINDINGS, all 3 MED + 3 LOW fixed/accepted same-session — incl. the vacuous-chrome-assertion fix, the apply-template-422 fact, forkNew/retry-key flow tests, the workspace→banner wire) and **052 ✅** (delivered-early-in-050; SpeVersionHistoryOboSeamTests covers the whole closed acceptance set, re-verified 7/7; no duplicate authoring per §11/test-diet). Also repaired a LATENT MASTER RED: the I-7 write-path text-search lexical audit tripped by the A-HIGH-1 guard's `.EndsWith` (rephrased to Path.GetExtension equality). Earlier this session: /worktree-sync FULL → **PR #747 merged** (everything through B-MED-3 on master at `7335a71d1`; ComposeService.cs conflict = FR-C3 ∪ B-MED-3 union). |
 | **Tasks complete** | 001-004, 010-014, 020-027, 030-033, 040-042, 050-052, 060, 061. **Remaining: 090 wrap-up ONLY.** |
-| **042/052** | **042 ✅** (`d06f3b34e` impl + `19cfb8d0b` triage — Step 9.5 PASS-WITH-FINDINGS, all 3 MED + 3 LOW fixed/accepted same-session; seam 5/5, client 66/66; full record `notes/042-052-close.md`). **052 ✅** — delivered-early-in-050 (SpeVersionHistoryOboSeamTests covers the whole closed acceptance set; re-verified 7/7; deviation recorded, no duplicate authoring per §11/test-diet). |
-| **Status** | ALL committed; push pending this checkpoint; NO agents in flight |
+| **Key records** | `notes/042-052-close.md` (042 delivery + triage table + 052 deviation) · `notes/040-pdf-intake.md` (the whole PDF-intake arc) · commits this arc: `d06f3b34e` (042 impl) · `19cfb8d0b` (042 triage) · `87c09e08a` (docs). Suites at close: seam 5/5 · client 66/66 · server sweep 897/897 · publish 47.06 MB. |
+| **Status** | ALL committed + PUSHED through `87c09e08a`; working tree clean; NO agents in flight |
 | **Next Action** | On "continue": task-execute **090 wrap-up** (`tasks/090-*.poml`, STANDARD/sonnet; deps ALL ✅): `/test-diet` gate (report to `notes/test-diet-report.md`; reconcile this project's added tests vs the 17-ban classifier — the seam/contract/reducer suites are MAINTAIN-class by design), master reconcile (LIGHT — master synced at #747; only 042-arc commits since: d06f3b34e, 19cfb8d0b + docs), `/conflict-check`, final PR + merge, ADR-049 amendment verify (merged with 001), the 6 success criteria checklist, Corteva-NDA corpus-row-4 decision (needs operator confidentiality sign-off — surface it), anti-clobber deploy coordination note (deploy still pending; r2 freeze stands). |
 
 ### Critical Context (3 sentences)
