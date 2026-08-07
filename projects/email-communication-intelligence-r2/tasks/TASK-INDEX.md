@@ -15,7 +15,7 @@
 | 010 | HMAC footer/token signing helper (Key Vault) | 1·A | ✅ | — | **opus·xhigh** | ❌ false |
 | 011 | Footer config (operator app setting, per-tenant) | 1·A | ✅ | — | sonnet·high | ❌ false |
 | 012 | Inject signed footer on outbound send path | 1·A | ✅ | 010,011 | sonnet·high | ❌ false |
-| 013 | `TrackingTokenRung` (reuse RungKind.ExplicitReference) | 1·A | 🔲 | 010,011 | **opus·high** | ✅ true (A-rungs) |
+| 013 | `TrackingTokenRung` (reuse RungKind.ExplicitReference) | 1·A | ✅ | 010,011 | **opus·high** | ✅ true (A-rungs) |
 | 014 | `RecipientAliasRung` + Bcc plumbing | 1·A | ✅ | 011 | sonnet·high | ✅ true (A-rungs) |
 | 015 | Formalize external-reply self-association + test | 1·A | ✅ | — | sonnet·high | ❌ false |
 | 016 | `AffinityRung` + `sprk_affinity` store | 1·A | ✅ | 011 | **opus·high** | ✅ true (A-rungs) |
@@ -36,7 +36,7 @@
 | 033 | Job B allow-list seed (`sprk_emailupdatefield`) | 3·D | 🔲 | — | sonnet·med | ✅ true (D-indep) |
 | 034 | Job C apply endpoint + create-task queue-feed discriminator | 3·D | ✅ | — | **opus·high** | ❌ false |
 | 035 | Pillar D BFF deploy (size/CVE) | 3·D | 🔲 | 030,031,034 | sonnet·med | ❌ false |
-| 040 | Add-in realignment (FR-B0 a–d) | 4·B | 🔲 | 004 | sonnet·high | ✅ true (PB-a) |
+| 040 | Add-in realignment (FR-B0 a–d) — **code ✅** (401-retry routing, Word-manifest parity, cleanup; new `authenticatedJsonFetch` §11-justified); runtime NAA sign-in + dark-mode live-render **operator-gated** (needs live Office host; deploys paused) | 4·B | ✅-code | 004 | sonnet·high | ✅ true (PB-a) |
 | 041 | Real Spaarke intake folder — re-scoped (mech-1 = config, documented; mech-2 → 043) | 4·B | ✅ | — | sonnet·high | ✅ true (PB-a) |
 | 042 | Drag-to-matter + engine pre-select + ribbon quick-save | 4·B | ✅ | 041 | **opus·high (Option B)** | ✅ true (PB-b) |
 | 043 | Unify user-upload with capture (engine + dedup) — absorbs FR-B1 add-in drag-target (from 041) | 4·B | ✅ | 021,024 | sonnet·high | ❌ false |

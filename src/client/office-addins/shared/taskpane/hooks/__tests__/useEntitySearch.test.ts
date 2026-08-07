@@ -26,11 +26,16 @@ Object.defineProperty(window, 'sessionStorage', {
   value: mockSessionStorage,
 });
 
+// Mock fetch for the real-API path (task 040 / FR-B0 401-retry tests).
+const mockFetch = jest.fn();
+global.fetch = mockFetch;
+
 describe('useEntitySearch', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     mockSessionStorage.clear();
     jest.clearAllMocks();
+    mockFetch.mockReset();
   });
 
   afterEach(() => {
@@ -70,6 +75,65 @@ describe('useEntitySearch', () => {
       const { result } = renderHook(() => useEntitySearch({ initialTypeFilter: ['Matter', 'Project'] }));
 
       expect(result.current.typeFilter).toEqual(['Matter', 'Project']);
+    });
+  });
+
+  // Positioned before `searchNow` (below): that pre-existing test has an
+  // unrelated fake-timer/mock-delay interaction that can time out and corrupt
+  // React's fake-timer state for whatever test runs next in this file — moving
+  // these tests earlier keeps them independent of that pre-existing flake.
+  describe('401 retry (task 040 / FR-B0)', () => {
+    const mockGetAccessToken = jest.fn().mockResolvedValue('test-access-token');
+
+    it('retries exactly once on 401 and succeeds with the real API path', async () => {
+      mockGetAccessToken.mockClear();
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 }).mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ results: [], totalCount: 0, hasMore: false }),
+      });
+
+      const { result } = renderHook(() =>
+        useEntitySearch({
+          apiBaseUrl: 'https://bff.example.com',
+          getAccessToken: mockGetAccessToken,
+        })
+      );
+
+      act(() => {
+        result.current.setQuery('smith');
+      });
+
+      await act(async () => {
+        await result.current.searchNow();
+      });
+
+      expect(result.current.error).toBeNull();
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(mockGetAccessToken).toHaveBeenCalledTimes(2);
+    });
+
+    it('does not loop indefinitely — a second 401 surfaces as a normal search error', async () => {
+      mockGetAccessToken.mockClear();
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 }).mockResolvedValueOnce({ ok: false, status: 401 });
+
+      const { result } = renderHook(() =>
+        useEntitySearch({
+          apiBaseUrl: 'https://bff.example.com',
+          getAccessToken: mockGetAccessToken,
+        })
+      );
+
+      act(() => {
+        result.current.setQuery('smith');
+      });
+
+      await act(async () => {
+        await result.current.searchNow();
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result.current.error).not.toBeNull();
+      expect(result.current.results).toEqual([]);
     });
   });
 

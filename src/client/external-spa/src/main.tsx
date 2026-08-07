@@ -208,6 +208,41 @@ async function bootstrapTeams(root: Root): Promise<void> {
 }
 
 /**
+ * Extracts the underlying NAA + Teams-SSO failure detail (error name / MSAL errorCode / subError /
+ * any AADSTS code / message) from a TeamsWorkforceAuthError's `cause` ({ naaError, ssoError }), so the
+ * on-screen error state can show the REAL diagnostic on hosts where dev tools aren't readily available
+ * (e.g. the Teams desktop client). Diagnostic-only; contains no tokens or secrets.
+ */
+function extractAuthDiagnostics(err: unknown): string {
+  const describe = (label: string, e: unknown): string => {
+    if (e == null) return `${label}: (none)`;
+    if (typeof e === 'string') return `${label}: ${e}`;
+    const any = e as Record<string, unknown>;
+    const parts: string[] = [];
+    if (any.name) parts.push(`name=${String(any.name)}`);
+    if (any.errorCode) parts.push(`errorCode=${String(any.errorCode)}`);
+    if (any.subError) parts.push(`subError=${String(any.subError)}`);
+    const msg = (any.errorMessage ?? any.message) as string | undefined;
+    if (msg) parts.push(`msg=${String(msg).slice(0, 600)}`);
+    const aadsts = `${String(any.message ?? '')} ${String(any.errorMessage ?? '')}`.match(/AADSTS\d+/);
+    if (aadsts) parts.push(`AADSTS=${aadsts[0]}`);
+    if (parts.length === 0) {
+      try { return `${label}: ${JSON.stringify(any).slice(0, 400)}`; } catch { return `${label}: (unserializable)`; }
+    }
+    return `${label}: ${parts.join('  ·  ')}`;
+  };
+  const cause = (err as { cause?: unknown } | null)?.cause as
+    | { naaError?: unknown; ssoError?: unknown }
+    | undefined;
+  const lines = [describe('top', err)];
+  if (cause && typeof cause === 'object') {
+    lines.push(describe('NAA', cause.naaError));
+    lines.push(describe('SSO', cause.ssoError));
+  }
+  return lines.join('\n');
+}
+
+/**
  * Fail-loud error state for a Teams bootstrap failure (acceptance criterion 4 - never silently
  * degrade to a blank/broken tab). Minimal Fluent v9 markup styled exclusively with semantic tokens
  * (ADR-021); intentionally NOT a feature component - this is bootstrap-path infrastructure, shown
@@ -215,6 +250,7 @@ async function bootstrapTeams(root: Root): Promise<void> {
  */
 function renderTeamsAuthError(root: Root, err: unknown): void {
   const message = err instanceof Error ? err.message : 'Sign-in to the Spaarke collaboration tab failed.';
+  const diagnostics = extractAuthDiagnostics(err);
   // The adapter writes the Teams-provided theme to localStorage BEFORE the auth step that can
   // fail (see TeamsHostAdapter.wireTheme), so resolveCodePageTheme() already reflects the correct
   // Teams theme here even on an auth failure - this error screen is never a jarring light-in-dark
@@ -245,6 +281,27 @@ function renderTeamsAuthError(root: Root, err: unknown): void {
           <Text size={200} style={{ color: tokens.colorNeutralForeground4 }}>
             Contact your Teams admin if this persists - your organization may not have consented to the Spaarke app yet.
           </Text>
+          <pre
+            style={{
+              marginTop: tokens.spacingVerticalM,
+              maxWidth: '46rem',
+              maxHeight: '14rem',
+              overflow: 'auto',
+              textAlign: 'left',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontFamily: tokens.fontFamilyMonospace,
+              fontSize: tokens.fontSizeBase200,
+              lineHeight: tokens.lineHeightBase200,
+              color: tokens.colorNeutralForeground3,
+              backgroundColor: tokens.colorNeutralBackground3,
+              border: `1px solid ${tokens.colorNeutralStroke2}`,
+              borderRadius: tokens.borderRadiusMedium,
+              padding: tokens.spacingHorizontalM,
+            }}
+          >
+            {`Diagnostic detail (share this):\n${diagnostics}`}
+          </pre>
         </div>
       </FluentProvider>
     </React.StrictMode>

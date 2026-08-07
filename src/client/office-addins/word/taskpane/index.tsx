@@ -4,9 +4,10 @@ import { App } from '@shared/taskpane';
 import { WordHostAdapter } from '../WordHostAdapter';
 import { authService, apiClient } from '@shared/services';
 
-// Version information - synced with manifest version
-const APP_VERSION = '1.0.3';
-const BUILD_DATE = process.env.BUILD_DATE || 'Jan 22, 2026';
+// Version information - synced with word-manifest.xml's <Version> element
+// (task 040 / FR-B0: was stale at 1.0.3 vs manifest's 1.0.4.0).
+const APP_VERSION = '1.0.4';
+const BUILD_DATE = process.env.BUILD_DATE || 'unknown';
 
 // Configuration from environment or build-time injection
 const CONFIG = {
