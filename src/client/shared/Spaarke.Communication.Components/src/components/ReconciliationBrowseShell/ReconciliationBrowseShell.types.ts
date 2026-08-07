@@ -23,6 +23,7 @@
 import type * as React from 'react';
 import type { AuthenticatedFetchFn, ReconciliationAttachmentContent } from '../EmailBody/EmailBodyView.types';
 import type { EmailToolbarActionHandlers } from '../EmailReadingPaneShell/EmailReadingPaneShell.types';
+import type { EmailCitation } from '../../logic/citations';
 
 /**
  * One record the browse shell steps through + renders in the left reader. The
@@ -95,6 +96,14 @@ export interface ReconciliationBrowseShellProps {
   onOpenOriginalActivate?: (attachment: ReconciliationAttachmentContent, record: ReconciliationBrowseRecord) => void;
   /** Test/host seam forwarded to `EmailBodyView`'s `eml-render` fetch. */
   authenticatedFetch?: AuthenticatedFetchFn;
+  /**
+   * The active proposal citation to anchor into the reader (task 054, NFR-11).
+   * A reconcile tab (Fields = 055 / Tasks = 056) sets this when the reviewer
+   * clicks a proposal's citation; the reader jumps to + highlights the exact
+   * passage (body callout or inline in a folded attachment), or surfaces "source
+   * not locatable" for a forged/absent quote. Forwarded to `EmailBodyView`.
+   */
+  activeCitation?: EmailCitation;
   /** `--sprk-ui-scale` forwarded to `SprkModal` + the overlay. */
   uiScale?: number;
 }

@@ -7,4 +7,6 @@
  * `EmailReadingPaneShell` `renderBody(selectedId)` slot.
  */
 export { EmailBodyView } from './EmailBodyView';
+export { HighlightedText } from './HighlightedText';
+export type { HighlightedTextProps } from './HighlightedText';
 export type { EmailBodyViewProps, AuthenticatedFetchFn, ReconciliationAttachmentContent } from './EmailBodyView.types';

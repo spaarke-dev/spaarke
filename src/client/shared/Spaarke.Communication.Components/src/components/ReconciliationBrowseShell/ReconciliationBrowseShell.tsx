@@ -150,6 +150,7 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
   readerActions,
   onOpenOriginalActivate,
   authenticatedFetch,
+  activeCitation,
   uiScale,
 }) => {
   const s = useStyles();
@@ -232,6 +233,7 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
                       body={current.body ?? ''}
                       attachments={current.attachments}
                       onOpenOriginal={att => setOverlayAttachment(att)}
+                      activeCitation={activeCitation}
                       authenticatedFetch={authenticatedFetch}
                     />
                   </div>

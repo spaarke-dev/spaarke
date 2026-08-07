@@ -37,6 +37,8 @@
  * component imports the real free-function by default; this alias exists so the
  * dependency is named + documented and so tests can `jest.mock('@spaarke/auth')`.
  */
+import type { EmailCitation } from '../../logic/citations';
+
 export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**
@@ -129,4 +131,15 @@ export interface EmailBodyViewProps {
    * preview. Only rendered for folds that carry a `documentId`.
    */
   onOpenOriginal?: (attachment: ReconciliationAttachmentContent) => void;
+
+  /**
+   * The proposal citation to anchor into the reader (task 054, NFR-11). When set,
+   * the reader resolves it over its normalized text (body + folded attachment
+   * text) via `resolveQuotedCitation` and jumps to + highlights the exact passage
+   * — in a folded attachment (inline) or, for a body-sourced quote, an ephemeral
+   * "cited passage" callout (the `.eml` body renders in a sandboxed iframe the
+   * parent cannot reach into, NFR-03). An unlocatable/forged quote surfaces a
+   * "source not locatable" affordance and does NOT navigate. Omitted ⇒ no anchor.
+   */
+  activeCitation?: EmailCitation;
 }

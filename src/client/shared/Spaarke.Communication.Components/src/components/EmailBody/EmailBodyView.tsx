@@ -38,6 +38,8 @@ import {
 } from '@fluentui/react-icons';
 import { sanitizeEmailHtml } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
+import { buildReaderReferenceMap, resolveQuotedCitation, type QuotedCitationResolution } from '../../logic/citations';
+import { HighlightedText } from './HighlightedText';
 import type { EmailBodyViewProps, ReconciliationAttachmentContent } from './EmailBodyView.types';
 
 const useStyles = makeStyles({
@@ -197,7 +199,50 @@ const useStyles = makeStyles({
     fontStyle: 'italic',
   },
   openOriginalLink: { flexShrink: 0 },
+  // Citation anchor affordances (task 054, NFR-11) — the body "cited passage"
+  // callout + the "source not locatable" note. Semantic tokens only (ADR-021).
+  citationBanner: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXS,
+    margin: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    borderLeftWidth: tokens.strokeWidthThick,
+    borderLeftStyle: 'solid',
+    borderLeftColor: tokens.colorBrandStroke1,
+    backgroundColor: tokens.colorNeutralBackground3,
+  },
+  citationBannerLabel: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  notLocatable: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    margin: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    padding: `${tokens.spacingVerticalS} ${tokens.spacingHorizontalM}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground3,
+    color: tokens.colorNeutralForeground2,
+    fontSize: tokens.fontSizeBase200,
+  },
+  notLocatableIcon: { flexShrink: 0, color: tokens.colorStatusWarningForeground1 },
 });
+
+/** The active fold-highlight target passed to {@link FoldedAttachments} when a citation resolves into an attachment. */
+interface ActiveFoldHighlight {
+  attachmentId: string;
+  /** The NORMALIZED segment text the span offsets index into (so the highlight aligns exactly). */
+  text: string;
+  start: number;
+  end: number;
+}
 
 /**
  * Renders each attachment's extracted content folded into the reader as
@@ -210,7 +255,8 @@ const useStyles = makeStyles({
 const FoldedAttachments: React.FC<{
   attachments: ReadonlyArray<ReconciliationAttachmentContent>;
   onOpenOriginal?: (attachment: ReconciliationAttachmentContent) => void;
-}> = ({ attachments, onOpenOriginal }) => {
+  activeFold?: ActiveFoldHighlight;
+}> = ({ attachments, onOpenOriginal, activeFold }) => {
   const s = useStyles();
   if (attachments.length === 0) return null;
   return (
@@ -219,6 +265,7 @@ const FoldedAttachments: React.FC<{
         const hasText = typeof att.text === 'string' && att.text.length > 0;
         const unextractable = !hasText && att.extractable === false;
         const canOpen = typeof att.documentId === 'string' && att.documentId.length > 0;
+        const highlight = activeFold && activeFold.attachmentId === att.attachmentId ? activeFold : undefined;
         return (
           <section key={att.attachmentId} className={s.fold} data-testid="email-body-attachment-fold">
             <div className={s.foldHead}>
@@ -238,7 +285,13 @@ const FoldedAttachments: React.FC<{
                 </Link>
               ) : null}
             </div>
-            {hasText ? (
+            {hasText && highlight ? (
+              // Active citation resolves into THIS attachment — render its
+              // normalized text with the exact cited span highlighted + scrolled.
+              <div className={s.foldText} data-testid="email-body-attachment-text">
+                <HighlightedText text={highlight.text} start={highlight.start} end={highlight.end} />
+              </div>
+            ) : hasText ? (
               <div className={s.foldText} data-testid="email-body-attachment-text">
                 {att.text}
               </div>
@@ -278,16 +331,68 @@ export const EmailBodyView: React.FC<EmailBodyViewProps> = ({
   authenticatedFetch = defaultAuthenticatedFetch,
   attachments,
   onOpenOriginal,
+  activeCitation,
 }) => {
   const s = useStyles();
+
+  // Resolve the active proposal citation over the reader's normalized text
+  // (body + folded attachment text) — the same surface the AI extraction ran
+  // over (task 054, NFR-11). Pure, memoized; never throws. `resolution` is null
+  // when no citation is active.
+  const referenceMap = React.useMemo(() => buildReaderReferenceMap({ body, attachments }), [body, attachments]);
+  const resolution = React.useMemo<QuotedCitationResolution | null>(
+    () => (activeCitation ? resolveQuotedCitation(activeCitation, referenceMap) : null),
+    [activeCitation, referenceMap]
+  );
+
+  // When the citation resolves into an ATTACHMENT, hand the fold its exact span
+  // (over the segment's normalized text) so it highlights inline.
+  const activeFold = React.useMemo<ActiveFoldHighlight | undefined>(() => {
+    if (!resolution || !resolution.located || resolution.kind !== 'attachment') return undefined;
+    const seg = referenceMap.segments.find(sg => sg.segmentId === resolution.segmentId);
+    if (!seg) return undefined;
+    return { attachmentId: resolution.segmentId, text: seg.text, start: resolution.start, end: resolution.end };
+  }, [resolution, referenceMap]);
 
   // The attachment-text fold — appended below the body in every content phase
   // (eml + fallback) so body + attachment text form one continuous reader
   // surface (task 053, NFR-11). Not rendered in the loading/record-error states.
   const folds =
     attachments && attachments.length > 0 ? (
-      <FoldedAttachments attachments={attachments} onOpenOriginal={onOpenOriginal} />
+      <FoldedAttachments attachments={attachments} onOpenOriginal={onOpenOriginal} activeFold={activeFold} />
     ) : null;
+
+  // The citation banner rendered ABOVE the body (task 054): a "cited passage"
+  // callout when the quote resolves into the BODY (the `.eml` iframe can't be
+  // highlighted in place, NFR-03 — so the exact passage is shown here), or a
+  // "source not locatable" note when a forged/absent quote can't be anchored
+  // (never a silent mis-navigation).
+  const citationBanner = (() => {
+    if (!resolution) return null;
+    if (!resolution.located) {
+      return (
+        <div className={s.notLocatable} role="status" data-testid="email-body-citation-not-locatable">
+          <Info16Regular className={s.notLocatableIcon} aria-hidden="true" />
+          <span>
+            Source not locatable — the cited text wasn&apos;t found in this email. Open the original to verify.
+          </span>
+        </div>
+      );
+    }
+    if (resolution.kind === 'body') {
+      const seg = referenceMap.segments.find(sg => sg.segmentId === resolution.segmentId);
+      if (!seg) return null;
+      return (
+        <div className={s.citationBanner} role="note" data-testid="email-body-citation-banner">
+          <span className={s.citationBannerLabel}>
+            <DocumentText16Regular aria-hidden="true" /> Cited passage
+          </span>
+          <HighlightedText text={seg.text} start={resolution.start} end={resolution.end} />
+        </div>
+      );
+    }
+    return null; // attachment-sourced → highlighted inline in its fold (activeFold).
+  })();
 
   const hasArchive = typeof emlDocumentId === 'string' && emlDocumentId.length > 0;
 
@@ -379,6 +484,7 @@ export const EmailBodyView: React.FC<EmailBodyViewProps> = ({
     // images already resolved to `data:` URIs server-side.
     return (
       <div className={s.root}>
+        {citationBanner}
         <iframe
           className={s.iframe}
           title="Email message"
@@ -396,6 +502,7 @@ export const EmailBodyView: React.FC<EmailBodyViewProps> = ({
   const safeHtml = sanitizeEmailHtml(body ?? '');
   return (
     <div className={s.root} data-testid="email-body-fallback">
+      {citationBanner}
       <div
         className={s.fallbackBody}
         data-testid="email-body-fallback-content"
