@@ -4,7 +4,7 @@
     <title>Widget registry + tabbed role-defaulted workspace + pinned Quick Start first tab + entitlement-gated widget library (/me-driven visibility)</title>
     <phase>P1 Workspace-shell foundation</phase>
     <gate>blocked-until:011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>NEW frontend surface (modifying/creating .tsx) that is the entitlement-honest routing core of the shell; entitlement gating is a security-adjacent invariant (unentitled widget neither shown nor routable); role-defaulting per persona.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -133,6 +133,28 @@
     tasks 015 (module framework) + 022 (/me endpoint). Register data widgets as placeholders with correct entitlement/role metadata;
     task 016 fills the outside-counsel widgets, and FR-23–27 land the workforce widgets/quick-starts later. Anchor visuals to the
     approved P0 prototype (widgetRegistry.tsx, WidgetLibraryModal.tsx, quickstart/).
+  </notes>
+
+  <notes phase="completion" date="2026-08-06">
+    Implemented: src/client/external-spa/src/api/me-client.ts (Plane + MeEntitlementsResponse contract, client-side
+    mock gated on the real teamsHost signal, dev-only ?dv_persona override); src/client/external-spa/src/registry/widgetRegistry.ts
+    (WIDGET_DEFINITIONS — 11 entries — + isEntitled/isWidgetEntitled/isEntitledToWidgetId/defaultWidgetIdsFor/libraryWidgetsFor/
+    getWidgetLazyComponent); src/client/external-spa/src/registry/PlaceholderWidgetBody.tsx (shared body every definition resolves
+    to, pending task 016+); src/client/external-spa/src/components/shell/WidgetLibraryModal.tsx (NEW, FormModal + ActionCard grid);
+    src/client/external-spa/src/components/shell/QuickStartPane.tsx (REWRITTEN — role-gated ActionCardRow + FormModal "More
+    Services", reuses widgetRegistry.isEntitled to avoid duplicate gating logic); src/client/external-spa/src/pages/WorkspaceHomePage.tsx
+    (REWRITTEN — fetches /me, seeds role-defaulted tabs behind the pinned Quick Start tab via onEntitledOpenWidget, the single
+    tab-open choke point); src/client/external-spa/src/App.tsx (1-line: thread teamsHost to WorkspaceHomePage).
+    Deviations from the literal descriptor shape in the goal ({id,title,icon,defaultForRoles,requiredEntitlement,lazyLoader}):
+    added `planes` (hard plane gate independent of the entitlement string) and `ariaLabel`/`description` (library-card display) —
+    both additive, not contradicting the authored shape. `npm run build:prod` does not exist for this Vite Code Page (confirmed
+    consistent with task 011's finding); verified instead with `npx tsc --noEmit` (clean, 0 errors) per the orchestrating session's
+    explicit instruction — full `npm run build` intentionally deferred to the orchestrating session's end-of-wave build.
+    Quality gates: code-review (self-invoked, FULL rigor) found one duplication (QuickStartPane's local isActionEntitled vs
+    widgetRegistry's isWidgetEntitled) — fixed by extracting the shared `isEntitled(me, EntitlementGate)` helper; no other
+    Critical/Warning findings. adr-check (self-invoked): zero hits for hardcoded hex, Fluent v8 imports, raw fetch/Authorization
+    headers, PublicClientApplication, or accessToken:string across all task-012 files — clean on ADR-021/050/028/022.
+    Full detail: notes/task-012-deviations.md.
   </notes>
 
   <execution>

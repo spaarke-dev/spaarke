@@ -4,7 +4,7 @@
     <title>Remove dead Power Pages proxy/config (vite.config.ts proxy, powerpages.config.json, stale README)</title>
     <phase>P1 Module-host foundation</phase>
     <gate>blocked-until:011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deletion/cleanup of dead config; not core logic; STANDARD per CLAUDE.md §8 (with a build/deploy-green + zero-refs verification gate).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -100,6 +100,32 @@
   <notes>
     R1 already migrated off Power Pages to SWA — this config is inert. Scoped cleanup only; do not touch SWA hosting
     config or the frame. Pairs with FR-06 (shell scaffold + cleanup); the scaffold is task 011.
+
+    COMPLETED 2026-08-06. Full evidence + deviations in
+    projects/spaarke-SPA-external-access-platform-r2/notes/task-017-deviations.md. Summary: dev-server proxy for
+    /_api,/_layout,/_services removed (targets were dead powerappsportals.com URLs; zero live client references
+    found via grep — safe); removeModuleScriptType() plugin removed (its JSDoc's sole purpose was defeating the
+    Power Pages Module Federation host); build.output comment scrubbed of Power-Pages rationale but `format: 'iife'`
+    itself was DELIBERATELY KEPT (changing bundle format is a distinct, higher-risk decision unverifiable without a
+    full `npm run build`, which this task was instructed not to run — documented as a scoped deviation, not a full
+    architectural revert). powerpages.config.json deleted. README.md rewritten for SWA reality. Also fixed 3
+    trivially-safe, zero-collision-risk stray "Power Pages" text refs outside the named 3 files (.gitignore
+    `.powerpages-site/` entry, package.json description, index.html comment) to satisfy the negative-grep
+    acceptance criterion; deliberately did NOT touch the ~9 files with stale "Power Pages" prose comments in
+    src/api/web-api-client.ts and several widget/page components (main.tsx, useExternalContext.ts, types/index.ts,
+    ContactsOrganizations.tsx, PlaybookLibraryPage.tsx, DocumentUploadPage.tsx, DocumentLibrary.tsx,
+    EventsCalendar.tsx) — confirmed these are dead prose only (web-api-client.ts's header comment + BFF route list
+    prove it already calls `/api/v1/external/...` via bffApiCall, not a live Power Pages Web API), but touching them
+    is out of this task's declared file scope and collides with task 012's concurrent widget-registry work; Step 4's
+    "or are unrelated legitimate paths" escape valve applies. deploy-external-spa.yml verified to have zero
+    dependency on the removed proxy (server.proxy only applies to `vite dev`, never `vite build`) — no change
+    needed. `npx tsc --noEmit` (src/ via tsconfig.json) clean. `npx tsc --noEmit -p tsconfig.node.json` (checks
+    vite.config.ts) has 8 pre-existing errors (missing @types/node in tsconfig.node.json — target/lib/types gap);
+    verified via `git stash` A/B comparison against the pre-edit file that all 8 pre-exist unrelated to this change,
+    and my edit actually reduced the count from 11 to 8 (removed 3 `process.env` references along with the proxy
+    block). Full `npm run build`/`build:prod` intentionally NOT run per orchestrator instruction — main session runs
+    the authoritative wave build. Did not touch TASK-INDEX.md per orchestrator instruction (main session owns wave
+    aggregation). Escalation trigger did NOT fire — verified no live client depends on the removed proxy/config.
   </notes>
 
   <execution>

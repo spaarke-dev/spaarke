@@ -1,7 +1,7 @@
 {
   "name": "@spaarke/secure-project-workspace",
   "version": "1.0.0",
-  "description": "Secure Project Workspace — Power Pages Code Page SPA for external user access to secure projects",
+  "description": "Secure Project Workspace — external access SPA (Azure Static Web Apps) for external user access to secure projects",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -139,7 +139,7 @@ const AppShell: React.FC<{
         <AuthGuard>
           <ErrorBoundary>
             <Routes>
-              <Route path="/" element={<WorkspaceHomePage />} />
+              <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
               <Route path="/project/:id" element={<ProjectPage />} />
               <Route path="/playbooks/:entityType/:entityId" element={<PlaybookLibraryPage />} />
               <Route path="/upload" element={<DocumentUploadPage />} />

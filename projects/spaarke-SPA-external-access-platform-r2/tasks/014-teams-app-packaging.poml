@@ -4,7 +4,7 @@
     <title>Teams personal-tab manifest + CSP frame-ancestors + Teams theme bridging</title>
     <phase>P1 Module-host foundation</phase>
     <gate>blocked-until:011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New-file creation (manifest, staticwebapp.config.json CSP) + theme-bridge wiring; not core .cs/auth logic; STANDARD per CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,4 +116,42 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
   </execution>
+
+  <notes>
+    Completed 2026-08-06. All three packaging surfaces (manifest, CSP frame-ancestors, Teams theme bridge)
+    were found ALREADY DELIVERED via inherited teams-app-r1 artifacts (`src/client/external-spa/appPackage/manifest.json`,
+    `staticwebapp.config.json`, `host/TeamsHostAdapter.ts`) — same SWA/Teams app, same Entra app `1e40baad-…`,
+    byte-exact CSP already present. Verified each against R2's acceptance criteria rather than re-authoring:
+    (1) CSP `frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft`, no `X-Frame-Options` —
+    confirmed exact, unchanged. (2) Teams dark-theme bridge — `TeamsHostAdapter.wireTheme()` already feeds
+    `setUserThemePreference()` into the shared `@spaarke/ui-components` cascade that `App.tsx` consumes; zero
+    hardcoded hex confirmed via repo-wide grep of `src/client/external-spa/src`. (3) Browser no-op — `main.tsx`'s
+    `detectTeamsHost()` race + `bootstrapStandalone()` branch confirmed unchanged/unaffected. (4) Manifest personal
+    tab + valid domains — confirmed present, `webApplicationInfo`/`validDomains`/`staticTabs` byte-exact (untouched,
+    since a mismatch silently breaks Teams SSO).
+
+    Only change made: updated `appPackage/manifest.json` `version` (1.0.0 → 1.1.0), `name.full`, and
+    `description.{short,full}` to reflect R2's broader "Legal Department Service Portal" workspace-shell framing
+    (was teams-app-r1's narrower "Spaarke Collaboration Workspace" copy) — same tab (`entityId`), same
+    `contentUrl`/`validDomains`/`webApplicationInfo`, text-only. `TeamsHostAdapter.ts` was NOT modified (hard
+    constraint — auth/theme-selection file; task 011 already threads `teamsHost` through it unchanged).
+
+    Deviation / discovered gap: filed **ISS-001** (`notes/defer-issues.md`, GitHub issue
+    https://github.com/spaarke-dev/spaarke/issues/744) — Teams high-contrast ('contrast') theme currently maps to
+    'dark' (not a dedicated `teamsHighContrastTheme`) because the SHARED `@spaarke/ui-components` theme cascade
+    (`ThemePreference` type + `resolveCodePageTheme`) has no third state wired in, despite ADR-021 listing
+    `teamsHighContrastTheme` as a MUST-supported Code Page state. Fixing this requires a cross-cutting shared-lib
+    change (blast radius = every PCF + Code Page) and touching `TeamsHostAdapter.ts`, both out of this task's
+    scope (task explicitly barred from modifying `TeamsHostAdapter.ts`). Recommended as a small dedicated follow-up.
+
+    Verification: `npx tsc --noEmit` clean (no TS files changed by this task); `node -e "JSON.parse(...)"` confirms
+    manifest.json valid JSON; `git diff` confirms the manifest edit touches ONLY `version`/`name.full`/`description`
+    — `id`/`developer`/`icons`/`accentColor`/`staticTabs`/`permissions`/`validDomains`/`webApplicationInfo` are
+    byte-exact unchanged. Quality gates (code-review + adr-check, FULL rigor override) both clean — no findings.
+    Full build (`npm run build`) intentionally NOT run per orchestrator instruction (main session runs the
+    authoritative wave build). TASK-INDEX.md intentionally NOT edited (main session aggregates wave status).
+
+    Acceptance criteria: all 4 met — (1) CSP exact ✅ (2) Teams dark renders via bridge, zero hardcoded hex ✅
+    (3) browser no-op unaffected ✅ (4) manifest personal tab + valid domains ✅.
+  </notes>
 </task>
