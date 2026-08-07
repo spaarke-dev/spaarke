@@ -4,7 +4,7 @@
     <title>Wire the fidelity harness into CI as a release gate</title>
     <phase>6 Round-trip fidelity harness (CI release gate)</phase>
     <gate>dep:060</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches the shared CI workflow (`.github/workflows/sdap-ci.yml`) — a hot-path skill/CI surface — and the change gates every release; TEST-MODIFYING-adjacent (wires the fidelity harness gate). FULL to run code-review + adr-check on the CI change.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -87,6 +87,7 @@
     <criterion testable="true">The change was coordinated with `ci-cd-unit-test-remediation-r1` and `/conflict-check` ran before the PR.</criterion>
   </acceptance-criteria>
 
+  <completion-note>COMPLETED 2026-08-07 (isolated-worktree agent; cherry-picked into 4745cf7bb->branch). Self-contained compose-fidelity-gate job appended EOF to sdap-ci.yml (existing jobs untouched - ci-cd-unit-test-remediation-r1 ownership honored): checkout lfs:true (PR #690 mechanism), setup-dotnet 8.x, dotnet test --filter FidelityGate (test red IS the gate; no continue-on-error), fidelity-gate-result.json artifact if:always(). YAML 9 jobs parses; exact gate command verified locally 11/11; artifact path verified. NOT verifiable locally: live Actions run (LFS smudge on hosted runner assumed per #690). NOTE: after #690 merges, build-test also executes FidelityGate (double-run) - dedicated job stays as the unswallowed release signal; dedup decision later.</completion-note>
   <notes>Spec FR-08 + Success Criterion 5 + ADR-049 amendment point 3; plan.md §5 Phase 6. Modify-only CI wiring (no new production surface → no §11 justification). Self-contained job only — CI-workflow ownership held by ci-cd-unit-test-remediation-r1.</notes>
 
   <execution>

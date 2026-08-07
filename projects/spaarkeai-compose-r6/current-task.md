@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | AGENT WAVE 2 IN FLIGHT: **exec-032** (apply-template endpoint + ComposeService.ApplyTemplateAsync + workspace affordance; design DECIDED: app-only Dataverse token at endpoint mirroring CommunicationTemplateEndpoints:95-110, document ops stay user-OBO; agent has full spec) + **exec-051** (AllDocuments version-history affordance). **061 CLOSED into branch** (cherry-pick 4745cf7bb → local; sdap-ci.yml compose-fidelity-gate job, YAML 9 jobs OK, gate cmd verified 11/11; aligned w/ PR #690 — note: after #690 merges, build-test ALSO runs FidelityGate → dedup decision for later). Wave-1 review APPROVED; fixes in ec69d6a79. |
-| **Next task** | On agent returns: cherry-pick commits, verify (build + Compose filter + client tsc baseline ~28), Step 9.5 review agent per FULL task (032 needs one; 051 needs one), close out 032/051/061 (POML+TASK-INDEX+notes; 061 still needs its close-out flip). Then 033 (provenance seam incl. imported-carrier slice per §21), 052. Branch ~41+ behind master — reconcile at next PR with /conflict-check. |
-| **Status** | 061 merged locally (not yet close-flipped); 032+051 agents running; pushing checkpoint |
-| **Next Action** | Triage agent returns as they land. |
+| **Task** | NONE ACTIVE — wave-2 (032+051+061) CLOSED at a1f005033 (suite 1104/1104; the only reds all day = the known flaky ComposeServiceCreateOnSaveTests class). Step 9.5 review agent for 032+051 IN FLIGHT — triage on return (fix-commit if needed), record in notes §23. |
+| **Next task** | **033 — part-merge provenance seam tests** (deps 030-032 ✅; MUST include an imported-carrier wire slice per §21) → then 052 (remaining Phase-5 client polish/picker if scoped), 040-042 (PDF intake), 090 wrap-up (needs 033/042/052/061✅). Also outstanding: D1-D7 fix-task scope approval; branch ~45 behind master (reconcile at next PR + /conflict-check; PR #690 fidelity-gate double-run dedup note). Phase 3 (030-033) is one task from done; Phases 5+6 DONE product-side. |
+| **Status** | Pushing close-out; review triage pending |
+| **Next Action** | On review return: triage + fix-commit + push. Then on "continue": task-execute 033 (Compose-serialized, main session or agent). |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are

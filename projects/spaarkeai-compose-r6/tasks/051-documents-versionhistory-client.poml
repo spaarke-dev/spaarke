@@ -4,7 +4,7 @@
     <title>Documents surface version-history entry point (AllDocuments)</title>
     <phase>5 Documents version-history open UX (read-only)</phase>
     <gate>dep:050</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend implementation modifying `.tsx` on a shared solution surface (`AllDocuments`), consuming a new authorization-bearing endpoint, with a new user-reachable entry point. CLAUDE.md §8 — code implementation + `.tsx` change + frontend tag → FULL; includes `&lt;ui-tests&gt;` with an ADR-021 dark-mode check.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -116,6 +116,7 @@
     <criterion testable="true">Solution build is green; ui-tests pass; `docxBridge.ts` is not deleted.</criterion>
   </acceptance-criteria>
 
+  <completion-note>COMPLETED 2026-08-07 (isolated-worktree agent; cherry-picked 032047723). AllDocuments row-level version-history affordance (HistoryRegular button when sprk_graphdriveid+sprk_graphitemid present) -> SprkModal sm version list (label/timestamp/size, Current badge) -> open prior version READ-ONLY (exact bytes; viewable types new-tab, others download labeled read-only) via @spaarke/auth authenticatedFetch to the 050 OBO endpoints ONLY; honest no-restore copy + read-only banner; theme tokens only. NEW jest infra for AllDocuments (WorkspaceLayoutWizard config precedent) - 4/4 incl. dark-mode + negative-path (never /containers/). Build green (2089 kB). Deviations: no in-app docx renderer (download carries read-only honesty); browser ui-tests not executable in env (jest light/dark render instead). FR-07 / Success Criterion 4 now product-complete pending 002 live-tenant gate. Step 9.5 review agent launched on the merged SHAs.</completion-note>
   <notes>Spec FR-07 + Success Criterion 4; plan.md §5 Phase 5. NEW client entry point → §11 justification emitted. Depends on task 050's OBO endpoint contract. View/open read-only only — no restore/branch UX. frontend tag → ui-tests incl. ADR-021 dark-mode.</notes>
 
   <execution>
