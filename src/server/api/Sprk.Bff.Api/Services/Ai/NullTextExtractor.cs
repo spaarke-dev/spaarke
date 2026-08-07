@@ -56,6 +56,18 @@ public sealed class NullTextExtractor : ITextExtractor
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
+    public Task<LayoutExtractionResult> ExtractLayoutAsync(
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        // Task 040: explicit override of the interface default — same P3 Fail-Fast posture as the
+        // flat-text methods (a silent Failed result would mislead the caller into a "document has no
+        // layout" path; the truth is the kill switch is off).
+        LogDisabled(nameof(ExtractLayoutAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
     public bool IsSupported(string extension) => false;
 
     public ExtractionMethod? GetMethod(string extension) => null;

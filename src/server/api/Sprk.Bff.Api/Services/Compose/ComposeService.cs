@@ -170,6 +170,14 @@ public class ComposeService : IComposeService
     // Optional + defaults to a fresh instance (stateless, thread-safe) so existing test constructors
     // compile unchanged; DI resolves the registered singleton in every host (ComposeModule.cs).
     private readonly ComposeTemplatePartMergeEngine _partMergeEngine;
+    // Task 040 (spaarkeai-compose-r6, FR-06): the PublicContracts PDF-intake facade (ADR-013 — Compose
+    // consumes the facade, never Services/Ai internals) + the pure DocumentLayout→canonical-model
+    // projector. The facade is optional + defaults null (bare test ctor / compound-OFF hosts resolve the
+    // NullComposePdfIntakeSource peer via DI); null here means a PDF load fails LOUDLY with a clear
+    // "PDF intake unavailable" message — never a silent empty mount. The projector mirrors the
+    // _patchEngine idiom (stateless singleton-shaped; fresh instance ≡ DI-registered one).
+    private readonly Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource? _pdfIntakeSource;
+    private readonly ComposePdfModelProjector _pdfModelProjector;
     // FR-08 (task 050): the raw distributed cache handle for the save-path version stamp (Redis, ADR-009 —
     // NOT IMemoryCache). Optional + defaults null so existing test constructors keep compiling; DI resolves
     // the real IDistributedCache (AddStackExchangeRedisCache) in every non-test host. Null in a bare test
@@ -199,7 +207,9 @@ public class ComposeService : IComposeService
         DocxAnnotationReader? annotationReader = null,
         ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
         ComposeDocxProjectionBuilder? projectionBuilder = null,
-        ComposeTemplatePartMergeEngine? partMergeEngine = null)
+        ComposeTemplatePartMergeEngine? partMergeEngine = null,
+        Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource? pdfIntakeSource = null,
+        ComposePdfModelProjector? pdfModelProjector = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -219,6 +229,10 @@ public class ComposeService : IComposeService
         // Task 032 (FR-05): mirrors the _patchEngine idiom — stateless singleton-shaped, so a fresh
         // instance is functionally identical to the DI-registered one.
         _partMergeEngine = partMergeEngine ?? new ComposeTemplatePartMergeEngine();
+        // Task 040 (FR-06): facade stays null in a bare test ctor (PDF loads then fail loudly);
+        // the projector mirrors the stateless-singleton idiom above.
+        _pdfIntakeSource = pdfIntakeSource;
+        _pdfModelProjector = pdfModelProjector ?? new ComposePdfModelProjector();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // FR-08 (task 050): ADR-009 Redis when present in every non-test host, null (no staleness
@@ -422,6 +436,27 @@ public class ComposeService : IComposeService
             content = buffer.ToArray();
         }
 
+        // Task 040 (spaarkeai-compose-r6, FR-06 — PDF intake): a PDF source projects through the SAME
+        // canonical hub as docx, then IS a docx from here on. Detection is extension OR magic-bytes
+        // (a mis-named file lands on the branch its BYTES belong to). The branch: PublicContracts
+        // intake facade (Azure DI prebuilt-layout via the existing parse stack — ADR-013, no
+        // Services/Ai fork) → ComposePdfModelProjector (DocumentLayout → ComposeContentModel, counted
+        // pdf-intake-* degradations, never a construct hard-fail) → SynthesizeDocument (the ONE
+        // renderer) → the synthesized .docx replaces `content`, and the ENTIRE existing pipeline below
+        // (paraId mint, HTML projection, canonical re-projection, annotation read) runs UNCHANGED —
+        // "PDF projects into the same model docx projects into" holds by construction. Unavailability
+        // (compound gate OFF / parse failure / nothing projectable) throws a CLEAR message — never a
+        // silent empty mount over a non-empty PDF (honest-lossiness principle).
+        IReadOnlyList<ComposeProjectionWarning>? pdfIntakeWarnings = null;
+        string? sourceFormat = null;
+        if (IsPdfSource(metadata.Name, content.Span))
+        {
+            sourceFormat = "pdf";
+            (content, pdfIntakeWarnings) = await ProjectPdfToDocxAsync(
+                    content, metadata.Name ?? request.DocumentSpeId, request.DriveId, request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         // FR-01 (task 010, ingest — design §5, I-1/I-3): mint + PERSIST a w14:paraId into the retained
         // package's DOM for every editable paragraph that lacks one — durable across a load → save →
         // reload round-trip, not merely carried in the projection map below. Idempotent
@@ -469,6 +504,16 @@ public class ComposeService : IComposeService
         var contentModelWarnings = contentModel is not null && canonicalProjection.Warnings.Count > 0
             ? canonicalProjection.Warnings
             : null;
+        // Task 040 (FR-06): the PDF intake's counted degradations ride WITH the model warnings —
+        // intake facts first (source-level: fixed-layout reflow, page chrome, list/table
+        // approximation), then whatever the synthesized-docx re-projection added. Same client
+        // surface as the docx flatten warnings (the 041 honest-lossiness banner reads these).
+        if (pdfIntakeWarnings is { Count: > 0 } && contentModel is not null)
+        {
+            contentModelWarnings = contentModelWarnings is null
+                ? pdfIntakeWarnings
+                : pdfIntakeWarnings.Concat(contentModelWarnings).ToList();
+        }
         if (canonicalProjection.Status == ComposeProjectionStatus.Failed)
         {
             _logger.LogWarning(
@@ -674,7 +719,78 @@ public class ComposeService : IComposeService
             ContentModel = contentModel,
             ContentModelWarnings = contentModelWarnings,
             Origin = origin,
+            SourceFormat = sourceFormat,
         };
+    }
+
+    /// <summary>
+    /// Task 040 (FR-06): PDF source detection — file extension OR the <c>%PDF-</c> magic bytes, so a
+    /// mis-named file lands on the branch its bytes belong to (a docx named <c>.pdf</c> still parses:
+    /// Azure DI's layout model accepts Office documents; a PDF named <c>.docx</c> would otherwise
+    /// fail-closed on the OOXML projection).
+    /// </summary>
+    private static bool IsPdfSource(string? fileName, ReadOnlySpan<byte> content)
+    {
+        if (fileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return true;
+        }
+
+        return content.Length >= 5
+            && content[0] == (byte)'%' && content[1] == (byte)'P' && content[2] == (byte)'D'
+            && content[3] == (byte)'F' && content[4] == (byte)'-';
+    }
+
+    /// <summary>
+    /// Task 040 (FR-06): the PDF → canonical model → synthesized-docx intake leg. Throws
+    /// <see cref="InvalidOperationException"/> with a clear, user-presentable reason on
+    /// unavailability/failure — the Compose load endpoint surfaces it as a ProblemDetails failure,
+    /// never a silent empty mount. Counts-only logging (privacy — no document text).
+    /// </summary>
+    private async Task<(ReadOnlyMemory<byte> DocxBytes, IReadOnlyList<ComposeProjectionWarning> IntakeWarnings)> ProjectPdfToDocxAsync(
+        ReadOnlyMemory<byte> pdfBytes,
+        string fileName,
+        string driveId,
+        string documentSpeId,
+        CancellationToken cancellationToken)
+    {
+        if (_pdfIntakeSource is null)
+        {
+            throw new InvalidOperationException(
+                "PDF intake is unavailable: AI document parsing is disabled on this host " +
+                "(Analysis:Enabled + DocumentIntelligence:Enabled required).");
+        }
+
+        var layout = await _pdfIntakeSource.ParseAsync(pdfBytes.ToArray(), fileName, cancellationToken)
+            .ConfigureAwait(false);
+        if (layout is null)
+        {
+            throw new InvalidOperationException(
+                $"PDF intake failed: the document layout could not be extracted from '{fileName}'. " +
+                "The file may be corrupt or the document-parsing service is unavailable.");
+        }
+
+        var projection = _pdfModelProjector.Project(layout);
+        if (projection.Status == ComposeProjectionStatus.Failed)
+        {
+            // The projector's only Failed outcome is "nothing projectable" — mounting an empty
+            // editor over a non-empty PDF would be a silent lie (projection contract).
+            throw new InvalidOperationException(
+                $"PDF intake failed: no editable content could be projected from '{fileName}'.");
+        }
+
+        // Render the model through the ONE renderer (render-on-save hub) — the synthesized docx is a
+        // first-class imported carrier for everything downstream (paraIds minted by the renderer).
+        var intakeWarnings = new List<ComposeProjectionWarning>(projection.Warnings);
+        var docxBytes = _documentRenderer.SynthesizeDocument(projection.Model, author: "Spaarke Compose", intakeWarnings);
+
+        _logger.LogInformation(
+            "Compose load: PDF intake projected drive={DriveId} item={DocumentSpeId} into the canonical model " +
+            "({Pages} source pages, {Blocks} blocks); degradations={Warnings}",
+            driveId, documentSpeId, layout.PageCount, projection.Model.Blocks.Count,
+            string.Join(",", intakeWarnings.Select(w => $"{w.Code}:{w.Count}")));
+
+        return (docxBytes, intakeWarnings);
     }
 
     /// <summary>

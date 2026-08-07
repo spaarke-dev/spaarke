@@ -592,6 +592,17 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     /// (NFR-02 — no SPE-id/content inference).
     /// </summary>
     public ComposeOrigin? Origin { get; init; }
+
+    /// <summary>
+    /// Task 040 (spaarkeai-compose-r6, FR-06 — PDF intake): the SOURCE format the load projected from
+    /// when it was not a native <c>.docx</c>. <c>"pdf"</c> = the document was a PDF and
+    /// <see cref="Content"/> is the docx SYNTHESIZED from its canonical-model projection (the PDF
+    /// itself is untouched in SPE); null = native docx load (the overwhelmingly common case —
+    /// existing clients are byte-unchanged). The client (task 041) keys the honest-lossiness UX and
+    /// the save-as-docx flow off this marker; the intake's counted degradations ride in
+    /// <see cref="ContentModelWarnings"/> (<c>pdf-intake-*</c> codes). ADDITIVE (ADR-040).
+    /// </summary>
+    public string? SourceFormat { get; init; }
 }
 
 /// <summary>

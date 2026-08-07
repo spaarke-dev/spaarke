@@ -908,6 +908,249 @@ public class TextExtractorService : ITextExtractor
     }
 
     /// <summary>
+    /// Task 040 (spaarkeai-compose-r6, FR-06): STRUCTURED layout extraction — the structured twin of
+    /// <see cref="ExtractViaDocIntelAsync"/>. Calls Azure Document Intelligence <c>prebuilt-layout</c>
+    /// (the model <see cref="SemanticDocumentChunker"/> already documents as the layout source) and maps
+    /// the result to the neutral <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentLayout"/>
+    /// contract: paragraphs-with-roles + tables interleaved in span order, with table-cell paragraphs
+    /// deduplicated into their table (the layout model reports cell content BOTH as paragraphs and as
+    /// table cells). Shares the flat-text path's configuration, size limit, timeout, and circuit
+    /// breaker; never throws — failures return <see cref="LayoutExtractionResult.Failed"/>.
+    /// </summary>
+    public async Task<LayoutExtractionResult> ExtractLayoutAsync(
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrEmpty(_options.DocIntelEndpoint) || string.IsNullOrEmpty(_options.DocIntelKey))
+        {
+            _logger.LogWarning(
+                "Document Intelligence not configured. Cannot extract layout from {FileName}.", fileName);
+            return LayoutExtractionResult.Failed(
+                "Document Intelligence is not configured. Structured layout extraction is unavailable.");
+        }
+
+        if (_docIntelCircuitBreaker.CircuitState == Polly.CircuitBreaker.CircuitState.Open)
+        {
+            _logger.LogWarning(
+                "Document Intelligence circuit breaker is OPEN. Skipping layout extraction for {FileName}",
+                fileName);
+            return LayoutExtractionResult.Failed(
+                "Document layout extraction is temporarily unavailable due to repeated service failures. Please try again in a few minutes.");
+        }
+
+        if (fileStream.CanSeek && fileStream.Length > _options.MaxFileSizeBytes)
+        {
+            var sizeMb = fileStream.Length / (1024.0 * 1024.0);
+            var maxMb = _options.MaxFileSizeBytes / (1024.0 * 1024.0);
+            return LayoutExtractionResult.Failed(
+                $"File size ({sizeMb:F1}MB) exceeds maximum allowed ({maxMb:F1}MB).");
+        }
+
+        try
+        {
+            return await _docIntelCircuitBreaker.ExecuteAsync(
+                async ct => await ExtractLayoutCoreAsync(fileStream, fileName, ct),
+                cancellationToken);
+        }
+        catch (BrokenCircuitException)
+        {
+            _logger.LogWarning(
+                "Document Intelligence circuit breaker rejected layout request for {FileName}", fileName);
+            return LayoutExtractionResult.Failed(
+                "Document layout extraction is temporarily unavailable due to repeated service failures. Please try again in a few minutes.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Document Intelligence layout extraction timed out after {Timeout}s for {FileName}",
+                _options.DocIntelTimeoutSeconds, fileName);
+            _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.DocumentIntelligence);
+            return LayoutExtractionResult.Failed(
+                $"Document layout extraction took too long (exceeded {_options.DocIntelTimeoutSeconds}s timeout). Please try again later.");
+        }
+        catch (RequestFailedException ex)
+        {
+            // 400s already returned Failed inside the core; anything reaching here was rethrown for
+            // circuit-breaker tracking — surface as a Failed result (this path never throws).
+            _logger.LogError(ex, "Document Intelligence layout API error for {FileName}: {Status} {Code}",
+                fileName, ex.Status, ex.ErrorCode);
+            return LayoutExtractionResult.Failed(
+                "Document Intelligence could not analyze the document layout. Please try again later.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract layout from {FileName} using Document Intelligence", fileName);
+            return LayoutExtractionResult.Failed(
+                $"Failed to extract document layout: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Core layout call — runs inside the shared circuit breaker (failures recorded/rethrown exactly
+    /// like <see cref="ExtractViaDocIntelCoreAsync"/> so both paths trip the same breaker).
+    /// </summary>
+    private async Task<LayoutExtractionResult> ExtractLayoutCoreAsync(
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            _logger.LogDebug(
+                "Starting Document Intelligence layout extraction for {FileName} (timeout: {Timeout}s)",
+                fileName, _options.DocIntelTimeoutSeconds);
+
+            var credential = new AzureKeyCredential(_options.DocIntelKey!);
+            var client = new DocumentIntelligenceClient(new Uri(_options.DocIntelEndpoint!), credential);
+
+            using var memoryStream = new MemoryStream();
+            await fileStream.CopyToAsync(memoryStream, cancellationToken);
+            var binaryData = BinaryData.FromBytes(memoryStream.ToArray());
+
+            using var timeoutCts = new CancellationTokenSource(
+                TimeSpan.FromSeconds(_options.DocIntelTimeoutSeconds));
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                cancellationToken, timeoutCts.Token);
+
+            var operation = await client.AnalyzeDocumentAsync(
+                WaitUntil.Completed,
+                "prebuilt-layout",
+                binaryData,
+                cancellationToken: linkedCts.Token);
+
+            var result = operation.Value;
+            _circuitRegistry?.RecordSuccess(CircuitBreakerRegistry.DocumentIntelligence);
+
+            var layout = MapAnalyzeResultToLayout(result);
+            _logger.LogInformation(
+                "Successfully extracted layout from {FileName}: {Pages} pages, {Blocks} blocks",
+                fileName, layout.PageCount, layout.Blocks.Count);
+
+            return LayoutExtractionResult.Succeeded(layout);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Document Intelligence layout extraction timed out after {Timeout}s for {FileName}",
+                _options.DocIntelTimeoutSeconds, fileName);
+            _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.DocumentIntelligence);
+            throw;
+        }
+        catch (RequestFailedException ex) when (ex.Status == 400)
+        {
+            // Client-side (bad document) — don't count toward circuit breaker.
+            _logger.LogWarning(ex,
+                "Document Intelligence could not process layout for {FileName} - invalid or unsupported format",
+                fileName);
+            return LayoutExtractionResult.Failed(
+                "The document format is invalid or unsupported by Document Intelligence.");
+        }
+        catch (RequestFailedException ex)
+        {
+            _logger.LogError(ex, "Document Intelligence layout API error for {FileName}: {Status} {Code}",
+                fileName, ex.Status, ex.ErrorCode);
+            _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.DocumentIntelligence);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to extract layout from {FileName} using Document Intelligence", fileName);
+            _circuitRegistry?.RecordFailure(CircuitBreakerRegistry.DocumentIntelligence);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Maps an Azure DI <c>prebuilt-layout</c> <see cref="AnalyzeResult"/> to the neutral
+    /// <see cref="Services.Ai.PublicContracts.DocumentLayout"/> contract. Document order is
+    /// reconstructed by span offset; paragraphs whose spans fall inside a table's spans are the
+    /// table's own cell content and are NOT emitted as loose paragraphs (the layout model reports
+    /// them twice).
+    /// </summary>
+    internal static Services.Ai.PublicContracts.DocumentLayout MapAnalyzeResultToLayout(AnalyzeResult result)
+    {
+        var pageCount = result.Pages?.Count ?? 0;
+
+        // Table span ranges (a table may carry multiple spans) — used to dedupe cell paragraphs.
+        var tables = result.Tables ?? (IReadOnlyList<DocumentTable>)Array.Empty<DocumentTable>();
+        var tableRanges = tables
+            .SelectMany(t => t.Spans ?? (IReadOnlyList<DocumentSpan>)Array.Empty<DocumentSpan>())
+            .Select(s => (Start: s.Offset, End: s.Offset + s.Length))
+            .ToList();
+
+        // Ordered emission list: (offset, block).
+        var ordered = new List<(int Offset, Services.Ai.PublicContracts.DocumentLayoutBlock Block)>();
+
+        var paragraphs = result.Paragraphs ?? (IReadOnlyList<DocumentParagraph>)Array.Empty<DocumentParagraph>();
+        foreach (var paragraph in paragraphs)
+        {
+            var text = paragraph.Content?.Trim() ?? string.Empty;
+            if (text.Length == 0)
+            {
+                continue;
+            }
+
+            var offset = paragraph.Spans is { Count: > 0 } spans ? spans[0].Offset : int.MaxValue;
+            if (tableRanges.Any(r => offset >= r.Start && offset < r.End))
+            {
+                continue; // table-cell content — carried by the table block below
+            }
+
+            ordered.Add((offset, new Services.Ai.PublicContracts.DocumentLayoutBlock
+            {
+                Paragraph = new Services.Ai.PublicContracts.DocumentLayoutParagraph(
+                    text,
+                    MapParagraphRole(paragraph.Role?.ToString()),
+                    paragraph.BoundingRegions is { Count: > 0 } regions ? regions[0].PageNumber : 0),
+            }));
+        }
+
+        foreach (var table in tables)
+        {
+            var cells = (table.Cells ?? (IReadOnlyList<DocumentTableCell>)Array.Empty<DocumentTableCell>())
+                .Select(c => new Services.Ai.PublicContracts.DocumentLayoutTableCell(
+                    RowIndex: c.RowIndex,
+                    ColumnIndex: c.ColumnIndex,
+                    RowSpan: Math.Max(1, c.RowSpan.GetValueOrDefault(1)),
+                    ColumnSpan: Math.Max(1, c.ColumnSpan.GetValueOrDefault(1)),
+                    Text: c.Content?.Trim() ?? string.Empty,
+                    IsHeader: c.Kind is not null &&
+                              (c.Kind == DocumentTableCellKind.ColumnHeader || c.Kind == DocumentTableCellKind.RowHeader)))
+                .ToList();
+
+            var offset = table.Spans is { Count: > 0 } spans ? spans[0].Offset : int.MaxValue;
+            ordered.Add((offset, new Services.Ai.PublicContracts.DocumentLayoutBlock
+            {
+                Table = new Services.Ai.PublicContracts.DocumentLayoutTable(
+                    RowCount: table.RowCount,
+                    ColumnCount: table.ColumnCount,
+                    Cells: cells,
+                    PageNumber: table.BoundingRegions is { Count: > 0 } regions ? regions[0].PageNumber : 0),
+            }));
+        }
+
+        return new Services.Ai.PublicContracts.DocumentLayout
+        {
+            PageCount = pageCount,
+            Blocks = ordered.OrderBy(e => e.Offset).Select(e => e.Block).ToList(),
+        };
+    }
+
+    private static Services.Ai.PublicContracts.DocumentLayoutParagraphRole MapParagraphRole(string? role)
+        => role?.ToLowerInvariant() switch
+        {
+            "title" => Services.Ai.PublicContracts.DocumentLayoutParagraphRole.Title,
+            "sectionheading" => Services.Ai.PublicContracts.DocumentLayoutParagraphRole.SectionHeading,
+            "pageheader" => Services.Ai.PublicContracts.DocumentLayoutParagraphRole.PageHeader,
+            "pagefooter" => Services.Ai.PublicContracts.DocumentLayoutParagraphRole.PageFooter,
+            "pagenumber" => Services.Ai.PublicContracts.DocumentLayoutParagraphRole.PageNumber,
+            "footnote" => Services.Ai.PublicContracts.DocumentLayoutParagraphRole.Footnote,
+            "formulablock" => Services.Ai.PublicContracts.DocumentLayoutParagraphRole.Formula,
+            _ => Services.Ai.PublicContracts.DocumentLayoutParagraphRole.Body,
+        };
+
+    /// <summary>
     /// Check if a file extension is supported for extraction.
     /// </summary>
     public bool IsSupported(string extension)
