@@ -1,16 +1,16 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-07 (parallel wave 031+050+060 closed; review triage pending; next 032)
+> **Last Updated**: 2026-08-07 (032 starting; agents 051+061+wave-review in flight)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary pending wave review triage. **PARALLEL WAVE 031+050+060 COMPLETE** (031 main-session 5c162e37b; 060 agent 4cb67b286; 050 agent cherry-picked at HEAD). Merged suite 1094/1094. Step 9.5 wave review agent IN FLIGHT — triage its findings on return, fix-commit if needed. Records: POML completion-notes + notes §22 + notes/050-obo-version-endpoint.md. |
-| **Next task** | **032 — part-merge endpoint + client wiring** (deps 030 ✅ + 031 ✅) → 033 (provenance seam incl. imported-carrier slice). Also unblocked: 051 (version-history client entry, dep 050 ✅), 061 (CI gate wiring, dep 060 ✅ — consumes fidelity-gate-result.json; coordinate LFS with PR #690). Branch is 41 behind master (routine — merge at next PR). D1-D7 fix tasks still awaiting operator scope approval. |
-| **Status** | Wave closed except review triage; pushing |
-| **Next Action** | When the wave review agent reports: triage findings → fix commit if warranted → push. Then on "continue": task-execute 032 (Compose-serialized, main session; 051/061 are parallel-eligible agent candidates). |
+| **Task** | **032 — part-merge endpoint + client wiring** (FULL/opus, main session) STARTING: server half = POST template-merge endpoint in Api/ComposeEndpoints.cs invoking IComposeTemplateSource (031 facade) + ComposeTemplatePartMergeEngine (030) + persist via the EXISTING save path; client half = template-select + apply affordance in ComposeWorkspace.tsx (theme tokens, ADR-021). |
+| **Next task** | IN-FLIGHT PARALLEL: exec-051 agent (AllDocuments version-history affordance, isolated worktree), exec-061 agent (sdap-ci.yml self-contained fidelity-gate job, isolated worktree; aligns with PR #690 LFS approach), PLUS the wave-3150 Step 9.5 review agent (031+050+060 commits) — triage its findings on return. After 032: 033 (provenance seam incl. imported-carrier slice per §21). Branch ~41 behind master (reconcile at next PR). |
+| **Status** | 032 starting; three agents in flight |
+| **Next Action** | Implement 032 server endpoint → commit → client affordance → commit → Step 9.5 → close out. On agent returns: cherry-pick their commits (051/061), triage wave review findings. |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are
