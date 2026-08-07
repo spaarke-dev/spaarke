@@ -1056,6 +1056,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // server-log-only) — retained and folded into saveDegradationWarnings on the FIRST
           // model-path save, where the loss they describe materializes.
           contentModelWarnings?: Array<{ code: string; count: number }> | null;
+          // Task 041 (FR-06, PDF intake): 'pdf' = `content` is the docx SYNTHESIZED server-side from
+          // the PDF's canonical-model projection (task 040). Parsed defensively (older BFF omits it).
+          sourceFormat?: string | null;
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -1103,6 +1106,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
           // G1 (FR-01, task 020): normalize undefined (older BFF / Path B continuation) to `null`.
           origin: payload.origin ?? null,
+          // Task 041 (FR-06, PDF intake): the source-format marker + a client-minted transient dedup
+          // key for the PDF's create-on-save routing (repeated saves of this session dedup to ONE new
+          // docx record — the G7 mechanism, reused). Only PDF-sourced loads carry either.
+          sourceFormat: payload.sourceFormat === 'pdf' ? 'pdf' : null,
+          transientKey: payload.sourceFormat === 'pdf' ? mintTransientKey() : undefined,
         });
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -1345,10 +1353,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // minted so the fork gets its OWN dedup identity, and `forkNew` tells the server to SKIP the
       // transient-key dedup lookup for this call (a deliberate new document, not a new version).
       const forkNew = saveMode === 'new';
+      // Task 041 (FR-06, PDF intake): a PDF-sourced doc (the mounted docx was SYNTHESIZED from a PDF,
+      // task 040) must NEVER take the replace path — that would write docx bytes onto the `.pdf`
+      // drive-item. EVERY save while sourceFormat==='pdf' routes create-on-save (a NEW Word document;
+      // the original PDF stays untouched — the honest "saves as a docx version" contract), with the
+      // load-minted documentRef.transientKey deduping repeated saves onto ONE new record (G7). On
+      // success, saveSucceeded re-targets documentRef to the new docx identity + clears sourceFormat,
+      // so subsequent saves take the normal replace path.
+      const pdfSourced = state.sourceFormat === 'pdf';
       // FR-05 (task 100): a TRANSIENT (Browse/Upload) draft has NO SPE drive-item — it persists via
       // create-on-save into the client-resolved BU container, not the replace path. Branch on the
       // absence of a real speDriveItemId (mountTransient sets it to ''), OR on a deliberate Save-New fork.
-      const isTransientCreate = forkNew || !state.documentRef.speDriveItemId;
+      const isTransientCreate = forkNew || !state.documentRef.speDriveItemId || pdfSourced;
       // G7: the dedup key to send on a create-on-save. A fork mints a fresh key (its own identity going
       // forward); a normal transient save reuses the mount-time key so repeated saves dedup to ONE record.
       const effectiveTransientKey = forkNew ? mintTransientKey() : state.documentRef.transientKey;
@@ -1523,7 +1539,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             containerId: saveContainerId,
             tenantId,
             sessionId: state.sessionId,
-            displayName: state.documentRef.fileName ?? null,
+            // Task 041 (FR-06): a PDF-sourced create-on-save names the NEW document as Word — swap
+            // the .pdf extension for .docx (the saved bytes ARE docx; a ".pdf"-named docx would
+            // mislead every downstream consumer). Non-PDF creates keep the existing name verbatim.
+            displayName: pdfSourced
+              ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
+              : (state.documentRef.fileName ?? null),
             transientKey: effectiveTransientKey,
             forkNew,
           };
@@ -3622,6 +3643,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           {/* Banner stack — errors / warnings / checkout status / assistant pending */}
           <ComposeBannerStack
             errorMessage={state.errorMessage}
+            // Task 041 (FR-06, PDF intake): the honest-lossiness notice while the mounted doc is
+            // PDF-sourced; cleared by the reducer after the first successful save (new docx identity).
+            pdfSourceNotice={state.sourceFormat === 'pdf'}
             // UAT #10/#11 (task 052): when the save failed with a Word co-authoring lock (423), show the
             // honest "Open in Word" bar with Retry (re-run the save once Word is closed) + Reload-from-Word
             // (pull Word's latest version as the new baseline). No fake "Unlock" — none exists.

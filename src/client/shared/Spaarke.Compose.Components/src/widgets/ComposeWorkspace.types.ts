@@ -197,6 +197,16 @@ export interface ComposeWorkspaceState {
    */
   loadedContentModelWarnings: Array<{ code: string; count: number }> | null;
   /**
+   * Task 041 (spaarkeai-compose-r6, FR-06 — PDF intake): the load's source format. `'pdf'` = the
+   * mounted docx was SYNTHESIZED server-side from a PDF's canonical-model projection (task 040;
+   * the original PDF is untouched in SPE). Drives (a) the honest-lossiness notice banner and (b)
+   * the save routing: while `'pdf'`, EVERY save takes the create-on-save path with a `.docx`
+   * display name — a new Word document, never docx bytes replaced onto the `.pdf` item. Cleared
+   * to null by `saveSucceeded` (the doc is re-targeted to its new docx identity) and by every
+   * fresh mount. Null = native docx (the overwhelmingly common case — behavior unchanged).
+   */
+  sourceFormat: string | null;
+  /**
    * 026-F5 (task 012, r6): SAVE-time degradation warnings — content the server (and/or the client
    * imported-model mapper) simplified/dropped while authoring the LAST successful save. A SEPARATE
    * warning family from `importWarnings` (load-time import fidelity): the workspace suppresses the
@@ -291,6 +301,13 @@ export type ComposeWorkspaceAction =
       // response — folded into saveDegradationWarnings on the first model-path save. Undefined/null
       // (older BFF / no loss) → null.
       contentModelWarnings?: Array<{ code: string; count: number }> | null;
+      // Task 041 (FR-06, PDF intake): the Load response's sourceFormat marker ('pdf' = the mounted
+      // docx was synthesized from a PDF). Undefined/null (older BFF / native docx) → null.
+      sourceFormat?: string | null;
+      // Task 041 (FR-06): a client-minted transient dedup key, supplied ONLY on a PDF-sourced load —
+      // carried onto documentRef.transientKey so the PDF's repeated create-on-saves dedup to ONE new
+      // docx record (the G7 mechanism, reused).
+      transientKey?: string;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -419,6 +436,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   projection: null,
   loadedContentModel: null,
   loadedContentModelWarnings: null,
+  sourceFormat: null,
   saveDegradationWarnings: null,
   errorMessage: null,
   saveErrorIsLock: false,
@@ -477,11 +495,17 @@ export function composeWorkspaceReducer(
         // G1 (FR-01, task 020): normalize an omitted/undefined field (Path B continuation, or an
         // older BFF) to `null` — the BINDING null-handling contract treats null as 'imported'.
         origin: action.origin ?? null,
+        // Task 041 (FR-06, PDF intake): 'pdf' = the mounted docx was synthesized from a PDF —
+        // drives the honest-lossiness notice + the create-on-save routing. Omitted → null.
+        sourceFormat: action.sourceFormat ?? null,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
               sprkDocumentId: action.sprkDocumentId ?? state.documentRef.sprkDocumentId,
               fileName: action.fileName ?? state.documentRef.fileName,
+              // Task 041: the PDF dedup key (supplied only on PDF-sourced loads) — repeated saves
+              // of the same PDF session create-on-save onto ONE new docx record (G7 mechanism).
+              transientKey: action.transientKey ?? state.documentRef.transientKey,
             }
           : state.documentRef,
         errorMessage: null,
@@ -552,6 +576,8 @@ export function composeWorkspaceReducer(
         loadedContentModel: action.contentModel ?? null,
         // task 013 (r6, F7): same lifecycle as the model — set from this mount's response or cleared.
         loadedContentModelWarnings: action.contentModelWarnings ?? null,
+        // Task 041 (FR-06): a transient mount is not a PDF-sourced load — clear rather than inherit.
+        sourceFormat: null,
         // 026-F5 (task 012, r6): a fresh mount has no save history — clear any stale save-warning
         // banner from a prior document mounted in this same tab.
         saveDegradationWarnings: null,
@@ -598,6 +624,8 @@ export function composeWorkspaceReducer(
         loadedContentModel: null,
         // task 013 (r6, F7): no projection ran for this mount — nothing was flattened.
         loadedContentModelWarnings: null,
+        // Task 041 (FR-06): a born-in-editor seed is not a PDF-sourced load — clear rather than inherit.
+        sourceFormat: null,
         // 026-F5 (task 012, r6): clear any stale save-warning banner from a prior mount (same
         // clear-rather-than-inherit rationale as mountTransient).
         saveDegradationWarnings: null,
@@ -628,7 +656,14 @@ export function composeWorkspaceReducer(
         //   the LOAD-TIME original (set on loadSucceeded) and MUST stay fixed across saves so
         //   every save is a delta vs the load-time original (FR-01). Advancing it each save would
         //   re-baseline onto the just-saved version and corrupt the tracked-change accumulation.
-        versionId: state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null),
+        //   Task 041 (FR-06, PDF intake) EXCEPTION: a PDF-sourced doc's load-time versionId is the
+        //   PDF ITEM's version — meaningless as a baseline for the NEW docx its create-on-save just
+        //   minted. Re-baseline onto the save response's versionId (the new doc's first version)
+        //   instead of keeping the PDF's.
+        versionId:
+          state.sourceFormat === 'pdf'
+            ? (action.versionId && action.versionId.length > 0 ? action.versionId : null)
+            : state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null),
         // G1 (FR-01, task 020): refresh from this save's resolved origin when the response carries
         // one; otherwise keep whatever state already had (never regress a known origin to null just
         // because an older BFF response omitted the field).
@@ -643,10 +678,21 @@ export function composeWorkspaceReducer(
         // reflects the loss). An op-log / born-in-editor save (no `action.contentModel`) keeps them:
         // the loss has NOT materialized on the byte-identical path yet.
         loadedContentModelWarnings: action.contentModel ? null : state.loadedContentModelWarnings,
+        // Task 041 (FR-06, PDF intake): the create-on-save re-targeted the doc to its NEW docx
+        // identity (documentSpeId/driveId below) — it is a native docx from here on. Clearing the
+        // marker routes subsequent saves onto the normal replace path and retires the PDF notice.
+        sourceFormat: null,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
               sprkDocumentId: action.sprkDocumentId ?? state.documentRef.sprkDocumentId,
+              // Task 041 (FR-06): a PDF-sourced save just created a NEW Word document — reflect the
+              // .docx name locally (triggerSave sent it as the create displayName) so subsequent
+              // replace-path saves and the toolbar show the document's real identity.
+              fileName:
+                state.sourceFormat === 'pdf' && state.documentRef.fileName
+                  ? state.documentRef.fileName.replace(/\.pdf$/i, '') + '.docx'
+                  : state.documentRef.fileName,
               // gap 1.7: carry the server-minted SPE id back so the mount is no longer transient
               // (empty speDriveItemId) — a second Save now targets the real drive-item.
               speDriveItemId:

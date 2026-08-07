@@ -81,6 +81,15 @@ export interface ComposeBannerStackProps {
    * as the import banner, SEPARATE key): a NEW warning set (different signature) re-shows the banner.
    */
   saveDegradationWarnings?: Array<{ code: string; count: number }> | null;
+  /**
+   * Task 041 (spaarkeai-compose-r6, FR-06 — PDF intake): true while the mounted document was opened
+   * FROM A PDF (server-synthesized docx, task 040). Renders the honest-lossiness notice: fixed-layout
+   * PDF → the editable version may reflow/simplify formatting; saving creates a NEW Word document and
+   * the original PDF is unchanged (version history is the safety net). No false "identical to source"
+   * claim. Dismissable per mount; a fresh PDF open re-warns (honesty over convenience). The parent
+   * clears it after the first successful save (the doc is a native docx from then on).
+   */
+  pdfSourceNotice?: boolean;
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /**
    * UAT #7 (compose-r2): a monotonically-incrementing token bumped by the parent on every
@@ -188,6 +197,15 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'edited-paragraph-line-break-dropped': 'A line break inside an edited paragraph was dropped.',
   'edited-table-structure-rebuilt': "An edited table's structure was rebuilt; some table formatting may be simplified.",
   'comment-anchor-unresolved': 'A comment could not be anchored and was not saved.',
+  // Task 041 (FR-06, PDF intake): the pdf-intake-* degradation family (task 040's projector) — these
+  // ride ContentModelWarnings on a PDF open and fold into the first model-path save like the docx
+  // flatten codes. Honest, non-alarming copy; the general reflow fact also drives the PDF notice banner.
+  'pdf-intake-fixed-layout-reflowed': 'Content was reflowed from the fixed PDF page layout.',
+  'pdf-intake-page-chrome-dropped': 'Repeating page headers, footers, and page numbers were not carried over.',
+  'pdf-intake-footnote-inlined': 'A footnote was placed inline in the main text.',
+  'pdf-intake-formula-flattened': 'A formula was converted to plain text.',
+  'pdf-intake-list-approximated': 'A bulleted line was converted to a list item.',
+  'pdf-intake-table-style-approximated': "A table's PDF styling was replaced with standard table formatting.",
 };
 
 /** One human-readable line per warning; known codes get friendly copy (+ ×N when repeated). */
@@ -228,11 +246,21 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     importWarnings,
     hideImportWarnings = false,
     saveDegradationWarnings = null,
+    pdfSourceNotice = false,
     pendingAssistantInsert,
     saveSuccessToken = 0,
     partialApply = null,
     reviewFindingsDegraded = null,
   } = props;
+
+  // Task 041 (FR-06, PDF intake): per-mount dismissal only — DELIBERATELY not sessionStorage-keyed
+  // (unlike the import/save-warning banners): every fresh PDF open must re-warn (honesty over
+  // convenience — the lossiness is per-open, and the parent clears the notice after the first save).
+  const [pdfNoticeDismissed, setPdfNoticeDismissed] = React.useState(false);
+  React.useEffect(() => {
+    if (pdfSourceNotice) setPdfNoticeDismissed(false);
+  }, [pdfSourceNotice]);
+  const showPdfSourceNotice = pdfSourceNotice && !pdfNoticeDismissed;
 
   // FR-21 (DEF-15, R3 UAT round-3 carry-in): the "Document opened with N
   // simplification(s)" warning is informational and dismiss-and-stay-closed for
@@ -312,6 +340,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   const showReviewFindingsDegradedBanner = showReviewFindingsDegraded && !reviewFindingsDegradedDismissed;
 
   const showStack =
+    showPdfSourceNotice ||
     showImportWarnings ||
     showSaveDegradation ||
     !!errorMessage ||
@@ -327,6 +356,32 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
 
   return (
     <div className={styles.bannerStack}>
+      {showPdfSourceNotice ? (
+        // Task 041 (FR-06, PDF intake) — the honest-lossiness notice. Fluent v9 semantic tokens only
+        // (ADR-021; MessageBar intent colors are theme-derived — correct in light AND dark). Copy
+        // contract: fixed-layout honesty, NO "identical to source" claim, version history / original
+        // PDF preserved as the safety net, save-creates-a-new-Word-document expectation set up front.
+        <MessageBar intent="info" data-testid="compose-workspace-pdf-source-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Opened from PDF</MessageBarTitle>
+            This document was converted from a fixed-layout PDF, so some formatting was simplified and
+            content may reflow. Saving creates a new Word document — the original PDF is unchanged and
+            remains available with its version history.
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-pdf-source-dismiss"
+                onClick={() => setPdfNoticeDismissed(true)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
       {showSaveSuccessBanner ? (
         <MessageBar intent="success" data-testid="compose-workspace-save-success-banner" aria-live="polite">
           <MessageBarBody>
