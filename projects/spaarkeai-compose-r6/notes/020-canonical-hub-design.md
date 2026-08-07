@@ -969,3 +969,14 @@ branch in handleApplyTemplate (dead response.ok idiom); 051 window.open popup-bl
 revoke + index-0 Current badge; nda-interrupted-clauses.docx paraId regeneration (spec-invalid >= 0x80000000);
 corpus-manifest §3 consumer rows; #690 FidelityGate double-run dedup; flaky ComposeServiceCreateOnSaveTests
 FakeTimeProvider fix (owning project); D1-D7 UAT fix tasks awaiting operator scope approval.
+
+### §23 addendum — 033 Step 9.5 verdict (2026-08-07)
+
+PASS, empirically probed (reviewer RAN the 3 facts + scratch-probed the graft helper and validator
+baselines against raw corpus bytes): oracles discriminate (template-color pin still distinguishes vs the
+NDA's color-less Heading1; footer resolved via real rId graph traversal; baseline-diff self-destructs to
+strict-empty as claimed — 8 distinct pre-existing paraId errors confirmed). Zero blocking findings.
+Two LOW hardening notes added to the follow-ups ledger: (a) baseline set-Contains loses multiplicity at
+:306 (multiset diff would close a duplicate-paragraph mask; other oracles compensate today); (b) graft
+helper InsertAt(...,0) would misplace commentRangeStart if the target paragraph ever gains a pPr
+(self-policing via the strict validator today). PHASE 3 FULLY CLOSED — implementation + tests + gates.
