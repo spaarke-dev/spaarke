@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. **PHASE 3 FULLY CLOSED** (030-033 ✅ incl. Step 9.5: 033 review PASS, empirically probed — §23 addendum). Phases complete: 0,1,2,3,5,6. This session also closed: 014 deploy+UAT (render-on-save LIVE on dev, real-NDA UAT passed), master merge + PR #745 MERGED (render-on-save on master), parallel waves 031+050+060 and 032+051+061. |
-| **Next task** | **040 — PDF → canonical model** (`tasks/040-*.poml`, opus/FULL, deps 020 ✅; extends DocumentIntelligenceService/DocumentParserRouter + Compose load path; Compose-serialized — main session or single agent) → 041/042. Then 052 (Phase-5 remainder — check TASK-INDEX), then **090 wrap-up** (needs 033✅,042,052,061✅,014✅,027✅: /test-diet gate, master reconcile ~45+ behind + /conflict-check, final PR, anti-clobber deploy). |
-| **Status** | ALL work committed + pushed through `0a8b3e053`; working tree clean; NO agents in flight |
-| **Next Action** | On "continue": task-execute 040. Proven wave pattern: isolated-worktree agents for disjoint surfaces, cherry-pick back, combined Step 9.5 review agent, close-out batch. |
+| **Task** | **040 — PDF → canonical model** (FULL rigor, opus tier) — IMPLEMENTED + COMMITTED `5ae5a4246` (pushed). All Step-4 gates passed (build ✅ · projector tests 10/10 ✅ · Compose suite 384/384 ✅ · ADR-013 arch guards ✅ (4 arch fails pre-existing, unrelated) · publish 47.00 MB Δ≈0 ✅ · CVE clean ✅ · conflict-check soft-pass ✅). Design + Placement Justification recorded in `notes/040-pdf-intake.md`. |
+| **Step** | Step 9.5 IN FLIGHT — combined code-review + adr-check agent running on `5ae5a4246` |
+| **Status** | in-progress (awaiting review agent; TASK-INDEX still 🔲 for 040 pending triage) |
+| **Next Action** | When the review agent returns: triage findings → fix commit(s) if needed → append triage to `notes/040-pdf-intake.md` → TASK-INDEX 040 → ✅ → then 041 (client wiring, sonnet) → 042 → 052 → 090 wrap-up. |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are
