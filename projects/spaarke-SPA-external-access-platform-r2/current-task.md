@@ -7,8 +7,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | P1 complete (010–019 ✅) + merged to master; Teams SSO fix applied; R2 client redeployed. **One open bug.** |
-| **NEXT ACTION** | **Fix the R2 grid-widget bug** — ALL data grids (Projects/Matters/Documents/Invoices/Work Assignments) render **empty** in the R2 shell on BOTH planes, even though the BFF returns the data (old SPA shows the records). Client-side, shared grid path. Leads below. |
+| **Status** | P1 complete (010–019 ✅) + merged to master; Teams SSO fix applied. **Grid-widget bug DIAGNOSED + FIXED (2026-08-07, commit `bff7e82e5`, BFF redeployed).** Awaiting user retest. |
+| **NEXT ACTION** | **User retest** the deployed grids (Projects should show 16; Documents should show project-linked docs; Matters clean "coming soon"; Work Assignments already worked). Then verify via App Insights `[EXT-MODULE] Fetch … server-side filtered`. **Invoices deferred** to matter-access work (invoices link to `sprk_matter`, not `sprk_project`). Full diagnosis: `notes/grid-widget-empty-diagnosis.md`. |
 | **Branch/master** | `work/spaarke-SPA-external-access-platform-r2` == `origin/master` == `e9da94467` (0 behind/ahead; main repo synced). Clean tree. |
 | **Pre-conditions** | Deploy from worktree (NOT CI) — see memory `deploy-from-worktree-not-ci.md`. Build client with `VITE_DEV_MOCK=false` + full CI VITE_* env (`.env.local` has mock=true; must override). |
 
