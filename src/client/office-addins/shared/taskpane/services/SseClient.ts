@@ -89,7 +89,7 @@ export interface SseConnection {
  * @example
  * ```typescript
  * const connection = createSseConnection('/office/jobs/123/stream', {
- *   getAccessToken: () => authService.getAccessToken(['user_impersonation']),
+ *   getAccessToken: () => authService.getAccessToken(),
  *   onEvent: (event) => console.log('Event:', event),
  *   onError: (error) => console.error('Error:', error),
  * });

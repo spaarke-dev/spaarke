@@ -4,6 +4,21 @@
  * This file runs before each test file and sets up global mocks.
  */
 
+// TextEncoder/TextDecoder are not exposed by jsdom's test environment (Node's
+// implementations exist, but jsdom doesn't put them on `global`). Required by
+// `computeIdempotencyKey` (useSaveFlow.ts) and any other code path that
+// encodes/hashes text. Added task 040 / FR-B0 so the new 401-retry tests can
+// actually exercise `startSave`'s fetch path — this also fixes several
+// pre-existing `useSaveFlow.test.ts` failures ("TextEncoder is not defined")
+// that were unrelated to auth and predate this task.
+const { TextEncoder, TextDecoder } = require('util');
+if (typeof global.TextEncoder === 'undefined') {
+  global.TextEncoder = TextEncoder;
+}
+if (typeof global.TextDecoder === 'undefined') {
+  global.TextDecoder = TextDecoder;
+}
+
 // Mock Office.js global object
 global.Office = {
   context: {

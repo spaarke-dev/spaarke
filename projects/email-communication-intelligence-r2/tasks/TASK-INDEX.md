@@ -36,7 +36,7 @@
 | 033 | Job B allow-list seed (`sprk_emailupdatefield`) | 3·D | 🔲 | — | sonnet·med | ✅ true (D-indep) |
 | 034 | Job C apply endpoint + create-task queue-feed discriminator | 3·D | ✅ | — | **opus·high** | ❌ false |
 | 035 | Pillar D BFF deploy (size/CVE) | 3·D | 🔲 | 030,031,034 | sonnet·med | ❌ false |
-| 040 | Add-in realignment (FR-B0 a–d) | 4·B | 🔲 | 004 | sonnet·high | ✅ true (PB-a) |
+| 040 | Add-in realignment (FR-B0 a–d) — **code ✅** (401-retry routing, Word-manifest parity, cleanup; new `authenticatedJsonFetch` §11-justified); runtime NAA sign-in + dark-mode live-render **operator-gated** (needs live Office host; deploys paused) | 4·B | ✅-code | 004 | sonnet·high | ✅ true (PB-a) |
 | 041 | Real Spaarke intake folder — re-scoped (mech-1 = config, documented; mech-2 → 043) | 4·B | ✅ | — | sonnet·high | ✅ true (PB-a) |
 | 042 | Drag-to-matter + engine pre-select + ribbon quick-save | 4·B | ✅ | 041 | **opus·high (Option B)** | ✅ true (PB-b) |
 | 043 | Unify user-upload with capture (engine + dedup) — absorbs FR-B1 add-in drag-target (from 041) | 4·B | ✅ | 021,024 | sonnet·high | ❌ false |
