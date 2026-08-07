@@ -43,7 +43,7 @@
 | 044 | Deploy Pillar B add-in (Azure SWA) | 4·B | 🔲 | 040,042 | sonnet·med | ❌ false |
 | 045 | Pillar B BFF deploy (size/CVE) | 4·B | 🔲 | 041,043 | sonnet·med | ❌ false |
 | 050 | Reconciliation grid — **`ReconciliationGrid` + Needs-review config (NO DataGrid-framework edit — all seams already shipped; zero dataset-grid-r2 contention)** | 5·E | ✅ | — | sonnet·high | ❌ false (shared lib) |
-| 051 | Triage as grid columns | 5·E | 🔲 | 050 | sonnet·high | ❌ false |
+| 051 | Triage as grid columns — **`triageColumnRenderers.tsx` (category/priority/summary/RI-conf/review-outcome) merged into `ReconciliationGrid` via columnRenderers seam; config default-sort = `sprk_triagepriority` asc; null→placeholder** | 5·E | ✅ | 050 | sonnet·high | ❌ false |
 | 052 | Related-to card-picker (reuse EmailConnectionsReview) | 5·E | 🔲 | 050 | sonnet·high | ❌ false |
 | 053 | Browse shell + one normalized reader (attachment folding) — **`ReconciliationBrowseShell` (SprkModal+nav two-pane; NOT BrowseModal preset — owner-approved ADR-050 Path C, see notes/053) + `EmailBodyView` attachment-text folding; reuses EmailReadingPaneShell(hideList)/AttachmentList** | 5·E | ✅ | 050 | **opus·xhigh** | ❌ false |
 | 054 | Citation navigation — **quoted-text anchor `logic/citations/readerReferenceMap.ts` + `HighlightedText` + `EmailBodyView.activeCitation` (jump/highlight; source-not-locatable). §6.5 Path A: composeCitationResolver is legal-number-only + its quoted-text twin is editor-bound → built the email-domain quoted-text analog, NOT a fork; see notes/054** | 5·E | ✅ | 053 | **opus·xhigh** | ❌ false |

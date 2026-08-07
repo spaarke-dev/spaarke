@@ -52,6 +52,7 @@ import {
   type MembershipResolver,
   type DataGridParentContext,
 } from '@spaarke/ui-components';
+import { TRIAGE_COLUMN_RENDERERS } from './triageColumnRenderers';
 
 /**
  * Placeholder GUID for the "Needs-review" `sprk_gridconfiguration` record.
@@ -150,10 +151,11 @@ const ReviewedStatusCell: React.FC<{ value: unknown }> = ({ value }) => {
 };
 ReviewedStatusCell.displayName = 'ReviewedStatusCell';
 
-/** Default reconciliation-grid column renderers, keyed by `sprk_communication` field logical name. Caller-supplied `columnRenderers` (see {@link ReconciliationGridProps}) win over these on a per-field basis. */
+/** Default reconciliation-grid column renderers, keyed by `sprk_communication` field logical name. Caller-supplied `columnRenderers` (see {@link ReconciliationGridProps}) win over these on a per-field basis. Includes the task-051 triage renderers (category / priority / summary / RI-confidence / review-outcome). */
 const DEFAULT_COLUMN_RENDERERS: NonNullable<DataGridOverrides['columnRenderers']> = {
   sprk_body: value => <BodyPreviewCell value={value} />,
   sprk_associationstatus: value => <ReviewedStatusCell value={value} />,
+  ...TRIAGE_COLUMN_RENDERERS,
 };
 
 export interface ReconciliationGridProps {
