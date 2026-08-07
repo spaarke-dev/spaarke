@@ -288,6 +288,23 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
 
+        // POST /api/communications/proposals/{reviewLogId}/dismiss — Job B REJECT (task 055b / FR-E4). The Fields
+        // reconcile tab (task 055) POSTs a proposal's ReviewLogId here on Reject. The service resolves the rejecting
+        // caller server-side (fail-closed 403), re-confirms the proposal is the OPEN pending row (409 if already
+        // resolved), and writes ONE append-only Dismissed sprk_emailreviewlog audit row — NO record change, NO
+        // allow-list/citation re-validation (a rejection is safe regardless of drift). The proposal then no longer
+        // surfaces as OPEN in the queue-feed. Contrast Hold ("leave Proposed") which is a client-only no-op. Takes no
+        // request body. Registered unconditionally (ADR-010/ADR-032). r1 builds no UI.
+        group.MapPost("/proposals/{reviewLogId:guid}/dismiss", DismissProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("DismissCommunicationProposal")
+            .WithDescription("Job B reject (FR-E4): terminally dismiss a pending field-update proposal — write one append-only Dismissed audit row attributed to the rejecting user and make NO record change. Caller resolved server-side (403 fail-closed); a missing proposal (404), malformed proposal (422), or non-pending/already-resolved proposal (409) are refused.")
+            .Produces<DismissProposalResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
         // POST /api/communications/proposals/{reviewLogId}/create-task/apply — Job C APPLY (task 034 / FR-D5, backs
         // FR-E5). Sibling of the Job B apply above. r5's Tasks reconcile tab (task 056) POSTs a confirmed create-task
         // proposal's ReviewLogId here on Approve, with the human-supplied FR-E5 fields in the body. The service
@@ -953,6 +970,19 @@ public static class CommunicationEndpoints
     {
         // Optional body carries the reviewer's edited value (FR-E4); absent/blank ⇒ apply the stored proposed value.
         var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job B reject / dismiss (task 055b / FR-E4). The caller is resolved server-side inside the service (fail-closed
+    // 403); the proposal is terminally dismissed by writing ONE append-only Dismissed audit row with no record change.
+    // Failures surface as RFC 7807 ProblemDetails via SdapProblemException (403/404/409/422). No request body.
+    private static async Task<IResult> DismissProposalAsync(
+        Guid reviewLogId,
+        ICommunicationProposalApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.DismissAsync(reviewLogId, context.User, ct);
         return TypedResults.Ok(result);
     }
 

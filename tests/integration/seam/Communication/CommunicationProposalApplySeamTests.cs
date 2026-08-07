@@ -24,7 +24,11 @@ namespace Sprk.Bff.Api.Tests.Integration.Seam.Communication;
 /// (ADR-038 — no <c>Mock&lt;HttpMessageHandler&gt;</c>, no class-under-test collaborator mocking). The properties
 /// under test are non-negotiable: the record write runs UNDER THE CONFIRMING USER'S impersonation (never app-only),
 /// a non-allow-listed field is refused at apply time, an unresolved caller fails closed (403), an unverifiable
-/// citation is refused, and every successful apply writes exactly one append-only audit row.
+/// citation is refused, and every successful apply writes exactly one append-only audit row. Also covers Job B REJECT
+/// (<see cref="CommunicationProposalApplyService.DismissAsync"/>, task 055b / FR-E4): a rejection writes exactly one
+/// append-only Dismissed audit row, makes NO record change, does NOT re-gate on the allow-list or re-verify the
+/// citation (a rejection is safe regardless of drift), fails closed on an unresolved caller (403), and is idempotent
+/// against an already-resolved proposal (409).
 /// </summary>
 public sealed class CommunicationProposalApplySeamTests
 {
@@ -43,6 +47,7 @@ public sealed class CommunicationProposalApplySeamTests
     private const int ActionProposed = 100000001;
     private const int ActionApplied = 100000005;
     private const int ActionOverriden = 100000003;
+    private const int ActionDismissed = 100000004;
     private const int ActorTypeHuman = 100000001;
     private const int FieldTypeDateTime = 100000004;
 
@@ -288,6 +293,94 @@ public sealed class CommunicationProposalApplySeamTests
         (await act.Should().ThrowAsync<SdapProblemException>())
             .Which.StatusCode.Should().Be(403);
         _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // FR-E4 (task 055b) — REJECT: a pending proposal is terminally dismissed by writing ONE append-only Dismissed
+    // audit row (actor = the rejecting human) and making NO record change (the target field is never written).
+    [Fact]
+    public async Task DismissAsync_WhenPendingProposal_WritesOneDismissedAuditRowAndNeverWritesRecord()
+    {
+        var sut = BuildSut();
+
+        var result = await sut.DismissAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        // Exactly one append-only Dismissed audit row (actor = the rejecting human), carrying the AI suggestion forward.
+        _generic.Verify(g => g.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == "sprk_emailreviewlog"
+                && ((OptionSetValue)e["sprk_action"]).Value == ActionDismissed
+                && ((OptionSetValue)e["sprk_actortype"]).Value == ActorTypeHuman
+                && (string)e["sprk_actor"] == CallerSystemUserId.ToString()
+                && (string)e["sprk_targetentity"] == TargetEntity
+                && (string)e["sprk_targetfield"] == TargetField),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        // NO record change — a rejection writes nothing to the target record.
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        result.ReviewLogId.Should().Be(ReviewLogId);
+        result.AuditLogId.Should().Be(AuditLogId);
+        result.TargetEntity.Should().Be(TargetEntity);
+        result.TargetField.Should().Be(TargetField);
+    }
+
+    // FR-E4 (task 055b) — the correctness property that distinguishes dismiss from apply: a dismiss does NOT re-gate on
+    // the allow-list OR re-verify the citation. Rejecting a proposal whose field is no longer allow-listed (and whose
+    // cited text is gone) STILL succeeds — indeed drift is a reason to reject. The envelope reader + allow-list queries
+    // are never even reached (asserted by the strict envelope-reader mock: were dismiss to re-verify, it would call it).
+    [Fact]
+    public async Task DismissAsync_WhenFieldNoLongerAllowListedAndCitationGone_StillDismisses()
+    {
+        _allowListRows = new EntityCollection();     // field no longer allow-listed
+        _bodyText = "This message no longer contains the quoted sentence at all."; // cited text gone
+        var sut = BuildSut();
+
+        var result = await sut.DismissAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        result.AuditLogId.Should().Be(AuditLogId);
+        _generic.Verify(g => g.CreateAsync(
+            It.Is<Entity>(e => ((OptionSetValue)e["sprk_action"]).Value == ActionDismissed),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _envelopeReader.Verify(r => r.ReconstructEnvelopeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // FR-E4 (task 055b) NEGATIVE — auth: an unresolved caller fails closed (403); NO audit row is written (a rejection
+    // is still a recorded human decision that must carry an authenticated identity).
+    [Fact]
+    public async Task DismissAsync_WhenCallerUnresolved_Returns403AndNeverWrites()
+    {
+        var sut = BuildSut();
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved("no oid"));
+
+        var act = () => sut.DismissAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.StatusCode.Should().Be(403);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // FR-E4 (task 055b) NEGATIVE — idempotency: a proposal already closed by a later terminal row is refused (409);
+    // no second (Dismissed) audit row is written (the same still-open guard the apply path uses).
+    [Fact]
+    public async Task DismissAsync_WhenProposalAlreadyResolved_Refuses409AndNeverWrites()
+    {
+        var terminal = new Entity("sprk_emailreviewlog") { Id = Guid.NewGuid() };
+        terminal["sprk_action"] = new OptionSetValue(ActionApplied);
+        terminal["sprk_targetentity"] = TargetEntity;
+        terminal["sprk_targetfield"] = TargetField;
+        _reviewLogWalk = new EntityCollection(new List<Entity> { ProposedRow(), terminal });
+        var sut = BuildSut();
+
+        var act = () => sut.DismissAsync(ReviewLogId, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.StatusCode.Should().Be(409);
         _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 

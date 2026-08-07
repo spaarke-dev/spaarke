@@ -56,6 +56,19 @@ public interface ICommunicationProposalApplyService
     /// audit).
     /// </summary>
     Task<ApplyProposalResult> ApplyAsync(Guid reviewLogId, ApplyProposalRequest? request, ClaimsPrincipal? caller, CancellationToken ct);
+
+    /// <summary>
+    /// Terminally DISMISSES the pending proposal identified by <paramref name="reviewLogId"/> — the reviewer's
+    /// "Reject" decision NOT to apply it (FR-E4, task 055b). Writes EXACTLY ONE append-only <c>Dismissed</c> audit row
+    /// (actor = the rejecting human) and makes NO change to the target record: there is no field write, and no
+    /// allow-list / citation re-validation (a rejection is safe regardless of allow-list or citation drift — indeed
+    /// drift is a reason to reject). Once dismissed, the proposal no longer appears as an OPEN pending proposal in the
+    /// queue feed (the same terminal-row close logic the apply path relies on). Throws <see cref="SdapProblemException"/>
+    /// (RFC 7807) for an unresolved caller (403), a missing proposal (404), a malformed proposal (422), or a
+    /// non-pending / already-resolved proposal (409). Contrast <see cref="ApplyAsync(Guid, ClaimsPrincipal?, CancellationToken)"/>
+    /// ("leave Proposed" / Hold is a client-only no-op — it writes nothing and the proposal deliberately reappears).
+    /// </summary>
+    Task<DismissProposalResult> DismissAsync(Guid reviewLogId, ClaimsPrincipal? caller, CancellationToken ct);
 }
 
 /// <summary>
@@ -72,6 +85,14 @@ public sealed record ApplyProposalResult(
     Guid TargetRecordId,
     string TargetField,
     IReadOnlyList<string> FieldsUpdated);
+
+/// <summary>Result of a successful <see cref="ICommunicationProposalApplyService.DismissAsync"/> (task 055b). Carries
+/// no <c>FieldsUpdated</c> — a dismiss makes no record change; only the terminal <c>Dismissed</c> audit row is written.</summary>
+public sealed record DismissProposalResult(
+    Guid ReviewLogId,
+    Guid AuditLogId,
+    string TargetEntity,
+    string TargetField);
 
 /// <inheritdoc />
 public sealed class CommunicationProposalApplyService : ICommunicationProposalApplyService
@@ -298,6 +319,84 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
             reviewLogId, auditLogId, targetEntity, targetRecordId, targetField, updateResult.FieldsUpdated);
     }
 
+    /// <inheritdoc />
+    public async Task<DismissProposalResult> DismissAsync(Guid reviewLogId, ClaimsPrincipal? caller, CancellationToken ct)
+    {
+        // (1) Resolve the rejecting caller server-side; fail closed (403). A rejection is still a recorded human
+        //     decision, so it must carry an authenticated identity (sprk_actor) — never app-only / anonymous.
+        var resolution = await _callerResolver.ResolveAsync(caller, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved
+            || !Guid.TryParse(resolution.SystemUserId, out var callerSystemUserId)
+            || callerSystemUserId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "CALLER_NOT_RESOLVED",
+                title: "Caller Not Resolved",
+                detail: "The caller could not be resolved to a Dataverse systemuser; the dismiss is refused (fail closed — the rejection must be attributed to the deciding user).",
+                statusCode: 403);
+        }
+
+        // (2) Load the proposal row.
+        var row = await LoadReviewLogRowAsync(reviewLogId, ct).ConfigureAwait(false);
+        if (row is null)
+        {
+            throw new SdapProblemException(
+                code: "PROPOSAL_NOT_FOUND",
+                title: "Proposal Not Found",
+                detail: $"No sprk_emailreviewlog proposal was found for id {reviewLogId}.",
+                statusCode: 404);
+        }
+
+        var communicationRef = row.GetAttributeValue<EntityReference>("sprk_communication");
+        var targetEntity = row.GetAttributeValue<string>("sprk_targetentity")?.Trim();
+        var targetField = row.GetAttributeValue<string>("sprk_targetfield")?.Trim();
+        var targetRecordIdRaw = row.GetAttributeValue<string>("sprk_targetrecordid")?.Trim();
+        var action = row.GetAttributeValue<OptionSetValue>("sprk_action")?.Value;
+
+        // A dismiss does not write the target record, so targetRecordId need not parse — but the (communication,
+        // entity, field) key is required for the still-open guard + a coherent audit row.
+        if (communicationRef is null
+            || string.IsNullOrWhiteSpace(targetEntity)
+            || string.IsNullOrWhiteSpace(targetField))
+        {
+            throw new SdapProblemException(
+                code: "PROPOSAL_MALFORMED",
+                title: "Proposal Malformed",
+                detail: "The proposal row is missing a communication, target entity, or target field.",
+                statusCode: 422);
+        }
+
+        if (action != ReviewActionProposed)
+        {
+            throw new SdapProblemException(
+                code: "PROPOSAL_NOT_PENDING",
+                title: "Proposal Not Pending",
+                detail: "The referenced review-log row is not a pending Proposed row.",
+                statusCode: 409);
+        }
+
+        // (3) Confirm the proposal is still OPEN — the SAME idempotency guard the apply path uses; a proposal already
+        //     applied/dismissed/superseded is not the open pending row and cannot be dismissed again (409).
+        await EnsureStillOpenAsync(reviewLogId, communicationRef.Id, targetEntity, targetField, ct).ConfigureAwait(false);
+
+        // (4) Write EXACTLY ONE append-only Dismissed audit row (actor = the rejecting human). NO target-record write
+        //     and NO allow-list / citation re-validation: a rejection is a decision NOT to write, safe regardless of
+        //     drift. The AI suggestion is carried forward so the row is self-contained (what the AI proposed / that a
+        //     human rejected it).
+        var suggestionJson = row.GetAttributeValue<string>("sprk_aisuggestion");
+        var suggestion = ParseSuggestion(suggestionJson);
+
+        var auditLogId = await WriteDismissedAuditRowAsync(
+            communicationRef.Id, targetEntity, targetRecordIdRaw, targetField,
+            suggestion, suggestionJson, callerSystemUserId, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Job B dismiss: proposal {ReviewLogId} for {Entity}.{Field} rejected by caller {Caller}; Dismissed audit row {AuditLogId} written (no record change).",
+            reviewLogId, targetEntity, targetField, callerSystemUserId, auditLogId);
+
+        return new DismissProposalResult(reviewLogId, auditLogId, targetEntity, targetField);
+    }
+
     private async Task<Entity?> LoadReviewLogRowAsync(Guid reviewLogId, CancellationToken ct)
     {
         try
@@ -444,6 +543,45 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
             : suggestionJson;
         if (!string.IsNullOrWhiteSpace(storedSuggestion))
             entity["sprk_aisuggestion"] = storedSuggestion;
+
+        return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the single append-only <c>Dismissed</c> audit row for a rejected proposal (task 055b). Mirrors
+    /// <see cref="WriteAppliedAuditRowAsync"/> minus the applied value: no field is written, the AI suggestion is
+    /// carried forward verbatim, and <c>sprk_targetrecordid</c> is included only when the proposal carried one.
+    /// </summary>
+    private async Task<Guid> WriteDismissedAuditRowAsync(
+        Guid communicationId, string targetEntity, string? targetRecordIdRaw, string targetField,
+        ProposalSuggestion? suggestion, string? suggestionJson, Guid callerSystemUserId, CancellationToken ct)
+    {
+        var entity = new Entity(ReviewLogEntity)
+        {
+            ["sprk_name"] = Truncate($"Dismissed update: {targetEntity}.{targetField}", 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeHuman),
+            ["sprk_action"] = new OptionSetValue(ReviewActionDismissed),
+            ["sprk_actor"] = Truncate(callerSystemUserId.ToString(), 200),
+            ["sprk_targetentity"] = Truncate(targetEntity, 100),
+            ["sprk_targetfield"] = Truncate(targetField, 100),
+        };
+
+        if (!string.IsNullOrWhiteSpace(targetRecordIdRaw))
+            entity["sprk_targetrecordid"] = Truncate(targetRecordIdRaw, 100);
+
+        if (suggestion is not null)
+        {
+            if (suggestion.Confidence.HasValue)
+                entity["sprk_confidence"] = (decimal)suggestion.Confidence.Value;
+
+            var sourceRef = suggestion.Citation?.Locator ?? suggestion.Citation?.Source;
+            if (!string.IsNullOrWhiteSpace(sourceRef))
+                entity["sprk_sourceref"] = Truncate(sourceRef, 1000);
+        }
+
+        if (!string.IsNullOrWhiteSpace(suggestionJson))
+            entity["sprk_aisuggestion"] = suggestionJson;
 
         return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
     }
