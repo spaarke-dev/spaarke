@@ -128,6 +128,15 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.GetCurrentVersionIdAsUserAsync(ctx, driveId, itemId, ct);
 
+    // spaarkeai-compose-r6 task 050 (FR-07): user-context (OBO) full version-history list —
+    // the projection backing GET /api/obo/drives/{driveId}/items/{itemId}/versions. Read-only.
+    public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.ListFileVersionsAsUserAsync(ctx, driveId, itemId, ct);
+
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,
         string itemId,
