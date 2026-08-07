@@ -24,6 +24,17 @@ resolves correctly (16 accessible projects, `SystemUserMembership=True, ContactG
 - `sprk_matter`: name=`sprk_mattername` (NOT `sprk_mattertitle`); `sprk_matternumber` + `statuscode` were correct.
 - Total active projects = 16 (all accessible to the systemuser; ≤ pageSize 25 → all fit page 1).
 
+## ✅ UAT VERIFIED (2026-08-07, both planes)
+| | Organization (workforce, ralph@spaarke.com) | Partner (CIAM, ralph@hotmail) |
+|---|---|---|
+| Projects | 16 (all) | 2 (granted) |
+| Documents | 49 (all project-linked) | 14 (across the 2 projects) |
+| Work Assignments | 5 | 4 |
+| Matters | 0 (coming soon) | — |
+| Invoices | 0 (deferred — links to `sprk_matter`, not `sprk_project`) | 0 |
+
+Server-side scoping confirmed correct on both planes (workforce sees all project-linked records; partner sees the strict per-grant subset).
+
 ## Fixes
 
 ### ✅ DONE (deploy-free — live Dataverse config-record data fix, 2026-08-07)
