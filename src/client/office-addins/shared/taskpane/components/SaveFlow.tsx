@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useEffect, useState } from 'react';
+import React, { useCallback, useMemo, useEffect, useState, useRef } from 'react';
 import {
   makeStyles,
   tokens,
@@ -37,6 +37,7 @@ import {
 } from '@fluentui/react-icons';
 import { EntityPicker } from './EntityPicker';
 import { AttachmentSelector } from './AttachmentSelector';
+import { ALL_ENTITY_TYPES } from '../hooks/useEntitySearch';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
 import {
   useSaveFlow,
@@ -48,6 +49,7 @@ import {
   type UseSaveFlowOptions,
 } from '../hooks/useSaveFlow';
 import { useAnnounce } from '../hooks/useAnnounce';
+import { fetchEnginePreSelection } from '../services/communicationSuggestionsService';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 
 /**
@@ -357,6 +359,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [documentName, setDocumentName] = useState<string>('');
   const [documentDescription, setDocumentDescription] = useState<string>('');
 
+  // FR-B2 engine pre-selection: true while the current selection is the engine's
+  // predicted record (cleared the moment the user picks a different record).
+  const [preSelectedFromEngine, setPreSelectedFromEngine] = useState(false);
+  // Set once the user manually touches the picker — stops a late-returning engine
+  // prediction from clobbering their explicit choice.
+  const userTouchedPickerRef = useRef(false);
+
   // Build save context
   const buildSaveContext = useCallback(
     (): SaveFlowContext => ({
@@ -400,6 +409,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // Handle entity selection
   const handleEntitySelect = useCallback(
     (entity: EntitySearchResult | null) => {
+      userTouchedPickerRef.current = true;
+      setPreSelectedFromEngine(false);
       setSelectedEntity(entity);
       if (entity) {
         announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
@@ -407,6 +418,30 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     },
     [setSelectedEntity, announce]
   );
+
+  // FR-B2: pre-select the Association Engine's predicted record when the picker opens.
+  // Reuses the SHARED derivePrimaryReview candidate model (no fork; ADR-045). Outlook
+  // only, best-effort: a 404 (email not captured), no usable candidate, or any failure
+  // leaves the picker with NO engine pre-selection (the user must choose — never an
+  // auto-filed guess). Does not override a selection the user has already made.
+  useEffect(() => {
+    if (hostType !== 'outlook' || !itemId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const pre = await fetchEnginePreSelection(itemId);
+        if (cancelled || userTouchedPickerRef.current || !pre) return;
+        setSelectedEntity(pre.predicted);
+        setPreSelectedFromEngine(true);
+        announce(`Spaarke suggested ${pre.predicted.entityType}: ${pre.predicted.name}`, 'polite');
+      } catch {
+        // Best-effort — a failed prediction must never block the manual save flow.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hostType, itemId, setSelectedEntity, announce]);
 
   // Handle view document
   const handleViewDocument = useCallback(() => {
@@ -630,6 +665,33 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           </div>
         </div>
       )}
+
+      {/* File to (association target) — FR-B2: pre-selected with the engine's
+          predicted record when available (reuses derivePrimaryReview; ADR-045). */}
+      <div className={styles.section}>
+        <div className={styles.sectionTitle}>
+          <PersonSearchRegular />
+          <Text weight="semibold">File to</Text>
+        </div>
+        <EntityPicker
+          value={selectedEntity}
+          onChange={handleEntitySelect}
+          allowedTypes={allowedEntityTypes ?? ALL_ENTITY_TYPES}
+          onQuickCreate={onQuickCreate}
+          disabled={isSaving}
+          showTypeFilter
+          showRecent
+          showQuickCreate
+          placeholder="Search for a Matter, Project, Account…"
+          aria-label="File to"
+        />
+        {preSelectedFromEngine && selectedEntity && (
+          <div className={styles.sectionTitle}>
+            <SparkleRegular />
+            <Text size={200}>Suggested by Spaarke from this email</Text>
+          </div>
+        )}
+      </div>
 
       {/* Document Metadata Fields */}
       <div className={styles.section}>

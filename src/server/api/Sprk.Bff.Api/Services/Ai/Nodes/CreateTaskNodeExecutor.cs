@@ -180,9 +180,9 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
                 subject);
 
             // Resolve template values into typed parameters (session-specific), then delegate the
-            // `task` entity build + degraded-success create to the session-agnostic TaskActionCore
-            // (task 031). Template rendering + ConfigJson parsing stay here; the entity build/create
-            // is shared with the IActionSeam facade.
+            // sprk_event (event type = Task) build + degraded-success create to the session-agnostic
+            // TaskActionCore (task 031; entity corrected task→sprk_event 2026-08-06). Template rendering +
+            // ConfigJson parsing stay here; the entity build/create is shared with the IActionSeam facade.
             DateTime? scheduledEnd = null;
             if (config.DueDate is not null)
             {

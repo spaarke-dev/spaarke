@@ -43,9 +43,11 @@ public class CreateTaskNodeExecutorSeamTests
     // ── Happy path — exact task field set (criterion 6) ───────────────────────────────────────
 
     [Fact]
-    public async Task ExecuteAsync_WithFullConfig_BuildsExactTaskEntityFieldSet()
+    public async Task ExecuteAsync_WithFullConfig_BuildsExactSprkEventTaskFieldSet()
     {
-        // Arrange
+        // A Spaarke "task" is a sprk_event with event type = Task — NOT the OOB `task` activity
+        // (corrected 2026-08-06). Regarding maps to sprk_event's TYPED lookup for the target entity
+        // (here sprk_matter → sprk_regardingmatter); sprk_event has no regarding lookup for a document.
         var regardingId = Guid.Parse("66666666-6666-6666-6666-666666666666");
         var ownerId = Guid.Parse("77777777-7777-7777-7777-777777777777");
         var config = $$"""
@@ -54,7 +56,7 @@ public class CreateTaskNodeExecutorSeamTests
           "description": "Please review the uploaded contract.",
           "dueDate": "2026-08-01T00:00:00Z",
           "regardingObjectId": "{{regardingId}}",
-          "regardingObjectType": "sprk_document",
+          "regardingObjectType": "sprk_matter",
           "ownerId": "{{ownerId}}"
         }
         """;
@@ -77,19 +79,23 @@ public class CreateTaskNodeExecutorSeamTests
         data.Subject.Should().Be("Review contract");
         data.Description.Should().Be("Please review the uploaded contract.");
 
-        // Assert — EXACT Dataverse field set written today
+        // Assert — EXACT sprk_event (type=Task) field set
         captured.Should().NotBeNull();
-        captured!.LogicalName.Should().Be("task");
+        captured!.LogicalName.Should().Be("sprk_event");
         captured.Attributes.Keys.Should().BeEquivalentTo(new[]
         {
-            "subject", "description", "scheduledend", "regardingobjectid", "ownerid"
+            "sprk_eventname", "sprk_eventtype_ref", "sprk_description", "sprk_duedate", "sprk_regardingmatter", "ownerid"
         });
-        captured.GetAttributeValue<string>("subject").Should().Be("Review contract");
-        captured.GetAttributeValue<string>("description").Should().Be("Please review the uploaded contract.");
-        captured.GetAttributeValue<DateTime>("scheduledend").Should().Be(
+        captured.GetAttributeValue<string>("sprk_eventname").Should().Be("Review contract");
+        captured.GetAttributeValue<string>("sprk_description").Should().Be("Please review the uploaded contract.");
+        captured.GetAttributeValue<DateTime>("sprk_duedate").Should().Be(
             new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc));
-        var regarding = captured.GetAttributeValue<EntityReference>("regardingobjectid");
-        regarding.LogicalName.Should().Be("sprk_document");
+        // Event type = Task discriminator.
+        var eventType = captured.GetAttributeValue<EntityReference>("sprk_eventtype_ref");
+        eventType.LogicalName.Should().Be("sprk_eventtype_ref");
+        eventType.Id.Should().Be(Guid.Parse("124f5fc9-98ff-f011-8406-7c1e525abd8b"));
+        var regarding = captured.GetAttributeValue<EntityReference>("sprk_regardingmatter");
+        regarding.LogicalName.Should().Be("sprk_matter");
         regarding.Id.Should().Be(regardingId);
         var owner = captured.GetAttributeValue<EntityReference>("ownerid");
         owner.LogicalName.Should().Be("systemuser");

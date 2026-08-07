@@ -4,7 +4,7 @@
     <title>Inject signed tracking footer on the outbound send path</title>
     <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
     <gate>blocked: 010,011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the heavily-contended CommunicationService.SendAsync send path (.cs); auth-adjacent (signed token); Step 3.5.5 FULL.</rigor-reason>
     <model-tier>sonnet</model-tier>

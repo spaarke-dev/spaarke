@@ -4,7 +4,7 @@
     <title>AffinityRung + sprk_affinity per-tenant learning store</title>
     <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
     <gate>blocked: 011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New rung (.cs) + new Dataverse store (sprk_affinity) + new RungKind + write-on-confirmation path; ADR-040 Path A tension; Step 3.5.5 FULL.</rigor-reason>
     <model-tier>opus</model-tier>
