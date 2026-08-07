@@ -14,7 +14,7 @@
 | 004 | Entra NAA app-registration verify/provision | 0 | ✅ | — | sonnet·med | ✅ true |
 | 010 | HMAC footer/token signing helper (Key Vault) | 1·A | ✅ | — | **opus·xhigh** | ❌ false |
 | 011 | Footer config (operator app setting, per-tenant) | 1·A | ✅ | — | sonnet·high | ❌ false |
-| 012 | Inject signed footer on outbound send path | 1·A | 🔲 | 010,011 | sonnet·high | ❌ false |
+| 012 | Inject signed footer on outbound send path | 1·A | ✅ | 010,011 | sonnet·high | ❌ false |
 | 013 | `TrackingTokenRung` (reuse RungKind.ExplicitReference) | 1·A | 🔲 | 010,011 | **opus·high** | ✅ true (A-rungs) |
 | 014 | `RecipientAliasRung` + Bcc plumbing | 1·A | ✅ | 011 | sonnet·high | ✅ true (A-rungs) |
 | 015 | Formalize external-reply self-association + test | 1·A | ✅ | — | sonnet·high | ❌ false |
