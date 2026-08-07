@@ -1,10 +1,13 @@
 import * as React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { MsalProvider } from '@azure/msal-react';
-import { FluentProvider, Text, tokens } from '@fluentui/react-components';
+import { Button, FluentProvider, Spinner, Text, tokens } from '@fluentui/react-components';
 import { resolveCodePageTheme } from '@spaarke/ui-components/utils/themeStorage';
 import { msalInstance } from './auth/msal-config';
 import { detectTeamsHost, createTeamsHostAdapter } from './host/TeamsHostAdapter';
+import { getStoredRealm, setStoredRealm, clearStoredRealm, type Realm } from './auth/realm';
+import { resolveStandalonePlane, applyStandalonePlane, type StandalonePlane } from './auth/standalone-plane';
+import { RealmChooser } from './components/auth/RealmChooser';
 import { App } from './App';
 
 // Power Pages Code Page SPA — React 18 with createRoot (bundled, not platform-provided).
@@ -32,23 +35,152 @@ function getRootElement(): HTMLElement | null {
   return rootElement;
 }
 
-/** Standalone browser bootstrap - the CIAM path. Unchanged from the pre-task-012 implementation. */
+/**
+ * Standalone browser bootstrap (task 013 — dual-plane home-realm discovery).
+ *
+ * A browser has no host broker to select the identity plane silently (unlike Teams), so the SAME URL
+ * serves both planes via an explicit "My organization / Partner" chooser (spec FR-03, ADR-028 A3).
+ * The dev-mock path is preserved unchanged (CIAM instance, no chooser, no MSAL init — localhost has
+ * no registered redirect URI). The live path renders <StandaloneBootstrap>, which drives: read stored
+ * realm → (chooser if none) → resolve the plane's authority → init MSAL → mount the SAME <App>.
+ *
+ * CIAM behavior is unchanged beyond the added pre-auth chooser (FR-15/NFR-05): same authority, same
+ * per-tab sessionStorage cache, same broker-only acquisition — `applyStandalonePlane('ciam')` sets
+ * the acquirer/scope to values identical to the module defaults.
+ */
 async function bootstrapStandalone(root: Root): Promise<void> {
-  if (import.meta.env.VITE_DEV_MOCK !== 'true') {
-    // MSAL v3 requires explicit initialization before any token operations or rendering.
-    // This processes any auth redirect response (auth code to tokens) before the app mounts.
-    // Skipped in mock mode - MSAL can hang/error on localhost without a registered redirect URI.
-    await msalInstance.initialize();
+  if (import.meta.env.VITE_DEV_MOCK === 'true') {
+    // Dev mock: existing behavior — CIAM instance, no chooser, no MSAL initialize (AuthGuard
+    // short-circuits in mock mode). Kept as a separate branch so StandaloneBootstrap's hooks stay
+    // unconditional (rules of hooks).
+    root.render(
+      <React.StrictMode>
+        <MsalProvider instance={msalInstance}>
+          <App teamsHost={false} />
+        </MsalProvider>
+      </React.StrictMode>
+    );
+    return;
   }
 
   root.render(
     <React.StrictMode>
-      <MsalProvider instance={msalInstance}>
-        <App teamsHost={false} />
-      </MsalProvider>
+      <StandaloneBootstrap />
     </React.StrictMode>
   );
 }
+
+/** Centered, semantic-token-only container for the pre-auth bootstrap screens (chooser/spinner/error). */
+const bootstrapCenterStyle: React.CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  justifyContent: 'center',
+  height: '100dvh',
+  rowGap: tokens.spacingVerticalM,
+  padding: tokens.spacingVerticalXXL,
+  textAlign: 'center',
+  backgroundColor: tokens.colorNeutralBackground1,
+  color: tokens.colorNeutralForeground1,
+};
+
+/**
+ * Live browser bootstrap component: home-realm discovery → per-context authority → MSAL init → App.
+ *
+ * State machine (all pre-auth screens are Fluent v9 semantic tokens only — ADR-021):
+ *   - no stored realm            → <RealmChooser> ("My organization" | "Partner")
+ *   - realm chosen, initializing → spinner
+ *   - realm chosen, init failed  → fail-loud error + "choose a different sign-in" (criterion 4)
+ *   - plane ready                → <MsalProvider instance={plane}><App/></MsalProvider>
+ *
+ * The chosen realm persists per-tab (sessionStorage) so it survives MSAL's login/token redirect; on
+ * reload main() re-runs and this component re-resolves the same plane deterministically.
+ */
+const StandaloneBootstrap: React.FC = () => {
+  const [realm, setRealm] = React.useState<Realm | null>(() => getStoredRealm());
+  const [plane, setPlane] = React.useState<StandalonePlane | null>(null);
+  const [error, setError] = React.useState<unknown>(null);
+
+  React.useEffect(() => {
+    if (!realm) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const resolved = resolveStandalonePlane(realm);
+        applyStandalonePlane(resolved);
+        // MSAL requires explicit initialize() before any token op / render; also processes the
+        // auth-code redirect response when returning from the IdP.
+        await resolved.instance.initialize();
+        if (!cancelled) setPlane(resolved);
+      } catch (err) {
+        if (!cancelled) setError(err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [realm]);
+
+  const handleChoose = React.useCallback((chosen: Realm) => {
+    setStoredRealm(chosen);
+    setRealm(chosen);
+  }, []);
+
+  const handleResetRealm = React.useCallback(() => {
+    clearStoredRealm();
+    setError(null);
+    setPlane(null);
+    setRealm(null);
+  }, []);
+
+  // No plane chosen yet → the explicit home-realm chooser (FR-03).
+  if (!realm) {
+    return (
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <RealmChooser onChoose={handleChoose} />
+      </FluentProvider>
+    );
+  }
+
+  // Plane resolution / MSAL init failed (e.g. workforce env not wired) → fail loud, offer recovery.
+  if (error) {
+    const message = error instanceof Error ? error.message : 'Sign-in could not be prepared.';
+    return (
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <div style={bootstrapCenterStyle}>
+          <Text size={500} weight="semibold">
+            Sign-in unavailable
+          </Text>
+          <Text size={300} style={{ color: tokens.colorNeutralForeground3, maxWidth: '32rem' }}>
+            {message}
+          </Text>
+          <Button appearance="primary" onClick={handleResetRealm}>
+            Choose a different sign-in
+          </Button>
+        </div>
+      </FluentProvider>
+    );
+  }
+
+  // Plane chosen, authority resolving / MSAL initializing.
+  if (!plane) {
+    return (
+      <FluentProvider theme={resolveCodePageTheme()} style={{ height: '100%' }}>
+        <div style={bootstrapCenterStyle}>
+          <Spinner size="large" label="Preparing sign-in..." />
+        </div>
+      </FluentProvider>
+    );
+  }
+
+  // Plane ready → mount the SAME shared <App> under the selected plane's MSAL instance. App supplies
+  // its own FluentProvider; AuthGuard drives the actual sign-in redirect against the plane's scope.
+  return (
+    <MsalProvider instance={plane.instance}>
+      <App teamsHost={false} />
+    </MsalProvider>
+  );
+};
 
 /**
  * Teams tab bootstrap. Delegates ALL Teams-specific concerns (app.initialize, context, theme,

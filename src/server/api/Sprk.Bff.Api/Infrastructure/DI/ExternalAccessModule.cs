@@ -79,6 +79,38 @@ public static class ExternalAccessModule
         services.AddScoped<ICallerPrincipalStrategy, WorkforcePrincipalStrategy>();
         services.AddScoped<ICallerPrincipalResolver, CallerPrincipalResolver>();
 
+        // Module-host registration framework (spaarke-SPA-external-access-platform-r2 task 015 · FR-22 ·
+        // ADR-028 A3). Generalizes the resolver seam into a per-module registry: each module registers a
+        // Tier-2 record predicate (over the plane-agnostic CallerPrincipal) that the BffDataverseClient
+        // read-data group applies. Registering a module is purely additive (call AddExternalModule) — no
+        // route/filter/handler change. The registry is a singleton built from every registered
+        // ExternalModuleDescriptor; it holds no per-request state (the predicate delegates run on the
+        // request's CallerPrincipal), so it is read-only + thread-safe after startup. ADR-010: concrete
+        // registration — the pluggable seam is the per-module descriptor delegates, not an interface.
+        services.AddSingleton<ExternalModuleRegistry>(sp =>
+        {
+            var registry = new ExternalModuleRegistry();
+            foreach (var descriptor in sp.GetServices<ExternalModuleDescriptor>())
+            {
+                registry.Register(descriptor);
+            }
+            return registry;
+        });
+
+        // FIRST module — the collaboration / Secure-Project surface delivered by teams-app-r1, now
+        // registered OVER the framework (design.md §3 reuse-as-is + generalize). Its Tier-2 predicate IS
+        // the project scope both plane strategies already composed onto CallerPrincipal.ProjectAccess
+        // (CIAM → sprk_externalrecordaccess participations; workforce → accessible-record-set). Task 016
+        // registers the remaining outside-counsel modules (matter/document/invoice/work-assignment) the
+        // same way — AddExternalModule with one descriptor each, no framework change.
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "collaboration",
+            RecordEntity = "sprk_project",
+            RecordIdAttribute = "sprk_projectid",
+            AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+        });
+
         // Accessible-record-set composition + enforcement gate (teams-app-r1 task 022, spec FR-06 /
         // design §5). Composes accessible(principal) = systemuser→ADR-034 membership (auto) ∪
         // contact→sprk_externalrecordaccess grants ∪ contact→standing-grant runtime membership, and is
@@ -100,6 +132,23 @@ public static class ExternalAccessModule
         // cross-tenant client above; reuses PasswordGenerator (RegistrationModule). Singleton per ADR-010.
         services.AddSingleton<CiamUserProvisioningService>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers one external module (widget) on the module-host platform (FR-22 · ADR-028 A3). Purely
+    /// additive: the <see cref="ExternalModuleRegistry"/> singleton aggregates every registered
+    /// <see cref="ExternalModuleDescriptor"/> at startup. This is the "add a module = register" seam —
+    /// no route, filter, resolver, or handler changes. Task 016 uses it to register the outside-counsel
+    /// modules. Registration order does not matter — the registry factory enumerates every registered
+    /// descriptor at resolution time — but keep module registration in <c>AddExternalAccess</c>'s
+    /// composition path so the registry singleton is also registered.
+    /// </summary>
+    public static IServiceCollection AddExternalModule(
+        this IServiceCollection services, ExternalModuleDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        services.AddSingleton(descriptor);
         return services;
     }
 }

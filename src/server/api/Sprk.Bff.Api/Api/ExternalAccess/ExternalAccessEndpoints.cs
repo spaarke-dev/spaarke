@@ -75,6 +75,14 @@ public static class ExternalAccessEndpoints
         // Project data endpoints — list/read projects, documents, todos, contacts, organizations,
         // document download. All principal-agnostic (filter the CallerPrincipal's accessible-record set).
         externalGroup.MapExternalProjectDataEndpoints();
+
+        // Module-host widget-data read seam (task 015 · FR-22 · ADR-028 A3): the per-module read-data
+        // endpoints (/api/dataverse/* under this group) consumed by the read-only BffDataverseClient.
+        // They inherit this group's ExternalCollaboration dual-scheme policy + CallerPrincipalAuthorizationFilter
+        // (the generalized resolver) and Tier-2-scope every data read through the requested module's
+        // registered predicate (app-only, no OBO, no Graph pointers). Additive — handlers + the group
+        // filter above are untouched.
+        externalGroup.MapExternalModuleDataEndpoints();
     }
 
     // =========================================================================

@@ -9,6 +9,7 @@ import {
   setUserThemePreference,
 } from '@spaarke/ui-components/utils/themeStorage';
 import { APP_VERSION } from './config';
+import { clearStoredRealm } from './auth/realm';
 import { AppHeader } from './components/AppHeader';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -212,10 +213,13 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
     setTheme(resolveCodePageTheme());
   }, [isDark]);
 
-  // Sign out via MSAL logout (standard redirect). Auth-config/storage untouched (NFR-05).
-  // No-op in dev mock mode (no live MSAL instance to log out of).
+  // Sign out via MSAL logout (standard redirect). MSAL auth-config/cache storage untouched (NFR-05).
+  // Also clears the per-tab home-realm choice (task 013) so the next sign-in re-shows the "My
+  // organization / Partner" chooser and the user can switch planes; no-op for Teams (no stored realm)
+  // and for dev mock mode (no live MSAL instance to log out of).
   const handleSignOut = React.useCallback(() => {
     if (import.meta.env.VITE_DEV_MOCK === 'true') return;
+    clearStoredRealm();
     void instance.logoutRedirect();
   }, [instance]);
 

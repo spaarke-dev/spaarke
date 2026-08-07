@@ -4,7 +4,7 @@
     <title>Dual-plane auth bootstrap (extend @spaarke/auth AuthStrategy: CIAM + realm discovery; adopt Teams path)</title>
     <phase>P1 Module-host foundation</phase>
     <gate>blocked-until:011</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive auth code; edits main.tsx auth bootstrap + @spaarke/auth AuthStrategy; tags include auth; token-audience contract risk.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -130,6 +130,19 @@
     Adopt the teams-app-r1 NAA path (proven live) rather than rebuilding it. Home-realm discovery defaults to an
     explicit chooser (spec Assumption; email-domain sniffing deferred). The BFF already validates both schemes
     (workforce default + CIAM); this task is client-side plane selection only.
+
+    COMPLETION (2026-08-06, FULL rigor / opus): Built via CLAUDE.md §6.5 Path C — did NOT modify @spaarke/auth
+    (ADR-028 A3 MUST NOT: module-host SPA MUST NOT route through the Xrm-bound @spaarke/auth). Instead extended the
+    sanctioned standalone-MSAL module + main.tsx host branch. New: auth/realm.ts (per-tab sessionStorage realm),
+    auth/standalone-plane.ts (realm→{instance,bffScope}; broker-only both planes), components/auth/RealmChooser.tsx
+    (ChoiceModal preset, ADR-050/ADR-021). Modified: msal-auth.ts (login-scope seam), AuthGuard.tsx (uses
+    getActiveLoginScope; CIAM default unchanged), main.tsx (StandaloneBootstrap state machine; Teams + dev-mock
+    branches untouched), App.tsx (clearStoredRealm on sign-out), config.ts (getWorkforceEnvConfig; Teams alias kept).
+    CIAM per-tab sessionStorage (msal-config.ts) + Teams NAA path preserved byte-for-byte. Workforce browser plane
+    reuses the proven teams-app-r1 workforceAuthorityConfig (same aud/iss) — contract verified by inspection, no
+    mismatch, escalation did NOT fire. `npx tsc --noEmit` clean. adr-check + code-review both PASS (0 critical, 0
+    blocking). All 5 acceptance criteria met (criterion 4 as invariant; live BFF-reject E2E deferred to P1 tasks
+    018/019 — BFF out of scope per NFR-05). Full detail: notes/task-013-deviations.md.
   </notes>
 
   <execution>

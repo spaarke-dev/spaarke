@@ -4,7 +4,7 @@
     <title>Generalize CallerPrincipalResolver into the module/widget framework + wire the BffDataverseClient widget-data seam (register per-module strategy/predicate)</title>
     <phase>P1 Module-host foundation</phase>
     <gate>blocked-until:010</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Core external-access BFF surface (tags bff-api/auth); brownfield generalization of shipped auth code; asymmetric-registration + CIAM byte-for-byte preservation risk.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -17,9 +17,9 @@ Legend: 🔲 not-started · ✅ completed · Tier S=sonnet O=opus · Eff h=high 
 | 010 | ADR-028 Amendment A3 | P1 | ✅ | none | O/h | FULL | — (.claude/ main-session) |
 | 011 | Workspace-shell scaffold (portal header + tab host + pane layout + dockable assistant) | P1 | ✅ | 004,010 | S/h | FULL | — (shell base) |
 | 012 | Widget registry + tabbed workspace + pinned Quick Start + entitlement-gated widget library | P1 | ✅ | 011 | S/h | FULL | Group B |
-| 013 | Dual-plane auth bootstrap (CIAM + realm discovery) | P1 | 🔲 | 011 | O/h | FULL | — (auth) |
+| 013 | Dual-plane auth bootstrap (CIAM + realm discovery) | P1 | ✅ | 011 | O/h | FULL | — (auth) |
 | 014 | Teams app packaging (manifest + CSP + theme) | P1 | ✅ | 011 | S/h | STANDARD | Group B |
-| 015 | FR-22 module/widget-data framework generalization | P1 | 🔲 | 010 | O/x | FULL | — (core BFF) |
+| 015 | FR-22 module/widget-data framework generalization | P1 | ✅ | 010 | O/x | FULL | — (core BFF) |
 | 016 | Outside Counsel widgets (Projects/Matters/Work Assignments/Documents/Invoices) | P1 | 🔲 | 012,015 | S/h | FULL | — |
 | 017 | Cleanup dead Power Pages proxy/config | P1 | ✅ | 011 | S/h | STANDARD | Group B |
 | 018 | Cleanup inert filter + /api/v1/collab | P1 | 🔲 | 015,016 | O/x | FULL | — (BFF deletion) |
