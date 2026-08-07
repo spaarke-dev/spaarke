@@ -173,6 +173,31 @@ export interface WidgetState<TData = unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// WidgetContextType (FR-B1 + FR-C3 — task 020)
+// ---------------------------------------------------------------------------
+
+/**
+ * CLOSED set of "what kind of workspace surface is this" tags for a
+ * registered widget. Exactly these six values — do not widen ad hoc.
+ *
+ * This is a DISTINCT concept from the free-form `contextType?: string` on
+ * `ContextPaneEvent` (`events/PaneEventTypes.ts`, the Context-pane channel's
+ * payload classifier, e.g. `"document"` / `"email"` / `"clause"`). That field
+ * is per-EVENT and open-ended; `WidgetContextType` is per-WIDGET-TYPE and
+ * closed. Do not conflate or reuse one for the other.
+ *
+ * Feeds FR-B1's proactive-chip scoping (Workstream B): the active workspace
+ * tab's declared `contextType` lets chip selection scope itself to "this tab
+ * is a document" / "this tab is an email" etc. Per ADR-039, this is DATA
+ * carried on the (already-closed) widget-registry catalog — never a
+ * classifier, reranker, or second intent-detection mechanism.
+ *
+ * @see WidgetMetadata.contextType — where this is declared per widget
+ * @see register-workspace-widgets.ts — per-widget assignment
+ */
+export type WidgetContextType = 'email' | 'document' | 'compose-doc' | 'matter-grid' | 'dashboard' | 'calendar';
+
+// ---------------------------------------------------------------------------
 // WidgetMetadata
 // ---------------------------------------------------------------------------
 
@@ -215,6 +240,16 @@ export interface WidgetMetadata {
    * registration order.
    */
   defaultOrder: number;
+
+  /**
+   * OPTIONAL closed-set tag (FR-B1 + FR-C3, task 020) classifying what kind
+   * of workspace surface this widget represents. Omit when the widget has no
+   * honest fit among the six values — `undefined` here means "none", not an
+   * authoring gap.
+   *
+   * @see WidgetContextType for the closed set + rationale.
+   */
+  contextType?: WidgetContextType;
 }
 
 // ---------------------------------------------------------------------------

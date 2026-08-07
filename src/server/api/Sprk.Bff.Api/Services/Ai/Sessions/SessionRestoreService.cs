@@ -117,6 +117,18 @@ public class SessionRestoreService : ISessionRestoreService
             ? (IReadOnlyList<SessionMessage>)session.Messages.AsReadOnly()
             : session.Messages.Skip(session.Messages.Count - VerbatimTailLength).ToList().AsReadOnly();
 
+        // ── Step 5b: Project the uploaded-files manifest for client chip rehydration (FR-D5) ──
+        // Minimal identifier/display fields only — the already-persisted StoredSession.UploadedFiles
+        // (ADR-040: no new store, no new query) mapped to a strict subset. Enriched fields
+        // (SummaryText / Sections / Citations / ExtractedText) are deliberately NOT projected
+        // (ADR-015 Tier-2: restore payload carries identifiers + display metadata, never content).
+        IReadOnlyList<RestoredUploadedFile> uploadedFiles = session.UploadedFiles is { Count: > 0 }
+            ? session.UploadedFiles
+                .Select(f => new RestoredUploadedFile(f.FileId, f.FileName, f.ContentType, f.SizeBytes))
+                .ToList()
+                .AsReadOnly()
+            : [];
+
         sw.Stop();
 
         _logger.LogInformation(
@@ -142,7 +154,8 @@ public class SessionRestoreService : ISessionRestoreService
             WasSummarized: wasSummarized,
             RestoredAt: DateTimeOffset.UtcNow,
             RestoreLatencyMs: sw.ElapsedMilliseconds,
-            RecentMessages: recentMessages);
+            RecentMessages: recentMessages,
+            UploadedFiles: uploadedFiles);
     }
 
     // =========================================================================

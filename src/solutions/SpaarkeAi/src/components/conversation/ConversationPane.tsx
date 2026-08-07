@@ -24,7 +24,7 @@ import {
   MessageBarBody,
   MessageBarActions,
 } from "@fluentui/react-components";
-import { ChatRegular, ChatAddRegular, DismissRegular } from "@fluentui/react-icons";
+import { ChatRegular, ChatAddRegular, DismissRegular, ArrowClockwiseRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat, createConsumerDispatcher, RichFilePreviewDialog, createXrmNavigationService, createXrmDataService, searchUsersAndContacts, launchSurface, resolveSurfaceLaunch, launchSummarizeFilesWizard, SendEmailDialog } from "@spaarke/ui-components";
 import { WelcomeStartCards } from "./WelcomeStartCards";
 import { QuickStartModal } from "./QuickStartModal";
@@ -41,6 +41,7 @@ import type {
   DispatchConsumerResult,
   INextStepChip,
   ResolvedLookup,
+  ConsumerChip,
 } from "@spaarke/ui-components";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
@@ -63,12 +64,11 @@ import { useConsumerChips } from "./useConsumerChips";
 // spaarke-notification-spine-r1 task 051 (FR-16): the proactive-suggestion renderer branch —
 // a SIBLING of the Click-path chips, subscribing to the Layer-C spine's `kind=suggestion`
 // pushes via the ONE host-wide `@spaarke/notifications` client (task 021).
-import { useSuggestionCards, type PendingSuggestionItem } from "./useSuggestionCards";
 // UAT round-4 (item #9): "Rerun a full analysis" card — offered after a QUICK-depth agreement
-// review completes. A SIBLING of useSuggestionCards (reuses its SuggestionCard visual directly)
-// but client-local/session-turn-scoped — no outbox row, no BFF re-ground.
+// review completes. Client-local/session-turn-scoped (no outbox row, no BFF re-ground). It reuses
+// the SuggestionCard presentational component, which is why SuggestionCard.tsx is retained even
+// though assistant-enhancements-r2 task 001 (FR-E1) removed the spine-driven suggestion surface.
 import { useRerunFullAnalysisCard } from "./useRerunFullAnalysisCard";
-import { getNotificationsClient } from "../../services/notificationsBootstrap";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
 import { useNdaReviewAdvisoryCommentsBridge, isNdaReviewResult } from "./useNdaReviewAdvisoryCommentsBridge";
@@ -79,6 +79,7 @@ import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
 import { useSelectionChip } from "./useSelectionChip";
 import { useSerialActionQueue, type ComposeActionRequest } from "./useSerialActionQueue";
+import { deriveActiveTabFocusStamp, type ActiveTabFocusStamp } from "./activeTabFocusStamp";
 // Deep-import the cross-pane bridge hook (not the `@spaarke/compose-components`
 // barrel) so this Assistant-pane module does NOT transitively pull the TipTap
 // editor widgets — mirrors ComposeEditor/ComposeWorkspace's `@spaarke/ai-widgets/events`
@@ -100,7 +101,7 @@ import { formatComposeActionResultMarkdown, extractComposeEditExplanation } from
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import { detectDraftDocumentIntent } from "./composeDraftRouting";
-import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip, getDocumentReviewCapability } from "./localActionChips";
+import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip, buildEmailSummarizeChip, getDocumentReviewCapability } from "./localActionChips";
 import { buildChipPreference, recordChipUsage } from "./chipPreference";
 import {
   detectReviseThisDocumentIntent,
@@ -137,6 +138,7 @@ import {
   AssistantModelTier,
   useConversationPaneLayoutStyles,
 } from "./ConversationPaneChrome";
+import type { AttachedFileSummary } from "./ConversationPaneChrome";
 
 // Public pure-helper surface (tests import these from '../ConversationPane').
 export {
@@ -281,6 +283,73 @@ export const WIZARD_AUTO_RUN_BRIDGE_FAILURE_MESSAGE =
  * network never false-alarms, while a genuinely failed bridge still surfaces within the session.
  */
 export const WIZARD_AUTO_RUN_WATCHDOG_MS = 30_000;
+
+/**
+ * task 024 (FR-B6) — one dev-only proactive-selection trace entry. Records what the CLIENT observed
+ * at the selection point of a proactive suggestion turn (task 022): the focused tab's context type,
+ * the tab id, what triggered the turn, and the ≤3 chips the grounded turn selected — each chip carries
+ * the model's per-chip `reason` (from the SUGGEST-FOLLOWUPS Action output). The server-side candidate
+ * Binding list that fed the selection is separately logged by `AssistantSuggestionService`
+ * (candidateCount + bindingIds), so the two together make the otherwise-opaque selection inspectable.
+ */
+interface SuggestTraceEntry {
+  at: number;
+  tabId: string;
+  contextType: string;
+  trigger: "first-open" | "refresh";
+  chips: unknown[];
+}
+
+/** Bounded ring-buffer size for the dev trace stashed on `window.__sprkSuggestTrace`. */
+const SUGGEST_TRACE_MAX = 20;
+
+/**
+ * Emit the FR-B6 dev-only proactive-selection trace: `console.debug` + a bounded
+ * `window.__sprkSuggestTrace` ring buffer for inspection. Guarded by
+ * `process.env.NODE_ENV === "production"` — Vite replaces that literal at build time, so the entire
+ * body is dead-code-eliminated from the production bundle (zero production UI/behavior change, FR-B6).
+ * In dev and under test (`NODE_ENV !== "production"`) the trace runs.
+ */
+function recordSuggestTrace(entry: SuggestTraceEntry): void {
+  if (process.env.NODE_ENV === "production") return;
+  const w = window as unknown as { __sprkSuggestTrace?: SuggestTraceEntry[] };
+  const buffer = (w.__sprkSuggestTrace ??= []);
+  buffer.push(entry);
+  if (buffer.length > SUGGEST_TRACE_MAX) buffer.shift();
+  // eslint-disable-next-line no-console
+  console.debug("[sprk:suggest-trace]", entry);
+}
+
+/**
+ * task 038 (FR-D11) — the "Reanalyze" follow-on chip for a document-context tab. Unlike the
+ * `local:*` chips in `localActionChips.ts`, this is a REAL dispatchable Binding chip: `bindingId`
+ * is the task-021-seeded Reanalyze Binding id (consumerType `chat-summarize`, consumerCode
+ * `reanalyze`, tagged `document`), resolved via capability discovery — never hardcoded (ADR-039).
+ * A click routes through the SAME Click-path `dispatchConsumer` every other consumer chip uses; the
+ * server resolves the target document from the current chat session's context with no slots
+ * required — mirrors the existing "compose-summarize" doc-action dispatch (`handleDocAction`'s
+ * "summarize" case), which also dispatches `{ slots: undefined }`.
+ */
+function buildReanalyzeChip(bindingId: string): ConsumerChip {
+  return { label: "Reanalyze", bindingId };
+}
+
+/**
+ * task 042c-fr-c4 (FR-C4) — pull the active email tab's `.eml` archive document id out of the
+ * focus-stamp's `compactState` (the tab's `EmailTabWidgetData`, kind==='Email'; see
+ * `@spaarke/ai-widgets` WorkspaceTab.ts). Returns the id only when it is a non-empty string, so
+ * an email with no `.eml` archive yet (`emlDocumentId: null`) never yields a null-document send.
+ * Typed structurally (reads `unknown`) to avoid coupling ConversationPane to the widget-data union.
+ */
+function readActiveEmailDocId(compactState: unknown): string | null {
+  if (compactState && typeof compactState === "object") {
+    const data = compactState as { kind?: unknown; emlDocumentId?: unknown };
+    if (data.kind === "Email" && typeof data.emlDocumentId === "string" && data.emlDocumentId.length > 0) {
+      return data.emlDocumentId;
+    }
+  }
+  return null;
+}
 
 export function ConversationPane(): React.JSX.Element {
   const styles = useConversationPaneLayoutStyles();
@@ -477,11 +546,20 @@ export function ConversationPane(): React.JSX.Element {
   // bindingId, enabled the moment the review-intent text detector first fires (see the decorate
   // hook below) — well before classification actually needs to dispatch.
   const [agreementReviewGateNeeded, setAgreementReviewGateNeeded] = React.useState<boolean>(false);
+  // task 038 (FR-D11) — the SAME deferred capability-discovery seam resolves the "Reanalyze"
+  // Binding id (task 021 seed: consumerType `chat-summarize`, consumerCode `reanalyze`, tagged
+  // `document`) the moment a document-context tab is first focused (armed by the
+  // `active_widget_changed` branch below) — well before the chip needs to dispatch.
+  const [reanalyzeCapabilityNeeded, setReanalyzeCapabilityNeeded] = React.useState<boolean>(false);
   const { capabilities: launchableCapabilities } = useCapabilityDiscovery({
     bffBaseUrl,
     authenticatedFetch,
     enabled:
-      reviseCapabilityNeeded || draftCapabilityNeeded || ndaReviewCapabilityNeeded || agreementReviewGateNeeded,
+      reviseCapabilityNeeded ||
+      draftCapabilityNeeded ||
+      ndaReviewCapabilityNeeded ||
+      agreementReviewGateNeeded ||
+      reanalyzeCapabilityNeeded,
   });
   const reviseBindingId = React.useMemo<string | null>(
     () =>
@@ -528,6 +606,19 @@ export function ConversationPane(): React.JSX.Element {
   // detected (see `agreementReviewGateNeeded` below), so it is resolved by the time the gate needs it.
   const classifyBindingId = React.useMemo<string | null>(
     () => launchableCapabilities.find((c) => c.consumerType === "agreement-classify")?.bindingId ?? null,
+    [launchableCapabilities]
+  );
+
+  // task 038 (FR-D11) — the Reanalyze Binding id, resolved from the SAME closed capability catalog
+  // (ADR-039: bindingId only from discovery, never invented/hardcoded — portable across
+  // environments exactly like the bindingIds above). Disambiguated from the pre-existing "Chat
+  // Summarize" Binding — SAME consumerType `chat-summarize` — by `consumerCode` (task 021 seed:
+  // consumerCode `reanalyze`); `CapabilityDiscoveryItem` carries both fields.
+  const reanalyzeBindingId = React.useMemo<string | null>(
+    () =>
+      launchableCapabilities.find(
+        (c) => c.consumerType === "chat-summarize" && c.consumerCode === "reanalyze"
+      )?.bindingId ?? null,
     [launchableCapabilities]
   );
 
@@ -603,6 +694,33 @@ export function ConversationPane(): React.JSX.Element {
   // Compose door is unbound). This pane adopts that session so the Assistant transcript CONTINUES on
   // return instead of cold-starting "back at the Review an NDA step". Adopted at most once per mount.
   const restoreSessionAdoptedRef = React.useRef<boolean>(false);
+
+  // task 010 (FR-A1) — active-tab focus-stamp. The currently-focused Workspace tab's identity +
+  // compact state, updated by the `workspace.active_widget_changed` subscriber below. Held in a
+  // REF (not state) so a tab switch never triggers a ConversationPane re-render — this is a
+  // read-on-send value, not a render input. Consumed by FR-A2 (outbound-body decorate, task 011)
+  // and, server-side, by FR-A3's focus-stamp (task 012, via the value threaded in task 011).
+  // `contextType` is populated by a later task (020, FR-B1's closed set { email, document,
+  // compose-doc, matter-grid, dashboard, calendar }) — intentionally left undefined here rather
+  // than inventing a value ahead of that closed union landing.
+  const activeTabFocusRef = React.useRef<ActiveTabFocusStamp | null>(null);
+
+  // task 022 (FR-B3/B5) — once-per-tab guard for the proactive suggestion turn. A tab's FIRST focus
+  // fires exactly one POST /suggest; switching away and back never re-fires (the tabId stays in the
+  // Set for the pane's lifetime). Ref (not state) — the fetch is a side effect, not a render input.
+  // Mirrors the `wizardAutoRunHandledRef` once-per-key idiom above.
+  const suggestedTabIdsRef = React.useRef<Set<string>>(new Set());
+
+  // task 042c-fr-c4 (FR-C4) — one-shot email-summarize wiring.
+  //  - `pendingEmailDocRef` holds the active email's `emlDocumentId` for exactly the NEXT
+  //    outbound turn. `handleDecorateOutboundBodyWithRevise` reads it, stamps it as that turn's
+  //    `body.documentId` (the server injects the .eml body for that turn only — ADR-015 on-demand,
+  //    never every-turn), and CLEARS it. Ref (not state) — a read-on-send value, no re-render.
+  //  - `pendingOutboundMessage` is the one-slot host→send request passed to <SprkChat>; SprkChat
+  //    sends it once (running the decorate seam above) then acks via `onOutboundConsumed`, which
+  //    clears this state back to null. State (not ref) because SprkChat re-reads it as a prop.
+  const pendingEmailDocRef = React.useRef<string | null>(null);
+  const [pendingOutboundMessage, setPendingOutboundMessage] = React.useState<string | null>(null);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -723,6 +841,11 @@ export function ConversationPane(): React.JSX.Element {
   ndaRunRef.current = ndaRun;
   const ndaReviewBindingIdRef = React.useRef<string | null>(null);
   ndaReviewBindingIdRef.current = ndaReviewBindingId;
+  // task 038 (FR-D11): ref mirror so the stable `[]`-deps `getAppendedLocalChips` callback (below)
+  // and the catch-up effect (after the `chips` controller is constructed) can read the current
+  // Reanalyze bindingId without re-subscribing.
+  const reanalyzeBindingIdRef = React.useRef<string | null>(null);
+  reanalyzeBindingIdRef.current = reanalyzeBindingId;
   // UAT round-3 (item #8): broadcast the progress modal's visibility on the PaneEventBus so
   // ReviewCompleteToast (shell/ReviewCompleteToast.tsx) can suppress a redundant completion toast
   // while the modal itself is STILL showing the outcome (no double-notification per the decided
@@ -820,6 +943,21 @@ export function ConversationPane(): React.JSX.Element {
         // "Review an NDA" for the NDA docType — unchanged behavior).
         ...(ndaReviewFileRef.current ? [buildNdaReviewChip(ndaReviewFileRef.current.cardLabel)] : []),
         ...(promotedFileIdsByNameRef.current.size > 0 ? [buildReviseInComposeChip()] : []),
+        // task 038 (FR-D11): "Reanalyze" persists across every subsequent chip carrier (proactive
+        // suggestions, dispatch re-arms) for as long as the active tab is a document context and
+        // the Binding id has resolved — a REAL Binding chip (not `local:*`), appended alongside
+        // whatever the carrier itself delivered rather than replacing it.
+        ...(activeTabFocusRef.current?.contextType === "document" && reanalyzeBindingIdRef.current
+          ? [buildReanalyzeChip(reanalyzeBindingIdRef.current)]
+          : []),
+        // task 042c-fr-c4 (FR-C4): the deterministic "Summarize this email" chip, folded into
+        // whatever carrier delivers alongside it — shown ONLY when the active tab is an email
+        // context (ADR-039 deterministic; no classifier) AND the tab exposes a non-null
+        // `emlDocumentId` (guarded by readActiveEmailDocId → never a null-document send).
+        ...(activeTabFocusRef.current?.contextType === "email" &&
+        readActiveEmailDocId(activeTabFocusRef.current?.compactState)
+          ? [buildEmailSummarizeChip()]
+          : []),
       ],
       []
     ),
@@ -860,6 +998,98 @@ export function ConversationPane(): React.JSX.Element {
     }, [dispatch]),
   });
   acceptChipsRef.current = chips.acceptChips;
+  // task 038 (FR-D11): ref mirrors so the catch-up effect below (and the workspace focus handler
+  // further down) can read the CURRENT hasChips/dispatching state without depending on the whole
+  // `chips` object — `chips` is recreated on every chip-strip change (its `consumerChipsSlot`
+  // member is memoized on `rankedConsumerChips`), so an effect depending on `chips` itself would
+  // re-fire on EVERY chip change, not just when `reanalyzeBindingId` resolves.
+  const chipsHasChipsRef = React.useRef(chips.hasChips);
+  chipsHasChipsRef.current = chips.hasChips;
+  const chipsDispatchingRef = React.useRef(chips.dispatching);
+  chipsDispatchingRef.current = chips.dispatching;
+
+  // task 038 (FR-D11): once capability discovery resolves the Reanalyze Binding id, ensure it's
+  // showing for a document-context tab even if the proactive-suggest turn (022) already settled
+  // with zero/errored suggestions before the binding resolved — `getAppendedLocalChips` above only
+  // folds Reanalyze in alongside ANOTHER non-empty chip carrier, so an all-empty carrier would
+  // otherwise never surface it. Guarded on `!hasChips` so this never clobbers chips a carrier
+  // already populated (those already include Reanalyze via getAppendedLocalChips) AND on
+  // `!dispatching` — the strip is ALSO briefly empty while a click-dispatch is in flight
+  // (`runBindingDispatch` clears it synchronously before the async call), and seeding here during
+  // that window would incorrectly re-populate the strip mid-dispatch. Deps are `[reanalyzeBindingId,
+  // chips.acceptChips]` — `acceptChips` is referentially stable, so this effect fires once, exactly
+  // when `reanalyzeBindingId` resolves (it never changes afterward).
+  React.useEffect(() => {
+    if (!reanalyzeBindingId) return;
+    if (activeTabFocusRef.current?.contextType !== "document") return;
+    if (chipsHasChipsRef.current || chipsDispatchingRef.current) return;
+    // De-duped against getAppendedLocalChips by bindingId (see the identical call above) — never
+    // double-renders.
+    chips.acceptChips([{ targetBindingId: reanalyzeBindingId, chipLabel: "Reanalyze" }]);
+  }, [reanalyzeBindingId, chips.acceptChips]);
+
+  // task 022 (FR-B3/B5) — proactive suggestion turn. On a workspace tab's FIRST focus, fire ONE
+  // grounded server call (POST /suggest); the BFF deterministically pre-filters candidate capabilities
+  // to the tab's contextType, runs ONE grounded turn that selects + phrases ≤3 content-specific chips,
+  // and returns them. The chips feed the SAME reactive surface (`chips.acceptChips`) the dispatch path
+  // uses, and dispatch via the existing Click path on user click — no SprkChat fork, no second dispatch
+  // protocol. Fire-and-forget + best-effort: any failure is swallowed (a proactive surface must never
+  // disrupt the chat). `acceptChips` does NOT cap, so we slice to ≤3 before handing it the array.
+  const fireProactiveSuggestion = React.useCallback(
+    (focusStamp: ActiveTabFocusStamp, force = false) => {
+      const tabId = focusStamp.tabId;
+      const contextType = focusStamp.contextType;
+      const sessionId = getSessionId();
+      // No tab identity, no context type (can't scope), or no session ⇒ skip WITHOUT marking the tab,
+      // so a later focus that DOES carry a contextType can still fire once.
+      if (!tabId || !contextType || !sessionId) return;
+      // task 023 (FR-B4): `force` (the manual "refresh suggestions" control) is the ONLY re-fire path
+      // besides first-open — it bypasses the once-per-tab guard for the active tab. The automatic
+      // first-open path (force=false) still fires at most once per tab (NFR-02).
+      if (!force && suggestedTabIdsRef.current.has(tabId)) return;
+      suggestedTabIdsRef.current.add(tabId);
+
+      const url = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/chat/sessions/${encodeURIComponent(
+        sessionId
+      )}/suggest`;
+      void (async () => {
+        try {
+          const response = await authenticatedFetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ contextType, activeContext: focusStamp }),
+          });
+          if (!response.ok) return;
+          const data = (await response.json()) as { chips?: unknown[] };
+          const top = Array.isArray(data?.chips) ? data.chips.slice(0, 3) : [];
+          // task 024 (FR-B6) — dev-only trace of the selection outcome (contextType + tab + trigger +
+          // the selected chips, each carrying the model's per-chip reason). Inert in production.
+          recordSuggestTrace({
+            at: Date.now(),
+            tabId,
+            contextType,
+            trigger: force ? "refresh" : "first-open",
+            chips: top,
+          });
+          if (top.length > 0) {
+            acceptChipsRef.current(top);
+          }
+        } catch {
+          // best-effort proactive surface — swallow (never disrupt the chat).
+        }
+      })();
+    },
+    [authenticatedFetch, bffBaseUrl, getSessionId]
+  );
+
+  // task 023 (FR-B4) — manual "refresh suggestions" affordance. Re-runs the 022 grounded turn for the
+  // CURRENTLY focused tab (read from the focus-stamp ref) with force=true, bypassing the once-per-tab
+  // guard; the returned chips replace the cached strip via acceptChips. This is the ONLY re-fire path
+  // besides first-open (NFR-02) — no automatic re-fire is introduced.
+  const handleRefreshSuggestions = React.useCallback(() => {
+    const stamp = activeTabFocusRef.current;
+    if (stamp) fireProactiveSuggestion(stamp, true);
+  }, [fireProactiveSuggestion]);
 
   // task 021 (FR-07/08/09 interactive orientation + confirmation gate) — the stateful gate
   // controller. Declared AFTER `chips` (needs `chips.dispatchBinding`/`chips.acceptChips`) and
@@ -927,64 +1157,11 @@ export function ConversationPane(): React.JSX.Element {
     }
   }, [ndaRun.status, dispatch]);
 
-  // ── spaarke-notification-spine-r1 task 051/052 (FR-16/FR-17): proactive-suggestion cards ──
-  // A `kind=suggestion` outbox row (task 050 producer) is delivered by the Layer-C
-  // spine via the task-021 `@spaarke/notifications` client, re-grounded through the
-  // BFF, and rendered as a compact card (SuggestionCard) — a SIBLING of the Click-path
-  // chips, independent of a dispatch turn. ACTING on it OPENS the regarding record in a
-  // MODAL (owner decision, task 052 / FR-17) — the modal-standard Layout 1
-  // (`Xrm.Navigation.navigateTo({ pageType: "entityrecord" }, { target: 2, 85% })`), so the
-  // Assistant is NOT navigated away. This is navigation, NOT a capability dispatch — it uses
-  // the existing `INavigationService` surface, so no second dispatch pipeline is introduced.
-  // ONE shared Xrm navigation service — also drives the saved-preview record open below.
+  // Shared Xrm navigation service — drives the saved-preview record "Open record" action below
+  // (~line 2952). assistant-enhancements-r2 task 001 (FR-E1) removed the spine-driven
+  // proactive-suggestion surface (useSuggestionCards) that formerly also consumed this service's
+  // openRecordModal; the service is retained for the saved-preview path.
   const previewNavigationService = React.useMemo(() => createXrmNavigationService(), []);
-  const suggestions = useSuggestionCards({
-    subscribe: React.useCallback(
-      (kind, handler) => getNotificationsClient().registerHandler(kind, handler),
-      []
-    ),
-    // Re-fetch/re-ground: GET /api/notifications/pending (task 022) — oid-scoped +
-    // read-time expiry-filtered SERVER-side. Tolerant of the `{ items }` wrapper or a bare array.
-    fetchPending: React.useCallback(async (): Promise<ReadonlyArray<PendingSuggestionItem>> => {
-      const response = await authenticatedFetch(`${bffBaseUrl}/api/notifications/pending`, {
-        method: "GET",
-      });
-      const data: unknown = await response.json();
-      const items = Array.isArray(data)
-        ? data
-        : data && typeof data === "object" && Array.isArray((data as { items?: unknown }).items)
-          ? (data as { items: unknown[] }).items
-          : [];
-      return items as ReadonlyArray<PendingSuggestionItem>;
-    }, [authenticatedFetch, bffBaseUrl]),
-    // task 052 (FR-17): acting on a suggestion OPENS the regarding record in a modal
-    // (owner decision) — the shared INavigationService's Layout-1 `openRecordModal`
-    // (`navigateTo` entityrecord, `target: 2`, 85%). Navigation, not a capability dispatch,
-    // so no second dispatch pipeline. `openRecordModal` is optional on the interface; the
-    // Xrm adapter always provides it, and a re-fetch already confirmed the row is live.
-    onSuggestionAction: React.useCallback(
-      (envelope) =>
-        previewNavigationService.openRecordModal?.(
-          envelope.regardingRecordType,
-          envelope.regardingRecordId
-        ) ?? Promise.resolve(),
-      []
-    ),
-    // Dismiss 'x' (UAT 2026-07-22): POST /api/notifications/{id}/dismiss stamps sprk_dismissed
-    // server-side so the row leaves /pending (ownership enforced server-side). Also fired after a
-    // successful action so an acted-on suggestion does not reappear. Best-effort — a non-2xx is
-    // swallowed (the hook has already removed the card locally).
-    dismiss: React.useCallback(
-      async (outboxRowId: string): Promise<void> => {
-        await authenticatedFetch(
-          `${bffBaseUrl}/api/notifications/${encodeURIComponent(outboxRowId)}/dismiss`,
-          { method: "POST" }
-        );
-      },
-      [authenticatedFetch, bffBaseUrl]
-    ),
-    inject: injection.inject,
-  });
 
   // ── spaarkeai-assistant-enhancements-r1 P0(b): TEXT/agent-path surface launch ──
   // The BFF's BindingCapabilityTool emits a `surface_launch` SSE event when the
@@ -1556,6 +1733,20 @@ export function ConversationPane(): React.JSX.Element {
           // SAME mount-in-Compose + dispatch-nda-review flow the old top-of-pane card used.
           handleReviewNda();
           return;
+        case LOCAL_CHIP.emailSummarize: {
+          // task 042c-fr-c4 (FR-C4): arm the one-shot email-summarize flow. Read the FOCUSED email
+          // tab's `emlDocumentId` off the focus stamp (the tab's persisted EmailTabWidgetData), set
+          // it as the one-shot decorate handle, and arm SprkChat's host→send slot. SprkChat sends
+          // "Summarize this email" once → handleDecorateOutboundBodyWithRevise attaches
+          // `documentId=emlDocumentId` to THAT turn only → the server injects the .eml body for that
+          // turn (ADR-015 on-demand, never every-turn). Guard: no emlDocumentId ⇒ do nothing (the
+          // chip is not offered without one, but this is belt-and-braces — never a null send).
+          const emlDocId = readActiveEmailDocId(activeTabFocusRef.current?.compactState);
+          if (!emlDocId) return;
+          pendingEmailDocRef.current = emlDocId;
+          setPendingOutboundMessage("Summarize this email");
+          return;
+        }
         case LOCAL_CHIP.agreementReviewConfirmQuick:
         case LOCAL_CHIP.agreementReviewConfirmThorough:
         case LOCAL_CHIP.agreementReviewGeneral:
@@ -1961,6 +2152,29 @@ export function ConversationPane(): React.JSX.Element {
         body.modelTierOverride = modelTierOverride;
       }
 
+      // task 011 (FR-A2): stamp the focused Workspace tab's compact identity onto the outbound
+      // body via this SAME onDecorateOutboundBody seam — MUST NOT fork SprkChat. Reuses the 010
+      // ref + `ActiveTabFocusStamp` shape verbatim (no redefinition). Omitted entirely when no tab
+      // has been focused yet (activeTabFocusRef.current is null before the first
+      // `active_widget_changed` event) — never send an empty/placeholder stamp. The stamp is
+      // already bounded (ADR-015 compact-ambient shape: widgetType/contextType/tabId/displayName +
+      // the widget's own small compactState) by task 010's derivation, so no further trimming is
+      // needed here.
+      if (activeTabFocusRef.current != null) {
+        body.activeContext = activeTabFocusRef.current;
+      }
+
+      // task 042c-fr-c4 (FR-C4): one-shot email-body handle. When the "Summarize this email" chip
+      // armed `pendingEmailDocRef`, attach it as THIS turn's `documentId` and CLEAR the ref
+      // immediately — so ONLY the invoked turn carries it (the server's per-turn injection renders
+      // the .eml body for that one turn; `request.DocumentId` is never persisted to session). Every
+      // normal turn on an email tab (ref unset) attaches NO documentId — ADR-015 on-demand, not
+      // ambient/every-turn. Same additive style as the activeContext/modelTierOverride stamps above.
+      if (pendingEmailDocRef.current) {
+        body.documentId = pendingEmailDocRef.current;
+        pendingEmailDocRef.current = null;
+      }
+
       const messageText = typeof body.message === "string" ? body.message : "";
       const hasActiveSourceDoc =
         activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
@@ -2311,6 +2525,22 @@ export function ConversationPane(): React.JSX.Element {
   // re-read it, so nothing happened. Adopt the selected id AND remount SprkChat (bump the
   // remount key) so its mount-effect resumes THIS session (resumeSession → loadHistory fetches
   // the transcript). Same remount seam as handleNewSession, minus the clear.
+  //
+  // FR-D1 (spaarkeai-assistant-enhancements-r2) — RICH resume, not a text-only reload.
+  // Setting chatSessionId here does double duty: it (1) remounts SprkChat to resume THIS
+  // session's transcript (the chat leg) AND (2) re-keys WorkspacePane's chatSessionId-scoped
+  // `/tabs` restore effect (the workspace leg). That effect now CLEARS the prior session's
+  // tabs BEFORE restoring the reopened session's stored tab set (see WorkspacePane's
+  // `lastRestoredSessionIdRef` / clear-before-restore block), so reopening restores chat +
+  // its tabs + document reference, and the reopened session's stored tabs are never
+  // overwritten by the previous session's. The workspace-clear intent lives in WorkspacePane
+  // (the pane that owns tab state) rather than a cross-pane bus event: `tabs_clear` already
+  // carries compose-PRESERVE semantics (exclusive-playbook path) and a full History-reopen
+  // clear must not preserve the prior session's compose tab, so reusing it would corrupt the
+  // reopened set. This SAME entry point is reused by the compose/wizard/analysis session
+  // adoptions below; those are excluded from the clear by WorkspacePane's
+  // `composeAdoptionSessionRef` marker (they show the adopted document, not a full tab set).
+  // External contract is unchanged: `HistoryMenu`'s `onSelectSession(sessionId: string)`.
   const handleSelectHistorySession = React.useCallback(
     (sessionId: string) => {
       setChatSessionId(sessionId);
@@ -2360,6 +2590,55 @@ export function ConversationPane(): React.JSX.Element {
   // A seed WITHOUT the hand-off fields (every non-wizard compose open — upload door, Browse,
   // "Open in Compose", revise mounts) returns immediately: zero behavior change.
   usePaneEvent("workspace", (event) => {
+    // task 010 (FR-A1) — active-tab focus-stamp. Extend the existing `workspace` subscription
+    // (rather than adding a second bus subscription, per ADR-030's single-subscriber-per-concern
+    // convention already followed by this handler) with an `active_widget_changed` branch that
+    // writes `activeTabFocusRef`. Ref write only — no state, no re-render. The field-mapping logic
+    // lives in `deriveActiveTabFocusStamp` (activeTabFocusStamp.ts) so it's unit-testable in
+    // isolation; this branch is the trivial glue.
+    const focusStamp = deriveActiveTabFocusStamp(event);
+    if (focusStamp) {
+      activeTabFocusRef.current = focusStamp;
+      // task 038 (FR-D11) — a document-context tab needs the Reanalyze Binding id: arm capability
+      // discovery (idempotent) and, when it has already resolved (the common case after the first
+      // document tab focused this session), seed the chip immediately — deterministic, rather than
+      // waiting on the proactive-suggest turn's (022) probabilistic selection or the catch-up
+      // effect above.
+      if (focusStamp.contextType === "document") {
+        setReanalyzeCapabilityNeeded(true);
+        // Skip while a chip dispatch is in flight (`runBindingDispatch` clears the strip
+        // synchronously before its async call) — seeding here would re-populate it mid-dispatch.
+        // The catch-up effect / getAppendedLocalChips pick Reanalyze back up once the dispatch settles.
+        if (reanalyzeBindingIdRef.current && !chips.dispatching) {
+          // useConsumerChips.acceptChips de-dupes against getAppendedLocalChips by bindingId, so
+          // this direct seed never double-renders once getAppendedLocalChips ALSO contributes it.
+          chips.acceptChips([
+            { targetBindingId: reanalyzeBindingIdRef.current, chipLabel: "Reanalyze" },
+          ]);
+        }
+      }
+      // task 042c-fr-c4 (FR-C4) — an email-context tab gets the deterministic "Summarize this
+      // email" chip (ADR-039: click affordance, NO classifier). Seed it directly on focus so it
+      // shows even when the proactive-suggest turn (022) returns zero chips — the SAME determinism
+      // gap task 038's Reanalyze seed closes (getAppendedLocalChips only folds a chip in ALONGSIDE
+      // a non-empty carrier). Guarded on a non-null `emlDocumentId` (never offer a null-document
+      // send) and, like the Reanalyze seed, skipped mid-dispatch (`chips.dispatching`) so it never
+      // re-populates the strip while a click is in flight. De-duped by bindingId against
+      // getAppendedLocalChips (identical local id), so it never double-renders.
+      if (focusStamp.contextType === "email") {
+        const emlDocId = readActiveEmailDocId(focusStamp.compactState);
+        if (emlDocId && !chips.dispatching) {
+          chips.acceptChips([
+            { targetBindingId: LOCAL_CHIP.emailSummarize, chipLabel: "Summarize this email" },
+          ]);
+        }
+      }
+      // task 022 (FR-B3/B5) — fire the proactive suggestion turn on this tab's FIRST focus
+      // (once-per-tabId guarded inside; best-effort fire-and-forget).
+      fireProactiveSuggestion(focusStamp);
+      return;
+    }
+
     const evt = event as WorkspacePaneEvent & {
       widgetType?: string;
       widgetData?: { compose?: ComposeWidgetSeed };
@@ -2463,6 +2742,31 @@ export function ConversationPane(): React.JSX.Element {
     }));
   }, [restoreCtx?.recentMessages]);
 
+  // FR-D5 (task 036): rehydrate the attachment chip on cold-load restore from the server
+  // UploadedFiles manifest (surfaced via restoreCtx; ADR-040 — the EXISTING manifest, no new store).
+  // Display-only projection: the files are already promoted + indexed server-side (they live in the
+  // session manifest), so this drives NOTHING beyond the chip — it deliberately does NOT feed
+  // SprkChat's `useChatFileAttachment` state (which would re-fire onAttachmentsChanged → the
+  // useAttachments ready-transition side-effects: "File attached" messages, files_staged dispatch,
+  // and the task-024 new-session prompt on a restored session that has prior messages). It renders
+  // through the same host-owned FilesAttachedIndicator the live path uses.
+  //
+  // Gated on `chatSessionId === restoreCtx.sessionId` so the restored files show ONLY while the pane
+  // is still on the restored session (a subsequent New Session / History reopen changes chatSessionId
+  // and clears them). Live attachments take precedence: once the user attaches a file this session,
+  // `attachments.uploadedFileCount > 0` and the live indicator renders instead.
+  const restoredAttachmentFiles = React.useMemo<AttachedFileSummary[]>(() => {
+    const files = restoreCtx?.uploadedFiles;
+    if (!files || files.length === 0) return [];
+    if (!chatSessionId || chatSessionId !== restoreCtx?.sessionId) return [];
+    return files.map((f) => ({ id: f.fileId, filename: f.fileName, status: "ready" }));
+  }, [restoreCtx?.uploadedFiles, restoreCtx?.sessionId, chatSessionId]);
+
+  // Prefer the LIVE attachment strip; fall back to the restored manifest only when there are no live
+  // attachments yet (the reopened-session case FR-D5 targets).
+  const showRestoredAttachments =
+    attachments.uploadedFileCount === 0 && restoredAttachmentFiles.length > 0;
+
   // FIX #1a — the post-mount document-level action chips (Summarize / Add to DMS / Draft email) now
   // render INSIDE the transcript footer, directly BENEATH the "Your file is available to edit…" ask
   // message (next-step affordances), instead of ABOVE the whole chat. Combined with the Click-path
@@ -2488,10 +2792,38 @@ export function ConversationPane(): React.JSX.Element {
             floating pinned at the top of the pane (the owner's round-6 complaint). Renders nothing until
             a quick run arms it; single-slot (never stacks). */}
         {rerunFullAnalysisCard.cardSlot}
-        {reviseChipsPending ? <ComposeDocActionChips onAction={handleDocAction} /> : chips.consumerChipsSlot}
+        {reviseChipsPending ? (
+          <ComposeDocActionChips onAction={handleDocAction} />
+        ) : (
+          <>
+            {chips.consumerChipsSlot}
+            {/* task 023 (FR-B4) — manual "refresh suggestions" affordance. Shown only when the strip
+                currently has chips (so there is something to refresh); re-runs the 022 grounded turn for
+                the active tab (force, bypassing the once-per-tab guard) and replaces the chips. Subtle +
+                icon-led; Fluent tokens/currentColor → ADR-021 dark-mode safe. */}
+            {chips.hasChips && (
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<ArrowClockwiseRegular />}
+                onClick={handleRefreshSuggestions}
+                aria-label="Refresh suggestions"
+              >
+                Refresh suggestions
+              </Button>
+            )}
+          </>
+        )}
       </>
     ),
-    [rerunFullAnalysisCard.cardSlot, reviseChipsPending, handleDocAction, chips.consumerChipsSlot]
+    [
+      rerunFullAnalysisCard.cardSlot,
+      reviseChipsPending,
+      handleDocAction,
+      chips.consumerChipsSlot,
+      chips.hasChips,
+      handleRefreshSuggestions,
+    ]
   );
 
   // task 042 (FR-F3) — My Assistant questionnaire: open-state, cold-start gate, write/erase path.
@@ -2643,10 +2975,10 @@ export function ConversationPane(): React.JSX.Element {
           </MessageBar>
         )}
 
-        {/* task 051 (FR-16): proactive suggestions render at the top of the pane — they arrive
-            from the Layer-C spine independent of a dispatch turn, so they are NOT in the
-            transcript-footer chip slot. Renders nothing when there are no live suggestions. */}
-        {suggestions.suggestionSlot}
+        {/* assistant-enhancements-r2 task 001 (FR-E1): the spine-driven proactive-suggestion
+            surface (banner + suggestion-card stack, formerly `{suggestions.suggestionSlot}`) was
+            removed here. The notification spine, NotificationsClient, and Daily Briefing are
+            unaffected; the reactive Suggested-Next-Steps chips render via the transcript footer. */}
 
         {/* UAT round-4 (item #9): "Rerun a full analysis" — a persistent act-on CARD (not a chip;
             ASSISTANT-UI-ELEMENT-CRITERIA.md) offered after a QUICK-depth review completes.
@@ -2723,6 +3055,19 @@ export function ConversationPane(): React.JSX.Element {
             />
           )}
 
+          {/* FR-D5 (task 036): restore-rehydrated attachment chip. Renders ONLY when there are no
+              live attachments (showRestoredAttachments) — the reopened-session case. Files are
+              already indexed server-side (they came from the persisted manifest), so promotedCount
+              equals the count. Same host-owned indicator as the live path — dark-mode safe (ADR-021,
+              Fluent tokens only). */}
+          {showRestoredAttachments && (
+            <FilesAttachedIndicator
+              uploadedFileCount={restoredAttachmentFiles.length}
+              promotedCount={restoredAttachmentFiles.length}
+              files={restoredAttachmentFiles}
+            />
+          )}
+
           {/* UP-10 (UAT 2026-07-19): live "Attaching file… / Classifying file…" progress with a
               spinner while the composer is locked during the ingest window, so the user knows to wait. */}
           <UploadProgressIndicator
@@ -2790,6 +3135,11 @@ export function ConversationPane(): React.JSX.Element {
               onAttachmentRemoved={attachments.handleAttachmentRemoved}
               injectLocalMessage={injection.pendingInjection}
               onLocalMessageInjected={injection.handleLocalMessageInjected}
+              // task 042c-fr-c4 (FR-C4): one-shot host→send seam for the deterministic
+              // "Summarize this email" chip. SprkChat sends the armed message once (running the
+              // decorate seam that attaches the one-turn documentId), then acks so we clear the slot.
+              pendingOutboundMessage={pendingOutboundMessage}
+              onOutboundConsumed={() => setPendingOutboundMessage(null)}
               onBeforeSendMessage={handleBeforeSendMessage}
               onMessagesChange={(msgs) => {
                 // CHAT-4: keep the local transcript-length in sync so the get-started cards toggle

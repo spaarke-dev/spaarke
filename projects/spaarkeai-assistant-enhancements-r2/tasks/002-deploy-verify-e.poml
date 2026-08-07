@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Deploy + regression-verify Workstream E (Notifications banner removal)</title>
+    <phase>1 E — Remove Notifications banner</phase>
+    <gate>blocked until 001</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment + regression verification (no new code implementation)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deploy + verification via code-page-deploy skill</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment step — must run after 001 lands</parallel-reason>
+    <deps>001</deps>
+    <tags>deploy, frontend</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Deploy the SpaarkeAi code page with the E changes and run the regression check that the spine + Daily Briefing + Communications badge/toast still work.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Code-page deployment + post-deploy regression verification expertise.</role>
+  <goal>SpaarkeAi code page deployed; regression check confirms banner gone and spine/Daily-Briefing/Communications intact.</goal>
+  <context>
+    <background>E removes a client surface only; the server spine is unchanged. Regression must confirm no collateral damage.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/ (build+deploy)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Use the code-page-deploy skill; do NOT hand-roll deployment.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Build the SpaarkeAi code page for production.</step>
+    <step order="2">Deploy via the code-page-deploy skill.</step>
+    <step order="3">Regression: verify banner/cards gone, Communications badge/toast works, Daily Briefing renders, spine endpoints respond.</step>
+    <step order="4">Update TASK-INDEX.md status to ✅.</step>
+    <step order="5">Record results in notes/.</step>
+  </steps>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r2/notes/e-deploy-verify.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Code page deploys successfully.</criterion>
+    <criterion testable="true">Banner absent post-deploy.</criterion>
+    <criterion testable="true">Communications badge/toast + Daily Briefing + spine all verified working.</criterion>
+  </acceptance-criteria>
+  <notes>Regression list from spec.md FR-E1 acceptance.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

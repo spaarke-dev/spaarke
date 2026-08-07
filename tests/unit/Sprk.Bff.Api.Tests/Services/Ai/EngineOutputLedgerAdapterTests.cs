@@ -307,7 +307,7 @@ public class EngineOutputLedgerAdapterTests
                     ? _current
                     : null);
 
-        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
         {
             PersistedSessions.Add(session);
             _current = session;

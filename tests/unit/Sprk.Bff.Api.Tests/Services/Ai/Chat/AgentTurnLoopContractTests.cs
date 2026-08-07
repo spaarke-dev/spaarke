@@ -659,7 +659,7 @@ public class AgentTurnLoopContractTests
         public override Task<ChatSession?> GetSessionAsync(string tenantId, string sessionId, CancellationToken ct = default)
             => Task.FromResult(_session);
 
-        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
         {
             PersistedSessions.Add(session);
             return Task.CompletedTask;

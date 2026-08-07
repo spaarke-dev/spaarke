@@ -10,7 +10,12 @@
  * `reviewTone`, while a row with no association columns still derives none (so a
  * view that selects no association data never renders a misleading all-red list).
  */
-import { mapRowToEmailCardItem } from '../EmailWorkspace.mapping';
+import {
+  mapRowToEmailCardItem,
+  deriveEmailWorkspaceVisibleState,
+  EMAIL_VISIBLE_SNIPPET_CAP_CHARS,
+  type EmailWorkspaceRecordState,
+} from '../EmailWorkspace.mapping';
 
 const EMAIL_TYPE = 100000000;
 
@@ -41,5 +46,77 @@ describe('mapRowToEmailCardItem — review dot wiring (owner UAT R2 item 5)', ()
   it('derives NO reviewTone (no dot) when the row carries no association data at all', () => {
     const item = mapRowToEmailCardItem({ ...BASE_ROW });
     expect(item.reviewTone).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-C1 (task 042b) — deriveEmailWorkspaceVisibleState (Path 1 persisted carrier)
+// ---------------------------------------------------------------------------
+
+function buildRecordState(overrides: Partial<EmailWorkspaceRecordState> = {}): EmailWorkspaceRecordState {
+  return {
+    subject: 'Quarterly filing update',
+    from: 'jane.doe@example.com',
+    to: null,
+    cc: null,
+    bcc: null,
+    sentAt: '2026-08-01T09:00:00Z',
+    receivedDate: '2026-08-02T10:30:00Z',
+    sprk_body: '<p>Please review the attached <b>filing</b> before Friday.</p>',
+    regardingRecordName: null,
+    regardingRecordNumber: null,
+    regardingRecordType: null,
+    associationStatus: null,
+    associationProvenanceJson: null,
+    filedAssociations: [],
+    monitor: false,
+    highPriority: false,
+    accessPermission: null,
+    ...overrides,
+  };
+}
+
+describe('deriveEmailWorkspaceVisibleState — compact persisted-carrier shape (FR-C1)', () => {
+  it('derives subject/from/date + a plain-text snippet + the eml handle from the resolved record', () => {
+    const state = deriveEmailWorkspaceVisibleState(buildRecordState(), 'eml-doc-1');
+    expect(state).not.toBeNull();
+    expect(state!.subject).toBe('Quarterly filing update');
+    expect(state!.from).toBe('jane.doe@example.com');
+    // date prefers receivedDate over sentAt
+    expect(state!.date).toBe('2026-08-02T10:30:00Z');
+    // eml handle carried through (fetch handle for on-demand eml-render, FR-C4)
+    expect(state!.emlDocumentId).toBe('eml-doc-1');
+    // snippet is plain text (tags stripped), non-empty
+    expect(state!.snippet).toContain('Please review the attached');
+    expect(state!.snippet).not.toContain('<');
+    // no thread column exists on sprk_communication today → omitted
+    expect(state!.threadId).toBeUndefined();
+  });
+
+  it('falls back to sentAt when receivedDate is absent', () => {
+    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ receivedDate: null }), null);
+    expect(state!.date).toBe('2026-08-01T09:00:00Z');
+    expect(state!.emlDocumentId).toBeNull();
+  });
+
+  it('caps the snippet at EMAIL_VISIBLE_SNIPPET_CAP_CHARS', () => {
+    const long = 'x'.repeat(1000);
+    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ sprk_body: `<p>${long}</p>` }), null);
+    expect(state!.snippet!.length).toBeLessThanOrEqual(EMAIL_VISIBLE_SNIPPET_CAP_CHARS + 1); // +1 tolerates an ellipsis suffix
+  });
+
+  it('omits snippet when the body is empty (privacy default)', () => {
+    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ sprk_body: '' }), null);
+    expect(state!.snippet).toBeUndefined();
+  });
+
+  it('returns null when nothing is selected / the read is loading or failed (recordState null)', () => {
+    expect(deriveEmailWorkspaceVisibleState(null, 'eml-doc-1')).toBeNull();
+  });
+
+  it('returns null when the identity minimum (subject/from/date) is incomplete — never persists a carrier the agent-visible derivation would reject', () => {
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ subject: null }), null)).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ from: null }), null)).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ sentAt: null, receivedDate: null }), null)).toBeNull();
   });
 });

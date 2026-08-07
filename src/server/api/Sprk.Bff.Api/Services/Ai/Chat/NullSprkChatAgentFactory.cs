@@ -57,6 +57,7 @@ public sealed class NullSprkChatAgentFactory : SprkChatAgentFactory
         IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         string? activeSessionFileId = null,
         AiModelTier? modelTierOverride = null,
+        string? activeContextTabId = null,
         CancellationToken cancellationToken = default)
     {
         LogDisabled(nameof(CreateAgentAsync));

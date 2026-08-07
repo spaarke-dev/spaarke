@@ -89,6 +89,20 @@ public sealed record Binding
     public IReadOnlyList<string> Surfaces { get; init; } = Array.Empty<string>();
 
     /// <summary>
+    /// Workspace context-type relevance tags parsed from comma-separated
+    /// <c>sprk_contexttypetags</c> (FR-B2 / spaarkeai-assistant-enhancements-r2). Closed
+    /// vocabulary aligned to the client <c>WidgetContextType</c> set:
+    /// <c>email</c>, <c>document</c>, <c>compose-doc</c>, <c>matter-grid</c>,
+    /// <c>dashboard</c>, <c>calendar</c>. Empty = relevant to ANY context (offered
+    /// regardless of the active tab). This is DATA for ADR-039 deterministic
+    /// pre-filtering (context scoping) of proactive follow-on chip selection to the
+    /// focused tab's context type — NOT a classifier, reranker, or second intent
+    /// mechanism. The active-tab candidate filter that consumes this field lives in
+    /// the client proactive turn (task 022); this Binding only carries the tags.
+    /// </summary>
+    public IReadOnlyList<string> ContextTypeTags { get; init; } = Array.Empty<string>();
+
+    /// <summary>
     /// Grounding precondition (<c>sprk_requiresnoattachedrecord</c>, FR-H1): when <c>true</c>, this
     /// capability is offered ONLY when the host chat context has NO attached/regarding record. The
     /// deterministic <c>AgentToolProjection.PreFilter</c> (task 044) removes the capability when the

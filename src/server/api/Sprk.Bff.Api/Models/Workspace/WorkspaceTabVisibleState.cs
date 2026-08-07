@@ -91,4 +91,35 @@ public abstract record WorkspaceTabVisibleState
     {
         public override string WidgetType => "Table";
     }
+
+    /// <summary>
+    /// spaarkeai-assistant-enhancements-r2 task 041 (FR-C2 server) — visible state for an
+    /// Email tab. Shape: <c>{ widgetType, subject, from, date, threadId?, snippet? }</c>.
+    /// Mirrors the client's <c>WorkspaceTabWidgetType</c> Email contract (see
+    /// <c>WorkspaceTab.ts</c>) and the closed <c>SerializedWidgetState</c> Email variant
+    /// (task 040) 1:1. <see cref="Subject"/>/<see cref="From"/>/<see cref="Date"/> are
+    /// identity/metadata fields — always emitted, like <see cref="DocumentViewer"/>'s
+    /// filename/mimeType/sizeBytes. <see cref="Snippet"/> is the ONLY content-bearing
+    /// field per ADR-015; capped at 200 chars upstream (mirrors
+    /// <see cref="DocumentViewer.SelectionText"/> and
+    /// <see cref="SprkChatAgentFactory.SelectionTextMaxChars"/>) and suppressed on
+    /// background tabs (only the active tab emits it — FR-A4).
+    /// </summary>
+    /// <remarks>
+    /// <b>task 041b (2026-08-06, "Path 1: persisted Email carrier")</b>: resolves the task
+    /// 041 escalation. <see cref="EmailTabWidgetData"/> is now the persisted producer for
+    /// this shape — <see cref="SprkChatAgentFactory.TryDeriveVisibleState"/> maps it to this
+    /// record via a first-class switch case (no fallback, no Dashboard masquerade). See
+    /// <c>projects/spaarkeai-assistant-enhancements-r2/notes/c-architecture-gap.md</c> for
+    /// the full resolution rationale.
+    /// </remarks>
+    public sealed record Email(
+        string Subject,
+        string From,
+        string Date,
+        string? ThreadId,
+        string? Snippet) : WorkspaceTabVisibleState
+    {
+        public override string WidgetType => "Email";
+    }
 }

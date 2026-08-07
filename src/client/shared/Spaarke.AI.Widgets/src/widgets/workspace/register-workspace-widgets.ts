@@ -33,14 +33,45 @@
  */
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
+import type { RegistryGetAgentVisibleState } from '../../registry/WorkspaceWidgetRegistry';
 import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
 import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
+import type { EmailTabWidgetData } from '../../types/WorkspaceTab';
 // Pillar 9 visibility derivations (task 073, D-C-28). The Dashboard category
 // is attached to the 'workspace' registration (WorkspaceLayoutWidget); the
 // Table category is attached to all 5 DataverseEntityViewWidget-backed
-// system widgets (documents/matters/projects/invoices/work-assignments).
-import { dashboardWidgetVisibility, tableWidgetVisibility } from './pillar9-visibility';
+// system widgets (documents/matters/projects/invoices/work-assignments). The
+// Email category (R2 task 040/042a/042c) is attached to the 'email'
+// registration below via the `emailWorkspaceTabVisibility` kind-guard wrapper.
+import { dashboardWidgetVisibility, emailWidgetVisibility, tableWidgetVisibility } from './pillar9-visibility';
+
+// ---------------------------------------------------------------------------
+// Email category derivation — R2 Phase C (task 042a/042c, FR-C1/C2/C4)
+//
+// Path 1 "persisted Email carrier" (see `notes/c-architecture-gap.md`): the
+// email tab's `widgetData` is expected to structurally match the persisted
+// `EmailTabWidgetData` carrier (added to `WorkspaceTabWidgetData` alongside
+// this task). This wrapper narrows `widgetData` to that shape (guarding on
+// `kind === 'Email'`) before delegating to `emailWidgetVisibility` (task 040)
+// for the actual field mapping + `EMAIL_SNIPPET_CAP_CHARS` truncation — reused
+// verbatim, not duplicated. Returns `null` for any non-Email `widgetData`,
+// including tabs not yet populated by the population task (042b).
+//
+// `emlDocumentId` (the on-demand `eml-render` fetch handle, FR-C4) is a fetch
+// handle only and is intentionally never read here — `emailWidgetVisibility`
+// does not surface it, keeping it out of the agent-visible
+// `SerializedEmailState`.
+// ---------------------------------------------------------------------------
+
+function isEmailTabWidgetData(value: unknown): value is EmailTabWidgetData {
+  return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'Email';
+}
+
+const emailWorkspaceTabVisibility: RegistryGetAgentVisibleState = (widgetData: unknown) => {
+  if (!isEmailTabWidgetData(widgetData)) return null;
+  return emailWidgetVisibility(widgetData);
+};
 
 // ai-spaarke-ai-workspace-UI-r1 brittleness Phase B.5 (2026-06-09):
 // Isolate each registration in its own try/catch. Without this, a synchronous
@@ -181,6 +212,8 @@ safeRegisterWidget(
     icon: 'DocumentCompareRegular',
     allowMultiple: true,
     defaultOrder: 40,
+    // FR-B1/FR-C3 (task 020): side-by-side document clause comparison.
+    contextType: 'document',
   },
   wrapFactory(
     () =>
@@ -294,6 +327,8 @@ registerWorkspaceWidget(
      * and SearchResults (20) but before AnalysisEditor (30).
      */
     defaultOrder: 25,
+    // FR-B1/FR-C3 (task 020): a document diff is a document-viewing surface.
+    contextType: 'document',
   },
   () =>
     import('./RedlineViewerWidget') as Promise<{
@@ -576,6 +611,9 @@ registerWorkspaceWidget(
      * find-similar 130).
      */
     defaultOrder: 140,
+    // FR-B1/FR-C3 (task 020): the workspace-layout dispatcher mounts the
+    // embedded LegalWorkspaceApp dashboard surface.
+    contextType: 'dashboard',
   },
   () =>
     import('./WorkspaceLayoutWidget').then(m => ({
@@ -676,6 +714,8 @@ registerWorkspaceWidget(
     icon: 'DocumentRegular',
     allowMultiple: true,
     defaultOrder: 200,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents),
   tableWidgetVisibility
@@ -689,6 +729,8 @@ safeRegisterWidget(
     icon: 'BriefcaseSearchRegular',
     allowMultiple: true,
     defaultOrder: 205,
+    // FR-B1/FR-C3 (task 020): the canonical matter-grid entity-view widget.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters),
   tableWidgetVisibility
@@ -702,6 +744,8 @@ registerWorkspaceWidget(
     icon: 'FolderRegular',
     allowMultiple: true,
     defaultOrder: 210,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects),
   tableWidgetVisibility
@@ -715,6 +759,8 @@ registerWorkspaceWidget(
     icon: 'ReceiptRegular',
     allowMultiple: true,
     defaultOrder: 220,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices),
   tableWidgetVisibility
@@ -728,6 +774,8 @@ registerWorkspaceWidget(
     icon: 'BriefcaseRegular',
     allowMultiple: true,
     defaultOrder: 230,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
   tableWidgetVisibility
@@ -746,6 +794,8 @@ registerWorkspaceWidget(
     icon: 'TaskListSquareLtrRegular',
     allowMultiple: false,
     defaultOrder: 235,
+    // FR-B1/FR-C3 (task 020): Dataverse entity-view grid (DataverseEntityViewWidget-backed).
+    contextType: 'matter-grid',
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.myTasks),
   tableWidgetVisibility
@@ -777,6 +827,10 @@ registerWorkspaceWidget(
     icon: 'MailRegular',
     allowMultiple: true,
     defaultOrder: 240,
+    // FR-B1/FR-C3 (task 020): rich Pattern D widget embeds a DataGrid over
+    // communication records — the entity-grid bucket is the closest honest
+    // fit among the six values.
+    contextType: 'matter-grid',
   },
   () =>
     import('@spaarke/communication-components').then(m => ({
@@ -809,11 +863,16 @@ safeRegisterWidget(
     // defaultOrder=245: positioned immediately after Communications (240),
     // before the metrics dashboards (300+).
     defaultOrder: 245,
+    // FR-B1/FR-C3 (task 020, BINDING): the email direct widget declares the
+    // 'email' contextType — required so proactive-chip scoping (Workstream B)
+    // can recognize an email tab as the active surface.
+    contextType: 'email',
   },
   () =>
     import('./EmailWorkspaceWidget').then(m => ({
       default: m.EmailWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
-    }))
+    })),
+  emailWorkspaceTabVisibility
 );
 
 // ---------------------------------------------------------------------------
@@ -864,6 +923,8 @@ registerWorkspaceWidget(
     icon: 'DataBarVerticalRegular',
     allowMultiple: false,
     defaultOrder: 300,
+    // FR-B1/FR-C3 (task 020): metrics/report dashboard surface.
+    contextType: 'dashboard',
   },
   createMetricsDashboardFactory('matters-dashboard')
 );

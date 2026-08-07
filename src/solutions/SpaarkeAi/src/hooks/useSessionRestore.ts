@@ -24,6 +24,19 @@ export interface SessionRestoreMessage {
   timestamp: string;
 }
 
+/**
+ * Minimal per-file shape carried on the restore spec so the client can rehydrate the attachment
+ * chip on reopen (spaarkeai-assistant-enhancements-r2 FR-D5). Mirrors the BFF
+ * `SessionRestoreUploadedFileDto` — identifier/display fields only (ADR-015 Tier-2: the restore
+ * projection deliberately excludes summary/sections/citations/extracted-text).
+ */
+export interface SessionRestoreUploadedFile {
+  fileId: string;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+}
+
 export interface SessionRestoreSpec {
   sessionId: string;
   playbookId: string | null;
@@ -33,6 +46,12 @@ export interface SessionRestoreSpec {
   recentMessages: SessionRestoreMessage[];
   hasStaleEntities: boolean;
   restoreLatencyMs: number;
+  /**
+   * FR-D5 — the session's uploaded-files manifest (empty when none). Read from the existing
+   * server-side manifest (ADR-040: no new store); drives client attachment-chip rehydration.
+   * Optional on the wire for backward-compat with pre-FR-D5 payloads (normalised to [] below).
+   */
+  uploadedFiles: SessionRestoreUploadedFile[];
 }
 
 export interface UseSessionRestoreResult {
@@ -109,7 +128,13 @@ export function useSessionRestore(
           return;
         }
 
-        const spec = (await response.json()) as SessionRestoreSpec;
+        const raw = (await response.json()) as SessionRestoreSpec;
+        // FR-D5 backward-compat: a pre-FR-D5 server omits `uploadedFiles`. Normalise to [] so
+        // consumers can read it unconditionally.
+        const spec: SessionRestoreSpec = {
+          ...raw,
+          uploadedFiles: Array.isArray(raw.uploadedFiles) ? raw.uploadedFiles : [],
+        };
         if (!cancelled) {
           setRestoreSpec(spec);
 

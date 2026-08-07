@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
@@ -12,6 +13,12 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///   - After adding a message, summarisation is triggered if the session has &gt;= 15 messages.
 ///   - Archive is triggered when approaching the 50-message limit (NFR-12).
 ///   - History retrieval returns the most recent N messages from Redis (hot path).
+///
+/// Cosmos durability (FR-D2 / ADR-040, task 030): the Redis-refresh step also write-throughs to
+/// Cosmos DB via <see cref="ChatSessionManager.UpdateSessionCacheAsync"/>. For messages[0] — the
+/// first message of a brand-new session, which also seeds the History title (FR-D4) — that Cosmos
+/// write is CONFIRMED (awaited) so the transcript survives a Redis eviction; every later turn keeps
+/// the original fire-and-forget write-through (D-06, NFR-03 — no latency regression on turns 2+).
 ///
 /// Summarisation (NFR / spec):
 ///   - Trigger: <c>session.Messages.Count &gt;= <see cref="SummarisationThreshold"/></c>
@@ -65,18 +72,41 @@ public sealed class ChatHistoryManager
     // The compaction-digest path (BuildOutputDigestSection / MaxOutputSnippetLength) stays here; both
     // paths reuse the shared surrogate-safe truncation below.
 
+    /// <summary>
+    /// FR-D4 (task 032) — maximum output tokens for the cheap session-title completion.
+    /// A 3-6 word title is a handful of tokens; this bounds cost + latency of the call.
+    /// </summary>
+    private const int TitleGenerationMaxOutputTokens = 16;
+
+    /// <summary>FR-D4 — display cap for the generated/fallback title (matches the History list's single-line rendering).</summary>
+    private const int TitleMaxLength = 60;
+
     private readonly ChatSessionManager _sessionManager;
     private readonly IChatDataverseRepository _dataverseRepository;
     private readonly ILogger<ChatHistoryManager> _logger;
 
+    /// <summary>
+    /// FR-D4 (task 032) — optional cheap-completion client used to grounded-generate the
+    /// session title at the first substantive exchange. Null when the AI DocumentIntelligence
+    /// compound gate is OFF (<see cref="IOpenAiClient"/> is registered conditionally —
+    /// <c>AnalysisServicesModule</c>); <see cref="ChatHistoryManager"/> itself stays registered
+    /// UNCONDITIONALLY (B5), so this MUST be optional/nullable to avoid the §F.1
+    /// asymmetric-registration anti-pattern (a required dep here would break message-adding
+    /// entirely when AI is OFF). When null, title generation degrades to the deterministic
+    /// first-user-message fallback (FR-D4 fallback chain) — never a heavyweight new mechanism.
+    /// </summary>
+    private readonly IOpenAiClient? _openAiClient;
+
     public ChatHistoryManager(
         ChatSessionManager sessionManager,
         IChatDataverseRepository dataverseRepository,
-        ILogger<ChatHistoryManager> logger)
+        ILogger<ChatHistoryManager> logger,
+        IOpenAiClient? openAiClient = null)
     {
         _sessionManager = sessionManager;
         _dataverseRepository = dataverseRepository;
         _logger = logger;
+        _openAiClient = openAiClient;
     }
 
     /// <summary>
@@ -125,8 +155,37 @@ public sealed class ChatHistoryManager
             LastActivity = DateTimeOffset.UtcNow
         };
 
-        // 3. Refresh the Redis hot cache with the updated session
-        await _sessionManager.UpdateSessionCacheAsync(updatedSession, ct);
+        // FR-D4 (task 032): session.Messages.Count is the PRE-append count — Count == 0 means
+        // `message` is minting messages[0] (the very first message of a brand-new session). When
+        // that first message is from the user, seed the stored, human-readable session title here
+        // — the ONE place a title is ever minted for a new session, so the History list and this
+        // write never double-source a title (see StoredSession.Title remarks). Sessions that
+        // already carry a title (e.g. restored from an older flow, or renamed before their first
+        // message somehow landed) are left untouched.
+        //
+        // This call happens AFTER SendMessageAsync has already written the SSE "done" event to the
+        // client (see ChatEndpoints.SendMessageAsync) — the stream is over from the caller's
+        // perspective, so an awaited cheap completion here adds NO perceived latency to the turn,
+        // even though it does extend how long the underlying request handler keeps running.
+        if (session.Messages.Count == 0 &&
+            message.Role == ChatMessageRole.User &&
+            string.IsNullOrWhiteSpace(updatedSession.Title))
+        {
+            var title = await GenerateSessionTitleAsync(message.Content, ct);
+            updatedSession = updatedSession with { Title = title };
+        }
+
+        // 3. Refresh the Redis hot cache with the updated session.
+        //
+        // FR-D2 (task 030): session.Messages.Count is the PRE-append count — the index `message`
+        // will occupy once appended. Count == 0 means this call is minting messages[0] (the very
+        // first message of a brand-new session), which also seeds the History title (FR-D4). That
+        // ONE write is CONFIRMED (awaitCosmosWrite: true) so the transcript survives a Redis
+        // eviction even if it happens moments after this request completes. Every later turn
+        // (Count > 0) keeps the default fire-and-forget write-through (D-06) — no latency
+        // regression for turns 2+ (NFR-03).
+        var isFirstMessage = session.Messages.Count == 0;
+        await _sessionManager.UpdateSessionCacheAsync(updatedSession, ct, awaitCosmosWrite: isFirstMessage);
 
         // 4. Update session activity in Dataverse (fire-and-forget acceptable for counters)
         _ = _dataverseRepository.UpdateSessionActivityAsync(
@@ -149,6 +208,129 @@ public sealed class ChatHistoryManager
         }
 
         return updatedSession;
+    }
+
+    // =========================================================================
+    // Title generation (FR-D4, task 032)
+    // =========================================================================
+    //
+    // PLACEMENT JUSTIFICATION (CLAUDE.md §10 BFF Hygiene / §11 Component Justification):
+    //   - Existing: no stored title existed anywhere; BuildSessionTitle
+    //     (SessionPersistenceService.cs) was read-computed-only for the History list, with
+    //     nowhere for a generated label to persist and no rename surface.
+    //   - Extension: reuses the EXISTING IOpenAiClient.GetCompletionAsync cheap-completion
+    //     primitive (the same one SummarizationCompressionService already calls directly,
+    //     outside the ADR-039 three-entry-path dispatch protocol) for a bounded, one-shot,
+    //     ~16-token label. NOT a second intent-detection/classifier mechanism (ADR-039 MUST
+    //     NOT) — it makes no dispatch decision and selects no capability; it produces a
+    //     short descriptive string, same class of call as the existing digest/summary
+    //     completions in this file's sibling TriggerSummarisationAsync path.
+    //   - Cost of doing nothing: sessions would keep showing a bare timestamp or the
+    //     read-computed heuristic with nowhere to persist a nicer label, and users would have
+    //     no way to rename a session (FR-D4).
+    //
+    // FALLBACK CHAIN (binding per POML `<constraint source="project">`): generated -> first
+    // user message -> NEVER a bare timestamp. Because this method only ever runs at the
+    // session's first user message (see the AddMessageAsync call site), the deterministic
+    // fallback is ALWAYS available — a bare timestamp is structurally unreachable here.
+
+    /// <summary>
+    /// Produces the FR-D4 stored session title for a brand-new session from its first user
+    /// message. Tries a cheap grounded completion first (bounded to
+    /// <see cref="TitleGenerationMaxOutputTokens"/> output tokens); on any failure — circuit
+    /// broken, transient error, disabled AI (<see cref="_openAiClient"/> null), cancellation,
+    /// or an unusable model response — degrades to the deterministic first-message fallback.
+    /// Never returns a bare timestamp (that fallback is reserved for
+    /// <see cref="Sessions.SessionPersistenceService"/>'s legacy read-computed heuristic for
+    /// sessions that pre-date this field entirely).
+    /// </summary>
+    private async Task<string> GenerateSessionTitleAsync(string firstMessageContent, CancellationToken ct)
+    {
+        var fallback = BuildFallbackTitle(firstMessageContent);
+
+        if (_openAiClient is null)
+        {
+            return fallback;
+        }
+
+        try
+        {
+            var prompt =
+                "Write a short, work-descriptive title (3-6 words, no quotes, no trailing " +
+                "punctuation, no markdown) for a conversation that starts with this message:\n\n" +
+                TruncateSurrogateSafe(firstMessageContent, 500);
+
+            var raw = await _openAiClient.GetCompletionAsync(
+                prompt: prompt,
+                maxOutputTokens: TitleGenerationMaxOutputTokens,
+                cancellationToken: ct);
+
+            var cleaned = CleanGeneratedTitle(raw);
+            return string.IsNullOrWhiteSpace(cleaned) ? fallback : cleaned;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Caller (AddMessageAsync) is invoked with CancellationToken.None from
+            // SendMessageAsync (the SSE stream has already completed by this point), so this
+            // branch is defensive rather than expected in production traffic.
+            return fallback;
+        }
+        catch (OpenAiCircuitBrokenException ex)
+        {
+            _logger.LogWarning(ex,
+                "GenerateSessionTitleAsync: OpenAI circuit broken — falling back to first-message title");
+            return fallback;
+        }
+        catch (Exception ex)
+        {
+            // P2 Quiet — title generation is an enhancement; the deterministic fallback always
+            // produces a usable, non-timestamp title (FR-D4 fallback chain).
+            _logger.LogWarning(ex,
+                "GenerateSessionTitleAsync: LLM call failed — falling back to first-message title");
+            return fallback;
+        }
+    }
+
+    /// <summary>
+    /// Deterministic, LLM-free title fallback: the first single line of the user's opening
+    /// message, capped at <see cref="TitleMaxLength"/> characters. Always non-empty-producing
+    /// when called with the session's actual first user message content (FR-D4 fallback chain
+    /// — never a bare timestamp at this call site).
+    /// </summary>
+    private static string BuildFallbackTitle(string firstMessageContent)
+    {
+        var oneLine = firstMessageContent.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        if (string.IsNullOrWhiteSpace(oneLine))
+        {
+            // Defensive only — SendMessageAsync always supplies non-empty request.Message.
+            return "New conversation";
+        }
+
+        return TruncateSurrogateSafe(oneLine, TitleMaxLength);
+    }
+
+    /// <summary>
+    /// Strips common LLM title artifacts (surrounding quotes, a trailing period, collapsed
+    /// whitespace) and enforces <see cref="TitleMaxLength"/>. Returns an empty string when the
+    /// model response is unusable (empty/whitespace-only) so the caller falls back.
+    /// </summary>
+    private static string CleanGeneratedTitle(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return string.Empty;
+        }
+
+        var oneLine = raw.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        oneLine = oneLine.Trim('"', '\'', '“', '”', '`');
+        oneLine = oneLine.TrimEnd('.', ' ');
+
+        while (oneLine.Contains("  ", StringComparison.Ordinal))
+        {
+            oneLine = oneLine.Replace("  ", " ");
+        }
+
+        return string.IsNullOrWhiteSpace(oneLine) ? string.Empty : TruncateSurrogateSafe(oneLine, TitleMaxLength);
     }
 
     /// <summary>

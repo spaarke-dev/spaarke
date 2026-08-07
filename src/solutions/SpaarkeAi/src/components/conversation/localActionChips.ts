@@ -39,6 +39,16 @@ export const LOCAL_CHIP = {
   reviseInCompose: "local:revise-in-compose",
   ndaReview: "local:nda-review",
   /**
+   * spaarkeai-assistant-enhancements-r2 task 042c-fr-c4 (FR-C4) — the deterministic
+   * "Summarize this email" chip shown ONLY on an active email-context tab. Rides the
+   * local-chip path because its click is a CLIENT bridge (arm the one-shot host→send
+   * seam on SprkChat + attach the active email's `emlDocumentId` to that ONE turn via
+   * the `onDecorateOutboundBody` seam), NOT a Binding dispatch. ADR-039: deterministic
+   * click affordance, no NL classifier. ADR-015: `emlDocumentId` is a fetch handle that
+   * rides only the invoked turn — never ambient/every-turn.
+   */
+  emailSummarize: "local:email-summarize",
+  /**
    * task 021 (FR-08 interactive confirmation gate), SPLIT by task 070 (UAT2 review-depth
    * selector): below-threshold "Review as {type} — Quick/Thorough" chips. Accepts the
    * classifier's top (unconfirmed) candidate AND the depth choice in the SAME turn (no
@@ -145,6 +155,18 @@ export function buildReviseInComposeChip(): ConsumerChip {
  */
 export function buildNdaReviewChip(cardLabel: string = "Review an NDA"): ConsumerChip {
   return { label: cardLabel, bindingId: LOCAL_CHIP.ndaReview, requiresAttachments: true };
+}
+
+/**
+ * spaarkeai-assistant-enhancements-r2 task 042c-fr-c4 (FR-C4) — the deterministic
+ * "Summarize this email" chip for an active email-context tab. `requiresAttachments:false`
+ * because it acts on the FOCUSED email (via its `emlDocumentId` fetch handle), not on a
+ * session attachment. The host only renders it when the active tab's `contextType==='email'`
+ * AND the tab exposes a non-null `emlDocumentId` (never a null-document send — see
+ * ConversationPane `getAppendedLocalChips` / the `active_widget_changed` email branch).
+ */
+export function buildEmailSummarizeChip(): ConsumerChip {
+  return { label: "Summarize this email", bindingId: LOCAL_CHIP.emailSummarize, requiresAttachments: false };
 }
 
 /**

@@ -28,6 +28,13 @@
  *     `useComposeHeartbeatGate`). FU-1 heartbeat-gate bug fixed by hoisting
  *     the heartbeat to this workspace level and gating on
  *     `checkoutStatus === 'acquired'`. Behaviour is otherwise preserved.
+ *   - spaarkeai-assistant-enhancements-r2 (DI-02 fix): flush-on-unmount. Every
+ *     compose-tab close path (`WorkspaceTabManager.closeTab`, `clearAllTabs` on a
+ *     History switch or exclusive-playbook reset) unmounted this component with no
+ *     dirty-check — there is no autosave/debounce anywhere in this workspace, only
+ *     explicit Ctrl+S/toolbar-Save/bridge-chip saves. The unmount cleanup now
+ *     best-effort flushes through the SAME `triggerSave` path when unsaved work is
+ *     present (see `hasUnsavedWorkRef` below).
  *
  * Constraints honored (BINDING):
  *   - ADR-021: Fluent v9 only; `makeStyles` + `tokens.*` (semantic).
@@ -2626,6 +2633,65 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [isDirty, setIsDirty] = React.useState<boolean>(false);
   const handleDirtyChange = React.useCallback((dirty: boolean): void => {
     setIsDirty(dirty);
+  }, []);
+
+  // -------------------------------------------------------------------------
+  // DI-02 (spaarkeai-assistant-enhancements-r2, notes/defer-issues.md) — flush
+  // unsaved compose work on unmount.
+  // -------------------------------------------------------------------------
+  // Investigation finding: EVERY path that removes this compose tab —
+  // `WorkspaceTabManager.closeTab` (manual X), `clearAllTabs` (a History switch,
+  // spaarkeai-assistant-enhancements-r2 task 035; or an exclusive-playbook reset) —
+  // unmounts this component with NO dirty-check/flush gate anywhere in
+  // `WorkspaceTabManager` (verified: both methods unconditionally filter the tab
+  // out of the list; neither reads editor dirty state). And unlike the escalation's
+  // assumption of a "debounce that hasn't fired yet", there is NO
+  // autosave/debounce/flush-on-blur in this workspace at all — `triggerSave` fires
+  // ONLY on an explicit Ctrl+S, the toolbar Save button, or the cross-pane "Add to
+  // DMS" bridge chip (`useRegisterComposeSaveHandler` above). So a compose tab
+  // closed via ANY of those paths while dirty silently drops every keystroke typed
+  // since the last explicit Save. The compose DOCUMENT itself is durable
+  // server-side (ADR-049 — OOXML byte-store; TipTap is a lossy view) — only the
+  // un-flushed in-memory delta is at risk.
+  //
+  // Fix: best-effort flush through the SAME `triggerSave` path a manual Save uses
+  // (no new persistence mechanism — CLAUDE.md §11) when the tab unmounts while
+  // dirty OR holding an un-persisted transient (create-on-save) draft. Chosen over
+  // a flush call sited in WorkspacePane's History-switch handler because it is the
+  // single choke point EVERY close path already funnels through (a WorkspacePane-
+  // local fix would leave the manual-close and exclusive-playbook paths unflushed).
+  //
+  // `hasUnsavedWorkRef` mirrors the live "is there unsaved work" signal on every
+  // render (the same ref-mirror convention `triggerSaveRef`/
+  // `notifyComposeSaveCompletedRef` below use) so the unmount effect's cleanup —
+  // registered once, deps `[]` — reads the CURRENT value instead of a stale
+  // closure. `triggerSave` never rejects (it internally try/catches network errors
+  // into a `saveFailed` dispatch), so no `.catch()` is needed; a dispatch that
+  // lands after unmount is a documented React no-op, not a crash. Mirrors
+  // `hasTransientDraft`'s condition below (kept LOCAL here — `hasTransientDraft`
+  // itself is computed later in render order, so duplicating the two-line
+  // predicate is cheaper than reordering a widely-referenced derived const).
+  const hasUnsavedWorkRef = React.useRef(false);
+  hasUnsavedWorkRef.current =
+    state.status === 'loaded' && !!state.documentRef && (isDirty || !state.documentRef.speDriveItemId);
+
+  // `useLayoutEffect`, NOT `useEffect`, is load-bearing here (verified empirically, not just in
+  // theory): React detaches a forwardRef child's `ref.current` (here, `editorRef.current`, the
+  // `ComposeEditorHandle`) during the SAME synchronous commit pass as `useLayoutEffect` cleanups —
+  // but strictly BEFORE the separate, later passive-effect pass that runs `useEffect` cleanups. A
+  // first implementation of this fix using `useEffect` measurably saw `editorRef.current === null`
+  // by the time its cleanup ran (the child's ref was already detached), so `triggerSave`'s internal
+  // `if (!editorRef.current) return;` guard silently no-opped — the flush never fired. Swapping to
+  // `useLayoutEffect` fixed it: `editorRef.current` is still the live handle at cleanup time.
+  React.useLayoutEffect(() => {
+    return () => {
+      if (hasUnsavedWorkRef.current) {
+        void triggerSaveRef.current();
+      }
+    };
+    // Intentionally fire-once (mount/unmount only) — reads the latest state via
+    // `hasUnsavedWorkRef`/`triggerSaveRef`, not via this effect's own deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleImportWarnings = React.useCallback((warnings: Array<{ type: string; message: string }>): void => {

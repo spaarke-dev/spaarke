@@ -97,6 +97,8 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         "sprk_capturemode",
         "sprk_oneventbindings",
         "sprk_surfaces",
+        // FR-B2 (spaarkeai-assistant-enhancements-r2): context-type relevance tags (CSV, mirrors sprk_surfaces).
+        "sprk_contexttypetags",
         "sprk_modeltieroverride",
         // FR-H1 grounding predicate (task 003/044): host-context precondition read by the PreFilter.
         "sprk_requiresnoattachedrecord",
@@ -875,6 +877,9 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             OnEventBindings = ParseJsonList<OnEventBinding>(
                 entity.GetAttributeValue<string>("sprk_oneventbindings")),
             Surfaces = ParseSurfaces(entity.GetAttributeValue<string>("sprk_surfaces")),
+            // FR-B2: context-type tags share the sprk_surfaces CSV shape; ParseSurfaces is a
+            // generic comma-token splitter (null/empty → empty list = relevant to any context).
+            ContextTypeTags = ParseSurfaces(entity.GetAttributeValue<string>("sprk_contexttypetags")),
             ModelTierOverride = MapNullableChoice<AiModelTier>(
                 entity.GetAttributeValue<OptionSetValue>("sprk_modeltieroverride")),
             // FR-H1 grounding predicate (task 044): BIT column; null/unset → false (offered regardless).
@@ -954,6 +959,38 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         => string.IsNullOrWhiteSpace(surfaces)
             ? Array.Empty<string>()
             : surfaces.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    /// <summary>
+    /// FR-B3/B5 (spaarkeai-assistant-enhancements-r2 task 022) — deterministic context-type
+    /// pre-filter for the proactive-suggestion candidate set. Keeps a candidate when its
+    /// <see cref="Binding.ContextTypeTags"/> contain <paramref name="contextType"/>
+    /// (ordinal-case-insensitive) OR are empty (empty = relevant to ANY context, per the
+    /// column dictionary). A null/blank <paramref name="contextType"/> returns the input
+    /// unchanged (no narrowing).
+    /// </summary>
+    /// <remarks>
+    /// This is the ONLY ADR-039-permitted aid for the suggestion path: a deterministic
+    /// context-scoping PRE-FILTER over the closed catalog — never a ranker, classifier,
+    /// reranker, or decision-maker. The ONE grounded suggestion turn downstream
+    /// (<c>AssistantSuggestionService</c>) is the sole decider of WHICH ≤3 capabilities to
+    /// propose. Pure + static for direct unit testability, mirroring
+    /// <see cref="SelectTextProjectable"/> / <see cref="SelectEventMembers"/>.
+    /// </remarks>
+    internal static IReadOnlyList<Binding> FilterByContextType(
+        IReadOnlyList<Binding> candidates,
+        string? contextType)
+    {
+        if (string.IsNullOrWhiteSpace(contextType))
+        {
+            return candidates;
+        }
+
+        return candidates
+            .Where(b => b.ContextTypeTags.Count == 0
+                        || b.ContextTypeTags.Any(t =>
+                            string.Equals(t, contextType, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+    }
 
     /// <summary>
     /// FR-1R-03 selection algorithm. Filters by consumer-code and environment,

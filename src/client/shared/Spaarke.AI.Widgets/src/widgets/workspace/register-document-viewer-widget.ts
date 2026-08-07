@@ -46,6 +46,8 @@ registerWorkspaceWidget(
      * find-similar 130, workspace 140) so it sorts last among current widgets.
      */
     defaultOrder: 150,
+    // FR-B1/FR-C3 (task 020): the canonical document-preview widget.
+    contextType: 'document',
   },
   () =>
     import('./DocumentViewerWidget') as Promise<{

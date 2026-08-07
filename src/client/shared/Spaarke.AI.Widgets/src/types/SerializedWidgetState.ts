@@ -4,7 +4,7 @@
  * Defines the agent-visible serialization shape each workspace widget MAY expose
  * to the LLM prompt builder. The contract has TWO surfaces:
  *
- *   1. `SerializedWidgetState` — discriminated union (4 variants) describing what
+ *   1. `SerializedWidgetState` — discriminated union (5 variants) describing what
  *      a widget chooses to expose. Each variant is the EXACT shape Pillar 9's
  *      prompt builder reads into the per-turn system-prompt snapshot.
  *   2. `GetAgentVisibleState` — the function signature each widget implements to
@@ -12,10 +12,11 @@
  *      per ADR-015 (data minimization) — the widget contributes NOTHING to the
  *      agent prompt for that tab.
  *
- * The four variants align 1:1 with `WorkspaceTabWidgetType` from task 050
- * (`WorkspaceTab.ts`). This file MUST reuse that union (NOT redefine) so a
- * future fifth variant added to `WorkspaceTab` produces a TS compile error here
- * (gate-protection mechanism — see `assertNeverSerializedState` below).
+ * The variants align 1:1 with `WorkspaceTabWidgetType` from task 050
+ * (`WorkspaceTab.ts`; extended in R2 task 040 with the `Email` variant). This
+ * file MUST reuse that union (NOT redefine) so a future variant added to
+ * `WorkspaceTab` produces a TS compile error here (gate-protection mechanism —
+ * see `assertNeverSerializedState` below).
  *
  * ## Consumer Surface (Phase C downstream gates)
  *
@@ -68,6 +69,12 @@
  *                        respects ADR-015 data-minimization while letting the
  *                        agent know "the user is looking at 47 matters
  *                        filtered by Status=Open" for context-aware replies.
+ *   - `Email`          — exposes `subject`/`from`/`date`/`threadId` + a single
+ *                        capped `snippet` (short body excerpt or the user's
+ *                        current selection, 200-char cap — same precedent as
+ *                        `DocumentViewer.selectionText`). Withholds the full
+ *                        email body; the agent must use a chat tool to act on
+ *                        content beyond the snippet. R2 task 040 (FR-C2).
  *
  * @see FR-55 — `getAgentVisibleState()` returns compact + schema-typed +
  *      nullable representation (R6 spec)
@@ -298,6 +305,68 @@ export interface SerializedTableState {
   selectedRows?: number;
 }
 
+/**
+ * Serialized agent-visible state for an `Email` widget (R2 Workstream C, FR-C2).
+ *
+ * A COMPACT shape per ADR-015 data minimization — identity fields
+ * (`subject`, `from`, `date`, `threadId`) plus ONE content-bearing field
+ * (`snippet`, capped at 200 chars, mirroring `DocumentViewer.selectionText`).
+ * The full email body is NEVER surfaced; the agent must use a chat tool to
+ * read/act on message content beyond the snippet.
+ *
+ * Field rationale:
+ *   - `subject` — email subject line. Class 2 derived metadata per ADR-015.
+ *   - `from`     — sender display name or address. Class 2 derived metadata.
+ *   - `date`     — ISO-8601 sent/received timestamp AS A STRING (not `Date`,
+ *     for JSON-serialization stability across the prompt-builder boundary).
+ *     Class 2 derived metadata per ADR-015.
+ *   - `threadId` — conversation/thread identifier. Class 1 identifier per
+ *     ADR-015. Nullable — not every email surface has a resolvable thread.
+ *   - `snippet`  — short body snippet OR the user's current selection. THE
+ *     ONLY content-bearing field in this variant; capped at 200 chars (same
+ *     cap `DocumentViewer.selectionText` uses). Nullable — omitted (null)
+ *     when no snippet/selection is available (privacy default per ADR-015).
+ *
+ * @see FR-C2 (spaarkeai-assistant-enhancements-r2 spec) — client Email variant
+ * @see SerializedDocumentViewerState — the 200-char content-cap precedent
+ * @see ADR-015 — AI data governance (data minimization; identifiers + derived
+ *      metadata OK; content withheld beyond the capped snippet)
+ */
+export interface SerializedEmailState {
+  /** Discriminator — equal to the parent tab's `widgetType`. */
+  readonly widgetType: 'Email';
+  /**
+   * Email subject line. Class 2 derived metadata per ADR-015.
+   * @see FR-C2
+   */
+  subject: string;
+  /**
+   * Sender display name or address. Class 2 derived metadata per ADR-015.
+   * @see FR-C2
+   */
+  from: string;
+  /**
+   * ISO-8601 sent/received timestamp, as a STRING (not `Date`). Class 2
+   * derived metadata per ADR-015.
+   * @see FR-C2
+   */
+  date: string;
+  /**
+   * Conversation/thread id. Class 1 identifier per ADR-015. `null` when no
+   * thread id is resolvable for this message.
+   * @see FR-C2
+   */
+  threadId: string | null;
+  /**
+   * Short body snippet OR the user's current selection. The ONLY
+   * content-bearing field in this variant; CAPPED at 200 characters (same
+   * cap `DocumentViewer.selectionText` uses). `null` when no snippet or
+   * selection is available (privacy default per ADR-015).
+   * @see FR-C2, ADR-015 (content allowed only in a bounded, capped form)
+   */
+  snippet: string | null;
+}
+
 // ---------------------------------------------------------------------------
 // Discriminated union + opt-in function signature
 // ---------------------------------------------------------------------------
@@ -322,7 +391,8 @@ export type SerializedWidgetState =
   | SerializedSummaryState
   | SerializedDocumentViewerState
   | SerializedDashboardState
-  | SerializedTableState;
+  | SerializedTableState
+  | SerializedEmailState;
 
 /**
  * Function signature each workspace widget implements to opt into Pillar 9
@@ -391,6 +461,7 @@ export type GetAgentVisibleState = () => SerializedWidgetState | null;
  *     case 'DocumentViewer': return renderDocumentViewer(state);
  *     case 'Dashboard':      return renderDashboard(state);
  *     case 'Table':          return renderTable(state);
+ *     case 'Email':          return renderEmail(state);
  *     default:               return assertNeverSerializedState(state);
  *     //                              ^^^^^ TS error if a variant is missed
  *   }
