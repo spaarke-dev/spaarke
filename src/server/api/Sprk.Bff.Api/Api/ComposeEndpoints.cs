@@ -1311,7 +1311,10 @@ public static class ComposeEndpoints
                 ContentModel: result.ContentModel,
                 // Task 013 (012-review F7): the canonical projection's flatten warnings - the client
                 // folds them into the FIRST model-path save's degradation banner. Additive.
-                ContentModelWarnings: MapWarningResponses(result.ContentModelWarnings)));
+                ContentModelWarnings: MapWarningResponses(result.ContentModelWarnings),
+                // Task 040 (FR-06, PDF intake): "pdf" when Content is the docx SYNTHESIZED from the
+                // PDF's canonical-model projection; null for a native docx load. Additive (ADR-040).
+                SourceFormat: result.SourceFormat));
         }
         catch (ArgumentException ex)
         {
@@ -2423,7 +2426,11 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
     // Task 013 (012-review F7): flatten warnings of the canonical-model projection (codes + counts) -
     // folded by the client into the FIRST model-path save's degradation banner. Optional/trailing.
-    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null,
+    // Task 040 (FR-06, PDF intake): "pdf" when content is the docx SYNTHESIZED from the PDF's
+    // canonical-model projection (client keys the honest-lossiness UX + save-as-docx routing off
+    // this); null for a native docx load. Optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null);
 
 /// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
 /// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it
