@@ -187,7 +187,7 @@ public static class AnalysisEndpoints
                 request.DocumentId,
                 request.Name,
                 playbookId: request.PlaybookId,
-                cancellationToken);
+                ct: cancellationToken);
 
             // Step 2: Associate N:N scope items (skills, knowledge, tools)
             if (request.SkillIds.Length > 0 || request.KnowledgeIds.Length > 0 || request.ToolIds.Length > 0)
@@ -1180,7 +1180,7 @@ public static class AnalysisEndpoints
         try
         {
             analysisId = await analysisService.CreateAnalysisAsync(
-                request.DocumentId, request.Name, playbookId: request.PlaybookId, cancellationToken);
+                request.DocumentId, request.Name, playbookId: request.PlaybookId, ct: cancellationToken);
         }
         catch (Exception ex)
         {
@@ -1329,10 +1329,29 @@ public static class AnalysisEndpoints
                 "This session is already bound to an Analysis and cannot be promoted again.");
         }
 
-        // Promotion is document-anchored (mirrors CreateAnalysis/ForkAnalysis — sprk_analysis
-        // requires a document). Prefer the request's explicit documentId; fall back to the session's
-        // own DocumentId (set at session-create time from the chat's attached document, if any).
-        Guid documentId;
+        // ---- Resolve the anchor: a regarding target (FR-D9) and/or a document ----
+        // FR-D9 ("Set related record"): promotion may associate the new Analysis to an EXISTING
+        // matter/project (ADR-024 regarding) so it surfaces on that record's Analyses tab, OR anchor it
+        // to a document (the "regarding = document" path, via sprk_documentid). At least one is required.
+        AnalysisRegardingTarget? regarding = null;
+        if (!string.IsNullOrWhiteSpace(request.RegardingEntityType) || request.RegardingEntityId is not null)
+        {
+            // Both parts must be present; the entity type is a closed set (matter | project) — a document
+            // association is expressed via DocumentId, not here.
+            var entityType = request.RegardingEntityType?.Trim().ToLowerInvariant();
+            if (entityType is not ("sprk_matter" or "sprk_project") ||
+                request.RegardingEntityId is not { } regId || regId == Guid.Empty)
+            {
+                return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
+                    "A regarding association requires regardingEntityType ('sprk_matter' or 'sprk_project') and a non-empty regardingEntityId.");
+            }
+            regarding = new AnalysisRegardingTarget(entityType, regId, request.RegardingEntityName);
+        }
+
+        // Document anchor: prefer the request's explicit documentId; fall back to the session's own
+        // DocumentId (set at session-create time from the chat's attached document, if any). Now OPTIONAL
+        // — a document-less analysis is valid when a regarding target was supplied (FR-D9 relaxation).
+        Guid? documentId = null;
         if (request.DocumentId is { } requestDocId && requestDocId != Guid.Empty)
         {
             documentId = requestDocId;
@@ -1343,10 +1362,11 @@ public static class AnalysisEndpoints
         {
             documentId = sessionDocId;
         }
-        else
+
+        if (documentId is null && regarding is null)
         {
             return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
-                "This session has no associated document; promoting to an Analysis requires a documentId.");
+                "This session has no associated document; promoting to an Analysis requires a documentId or a regarding target (matter/project).");
         }
 
         // ---- Step 2: create the new Analysis anchor ----
@@ -1354,7 +1374,8 @@ public static class AnalysisEndpoints
         try
         {
             analysisId = await analysisService.CreateAnalysisAsync(
-                documentId, request.Name, playbookId: request.PlaybookId ?? session.PlaybookId, cancellationToken);
+                documentId, request.Name, playbookId: request.PlaybookId ?? session.PlaybookId,
+                regarding: regarding, ct: cancellationToken);
         }
         catch (Exception ex)
         {

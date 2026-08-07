@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Services.Communication.Engine.Detectors;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Membership;
 using Sprk.Bff.Api.Services.Communication.Threads;
+using Sprk.Bff.Api.Services.Communication.Tracking;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
@@ -51,6 +52,12 @@ public static class CommunicationModule
         // is an operational kill-switch (no redeploy). Deterministic exact full-name→contact matcher, suggest-only
         // (email-r4 UAT R2 B1).
         services.Configure<ContactNameMatchOptions>(configuration.GetSection(ContactNameMatchOptions.SectionName));
+
+        // Affinity / deterministic-learning rung (FR-A4) options. Bound from "Communication:Affinity"; the
+        // Enabled flag is a per-tenant operational kill-switch (IOptionsMonitor — no redeploy, ADR-018). The
+        // rung surfaces a learned SUGGEST-ONLY candidate from the per-tenant sprk_affinity store; it never
+        // auto-files (excluded from the mapper's auto-file/deterministic-write sets).
+        services.Configure<AffinityOptions>(configuration.GetSection(AffinityOptions.SectionName));
 
         // Attachment-text match signal (Phase 2) options. Bound from "Communication:AttachmentMatch"; the
         // Enabled flag is an operational kill-switch (no redeploy). The inbound processor extracts bounded
@@ -172,6 +179,22 @@ public static class CommunicationModule
         // emit sub-threshold (never auto-file alone); multi-entity tokens are capped (never a guessed auto-file).
         // Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
         services.AddSingleton<IAssociationRung, IdentifierReverseLookupRung>(); // rung 0 — identifier reverse-lookup
+        // rung 0 (tier) — recipient-alias (FR-A2). Parses To/Cc/Bcc for a per-record intake address
+        // (matter-{ref}@) and resolves it to a matter — a deliberate routing instruction, so it is
+        // auto-file-eligible like an explicit reference (AssociationStatusMapper.IsAutoFileEligible). Reads
+        // NormalizedMessage.Bcc (mapped at the Graph boundary); Bcc-only delivery associates deterministically.
+        // Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
+        services.AddSingleton<IAssociationRung, RecipientAliasRung>();         // rung 0 — recipient-alias
+        // rung 0 (tier) — tracking-token reader (FR-A1 / task 013). Reads the HMAC-signed footer token task 012
+        // stamps on outbound Spaarke communications, VERIFIES the signature via ITrackingTokenSigner (010) BEFORE
+        // trusting the bound record (ADR-028 verify-before-trust / NFR-07), and emits a signed-valid match at 1.0
+        // (auto-file-eligible) or a bare/edited textual reference at 0.65 (corroborating). Reuses
+        // Kind=ExplicitReference so NO AssociationStatusMapper change is required (a verified, Spaarke-minted token
+        // IS the strongest explicit reference; the mapper collapses same-kind matches per target to their MAX).
+        // Reads only the envelope (BodyText/BodyHtml incl. quoted history) + RegardingFieldMap + the signer — no
+        // Dataverse, no AI (ADR-013). Best-effort/non-fatal (NFR-04): a forged/absent/deleted footer degrades to
+        // no-match. Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
+        services.AddSingleton<IAssociationRung, TrackingTokenRung>();          // rung 0 — tracking-token reader
         services.AddSingleton<IAssociationRung, ThreadContinuityRung>();       // rung 1 — thread continuity
         services.AddSingleton<IAssociationRung, ParticipantCorrelationRung>(); // rung 2 — participant correlation
         // rung 3 — structural detectors (NFR-04: adding a detector is a new IStructuralDetector
@@ -201,6 +224,19 @@ public static class CommunicationModule
         // mapper's auto-file-eligible/deterministic-write sets, so it can only add review candidates, never
         // auto-file. Takes the singleton IGenericEntityService (no captive dependency). Registered unconditionally (ADR-010).
         services.AddSingleton<IAssociationRung, AttachmentDocumentAssociationRung>(); // rung 3.7 — attachment→document
+        // Affinity / deterministic learning loop (FR-A4). Reads the per-tenant sprk_affinity store (human
+        // confirmation frequencies: sender / sender-domain / subject-keyword / participant-set → record) and
+        // surfaces the highest-frequency record for an untagged message's signals as an explainable candidate
+        // citing the confirmation count. SUGGEST-ONLY: RungKind.Affinity is excluded from the mapper's
+        // auto-file/deterministic-write sets, so it can only add a review candidate, never auto-file. Deterministic
+        // frequency counting only (no AI/ML — ADR-013). The store is an ADR-040 Path A exception (distinct from the
+        // ADR-040 session ledger + ADR-048 participant index). Registered unconditionally (ADR-010); self-gated by
+        // Communication:Affinity:Enabled (per-tenant). AffinityStore takes the singleton IGenericEntityService.
+        services.AddSingleton<AffinityStore>();
+        services.AddSingleton<IAssociationRung, AffinityRung>();               // rung 3 (tier) — affinity learning
+        // FR-A4 R-1: the human-confirmation→affinity write orchestration behind POST /{id}/confirm-affinity.
+        // Singleton (its deps — ICommunicationEnvelopeReader, AffinityStore, IOptionsMonitor — are all singletons).
+        services.AddSingleton<AffinityConfirmationRecorder>();
         // rung 4 — semantic record match (FR-14). AI-tier: the engine evaluates it only when the
         // deterministic pass did not auto-file, and the mapper caps it to Suggested (never auto-files).
         // Consumes the IRecordMatchingAi facade (ADR-013) from a per-evaluation scope (facade is scoped,
@@ -217,9 +253,22 @@ public static class CommunicationModule
         services.AddSingleton<AutoFileGate>();
         // Tracking-footer resolver (FR-A1 / ADR-018) — unconditional (ADR-010); pure config resolution.
         services.AddSingleton<TrackingFooterGate>();
+        // Tracking-token HMAC signer (FR-A1 / NFR-07 / task 010). Registered UNCONDITIONALLY (ADR-010; the
+        // FEATURE gate lives in 011's TrackingFooterOptions.Enabled, not the registration). Placement: lives in
+        // Services/Communication/Tracking beside its sole callers — the send path (012) + TrackingTokenRung
+        // (013) — per §10 BFF hygiene. Injects the CENTRAL TokenCredential (Program.cs) to reach Key Vault; no
+        // credential is new-ed here (ADR-028). Singleton: holds the TTL key cache (thread-safe).
+        services.AddSingleton<ITrackingTokenSigner, TrackingTokenSigner>();
         services.AddSingleton<AssociationStatusMapper>();
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
+
+        // FR-B3 (task 043): the user-upload ("Save to Spaarke") capture entry point — the email sibling of
+        // IncomingCommunicationProcessor (Graph-webhook) and MessagingIngestor (ACS). Routes a hand-filed email
+        // through the SAME Association Engine + enrichment so a saved email becomes an intelligence-bearing
+        // sprk_communication, not merely a sprk_document archive. Registered UNCONDITIONALLY (ADR-010 concrete;
+        // §10 unconditional DI) — all deps are singletons; OfficeService consumes it best-effort (optional ctor).
+        services.AddSingleton<EmailUploadCaptureService>();
 
         // Direction-agnostic enrichment orchestrator (ADR-045 / FR-08). Invoked by BOTH the inbound
         // processor and the outbound send path so received and sent communications get identical
@@ -363,6 +412,15 @@ public static class CommunicationModule
         // Applied audit row. SCOPED (consumes the Scoped ICallerSystemUserResolver, same as the queue feed).
         // Registered UNCONDITIONALLY (ADR-010/ADR-032 — the apply endpoint maps unconditionally).
         services.AddScoped<ICommunicationProposalApplyService, CommunicationProposalApplyService>();
+
+        // Job C APPLY (email-communication-intelligence-r2 task 034 / FR-D5, backs FR-E5). Sibling of the Job B apply
+        // above: creates the sprk_event (type=task) a CONFIRMED create-task proposal describes via the blessed
+        // IActionSeam.CreateTaskAsync, PATCHes the human-supplied FR-E5 fields (status/completed-date/base-date/
+        // final-due-date) UNDER THE CONFIRMING USER'S MSCRMCallerID impersonation, and writes ONE append-only Applied
+        // audit row (Path B — facade unchanged per ADR-013). SCOPED (consumes the Scoped ICallerSystemUserResolver,
+        // same as the Job B apply + queue feed). Registered UNCONDITIONALLY (ADR-010/ADR-032 — the apply endpoint maps
+        // unconditionally).
+        services.AddScoped<ICommunicationCreateTaskApplyService, CommunicationCreateTaskApplyService>();
 
         // Layer-C fan-out targeting (spaarke-notification-spine-r1 task 023 / FR-08 / NFR-07). Given a persisted
         // sprk_communication + its thread, returns the systemuserids eligible to receive a Layer-C ping (task 024's

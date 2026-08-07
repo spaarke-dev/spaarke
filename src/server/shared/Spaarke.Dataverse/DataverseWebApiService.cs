@@ -347,16 +347,28 @@ public class DataverseWebApiService : IDataverseService
         }
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, CancellationToken ct = default)
     {
-
+        // FR-D9: at least one anchor is required — a source document OR a regarding (matter/project) target.
+        // NOTE: at runtime IAnalysisDataverseService resolves to DataverseServiceClientImpl (SDK path, see
+        // GraphModule DI); this WebAPI impl is kept in parity for the interface + any direct injection.
+        if ((documentId is null || documentId.Value == Guid.Empty) && regarding is null)
+        {
+            throw new ArgumentException(
+                "CreateAnalysisAsync requires either a documentId or a regarding target (FR-D9).", nameof(documentId));
+        }
 
         var payload = new Dictionary<string, object>
         {
             ["sprk_name"] = name ?? $"Analysis {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
-            ["sprk_documentid@odata.bind"] = $"/sprk_documents({documentId})",
             ["statuscode"] = 1 // Active
         };
+
+        // Document anchor is now optional (FR-D9). Only bind when supplied.
+        if (documentId is { } docId && docId != Guid.Empty)
+        {
+            payload["sprk_documentid@odata.bind"] = $"/sprk_documents({docId})";
+        }
 
         // Set playbook lookup if provided
         if (playbookId.HasValue)
@@ -364,6 +376,19 @@ public class DataverseWebApiService : IDataverseService
             // R5 task 002 (FR-C9): nav prop is sprk_Playbook (metadata-verified) — sprk_analysis
             // has no "sprk_playbookid" lookup; the earlier key was a non-existent nav property.
             payload["sprk_Playbook@odata.bind"] = $"/sprk_analysisplaybooks({playbookId.Value})";
+        }
+
+        // FR-D9 (ADR-024): the regarding field-set is NOT implemented on this WebAPI impl. At runtime
+        // IAnalysisDataverseService resolves to DataverseServiceClientImpl (SDK path, see GraphModule DI),
+        // whose StageAnalysisRegardingFields does the ADR-024-correct write (true-name retrieve per
+        // SRFR-052, reduced field-set per W1). Rather than ship a subtly-wrong parallel write here (which
+        // would set sprk_regardingrecordname to the picker name — the NUMBER for a matter — and stage a
+        // non-existent sprk_regardingrecordurl), fail fast: a regarding promotion must go through the SDK path.
+        if (regarding is not null)
+        {
+            throw new NotSupportedException(
+                "sprk_analysis regarding write is implemented only on the SDK path (DataverseServiceClientImpl); " +
+                "this WebAPI impl is not the runtime IAnalysisDataverseService binding (see GraphModule DI).");
         }
 
         var response = await SendPostAsJsonAsync("sprk_analysises", payload, ct);
@@ -382,7 +407,8 @@ public class DataverseWebApiService : IDataverseService
             throw new InvalidOperationException($"Failed to parse analysis ID from location: {location}");
         }
 
-        _logger.LogInformation("[DATAVERSE-API] Created analysis {AnalysisId} for document {DocumentId}", analysisId, documentId);
+        _logger.LogInformation("[DATAVERSE-API] Created analysis {AnalysisId} (document={DocumentId}, regarding={Regarding})",
+            analysisId, documentId, regarding is null ? "(none)" : $"{regarding.EntityLogicalName}:{regarding.RecordId}");
         return analysisId;
     }
 
@@ -615,6 +641,7 @@ public class DataverseWebApiService : IDataverseService
         if (request.GraphDriveId != null) payload["sprk_graphdriveid"] = request.GraphDriveId;
         if (request.FileType != null) payload["sprk_filetype"] = request.FileType;
         if (request.HasFile.HasValue) payload["sprk_hasfile"] = request.HasFile.Value;
+        if (request.CanonicalHash != null) payload["sprk_canonicalhash"] = request.CanonicalHash; // FR-C3 content-dedup identity
         if (request.Status.HasValue) payload["statuscode"] = (int)request.Status.Value;
 
         // AI Analysis fields
@@ -2647,6 +2674,15 @@ public class DataverseWebApiService : IDataverseService
         throw new NotImplementedException(
             "ExistsCommunicationByGraphMessageIdAsync is implemented in DataverseServiceClientImpl. " +
             "Configure DI to use ServiceClient implementation for communication dedup queries.");
+    }
+
+    public Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRaceProofAsync(
+        Entity communication, string? internetMessageId, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "CreateCommunicationRaceProofAsync is implemented in DataverseServiceClientImpl (needs the SDK " +
+            "OrganizationServiceFault to catch the alternate-key duplicate). Configure DI to use the " +
+            "ServiceClient implementation for communication dedup writes.");
     }
 
     public Task<Entity?> GetCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default)

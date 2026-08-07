@@ -462,6 +462,24 @@ export type ComposeBlockKind = 'Paragraph' | 'Heading' | 'ListItem' | 'Table';
 /** Paragraph alignment — mirrors the server `ComposeParagraphAlignment` (string enum). */
 export type ComposeAlignment = 'Default' | 'Left' | 'Center' | 'Right' | 'Justify';
 
+/** A tracked-change identity (server task 025 — mirrors the server `ComposeRevision`): the WHO/WHEN of a
+ * `w:ins`/`w:del` revision. The revision `w:id` is deliberately NOT here — the server always mints it. */
+export interface ComposeRevisionFact {
+  kind: 'Inserted' | 'Deleted';
+  author?: string;
+  /** Revision timestamp as authored (`xsd:dateTime`), raw. */
+  date?: string;
+}
+
+/** A tracked FORMATTING-change record (server task 025 — mirrors the server `ComposeFormatChange`):
+ * `w:pPrChange` / `w:rPrChange` identity + the previous properties as opaque server-set XML (SDK-parse
+ * validated server-side; never inspect or edit it client-side). */
+export interface ComposeFormatChangeFact {
+  author?: string;
+  date?: string;
+  previousPropertiesXml?: string;
+}
+
 /** One inline run — a span of text with optional formatting (mirrors the server `ComposeInlineRun`). */
 export interface ComposeInlineRun {
   /** Run text (Tier 3 — document content). */
@@ -469,22 +487,84 @@ export interface ComposeInlineRun {
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
+  /** Server task 023: this run IS a manual page break (`w:br w:type="page"`); every other field is
+   * ignored when true. Server-set by the docx→model projection; preserve untouched on re-post. */
+  isPageBreak?: boolean;
+  /** Server task 024: this run IS a comment range anchor (`Start` → `w:commentRangeStart`; `End` →
+   * `w:commentRangeEnd` + the folded `w:commentReference` run); every other field is ignored when set.
+   * Server-set; preserve untouched on re-post. */
+  commentAnchor?: { kind: 'Start' | 'End'; id: number };
+  /** Server task 025: the tracked revision this run belongs to (`w:ins`/`w:del` — pending-deleted text is
+   * carried as ordinary `text` and re-authored as `w:delText`). Server-set; preserve untouched on
+   * re-post — dropping it silently SETTLES the redline (data loss for a legal document). */
+  revision?: ComposeRevisionFact;
+  /** Server task 025: a tracked run-formatting change (`w:rPrChange`). Server-set; preserve untouched. */
+  formatChange?: ComposeFormatChangeFact;
+  /** Mirrors server `ComposeInlineRun.Href` (G5, task 033) — the hyperlink target this run is wrapped
+   * in. Set by the server projection for imported docs AND by the client mapper from the TipTap `link`
+   * mark; the renderer wraps the run in `w:hyperlink`. */
+  href?: string;
 }
 
-/** A table cell — nested block content (mirrors the server `ComposeTableCell`). */
+/** A table cell — nested block content (mirrors the server `ComposeTableCell`).
+ *
+ * The optional structural-fact fields (server task 022 — `gridSpan`, `vMerge`, `width`,
+ * `verticalAlignment`) are SERVER-set by the docx→model projection for imported documents; the client
+ * mapper never sets them. Preserve untouched on edit-and-repost. */
 export interface ComposeTableCell {
   blocks: ComposeContentBlock[];
   isHeader?: boolean;
+  gridSpan?: number;
+  vMerge?: 'None' | 'Restart' | 'Continue';
+  width?: ComposeTableWidth;
+  verticalAlignment?: 'top' | 'center' | 'bottom';
 }
 
-/** A table row (mirrors the server `ComposeTableRow`). */
+/** A table row (mirrors the server `ComposeTableRow`). `repeatAsHeaderRow` = `w:trPr/w:tblHeader`
+ * (row repeats at the top of every page — server task 022; distinct from the cosmetic cell `isHeader`). */
 export interface ComposeTableRow {
   cells: ComposeTableCell[];
+  repeatAsHeaderRow?: boolean;
 }
 
-/** A native table (mirrors the server `ComposeTable`). */
+/** A native table (mirrors the server `ComposeTable`).
+ *
+ * The optional structural-fact fields (server task 022) are SERVER-set by the docx→model projection for
+ * imported documents: style identity, width, borders (tri-state: absent = born-in-editor renderer chrome;
+ * present-but-all-edges-omitted = borderless), explicit grid widths, and `tblLook` hex. `borders` is ALSO
+ * the mode discriminator: `styleId`/`width`/`lookHex` are honored only when `borders` is present. The
+ * client mapper never sets any of these; preserve untouched on edit-and-repost (like `numId`, dropping
+ * them regresses imported-table fidelity — mapper preservation is the 010/012 cutover's obligation). */
 export interface ComposeTable {
   rows: ComposeTableRow[];
+  styleId?: string;
+  width?: ComposeTableWidth;
+  borders?: ComposeTableBorders;
+  gridColumnWidthsTwips?: string[];
+  lookHex?: string;
+}
+
+/** A table/cell width (`w:tblW` / `w:tcW`): OOXML `ST_TblWidth` type + raw numeric string (server task 022). */
+export interface ComposeTableWidth {
+  type: 'auto' | 'dxa' | 'pct' | 'nil';
+  value: string;
+}
+
+/** The six table border edges (each omitted edge is not emitted; all-omitted = borderless — server task 022). */
+export interface ComposeTableBorders {
+  top?: ComposeTableBorderEdge;
+  left?: ComposeTableBorderEdge;
+  bottom?: ComposeTableBorderEdge;
+  right?: ComposeTableBorderEdge;
+  insideHorizontal?: ComposeTableBorderEdge;
+  insideVertical?: ComposeTableBorderEdge;
+}
+
+/** One border edge: OOXML `ST_Border` name + size (eighths of a point) + color (hex or `auto`). */
+export interface ComposeTableBorderEdge {
+  val: string;
+  size?: number;
+  color?: string;
 }
 
 /**
@@ -499,9 +579,25 @@ export interface ComposeContentBlock {
   level?: number;
   ordered?: boolean;
   startsNewList?: boolean;
+  /**
+   * ListItem only (server task 021): the SOURCE document's numbering-instance identity (`w:numId`),
+   * captured by the SERVER-side docx→model projection for imported documents. The client mapper never
+   * sets this (born-in-editor items use `startsNewList`); when a server-supplied model is edited and
+   * re-posted, preserve the value untouched — the renderer keys list identity/continuity on it.
+   */
+  numId?: number;
   runs?: ComposeInlineRun[];
   alignment?: ComposeAlignment;
   table?: ComposeTable;
+  /** Server task 023: `w:pPr/w:pageBreakBefore` — the paragraph starts on a new page. Server-set by the
+   * docx→model projection; preserve untouched on re-post. */
+  pageBreakBefore?: boolean;
+  /** Server task 025: a tracked revision on this paragraph's MARK (`w:pPr/w:rPr/w:ins|w:del` —
+   * `Deleted` = accepting merges this paragraph with the next). Server-set; preserve untouched. */
+  markRevision?: ComposeRevisionFact;
+  /** Server task 025: a tracked paragraph-formatting change (`w:pPrChange`). Server-set; preserve
+   * untouched. */
+  propertiesChange?: ComposeFormatChangeFact;
 }
 
 /**
@@ -511,6 +607,21 @@ export interface ComposeContentBlock {
  */
 export interface ComposeContentModel {
   blocks: ComposeContentBlock[];
+  /** Server task 024: the document's comments (`word/comments.xml` projection) — ids match the body's
+   * `commentAnchor` markers. Server-set; preserve untouched on re-post (in carrier mode the source
+   * comments part is authoritative; this list re-authors the part only for blank-package renders). */
+  comments?: ComposeComment[];
+}
+
+/** One document comment (mirrors the server `ComposeComment` — server task 024). */
+export interface ComposeComment {
+  id: number;
+  author?: string;
+  initials?: string;
+  /** ISO-8601 timestamp as authored. */
+  date?: string;
+  /** Plain text (paragraphs joined by `\n`). */
+  text?: string;
 }
 
 // ---------------------------------------------------------------------------

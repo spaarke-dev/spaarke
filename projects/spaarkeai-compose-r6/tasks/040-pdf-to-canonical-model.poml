@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>PDF → canonical model via `DocumentIntelligenceService`/`DocumentParserRouter`</title>
+    <phase>4 PDF intake</phase>
+    <gate>blocked until 020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` on the `bff-api` hot path — extends the Azure Document Intelligence intake path to produce the canonical document model (a new intake source feeding the render-on-save hub). FULL per root CLAUDE.md §8 (modifying `.cs`, tags include BFF, cross-service data-shape). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Mapping Azure DI Layout/Read output (fixed-layout PDF) onto the canonical document model is the highest-judgment task in Phase 4 — deciding which PDF constructs project faithfully vs degrade, and preserving the honest-lossiness contract, is a cross-service data-shape decision. Opus per plan.md §5 Phase 4 + Step 3.5.5b.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends `Services/Ai/DocumentIntelligenceService.cs` + `DocumentParserRouter.cs` and produces the canonical model consumed in `Services/Compose/` — `Services/Ai/` is SOLELY OWNED by `spaarke-ai-architecture-redesign-r2` (consume `PublicContracts/` seams, NO fork), and the Compose surface is contested by `spaarkeai-compose-r5`/`r4.5`/`r1/r2/r3`, `agreements-r1`/`analysis-hub-r1`. Serialize edits; sequential after 020; `/conflict-check` before the PR. Phase 4 is cross-phase-independent of Phase 3/5 AFTER 020 lands.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff</tags>
+    <estimated-effort>1.5-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Extend the EXISTING Azure Document Intelligence intake path (`DocumentIntelligenceService` + `DocumentParserRouter`
+    + `ITextExtractor`) so a PDF (NDA/agreement) projects into the SAME canonical document model (task 020) that docx
+    projects into — no parallel PDF subsystem (spec MUST rule / §11). This is FR-06 (PDF intake). Azure DI is a MANAGED
+    service (no binary weight — NFR-01) and this is modify/extend, so a Placement Justification (§10 Path A: extend
+    Azure DI) is required — NOT a §11 new-component justification. Set HONEST lossiness expectations: PDF is
+    fixed-layout and intake is lossier than docx; version history (FR-07) is the safety net. Keep `Services/Compose/`
+    pure; consume `Services/Ai/PublicContracts/` seams only — do NOT fork `Services/Ai/`.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF). Expert in the existing Azure Document Intelligence path (`DocumentIntelligenceService` Layout/Read + `DocumentParserRouter` + `ITextExtractor` → `ParsedDocument`) and the R6 canonical document model (020). Understands the ADR-013 facade (`Services/Ai/PublicContracts/`) and that `Services/Ai/` is solely owned by `spaarke-ai-architecture-redesign-r2` (no fork). Follow ADRs strictly.</role>
+
+  <goal>
+    An extension of the existing `DocumentIntelligenceService` / `DocumentParserRouter` path that maps Azure DI
+    (Layout/Read) output for a PDF into the R6 canonical document model (020) — the same model docx projects into — with
+    fixed-layout constructs that cannot project faithfully degrading gracefully (never a hard-fail) and surfaced as
+    honest-lossiness warnings. No parallel PDF subsystem; `Services/Ai/` consumed via `PublicContracts/`, not forked.
+  </goal>
+
+  <context>
+    <background>
+      FR-06 makes PDF a first-class intake source. The existing `DocumentIntelligenceService` (Azure DI Layout/Read) +
+      `DocumentParserRouter` + `ITextExtractor` already parse PDF/DOCX → `ParsedDocument`. R6 extends that path to emit
+      the canonical document model (020) so the editor edits one model regardless of source, and save renders a docx
+      version. Azure DI is a managed service — no binary weight (NFR-01). PDF is fixed-layout, so intake is inherently
+      lossier than docx; the spec requires HONEST lossiness expectations and leans on version history (FR-07). Per spec
+      §11, PDF intake is modify/extend existing surfaces (no new-component justification); it carries a Placement
+      Justification (§10 Path A: extend Azure DI, managed service). Success Criterion 2 depends on this + 041.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs — Azure DI Layout/Read intake; extend to emit the canonical model (020) for PDF.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentParserRouter.cs — the parse router; route PDF intake into the canonical-model projection.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/ITextExtractor.cs — the text-extraction seam feeding intake.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — the canonical document model / projection (020) PDF must project INTO (single hub); reuse `NumberingComputationEngine:1357` where applicable.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ — the facade `Services/Compose/` consumes; do NOT fork `Services/Ai/` (sole owner `spaarke-ai-architecture-redesign-r2`).</file>
+      <file role="reference">projects/spaarkeai-compose-r6/spec.md — FR-06, NFR-01 (Azure DI managed service), Placement &amp; New Components (PDF intake row).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The canonical document model — the single hub between every source and the editor; PDF intake must project into it (not a parallel model).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-06">MUST reuse `DocumentIntelligenceService` (Azure DI) + `DocumentParserRouter` for PDF intake, projecting into the canonical model (020) — NO parallel PDF subsystem (§11). Scope: PDF → canonical model only; the edit + save-as-docx round-trip is 041.</constraint>
+    <constraint source="ADR-013">Consume `Services/Ai/PublicContracts/` seams; MUST NOT fork `Services/Ai/` (sole owner `spaarke-ai-architecture-redesign-r2`) and MUST NOT inject AI-internal types into `Services/Compose/`. Scope: PDF intake uses the document-parse service, NOT AI-dispatch (ADR-039).</constraint>
+    <constraint source="ADR-007">`byte[]`-in / projection-out; no `Microsoft.Graph` above `SpeFileStore`. Scope: PDF bytes → canonical model projection.</constraint>
+    <constraint source="spec / honest-lossiness">Fixed-layout PDF constructs that cannot project faithfully MUST degrade gracefully (never a hard-fail) and be surfaced as warnings; version history (FR-07) is the safety net. Scope: no silent drops; no 422 on intake.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (§10 Path A: extend Azure DI, a MANAGED service — no binary weight per NFR-01; cite `.claude/constraints/bff-extensions.md`). Report compressed publish size + delta vs ~49.63 MB baseline (incl. PDBs) — expected ~0 MB. Verify no new HIGH CVE. Run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure Document Intelligence intake (Layout/Read) → canonical model; ADR-013 PublicContracts facade (no `Services/Ai/` fork); honest-lossiness degradation; BFF hygiene</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r6/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Extend existing intake" location="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs">
+        The Azure DI Layout/Read path already yields `ParsedDocument`; extend it (and `DocumentParserRouter`) to project PDF into the canonical model (020) — reuse, do not fork or duplicate.
+      </pattern>
+      <pattern name="Single canonical hub" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">
+        docx and PDF must project into the SAME canonical model so the editor edits one model and save renders it out; reuse `NumberingComputationEngine` where numbering applies.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec FR-06 + NFR-01, Placement &amp; New Components, ADR-013/007/039, `.claude/constraints/bff-extensions.md`.</step>
+    <step order="1" name="Re-grep the intake surfaces">Confirm the `DocumentIntelligenceService` Layout/Read + `DocumentParserRouter` + `ITextExtractor` → `ParsedDocument` path and the canonical model (020) shape PDF must project into. Confirm the `PublicContracts/` seam boundary.</step>
+    <step order="2" name="Map PDF → canonical model">Extend the intake path so Azure DI output for a PDF projects into the canonical model (020) — faithful constructs project; fixed-layout constructs that cannot degrade gracefully (accept/flatten) and are surfaced as warnings, never a hard-fail.</step>
+    <step order="3" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="4" name="Build + hygiene">Build BFF; run the relevant suite; confirm Tier-1 NetArchTest green (no `Services/Ai/` fork, no AI-internal injection into Compose). `dotnet publish -c Release` size + delta vs ~49.63 MB (expect ~0; Azure DI is managed). `dotnet list package --vulnerable`. `/conflict-check`. State the Placement Justification (§10 Path A).</step>
+    <step order="5" name="Close out">Update `projects/spaarkeai-compose-r6/tasks/TASK-INDEX.md`: set task 040 to ✅. Record any deviation in `projects/spaarkeai-compose-r6/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If extending the existing Azure DI path cannot project PDF into the canonical model (020) without a parallel PDF subsystem or a fork of `Services/Ai/` (sole owner `spaarke-ai-architecture-redesign-r2`), STOP and escalate per root CLAUDE.md §6/§6.5 (§11 no-parallel-subsystem + ADR-013 no-fork). Do NOT silently 422 on a fixed-layout construct — degrade + warn, or escalate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build BFF; run the test suite; `dotnet publish -c Release`; `dotnet list package --vulnerable`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs + DocumentParserRouter.cs — PDF → canonical model (020) intake</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a PDF NDA/agreement, when intake runs, then Azure DI (Layout/Read) output projects into the SAME canonical document model (020) that docx projects into.</criterion>
+    <criterion testable="true">Fixed-layout constructs that cannot project faithfully degrade gracefully (accept/flatten) and are surfaced as warnings — intake NEVER hard-fails / 422s.</criterion>
+    <criterion testable="true">No parallel PDF subsystem is introduced; the existing `DocumentIntelligenceService` + `DocumentParserRouter` are extended (§11 reuse).</criterion>
+    <criterion testable="true">`Services/Ai/` is consumed via `PublicContracts/` (not forked); no AI-internal type is injected into `Services/Compose/`; no `Microsoft.Graph` above `SpeFileStore` — Tier-1 NetArchTest green (ADR-013/007).</criterion>
+    <criterion testable="true">Negative: PDF intake does NOT go through the AI-dispatch engine (ADR-039) — it uses the document-parse service only.</criterion>
+    <criterion testable="true">BFF build green; compressed publish size ~0 MB delta vs ~49.63 MB baseline (Azure DI managed, no binary weight; ≤60 MB ceiling); no new HIGH CVE; `/conflict-check` clean; Placement Justification (§10 Path A) stated in the PR.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 040 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-06; NFR-01 (Azure DI managed service, no binary weight); Placement &amp; New Components (PDF intake = modify/
+    extend, Path A). This is the intake half of Phase 4 — 041 wires open→edit→save-as-docx and the lossiness UX copy;
+    042 tests it end-to-end. Honest lossiness: PDF is fixed-layout, lossier than docx; version history is the safety net.
+    TASK-INDEX.md + current-task.md are owned by the main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -3,8 +3,8 @@
   <metadata>
     <title>Cross-path reconciliation — sprk_communication ↔ sprk_document via internet-message-id</title>
     <phase>2 Pillar C — De-duplication</phase>
-    <gate>blocked: needs 021 (canonical message-id dedup)</gate>
-    <status>not-started</status>
+    <gate>startable (021 ✅ complete)</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code linking two Dataverse representations on the contended capture/upload path; correctness-sensitive (review surface must show one email); tags include bff-api. code-review + adr-check MANDATORY at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

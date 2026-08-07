@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Template storage/variable rendering reuse (`template` entity + `ITemplateEngine`)</title>
+    <phase>3 Template part-merge</phase>
+    <gate>blocked until 030</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Reuses existing storage/variable-rendering surfaces (Dataverse `template` entity + `ITemplateEngine`/Handlebars) to supply the part-merge engine — no new subsystem, no architectural change. STANDARD per root CLAUDE.md §8 (reuse of existing surface with project constraints; not a NEW abstraction).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified reuse: fetch the `.dotx` + variables from the `template` entity, render variables via the existing `ITemplateEngine`, and hand the resolved template to 030's engine. No architectural judgment — the merge machinery is 030's. Sonnet per plan.md §5 Phase 3.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Wires template storage into the `Services/Compose/` part-merge path — touches the shared Compose surface alongside 030, contested by `spaarkeai-compose-r5`/`r4.5`/`r1/r2/r3`, `spaarke-ai-architecture-redesign-r2` (sole owner of `Services/Ai/`), and `agreements-r1`/`analysis-hub-r1`. Serialize Compose-file edits; sequential after 030; `/conflict-check` before the PR.</parallel-reason>
+    <deps>030</deps>
+    <tags>bff</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire template STORAGE and VARIABLE rendering into the Phase 3 part-merge path by REUSING the existing Dataverse
+    `template` entity (the firm/matter `.dotx` store) and the existing `ITemplateEngine` (Handlebars variable rendering)
+    — no parallel subsystem (spec MUST rule / §11). This task supplies the resolved firm/matter `.dotx` (with any
+    `{{variable}}`s rendered) to the part-merge engine built in 030. Native Dataverse `documenttemplate` is REJECTED.
+    Keep `Services/Compose/` pure: reach template storage through the existing seam, do NOT inject AI-internal types and
+    do NOT fork `Services/Ai/`.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF). Familiar with the Dataverse `template` entity, `WordTemplateService` + `ITemplateEngine` (Handlebars) for template storage/variable rendering, and the ADR-013 facade boundary between `Services/Compose/` and `Services/Ai/`. Follow ADRs strictly.</role>
+
+  <goal>
+    A storage/variable path that, given a firm/matter template selection, retrieves the `.dotx` from the Dataverse
+    `template` entity, renders its `{{variable}}`s via the existing `ITemplateEngine`, and delivers the resolved
+    template bytes to 030's part-merge engine — reusing the existing `template` entity + `ITemplateEngine` with no new
+    storage subsystem and no native `documenttemplate` usage.
+  </goal>
+
+  <context>
+    <background>
+      FR-05's LOCKED decision reuses the Dataverse `template` entity + `ITemplateEngine` (Handlebars) for template
+      STORAGE and VARIABLE rendering, while the OOXML part-merge itself is built in `Services/Compose/` (task 030). The
+      existing `WordTemplateService` (`Services/Ai/Delivery/WordTemplateService.cs`) already does `{{placeholder}}`
+      variable rendering over `ITemplateEngine`; this task reuses that storage/variable capability to feed 030 — it does
+      NOT extend `WordTemplateService` to do part-merge (030 owns the merge). Native `documenttemplate` is rejected
+      (zero code). Per spec §11, no parallel storage subsystem may be introduced.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ — the part-merge path (030) consuming the resolved template bytes; wire template retrieval + variable rendering into it via the existing seam.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/WordTemplateService.cs — existing `{{placeholder}}` variable rendering over `ITemplateEngine`; the storage/variable capability to REUSE (not extend for part-merge).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/ITemplateEngine.cs — the Handlebars variable-rendering seam.</file>
+      <file role="reference">projects/spaarkeai-compose-r6/spec.md — FR-05 (LOCKED; reuse `template` entity + `ITemplateEngine`), MUST Rules (no parallel subsystems, §11), Placement &amp; New Components.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">The part-merge engine that consumes the resolved firm/matter `.dotx` this task supplies.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-05">MUST reuse the Dataverse `template` entity + `ITemplateEngine` for template storage/variable rendering — NO parallel storage subsystem; native `documenttemplate` is NOT used. Scope: this task supplies the resolved `.dotx` to 030; it does NOT build the OOXML merge.</constraint>
+    <constraint source="ADR-013">MUST NOT inject `IOpenAiClient`/executor/routing into `Services/Compose/`, and MUST NOT fork `Services/Ai/`. Scope: reach the `template` entity + `ITemplateEngine` through the existing seam; `Services/Compose/` stays pure (Tier-1 NetArchTest green).</constraint>
+    <constraint source="ADR-007">`byte[]`-in / projection-out; no `Microsoft.Graph` above `SpeFileStore`. Scope: template bytes flow as `byte[]`/streams to the merge engine.</constraint>
+    <constraint source="project / §11">Reuse the existing `template` entity + `ITemplateEngine`; do NOT add a new storage table, endpoint, or variable engine. Scope: one reuse path; extension over new surface.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); report compressed publish size + delta vs ~49.63 MB baseline (incl. PDBs) — expected ~0 MB (reuse only). Verify no new HIGH CVE. Run `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Template storage/variable reuse (Dataverse `template` entity + `ITemplateEngine`/Handlebars); ADR-013 facade boundary; BFF hygiene</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Variable rendering reuse" location="src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/WordTemplateService.cs">
+        Reuse the existing `{{variable}}` rendering over `ITemplateEngine` for template variables; hand the resolved `.dotx` bytes to 030's part-merge engine. Do not extend this service to perform OOXML part-merge — that lives in `Services/Compose/`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the STANDARD rigor-level declaration (🔒 RIGOR LEVEL: STANDARD / 📋 REASON: reuse of existing template storage/variable surfaces / 📖 PROTOCOL STEPS). Load spec FR-05 + MUST Rules (§11 no parallel subsystems), ADR-013/007.</step>
+    <step order="1" name="Re-grep the reuse surfaces">Confirm the `template` entity access + `ITemplateEngine` variable-rendering path in `WordTemplateService`; confirm the ADR-013 seam by which `Services/Compose/` reaches template storage without injecting AI internals.</step>
+    <step order="2" name="Wire storage + variable rendering">Retrieve the selected firm/matter `.dotx` from the `template` entity, render its `{{variable}}`s via `ITemplateEngine`, and deliver the resolved bytes to 030's part-merge engine. No new table/endpoint/engine.</step>
+    <step order="3" name="Build + hygiene">Build BFF; run the Compose suite; confirm Tier-1 NetArchTest green. `dotnet publish -c Release` size + delta vs ~49.63 MB (expect ~0). `dotnet list package --vulnerable`. `/conflict-check`. State the Placement Justification.</step>
+    <step order="4" name="Close out">Update `projects/spaarkeai-compose-r6/tasks/TASK-INDEX.md`: set task 031 to ✅. Record any deviation in `projects/spaarkeai-compose-r6/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing `template` entity + `ITemplateEngine` cannot supply the firm/matter `.dotx` (or its variables) to the part-merge engine without a NEW storage table/endpoint or a fork of `Services/Ai/`, STOP and escalate per root CLAUDE.md §6/§6.5 (§11 no-parallel-subsystem rule + ADR-013 no-fork) — do not silently introduce a parallel storage subsystem or native `documenttemplate`.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build BFF; run the Compose test suite; `dotnet publish -c Release`; `dotnet list package --vulnerable`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ — template storage/variable path feeding 030 (reuses `template` entity + `ITemplateEngine`)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a firm/matter template selection, when resolved, then the `.dotx` is retrieved from the Dataverse `template` entity and its `{{variable}}`s are rendered via the existing `ITemplateEngine`, and the resolved bytes are delivered to 030's part-merge engine.</criterion>
+    <criterion testable="true">No new storage table, endpoint, or variable engine is introduced (§11 reuse); native `documenttemplate` is NOT used.</criterion>
+    <criterion testable="true">`Services/Compose/` stays pure — Tier-1 NetArchTest green: no AI-internal injection, no `Services/Ai/` fork (ADR-013); no `Microsoft.Graph` above `SpeFileStore` (ADR-007).</criterion>
+    <criterion testable="true">BFF build + Compose suite green; compressed publish size ~0 MB delta vs ~49.63 MB baseline (≤60 MB ceiling); no new HIGH CVE; `/conflict-check` clean; Placement Justification stated in the PR.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 031 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-05 (LOCKED); §11 reuse (no parallel subsystem). This is the storage/variable half of Phase 3 — 030 owns the
+    OOXML merge, this task feeds it the resolved firm/matter `.dotx`. Reuse `WordTemplateService`/`ITemplateEngine`; do
+    NOT extend `WordTemplateService` for part-merge. TASK-INDEX.md + current-task.md are owned by the main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

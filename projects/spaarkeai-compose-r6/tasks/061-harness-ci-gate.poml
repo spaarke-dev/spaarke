@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Wire the fidelity harness into CI as a release gate</title>
+    <phase>6 Round-trip fidelity harness (CI release gate)</phase>
+    <gate>dep:060</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches the shared CI workflow (`.github/workflows/sdap-ci.yml`) — a hot-path skill/CI surface — and the change gates every release; TEST-MODIFYING-adjacent (wires the fidelity harness gate). FULL to run code-review + adr-check on the CI change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>plan.md §5 Phase 6 assigns sonnet: adding a self-contained CI job that invokes the task-060 harness; well-specified YAML wiring, no architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `.github/workflows/sdap-ci.yml`, which `ci-cd-unit-test-remediation-r1` owns for existing CI-workflow edits (per `projects/INDEX.md`). Add a SELF-CONTAINED job — do NOT restructure existing stages — and coordinate/`/conflict-check` before the PR.</parallel-reason>
+    <deps>060</deps>
+    <tags>ci</tags>
+    <estimated-effort>S (≤1d)</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the task-060 fidelity harness into CI as a RELEASE GATE: add a self-contained job to `.github/workflows/sdap-ci.yml` that checks out the corpus (with Git-LFS), runs the harness, and fails the build red on any hard-fail/regression. Do NOT restructure existing CI stages — add a self-contained job; `ci-cd-unit-test-remediation-r1` owns existing CI-workflow edits (coordinate).</prompt>
+
+  <role>SPAARKE platform developer with GitHub Actions CI expertise (the `sdap-ci.yml` pipeline) and Git-LFS-in-CI familiarity. Follow the CI-workflow ownership boundary.</role>
+
+  <goal>`.github/workflows/sdap-ci.yml` carries a new self-contained job that (1) checks out the compose-corpus fixtures with Git-LFS, (2) runs the task-060 fidelity harness, and (3) fails the pipeline (red) on any hard-fail or fidelity regression — gating the release. The job is additive (existing stages untouched), coordinated with `ci-cd-unit-test-remediation-r1`, and proven to go red on an injected regression.</goal>
+
+  <context>
+    <background>Per spec FR-08 + Success Criterion 5 ("the round-trip fidelity harness runs in CI and gates the release — verify by CI job present + red on an injected regression") + ADR-049 amendment point 3. Task 060 built the harness + machine-readable result; this task makes it a CI gate. Per `projects/INDEX.md`, `ci-cd-unit-test-remediation-r1` owns existing `sdap-ci.yml` edits, so this task adds a SELF-CONTAINED job rather than restructuring stages, to avoid a merge collision on the CI hot path.</background>
+    <relevant-files>
+      <file role="modify">.github/workflows/sdap-ci.yml (add a self-contained fidelity-harness gate job)</file>
+      <file role="canonical-reference">tests/integration/ (the task-060 harness + its machine-readable result / exit code)</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/INDEX.md (CI-workflow ownership: ci-cd-unit-test-remediation-r1)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="060" status="pending">The fidelity harness + its machine-readable result / non-zero exit on hard-fail/regression that CI gates on.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">CI-workflow ownership: `ci-cd-unit-test-remediation-r1` owns existing `sdap-ci.yml` edits. Add a SELF-CONTAINED job — do NOT restructure or renumber existing stages. Coordinate + run `/conflict-check` before the PR.</constraint>
+    <constraint source="project">The job MUST check out the compose-corpus fixtures with Git-LFS (`lfs: true`) so the NDA fixture bytes are present; a missing-LFS silent skip is a gate defect.</constraint>
+    <constraint source="project">The gate is a real release gate: a hard-fail/regression fails the pipeline (non-zero). Do NOT mark the job `continue-on-error` or otherwise make the gate advisory (that would defeat FR-08).</constraint>
+    <constraint source="ADR-038">This wires the FR-08 release gate (an explicit exception to "coverage = observation"); keep it as an integration round-trip over real fixtures, not a mock-based check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>CI release-gate wiring</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing CI pipeline" location=".github/workflows/sdap-ci.yml">The pipeline to add a self-contained gate job to; model the new job's checkout/setup on an existing .NET test job but keep it independent.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all &lt;knowledge&gt;&lt;files&gt;. Declare RIGOR LEVEL: FULL (reason: CI hot-path + release gate). Confirm the task-060 harness exposes a non-zero exit / machine-readable result CI can gate on.</step>
+    <step order="1">Read `sdap-ci.yml` and identify how existing .NET test jobs check out + set up. Note the ownership boundary (ci-cd-unit-test-remediation-r1) — plan a self-contained additive job.</step>
+    <step order="2">Add a self-contained job: `actions/checkout` with `lfs: true`, .NET setup, invoke the task-060 fidelity harness, and fail the job on the harness's non-zero result. Do NOT modify existing stages.</step>
+    <step order="3">Coordinate with `ci-cd-unit-test-remediation-r1` and run `/conflict-check` before the PR (CI hot path).</step>
+    <step order="4">Verify the gate: it passes on the current green corpus and goes RED when a regression is injected into the harness input (Success Criterion 5's "red on an injected regression").</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="6">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If wiring the gate requires restructuring existing `sdap-ci.yml` stages owned by `ci-cd-unit-test-remediation-r1` (not just adding a self-contained job), STOP and coordinate with that worktree per CLAUDE.md §6 rather than editing shared stages unilaterally.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">Run `/conflict-check`; trigger/inspect the CI run; inject a regression to confirm the gate goes red.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.github/workflows/sdap-ci.yml (self-contained fidelity-harness gate job)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the pipeline, when it runs, then a self-contained fidelity-harness job checks out the corpus with Git-LFS and runs the task-060 harness — with existing stages untouched.</criterion>
+    <criterion testable="true">Given a green corpus, when the gate job runs, then it passes; given an injected regression/hard-fail, when it runs, then the pipeline goes RED (the release is gated).</criterion>
+    <criterion testable="true">Negative: the job is not `continue-on-error`/advisory, and it does not silently skip when LFS bytes are absent.</criterion>
+    <criterion testable="true">The change was coordinated with `ci-cd-unit-test-remediation-r1` and `/conflict-check` ran before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-08 + Success Criterion 5 + ADR-049 amendment point 3; plan.md §5 Phase 6. Modify-only CI wiring (no new production surface → no §11 justification). Self-contained job only — CI-workflow ownership held by ci-cd-unit-test-remediation-r1.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

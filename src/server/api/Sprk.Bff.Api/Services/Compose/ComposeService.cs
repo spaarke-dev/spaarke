@@ -16,6 +16,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose.Operations;
+using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Jobs;
 
 namespace Sprk.Bff.Api.Services.Compose;
@@ -72,6 +73,14 @@ public class ComposeService : IComposeService
     // record in place instead of minting duplicates (the 8-duplicate defect). Resolve by KEY, never by
     // content (I-7/NFR-02).
     private const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
+    // FR-C3 (email-communication-intelligence-r2, graduate-on-divergence): the SPE content identity
+    // (quickXorHash, task 023 indexed column) + the self-referential canonical link. A create-on-save
+    // stamps sprk_canonicalhash; on a byte-identical hit it also LINKS via sprk_canonicaldocument (this
+    // editable copy is byte-identical NOW). The link is CLEARED the moment content diverges (first edit),
+    // graduating the copy to its own canonical — see the create + idempotent branches of
+    // PromoteIfEphemeralAsync. Distinct from sprk_parentdocument (attachment→parent-email).
+    private const string CanonicalHashAttribute = "sprk_canonicalhash";
+    private const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
 
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
@@ -90,6 +99,12 @@ public class ComposeService : IComposeService
     private readonly IGenericEntityService _dataverse;
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
+    // FR-C3 (email-communication-intelligence-r2): SPE content-dedup detector for the create-on-save
+    // graduate-on-divergence hook. Optional + defaults null so the single bare test constructor
+    // (ComposeServiceCreateOnSaveTests) + any legacy construction keep compiling; DI resolves the real
+    // scoped ContentDedupDetector in every non-test host. Null → the dedup hook is a guarded no-op
+    // (behavior identical to pre-R2 create-on-save). Best-effort/non-fatal by construction (NFR-04).
+    private readonly ContentDedupDetector? _dedupDetector;
     // FR-05 Fork C (compose-r2, UAT #7b): the ADR-013-safe profile seam is the OBO-capable
     // IDocumentProfileAi facade (Services/Ai/PublicContracts). ComposeService injects ONLY this
     // facade — NOT IAppOnlyAnalysisService / IOpenAiClient / IPlaybookService / IConsumerRoutingService
@@ -192,7 +207,8 @@ public class ComposeService : IComposeService
         ComposeDocumentRenderer? documentRenderer = null,
         DocxAnnotationReader? annotationReader = null,
         ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
-        ComposeDocxProjectionBuilder? projectionBuilder = null)
+        ComposeDocxProjectionBuilder? projectionBuilder = null,
+        ContentDedupDetector? dedupDetector = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -211,6 +227,9 @@ public class ComposeService : IComposeService
         _projectionBuilder = projectionBuilder ?? new ComposeDocxProjectionBuilder();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
+        // FR-C3 (email-communication-intelligence-r2): null in a bare test constructor (dedup hook = no-op),
+        // the real scoped detector in every non-test host.
+        _dedupDetector = dedupDetector;
         // FR-08 (task 050): ADR-009 Redis when present in every non-test host, null (no staleness
         // re-anchor) in a bare test constructor.
         _cache = cache;
@@ -234,6 +253,34 @@ public class ComposeService : IComposeService
     // LoadAsync builds the Load-path projection from — one builder, one shape, both doorways (F-2).
     public ComposeDocxProjection ProjectDocument(ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
         => _projectionBuilder.Build(content, cancellationToken);
+
+    /// <inheritdoc />
+    // Task 012 (the client cutover): mint FIRST, then build BOTH projections from the SAME minted
+    // bytes. The builder mints ids for id-less paragraphs from a cryptographic RNG per walk, so two
+    // independent walks over unminted bytes would DISAGREE on those paragraphs' ids — the retained
+    // model's block ids must match the editor's node ids or the client's imported-save merge mapper
+    // (keyed by paraId) cannot pair them. MintAndPersist is the ingest-time stamp (fill-gaps-only,
+    // idempotent, fail-open — NOT the save-path count-gate this project retires), the same pass
+    // LoadAsync applies before its own projection build.
+    public ComposeMountProjection ProjectForMount(ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+    {
+        var stamp = _baselineParaIdStamper.MintAndPersist(content);
+        var bytes = stamp.Mutated ? stamp.Bytes : content;
+
+        var projection = _projectionBuilder.Build(bytes, cancellationToken);
+        var canonical = _projectionBuilder.BuildContentModel(bytes, cancellationToken);
+
+        var mountModel = canonical.Status == ComposeProjectionStatus.Failed ? null : canonical.Model;
+        return new ComposeMountProjection
+        {
+            Content = bytes,
+            Minted = stamp.Mutated,
+            Projection = projection,
+            ContentModel = mountModel,
+            // Task 013 (012-review F7): flatten warnings ride to the client with the model.
+            ContentModelWarnings = mountModel is not null && canonical.Warnings.Count > 0 ? canonical.Warnings : null,
+        };
+    }
 
     /// <inheritdoc />
     public async Task<LoadComposeDocumentResult> LoadAsync(
@@ -310,6 +357,35 @@ public class ComposeService : IComposeService
         // supersedes the ParaIdPreParser single-pass on the Load path (one paragraph-enumeration authority).
         var projection = _projectionBuilder.Build(content, cancellationToken);
         IReadOnlyList<ParaIdMapEntry> paraIdMap = projection.ParaIdMap;
+
+        // Task 012 (the client cutover): the CANONICAL content model, built from the SAME minted bytes
+        // the HTML projection above walks (ids already persisted by MintAndPersist — the two walks agree
+        // by construction). The client retains it as the loaded model and re-posts it (merged with editor
+        // state, every server-set field preserved) on an imported dirty save — the render-on-save (a1)
+        // shape. Best-effort: a Failed canonical projection degrades to null (the client falls back to
+        // the transitional op-log shape); never fails Load. Counts-only logging (privacy — no text).
+        var canonicalProjection = _projectionBuilder.BuildContentModel(content, cancellationToken);
+        var contentModel = canonicalProjection.Status == ComposeProjectionStatus.Failed
+            ? null
+            : canonicalProjection.Model;
+        // Task 013 (012-review F7): surface the flatten warnings to the client (folded into the FIRST
+        // model-path save's degradation banner - the save is when the loss materializes).
+        var contentModelWarnings = contentModel is not null && canonicalProjection.Warnings.Count > 0
+            ? canonicalProjection.Warnings
+            : null;
+        if (canonicalProjection.Status == ComposeProjectionStatus.Failed)
+        {
+            _logger.LogWarning(
+                "Compose load: canonical-model projection failed for drive={DriveId} item={DocumentSpeId} (code={Code}); imported saves will use the transitional op-log shape",
+                request.DriveId, request.DocumentSpeId, canonicalProjection.Warnings.FirstOrDefault()?.Code);
+        }
+        else if (canonicalProjection.Warnings.Count > 0)
+        {
+            _logger.LogInformation(
+                "Compose load: canonical-model projection partial for drive={DriveId} item={DocumentSpeId}; warnings={Warnings}",
+                request.DriveId, request.DocumentSpeId,
+                string.Join(",", canonicalProjection.Warnings.Select(w => $"{w.Code}:{w.Count}")));
+        }
         if (projection.Status == ComposeProjectionStatus.Failed)
         {
             _logger.LogWarning(
@@ -499,6 +575,8 @@ public class ComposeService : IComposeService
             Projection = projection,
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
+            ContentModel = contentModel,
+            ContentModelWarnings = contentModelWarnings,
             Origin = origin,
         };
     }
@@ -681,7 +759,7 @@ public class ComposeService : IComposeService
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
 
-        byte[] contentToPersist = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
+        (byte[] contentToPersist, var renderDegradationWarnings) = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
 
         // FR-06 (task 032, the write-path cutover): apply the client's ordered, rebased task-003 operation log
@@ -693,27 +771,48 @@ public class ComposeService : IComposeService
         var hasOperations = request.OperationLog is { Operations.Count: > 0 };
         var hasComments = request.Comments is { Count: > 0 };
 
-        // G1 (FR-01, task 020): the durable origin discriminator — mirrors the SAME ContentModel-presence
-        // signal the born-in-editor render branch above already keys off (ResolveSaveBaselineAsync's "(a0)
-        // BORN-IN-EDITOR" check). ContentModel present → the renderer authors the whole document from the
-        // client's content model (Authored, no retained baseline to delta onto); ContentModel absent → the
-        // save carries retained SPE bytes, whether a delta (op-log) or a byte-identical replace (Imported).
+        // G1 (FR-01, task 020): the durable origin discriminator — mirrors the SAME baseline-source
+        // signal ResolveSaveBaselineAsync's routing keys off. ContentModel present WITHOUT any baseline
+        // source → born-in-editor render (a0, Authored); ContentModel WITH a baseline source → imported
+        // render-on-save (a1 carrier render, Imported — task 010); ContentModel absent → the save carries
+        // retained SPE bytes, whether a delta (op-log) or a byte-identical replace (Imported).
         // Resolved ONLY from this server-side discriminant — NEVER from SPE-id presence or a content/text
         // match (NFR-02, I-7). Computed on every save (not only create-on-save) so it can ride the returned
         // SaveComposeDocumentResult for immediate client/consumer use (e.g. task 021's clean-apply engine
         // mode selection) — but it is PERSISTED onto sprk_document ONLY at create-on-save (see the
         // PromoteComposeDocumentRequest.Origin wiring below); a replace-path save of an already-promoted
         // document never mutates the stored value.
-        // UAT #1A hardening (task 050): Authored requires a ContentModel AND no retained original bytes — i.e. a
-        // genuine born-in-editor doc with no baseline to delta onto. A save that carries retained original bytes
-        // (Content) is IMPORTED even if a ContentModel is also (erroneously) present, so a client-side routing
-        // slip can never durably mis-stamp an imported doc Authored (which would force every later op-log save
-        // onto the clean branch and silently drop redlines — the SEV-1 UAT regression). ContentModel absent →
-        // Imported. Still resolved ONLY from server-side request shape — never from SPE-id presence or a
-        // content/text match (NFR-02, I-7).
-        var origin = request.ContentModel is not null && request.Content.IsEmpty
+        // UAT #1A hardening (task 050) + task 010 cutover: Authored requires a ContentModel AND no baseline
+        // SOURCE at all — no retained original bytes AND no version-fetch coordinates. A save carrying a
+        // baseline source is IMPORTED even when a ContentModel is present: post-cutover that combination IS
+        // the designed imported render-on-save shape (model + carrier via RenderIntoCarrier), and pre-cutover
+        // it was the erroneous-routing case UAT #1A already labeled Imported — either way the label is
+        // Imported, so a routing slip can never durably mis-stamp an imported doc Authored (which would force
+        // every later save onto the clean branch and silently drop redlines — the SEV-1 UAT regression).
+        // ContentModel absent → Imported. Still resolved ONLY from server-side request shape — never from
+        // SPE-id presence or a content/text match (NFR-02, I-7).
+        var origin = request.ContentModel is not null
+            && request.Content.IsEmpty
+            && !HasBaselineVersionCoordinates(request)
             ? ComposeOrigin.Authored
             : ComposeOrigin.Imported;
+
+        // Task 010: on the render-on-save path an op-log cannot apply (the model IS the document state);
+        // a client that sends both is on a mixed contract — the ops are ignored LOUDLY, never
+        // half-applied: logged server-side AND surfaced on the wire as an `op-log-ignored` degradation
+        // warning (Step-9.5 F1 — observable to clients/tests, not just operators).
+        if (request.ContentModel is not null && hasOperations)
+        {
+            _logger.LogWarning(
+                "Compose save: request carries BOTH a ContentModel and an operation log ({OpCount} op(s)) — the render-on-save path ignores the op-log (the model is the authoritative document state). session={SessionId}",
+                request.OperationLog!.Operations.Count, request.SessionId);
+            var combinedWarnings = new List<ComposeProjectionWarning>(
+                renderDegradationWarnings ?? (IReadOnlyList<ComposeProjectionWarning>)Array.Empty<ComposeProjectionWarning>())
+            {
+                new("op-log-ignored", request.OperationLog!.Operations.Count),
+            };
+            renderDegradationWarnings = combinedWarnings;
+        }
 
         // G2 (FR-02, task 021 / R5-D2 Candidate A): the CLEAN-APPLY decision for the op-log/engine path.
         // A reopened AUTHORED doc sends an op-log (ContentModel null) — the ContentModel discriminant above
@@ -802,9 +901,14 @@ public class ComposeService : IComposeService
                 contentToPersist = _baselineParaIdStamper.Stamp(contentToPersist, request.ParaIdMap);
             }
 
-            _logger.LogInformation(
-                "Compose save: applying operation log ({OpCount} op(s)) + {CommentCount} comment(s) via the Patch Engine onto the retained baseline (session={SessionId}).",
-                request.OperationLog?.Operations.Count ?? 0, request.Comments?.Count ?? 0, request.SessionId);
+            // Task 012: this op-log/engine path is the TRANSITIONAL save shape — the ADR-049 R6
+            // amendment's sole permitted ComposeShadowPatchEngine caller (reopened-authored clean-apply
+            // + pre-cutover clients / legacy in-flight sessions). Post-cutover clients send a
+            // ContentModel + baseline source for every imported dirty save and never reach this block.
+            // Logged at Warning for retirement telemetry (tasks 013/090 own the eventual removal).
+            _logger.LogWarning(
+                "Compose save: TRANSITIONAL op-log save shape — applying {OpCount} op(s) + {CommentCount} comment(s) via the Patch Engine onto the retained baseline (cleanApply={CleanApply}, session={SessionId}).",
+                request.OperationLog?.Operations.Count ?? 0, request.Comments?.Count ?? 0, cleanApply, request.SessionId);
 
             // Pure/in-memory BEFORE any SPE write: a refusal (unresolved paraId/anchor, unsupported schema
             // version, opaque-atom/structural refusal) throws ComposePatchException here — mapped to a
@@ -862,43 +966,26 @@ public class ComposeService : IComposeService
                     partial.AppliedCount, partial.Total, partial.UnresolvedCount, request.SessionId);
             }
         }
-        // UAT round-3 (2026-07-27) — advisory comments on the CREATE-ON-SAVE / ContentModel path.
-        // The block above only bakes comments when ContentModel is null (a loaded-doc delta save). But a
-        // DIRTY transient save (the reviewer's session goes dirty the moment the AI places comment marks)
-        // sends a rendered ContentModel instead — App Insights showed the NDA saving as
-        // transientCreate=True with a ContentModel, so its advisory comments were silently dropped (no
-        // native w:comment reached Word). The renderer (ComposeDocumentRenderer.SynthesizeDocument) stamps
-        // each block's CLIENT paraId into the rendered .docx (CarryClientParaId/AssignParaIds), and the
-        // comment anchors reference those SAME client-minted paraIds — so a comments-only patch resolves
-        // cleanly. Empty op-log + comments is a first-class ComposeShadowPatchEngine.Apply case; pass a
-        // fresh ComposeOperationLog() so its SchemaVersion matches. Runs BEFORE the SummaryPage append +
-        // SPE write, mirroring the loaded-doc block's ordering.
-        // FAIL-SOFT: a create-on-save currently succeeds WITHOUT comments; baking must never regress that
-        // to a hard failure. If a comment's paraId can't resolve (e.g. a non-hex editor id the renderer
-        // re-minted, or a range shifted by pending-insert exclusion), log it and persist the rendered
-        // bytes uncommented rather than throwing — the save still lands; the drop is visible in telemetry.
+        // Task 012 (the cutover — retires the UAT round-3 comment BAKE, the LAST ComposeShadowPatchEngine
+        // caller reachable with a ContentModel; 010 adr-check residual): on the render path comments ride
+        // the MODEL itself (ComposeContentModel.Comments + Start/End anchor marker runs, folded in by the
+        // client mapper per the task-024 shapes) — the renderer authors them into the blank package or
+        // APPENDS the new ones to the carrier's comments part. The server never anchors a (paraId,
+        // run-range) comment against rendered bytes again (that was anchor reconciliation — the retired
+        // bug class). A request that still carries the SEPARATE comments field alongside a ContentModel is
+        // a pre-cutover client shape: the comments are ignored LOUDLY (server log + wire-visible
+        // degradation warning), never half-anchored and never silently dropped.
         else if (request.ContentModel is not null && hasComments)
         {
-            try
+            _logger.LogWarning(
+                "Compose save: request carries BOTH a ContentModel and {CommentCount} separate anchored comment(s) — the render-on-save path ignores the separate comments field (comments ride the model itself; pre-cutover client shape). session={SessionId}",
+                request.Comments!.Count, request.SessionId);
+            var combinedCommentWarnings = new List<ComposeProjectionWarning>(
+                renderDegradationWarnings ?? (IReadOnlyList<ComposeProjectionWarning>)Array.Empty<ComposeProjectionWarning>())
             {
-                var withComments = _patchEngine.Apply(
-                    contentToPersist,
-                    new ComposeOperationLog(),
-                    request.Comments,
-                    ResolveRevisionAuthor(httpContext),
-                    observedAt);
-                contentToPersist = withComments;
-
-                _logger.LogInformation(
-                    "Compose save: baked {CommentCount} advisory comment(s) as native w:comment onto the rendered ContentModel (create-on-save path) (session={SessionId}).",
-                    request.Comments?.Count ?? 0, request.SessionId);
-            }
-            catch (ComposePatchException ex)
-            {
-                _logger.LogWarning(ex,
-                    "Compose save: could not bake {CommentCount} advisory comment(s) onto the rendered ContentModel ({Kind}) — persisting the document WITHOUT them so the save still succeeds (session={SessionId}).",
-                    request.Comments?.Count ?? 0, ex.Kind, request.SessionId);
-            }
+                new("comments-ignored", request.Comments!.Count),
+            };
+            renderDegradationWarnings = combinedCommentWarnings;
         }
 
         // Task 041 (Phase 4, NDA-REVIEW Summary Page): when the caller supplies the ledgered NDA-REVIEW
@@ -915,6 +1002,22 @@ public class ComposeService : IComposeService
             _logger.LogInformation(
                 "Compose save: appended NDA-REVIEW Summary Page ({FindingCount} flagged section(s), overallRisk={OverallRisk}) to the document (session={SessionId}).",
                 request.SummaryPage.FlaggedSections.Count, request.SummaryPage.OverallRisk, request.SessionId);
+        }
+
+        // Task 012 (the client cutover): on a render-path save, project the FINAL persisted bytes back
+        // into the canonical model and return it — the client adopts it as its new retained loaded model
+        // and re-baselines its edit snapshot, so the NEXT dirty save merges against the just-persisted
+        // state (without this, the next save would re-diff against the stale load-time baseline and
+        // re-emit the same revisions). Includes any Summary Page appended above. Best-effort: a failed
+        // projection returns null and the client keeps the model it posted as its merge base.
+        ComposeContentModel? savedContentModel = null;
+        if (request.ContentModel is not null)
+        {
+            var savedProjection = _projectionBuilder.BuildContentModel(contentToPersist, cancellationToken);
+            if (savedProjection.Status != ComposeProjectionStatus.Failed)
+            {
+                savedContentModel = savedProjection.Model;
+            }
         }
 
         _logger.LogInformation(
@@ -1170,6 +1273,10 @@ public class ComposeService : IComposeService
             ReanchorSummary = reanchorSummary,
             PartialApply = partialApplySummary,
             Origin = origin,
+            // Task 026 (FR-04): success-with-warnings — render-side degradations surfaced, never a 422.
+            DegradationWarnings = renderDegradationWarnings,
+            // Task 012: the post-save canonical model (render-path saves only) — the client's new merge base.
+            ContentModel = savedContentModel,
         };
     }
 
@@ -1197,54 +1304,73 @@ public class ComposeService : IComposeService
     /// fast-path + versionId cover every real save case.
     /// </para>
     /// </summary>
-    private async Task<byte[]> ResolveSaveBaselineAsync(
+    private async Task<(byte[] Bytes, IReadOnlyList<ComposeProjectionWarning>? RenderDegradations)> ResolveSaveBaselineAsync(
         SaveComposeDocumentRequest request,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        // (a0) BORN-IN-EDITOR (FR-01a, task 026): a document authored IN the editor (AI-drafted / blank /
-        //      browse-local) has NO retained original — its client CONTENT MODEL is the authoring source.
-        //      Render the high-fidelity .docx server-side (real styles + style-linked multi-level numbering +
-        //      native tables + minted w14:paraId) — the deterministic replacement for the removed client
-        //      docx.js exporter (task 027). This is NOT an AI dispatch (ADR-039 complied — design §11). No
-        //      EditedParagraphs/Annotations layer onto it (the whole document is authored here); the rendered
-        //      bytes ARE contentToPersist. Checked FIRST: ContentModel is mutually exclusive with Content /
-        //      BaselineVersionId (a born-in-editor doc has no baseline to delta onto).
         if (request.ContentModel is not null)
         {
-            return _documentRenderer.SynthesizeDocument(request.ContentModel, ResolveRevisionAuthor(httpContext));
+            // Task 026 (FR-04): the render degradation sink — dropped anchors / format-change records /
+            // hrefs surface as SUCCESS-WITH-WARNINGS, never a 422 and never silent.
+            var renderDegradations = new List<ComposeProjectionWarning>();
+            var revisionAuthor = ResolveRevisionAuthor(httpContext);
+
+            // (a1) IMPORTED RENDER-ON-SAVE (task 010 — the cutover; spec FR-01/FR-02, ADR-049 Path-B
+            //      amendment): a ContentModel WITH a resolvable retained baseline renders INTO that
+            //      carrier (RenderIntoCarrier) — the model (projected at load through the 020-026
+            //      canonical hub, edited in TipTap, re-posted with every server-set fact preserved) is
+            //      the authoring source, and the carrier contributes the parts the thin model cannot
+            //      carry (styles / numbering / headers / footers / theme / comments part). NO surgical
+            //      byte-patch and NO count-gate on this path — the anchor-reconciliation 422 class
+            //      (the NDA) is unreachable by construction. Hard-tier constructs accept-flattened at
+            //      projection (026) render as degraded prose; the prior version stays retrievable via
+            //      SPE version history (FR-07 safety net). Two boundary notes: (1) a born-in-editor doc
+            //      must keep OMITTING baselineVersionId on its re-saves (its retained versionId is the
+            //      drive-ITEM id, not a real SPE version — echoing it here would 404 the fetch; the
+            //      client's bornInEditor branch sends contentModel only); (2) the FR-08 stale-base
+            //      re-anchor deliberately does not run on this path — the model is full document state,
+            //      so a concurrent out-of-band writer resolves last-writer-wins with version history as
+            //      the net (design-accepted; the eTag stamp still updates post-save for the next op-log
+            //      save's assert).
+            if (!request.Content.IsEmpty)
+            {
+                var carrierRendered = _documentRenderer.RenderIntoCarrier(
+                    request.Content.ToArray(), request.ContentModel, revisionAuthor, renderDegradations);
+                return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
+            }
+
+            if (HasBaselineVersionCoordinates(request))
+            {
+                var carrierBytes = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
+                    .ConfigureAwait(false);
+                var carrierRendered = _documentRenderer.RenderIntoCarrier(
+                    carrierBytes, request.ContentModel, revisionAuthor, renderDegradations);
+                return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
+            }
+
+            // (a0) BORN-IN-EDITOR (FR-01a, task 026): no retained original at all (AI-drafted / blank) —
+            //      the model is the WHOLE document; render the high-fidelity .docx from a blank package
+            //      (real styles + style-linked multi-level numbering + native tables + minted
+            //      w14:paraId). Deterministic authoring, NOT an AI dispatch (ADR-039 — design §11).
+            var synthesized = _documentRenderer.SynthesizeDocument(
+                request.ContentModel, revisionAuthor, renderDegradations);
+            return (synthesized, renderDegradations.Count > 0 ? renderDegradations : null);
         }
 
         // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
         if (!request.Content.IsEmpty)
         {
-            return request.Content.ToArray();
+            return (request.Content.ToArray(), null);
         }
 
         // (b) FR-06 primary: re-fetch the LOAD-TIME SPE version by versionId (task 002), behind the
         //     SpeFileStore facade (ADR-007 — no Microsoft.Graph type crosses into Services/Compose).
-        if (!string.IsNullOrWhiteSpace(request.BaselineVersionId)
-            && !string.IsNullOrWhiteSpace(request.DriveId)
-            && !string.IsNullOrWhiteSpace(request.DocumentSpeId))
+        if (HasBaselineVersionCoordinates(request))
         {
-            var stream = await _spe.DownloadFileVersionAsUserAsync(
-                    httpContext, request.DriveId!, request.DocumentSpeId!, request.BaselineVersionId!, cancellationToken)
+            var baseline = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
                 .ConfigureAwait(false);
-
-            if (stream is not null)
-            {
-                await using (stream.ConfigureAwait(false))
-                {
-                    using var buffer = new MemoryStream();
-                    await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-                    return buffer.ToArray();
-                }
-            }
-
-            throw new InvalidOperationException(
-                $"Compose save: the load-time baseline version was not found (drive={request.DriveId} " +
-                $"item={request.DocumentSpeId} version={request.BaselineVersionId}). A dirty save must apply " +
-                "onto the load-time original — it will not fall back to a reconstruction (FR-01/FR-06).");
+            return (baseline, null);
         }
 
         // No baseline resolvable. A dirty save NEVER falls back to a client reconstruction (FR-01).
@@ -1253,6 +1379,41 @@ public class ComposeService : IComposeService
             "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
             "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
             nameof(request));
+    }
+
+    /// <summary>Whether the request carries the full coordinate set for an FR-06 load-time-version
+    /// re-fetch (versionId + driveId + speId).</summary>
+    private static bool HasBaselineVersionCoordinates(SaveComposeDocumentRequest request) =>
+        !string.IsNullOrWhiteSpace(request.BaselineVersionId)
+        && !string.IsNullOrWhiteSpace(request.DriveId)
+        && !string.IsNullOrWhiteSpace(request.DocumentSpeId);
+
+    /// <summary>FR-06: downloads the load-time SPE version's exact bytes (the retained baseline / render
+    /// carrier) behind the SpeFileStore facade. Throws when the version is gone — a dirty save never
+    /// falls back to a reconstruction (FR-01).</summary>
+    private async Task<byte[]> FetchBaselineVersionBytesAsync(
+        SaveComposeDocumentRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var stream = await _spe.DownloadFileVersionAsUserAsync(
+                httpContext, request.DriveId!, request.DocumentSpeId!, request.BaselineVersionId!, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (stream is not null)
+        {
+            await using (stream.ConfigureAwait(false))
+            {
+                using var buffer = new MemoryStream();
+                await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+                return buffer.ToArray();
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Compose save: the load-time baseline version was not found (drive={request.DriveId} " +
+            $"item={request.DocumentSpeId} version={request.BaselineVersionId}). A dirty save must apply " +
+            "onto the load-time original — it will not fall back to a reconstruction (FR-01/FR-06).");
     }
 
     // =========================================================================
@@ -2014,15 +2175,17 @@ public class ComposeService : IComposeService
         if (string.IsNullOrWhiteSpace(request.TenantId))
             throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
 
-        // 1) Idempotency check by SPE drive-item id (alt key sprk_graphitemid_uk).
-        var existingId = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
+        // 1) Idempotency check by SPE drive-item id (alt key sprk_graphitemid_uk). The lookup also carries the
+        //    FR-C3 dedup columns so graduate-on-divergence needs no extra round-trip.
+        var existingRow = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
 
-        if (existingId.HasValue)
+        if (existingRow is not null)
         {
+            var existingId = existingRow.Id;
             _logger.LogDebug(
                 "Compose promote: existing sprk_document {DocumentRecordId} found for driveItem={DocumentSpeId} — idempotent no-op",
-                existingId.Value, request.DocumentSpeId);
+                existingId, request.DocumentSpeId);
 
             // FR-07 rebind is OPTIONAL (task 110): skip entirely when no session is bound
             // (transient Browse/local-file first Save). RebindSessionDocumentIdAsync is already
@@ -2033,16 +2196,21 @@ public class ComposeService : IComposeService
                         tenantId: request.TenantId,
                         sessionId: request.SessionId,
                         currentDocumentId: request.DocumentSpeId,
-                        newDocumentId: existingId.Value.ToString(),
+                        newDocumentId: existingId.ToString(),
                         cancellationToken)
                     .ConfigureAwait(false);
             }
+
+            // FR-C3 graduate-on-divergence: if this existing row is a hash-linked COPY whose content has now
+            // diverged from the canonical it was linked at, sever the link so it becomes its own canonical.
+            await GraduateLinkedCopyIfDivergedAsync(existingRow, request, cancellationToken)
+                .ConfigureAwait(false);
 
             return new PromoteComposeDocumentResult
             {
                 DocumentSpeId = request.DocumentSpeId,
                 SessionId = request.SessionId,
-                DocumentRecordId = existingId.Value,
+                DocumentRecordId = existingId,
                 WasCreated = false,
             };
         }
@@ -2112,6 +2280,40 @@ public class ComposeService : IComposeService
             entity[FilePathAttribute] = request.FilePath!;
         }
 
+        // ── FR-C3 content-dedup, graduate-on-divergence (CREATE branch) ─────────────────────────────
+        // Read the just-uploaded item's content identity (quickXorHash) and record it. On a byte-identical
+        // hit against an existing CANONICAL, LINK this editable copy (sprk_canonicaldocument) rather than
+        // suppressing it: a Compose document is a living document that diverges on first edit — the idempotent
+        // branch above graduates it then. NOTIFY (never silent). Best-effort/non-fatal (NFR-04): any failure →
+        // create proceeds unstamped. No-op when the detector is absent (bare test ctor) or the drive id is
+        // unknown. Suppression is deliberately NOT used here (that is the immutable email-attachment path's
+        // behavior; suppressing an editable copy would cross-wire the session onto a foreign drive-item).
+        if (_dedupDetector is not null && !string.IsNullOrWhiteSpace(request.GraphDriveId))
+        {
+            try
+            {
+                var (contentHash, canonicalId) = await _dedupDetector
+                    .ResolveContentIdentityAsync(request.GraphDriveId!, request.DocumentSpeId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (!string.IsNullOrWhiteSpace(contentHash))
+                    entity[CanonicalHashAttribute] = contentHash!;
+                if (canonicalId is { } canonical)
+                {
+                    entity[CanonicalDocumentAttribute] = new EntityReference(DocumentLogicalName, canonical);
+                    var ownerOid = httpContext.User?.FindFirst("oid")?.Value;
+                    await _dedupDetector
+                        .NotifyLinkedCopyAsync(ownerOid, canonical, effectiveFileName, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose content-dedup (create) failed (non-fatal) for driveItem={DocumentSpeId}; creating without dedup stamp.",
+                    request.DocumentSpeId);
+            }
+        }
+
         Guid newId;
         try
         {
@@ -2134,8 +2336,8 @@ public class ComposeService : IComposeService
                 "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key (graphItemId, then transientKey).",
                 request.DocumentSpeId);
 
-            var raceWinnerId = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
-                .ConfigureAwait(false);
+            Guid? raceWinnerId = (await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false))?.Id;
 
             if (!raceWinnerId.HasValue && !string.IsNullOrWhiteSpace(request.TransientKey))
             {
@@ -2675,7 +2877,64 @@ public class ComposeService : IComposeService
     /// <c>sprk_graphitemid_uk</c> alternate key. Returns the <c>sprk_documentid</c> or
     /// <c>null</c> when no row exists.
     /// </summary>
-    private async Task<Guid?> TryFindDocumentByGraphItemIdAsync(
+    /// <summary>
+    /// FR-C3 graduate-on-divergence (email-communication-intelligence-r2): when a subsequent Compose save
+    /// routes through <see cref="PromoteIfEphemeralAsync"/>'s idempotent existing-row branch, check whether the
+    /// row is a hash-linked COPY (<c>sprk_canonicaldocument</c> set) whose LIVE content has diverged from the
+    /// hash it was linked at (<c>sprk_canonicalhash</c>). If so, sever the link (clear
+    /// <c>sprk_canonicaldocument</c> via the <see cref="DBNull"/> clear-sentinel) and stamp the new content hash
+    /// — the copy graduates to its own canonical. The row's dedup columns are already in hand from the idempotent
+    /// alt-key lookup (no extra retrieve). Best-effort / non-fatal (NFR-04): every failure logs and leaves the
+    /// row unchanged (re-evaluated on the next save); never fails the save. No-op when the detector is absent
+    /// (bare test ctor), the drive id is unknown, or the row is a true canonical (no link to sever).
+    /// </summary>
+    private async Task GraduateLinkedCopyIfDivergedAsync(
+        Entity existingRow,
+        PromoteComposeDocumentRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (_dedupDetector is null || string.IsNullOrWhiteSpace(request.GraphDriveId))
+            return;
+
+        // Only a hash-linked COPY can graduate — a true canonical has no sprk_canonicaldocument link.
+        if (existingRow.GetAttributeValue<EntityReference>(CanonicalDocumentAttribute) is null)
+            return;
+
+        try
+        {
+            var linkedHash = existingRow.GetAttributeValue<string>(CanonicalHashAttribute);
+            var (liveHash, _) = await _dedupDetector
+                .ResolveContentIdentityAsync(request.GraphDriveId!, request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+
+            // No live hash (unavailable) OR still identical → not diverged; leave the link intact.
+            if (string.IsNullOrWhiteSpace(liveHash) || string.Equals(liveHash, linkedHash, StringComparison.Ordinal))
+                return;
+
+            await _dataverse.UpdateAsync(
+                    DocumentLogicalName,
+                    existingRow.Id,
+                    new Dictionary<string, object>
+                    {
+                        [CanonicalDocumentAttribute] = DBNull.Value, // sever the link (DBNull clear-sentinel)
+                        [CanonicalHashAttribute] = liveHash!,        // stamp the diverged content's own identity
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Compose content-dedup: sprk_document {DocumentId} diverged from its linked canonical; graduated to its own document.",
+                existingRow.Id);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Compose content-dedup (graduate) failed (non-fatal) for document {DocumentId}; leaving link intact.",
+                existingRow.Id);
+        }
+    }
+
+    private async Task<Entity?> TryFindDocumentByGraphItemIdAsync(
         string driveItemId,
         CancellationToken cancellationToken)
     {
@@ -2686,13 +2945,15 @@ public class ComposeService : IComposeService
 
         try
         {
+            // Fetch the FR-C3 dedup columns alongside the id so the idempotent branch can evaluate
+            // graduate-on-divergence WITHOUT a second Dataverse round-trip on the save hot path.
             var entity = await _dataverse.RetrieveByAlternateKeyAsync(
                 DocumentLogicalName,
                 key,
-                new[] { DocumentIdAttribute },
+                new[] { DocumentIdAttribute, CanonicalDocumentAttribute, CanonicalHashAttribute },
                 cancellationToken).ConfigureAwait(false);
 
-            return entity?.Id;
+            return entity;
         }
         catch (InvalidOperationException ex)
         {

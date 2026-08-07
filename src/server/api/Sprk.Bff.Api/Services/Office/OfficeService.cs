@@ -5,6 +5,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
+using Sprk.Bff.Api.Services.Communication;
 
 namespace Sprk.Bff.Api.Services.Office;
 
@@ -36,6 +37,11 @@ public class OfficeService : IOfficeService
     private readonly OfficeStorageUploader _storageUploader;
     private readonly EmailProcessingOptions _emailProcessingOptions;
     private readonly IMembershipEventPublisher _membershipEventPublisher;
+    // FR-B3 (task 043): routes a user-saved EMAIL through the SAME Association Engine as mailbox capture so a
+    // hand-filed email is associated + triaged (an intelligence-bearing sprk_communication), not merely a
+    // sprk_document archive. Optional/null-tolerant so hosts without the Communication module (and the existing
+    // bare test constructions) keep working; null → the capture step is a guarded no-op (best-effort, NFR-04).
+    private readonly EmailUploadCaptureService? _emailUploadCapture;
     private readonly ILogger<OfficeService> _logger;
 
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
@@ -50,7 +56,8 @@ public class OfficeService : IOfficeService
         OfficeStorageUploader storageUploader,
         IOptions<EmailProcessingOptions> emailProcessingOptions,
         IMembershipEventPublisher membershipEventPublisher,
-        ILogger<OfficeService> logger)
+        ILogger<OfficeService> logger,
+        EmailUploadCaptureService? emailUploadCapture = null)
     {
         _jobStatusService = jobStatusService;
         _jobService = jobService;
@@ -60,6 +67,7 @@ public class OfficeService : IOfficeService
         _storageUploader = storageUploader;
         _emailProcessingOptions = emailProcessingOptions.Value;
         _membershipEventPublisher = membershipEventPublisher;
+        _emailUploadCapture = emailUploadCapture;
         _logger = logger;
     }
 
@@ -120,6 +128,18 @@ public class OfficeService : IOfficeService
                     StatusUrl = $"/office/jobs/{existingJob.JobId}",
                     StreamUrl = $"/office/jobs/{existingJob.JobId}/stream"
                 };
+            }
+
+            // FR-B3 (task 043): route a user-saved EMAIL through the SAME capture engine as mailbox intake —
+            // create/reconcile the canonical sprk_communication and run association + triage + provenance — so a
+            // hand-filed email is intelligence-bearing, not merely a sprk_document archive. Runs AFTER the
+            // idempotency early-return (a genuine replay already captured) and BEFORE document creation so
+            // OfficeDocumentPersistence's cross-path link (FR-C4) resolves the canonical this produces. Message-
+            // level dedup is structural (FR-C1 alternate key) inside CaptureAsync — no second dedup mechanism.
+            // CaptureAsync is internally best-effort/non-fatal (NFR-04): it never throws out of the save.
+            if (_emailUploadCapture is not null && request.ContentType == SaveContentType.Email)
+            {
+                await _emailUploadCapture.CaptureAsync(request, userId, cancellationToken);
             }
 
             // Step 3: Determine job type based on content type
@@ -299,7 +319,7 @@ public class OfficeService : IOfficeService
                 };
 
                 // Create Document record with SPE pointers
-                var documentId = await _documentPersistence.CreateDocumentWithSpePointersAsync(
+                var (documentId, wasContentDuplicate) = await _documentPersistence.CreateDocumentWithSpePointersAsync(
                     request,
                     driveId,
                     itemId,
@@ -308,6 +328,41 @@ public class OfficeService : IOfficeService
                     fileSize,
                     userId,
                     cancellationToken);
+
+                // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
+                // canonical document (returned as `documentId`). No second document was created — and there is
+                // nothing new to finalize: the canonical already carries its Email/Attachment artifacts + AI, so
+                // re-running finalization would only duplicate them and re-spend AI on identical bytes. Skip the
+                // whole downstream pipeline, CLEAN UP the transient upload blob (gate-after-write; it is now truly
+                // unreferenced — this is the item THIS request just uploaded, never the canonical's own), and
+                // complete the job. The detector already NOTIFIED the user of the canonical. Blob cleanup is
+                // best-effort (never fails the save). The `finally` below still disposes the content stream.
+                if (wasContentDuplicate)
+                {
+                    await _storageUploader.DeleteFromSpeAsync(driveId, itemId, cancellationToken);
+
+                    await _documentPersistence.UpdateJobStatusInDataverseAsync(jobId, JobStatus.Completed, "DeduplicatedToExisting", 100, null, cancellationToken);
+                    _jobStore[jobId] = _jobStore[jobId] with
+                    {
+                        Status = JobStatus.Completed,
+                        Progress = 100,
+                        CurrentPhase = "DeduplicatedToExisting",
+                        CompletedAt = DateTimeOffset.UtcNow
+                    };
+
+                    _logger.LogInformation(
+                        "ProcessingJob {JobId} completed: content duplicate of canonical document {DocumentId}; finalization skipped, transient blob cleaned up.",
+                        jobId, documentId);
+
+                    return new SaveResponse
+                    {
+                        Success = true,
+                        Duplicate = false, // NOT an idempotent job replay — this is a content dedup (user notified via the canonical notification)
+                        JobId = jobId,
+                        StatusUrl = $"/office/jobs/{jobId}",
+                        StreamUrl = $"/office/jobs/{jobId}/stream"
+                    };
+                }
 
                 // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event.
                 // Per event-source-inventory §3B (line 64), POST /office/save

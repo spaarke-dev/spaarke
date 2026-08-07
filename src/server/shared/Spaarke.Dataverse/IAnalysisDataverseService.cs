@@ -8,7 +8,21 @@ public interface IAnalysisDataverseService
 {
     Task<AnalysisEntity?> GetAnalysisAsync(string id, CancellationToken ct = default);
     Task<AnalysisActionEntity?> GetAnalysisActionAsync(string id, CancellationToken ct = default);
-    Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default);
+    /// <summary>
+    /// Creates an <c>sprk_analysis</c> record.
+    ///
+    /// <para><paramref name="documentId"/> anchors the analysis to a source document (the historical
+    /// behavior; also the FR-D9 "regarding = document" path). It is now OPTIONAL: pass <c>null</c> to
+    /// create a document-less analysis, VALID only when <paramref name="regarding"/> supplies a
+    /// matter/project association (FR-D9 — "Set related record"). Callers MUST supply at least one of
+    /// <paramref name="documentId"/> or <paramref name="regarding"/>; supplying neither throws
+    /// <see cref="ArgumentException"/>.</para>
+    ///
+    /// <para>When <paramref name="regarding"/> is supplied, the ADR-024 polymorphic <c>regarding</c>
+    /// field-set (entity-specific lookup + denormalized resolver fields) is written on the analysis so
+    /// it surfaces on the parent's Analyses tab.</para>
+    /// </summary>
+    Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, CancellationToken ct = default);
     Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default);
 
     /// <summary>

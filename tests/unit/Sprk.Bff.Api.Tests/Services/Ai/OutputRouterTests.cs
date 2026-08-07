@@ -591,7 +591,7 @@ public class OutputRouterTests
 
         public List<ChatSession> PersistedSessions { get; } = new();
 
-        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
         {
             PersistedSessions.Add(session);
             return Task.CompletedTask;

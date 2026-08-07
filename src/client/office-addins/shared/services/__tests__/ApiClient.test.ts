@@ -10,6 +10,7 @@ import { apiClient, ApiClientError, type ApiError, type UploadResponse } from '.
 jest.mock('../AuthService', () => ({
   authService: {
     getAccessToken: jest.fn(),
+    clearCache: jest.fn(),
   },
 }));
 
@@ -306,7 +307,7 @@ describe('ApiClient', () => {
   });
 
   describe('token acquisition', () => {
-    it('should request token with correct scopes', async () => {
+    it('should request a token with no scope argument (task 040: dead `.default` scope arg removed)', async () => {
       mockFetch.mockResolvedValueOnce({
         ok: true,
         text: jest.fn().mockResolvedValue('{}'),
@@ -314,7 +315,67 @@ describe('ApiClient', () => {
 
       await apiClient.get('/api/test');
 
-      expect(authService.getAccessToken).toHaveBeenCalledWith([`api://${mockBffApiClientId}/.default`]);
+      expect(authService.getAccessToken).toHaveBeenCalledWith();
+    });
+  });
+
+  describe('401 retry (task 040 / FR-B0)', () => {
+    it('retries exactly once on 401 and succeeds with a fresh token', async () => {
+      const mockResponse = { data: 'test' };
+
+      // First attempt: 401. Retry attempt: 200.
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 401,
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          text: jest.fn().mockResolvedValue(JSON.stringify(mockResponse)),
+        });
+
+      const result = await apiClient.get<typeof mockResponse>('/api/test');
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(authService.clearCache).toHaveBeenCalledTimes(1);
+      // getAccessToken called once for the initial attempt + once for the retry
+      expect(authService.getAccessToken).toHaveBeenCalledTimes(2);
+      expect(result).toEqual(mockResponse);
+    });
+
+    it('does not surface an unhandled error or a second auth path — a second 401 is parsed as a normal ApiClientError', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 }).mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        json: jest.fn().mockResolvedValue({
+          type: 'about:blank',
+          title: 'Unauthorized',
+          status: 401,
+        }),
+      });
+
+      await expect(apiClient.get('/api/test')).rejects.toThrow(ApiClientError);
+      // Exactly one retry — not looped indefinitely.
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries exactly once on 401 for uploadFile', async () => {
+      const mockResponse: UploadResponse = {
+        documentId: 'doc-123',
+        jobId: 'job-456',
+        status: 'pending',
+      };
+
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 }).mockResolvedValueOnce({
+        ok: true,
+        json: jest.fn().mockResolvedValue(mockResponse),
+      });
+
+      const mockFile = new File(['test content'], 'test.txt', { type: 'text/plain' });
+      const result = await apiClient.uploadFile('/api/upload', mockFile, 'test.txt');
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result).toEqual(mockResponse);
     });
   });
 });

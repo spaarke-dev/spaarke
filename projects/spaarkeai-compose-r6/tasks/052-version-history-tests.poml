@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Version-history tests — open v3 after v4 returns exact bytes (+ authorization negative)</title>
+    <phase>5 Documents version-history open UX (read-only)</phase>
+    <gate>dep:051</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING (adds/updates `tests/**`, tags include testing/seam) → FULL gate UNCONDITIONALLY per CLAUDE.md §8 override row (code-review + adr-check at Step 9.5), even though the underlying behavior is read-only.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>plan.md §5 Phase 5 assigns sonnet: well-specified seam test over the task-050 endpoint contract; no novel algorithm or architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds seam slices under the contended `tests/integration/seam/Compose/**` tree shared across Compose worktrees; exercises the task-050 endpoint → serialize after 050/051.</parallel-reason>
+    <deps>050, 051</deps>
+    <tags>testing, seam</tags>
+    <estimated-effort>S (≤1d)</estimated-effort>
+  </metadata>
+
+  <prompt>Add the version-history seam tests proving the FR-07 read-only guarantee: open a prior version (v3) after a newer version (v4) exists and assert the response is v3's EXACT bytes, through the wire against the task-050 OBO endpoint. Include the authorization negative case (a user cannot read another user's document version). ADR-038 seam shape only — no banned test shapes.</prompt>
+
+  <role>SPAARKE platform developer with .NET 8 integration-test (WebApplicationFactory seam) expertise and SPE version-fetch familiarity. Follow ADR-038 test architecture strictly.</role>
+
+  <goal>Seam slices in `tests/integration/seam/Compose/` prove: (1) list-versions returns the expected version set for an authorized user; (2) opening v3 while v4 is latest returns v3's exact bytes read-only (byte-equality assertion); (3) NEGATIVE — a user requesting another user's document version is denied (403/404), never the bytes; (4) no restore/branch mutation occurs (version state unchanged after the read). All through the WebApplicationFactory wire with no `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</goal>
+
+  <context>
+    <background>Per spec FR-07 acceptance ("a user opens a prior version e.g. v3 after v4 exists and gets the exact bytes") + Success Criterion 4 (verify by the version-list + open-prior-version endpoint test + Documents UX check). Tasks 050 (endpoint) and 051 (client) deliver the surface; this task locks the read-only exact-bytes + authorization guarantees behind seam tests. ADR-038 mandates the vertical-slice seam shape and bans mock/DI/ctor tests.</background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Compose/ (version-history seam slice)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ (task-050 OBO list + open-prior-version endpoint)</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/SpeSaveVersioningSeamTests.cs (existing SPE-versioning seam to model the fixture/assertion pattern on)</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">The OBO endpoint under test.</dependency>
+      <dependency task="051" status="pending">The client entry point (the UX half of Success Criterion 4).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Vertical-slice seam through WebApplicationFactory in `tests/integration/seam/Compose/`. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests. Assert exact bytes (byte-equality), not a loose shape.</constraint>
+    <constraint source="ADR-028">The authorization negative case exercises the OBO boundary — a different user's token cannot list/open the document's versions.</constraint>
+    <constraint source="project">Read-only assertion: after opening a prior version, version state is unchanged (no restore/branch mutation). Reuse the existing `SpeSaveVersioningSeamTests.cs` fixture pattern rather than a new harness.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Version-history seam tests</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="SPE versioning seam" location="tests/integration/seam/Compose/SpeSaveVersioningSeamTests.cs">Existing through-the-wire SPE version seam — model the fixture, version setup, and byte-assertion pattern on this.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all &lt;knowledge&gt;&lt;files&gt;. Declare RIGOR LEVEL: FULL (reason: TEST-MODIFYING override row). Confirm the task-050 endpoint contract.</step>
+    <step order="1">Read `SpeSaveVersioningSeamTests.cs` for the fixture + version-setup + byte-assertion pattern to reuse.</step>
+    <step order="2">Add a seam slice: create a document, produce versions up to v4, call the OBO list-versions endpoint, and assert the returned set includes v3 and v4 for the authorized user.</step>
+    <step order="3">Add the exact-bytes slice: open v3 via the open-prior-version endpoint while v4 is latest; assert byte-equality with the known v3 content; assert version state is unchanged after the read (read-only).</step>
+    <step order="4">Add the negative slice: a different user's OBO token requests the document's versions/bytes and is denied (403/404), never the bytes.</step>
+    <step order="5">Run/verify: the Compose seam suite is green; no banned test shapes are present.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If opening a prior version does NOT return byte-identical content (fidelity/exact-bytes fails) or the negative authorization case leaks bytes, STOP and escalate — the tests are surfacing a real FR-07 / ADR-028 defect, not a test-authoring problem; do not weaken the assertion to make it pass.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run the Compose seam suite.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/ (version-history seam slices: list, exact-bytes open, negative authorization)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given versions up to v4, when the authorized user calls list-versions through the wire, then the returned set includes v3 and v4.</criterion>
+    <criterion testable="true">Given v4 is latest, when the user opens v3, then the seam asserts v3's exact bytes (byte-equality) and that version state is unchanged after the read (read-only).</criterion>
+    <criterion testable="true">Negative: a different user's token requesting the document's versions/bytes is denied (403/404), never the bytes.</criterion>
+    <criterion testable="true">All seam slices run through WebApplicationFactory with no `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests; the Compose seam suite is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07 acceptance + Success Criterion 4; plan.md §5 Phase 5. Modify-only test task (no new production surface → no §11 justification). Reuse `SpeSaveVersioningSeamTests.cs` fixture pattern. Byte-equality assertion is load-bearing.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -52,7 +52,11 @@ import { useEmailComposeActions } from '../EmailComposeActions';
 import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding } from '../../logic/connections';
 import { launchCreate, type CreateKind } from '../../logic/actions';
 import { CollapsibleSection } from './CollapsibleSection';
-import { COMMUNICATION_ENTITY, mapRowToEmailCardItem } from './EmailWorkspace.mapping';
+import {
+  COMMUNICATION_ENTITY,
+  mapRowToEmailCardItem,
+  deriveEmailWorkspaceVisibleState,
+} from './EmailWorkspace.mapping';
 import { useEmailWorkspaceRecord } from './useEmailWorkspaceRecord';
 import type { EmailWorkspaceProps } from './EmailWorkspace.types';
 
@@ -139,6 +143,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   linkAnotherCatalog,
   initialSelectedId,
   hideList,
+  onVisibleEmailChange,
 }) => {
   const s = useStyles();
 
@@ -180,6 +185,20 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   const effectiveInitialSelectedId = initialSelectedId ?? autoFirstId;
 
   const record = useEmailWorkspaceRecord(dataService, selectedId);
+
+  // FR-C1 (task 042b, "Path 1: persisted Email carrier") — surface the compact
+  // agent-visible snapshot of the selected email to the (optional) host callback
+  // whenever the selection or its resolved record changes. Recomputed from the
+  // SAME single per-selection read above (no second Dataverse call). The SpaarkeAi
+  // `email` widget mount forwards this to its tab's persisted `widgetData`; the
+  // standalone code page omits the callback (NFR-06 — no per-mount branch here).
+  const visibleEmail = React.useMemo(
+    () => deriveEmailWorkspaceVisibleState(record.recordState, record.emlDocumentId),
+    [record.recordState, record.emlDocumentId]
+  );
+  React.useEffect(() => {
+    onVisibleEmailChange?.(visibleEmail);
+  }, [onVisibleEmailChange, visibleEmail]);
 
   // Attachment count for the collapsed "Attachments (N)" header — reported by the
   // (kept-mounted) attachments view after its per-selection load; reset on change.
@@ -408,7 +427,24 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   regardingRecordNumber={record.recordState?.regardingRecordNumber ?? null}
                   regardingRecordType={record.recordState?.regardingRecordType ?? null}
                   filedAssociations={filedAssociations}
-                  writeContext={{ webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: id }}
+                  writeContext={{
+                    webApi,
+                    hostEntity: COMMUNICATION_ENTITY,
+                    hostRecordId: id,
+                    // FR-A4 (R-1): after a human confirms, record affinity to the BFF so the AffinityRung
+                    // learns this email's signals → this record. Fire-and-forget + best-effort — the .catch
+                    // swallows failures so a learning signal never affects the confirmation (mirrors the
+                    // archive POST above, ADR-028 authenticatedFetch).
+                    recordAffinity: (targetEntityType, targetRecordId) => {
+                      void authenticatedFetch(`/communications/${id}/confirm-affinity`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ targetEntityType, targetRecordId }),
+                      }).catch(() => {
+                        /* best-effort learning signal — never surfaced to the user */
+                      });
+                    },
+                  }}
                   pickerWebApi={webApi}
                   linkAnotherCatalog={linkAnotherCatalog}
                   onAssociationsChanged={record.reload}

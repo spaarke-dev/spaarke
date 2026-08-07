@@ -208,6 +208,12 @@ export interface ConsumerChipsController {
   ) => Promise<void>;
   /** Chips are session-scoped — clear on session change. */
   resetForSession: () => void;
+  /**
+   * task 023 (FR-B4): true when the strip currently renders at least one chip. Reactive (derived from
+   * the same `consumerChips` state the slot renders), so the host can gate a "refresh suggestions"
+   * affordance on whether there is anything to refresh.
+   */
+  hasChips: boolean;
 }
 
 export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsController {
@@ -553,7 +559,13 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
       if (parsed.length > 0) {
         // R5-1: append client-only local chips (e.g. "Revise in Compose") to the delivered
         // card set so they sit in line with the post-attach cards, not as a separate button.
-        const appended = getAppendedLocalChips?.() ?? [];
+        // task 038 (FR-D11): de-duplicated by bindingId against `parsed` — a caller (e.g. a
+        // deterministic host-side seed) MAY legitimately include a chip in `parsed` that
+        // `getAppendedLocalChips` would ALSO contribute (e.g. Reanalyze); without the dedupe it
+        // would render twice.
+        const appended = (getAppendedLocalChips?.() ?? []).filter(
+          (c) => !parsed.some((p) => p.bindingId === c.bindingId)
+        );
         setConsumerChips(appended.length > 0 ? [...parsed, ...appended] : parsed);
       }
     },
@@ -564,9 +576,14 @@ export function useConsumerChips(deps: ConsumerChipsDeps): ConsumerChipsControll
     setConsumerChips([]);
   }, []);
 
+  // task 023 (FR-B4) — reactive chip-presence flag so the host can gate a "refresh suggestions"
+  // affordance on whether the strip currently shows anything (no new state; derived from the same
+  // reactive `consumerChips` the slot renders).
+  const hasChips = rankedConsumerChips.length > 0;
+
   // Stable controller identity (Step 9.5 review) — changes only with the slot.
   return React.useMemo(
-    () => ({ consumerChipsSlot, dispatching, acceptChips, dispatchBinding, resetForSession }),
-    [consumerChipsSlot, dispatching, acceptChips, dispatchBinding, resetForSession]
+    () => ({ consumerChipsSlot, dispatching, acceptChips, dispatchBinding, resetForSession, hasChips }),
+    [consumerChipsSlot, dispatching, acceptChips, dispatchBinding, resetForSession, hasChips]
   );
 }

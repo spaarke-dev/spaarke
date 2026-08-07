@@ -198,8 +198,10 @@ public class ActionSeamTests
     // ── CreateTask: parity + degraded success ─────────────────────────────────────────────────
 
     [Fact]
-    public async Task CreateTaskAsync_WithValidRequest_WritesSameTaskFieldSetAsExecutor()
+    public async Task CreateTaskAsync_WithValidRequest_WritesSameSprkEventTaskFieldSetAsExecutor()
     {
+        // Parity with the executor: a Spaarke task is a sprk_event (event type = Task), NOT the OOB `task`
+        // activity (corrected 2026-08-06). Regarding maps to sprk_event's typed lookup (sprk_matter → sprk_regardingmatter).
         var regardingId = Guid.Parse("66666666-6666-6666-6666-666666666666");
         var ownerId = Guid.Parse("77777777-7777-7777-7777-777777777777");
         var createdTaskId = Guid.Parse("55555555-5555-5555-5555-555555555555");
@@ -215,7 +217,7 @@ public class ActionSeamTests
             Description = "Please review.",
             DueDate = new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc),
             RegardingObjectId = regardingId,
-            RegardingObjectType = "sprk_document",
+            RegardingObjectType = "sprk_matter",
             OwnerId = ownerId
         };
 
@@ -224,12 +226,14 @@ public class ActionSeamTests
         result.Success.Should().BeTrue();
         result.TaskId.Should().Be(createdTaskId);
         captured.Should().NotBeNull();
-        captured!.LogicalName.Should().Be("task");
+        captured!.LogicalName.Should().Be("sprk_event");
         captured.Attributes.Keys.Should().BeEquivalentTo(new[]
         {
-            "subject", "description", "scheduledend", "regardingobjectid", "ownerid"
+            "sprk_eventname", "sprk_eventtype_ref", "sprk_description", "sprk_duedate", "sprk_regardingmatter", "ownerid"
         });
-        captured.GetAttributeValue<EntityReference>("regardingobjectid").Id.Should().Be(regardingId);
+        captured.GetAttributeValue<EntityReference>("sprk_eventtype_ref").Id.Should().Be(
+            Guid.Parse("124f5fc9-98ff-f011-8406-7c1e525abd8b"), "event type = Task");
+        captured.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(regardingId);
         captured.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(ownerId);
     }
 

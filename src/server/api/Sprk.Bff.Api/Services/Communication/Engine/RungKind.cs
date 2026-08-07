@@ -69,4 +69,32 @@ public enum RungKind
     /// name, or a name resolving to no contact, matches nothing) — bias to precision over recall.
     /// </summary>
     ContactNameMatch = 7,
+
+    /// <summary>
+    /// Rung 0 (tier) — recipient-alias (FR-A2). A per-record intake address in any recipient field
+    /// (To/Cc/<b>Bcc</b>) — e.g. <c>matter-12345@intake.example.com</c> — is a deliberate, unambiguous
+    /// routing instruction, so it is treated as an <b>explicit reference</b>-tier deterministic signal:
+    /// AUTO-FILE-ELIGIBLE (see <see cref="AssociationStatusMapper.IsAutoFileEligible"/>). A distinct
+    /// <see cref="RungKind"/> (rather than reusing <see cref="ExplicitReference"/>) so the alias signal is
+    /// isolated + independently testable and reinforces distinctly. Delivered via a targeted Exchange
+    /// mail-flow rule (NOT tenant-wide plus-addressing); Bcc-only delivery is the common pattern, so it
+    /// must associate deterministically. MVP scope = the <c>matter-{ref}@</c> scheme only (no per-tenant
+    /// address catalog — see <c>RecipientAliasRung</c>).
+    /// </summary>
+    RecipientAlias = 9,
+
+    /// <summary>
+    /// Rung (tier 3) — affinity / deterministic learning loop (FR-A4). Reads a per-tenant
+    /// <c>sprk_affinity</c> store of human-confirmation frequencies (sender/sender-domain/subject-keyword/
+    /// participant-set to record) and surfaces the highest-frequency record for an untagged message's signal
+    /// set as an explainable candidate citing the confirmation count. It is <b>SUGGEST-ONLY, never
+    /// auto-file</b>: deliberately EXCLUDED from both
+    /// <see cref="AssociationStatusMapper.IsAutoFileEligible"/> and
+    /// <c>AssociationStatusMapper.IsDeterministicWriteEligible</c> (like <see cref="RecordNameMatch"/> /
+    /// <see cref="ContactNameMatch"/>), so an affinity signal can never push a communication to Resolved —
+    /// only surface it as at-most-Suggested for the reviewer to confirm. Deterministic frequency counting
+    /// only (no ML/AI — ADR-013). The <c>sprk_affinity</c> store is an ADR-040 Path A exception: filing-history
+    /// metadata, distinct from the ADR-040 session ledger and the ADR-048 participant index.
+    /// </summary>
+    Affinity = 10,
 }

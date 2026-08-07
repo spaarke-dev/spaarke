@@ -12,6 +12,19 @@ public interface ICommunicationDataverseService
     Task<bool> ExistsCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default);
     Task<Entity?> GetCommunicationByGraphMessageIdAsync(string graphMessageId, CancellationToken ct = default);
     Task<Entity?> GetCommunicationByInternetMessageIdAsync(string internetMessageId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Race-proof create for <c>sprk_communication</c> keyed on the canonical internet-message-id (FR-C1 /
+    /// NFR-02). Attempts the create; if the task-020 UNIQUE alternate key (<c>sprk_InternetMessageIdKey</c>)
+    /// rejects it with the platform duplicate-key fault (<c>OrganizationServiceFault.ErrorCode</c>
+    /// <c>0x80060892</c>), RECONCILES to the existing canonical row (via
+    /// <see cref="GetCommunicationByInternetMessageIdAsync"/>) and returns it with <c>wasDuplicate = true</c>
+    /// instead of throwing — closing the concurrent-insert race window a check-then-insert pre-check cannot.
+    /// When <paramref name="internetMessageId"/> is null/blank the create runs unguarded (multiple null-keyed
+    /// rows are permitted — e.g. drafts / headerless capture; the alternate key excludes nulls).
+    /// </summary>
+    Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRaceProofAsync(
+        Entity communication, string? internetMessageId, CancellationToken ct = default);
     Task<Entity?> QueryContactByEmailAsync(string emailAddress, CancellationToken ct = default);
 
     /// <summary>

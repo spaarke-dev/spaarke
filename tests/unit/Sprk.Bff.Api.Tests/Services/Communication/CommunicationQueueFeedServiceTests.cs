@@ -36,6 +36,7 @@ public class CommunicationQueueFeedServiceTests
     private const int ActionProposed = 100000001;
     private const int ActionApproved = 100000002;
     private const int ActionDismissed = 100000004;
+    private const int ActionApplied = 100000005;
 
     private readonly Mock<IImpersonatedCommunicationQuery> _query = new(MockBehavior.Strict);
     private readonly Mock<ICallerSystemUserResolver> _resolver = new();
@@ -285,6 +286,60 @@ public class CommunicationQueueFeedServiceTests
         {
             QueueFeedItemKinds.AssociationException, QueueFeedItemKinds.PendingProposal,
         });
+    }
+
+    // ─────────────────────────── (e) create-task discriminator (task 034 / FR-D5) ────────────────────────
+
+    [Fact]
+    public async Task GetQueueFeedAsync_OpenCreateTaskProposal_EmitsCreateTaskItemWithTaskFields()
+    {
+        // A Job C create-task proposal is an OPEN Proposed row keyed by the __create_task__ sentinel targetfield. It
+        // must surface as Kind="create-task" with the extracted task name/description/due-date, the regarding record
+        // (sprk_targetentity/sprk_targetrecordid) carried through, and the sentinel NOT surfaced as a real field.
+        var commId = Guid.NewGuid();
+        SetupCandidates(CandidateRow(commId, "Discovery email", AssociationStatusCodes.Resolved, priority: 100000001, riConfidence: 0.6));
+
+        SetupReviewLog(ProposedRow(
+            commId, "sprk_matter", "__create_task__:abcd1234", confidence: 0.8m,
+            suggestionJson: """
+                {"kind":"create-task","subject":"Follow up on discovery","description":"Prepare and file discovery responses",
+                 "dueDate":"2026-09-01","regardingObjectType":"sprk_matter",
+                 "citation":{"source":"body","locator":"body: sentence 2","quotedText":"file discovery"},
+                 "reason":"the email asks counsel to file discovery","confidence":0.8,"requireConfirm":true}
+                """));
+
+        var result = await Sut().GetQueueFeedAsync(regarding: null, top: null, Caller(), CancellationToken.None);
+
+        var item = result.Items.Should().ContainSingle().Which;
+        item.Kind.Should().Be(QueueFeedItemKinds.CreateTask);
+        item.TaskName.Should().Be("Follow up on discovery");
+        item.TaskDescription.Should().Be("Prepare and file discovery responses");
+        item.TaskDueDate.Should().Be(new DateOnly(2026, 9, 1));
+        item.TargetEntity.Should().Be("sprk_matter", "the regarding record the task attaches to (NFR-10)");
+        item.TargetField.Should().BeNull("the __create_task__ sentinel is an internal key, never a real field");
+        item.CitationQuotedText.Should().Be("file discovery");
+        item.RequireConfirm.Should().BeTrue();
+
+        // Ranking still rides the PARENT communication's signals (D-08) — never the sentinel or the proposal itself.
+        item.TriagePriority.Should().Be(100000001);
+        item.RiConfidence.Should().Be(0.6);
+    }
+
+    [Fact]
+    public async Task GetQueueFeedAsync_ClosedCreateTaskProposal_IsExcludedAsResolved()
+    {
+        // A create-task proposal closed by a later Applied row (the create-task apply endpoint, task 034) must NOT
+        // resurface — the same open/closed walk that governs Job B proposals governs the create-task sentinel.
+        var commId = Guid.NewGuid();
+        SetupCandidates(CandidateRow(commId, "Applied create-task email", AssociationStatusCodes.Resolved, priority: 100000001, riConfidence: 0.6));
+
+        SetupReviewLog(
+            ProposedRow(commId, "sprk_matter", "__create_task__:abcd1234", confidence: 0.8m, suggestionJson: "{\"kind\":\"create-task\",\"subject\":\"x\"}", createdOn: new DateTime(2026, 8, 1, 0, 0, 0, DateTimeKind.Utc)),
+            TerminalRow(commId, "sprk_matter", "__create_task__:abcd1234", ActionApplied, createdOn: new DateTime(2026, 8, 2, 0, 0, 0, DateTimeKind.Utc)));
+
+        var result = await Sut().GetQueueFeedAsync(regarding: null, top: null, Caller(), CancellationToken.None);
+
+        result.Items.Should().BeEmpty("the create-task proposal was applied (closed) — it is no longer open");
     }
 
     // ─────────────────────────── row builders ──────────────────────────────────────────────────────────

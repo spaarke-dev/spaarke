@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Dev-visible proactive-selection trace (FR-B6)</title>
+    <phase>3 B — Proactive follow-ons</phase>
+    <gate>blocked until 022</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Adds a dev-only observability trace (no product behavior change)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small additive dev trace</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the ConversationPane proactive path (shared client spine); depends on 022</parallel-reason>
+    <deps>022</deps>
+    <tags>react, frontend, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Emit a dev-visible trace recording the context type, candidate Bindings, and selected chips for a given tab+content, inspectable in dev.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript frontend expertise; comfortable adding a dev-only observability trace that observes the grounded selection without altering product behavior.</role>
+  <goal>The trace is emitted and inspectable in dev for a tab+content.</goal>
+  <context>
+    <background>FR-B6 — the proactive selection in task 022 is opaque today. A dev-visible trace at the selection point aids debugging by recording what fed the choice (contextType, candidate Bindings, selected chips) without changing production behavior.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Dev-visible only — no production UI change.</constraint>
+    <constraint source="ADR-039">The trace observes the ONE grounded selection, it is not a second decider.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">At the proactive-selection point, emit a dev trace (contextType, candidate Bindings, selected chips).</step>
+    <step order="2">Verify it is inspectable in dev and inert in production.</step>
+    <step order="3">Build.</step>
+    <step order="4">Update TASK-INDEX ✅.</step>
+  </steps>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The trace records contextType + candidate Bindings + selected chips.</criterion>
+    <criterion testable="true">Inspectable in dev.</criterion>
+    <criterion testable="true">No production UI/behavior change.</criterion>
+  </acceptance-criteria>
+  <notes>FR-B6.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

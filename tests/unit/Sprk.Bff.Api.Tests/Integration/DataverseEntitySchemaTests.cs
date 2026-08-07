@@ -35,6 +35,9 @@ public class DataverseEntitySchemaTests
         { "FileType", new("sprk_fileextension", typeof(string)) },
         { "Status", new("statuscode", typeof(OptionSetValue)) },
 
+        // Content-dedup identity (FR-C3 / task 023 — indexed sprk_canonicalhash column)
+        { "CanonicalHash", new("sprk_canonicalhash", typeof(string)) },
+
         // AI Analysis Fields
         { "Summary", new("sprk_filesummary", typeof(string)) },
         { "TlDr", new("sprk_filetldr", typeof(string)) },

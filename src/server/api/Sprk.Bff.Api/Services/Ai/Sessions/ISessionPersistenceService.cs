@@ -77,7 +77,15 @@ public interface ISessionPersistenceService
     /// </summary>
     /// <param name="session">The session document to upsert.</param>
     /// <param name="ct">Cancellation token.</param>
-    Task PersistSessionAsync(StoredSession session, CancellationToken ct = default);
+    /// <param name="awaitCosmosWrite">
+    /// FR-D2 (task 030): when <c>true</c>, the Cosmos upsert is CONFIRMED — this method does not
+    /// return until the write completes — so the caller's "before request completes" durability
+    /// contract holds even under a Redis eviction moments later. Reserved for the FIRST message of
+    /// a session (<c>messages[0]</c>), which also seeds the History title (FR-D4). Defaults to
+    /// <c>false</c>, which preserves the original D-06 fire-and-forget contract for every other
+    /// call site — remaining turns are NOT slowed down by this change (NFR-03).
+    /// </param>
+    Task PersistSessionAsync(StoredSession session, CancellationToken ct = default, bool awaitCosmosWrite = false);
 
     /// <summary>
     /// Persists workspace tabs[] + activeTabId for a session (NFR-09 write-through).
@@ -153,6 +161,13 @@ public interface ISessionPersistenceService
 /// Lightweight projection of a session for the History list (R4-8). Never carries the message body —
 /// only what the dropdown renders (a display title + last-activity timestamp + optional entity/playbook
 /// labels). Maps 1:1 to the client's history row contract.
+///
+/// <para><b>FR-D7 (spaarkeai-assistant-enhancements-r2, DI-01)</b> adds <see cref="Preview"/>,
+/// <see cref="MessageCount"/>, and <see cref="TabSummary"/> so the History row can render a
+/// last-message preview + message count + tab summary ("Email · Compose"), completing the
+/// client-side rendering `HistoryOverlay.tsx` shipped forward-compatible in task 037. All three
+/// are bounded/optional — a session that predates these fields (or has none of the underlying
+/// content) simply omits them; the client already renders that state gracefully.</para>
 /// </summary>
 public record RecentSessionInfo(
     string SessionId,
@@ -160,4 +175,7 @@ public record RecentSessionInfo(
     string? EntityType,
     string? EntityName,
     string? PlaybookName,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? Preview,
+    int? MessageCount,
+    string? TabSummary);

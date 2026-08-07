@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>'Reanalyze' follow-on chip on a document context (FR-D11)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 021,022</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend chip wiring reusing the reactive surface + Reanalyze binding</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive chip reusing the 022 reactive surface + the 021 Reanalyze binding</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (shared client spine); depends on 021+022</parallel-reason>
+    <deps>021,022</deps>
+    <tags>react, frontend, ai</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a "Reanalyze" follow-on chip on a `document` context that re-runs the analysis on the loaded document (reuses the document's playbook).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 frontend expertise; disciplined about reusing the reactive chip surface and the existing Reanalyze Binding without adding a dispatch endpoint.</role>
+  <goal>The chip appears for a loaded document and re-runs analysis on demand.</goal>
+  <context>
+    <background>FR-D11 — a document context has no "Reanalyze" affordance today. Reuse the reactive chip surface from task 022 (useConsumerChips) + the Reanalyze Binding from task 021; on click, re-run the analysis via the existing dispatch/binding using the loaded document's playbook.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx (reuse)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Reuse the reactive chip surface (022) + the Reanalyze Binding (021); MUST NOT add a new dispatch endpoint.</constraint>
+    <constraint source="ADR-039">Reanalyze is a catalog Binding, not a new decider.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Surface the Reanalyze chip for a document-context tab via the reactive surface.</step>
+    <step order="2">On click, re-run the analysis using the loaded document's playbook (via the existing dispatch/binding).</step>
+    <step order="3">Build.</step>
+    <step order="4">Update TASK-INDEX ✅.</step>
+  </steps>
+  <ui-tests>
+    <test name="Reanalyze">
+      <steps>With a loaded document, verify the Reanalyze chip appears and re-runs analysis on click. Include an ADR-021 dark-mode check.</steps>
+      <expected>The Reanalyze chip appears for a document context and re-runs analysis on click; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The Reanalyze chip appears for a loaded document (document context).</criterion>
+    <criterion testable="true">Clicking it re-runs analysis using the document's playbook.</criterion>
+    <criterion testable="true">Reuses the reactive surface + Reanalyze binding.</criterion>
+    <criterion testable="true">No new endpoint.</criterion>
+  </acceptance-criteria>
+  <notes>FR-D11. COMPLETED 2026-08-06.
+  Mechanism (approach b, deterministic push — see reasoning): the reactive proactive-suggest turn
+  (022) is a probabilistic LLM selection over ≤3 chips and would not reliably satisfy "the chip
+  appears for a loaded document"; instead the Reanalyze Binding id is resolved via the SAME
+  capability-discovery seam every other bindingId in ConversationPane uses (consumerType
+  `chat-summarize` + consumerCode `reanalyze`, disambiguated from the pre-existing Chat Summarize
+  Binding), then deterministically pushed onto the reactive `useConsumerChips` surface: (1)
+  immediately on a document-context tab focus if the bindingId is already resolved; (2) a catch-up
+  effect once the bindingId resolves later; (3) persisted across every subsequent chip carrier via
+  `getAppendedLocalChips`. Click routes through the existing `chips.acceptChips`/`dispatchBinding`
+  → `dispatchConsumer` Click path — no new endpoint, no new decider (ADR-039 clean).
+  `useConsumerChips.tsx` was edited additively: `acceptChips` now de-dupes `getAppendedLocalChips`
+  output against `parsed` by bindingId (prevents double-render when a caller seeds the same chip
+  both directly and via the append seam) — zero behavior change for any pre-existing caller.
+  Step 9.5 review caught and fixed a real bug pre-merge: the catch-up effect originally depended on
+  the whole (unstable) `chips` object and neither seed path guarded against an in-flight dispatch,
+  which could have re-populated the strip mid-dispatch. Fixed with stable deps + dispatching/hasChips
+  ref guards; locked in by a new regression test.
+  Tests: ConversationPane.reanalyze-chip.e2e.test.tsx (5 tests — appears deterministically even
+  with empty proactive-suggest result; absent for non-document context; click dispatches via
+  dispatchConsumer; dark mode; no mid-dispatch re-seed). Full conversation suite: 626/626 green.
+  typecheck: Surface-owned 0. Step 9.5 code-review + adr-check: PASS (no violations; ADR-039/021/028
+  compliant). No new endpoint/decider added.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

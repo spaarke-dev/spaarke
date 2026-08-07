@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Round-trip fidelity harness — round-trip the corpus; fail on hard-fail/regression</title>
+    <phase>6 Round-trip fidelity harness (CI release gate)</phase>
+    <gate>dep:027,004</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING (adds `tests/**` harness, tags include testing) → FULL gate UNCONDITIONALLY per CLAUDE.md §8 override row; also builds the release-gating fidelity harness (high blast radius on the CI signal). code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>plan.md §5 Phase 6 assigns sonnet: the round-trip harness reuses the existing corpus + `DocumentFormat.OpenXml` byte-diff machinery and the render-on-save path; well-specified, no novel algorithm.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Exercises the shared render-on-save path (`Services/Compose/**`) and the contended `tests/fixtures/compose-corpus/**` + `tests/integration/**` trees shared across Compose worktrees; must serialize behind Phase 1–2 landing.</parallel-reason>
+    <deps>027, 004</deps>
+    <tags>testing, ci</tags>
+    <estimated-effort>M (2-4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Build a round-trip fidelity harness that loads each document in `tests/fixtures/compose-corpus/` (including the NDA fixture seeded by task 004), runs it through the render-on-save round-trip, and FAILS on any hard-fail (e.g. a 422) or fidelity regression while allowing hard-tier constructs to WARN (accept-flatten), never hard-fail. This moves divergence discovery from UAT to CI (FR-08). Task 061 wires it into CI.</prompt>
+
+  <role>SPAARKE platform developer with .NET 8 integration-test + `DocumentFormat.OpenXml` (3.5.1) round-trip/byte-diff expertise and Compose render-on-save familiarity. Follow ADR-038 test architecture strictly.</role>
+
+  <goal>A runnable fidelity harness (invocable locally and from CI) round-trips every corpus document (load → edit → render-on-save → reopen), asserts near-term-tier fidelity per feature, treats hard-tier constructs (text boxes / drawings / fields / content controls) as WARN-not-fail (accept-flatten), and returns a non-zero/failed result on any hard-fail (422) or fidelity regression. The NDA fixture passes by construction under render-on-save. The harness emits a machine-readable per-document/per-feature result CI can gate on.</goal>
+
+  <context>
+    <background>Per spec FR-08 + Success Criterion 5 + the ADR-049 amendment (representative-corpus round-trip is a release gate): every Compose save failure R3→R5 was discovered reactively in UAT and patched one divergence at a time; the NDA hard-failed with a 422. R6's render-on-save eliminates the anchor bug class by construction, and this harness is the forcing function that keeps it eliminated — it round-trips the corpus and fails the build on a hard-fail/regression. Seeded with `AppligentNDA_Signed.docx` (task 004 moved it into `tests/fixtures/compose-corpus/` as an LFS fixture with a manifest coverage row for text-boxes / `mc:AlternateContent` / duplicate paraIds). Depends on Phases 1–2 (render-on-save core + fidelity widening) being in place.</background>
+    <relevant-files>
+      <file role="new">tests/integration/ (fidelity harness — round-trip driver over the corpus)</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/ (corpus incl. the NDA fixture) + corpus-manifest.md (feature-coverage rows)</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ (existing seam/byte-diff harness to model the round-trip driver on)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (render-from-model — the save path the harness exercises)</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="027" status="pending">Phase-2 fidelity seam tests across the corpus (per-feature round-trip; hard-tier warns-not-fails) — the per-feature classification this harness aggregates into a gate.</dependency>
+      <dependency task="004" status="pending">The NDA fixture moved into `tests/fixtures/compose-corpus/` (LFS) + manifest coverage row.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Harness is an integration/seam-shaped round-trip over real fixtures — NO `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests. Per ADR-038 coverage is observation, but THIS harness is an explicit release GATE (FR-08 / ADR-049 amendment point 3), so it MUST fail on hard-fail/regression.</constraint>
+    <constraint source="ADR-049">Honor the Path-B amendment: the round-trip goes through render-on-save (no surgical byte-patch on the save path); hard-tier constructs degrade gracefully (accept-flatten + warning), MUST NOT 422. Version history is the safety net — the harness asserts the save succeeds, not byte-identity of hard-tier subtrees.</constraint>
+    <constraint source="project">Hard-tier = WARN, not FAIL: text boxes / drawings / fields / content controls flatten with a surfaced warning; only a hard-fail (422 / unhandled error) or a near-term-tier fidelity regression fails the harness. Reuse the existing corpus + byte-diff machinery (§11 reuse) — no new corpus loader.</constraint>
+    <constraint source="project">Emit a machine-readable result (per-document pass/warn/fail) that task 061 can consume as a CI gate. Git-LFS: the harness reads the NDA fixture via LFS — ensure LFS checkout in the run environment (coordinate with task 061).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Round-trip fidelity harness</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r6/plan.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>tests/fixtures/compose-corpus/corpus-manifest.md</file>
+    </files>
+    <patterns>
+      <pattern name="Corpus + byte-diff harness" location="tests/integration/seam/Compose/">Existing round-trip/byte-diff seam machinery + corpus fixture locator to reuse for the round-trip driver.</pattern>
+      <pattern name="Render-on-save path" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument — the render-from-model save path the harness round-trips through.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all &lt;knowledge&gt;&lt;files&gt;. Declare RIGOR LEVEL: FULL (reason: TEST-MODIFYING + release-gate harness). Confirm Phase 1–2 render-on-save is in place and task 004's NDA fixture is present under LFS.</step>
+    <step order="1">Read the existing corpus locator + byte-diff seam machinery and the `corpus-manifest.md` coverage rows. Reuse the loader — do not build a new corpus reader.</step>
+    <step order="2">Build the round-trip driver: for each corpus document, load → apply a representative edit → render-on-save → reopen; classify each near-term-tier feature (paragraphs/headings, numbering, bold/italic/underline, tables, headers/footers, page breaks, hyperlinks, comments, tracked-changes) as pass/regress, and each hard-tier construct as warn (accept-flatten).</step>
+    <step order="3">Gate logic: the harness FAILS (non-zero) on any hard-fail (422 / unhandled) or near-term-tier fidelity regression; hard-tier warnings do NOT fail. The NDA fixture must pass by construction.</step>
+    <step order="4">Emit a machine-readable per-document/per-feature result (pass/warn/fail) for task 061's CI gate.</step>
+    <step order="5">Run/verify: the harness runs green on the current corpus (NDA passes; hard-tier warns), and RED when a regression is injected (sanity-check the gate actually fails).</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the NDA fixture does NOT pass by construction under render-on-save (i.e. it still hard-fails/422 in the round-trip), STOP and escalate — that means Phase 1's pivot did not actually eliminate the anchor bug class, which is a spec-level failure (Success Criterion 1), not a harness-tuning problem.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run the round-trip harness over the corpus; inject a regression to prove the gate goes red.</tool>
+    <tool name="terminal">Verify Git-LFS checkout of the NDA fixture in the run environment.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/ (fidelity round-trip harness + machine-readable result)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the corpus (incl. the NDA fixture), when the harness round-trips each document through render-on-save, then every near-term-tier feature passes and the NDA passes by construction (no 422).</criterion>
+    <criterion testable="true">Given a hard-tier construct (text box/drawing/field/content control), when it round-trips, then it flattens with a surfaced WARNING and does NOT fail the harness.</criterion>
+    <criterion testable="true">Given an injected fidelity regression or a hard-fail (422), when the harness runs, then it returns a failed/non-zero result (the gate goes red).</criterion>
+    <criterion testable="true">The harness emits a machine-readable per-document/per-feature result consumable by CI (task 061); no `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-08 + Success Criterion 5 + ADR-049 amendment point 3 (corpus round-trip is a release gate); plan.md §5 Phase 6. Modify/extend test surface (reuses corpus + byte-diff machinery → no new-component justification). Seeded with the NDA (task 004). Feeds task 061 (CI wiring).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

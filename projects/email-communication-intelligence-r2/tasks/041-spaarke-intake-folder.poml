@@ -3,8 +3,8 @@
   <metadata>
     <title>Real Spaarke intake folder — shared mailbox+folder AND add-in drag target feed the full pipeline, deduped (FR-B1)</title>
     <phase>4 Pillar B — Unified filing surfaces</phase>
-    <gate>startable</gate>
-    <status>not-started</status>
+    <gate>re-scoped 2026-08-05 (Option A) — mechanism-1 = existing config (documented); mechanism-2 folded into task 043</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF capture/subscription code (`Services/Communication/**`, .cs) that governs the full intelligence pipeline; tags include bff-api + communication. FULL per task-create Step 3.5.5 → code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -109,7 +109,13 @@
     <criterion testable="true">All unit tests pass; build is green. TASK-INDEX.md shows this task ✅ and deviations recorded under notes/.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec refs: FR-B1, Success Criterion 3 (drag-to-file and mailbox-capture identical output), Owner Clarification "Intake mechanism = Both". `/conflict-check` before the PR (contended Services/Communication path). Completion summary appended here when done.</notes>
+  <notes>Spec refs: FR-B1, Success Criterion 3 (drag-to-file and mailbox-capture identical output), Owner Clarification "Intake mechanism = Both". `/conflict-check` before the PR (contended Services/Communication path).
+
+RE-SCOPED 2026-08-05 (operator Option A) per the §11 reuse finding (notes/041-intake-folder-scope-finding.md). Investigation (no code) showed:
+- **Mechanism (1)** shared "Spaarke" intake folder → full pipeline **already works** via the existing receive-enabled `sprk_communicationaccount` + `sprk_monitorfolder` model (GraphSubscriptionManager → IncomingCommunicationProcessor). Delivery = operator config, not code. The prescribed ADR-018 IOptionsMonitor "intake config" would DUPLICATE that model (§11). **Documented** in docs/guides/COMMUNICATION-ADMIN-GUIDE.md → "Shared 'Spaarke' intake folder (FR-B1)".
+- **Mechanism (2)** add-in drag target → identical engine output (`/api/office/save` creates a `sprk_document`, no Association Engine) = the unification scope of **task 043** (deps 021/024). **Moved to 043** rather than duplicated here.
+
+Outcome: mechanism-1 satisfied by existing config (documented); mechanism-2 owned by task 043. No new code written for 041.
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

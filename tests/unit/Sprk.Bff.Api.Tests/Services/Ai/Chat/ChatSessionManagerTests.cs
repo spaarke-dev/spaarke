@@ -645,7 +645,7 @@ public class ChatSessionManagerTests
 
         // Cosmos persistence throws (e.g., transient network error)
         _persistenceMock
-            .Setup(p => p.PersistSessionAsync(It.IsAny<StoredSession>(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.PersistSessionAsync(It.IsAny<StoredSession>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
             .ThrowsAsync(new InvalidOperationException("Cosmos DB unavailable"));
 
         // Act — must not throw despite Cosmos failure
@@ -783,6 +783,204 @@ public class ChatSessionManagerTests
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
             It.IsAny<ChatSession>(), It.IsAny<TimeSpan>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
+    }
+
+    // =========================================================================
+    // FR-D10 (task 033) — per-item Cosmos retention override on filing.
+    //
+    // A FILED session (promoted to an Analysis — HostContext.EntityType ==
+    // "sprk_analysisoutput") must be retained INDEFINITELY; an UNFILED session keeps the
+    // container's 90-day default. The retention decision is DERIVED from live filed-state on
+    // every map-to-StoredSession, so every write-through re-asserts it (a later turn's upsert
+    // can never silently reset a filed doc to the 90-day default). These tests capture the
+    // StoredSession handed to the Cosmos warm-store write and assert the per-item ttl.
+    //
+    // What breaks if these are deleted: a filed analysis's transcript+tabs+redline would
+    // silently expire at 90 days (the FR-D10 bug), or an unfiled session would be pinned
+    // permanent (unbounded Cosmos growth).
+    // =========================================================================
+
+    [Fact]
+    public async Task UpdateSessionCacheAsync_UnfiledSession_PersistsWithNullTtl_RidesContainerDefault()
+    {
+        // Arrange — a loose (unfiled) session: no Analysis HostContext.
+        var session = CreateTestSession("session-unfiled-ttl");
+        SetupCacheSetSuccess();
+        var captured = CapturePersistedSession();
+
+        // Act
+        await _sutWithCosmos.UpdateSessionCacheAsync(session);
+
+        // Assert — no per-item ttl → the doc rides the container 90-day default (unchanged behavior).
+        captured.Value.Should().NotBeNull();
+        captured.Value!.Ttl.Should().BeNull(
+            "an unfiled session must keep the container-level 90-day retention, not opt out of expiry");
+    }
+
+    [Fact]
+    public async Task UpdateSessionCacheAsync_FiledSession_LaterTurn_ReassertsNeverExpireTtl()
+    {
+        // Arrange — an ALREADY-FILED session (promoted to an Analysis) receives a later write-through.
+        // This is the re-assert guard: a subsequent turn's upsert must keep ttl = -1, never reset it.
+        var filed = CreateTestSession("session-filed-ttl") with
+        {
+            HostContext = new ChatHostContext(
+                EntityType: "sprk_analysisoutput",
+                EntityId: Guid.NewGuid().ToString(),
+                EntityName: "Filed Analysis")
+        };
+        SetupCacheSetSuccess();
+        var captured = CapturePersistedSession();
+
+        // Act — a later write-through on the filed session.
+        await _sutWithCosmos.UpdateSessionCacheAsync(filed);
+
+        // Assert — ttl = -1 (the never-expire sentinel) → Cosmos never expires this doc (filed
+        // analyses retained indefinitely).
+        captured.Value.Should().NotBeNull();
+        captured.Value!.Ttl.Should().Be(StoredSession.NeverExpireTtl);
+    }
+
+    [Fact]
+    public async Task GetSessionAsync_FiledSession_RestoredFromCosmos_NextTurnUpsert_KeepsNeverExpireTtl()
+    {
+        // The durability regression (the exact FR-D10 failure this feature prevents): a FILED session's
+        // Redis entry evicts (24h sliding TTL) while the Cosmos doc persists with ttl = -1. On reopen
+        // the session is restored from the Cosmos WARM tier; the next message turn re-derives ttl. If
+        // filed-state (HostContext) did NOT survive the warm restore, re-derivation would yield null and
+        // silently revert the doc to the 90-day default — the filed analysis would then expire. This
+        // test drives Redis-miss → Cosmos-hit → next-turn upsert and asserts ttl stays -1.
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ChatSession?)null);
+
+        var filedStored = new StoredSession
+        {
+            Id = "session-filed-reload",
+            SessionId = "session-filed-reload",
+            TenantId = TenantId,
+            PlaybookId = PlaybookId,
+            Messages = [],
+            WidgetStates = [],
+            CreatedAt = DateTimeOffset.UtcNow.AddDays(-40),
+            LastActivity = DateTimeOffset.UtcNow.AddDays(-2), // past the 24h sliding TTL — Redis evicted
+            // The filed Cosmos doc: never-expire + filed HostContext (both persisted by the forward mapper).
+            Ttl = StoredSession.NeverExpireTtl,
+            HostContext = new ChatHostContext(
+                EntityType: "sprk_analysisoutput",
+                EntityId: Guid.NewGuid().ToString(),
+                EntityName: "Filed Analysis"),
+        };
+        _persistenceMock
+            .Setup(p => p.LoadSessionAsync(TenantId, "session-filed-reload", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(filedStored);
+        SetupCacheSetSuccess();
+        var captured = CapturePersistedSession();
+
+        // Act 1 — reopen: restore from the Cosmos warm tier.
+        var restored = await _sutWithCosmos.GetSessionAsync(TenantId, "session-filed-reload");
+
+        // Assert 1 — filed-state SURVIVED the warm restore (the fix; without it HostContext would be null).
+        restored.Should().NotBeNull();
+        restored!.HostContext.Should().NotBeNull("filed-state must survive a Cosmos warm-tier reload");
+        restored.HostContext!.EntityType.Should().Be("sprk_analysisoutput");
+
+        // Act 2 — the next message turn writes the session back through the warm tier.
+        await _sutWithCosmos.UpdateSessionCacheAsync(restored);
+
+        // Assert 2 — the re-derived ttl is STILL -1: the filed doc is never reverted to the 90-day default.
+        captured.Value.Should().NotBeNull();
+        captured.Value!.Ttl.Should().Be(StoredSession.NeverExpireTtl,
+            "a post-reload turn on a filed session must re-assert never-expire, not revert to 90 days");
+    }
+
+    [Fact]
+    public void StoredSession_FiledHostContextAndTtl_SurviveSystemTextJsonRoundTrip()
+    {
+        // Proves the Redis (System.Text.Json) serialization path carries both new fields faithfully:
+        // a filed doc's HostContext.EntityType and ttl = -1 survive serialize → deserialize. (The Cosmos
+        // Newtonsoft/CamelCase path maps Ttl → "ttl" and round-trips records the same way the existing
+        // ActiveDocumentIdentity/AnchoredAnnotation domain records already do.)
+        var original = new StoredSession
+        {
+            Id = "s1",
+            SessionId = "s1",
+            TenantId = TenantId,
+            Ttl = StoredSession.NeverExpireTtl,
+            HostContext = new ChatHostContext(
+                EntityType: "sprk_analysisoutput",
+                EntityId: "a1",
+                EntityName: "Filed Analysis"),
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(original);
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<StoredSession>(json);
+
+        roundTripped.Should().NotBeNull();
+        roundTripped!.Ttl.Should().Be(StoredSession.NeverExpireTtl);
+        roundTripped.HostContext.Should().NotBeNull();
+        roundTripped.HostContext!.EntityType.Should().Be("sprk_analysisoutput");
+
+        // An UNFILED doc omits ttl on the STJ write path (JsonIgnore WhenWritingNull) and round-trips to null.
+        var unfiled = new StoredSession { Id = "s2", SessionId = "s2", TenantId = TenantId };
+        var unfiledJson = System.Text.Json.JsonSerializer.Serialize(unfiled);
+        unfiledJson.Should().NotContain("\"ttl\"", "an unfiled doc must not write a ttl property (rides the container default)");
+        System.Text.Json.JsonSerializer.Deserialize<StoredSession>(unfiledJson)!.Ttl.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task PromoteSessionToAnalysisAsync_PersistsFiledDoc_WithNeverExpireTtl()
+    {
+        // Arrange — a loose session cached (Redis hit); promotion files it to an Analysis.
+        var looseSession = CreateTestSession("session-promote-ttl");
+        var analysisId = Guid.NewGuid();
+
+        _cacheMock
+            .Setup(c => c.GetAsync<ChatSession>(
+                TenantId, CacheResource, "session-promote-ttl", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(looseSession);
+        _cacheMock
+            .Setup(c => c.RefreshAsync(
+                TenantId, CacheResource, "session-promote-ttl", CacheVersion,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        SetupCacheSetSuccess();
+        _repoMock
+            .Setup(r => r.BindSessionToAnalysisAsync(TenantId, "session-promote-ttl", analysisId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var captured = CapturePersistedSession();
+
+        // Act
+        await _sutWithCosmos.PromoteSessionToAnalysisAsync(TenantId, "session-promote-ttl", analysisId, "My Analysis");
+
+        // Assert — filing extends retention indefinitely on the persisted Cosmos doc (FR-D10).
+        captured.Value.Should().NotBeNull();
+        captured.Value!.Ttl.Should().Be(StoredSession.NeverExpireTtl,
+            "promoting a session to an Analysis files it and must pin its Cosmos doc to never-expire");
+    }
+
+    /// <summary>
+    /// Captures the <see cref="StoredSession"/> handed to the Cosmos warm-store write
+    /// (<see cref="ISessionPersistenceService.PersistSessionAsync"/>). Returns a holder whose
+    /// <c>Value</c> is populated once the write-through fires. Boxed in a single-element holder so the
+    /// closure capture is unambiguous.
+    /// </summary>
+    private StoredSessionHolder CapturePersistedSession()
+    {
+        var holder = new StoredSessionHolder();
+        _persistenceMock
+            .Setup(p => p.PersistSessionAsync(It.IsAny<StoredSession>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Callback<StoredSession, CancellationToken, bool>((s, _, __) => holder.Value = s)
+            .Returns(Task.CompletedTask);
+        return holder;
+    }
+
+    private sealed class StoredSessionHolder
+    {
+        public StoredSession? Value { get; set; }
     }
 
     private static ChatSession CreateTestSession(string sessionId)

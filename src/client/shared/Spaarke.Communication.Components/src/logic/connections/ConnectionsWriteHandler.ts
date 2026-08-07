@@ -56,6 +56,17 @@ export interface IResolverWriteContext {
   hostEntity: string;
   /** Host record GUID. Empty / undefined when the form is creating a new record. */
   hostRecordId?: string;
+  /**
+   * FR-A4 affinity learning (email-communication-intelligence-r2, R-1). Optional host-injected
+   * fire-and-forget hook, called AFTER a human successfully confirms an association (never on the
+   * clear/unlink paths). The host wires it to the BFF `POST /api/communications/{id}/confirm-affinity`
+   * so the deterministic AffinityRung learns "sender/participants/subject-of THIS email → this record"
+   * for future untagged messages. Host-agnostic (ADR-012): the regarding write stays client-side
+   * `Xrm.WebApi` (ADR-024) and this is a separate, additive learning signal. Best-effort: the impl must
+   * swallow its own errors — it MUST NOT block or fail the confirmation. Undefined → affinity is simply
+   * not recorded (unchanged behavior).
+   */
+  recordAffinity?: (targetEntityType: string, targetRecordId: string) => void;
 }
 
 export interface IResolverWriteResult {
