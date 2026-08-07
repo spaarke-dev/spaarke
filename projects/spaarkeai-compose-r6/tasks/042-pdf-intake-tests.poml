@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>PDF intake tests + lossiness-expectation UX</title>
+    <phase>4 PDF intake</phase>
+    <gate>blocked until 041</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Plan.md §5 Phase 4 declares STANDARD. However this task modifies `tests/**` with `testing`/`seam` tags, so the TEST-MODIFYING override (root CLAUDE.md §8) applies UNCONDITIONALLY — Step 9.5 code-review + adr-check run regardless of the declared STANDARD level. Author the task at STANDARD per plan; the gates still fire via the override.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified end-to-end seam test over a finished intake (040) + client wiring (041): PDF NDA opens → edit → save-as-docx-version, plus asserting the lossiness-expectation UX. No architectural judgment. Sonnet per plan.md §5 Phase 4.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a seam test exercising the PDF intake path (`Services/Ai/DocumentIntelligenceService.cs` → canonical model) + Compose client wiring — the `Services/Ai/`/Compose surfaces contested by `spaarke-ai-architecture-redesign-r2` (sole owner of `Services/Ai/`), `spaarkeai-compose-r5`/`r4.5`/`r1/r2/r3`, `agreements-r1`/`analysis-hub-r1`. Sequential after 041; `/conflict-check` before the PR.</parallel-reason>
+    <deps>041</deps>
+    <tags>testing,seam</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Write the PDF-intake seam test that proves the END-TO-END flow: a PDF NDA OPENS in Compose (via the 040 PDF →
+    canonical model intake), is EDITED, and SAVES as a docx version through render-on-save (no 422, new SPE version) —
+    Success Criterion 2. Also assert the lossiness-expectation UX (honest fixed-layout / lossier-than-docx / version-
+    history-is-the-safety-net message) is present. Use an ADR-038 seam / KEEP-path vertical slice over the REAL intake
+    path — NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration test, NO ctor-null test.
+  </prompt>
+
+  <role>SPAARKE platform developer writing an end-to-end integration/seam test spanning PDF intake (040) + client wiring (041). Expert in ADR-038's KEEP-path seam model (real components, no `Mock&lt;...&gt;`, no DI/ctor tests) and in asserting a render-on-save docx-version outcome. Follow ADRs strictly.</role>
+
+  <goal>
+    An end-to-end seam test at the `tests/integration/seam/Compose/**` KEEP path: a PDF NDA fixture projects into the
+    canonical model (040), opens/edits through the client path (041), and saves as a docx version via render-on-save
+    (no 422, new version) — plus an assertion that the honest-lossiness UX message is surfaced. Fails loudly if intake
+    hard-fails, if save does not produce a docx version, or if the lossiness message is absent.
+  </goal>
+
+  <context>
+    <background>
+      Success Criterion 2: "A PDF NDA opens in Compose, is edited, and saves as a docx version — verify by an end-to-end
+      run on a PDF NDA." Task 040 built the intake, 041 wired the client. This task is the standing regression net for
+      the full PDF round-trip and the honest-lossiness UX. Because it exercises the real intake path with no mocks, it is
+      an ADR-038 seam vertical slice. Use a PDF NDA fixture (the corpus NDA or a PDF rendition) so the test mirrors the
+      real worst-offender.
+    </background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Compose/ — the end-to-end PDF-intake seam test (PDF NDA opens → edit → save-as-docx-version; lossiness UX asserted).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs — the 040 PDF → canonical model intake under test (real component, no mocks).</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — the 041 open→edit→save-as-docx + lossiness UX under test.</file>
+      <file role="reference">tests/fixtures/compose-corpus/ — the NDA fixture (or a PDF rendition) to drive the end-to-end test.</file>
+      <file role="adr">docs/adr/ADR-038-testing-strategy.md — seam / KEEP-path vertical slice; banned mock/DI/ctor tests.</file>
+      <file role="reference">projects/spaarkeai-compose-r6/spec.md — FR-06, Success Criterion 2, honest-lossiness UX.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">Client open→edit→save-as-docx wiring + lossiness UX — the flow this end-to-end test asserts against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / Success Criterion 2">The test MUST prove the end-to-end PDF NDA flow: opens (via 040 intake) → edited → saves as a docx version via render-on-save (no 422, new SPE version). Scope: use a PDF NDA fixture; the intake is 040's, the save is the R6 render-on-save path.</constraint>
+    <constraint source="spec / honest-lossiness">The test MUST assert the honest-lossiness UX message is surfaced on PDF open (fixed-layout / lossier than docx / version history is the safety net). Scope: presence + honesty (no "identical to source" claim).</constraint>
+    <constraint source="ADR-038">The test is a seam / KEEP-path vertical slice over the REAL intake path. Scope: NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration test, NO ctor-null test — drive the actual components end-to-end at `tests/integration/seam/Compose/**`.</constraint>
+    <constraint source="ADR-007 / ADR-013">The test exercises the pure intake + Compose path (`byte[]`/OOXML in, projection out; `PublicContracts/` seams). Scope: no `Microsoft.Graph`, no AI-internal type, no `Services/Ai/` fork in the test path.</constraint>
+    <constraint source="project / BFF Hygiene §10">No runtime package added. Scope: `dotnet publish -c Release` unaffected — report size + delta vs ~49.63 MB baseline (expect ~0); `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>End-to-end PDF intake round-trip (open→edit→save-as-docx-version); honest-lossiness UX assertion; ADR-038 seam / KEEP-path vertical slice</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="End-to-end PDF round-trip" location="src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs (040) + ComposeWorkspace.tsx (041)">
+        Drive a PDF NDA fixture through the real 040 intake → canonical model → 041 open/edit → render-on-save; assert a docx version is produced (no 422) and the lossiness message is surfaced. No mocks — real components end-to-end.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor declaration: 🔒 RIGOR LEVEL: STANDARD (plan.md §5) / 📋 REASON: test-modifying `tests/**` → TEST-MODIFYING override (root §8) makes Step 9.5 gates UNCONDITIONAL / 📖 PROTOCOL STEPS. Load Success Criterion 2, FR-06, ADR-038.</step>
+    <step order="1" name="RE-GREP the seam path + fixture">Confirm the established `tests/integration/seam/Compose/**` path and the PDF NDA fixture (or a PDF rendition) to drive the end-to-end test.</step>
+    <step order="2" name="Write the end-to-end seam test">Drive the PDF NDA through the real 040 intake → 041 open/edit → render-on-save; assert a docx version is produced (no 422) and the honest-lossiness message is surfaced. No banned mock/DI/ctor tests.</step>
+    <step order="3" name="Build + hygiene">`dotnet test` (+ client test if applicable) green; `dotnet publish -c Release` size + delta (0). `/conflict-check` before the PR.</step>
+    <step order="4" name="Close out">Update `projects/spaarkeai-compose-r6/tasks/TASK-INDEX.md`: set task 042 to ✅. Record any deviation in `projects/spaarkeai-compose-r6/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the PDF NDA intake hard-fails (422), if save does not produce a docx version, or if the lossiness message is absent — STOP. Do NOT weaken the assertions to make the test pass; surface which stage failed (intake / save / UX) so 040 or 041 is fixed. A green test that hides a hard-fail or a false "identical to source" claim would falsely satisfy Success Criterion 2.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run the seam test suite; `dotnet publish -c Release` for the size check.</tool>
+    <tool name="npm">Run the Compose client test if the end-to-end assertion spans the client.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/ — end-to-end PDF-intake seam test (PDF NDA opens → edit → save-as-docx-version; lossiness UX asserted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a PDF NDA fixture, when driven through the real 040 intake → 041 open/edit → render-on-save, then a docx version is produced with no 422 and a new SPE version.</criterion>
+    <criterion testable="true">The test asserts the honest-lossiness UX message is surfaced on PDF open (fixed-layout / lossier than docx / version history is the safety net) with no "identical to source" claim.</criterion>
+    <criterion testable="true">The test is an ADR-038 seam / KEEP-path slice over the real intake path — no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration test, no ctor-null test.</criterion>
+    <criterion testable="true">Negative: if intake hard-fails, save yields no docx version, or the lossiness message is absent, the test FAILS loudly (and the escalation fires) — the assertions are not weakened.</criterion>
+    <criterion testable="true">`dotnet test` seam suite green; publish size ~0 MB delta vs ~49.63 MB baseline; `/conflict-check` clean.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 042 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec Success Criterion 2; FR-06 honest-lossiness. Closes the Phase 4 slice: the standing regression net for the full
+    PDF round-trip. Declared STANDARD per plan.md, but the TEST-MODIFYING override (root §8) makes Step 9.5 gates
+    unconditional. TASK-INDEX.md + current-task.md are owned by the main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Generalize ComposeDocumentRenderer.SynthesizeDocument for imported/canonical model input</title>
+    <phase>1 Render-on-save core</phase>
+    <gate>blocked — requires 001 (ADR-049 Path-B amendment, committed on branch) + 020 (canonical model hub + docx→model projection in place). RE-SEQUENCED 2026-08-05: 011 pairs with 020 (renderer generalization for the widened model) and PRECEDES 010; was gated on 010 — inversion fixed. Run /conflict-check before the BFF PR.</gate>
+    <status>completed</status>
+    <completion-note>COMPLETED 2026-08-05 (commit e24ceefbc + Step-9.5 fix commit). Directional interpretation: with
+      task 020 done, SynthesizeDocument already accepts the canonical model — the real renderer gap was the CARRIER
+      render for imported docs. Delivered ComposeDocumentRenderer.RenderIntoCarrier(carrier, model, author):
+      replace-body-preserve-parts (generalizes AppendSection; third authoring mode), collision-safe numbering merge
+      (NumberingPlan firstNumId above carrier max + MergeNumberingDefinitions remapped abstracts; numIdMacAtCleanup
+      order kept), carrier styles win (catalog authored only when absent, WITHOUT heading numPr in carrier mode),
+      trailing sectPr preserved incl. pPr-nested promotion, carrier metadata preserved, list-free renders never touch
+      the numbering part (autoSave rewrite bug caught by the hardened seam oracle and fixed). Seam slice
+      ComposeCarrierRenderSeamTests: non-body parts BYTE-IDENTICAL on every corpus doc; block-kind + visible-text
+      fixed point; collision-free merge proven; unique paraIds. Step 9.5: adr-check PASS (11/11); code-review
+      APPROVE-WITH-MINORS (M-1/P-1/P-3/P-8/T-1..T-5 fixed; P-2/P-5/P-6/P-10/T-6 deferred-documented). Gates: publish
+      46.88 MB (≤60); no new HIGH CVE; suite 333/335 (2 pre-existing NDA reds). DEVIATION: strict golden-label
+      numbering parity through the round-trip → task 021 (labels derive from the scheme the thin model cannot yet
+      carry). Full record: notes/020-canonical-hub-design.md §10.</completion-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core BFF renderer change (tags bff/compose) on the render-from-model path; governed by the ADR amendment — FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural renderer generalization on the most-contested BFF surface; opus per §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Well-specified generalization of an existing renderer with a named precedent to copy; high (not xhigh) per §8.5.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Compose/ComposeDocumentRenderer.cs — most-contested BFF surface (overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1, spaarke-ai-architecture-redesign-r2, agreements-r1, analysis-hub-r1). Serialize all Compose edits.</parallel-reason>
+    <deps>001, 020</deps>
+    <tags>bff, compose</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Generalize ComposeDocumentRenderer.SynthesizeDocument so it renders a fresh docx from the canonical document model for ANY source (imported/PDF-ready canonical model), not only born-in-editor blocks. This makes render-from-model the single save-path renderer wired by task 010, reusing the deterministic R4.5 NumberingComputationEngine for numbering.</prompt>
+  <role>SPAARKE platform developer. Deep expertise in OOXML authoring via DocumentFormat.OpenXml 3.5.1, the ComposeContentModel/projection, and the R4.5 NumberingComputationEngine. Follow ADRs strictly.</role>
+  <goal>SynthesizeDocument (ComposeDocumentRenderer.cs:102) accepts the canonical document model (the generalized ComposeContentModel that both born-in-editor and imported sources project into) and emits a faithful docx — including deterministic numbering via NumberingComputationEngine — with no dependence on inherited/anchored XML; an empty edit set still yields a faithful render of the current model.</goal>
+
+  <context>
+    <background>spec FR-03: generalize the editor projection into the single canonical hub — every source becomes the model, the editor edits the model, save renders the model out. SynthesizeDocument already renders born-in-editor blocks (author-not-patch); this task widens its input contract to the canonical model so task 010's Imported routing has a renderer to call. Numbering must reuse the R4.5 NumberingComputationEngine (deterministic, numId-scoped). Task 020 (Phase 2) further generalizes the model itself; this task focuses on the renderer input.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs:102 — SynthesizeDocument (generalize input to canonical model); :142 AppendSection (author-not-patch precedent to extend).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs:1357 — NumberingComputationEngine (deterministic, numId-scoped; reuse for numbering).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:714 — the Imported branch (task 010) that calls this renderer.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">ADR-049 Path-B amendment (render-on-save) merged with/before this code.</dependency>
+      <dependency task="020" status="pending">Canonical document model hub + docx→canonical-model projection in place; this task generalizes SynthesizeDocument to render that widened model out. (RE-SEQUENCED 2026-08-05: was dep 010 — the renderer generalization pairs with the model build and precedes the cutover.)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Scope: render exclusively from the canonical model on the save path (per task-001 amendment); MUST NOT re-introduce anchoring against inherited XML inside SynthesizeDocument.</constraint>
+    <constraint source="ADR-007">Scope: keep ComposeDocumentRenderer byte[]-in / projection-out; NO Microsoft.Graph types above SpeFileStore.</constraint>
+    <constraint source="ADR-013">Scope: NO AI-internal types in Services/Compose; if any AI capability is needed, consume Services/Ai/PublicContracts/ seams only — no fork.</constraint>
+    <constraint source="project">Scope: numbering MUST reuse the existing NumberingComputationEngine (R4.5, deterministic numId-scoped) — do not author a parallel numbering path (§11 reuse).</constraint>
+    <constraint source="project">Scope (Placement Justification, root §10): modify/extend of existing Services/Compose renderer — cite .claude/constraints/bff-extensions.md in the PR, verify publish size ≤60 MB (absolute + delta vs task-003 baseline), verify no new HIGH CVE, run /conflict-check before the PR. NEVER delete docxBridge.ts.</constraint>
+    <constraint source="ADR-039">Scope: engine frozen — no new AI dispatch endpoint.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML render-from-model; canonical model; deterministic numbering</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+    </files>
+    <patterns>
+      <pattern name="Author-not-patch render" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument:102 + AppendSection:142 are the precedent; extend their input to the canonical model.</pattern>
+      <pattern name="Deterministic numbering" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">NumberingComputationEngine:1357 — reuse for numId-scoped label computation.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: FULL, model-tier opus, effort high. Confirm 001 merged + 010 in place (gate); run /conflict-check for Services/Compose.</step>
+    <step order="1">Read SynthesizeDocument:102 + AppendSection:142; identify the current born-in-editor-block input assumption.</step>
+    <step order="2">Widen the input contract to the canonical document model so imported/canonical sources render through the same path; wire numbering through NumberingComputationEngine.</step>
+    <step order="3">Ensure an empty edit set renders a faithful representation of the current model (no anchoring dependency).</step>
+    <step order="4">Build the BFF; measure publish size vs the task-003 baseline; run dotnet list package --vulnerable.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document the placement decision + publish-size delta + any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If generalizing SynthesizeDocument would require forking the numbering engine, forking Services/Ai, or reintroducing inherited-XML anchoring, STOP and escalate per root §6.5 rather than adapting silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a canonical model from an imported source, when SynthesizeDocument runs, then it emits a faithful docx with no dependence on inherited/anchored XML.</criterion>
+    <criterion testable="true">Given numbered content, when rendered, then numbering labels are computed via NumberingComputationEngine and match Word for the corpus numbering exemplars (R4.5 golden labels).</criterion>
+    <criterion testable="true">Given an empty edit set, when SynthesizeDocument runs, then it produces a faithful render of the current model (not an error / not a no-op patch).</criterion>
+    <criterion testable="true">Negative: no Microsoft.Graph or AI-internal type is introduced into Services/Compose; no parallel numbering path is created.</criterion>
+    <criterion testable="true">Publish size ≤60 MB with absolute + delta reported; no new HIGH CVE; BFF builds green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Critical path 001→010→011→012→013→014. Pairs with 010 (010 routes, 011 renders). Task 020 later generalizes the model itself. spec FR-03.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

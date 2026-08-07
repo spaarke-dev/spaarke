@@ -278,6 +278,25 @@ public static class AnalysisServicesModule
         // ZERO new Program.cs lines per ADR-010.
         services.AddScoped<IWorkspaceStateService, WorkspaceStateService>();
 
+        // spaarkeai-assistant-enhancements-r2 task 022 (FR-B3/B5) — AssistantSuggestionService, the
+        // proactive-suggestion facade behind POST /api/ai/chat/sessions/{id}/suggest.
+        //
+        // §F.1 asymmetric-registration audit: UNCONDITIONAL registration, symmetric with the
+        // UNCONDITIONAL endpoint mapping in ChatEndpoints.MapChatEndpoints (per RB-T028: an
+        // unconditionally-mapped endpoint requires an unconditional service registration). No Null
+        // peer is needed because the service degrades gracefully when the compound AI kill-switch is
+        // OFF: its Linear-consumer deps (IActionResolver/IActionRunner) resolve to their Null variants,
+        // whose throw is caught by the facade's best-effort try/catch → the endpoint returns an empty
+        // chip list (never a 5xx). Constructor deps are all unconditionally registered:
+        // IActionResolver/IActionRunner (LinearConsumersModule + this module's Null peers),
+        // IConsumerRoutingService (RoutingModule), IWorkspaceStateService (immediately above).
+        //
+        // Lifetime: Scoped — it consumes the Scoped IWorkspaceStateService + IConsumerRoutingService,
+        // so it cannot be a Singleton (captive-dependency rule).
+        // ADR-010: registered as the CONCRETE class (no interface) — single implementation, no
+        // Null-Object variant needed (kill-switch-OFF is handled by graceful degradation via its deps).
+        services.AddScoped<Services.Ai.Chat.AssistantSuggestionService>();
+
         // Unconditional chat-CRUD + notification services (task 011 Phase 1b Tier 1, D-09 §2 B1/B4/B5/L5).
         // These services have ZERO AI dependencies; their previous conditional registration was
         // misclassification (they were placed inside compound-gated helpers because AI features

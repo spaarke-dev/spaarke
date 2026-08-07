@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Project wrap-up — anti-clobber deploy, ADR-049 amendment merged, /test-diet, lessons-learned, README Complete, verify 6 Success Criteria</title>
+    <phase>7 Wrap-up</phase>
+    <gate>dep:014,027,033,042,052,061</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>plan.md §5 Phase 7 assigns STANDARD. Note: the wrap-up reconciles `tests/**` via /test-diet, so the CLAUDE.md §8 TEST-MODIFYING override applies to the test-reconciliation step (code-review + adr-check run there); the deploy/close-out steps themselves are STANDARD close-out.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>plan.md §5 Phase 7 assigns sonnet: prescriptive close-out checklist driven by existing skills (/test-diet, /code-review, /adr-check, bff-deploy + code-page-deploy, /repo-cleanup, /devops-project-sync); no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final close-out — depends on all prior phases landing; deploys the whole project (BFF + `sprk_spaarkeai` together) and reconciles the whole project's tests + docs; cannot run concurrently with any implementation task.</parallel-reason>
+    <deps>014, 027, 033, 042, 052, 061</deps>
+    <tags>wrapup, deploy</tags>
+    <estimated-effort>S (≤1d)</estimated-effort>
+  </metadata>
+
+  <prompt>Run the mandatory R6 project wrap-up. Confirm the ADR-049 Path-B amendment (task 001) is merged, deploy BFF + `sprk_spaarkeai` TOGETHER with anti-clobber verify, run the /test-diet project-close gate (BINDING per CLAUDE.md §7), run /code-review + /adr-check and fix any Critical, write `notes/lessons-learned.md`, set README status Complete, and VERIFY all 6 spec Success Criteria. Do NOT skip the test-diet gate; do NOT deploy the BFF or the web resource in isolation.</prompt>
+
+  <role>SPAARKE platform developer responsible for project close-out — coordinated BFF + web-resource deployment (anti-clobber), test reconciliation (ADR-038 build-vs-maintain), documentation status, repo hygiene, and DevOps portfolio sync. Follow ADRs and the deploy discipline strictly.</role>
+
+  <goal>R6 is formally closed: (1) the ADR-049 Path-B amendment (task 001) is confirmed merged to master; (2) BFF + `sprk_spaarkeai` are deployed TOGETHER with anti-clobber verify (live artifact is a strict superset before deploy) via `bff-deploy` + `code-page-deploy`, and `/conflict-check` ran before the deploy PR; (3) /test-diet ran and reconciled all R6-added/modified tests against the ADR-038 17-ban classifier, emitting `notes/test-diet-report.md`; (4) /code-review + /adr-check ran on all R6 code with Criticals fixed; (5) /repo-cleanup ran; (6) `notes/lessons-learned.md` written; (7) README.md set to Status Complete / 100% with the 6 Success Criteria checked + changelog entry, plan.md marked Complete; (8) /devops-project-sync ran; (9) all 6 spec Success Criteria are verified as met; (10) all tasks show ✅ in TASK-INDEX.md and current-task.md is reset to none.</goal>
+
+  <context>
+    <background>Per task-create Step 3.7 (mandatory wrap-up) + CLAUDE.md §7 (project-close /test-diet gate, BINDING). R6 added seam slices + a fidelity harness + the NDA LFS fixture + a version-history endpoint/UX, so the test reconciliation is substantive. The pivot (render-on-save) is governed by the ADR-049 Path-B amendment which MUST be merged with/before the dependent code — this wrap-up confirms it landed. Deploy discipline (NFR-04): BFF + `sprk_spaarkeai` deploy together with anti-clobber verify; `/conflict-check` before every BFF PR. The close-out verifies all 6 Success Criteria from spec.md.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarkeai-compose-r6/README.md</file>
+      <file role="modify">projects/spaarkeai-compose-r6/plan.md</file>
+      <file role="modify">projects/spaarkeai-compose-r6/tasks/TASK-INDEX.md</file>
+      <file role="new">projects/spaarkeai-compose-r6/notes/lessons-learned.md</file>
+      <file role="new">projects/spaarkeai-compose-r6/notes/test-diet-report.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md (confirm the Path-B amendment merged)</file>
+      <file>projects/spaarkeai-compose-r6/spec.md (the 6 Success Criteria to verify)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="014" status="pending">Phase-1 render-on-save cutover deployed + UAT.</dependency>
+      <dependency task="027" status="pending">Phase-2 fidelity seam tests across the corpus.</dependency>
+      <dependency task="033" status="pending">Phase-3 template part-merge complete.</dependency>
+      <dependency task="042" status="pending">Phase-4 PDF intake complete.</dependency>
+      <dependency task="052" status="pending">Phase-5 version-history open UX complete.</dependency>
+      <dependency task="061" status="pending">Phase-6 fidelity harness wired into CI as a release gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">The /test-diet project-close gate is BINDING — run it BEFORE marking the project complete; skipping is a HARD WARNING and the wrap-up must cite the report (or document the skip rationale). It is read-only: it emits `git rm` / `git mv` commands for the reviewer; it does not auto-execute. Do NOT delete MAINTAIN-class seam slices / the fidelity harness proving R6 constructs round-trip.</constraint>
+    <constraint source="project">NFR-04 deploy discipline: deploy BFF + `sprk_spaarkeai` TOGETHER; anti-clobber verify (the live artifact is a strict superset before deploy) via `bff-deploy` + `code-page-deploy`; run `/conflict-check` before the deploy PR. MUST NOT deploy the BFF or the web resource in isolation ("last deploy wins" would clobber a sibling worktree).</constraint>
+    <constraint source="ADR-049">Confirm the Path-B amendment (task 001) is merged to master — the render-on-save save path is only sanctioned once the amendment landed (not a silent deviation). If it did not merge, STOP.</constraint>
+    <constraint source="project">Verify ALL 6 spec Success Criteria are met (NDA saves no-422 + new version; PDF NDA opens/edits/saves; template chrome provenance; version-open exact bytes; CI fidelity gate red-on-regression; publish ≤60 MB + no new HIGH CVE + placement justified). Do NOT mark complete with an unmet criterion or an open Critical.</constraint>
+    <constraint source="CLAUDE.md §7">After completion: update task status, TASK-INDEX.md 🔲→✅, reset current-task.md to none, report completion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r6/plan.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="test-diet close gate" location=".claude/skills/test-diet/SKILL.md">Read-only reconciliation of R6 tests vs the ADR-038 17-ban classifier; emits git rm/mv for the reviewer; output notes/test-diet-report.md.</pattern>
+      <pattern name="Coordinated deploy" location=".claude/skills/bff-deploy/SKILL.md">Deploy BFF + `sprk_spaarkeai` together with anti-clobber verify; pair with code-page-deploy; `/conflict-check` first.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load all &lt;knowledge&gt;&lt;files&gt;. Declare RIGOR LEVEL: STANDARD (with the TEST-MODIFYING gate applying to the /test-diet + code-review step). Confirm all dependency tasks (014/027/033/042/052/061) are ✅.</step>
+    <step order="1">Confirm the ADR-049 Path-B amendment (task 001) is MERGED to master. If not, STOP and escalate — the render-on-save save path is not sanctioned without it.</step>
+    <step order="2">Run /conflict-check, then deploy BFF + `sprk_spaarkeai` TOGETHER with anti-clobber verify (live artifact is a strict superset before deploy) via `bff-deploy` + `code-page-deploy`. Do NOT deploy either in isolation.</step>
+    <step order="3">Run /test-diet (BINDING project-close gate): reconcile all R6-added/modified tests against the ADR-038 17-ban classifier. Output notes/test-diet-report.md. Keep MAINTAIN-class seam slices + the fidelity harness; delete SCAFFOLDING-class; escalate AMBIGUOUS. If a Critical surfaces, STOP and remediate.</step>
+    <step order="4">Run /code-review + /adr-check on all R6 code; fix any Critical before proceeding.</step>
+    <step order="5">Run /repo-cleanup projects/spaarkeai-compose-r6 to validate structure + remove ephemeral files.</step>
+    <step order="6">Verify ALL 6 spec Success Criteria are met (record evidence per criterion in the wrap-up notes); do NOT mark complete if any is unmet.</step>
+    <step order="7">Append notes/lessons-learned.md (what worked, what to change, coordination outcomes with the sibling Compose worktrees + ci-cd-unit-test-remediation-r1).</step>
+    <step order="8">Update README.md → Status Complete / 100% with the 6 Success Criteria checked + changelog entry; update plan.md → Status Complete.</step>
+    <step order="9">Run /devops-project-sync to update the portfolio Issue fields from local state (archive optional).</step>
+    <step order="10">Verify all tasks show ✅ in TASK-INDEX.md; reset current-task.md to none (project complete). Run the final build + full Compose seam/unit suites + fidelity harness green after any test-diet deletions/moves.</step>
+    <step order="11">Update TASK-INDEX.md: set this task's status to ✅ completed. Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the ADR-049 Path-B amendment did NOT merge, STOP — the render-on-save save path is a silent ADR deviation without it (CLAUDE.md §6.5).</trigger>
+    <trigger>If /test-diet or /code-review surfaces a Critical, or any of the 6 Success Criteria is unmet, STOP and remediate before marking the project complete. Do NOT skip the test-diet gate (HARD WARNING per CLAUDE.md §7) — the wrap-up PR MUST cite notes/test-diet-report.md or document the skip rationale.</trigger>
+    <trigger>If anti-clobber verify shows the live artifact is NOT a strict superset (a sibling worktree deployed newer code), STOP — deploying would clobber it; coordinate before proceeding.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run the final build + seam/unit suites + fidelity harness after test-diet reconciliation.</tool>
+    <tool name="terminal">Run /conflict-check, bff-deploy, code-page-deploy, /test-diet, /code-review, /adr-check, /repo-cleanup, /devops-project-sync.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r6/notes/test-diet-report.md</output>
+    <output type="doc">projects/spaarkeai-compose-r6/notes/lessons-learned.md</output>
+    <output type="doc">projects/spaarkeai-compose-r6/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the pivot, when close-out runs, then the ADR-049 Path-B amendment (task 001) is confirmed merged to master.</criterion>
+    <criterion testable="true">Given deploy, when it runs, then BFF + `sprk_spaarkeai` deploy TOGETHER with anti-clobber verify (strict-superset check) and `/conflict-check` ran first — neither deployed in isolation.</criterion>
+    <criterion testable="true">Given the project is closing, when /test-diet runs, then notes/test-diet-report.md reconciles all R6 tests against the ADR-038 17-ban classifier and MAINTAIN-class seam slices + the fidelity harness are kept.</criterion>
+    <criterion testable="true">Given all R6 code, when /code-review + /adr-check run, then any Critical is fixed before completion.</criterion>
+    <criterion testable="true">Given close-out, when README.md + plan.md are updated, then both read Status Complete (README 100% with the 6 Success Criteria checked + changelog entry) and lessons-learned.md is appended.</criterion>
+    <criterion testable="true">Given the 6 spec Success Criteria, when verified, then each is met with recorded evidence; the project is NOT marked complete otherwise.</criterion>
+    <criterion testable="true">Negative: the project is NOT marked complete if the amendment did not merge, the test-diet gate was skipped without a cited report/rationale, a Critical remains open, anti-clobber verify failed, or any Success Criterion is unmet.</criterion>
+    <criterion testable="true">Given the task ledger, when close-out completes, then every task in TASK-INDEX.md shows ✅ and current-task.md is reset to none.</criterion>
+  </acceptance-criteria>
+
+  <notes>Mandatory wrap-up per task-create Step 3.7 + CLAUDE.md §7 (test-diet project-close gate BINDING). Prescriptive ordered close-out. Deploy BFF + `sprk_spaarkeai` together (anti-clobber; NFR-04). Confirm ADR-049 amendment merged. Verify all 6 spec Success Criteria. Do not skip the test-diet gate.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

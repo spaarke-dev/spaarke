@@ -330,6 +330,15 @@ public class SprkChatAgentFactory
     /// <c>SessionDispatchRequest.ModelTierOverride</c>). Default <c>null</c> = no override — the
     /// dispatched Binding's own tier composition governs unchanged (pre-task-011 behavior).
     /// </param>
+    /// <param name="activeContextTabId">
+    /// spaarkeai-assistant-enhancements-r2 FR-A3 (Active-tab awareness / focus-stamp): the
+    /// <c>WorkspaceTab.Id</c> of the tab the user has explicitly focused, sourced from the client
+    /// focus-stamp (<c>ChatSendMessageRequest.ActiveContext.TabId</c>). Forwarded to
+    /// <see cref="BuildWorkspaceStateBlock"/> so the "(active)" label prefers the explicit focus-stamp
+    /// over the legacy <c>UpdatedAt</c>-most-recent heuristic. The active tab then contributes its
+    /// COMPACT content shape while background tabs stay metadata-only (FR-A4, ADR-015 Path A). Default
+    /// <c>null</c> = no focus-stamp → the <c>UpdatedAt</c> fallback governs unchanged (backward compatible).
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -351,6 +360,7 @@ public class SprkChatAgentFactory
         IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         string? activeSessionFileId = null,
         AiModelTier? modelTierOverride = null,
+        string? activeContextTabId = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -547,7 +557,7 @@ public class SprkChatAgentFactory
             if (workspaceService is not null)
             {
                 var tabs = await workspaceService.GetTabsAsync(tenantId, sessionId, cancellationToken);
-                var workspaceBlock = BuildWorkspaceStateBlock(tabs, sessionId);
+                var workspaceBlock = BuildWorkspaceStateBlock(tabs, sessionId, activeContextTabId);
                 if (!string.IsNullOrEmpty(workspaceBlock))
                 {
                     if (TryReservePromptBudget(
@@ -1437,8 +1447,13 @@ public class SprkChatAgentFactory
     /// <see cref="WorkspaceStateBlockMaxCharsRich"/> to fit the richer per-tab shapes.
     /// </para>
     /// <para>
-    /// <b>Active tab convention</b>: the tab with the most recent <c>UpdatedAt</c>
-    /// is labeled "(active)". Preserved from task 053.
+    /// <b>Active tab convention</b> (spaarkeai-assistant-enhancements-r2 FR-A3/A4): when a
+    /// client focus-stamp is supplied (<paramref name="activeContextTabId"/> matching a visible
+    /// tab's <c>Id</c>), THAT tab is labeled "(active)" — preferred over the legacy
+    /// <c>UpdatedAt</c>-most-recent heuristic. When no focus-stamp is present (or it matches no
+    /// visible tab), the <c>UpdatedAt</c>-max tab is labeled active (backward-compatible fallback,
+    /// preserved from task 053). The active tab contributes its COMPACT content shape; background
+    /// tabs contribute metadata-only fields (FR-A4, ADR-015 Path A exception).
     /// </para>
     /// </remarks>
     internal const int WorkspaceStateBlockMaxChars = 500;
@@ -1451,7 +1466,10 @@ public class SprkChatAgentFactory
     /// </summary>
     internal const int WorkspaceStateBlockMaxCharsRich = 2000;
 
-    internal string BuildWorkspaceStateBlock(IReadOnlyList<WorkspaceTab> tabs, string sessionId)
+    internal string BuildWorkspaceStateBlock(
+        IReadOnlyList<WorkspaceTab> tabs,
+        string sessionId,
+        string? activeContextTabId = null)
     {
         // FR-58 + FR-59 BINDING: filter is `visibleToAssistant === true` AND widget has
         // derivable visible state. Both required. Privacy default — when EITHER condition
@@ -1464,19 +1482,38 @@ public class SprkChatAgentFactory
 
         if (visible.Count == 0) return string.Empty;
 
-        // Most-recent UpdatedAt → "active" (preserved from task 053 v1 simplification;
-        // explicit active-tab state from registry is a separate follow-up).
+        // Default ordering: most-recent UpdatedAt first (preserved from task 053 v1).
         var ordered = visible.OrderByDescending(p => p.Tab.UpdatedAt).ToList();
+
+        // spaarkeai-assistant-enhancements-r2 FR-A3: prefer the explicit client focus-stamp over
+        // the UpdatedAt-most-recent heuristic. When the stamp's tabId matches a visible tab, hoist
+        // it to the front so it becomes "Tab 1 (active)". When there is no stamp — or the stamp
+        // matches no visible tab (stale/closed tab) — the UpdatedAt-max tab stays active (backward-
+        // compatible fallback). Deterministic labeling only; no intent classification (ADR-039).
+        // After this hoist, the active tab is ALWAYS at index 0.
+        if (!string.IsNullOrWhiteSpace(activeContextTabId))
+        {
+            var stampIndex = ordered.FindIndex(p =>
+                string.Equals(p.Tab.Id, activeContextTabId, StringComparison.Ordinal));
+            if (stampIndex > 0)
+            {
+                var active = ordered[stampIndex];
+                ordered.RemoveAt(stampIndex);
+                ordered.Insert(0, active);
+            }
+            // stampIndex == 0 → already active; stampIndex < 0 → no match → UpdatedAt fallback.
+        }
 
         var sb = new System.Text.StringBuilder();
         sb.Append("\n\n## Workspace State\n");
-        sb.Append("Tabs the user has marked visible to the assistant. Per-tab fields are deterministic visible state only (ADR-015 — no raw user text, no widget bodies).\n");
+        sb.Append("Tabs the user has marked visible to the assistant. Per-tab fields are deterministic visible state only (ADR-015 — no raw user text, no widget bodies). The active tab contributes its compact content shape; background tabs are metadata-only.\n");
 
         var truncatedAt = -1;
         for (var i = 0; i < ordered.Count; i++)
         {
             var (tab, state) = ordered[i];
-            var activeMarker = i == 0 ? " (active)" : "";
+            var isActive = i == 0;
+            var activeMarker = isActive ? " (active)" : "";
             var pinnedMarker = tab.IsPinned ? " user-pinned" : "";
             var matterName = tab.MatterContext?.MatterName;
             var matterSuffix = string.IsNullOrWhiteSpace(matterName) ? "" : $" matter=\"{matterName}\"";
@@ -1484,8 +1521,14 @@ public class SprkChatAgentFactory
             // Header line + structured fields. Format chosen so the LLM can parse without
             // needing to validate a JSON envelope per tab while still treating each tab as
             // a discrete block.
+            //
+            // FR-A4 / ADR-015 Path A: only the ACTIVE tab contributes content-bearing fields
+            // (Summary tldr/summary, DocumentViewer selectionText). Background tabs are reduced to
+            // metadata-only (identity + sizes + counts) — this NARROWS what background tabs emit
+            // versus pre-r2 behavior; it never widens the active tab beyond the already-bounded
+            // compact shape derived server-side by TryDeriveVisibleState.
             var header = $"- Tab {i + 1}{activeMarker}: widgetType={tab.WidgetType}{pinnedMarker}{matterSuffix}\n";
-            var fields = FormatVisibleStateFields(state!);
+            var fields = FormatVisibleStateFields(state!, contentVisible: isActive);
             var block = header + fields;
 
             if (sb.Length + block.Length > WorkspaceStateBlockMaxCharsRich)
@@ -1544,6 +1587,15 @@ public class SprkChatAgentFactory
     /// </summary>
     internal const string ComposeDefaultFilename = "Compose document";
 
+    /// <remarks>
+    /// <b>task 041b (2026-08-06, spaarkeai-assistant-enhancements-r2, "Path 1: persisted
+    /// Email carrier")</b>: resolves the task 041 escalation. <see cref="EmailTabWidgetData"/>
+    /// (added by 041b) is the persisted server-side carrier for real email fields
+    /// (subject/from/date/threadId/snippet), populated client-side from
+    /// <c>useEmailWorkspaceRecord</c> at tab open/update (task 042a). Email now behaves like
+    /// the other 4 widgets: content persisted in <c>widgetData</c>, both derivations
+    /// structurally enforced, ADR-015-authoritative.
+    /// </remarks>
     internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
     {
         // spaarkeai-compose-r2 ("the flip"): a first-class Compose Direct widget
@@ -1585,6 +1637,16 @@ public class SprkChatAgentFactory
                 SortColumn: t.SortColumn,
                 FilteredColumns: t.FilteredColumns,
                 SelectedRows: t.SelectedRows?.Count ?? 0),
+
+            // task 041b ("Path 1: persisted Email carrier"). EmlDocumentId is deliberately
+            // NOT projected — it is a fetch handle for on-demand eml-render (FR-C4), not
+            // prompt content, mirroring DocumentViewer's DocumentId omission.
+            EmailTabWidgetData em => new WorkspaceTabVisibleState.Email(
+                Subject: em.Subject,
+                From: em.From,
+                Date: em.Date,
+                ThreadId: em.ThreadId,
+                Snippet: TruncateEmailSnippet(em.Snippet)),
 
             // Unknown / null widget data → no visible state (privacy default).
             _ => null,
@@ -1671,20 +1733,44 @@ public class SprkChatAgentFactory
     }
 
     /// <summary>
+    /// task 041b — cap an Email tab's snippet at the same <see cref="SelectionTextMaxChars"/>
+    /// bound <see cref="TruncateSelection"/> applies to DocumentViewer's selectionText. The
+    /// snippet is the sole content-bearing Email field per ADR-015.
+    /// </summary>
+    private static string? TruncateEmailSnippet(string? snippet)
+    {
+        if (string.IsNullOrWhiteSpace(snippet)) return null;
+        var trimmed = snippet.Trim();
+        if (trimmed.Length <= SelectionTextMaxChars) return trimmed;
+        return trimmed[..SelectionTextMaxChars] + "…";
+    }
+
+    /// <summary>
     /// Format a derived <see cref="WorkspaceTabVisibleState"/> as the per-tab prompt
     /// fields. Indented 2 spaces under the tab header. ADR-015: only deterministic
     /// fields are emitted; selectionText is the only content-bearing field and respects
     /// the 200-char cap upstream.
     /// </summary>
-    internal static string FormatVisibleStateFields(WorkspaceTabVisibleState state)
+    /// <param name="state">The derived visible state to format.</param>
+    /// <param name="contentVisible">
+    /// spaarkeai-assistant-enhancements-r2 FR-A4 (ADR-015 Path A): when <c>true</c> (the ACTIVE
+    /// tab) the compact content-bearing fields are emitted — Summary <c>tldr</c>/<c>summary</c> and
+    /// DocumentViewer <c>selectionText</c>. When <c>false</c> (a BACKGROUND tab) those
+    /// content-bearing fields are suppressed and only identity/metadata fields (filename, mimeType,
+    /// sizeBytes, hasSelection flag, dashboard/section names, row/column counts, edit flag) are
+    /// emitted. Background tabs therefore stay metadata-only; the active tab is content-visible.
+    /// Default <c>true</c> preserves the pre-r2 all-tabs-content behavior for any legacy caller.
+    /// </param>
+    internal static string FormatVisibleStateFields(WorkspaceTabVisibleState state, bool contentVisible = true)
     {
         var sb = new System.Text.StringBuilder();
         switch (state)
         {
             case WorkspaceTabVisibleState.Summary s:
-                if (!string.IsNullOrWhiteSpace(s.Tldr))
+                // tldr + summary are agent-generated CONTENT projections — active-tab only (FR-A4).
+                if (contentVisible && !string.IsNullOrWhiteSpace(s.Tldr))
                     sb.Append($"  tldr: {s.Tldr}\n");
-                if (!string.IsNullOrWhiteSpace(s.SummaryText))
+                if (contentVisible && !string.IsNullOrWhiteSpace(s.SummaryText))
                     sb.Append($"  summary: {s.SummaryText}\n");
                 sb.Append($"  hasUserEdits: {(s.HasUserEdits ? "true" : "false")}\n");
                 break;
@@ -1694,7 +1780,8 @@ public class SprkChatAgentFactory
                 sb.Append($"  mimeType: {d.MimeType}\n");
                 sb.Append($"  sizeBytes: {d.SizeBytes}\n");
                 sb.Append($"  hasSelection: {(d.HasSelection ? "true" : "false")}\n");
-                if (!string.IsNullOrWhiteSpace(d.SelectionText))
+                // selectionText is the only content-bearing DocumentViewer field — active-tab only.
+                if (contentVisible && !string.IsNullOrWhiteSpace(d.SelectionText))
                     sb.Append($"  selectionText: {d.SelectionText}\n");
                 break;
 
@@ -1711,6 +1798,20 @@ public class SprkChatAgentFactory
                 if (t.FilteredColumns is { Count: > 0 })
                     sb.Append($"  filteredColumns: [{string.Join(", ", t.FilteredColumns)}]\n");
                 sb.Append($"  selectedRows: {t.SelectedRows}\n");
+                break;
+
+            case WorkspaceTabVisibleState.Email em:
+                // subject/from/date/threadId are identity/metadata fields — always emitted
+                // (background tabs included), mirroring DocumentViewer's filename/mimeType.
+                sb.Append($"  subject: {em.Subject}\n");
+                sb.Append($"  from: {em.From}\n");
+                sb.Append($"  date: {em.Date}\n");
+                if (!string.IsNullOrWhiteSpace(em.ThreadId))
+                    sb.Append($"  threadId: {em.ThreadId}\n");
+                // snippet is the only content-bearing Email field — active-tab only (FR-A4),
+                // same gating as DocumentViewer.selectionText / Summary.tldr+summary.
+                if (contentVisible && !string.IsNullOrWhiteSpace(em.Snippet))
+                    sb.Append($"  snippet: {em.Snippet}\n");
                 break;
         }
         return sb.ToString();

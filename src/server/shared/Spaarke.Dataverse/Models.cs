@@ -412,6 +412,21 @@ public class AnalysisEntity
 }
 
 /// <summary>
+/// Target of an ADR-024 <c>regarding</c> association for a newly-created <c>sprk_analysis</c>
+/// (spaarkeai-assistant-enhancements-r2 FR-D9 — "Set related record"). Carries the polymorphic
+/// parent's logical name + id + (optional) picker-provided display name. When supplied to
+/// <see cref="IAnalysisDataverseService.CreateAnalysisAsync"/>, the entity-specific regarding
+/// lookup PLUS the ADR-024 denormalized resolver fields are written on the created analysis so it
+/// surfaces on the parent's Analyses tab (subgrid relationship <c>sprk_analysis_RegardingMatter_*</c>).
+///
+/// Supported entity types: <c>sprk_matter</c>, <c>sprk_project</c> — the parents whose forms carry an
+/// Analyses tab. A DOCUMENT association is NOT expressed here: an analysis anchors a document via its
+/// own required <c>sprk_documentid</c> lookup (the <c>documentId</c> parameter), which is the
+/// "regarding = document" path in FR-D9.
+/// </summary>
+public sealed record AnalysisRegardingTarget(string EntityLogicalName, Guid RecordId, string? RecordName);
+
+/// <summary>
 /// Analysis Action entity model (sprk_analysisaction)
 /// </summary>
 public class AnalysisActionEntity
@@ -854,6 +869,38 @@ public static class RegardingRecordType
         WorkAssignment => "sprk_regardingworkassignment",
         Budget => "sprk_regardingbudget",
         _ => null
+    };
+
+    // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──
+    // These map a target entity's LOGICAL NAME (as chosen in the client picker / AnalysisRegardingTarget)
+    // to the ADR-024 fields the resolver writes on sprk_analysis. The canonical field-name maps live
+    // here in the shared Spaarke.Dataverse library because the equivalent maps in the BFF-layer
+    // IncomingAssociationResolver (Services/Communication) cannot be referenced from here (Spaarke.Dataverse
+    // must not depend on Sprk.Bff.Api). Restricted to matter + project — the parents whose forms carry an
+    // Analyses tab; a document association uses the analysis's own sprk_documentid anchor instead.
+
+    /// <summary>Entity-specific regarding lookup attribute for a target entity logical name (matter/project).</summary>
+    public static string? GetRegardingLookupFieldByEntity(string entityLogicalName) => entityLogicalName switch
+    {
+        "sprk_matter" => "sprk_regardingmatter",
+        "sprk_project" => "sprk_regardingproject",
+        _ => null,
+    };
+
+    /// <summary>Primary display-name attribute for a target entity (ADR-024 sprk_regardingrecordname source).</summary>
+    public static string? GetPrimaryNameField(string entityLogicalName) => entityLogicalName switch
+    {
+        "sprk_matter" => "sprk_mattername",
+        "sprk_project" => "sprk_projectname",
+        _ => null,
+    };
+
+    /// <summary>Reference-number attribute for a target entity (ADR-024 sprk_regardingrecordnumber source); null when none.</summary>
+    public static string? GetReferenceNumberField(string entityLogicalName) => entityLogicalName switch
+    {
+        "sprk_matter" => "sprk_matternumber",
+        "sprk_project" => "sprk_projectnumber",
+        _ => null,
     };
 }
 

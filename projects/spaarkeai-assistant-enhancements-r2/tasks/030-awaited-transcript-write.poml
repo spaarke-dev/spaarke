@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Await/confirm the Cosmos transcript write for messages[0] (FR-D2)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF reliability change in the persistence write path</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded change: await the first-turn Cosmos write; Sonnet-5 strong on this brownfield reliability work</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>D-srv-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits SessionPersistenceService.cs/ChatSessionManager.cs — disjoint from ChatEndpoints (031/032) and client tasks</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Make the critical Cosmos transcript write awaited/confirmed for messages[0] (the first turn) so the transcript + title seed survive Redis eviction; keep remaining turns async; spec a latency budget.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI session-persistence expertise; comfortable splitting a fire-and-forget write into a confirmed first-turn write within the ADR-040 3-tier cascade.</role>
+  <goal>After a session's first turn, the Cosmos StoredSession contains messages[0] before the request completes; reopening after Redis TTL shows the transcript, not a blank pane.</goal>
+  <context>
+    <background>FR-D2 — the Cosmos transcript write is fire-and-forget today (ChatSessionManager.FireAndForgetCosmosPersist:574-587 / SessionPersistenceService.UpsertToCosmosAsync:863-879), so a session's first turn can be lost to Redis eviction, leaving a blank pane on reopen. Owner Option A: make only the FIRST turn's write awaited/confirmed; keep later turns async.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs (FireAndForgetCosmosPersist:574-587, UpdateSessionCacheAsync:298-306)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs (PersistSessionAsync:211-220, UpsertToCosmosAsync:863-879)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-040">Stay within the existing 3-tier cascade — no new store; only the FIRST turn's write becomes awaited.</constraint>
+    <constraint source="project">NFR-03 — the awaited write adds bounded latency to the first turn only; record a latency budget.</constraint>
+    <constraint source="project">Publish size ≤60 MB — report the delta (BFF §10).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Identify the first-turn path (messages[0]) vs subsequent turns.</step>
+    <step order="2">Await/confirm the Cosmos upsert for messages[0]; leave later turns fire-and-forget.</step>
+    <step order="3">Add a unit test asserting messages[0] is in Cosmos before the request completes.</step>
+    <step order="4">dotnet build + publish size check.</step>
+    <step order="5">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If awaiting messages[0] pushes first-turn latency beyond a reasonable budget, STOP and escalate with the measured numbers rather than awaiting all turns.</trigger>
+  </escalation>
+  <justification>
+    <existing>FireAndForgetCosmosPersist:583 deliberately does not await; no reliable first-turn write.</existing>
+    <extension>Yes — split the first-turn write out of the fire-and-forget path.</extension>
+    <cost-of-doing-nothing>A session's first turn can be lost to Redis eviction → blank pane on reopen.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</output>
+    <output type="test">the persistence test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">messages[0] is in Cosmos before the first request completes.</criterion>
+    <criterion testable="true">Subsequent turns remain async.</criterion>
+    <criterion testable="true">Reopen-after-eviction shows the transcript.</criterion>
+    <criterion testable="true">Latency budget recorded.</criterion>
+    <criterion testable="true">Publish ≤60 MB.</criterion>
+    <criterion testable="true">Tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-D2, owner Option A.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

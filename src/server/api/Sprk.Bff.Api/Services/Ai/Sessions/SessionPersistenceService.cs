@@ -17,9 +17,16 @@ namespace Sprk.Bff.Api.Services.Ai.Sessions;
 ///   1. Read the current session document from Redis (or an empty shell if new).
 ///   2. Append the message, update LastActivity.
 ///   3. Write updated document to Redis (non-blocking on failure).
-///   4. Upsert into Cosmos DB (fire-and-forget background task; non-blocking on failure).
+///   4. Upsert into Cosmos DB (fire-and-forget background task; non-blocking on failure) — EXCEPT
+///      <see cref="PersistSessionAsync"/> with <c>awaitCosmosWrite: true</c> (FR-D2, task 030),
+///      which CONFIRMS the Cosmos write before returning. Reserved for a session's first message
+///      (<c>messages[0]</c>) so the transcript survives a Redis eviction; every other write stays
+///      fire-and-forget (NFR-03 — no latency regression on turns 2+).
 ///
-/// Failure policy: either store failing is caught, logged at Warning, and swallowed.
+/// Failure policy: either store failing is caught, logged at Warning, and swallowed — EXCEPT the
+/// confirmed-write branch above, where a Cosmos failure still does not throw (logged at Warning)
+/// but the caller now observes the completed (failed-and-swallowed) attempt before proceeding,
+/// rather than a detached background task.
 /// The SSE streaming pipeline is never blocked by a persistence failure.
 ///
 /// Tenant isolation: all keys and Cosmos partition values are scoped by tenantId (ADR-015, NFR-09).
@@ -208,15 +215,29 @@ public class SessionPersistenceService : ISessionPersistenceService
     }
 
     /// <inheritdoc/>
-    public async Task PersistSessionAsync(StoredSession session, CancellationToken ct = default)
+    public async Task PersistSessionAsync(StoredSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
     {
         // Write to Redis (hot tier) — non-blocking on failure
         await WriteToRedisAsync(session.TenantId, session.SessionId, session, ct);
 
-        // Upsert to Cosmos DB (warm tier) — fire-and-forget, non-blocking on failure.
-        // We do NOT pass the request CancellationToken because the HTTP request may complete
-        // (or be cancelled) before the Cosmos write finishes (same pattern as PersistMessageAsync).
-        _ = UpsertToCosmosAsync(session, CancellationToken.None);
+        // Upsert to Cosmos DB (warm tier).
+        //
+        // FR-D2 (task 030): the caller (ChatSessionManager, for messages[0] ONLY) may request a
+        // CONFIRMED write via awaitCosmosWrite — this method then does not return until the Cosmos
+        // upsert completes, so the transcript + title seed survive a Redis eviction that happens
+        // moments after the HTTP response finishes. Every other call keeps the original D-06
+        // fire-and-forget contract (awaitCosmosWrite defaults to false) — turns 2+ are NOT slowed
+        // down (NFR-03). Either branch still passes CancellationToken.None (not `ct`) to the Cosmos
+        // call itself — a client mid-request disconnect must not abort a write whose whole purpose
+        // is to outlive the request; only the AWAIT boundary changes between the two branches.
+        if (awaitCosmosWrite)
+        {
+            await UpsertToCosmosAsync(session, CancellationToken.None);
+        }
+        else
+        {
+            _ = UpsertToCosmosAsync(session, CancellationToken.None);
+        }
     }
 
     // =========================================================================
@@ -757,11 +778,17 @@ public class SessionPersistenceService : ISessionPersistenceService
             var container = GetContainer();
 
             // Project ONLY the fields the History list needs (never the full messages array) — the
-            // first message's content is the title seed. ORDER BY lastActivity DESC uses the default
-            // range index; ISO-8601 timestamps sort chronologically as strings.
+            // first message's content is the title seed (pre-FR-D4 fallback). FR-D4 (task 032) adds
+            // c.title: the persisted, writable session title. FR-D7 (spaarkeai-assistant-enhancements-r2,
+            // DI-01) adds ARRAY_LENGTH(c.messages) AS messageCount (a scalar count, never the message
+            // bodies) and c.tabs (already-persisted NFR-09 workspace-tab metadata — displayName only is
+            // read downstream, see BuildTabSummary) so the History row can render a preview + message
+            // count + tab summary. ORDER BY lastActivity DESC uses the default range index; ISO-8601
+            // timestamps sort chronologically as strings.
             var query = new QueryDefinition(
                 "SELECT TOP @limit c.id, c.sessionId, c.lastActivity, c.conversationSummary, " +
-                "c.entityRefs, c.messages[0].content AS firstMessage " +
+                "c.entityRefs, c.messages[0].content AS firstMessage, c.title, " +
+                "ARRAY_LENGTH(c.messages) AS messageCount, c.tabs " +
                 "FROM c WHERE c.tenantId = @tenantId ORDER BY c.lastActivity DESC")
                 .WithParameter("@limit", capped)
                 .WithParameter("@tenantId", tenantId);
@@ -789,11 +816,14 @@ public class SessionPersistenceService : ISessionPersistenceService
                     var entity = p.EntityRefs is { Count: > 0 } ? p.EntityRefs[0] : null;
                     results.Add(new RecentSessionInfo(
                         SessionId: sessionId,
-                        Title: BuildSessionTitle(p, entity),
+                        Title: !string.IsNullOrWhiteSpace(p.Title) ? p.Title : BuildSessionTitle(p, entity),
                         EntityType: entity?.EntityType,
                         EntityName: entity?.DisplayName,
                         PlaybookName: null,
-                        UpdatedAt: p.LastActivity));
+                        UpdatedAt: p.LastActivity,
+                        Preview: BuildPreview(p),
+                        MessageCount: p.MessageCount,
+                        TabSummary: BuildTabSummary(p.Tabs)));
                 }
             }
 
@@ -808,18 +838,75 @@ public class SessionPersistenceService : ISessionPersistenceService
         }
     }
 
-    /// <summary>Derive a short, single-line display title for the History list from the cheapest signal.</summary>
+    /// <summary>
+    /// FALLBACK ONLY (FR-D4, task 032): derives a short, single-line display title for the
+    /// History list from the cheapest available signal when the session has no persisted
+    /// <see cref="RecentSessionProjection.Title"/> yet (pre-FR-D4 sessions, or a session that has
+    /// not exchanged its first message). Once <c>StoredSession.Title</c> is set,
+    /// <see cref="ListRecentSessionsAsync"/> uses it directly and this method is not consulted —
+    /// the persisted title is the ONE source of truth (no double-sourcing).
+    /// </summary>
     private static string BuildSessionTitle(RecentSessionProjection p, SessionEntityRef? entity)
     {
         var seed = FirstNonWhitespace(p.FirstMessage, p.ConversationSummary, entity?.DisplayName);
         if (!string.IsNullOrWhiteSpace(seed))
         {
-            var oneLine = seed.Replace('\r', ' ').Replace('\n', ' ').Trim();
-            return oneLine.Length > 80 ? oneLine[..77] + "…" : oneLine;
+            return TruncateSingleLine(seed, TitleMaxLength);
         }
         // No content yet — a stable, human-readable fallback.
         return $"Conversation · {p.LastActivity.UtcDateTime:MMM d, HH:mm} UTC";
     }
+
+    /// <summary>
+    /// FR-D7 (spaarkeai-assistant-enhancements-r2, DI-01) — derives the History row's last-message
+    /// preview: <c>conversationSummary ?? firstMessage</c>, single-line, bounded to
+    /// <see cref="PreviewMaxLength"/> chars. Unlike <see cref="BuildSessionTitle"/> this has NO
+    /// placeholder fallback — a session with neither field populated simply omits the preview
+    /// (the client (<c>HistoryOverlay.tsx</c> <c>mapSession</c>) renders nothing when `preview` is
+    /// absent, which is correct; a title always needs a fallback, a preview does not).
+    /// ADR-015 Tier 3 (user's own History list — same class of data as the existing title/
+    /// conversationSummary already returned by this endpoint): a short, bounded snippet of the
+    /// user's own content, not full message content.
+    /// </summary>
+    private static string? BuildPreview(RecentSessionProjection p)
+    {
+        var seed = FirstNonWhitespace(p.ConversationSummary, p.FirstMessage);
+        return string.IsNullOrWhiteSpace(seed) ? null : TruncateSingleLine(seed, PreviewMaxLength);
+    }
+
+    /// <summary>
+    /// FR-D7 (DI-01) — joins the session's persisted workspace-tab <c>displayName</c>s (e.g.
+    /// "Email · Compose") for the History row's tab summary. Only <see cref="StoredWorkspaceTab.DisplayName"/>
+    /// is read — never <c>widgetData</c> (opaque, potentially larger payload; out of scope for a list
+    /// row). Empty/absent tabs → null (client omits the segment; never renders "undefined").
+    /// </summary>
+    private static string? BuildTabSummary(List<StoredWorkspaceTab>? tabs)
+    {
+        if (tabs is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        var names = tabs
+            .Select(t => t.DisplayName)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .ToList();
+
+        return names.Count > 0 ? string.Join(" · ", names) : null;
+    }
+
+    /// <summary>Shared single-line truncation used by <see cref="BuildSessionTitle"/> and <see cref="BuildPreview"/>.</summary>
+    private static string TruncateSingleLine(string text, int maxLength)
+    {
+        var oneLine = text.Replace('\r', ' ').Replace('\n', ' ').Trim();
+        return oneLine.Length > maxLength ? oneLine[..(maxLength - 3)] + "…" : oneLine;
+    }
+
+    /// <summary>Title fallback bound (unchanged from the pre-FR-D7 80-char cap).</summary>
+    private const int TitleMaxLength = 80;
+
+    /// <summary>FR-D7 preview bound — a short snippet, not full content (ADR-015 Tier 3).</summary>
+    private const int PreviewMaxLength = 140;
 
     private static string? FirstNonWhitespace(params string?[] candidates)
     {
@@ -833,8 +920,13 @@ public class SessionPersistenceService : ISessionPersistenceService
         return null;
     }
 
-    /// <summary>Cosmos projection for <see cref="ListRecentSessionsAsync"/> — never the full message list.</summary>
-    private sealed class RecentSessionProjection
+    /// <summary>
+    /// Cosmos projection for <see cref="ListRecentSessionsAsync"/> — never the full message list.
+    /// Internal (not private), mirroring the codebase's established test seam convention (e.g.
+    /// <c>CosmosPromptDocument</c>), so <c>Sprk.Bff.Api.Tests</c> (InternalsVisibleTo, see .csproj)
+    /// can construct fixtures for the FR-D7 projection-mapping test without reflection.
+    /// </summary>
+    internal sealed class RecentSessionProjection
     {
         [System.Text.Json.Serialization.JsonPropertyName("id")]
         public string Id { get; set; } = string.Empty;
@@ -853,6 +945,18 @@ public class SessionPersistenceService : ISessionPersistenceService
 
         [System.Text.Json.Serialization.JsonPropertyName("firstMessage")]
         public string? FirstMessage { get; set; }
+
+        /// <summary>FR-D4 (task 032) — the persisted, writable session title. Null for sessions that pre-date the field.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("title")]
+        public string? Title { get; set; }
+
+        /// <summary>FR-D7 (DI-01) — <c>ARRAY_LENGTH(c.messages)</c>. Null only if the query omits it (never negative).</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("messageCount")]
+        public int? MessageCount { get; set; }
+
+        /// <summary>FR-D7 (DI-01) — the session's persisted NFR-09 workspace tabs. Empty/null for sessions with no non-Home tabs.</summary>
+        [System.Text.Json.Serialization.JsonPropertyName("tabs")]
+        public List<StoredWorkspaceTab>? Tabs { get; set; }
     }
 
     /// <summary>

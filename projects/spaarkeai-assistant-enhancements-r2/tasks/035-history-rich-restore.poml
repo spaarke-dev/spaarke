@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Route History through the rich restore path, clearing/remounting the workspace first (FR-D1)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 031</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend resume routing with a known overwrite hazard + regression test</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The tab-restore overwrite hazard is subtle and correctness-critical (must not corrupt stored tabs)</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (shared client spine) + WorkspacePane/WorkspaceTabManager</parallel-reason>
+    <deps>031</deps>
+    <tags>react, frontend, testing</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Route handleSelectHistorySession through the rich `/restore`+`/tabs` flow that "open an Analysis" already uses, clearing/remounting the workspace FIRST so tab restore is not blocked and cannot overwrite the reopened session's stored tabs.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 frontend expertise; disciplined about tab-restore lifecycle ordering and the overwrite hazard where a prior session's tabs corrupt the reopened set.</role>
+  <goal>Reopening a session restores chat + its tabs + document reference; the stored tab set is NOT corrupted by the previous session's tabs (regression test for the overwrite hazard).</goal>
+  <context>
+    <background>FR-D1 — the load-bearing resume fix. handleSelectHistorySession (ConversationPane.tsx:2314-2320) is a SIMPLE text-reload today; the rich path that "open an Analysis" uses (useSessionRestore GET /restore, SessionRestoreManager in ThreePaneShell, WorkspacePane /tabs restore, WorkspaceTabManager.restoreFromPersistence/clearAllTabs) exists but History doesn't use it. restoreFromPersistence is a no-op if a non-Home tab exists, so the workspace must be cleared/remounted BEFORE restore.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (handleSelectHistorySession:2314-2320 — replace the simple text-reload)</file>
+      <file>src/solutions/SpaarkeAi/src/hooks/useSessionRestore.ts (rich /restore)</file>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx (SessionRestoreManager)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (/tabs restore)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManager.ts (clearAllTabs/restoreFromPersistence)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-040">Restore reads the rich spec from the existing Cosmos StoredSession — no new store.</constraint>
+    <constraint source="ADR-049">A saved redline reloads render-follows-store.</constraint>
+    <constraint source="project">Clear/remount the workspace BEFORE tab restore so restoreFromPersistence (no-op if a non-Home tab exists) is not blocked and the prior session's tabs can't overwrite the reopened session's stored tabs.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Clear/remount the workspace (clearAllTabs) BEFORE restore so restoreFromPersistence isn't blocked.</step>
+    <step order="2">Route handleSelectHistorySession through the rich /restore + /tabs flow (as "open an Analysis" does), not the simple text reload.</step>
+    <step order="3">Ensure the reopened session's stored tabs are restored and NOT overwritten by the prior session's tabs.</step>
+    <step order="4">Add a regression test for the overwrite hazard (prior tabs must not corrupt the reopened set).</step>
+    <step order="5">Build + test.</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If clearing the workspace first risks losing an in-flight unsaved tab, STOP and escalate rather than silently discarding it.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Rich resume">
+      <steps>Reopen a history session, verify chat + tabs + document reference restore; open a session with tabs, then reopen a DIFFERENT session, verify the second session's tabs are correct (not the first's). Include an ADR-021 dark-mode check.</steps>
+      <expected>Reopening restores chat + tabs + document reference; the second session's tabs are correct (not the first's); no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="test">the overwrite-hazard regression test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Reopening restores chat + tabs + document reference.</criterion>
+    <criterion testable="true">The stored tab set is not corrupted by the previous session's tabs.</criterion>
+    <criterion testable="true">The overwrite-hazard regression test passes.</criterion>
+    <criterion testable="true">Uses the rich path (not the simple text reload).</criterion>
+  </acceptance-criteria>
+  <notes>FR-D1 — the load-bearing resume fix.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

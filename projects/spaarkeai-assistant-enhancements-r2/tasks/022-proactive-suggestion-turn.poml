@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Proactive suggestion turn — grounded, contextType-filtered, once-per-tab, ≤3 content-specific chips (FR-B3/B5) — Option B (BFF suggest path + client)</title>
+    <phase>3 B — Proactive follow-ons</phase>
+    <gate>blocked until 020,021</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF endpoint + service (new grounded-turn path) AND client .tsx spine (cache/lifecycle). bff-api + react + .cs/.tsx → FULL.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New grounded-turn suggestion path + ADR-039/040 discipline (one decider, no second dispatch protocol, store-before-render) + cache/lifecycle correctness. High judgment, high blast radius.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (shared client spine) + BFF ChatEndpoints/agent path. Run alone.</parallel-reason>
+    <deps>020,021</deps>
+    <tags>react, frontend, ai, bff-api</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+  <prompt>Deliver FR-B3/B5 as a TRUE grounded suggestion turn (Option B, owner-approved 2026-08-06): on a tab's first open, run ONE grounded agent turn — server-side, deterministically pre-filtered to Bindings whose ContextTypeTags include the tab's contextType — that reads the active-tab compact content and SELECTS + PHRASES ≤3 content-specific follow-on chips. Cache per tabId (fire at most once per tab; never on switch-back). Render via the reactive useConsumerChips surface. NOT a static per-type menu; NOT a classifier; NOT a SprkChat fork; NOT a second dispatch protocol.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Full-stack: .NET Minimal API + the SprkChat agent-turn/dispatch infra (BFF) AND React/TypeScript + Fluent v9 (SpaarkeAi). Disciplined about ADR-039 (one grounded decider, deterministic pre-filter only), ADR-040 (store-before-render), and reusing — not resurrecting/forking — existing surfaces.</role>
+  <goal>Opening a content-rich tab fires exactly ONE grounded suggestion turn whose ≤3 chips are specific to THAT tab's content (an NDA tab ≠ an invoice tab ≠ a generic "document" menu); switching away and back fires zero additional turns; chips render via useConsumerChips and are dismissible; no generic boilerplate chips on content-rich tabs.</goal>
+  <context>
+    <background>
+      Owner chose Option B over a deterministic catalog filter because A is structurally a context-type-keyed STATIC menu (same chips for every document tab) and therefore CANNOT satisfy FR-B5 ("generic boilerplate chips are not emitted for content-rich tabs"). B is the product capability: the Assistant reads what you opened and proposes the right next moves for it. See notes/deviations.md §"Task 022 Option B".
+
+      Verified structural gaps this design closes (from the 022 exploration):
+      1. `CapabilityDto` (CapabilityDiscoveryEndpoints.cs:177-183) does NOT expose ContextTypeTags — so contextType filtering CANNOT be client-side; it is done SERVER-SIDE in the suggest path (which reads Binding.ContextTypeTags via ConsumerRoutingService — task 021, already present).
+      2. No server path consumes activeContext.contextType and no client "fire a grounded turn on tab-open" handle exists — this task adds the purpose-built suggest endpoint + the client trigger.
+
+      Client seam ALREADY MAPPED (reuse, don't re-derive):
+      - Trigger: the existing `usePaneEvent("workspace", …)` subscriber at ConversationPane.tsx:2331; `deriveActiveTabFocusStamp(event)` (activeTabFocusStamp.ts:57-67) returns `{ widgetType, contextType, tabId, displayName, compactState }`. `focusStamp.tabId` + `focusStamp.contextType` are your trigger data.
+      - Once-per-tab idiom to mirror: `wizardAutoRunHandledRef = useRef<Set<string>>(new Set())` (ConversationPane.tsx:596) guarded via `.has(k)/.add(k)`.
+      - Render seam: `chips.acceptChips(rawChips)` (useConsumerChips.tsx:550-561; controller wired at ConversationPane.tsx:799-872, rendered via `chips.consumerChipsSlot` in `transcriptFooter` at :2472). acceptChips replaces-only-when-non-empty and does NOT cap — the caller slices to ≤3. Chip wire shape: `{ targetBindingId|target_binding_id, label|chip_label, args|prefillSlots }` (parseConsumerChips).
+      - `activeContext` compact tab state is already stamped onto outbound bodies (ConversationPane.tsx:1929-1931) and typed server-side as ChatActiveContext (task 012, ChatEndpoints.cs) — reuse this shape for the suggest request.
+      - `useSuggestionCards` is DELETED (confirmed). `SuggestionCard.tsx` is retained/presentational — do NOT re-wire it (de-facto resurrection).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (ChatActiveContext DTO + session message endpoints; add POST …/{id}/suggest here or a sibling SuggestionEndpoints.cs)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (grounded agent-turn construction — reuse for the suggestion turn)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs (deterministic candidate resolution; add a contextType pre-filter over Binding.ContextTypeTags from task 021)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (tab-open trigger + once-per-tab cache + acceptChips render)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx (render seam — acceptChips; do NOT add contextType logic here)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts (active_widget_changed payload: tabId :445, widgetContextType :440)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039">EXACTLY ONE grounded decider. The contextType→ContextTypeTags narrowing is a DETERMINISTIC PRE-FILTER (permitted). The ONE grounded turn then selects/phrases ≤3 chips. MUST NOT add a classifier/reranker/keyword map, a SECOND intent mechanism, or a SECOND dispatch protocol. The suggestion turn rides the existing single dispatch surface — no new routing contract.</constraint>
+    <constraint source="ADR-040">Store-before-render: any tool reads the suggestion turn consumes get citations + ledger persistence per the existing turn path. Do NOT invent a new persistence store. If a chip-only suggestion output cannot be ledgered within the existing StoredSession model, STOP and escalate (do not add a store).</constraint>
+    <constraint source="ADR-015">The active-tab compact content passed to the suggest turn is the SAME bounded compact-ambient shape already permitted (Path A). Do NOT widen it; do NOT dump full content (full body stays on-demand via eml-render, FR-C4).</constraint>
+    <constraint source="project">Render via the REACTIVE surface (useConsumerChips / chips.acceptChips). MUST NOT reuse or resurrect useSuggestionCards or re-wire SuggestionCard.tsx.</constraint>
+    <constraint source="project">Seam rule — MUST NOT fork SprkChat. Client fires the suggest call imperatively (fetch), feeds chips via acceptChips; the outbound-body/decorate seam is unchanged.</constraint>
+    <constraint source="project">NFR-02 — fire AT MOST once per tab (cache by tabId; Set&lt;string&gt; ref). Never on switch-back. ≤3 chips, dismissible, non-modal. No generic boilerplate on content-rich tabs.</constraint>
+    <constraint source="BFF-§10">New endpoint + service on the BFF. State Placement Justification (load bff-extensions.md). Publish ≤60 MB (baseline ~48.25 MB); report absolute + delta. No new NuGet packages expected. Add/adjust tests per the test-update obligation.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/notes/deviations.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/notes/catalog-context-tags.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-cosmos-session-ledger.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">BFF deterministic pre-filter: add a contextType filter over candidate Bindings in ConsumerRoutingService (reuse Binding.ContextTypeTags from task 021; a Binding matches when its tags contain the requested contextType OR its tags are empty=any). This is the ADR-039 permitted pre-filter — no ranking, no model call.</step>
+    <step order="2">BFF suggestion service: run ONE grounded agent turn (reuse SprkChatAgentFactory / the existing agent-turn infra — do NOT fork it) that receives the active-tab compact content + the pre-filtered candidate capabilities (bindingId + tool-description/label) and returns ≤3 CONTENT-SPECIFIC chips it selected + phrased. Structured output {targetBindingId, label, args?}, capped at 3. Ledger/cite per the existing turn path (ADR-040). Escalate rather than fork/duplicate if the existing turn infra can't yield a chip-only output cleanly.</step>
+    <step order="3">BFF endpoint: POST /api/ai/chat/sessions/{sessionId}/suggest — request { contextType, activeContext } (reuse ChatActiveContext), returns { chips: ≤3 }. Do NOT inject a transcript/Assistant message (silent proactive suggestion). Register DI; RequireAuthorization; add a contract/integration test.</step>
+    <step order="4">BFF build (dotnet build) + tests + publish-size check + deploy (Deploy-BffApi.ps1); report size + delta; /healthz.</step>
+    <step order="5">Client trigger: in the existing `usePaneEvent("workspace", …)` handler (ConversationPane.tsx:2331), when a focusStamp with a tabId+contextType arrives for a not-yet-suggested tab (Set&lt;string&gt; ref like wizardAutoRunHandledRef), call POST /suggest ONCE, cache the ≤3 chips per tabId, and render via chips.acceptChips(sliced≤3). No re-fire on switch-back. (Optional: restore cached chips on switch-back.)</step>
+    <step order="6">Client build (npm run typecheck — Surface-owned: 0) + seam test: two active_widget_changed with same tabId ⇒ suggest called once; different tabId ⇒ called again; ≤3 chips reach acceptChips. Model on useConsumerChips.surface-launch.test.tsx + ConversationPane.active-context-decorate.e2e.test.tsx.</step>
+    <step order="7">Deploy SpaarkeAi code page (Deploy-SpaarkeAi.ps1, clear Vite cache first). Update TASK-INDEX ✅ + current-task + notes.</step>
+  </steps>
+  <escalation>
+    <trigger>If a chip-only grounded suggestion output cannot be produced by reusing the existing agent-turn infra WITHOUT forking SprkChat or adding a second dispatch protocol/routing contract, STOP and escalate (ADR-039).</trigger>
+    <trigger>If ledgering the suggestion turn (ADR-040 store-before-render) would require a new persistence store or a change to the StoredSession model's identity, STOP and escalate.</trigger>
+    <trigger>If BFF publish delta ≥+5 MB or cumulative ≥55 MB, STOP and escalate per BFF §10 before deploying.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Content-specific, once per tab">
+      <steps>Open a content-rich document/email tab; verify ≤3 chips that are SPECIFIC to that content (not a generic per-type menu) and exactly one suggest call fires. Switch away and back; verify zero additional suggest calls. Verify chips are dismissible. Include an ADR-021 dark-mode no-regression check.</steps>
+      <expected>≤3 content-specific dismissible chips on first open; exactly one suggest call; zero additional on switch-back; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <justification>
+    <existing>ConsumerRoutingService resolves candidate Bindings (has ContextTypeTags from 021); SprkChatAgentFactory runs grounded turns; useConsumerChips renders chips; ChatActiveContext carries compact tab state.</existing>
+    <extension>Extend — a contextType pre-filter + a suggest endpoint that REUSES the grounded-turn infra; a client trigger that REUSES the existing focus-stamp subscriber + chip render seam. No new registry, no new dispatch protocol, no SprkChat fork.</extension>
+    <cost-of-doing-nothing>Without the server suggest path the Assistant cannot offer content-specific proactive chips (FR-B5 fails — only generic per-type menus are possible client-side); FR-B3's grounded, contextType-scoped suggestion has no home.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (or new SuggestionEndpoints.cs)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (suggestion service)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs (contextType pre-filter)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Opening a content-rich tab fires exactly one grounded suggest call; the ≤3 chips are specific to that tab's content (verified: different content → different chips, not a fixed per-type menu).</criterion>
+    <criterion testable="true">Switch-away-and-back fires zero additional suggest calls (cache keyed by tabId).</criterion>
+    <criterion testable="true">≤3 dismissible chips render via useConsumerChips (NOT useSuggestionCards; SuggestionCard.tsx untouched).</criterion>
+    <criterion testable="true">contextType filtering is a deterministic server-side pre-filter over Binding.ContextTypeTags; the ONE grounded turn is the only decider (no classifier/second mechanism/second dispatch protocol; no SprkChat fork).</criterion>
+    <criterion testable="true">No generic boilerplate chips on content-rich tabs.</criterion>
+    <criterion testable="true">BFF builds + tests pass; publish ≤60 MB (absolute + delta reported); both BFF + code page deployed; /healthz 200.</criterion>
+    <criterion testable="true">Seam test passes (one fire / zero on switch-back / ≤3 chips).</criterion>
+  </acceptance-criteria>
+  <notes>Re-scoped STANDARD→FULL, single-file→BFF+client, Option B (owner-approved 2026-08-06). Supersedes the original single-file ConversationPane-only scope. FR-B4 manual refresh = task 023; dev trace = task 024; Reanalyze chip = task 038 (reuses the Reanalyze binding 9c29b488… from 021).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill. BFF-touching → state Placement Justification + publish-size.</protocol>
+  </execution>
+</task>

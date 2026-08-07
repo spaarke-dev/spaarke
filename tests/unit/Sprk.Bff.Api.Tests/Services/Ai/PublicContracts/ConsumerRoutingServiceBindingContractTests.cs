@@ -90,6 +90,7 @@ public sealed class ConsumerRoutingServiceBindingContractTests
         entity["sprk_oneventbindings"] =
             """[{"event":"document_uploaded","order":2}]""";
         entity["sprk_surfaces"] = "assistant, record-form,office";
+        entity["sprk_contexttypetags"] = "document, calendar"; // FR-B2: CSV context-type tags (mirrors sprk_surfaces)
         entity["sprk_modeltieroverride"] = new OptionSetValue(100000002); // Reasoning
 
         // Action-side execution fields (§6.1) — aliased via the action link
@@ -146,6 +147,8 @@ public sealed class ConsumerRoutingServiceBindingContractTests
         binding.OnEventBindings[0].Event.Should().Be("document_uploaded");
         binding.OnEventBindings[0].Order.Should().Be(2);
         binding.Surfaces.Should().Equal("assistant", "record-form", "office");
+        // FR-B2: sprk_contexttypetags parses as trimmed CSV tokens, same shape as sprk_surfaces.
+        binding.ContextTypeTags.Should().Equal("document", "calendar");
         binding.ModelTierOverride.Should().Be(AiModelTier.Reasoning);
 
         // Action-side execution fields
@@ -182,6 +185,7 @@ public sealed class ConsumerRoutingServiceBindingContractTests
         binding.CaptureMode.Should().Be(BindingCaptureMode.LoopElicitation, "per column dictionary: treat null as Loop Elicitation");
         binding.OnEventBindings.Should().BeEmpty();
         binding.Surfaces.Should().BeEmpty("empty surfaces = offered on all surfaces");
+        binding.ContextTypeTags.Should().BeEmpty("FR-B2: null sprk_contexttypetags = relevant to any context");
         binding.ModelTierOverride.Should().BeNull("null = use Action default");
 
         // Action-side defaults when the left-outer link produced no row

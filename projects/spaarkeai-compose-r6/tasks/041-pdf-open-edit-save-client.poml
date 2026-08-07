@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Open PDF in Compose → edit → save as docx version (client wiring)</title>
+    <phase>4 PDF intake</phase>
+    <gate>blocked until 040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.tsx` on the Compose client hot path — wires the PDF open→edit→save-as-docx round-trip and the honest-lossiness UX. FULL per root CLAUDE.md §8 (modifying `.tsx`, tags include `compose`/`frontend`). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client wiring over a finished intake path (040) + the existing render-on-save path: open the PDF-derived canonical model in the editor, edit, save as a docx version, and present honest-lossiness copy. Well-specified integration; the intake judgment is 040's. Sonnet per plan.md §5 Phase 4.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the Compose client (`Spaarke.Compose.Components` — `ComposeWorkspace.tsx`/`ComposeEditor.tsx`) contested by `spaarkeai-compose-r5` (active on `ComposeWorkspace.tsx`), `r4.5`, `r1/r2/r3`, `agreements-r1`/`analysis-hub-r1`. Serialize edits; sequential after 040; `/conflict-check` before the PR; NEVER delete `docxBridge.ts`.</parallel-reason>
+    <deps>040</deps>
+    <tags>frontend,compose</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the client so a user can OPEN a PDF (NDA/agreement) in Compose (via the 040 PDF → canonical model intake), EDIT
+    it, and SAVE it as a docx version through the existing render-on-save path — with HONEST lossiness UX copy (PDF is
+    fixed-layout; intake is lossier than docx; version history is the safety net). This is FR-06's client half + Success
+    Criterion 2. Keep the client theme-aware (ADR-021 dark mode, Fluent v9 semantic tokens, zero hardcoded colors) and
+    NEVER delete `docxBridge.ts`.
+  </prompt>
+
+  <role>SPAARKE platform developer (Compose client). Comfortable in `Spaarke.Compose.Components` (`ComposeWorkspace.tsx`/`ComposeEditor.tsx`), the canonical-model open path, the render-on-save save path, and Fluent v9 semantic-token theming (ADR-021). Follow ADRs strictly.</role>
+
+  <goal>
+    A client flow where a PDF opens in Compose (rendered from the 040 canonical model), is editable, and saves as a docx
+    version through the existing render-on-save path — with a clear, honest-lossiness UX message that PDF intake is
+    fixed-layout / lossier than docx and that version history is the safety net. Theme-aware in light + dark;
+    `docxBridge.ts` intact.
+  </goal>
+
+  <context>
+    <background>
+      Task 040 projects PDF into the canonical model. This task exposes it in the client: open the PDF-derived model in
+      the editor, edit, and save as a docx version via the R6 render-on-save path (save = render a fresh docx from the
+      model into a new SPE version). Because PDF is fixed-layout, intake is inherently lossier than docx — the spec
+      requires HONEST lossiness expectations in the UX and leans on version history (FR-07). The client affordance must
+      obey ADR-021 (Fluent v9 semantic tokens; dark-mode correct). Success Criterion 2 ("a PDF NDA opens in Compose, is
+      edited, and saves as a docx version") closes on this + 042.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — add the PDF open path + honest-lossiness UX copy; save-as-docx via the existing save path.</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — render/edit the PDF-derived canonical model.</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — the docx↔editor bridge; NEVER delete; reuse for the model round-trip.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/DocumentIntelligenceService.cs — the 040 PDF → canonical model intake the client consumes.</file>
+      <file role="reference">projects/spaarkeai-compose-r6/spec.md — FR-06 (honest lossiness), Success Criterion 2, ADR-021 dark-mode.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">PDF → canonical model intake — the model the client opens, edits, and saves as a docx version.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-06">The client MUST open a PDF (via 040 intake), allow editing, and save as a docx version through the EXISTING render-on-save path — no new save mechanism. Scope: client wiring + UX; intake is 040's, save is the R6 render-on-save path.</constraint>
+    <constraint source="spec / honest-lossiness">The UX MUST set honest lossiness expectations (PDF is fixed-layout; intake is lossier than docx; version history is the safety net). Scope: a clear, non-alarming message on PDF open; no false "identical to source" claim.</constraint>
+    <constraint source="ADR-021">The client affordance/message MUST use Fluent v9 semantic tokens (zero hardcoded colors) and render correctly in BOTH light and dark themes. Scope: verified by the dark-mode `&lt;ui-tests&gt;` below.</constraint>
+    <constraint source="project / Compose client">NEVER delete `docxBridge.ts`; reuse it for the model round-trip. Scope: the PDF-derived model rides the same client bridge as docx.</constraint>
+    <constraint source="project / BFF Hygiene §10">If any BFF touch occurs, report compressed publish size + delta vs ~49.63 MB baseline; run `/conflict-check` before the PR (client-only change expected — state so). Scope: coordination on the contested Compose surface.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose client open→edit→save-as-docx round-trip; honest-lossiness UX; Fluent v9 dark mode (ADR-021); `docxBridge.ts` reuse</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical-model open + render-on-save" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx">
+        Open the PDF-derived canonical model (040) in the editor via `docxBridge.ts`; on save, go through the existing render-on-save path so the output is a docx version. Do not delete `docxBridge.ts`.
+      </pattern>
+      <pattern name="Honest-lossiness message" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx">
+        Present a clear, theme-aware (semantic-token) message on PDF open: fixed-layout / lossier than docx, version history is the safety net — no "identical to source" claim.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec FR-06 (honest lossiness) + Success Criterion 2 + ADR-021.</step>
+    <step order="1" name="Re-grep the client surfaces">Confirm the `ComposeWorkspace.tsx`/`ComposeEditor.tsx` open + save-as-docx paths and the `docxBridge.ts` round-trip; confirm the 040 intake contract the client consumes.</step>
+    <step order="2" name="Wire the PDF open path">Open a PDF via the 040 canonical-model intake into the editor; make it editable; save as a docx version through the existing render-on-save path.</step>
+    <step order="3" name="Add honest-lossiness UX">Add a clear, theme-aware (Fluent v9 semantic tokens) lossiness message on PDF open; no false "identical to source" claim.</step>
+    <step order="4" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="5" name="Build + ui-tests">Build the Compose client (`npm run build`); run the dark-mode `&lt;ui-tests&gt;`. If any BFF touch, `dotnet publish -c Release` size + delta. `/conflict-check` before the PR.</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-r6/tasks/TASK-INDEX.md`: set task 041 to ✅. Record any deviation in `projects/spaarkeai-compose-r6/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If opening/saving the PDF-derived model would require a new save mechanism (bypassing render-on-save), deleting `docxBridge.ts`, or a hardcoded-color affordance (ADR-021), STOP and escalate per root CLAUDE.md §6 rather than adapting — surface the conflict and options.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="PDF opens with honest-lossiness message in light and dark">
+      <steps>
+        <step>Open a PDF NDA/agreement in the Compose workspace.</step>
+        <step>Verify the editor renders the PDF-derived canonical model and an honest-lossiness message is shown (fixed-layout / lossier than docx / version history is the safety net).</step>
+        <step>Toggle the app theme from light to dark (ADR-021).</step>
+        <step>Verify the message + affordance re-render using Fluent v9 semantic tokens — no hardcoded colors, correct contrast in both themes, no console errors.</step>
+      </steps>
+      <expected>The PDF opens, the lossiness message is legible and correctly themed in both light and dark, no hardcoded colors, no console errors.</expected>
+    </test>
+    <test name="Edit + save-as-docx round-trips">
+      <steps>
+        <step>Edit the opened PDF-derived document.</step>
+        <step>Save; verify it saves as a docx version via render-on-save (no 422), and `docxBridge.ts` is intact.</step>
+      </steps>
+      <expected>The edited document saves as a new docx version without error; `docxBridge.ts` is not deleted.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build the Compose client (`npm run build`) and run the client tests.</tool>
+    <tool name="dotnet">If any BFF touch: `dotnet publish -c Release` for the size check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx + ComposeEditor.tsx — PDF open→edit→save-as-docx wiring + honest-lossiness UX</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a PDF NDA/agreement, when opened in Compose, then the editor renders the PDF-derived canonical model (040) and an honest-lossiness message is shown.</criterion>
+    <criterion testable="true">Given the opened PDF-derived document, when edited and saved, then it saves as a docx version through the existing render-on-save path (no 422, new SPE version).</criterion>
+    <criterion testable="true">The lossiness UX makes no false "identical to source" claim and points to version history as the safety net.</criterion>
+    <criterion testable="true">The affordance/message uses Fluent v9 semantic tokens (zero hardcoded colors) and renders correctly in both light and dark themes (ADR-021).</criterion>
+    <criterion testable="true">Negative: `docxBridge.ts` is NOT deleted; no new save mechanism is introduced (render-on-save reused).</criterion>
+    <criterion testable="true">Compose client build green; dark-mode ui-tests pass; `/conflict-check` clean; (client-only change; any BFF touch reports publish size + delta vs ~49.63 MB baseline).</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 041 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-06 (client half) + Success Criterion 2. The dark-mode `&lt;ui-tests&gt;` satisfy the ADR-021 check required for
+    frontend-tagged tasks. 042 tests the end-to-end PDF NDA open→edit→save. TASK-INDEX.md + current-task.md are owned by
+    the main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

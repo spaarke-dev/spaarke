@@ -122,9 +122,24 @@ public sealed class ComposeSummaryPageSeamTests
         appendedIds.Should().NotBeEmpty($"the appended Summary Page paragraphs must carry minted paraIds for '{docName}'");
         appendedIds.Should().OnlyHaveUniqueItems($"every appended paraId must be unique for '{docName}'");
 
-        // No tracked-change marks — the Summary Page is server-authored FINAL content, not a proposed edit.
-        body.Descendants<InsertedRun>().Should().BeEmpty(
-            $"the Summary Page must NOT be emitted as a tracked w:ins insertion for '{docName}' (ADR-049 — this is not a ComposeShadowPatchEngine operation)");
+        // No NEW tracked-change marks — the Summary Page is server-authored FINAL content, not a proposed
+        // edit. Task 027 re-baseline: the corpus now contains a live-redline exemplar (manifest §1.7,
+        // multi-author-redline-synthetic.docx) whose BODY legitimately carries w:ins — so the oracle is
+        // "AppendSection ADDS none" (count unchanged), not "the document contains none".
+        int CountInsertedRuns(byte[] bytes)
+        {
+            using var probe = WordprocessingDocument.Open(new MemoryStream(bytes, writable: false), isEditable: false);
+            return probe.MainDocumentPart!.Document!.Body!.Descendants<InsertedRun>().Count();
+        }
+        body.Descendants<InsertedRun>().Count().Should().Be(CountInsertedRuns(original),
+            $"the Summary Page must NOT be emitted as a tracked w:ins insertion for '{docName}' (ADR-049 — this is not a ComposeShadowPatchEngine operation); pre-existing document redlines are untouched");
+        // 027 review F3: the subset oracle - NO appended paragraph carries a tracked insertion. Immune to
+        // the net-zero hole (one removed + one added) the count comparison alone would miss.
+        paragraphs
+            .Where(p => !string.IsNullOrEmpty(p.ParagraphId?.Value)
+                && !originalParagraphIds.Contains(p.ParagraphId!.Value!, StringComparer.OrdinalIgnoreCase))
+            .SelectMany(p => p.Descendants<InsertedRun>())
+            .Should().BeEmpty($"no APPENDED Summary Page paragraph may carry a tracked insertion for '{docName}'");
 
         // NFR-01 (reused comparer, task 004): every package part OTHER than document.xml — styles,
         // numbering, headers/footers, theme, media, ... — is byte-identical. AppendSection only opens
@@ -176,9 +191,38 @@ public sealed class ComposeSummaryPageSeamTests
 
         var resultOuterXmlById = ReadParagraphOuterXmlById(result);
 
+        // Task 013 re-baseline (the AppendSection dup-paraId finding, notes S8/S17): a source document can
+        // carry DUPLICATE w14:paraId values (the NDA: the SAME ids appear in a construct's mc:Choice AND
+        // mc:Fallback text-box copies). AppendSection's E2 dedup re-mints the duplicate occurrences so the
+        // package it returns is anchorable - which legitimately mutates the HOST paragraph's OuterXml.
+        // Those paragraphs are exempt from byte-identity; their CONTENT (InnerText) must still be
+        // unchanged. Every other paragraph stays byte-identical (I-4 spirit).
+        HashSet<string> sourceDuplicatedIds;
+        using (var srcDoc = WordprocessingDocument.Open(new MemoryStream(original, writable: false), isEditable: false))
+        {
+            sourceDuplicatedIds = srcDoc.MainDocumentPart!.Document!.Body!
+                .Descendants<Paragraph>()
+                .Select(p => p.ParagraphId?.Value)
+                .Where(v => !string.IsNullOrEmpty(v))
+                .GroupBy(v => v!, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .Select(g => g.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        bool SubtreeCarriesDuplicatedId(string xml) => sourceDuplicatedIds.Any(dup =>
+            xml.Contains($"w14:paraId=\"{dup}\"", StringComparison.OrdinalIgnoreCase));
+
         foreach (var (id, outerXml) in originalOuterXmlById)
         {
             resultOuterXmlById.Should().ContainKey(id, $"original paragraph '{id}' must still exist for '{docName}'");
+            if (sourceDuplicatedIds.Count > 0 && SubtreeCarriesDuplicatedId(outerXml))
+            {
+                var strippedOriginal = System.Text.RegularExpressions.Regex.Replace(outerXml, "w14:paraId=\"[0-9A-Fa-f]{1,8}\"", "w14:paraId=\"X\"");
+                var strippedResult = System.Text.RegularExpressions.Regex.Replace(resultOuterXmlById[id], "w14:paraId=\"[0-9A-Fa-f]{1,8}\"", "w14:paraId=\"X\"");
+                strippedResult.Should().Be(strippedOriginal,
+                    $"paragraph '{id}' in '{docName}' carries source-duplicated nested paraIds - the E2 dedup may re-mint THOSE ids, but nothing else in the paragraph may change");
+                continue;
+            }
             resultOuterXmlById[id].Should().Be(outerXml,
                 $"original paragraph '{id}' must stay byte-identical after appending the Summary Page for '{docName}'");
         }

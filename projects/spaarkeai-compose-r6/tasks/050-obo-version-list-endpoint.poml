@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>New OBO (user-context) list-versions + open-prior-version (read-only) endpoint</title>
+    <phase>5 Documents version-history open UX (read-only)</phase>
+    <gate>dep:002</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF endpoint on the OBO (user-context) auth path; tags include bff/auth; modifies `.cs`; changes the public API surface and introduces an authorization boundary (a user must not read another user's document version). CLAUDE.md §8 — auth-path-touching + new endpoint + `.cs` change → FULL; code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>plan.md §5 Phase 5 assigns opus: OBO authorization-boundary design over SPE (per-user document scope, ADR-028 On-Behalf-Of contract) plus exact-bytes version-download semantics is high-blast-radius security work — a wrong scope leaks another user's document bytes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a new endpoint + its DI/service registration to the shared BFF endpoint surface (`Api/*Endpoints.cs`, `Program.cs` map + service registration), which overlaps every active BFF worktree per `projects/INDEX.md` (`spaarkeai-compose-r1..r5`, `spaarke-ai-architecture-redesign-r2`). Distinct new file, but shared registration → serialize; run `/conflict-check` before the PR.</parallel-reason>
+    <deps>002</deps>
+    <tags>bff, auth</tags>
+    <estimated-effort>M (2-4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Add a NEW OBO (user-context) endpoint that (1) LISTS the SPE versions of a document the calling user can access and (2) OPENS a specific prior version READ-ONLY, returning the exact bytes. Reuse the existing OBO primitive `DriveItemOperations.DownloadFileVersionAsUserAsync` (`:842`, Compose-internal + unexposed today) underneath. This is the render-on-save safety net made reachable from the product (FR-07 / Success Criterion 4). Restore and branch-from are OUT OF SCOPE — implement NO write/restore path.</prompt>
+
+  <role>SPAARKE platform developer with .NET 8 Minimal-API + SharePoint Embedded On-Behalf-Of (OBO) auth expertise (ADR-028 Spaarke Auth v2, the `GraphClientFactory` OBO path) and `SpeFileStore`/`DriveItemOperations` version-fetch familiarity. Follow ADRs strictly.</role>
+
+  <goal>A new OBO endpoint pair exists on the SPE/Documents endpoint surface: `GET` list-versions returns the version metadata (version id/label, timestamp, size) for a document the calling user is authorized to read, and `GET` open-prior-version streams the exact bytes of a named prior version read-only. Both run entirely through the user's OBO token (no app-only elevation), reuse `DownloadFileVersionAsUserAsync:842`, keep `Services/Compose`/facade purity (byte[]-in / projection-out; ADR-007), and are proven by a through-the-wire seam slice including a negative authorization case (a user cannot read another user's document version → 403/404, not the bytes). No restore/branch-from code is added.</goal>
+
+  <context>
+    <background>Per spec FR-07 (open/read-only) + Success Criterion 4: render-on-save makes prior versions the fidelity safety net, but that net is unreachable from the product today. The only version-list endpoint that exists is admin-only, app-only, and config-scoped (`GET /api/spe/containers/{id}/items/{itemId}/versions` at `ContainerItemEndpoints.cs:48`) — a DIFFERENT auth path and scope, so it cannot serve a user opening their own document's history. The OBO byte primitive `DriveItemOperations.DownloadFileVersionAsUserAsync:842` already exists but is Compose-internal and unexposed. This task exposes the user-context list + open-prior-version pair. Depends on task 002, which verified SPE versioning is append-only and inventoried the Documents version APIs (`notes/spe-versioning-verify.md`).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ (new OBO version-history endpoint — extend the existing SPE/Documents endpoint surface; do NOT fold into the admin `ContainerItemEndpoints.cs`)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs (DownloadFileVersionAsUserAsync:842 — the OBO primitive to reuse)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ContainerItemEndpoints.cs (admin/app-only version-list at :48 — the DIFFERENT auth path this task must NOT reuse)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs (facade; byte[]-in / projection-out boundary)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs (map the new endpoint + register any new service)</file>
+      <file role="new">tests/integration/seam/Compose/ (version-history seam slice, incl. negative authorization case)</file>
+      <file>projects/spaarkeai-compose-r6/notes/spe-versioning-verify.md (task 002 output)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Verified SPE versioning is append-only + inventory of the Documents version APIs (`notes/spe-versioning-verify.md`) — this endpoint relies on prior versions being retrievable and non-destructive.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Use the OBO (On-Behalf-Of, user-context) auth path only — the endpoint resolves the SPE item and its versions through the calling user's token (via the `GraphClientFactory` OBO flow), NEVER app-only elevation. A user MUST NOT be able to list or open a version of a document they are not authorized to read; enforce the SPE authorization boundary through the OBO token, not a post-hoc filter.</constraint>
+    <constraint source="ADR-007">No `Microsoft.Graph` types above `SpeFileStore` — the Graph/SPE hop stays behind the facade/`DriveItemOperations`; the endpoint returns a projection (version metadata DTO / byte stream), byte[]-in / projection-out.</constraint>
+    <constraint source="ADR-013">No AI-internal types (`IOpenAiClient` / executors / routing) introduced by this endpoint; version-history is a document/SPE concern, not AI dispatch.</constraint>
+    <constraint source="ADR-039">Engine frozen — this adds NO new AI dispatch endpoint; it is a document version-read endpoint only.</constraint>
+    <constraint source="ADR-038">Seam DoD: a through-the-wire WebApplicationFactory seam slice in `tests/integration/seam/Compose/` covers list + open-prior-version AND the negative authorization case. NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="project">SCOPE: open/read-only ONLY. MUST NOT implement version restore, branch-from, or any write/mutation of version state (deferred to a fast-follow per spec Out of Scope). NEVER delete `docxBridge.ts`.</constraint>
+    <constraint source="project">Registration symmetry (root §10): the endpoint maps unconditionally → register its service unconditionally (no `if(flag)` asymmetry). Run `/conflict-check` before the BFF PR (shared endpoint/DI registration overlaps `spaarkeai-compose-r1..r5` + `spaarke-ai-architecture-redesign-r2`).</constraint>
+    <constraint source="CLAUDE.md §10">BFF task — state the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`): the endpoint lands on the existing SPE/Documents endpoint surface, reuses the existing OBO primitive, adds no new subsystem. Verify publish size ≤60 MB compressed and report absolute + delta vs the task-003 baseline (~49.63 MB incl. PDBs; state the PDB convention). Verify no new HIGH CVE (`dotnet list package --vulnerable --include-transitive`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SharePoint Embedded OBO version-history endpoint</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r6/notes/spe-versioning-verify.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="OBO version-download primitive" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs">DownloadFileVersionAsUserAsync:842 — the existing user-context version-byte fetch to reuse under the new endpoint (do not re-implement).</pattern>
+      <pattern name="Admin version-list (the auth path NOT to reuse)" location="src/server/api/Sprk.Bff.Api/Api/ContainerItemEndpoints.cs">:48 — admin/app-only/config-scoped version list; shows the SPE version-metadata shape but is the wrong auth path/scope for a user opening their own doc.</pattern>
+      <pattern name="OBO auth binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Spaarke Auth v2 On-Behalf-Of flow — the calling-user token path this endpoint runs on.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all &lt;knowledge&gt;&lt;files&gt;. Declare RIGOR LEVEL: FULL (reason: OBO auth-path + new endpoint + `.cs`). Read task 002's `notes/spe-versioning-verify.md` for the confirmed version-API shape and append-only guarantee.</step>
+    <step order="1">Read `DownloadFileVersionAsUserAsync:842`, the admin `ContainerItemEndpoints.cs:48` version-list (for the metadata shape only), and the `SpeFileStore` facade boundary. Confirm the OBO list-versions primitive exists or add a user-context list method on the facade/`DriveItemOperations` (byte[]-in / projection-out; no `Microsoft.Graph` above the facade).</step>
+    <step order="2">Add the NEW OBO endpoint pair on the SPE/Documents endpoint surface: (a) list-versions → returns version metadata (id/label, timestamp, size) for a document resolved through the calling user's OBO token; (b) open-prior-version → streams the exact bytes of a named prior version read-only via `DownloadFileVersionAsUserAsync`. Both resolve authorization through the OBO token; NEITHER uses app-only elevation; NEITHER mutates version state.</step>
+    <step order="3">Map the endpoint in `Program.cs` and register any new service UNCONDITIONALLY (registration symmetry — no `if(flag)` asymmetry). Keep DI minimal (ADR-010).</step>
+    <step order="4">Add a through-the-wire seam slice in `tests/integration/seam/Compose/`: list returns the versions; open v3 (after v4 exists) returns v3's exact bytes; and the NEGATIVE case — a user requesting another user's document version is denied (403/404), never the bytes. No banned test shapes.</step>
+    <step order="5">Run `/conflict-check` before the BFF PR. Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size absolute + delta vs the task-003 baseline. Run `dotnet list package --vulnerable --include-transitive` (no new HIGH). State the Placement Justification in the PR.</step>
+    <step order="6">Run/verify: BFF build + the version-history seam slice (incl. negative case) pass green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the OBO token cannot enforce the per-document authorization boundary at the SPE layer (i.e., listing/opening a version would require app-only elevation or a post-hoc filter that could leak another user's bytes), STOP and escalate per CLAUDE.md §6 — this is a security boundary, not something to work around.</trigger>
+    <trigger>If task 002 found SPE versioning is NOT append-only / prior versions are not reliably retrievable, STOP — FR-07's exact-bytes guarantee (Success Criterion 4) cannot be met and the safety-net claim is invalid.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: the admin version-list `GET /api/spe/containers/{id}/items/{itemId}/versions` (`ContainerItemEndpoints.cs:48`) — app-only, config-scoped. The OBO byte primitive `DriveItemOperations.DownloadFileVersionAsUserAsync:842` exists but is Compose-internal and unexposed (grep: no HTTP endpoint maps it today).</existing>
+    <extension>No — the admin endpoint is a different auth path (app-only vs OBO/user-context) and a different scope (admin/config vs the calling user's own document); it cannot be widened to a user surface without breaking its authorization model. The new endpoint reuses the OBO `DownloadFileVersionAsUserAsync` primitive underneath rather than duplicating byte-fetch logic.</extension>
+    <cost-of-doing-nothing>Without it the render-on-save "version history is the safety net" claim is unreachable from the product: a user cannot list or open v3 after v4 exists, so FR-07 has no user-context surface and Success Criterion 4 fails.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build the BFF, run the version-history seam slice, run `dotnet publish` for the size delta, run `dotnet list package --vulnerable`.</tool>
+    <tool name="terminal">Run `/conflict-check` on the BFF endpoint/DI surface; grep for the OBO primitive + admin version-list.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ (new OBO version-history endpoint)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (endpoint map + unconditional service registration)</output>
+    <output type="test">tests/integration/seam/Compose/ (list + open-prior-version + negative authorization seam slice)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a document with multiple SPE versions owned/accessible by the calling user, when the OBO list-versions endpoint is called, then it returns the version metadata (id/label, timestamp, size) resolved through the user's OBO token (no app-only elevation).</criterion>
+    <criterion testable="true">Given versions v3 and v4 exist, when the user opens v3 read-only via the open-prior-version endpoint, then the response is v3's exact bytes and no version state is mutated (no restore/branch).</criterion>
+    <criterion testable="true">Negative (authorization): when a user requests list-versions or open-prior-version for a document they are NOT authorized to read, then the endpoint returns 403/404 and NEVER the bytes — enforced through the OBO token at the SPE layer, not a post-hoc filter.</criterion>
+    <criterion testable="true">Negative (scope): no restore, branch-from, or version-state write path is added; the endpoint is read-only.</criterion>
+    <criterion testable="true">The through-the-wire seam slice (list + open v3 + negative case) passes with no `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests; the endpoint maps unconditionally and its service is registered unconditionally.</criterion>
+    <criterion testable="true">No-regression: `Services/Compose`/facade purity holds (no `Microsoft.Graph` above `SpeFileStore`, no AI internals); BFF publish ≤60 MB (absolute + delta vs task-003 baseline reported); no new HIGH CVE; all unit tests pass and build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07 + Success Criterion 4; plan.md §5 Phase 5. NEW endpoint → §11 justification emitted. OBO auth path → FULL rigor + negative authorization criterion. Reuse `DownloadFileVersionAsUserAsync:842`; do NOT reuse the admin `ContainerItemEndpoints.cs:48` auth path. Restore/branch-from explicitly out of scope. Blocks task 051 (client entry point).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

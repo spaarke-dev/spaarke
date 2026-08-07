@@ -587,6 +587,11 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 {
     public const string TestTenantId = "tenant-compose-fidelity-seam-001";
 
+    /// <summary>The authenticated user's `name` claim the fake auth handler stamps - the save-path
+    /// revision author (ComposeService.ResolveRevisionAuthor). Hoisted (027 review F4) so consumers
+    /// assert against the ONE definition instead of duplicating the literal.</summary>
+    public const string AuthenticatedUserName = "Spaarke Fidelity Seam Test User";
+
     public Mock<ISpeFileOperations> SpeMock { get; } = new(MockBehavior.Loose);
     public Mock<IGenericEntityService> DataverseMock { get; } = new(MockBehavior.Loose);
     public Mock<IPostUploadIndexingEnqueuer> IndexingMock { get; } = new(MockBehavior.Loose);
@@ -755,8 +760,8 @@ internal sealed class ComposeFidelitySeamFakeAuthHandler : AuthenticationHandler
             new("oid", oid),
             new("tid", ComposeFidelitySeamFixture.TestTenantId),
             new(System.Security.Claims.ClaimTypes.NameIdentifier, oid),
-            new(System.Security.Claims.ClaimTypes.Name, "Spaarke Fidelity Seam Test User"),
-            new("name", "Spaarke Fidelity Seam Test User"),
+            new(System.Security.Claims.ClaimTypes.Name, ComposeFidelitySeamFixture.AuthenticatedUserName),
+            new("name", ComposeFidelitySeamFixture.AuthenticatedUserName),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);
