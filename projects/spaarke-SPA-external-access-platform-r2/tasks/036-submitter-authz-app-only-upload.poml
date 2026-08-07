@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Self-service submitter authz (Tier-2 requester==caller) + app-only SPE upload</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:030,031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-sensitive Tier-2 record-scope predicate + app-only SPE upload on the shared external-access surface; the NFR-08 per-module negative test lives here; tags bff-api/auth — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-critical: the requester==caller Tier-2 predicate + app-only (no OBO) SPE upload with authz-before-stream — a single scoping omission is a cross-user data leak; brownfield re-host of an OBO upload path.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Auth-sensitive; hardens the shared Front Door BFF group (031) + SPE surface; must not race another BFF editor (conflict-check with teams-app-r1).</parallel-reason>
+    <deps>030,031</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+  <prompt>Harden the Front Door module (031 group) with FR-17 self-service submitter authz: a Tier-2 record-scope predicate requester==caller so a Front Door user can create and see ONLY their own sprk_servicerequests, plus app-only SPE upload of submitted documents via SpeFileStore (ADR-007) — no OBO, keyed on documentId, authz-before-stream. Resolve the caller via CallerPrincipalResolver + lazily attribute the requester Contact by oid; enforce requester==caller on read AND write server-side. This is one instance of the NFR-08 per-module record-scope mechanism.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Broker-only external auth (ADR-028 +A1/A3, no OBO), per-endpoint/route-group authz filters (ADR-008), SPE via SpeFileStore app-only + authz-before-stream (ADR-007), ProblemDetails (ADR-019).</role>
+  <goal>The Front Door group enforces requester==caller: a GET my-requests returns only the caller's own sprk_servicerequests, a GET by-id for someone else's request returns 403/404 (no data), and a submit attributes the requester to the caller's Contact (lazily resolved-or-created by oid). Document upload streams app-only via SpeFileStore (keyed on documentId, no OBO, no Graph pointer exposure), with authz enforced BEFORE any bytes stream (an unauthorized upload returns 403 with no bytes written). This is the NFR-08 record-scope mechanism instance for the Front Door module.</goal>
+  <context>
+    <background>FR-17 (spec.md line 67): a Front Door user (workforce SSO) can create and see ONLY their own requests (Tier-2 predicate requester==caller, one instance of the per-module record-scope mechanism in NFR-08); document upload streams app-only via the SPE broker (no OBO, no pointer exposure). 031 established the Front Door group + submit/status and explicitly left the requester==caller enforcement + app-only upload as the "034 hardening seam" (now this task, 036). 030 supplies the sprk_requester Contact lookup + the submitted-document linkage. The caller is resolved plane-agnostically via CallerPrincipalResolver (delivered by teams-app-r1); internal workforce users are attributed via a lazily-created Contact bound by oid (FR-11; 023 built the resolve-or-create — reuse it). Tier-1 (module entitlement) is separate + already enforced by the group filter; Tier-2 (record scope) is THIS task. NFR-08 requires a negative Tier-2 test per module.</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-17 line 67; NFR-08 two-tier model + per-module negative test)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/031-typed-intake-framework.poml (the MapFrontDoorEndpoints group + submit/status this task hardens; the "hardening seam" marker)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs (plane-agnostic caller; CallerPrincipal :66 — resolve the caller identity)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs (group-level Tier-1 filter — Tier-2 is added at the handler/service layer)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/**/AccessibleRecordSetService.cs (ComposeAsync — the workforce record-scope predicate pattern to follow for requester==caller)</file>
+      <file>src/server/api/Sprk.Bff.Api/**/InviteExternalUserEndpoint.ResolveOrCreateContactAsync (:172) + ExternalParticipationService (resolve :231) (lazy Contact-by-oid attribution to reuse; 023 wired this)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/**/SpeFileStore.cs (app-only upload/download; ADR-007; key on documentId; authz-before-stream)</file>
+      <file>.claude/adr/ADR-007-spefilestore.md, .claude/adr/ADR-028-spaarke-auth-architecture.md, .claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+    <dependencies>030 (sprk_requester Contact lookup + submitted-document linkage) + 031 (Front Door group + submit/status) must be complete. 023 (lazy Contact attribution resolve-or-create by oid) is reused for requester attribution. 037 (my-requests UI + feedback) renders the requester==caller reads this task enforces.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-028">Broker-only: the upload + the requester==caller reads run app-only downstream (SPE + Dataverse) — the caller token authenticates ONLY to the BFF and is NEVER exchanged for an OBO token. No OBO on any path in this task.</constraint>
+    <constraint source="ADR-007">All SPE uploads/downloads go through SpeFileStore app-only; key on documentId; authz-before-stream (enforce requester==caller / entitlement BEFORE any bytes stream); never expose a Graph drive/item pointer to the client.</constraint>
+    <constraint source="project">Tier-2 requester==caller MUST be enforced SERVER-SIDE on BOTH read (list + by-id) AND write (submit/upload) — never rely on the client to scope. The requester is the caller's Contact, resolved-or-created lazily by oid (reuse 023). Tier-1 (module entitlement) stays on the group filter; do NOT conflate the two tiers.</constraint>
+    <constraint source="ADR-008">Tier-2 enforcement is at the handler/service layer within the existing Front Door route-group (no new global middleware); errors via ProblemDetails (ADR-019).</constraint>
+    <constraint source="project">BFF addition: state the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); run dotnet publish -c Release and report compressed size + delta vs baseline 46.90 MB incl PDBs (ceiling ≤60 MB); run /conflict-check before the BFF PR (teams-app-r1 shares Api/ExternalAccess/** + Infrastructure/ExternalAccess/**).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Record-scope predicate" location="src/server/api/Sprk.Bff.Api/Services/**/AccessibleRecordSetService.cs">Follow ComposeAsync's server-side record-scope predicate shape for requester==caller (Tier-2), keyed on the resolved caller.</pattern>
+      <pattern name="Lazy Contact by oid" location="src/server/api/Sprk.Bff.Api/**/ExternalParticipationService.cs:231">Resolve-or-create the requester Contact by oid (reuse 023) — do not require a licensed systemuser.</pattern>
+      <pattern name="App-only SPE" location=".claude/adr/ADR-007-spefilestore.md">Upload/download via SpeFileStore app-only; authz-before-stream; key on documentId; no Graph pointer to the client.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-17 (line 67) + NFR-08 + ADR-028/007/008 + bff-extensions.md + the 031 group (the hardening-seam markers). Read AccessibleRecordSetService.ComposeAsync + ExternalParticipationService (lazy Contact-by-oid) + SpeFileStore. Run /conflict-check for the external-access BFF surface.</step>
+    <step order="2">Requester attribution: on submit, resolve the caller via CallerPrincipalResolver + resolve-or-create the requester Contact by oid (reuse 023). Set sprk_requester (030) to that Contact. App-only.</step>
+    <step order="3">Tier-2 read enforcement: add a requester==caller predicate (following ComposeAsync) to the Front Door reads — GET my-requests returns only the caller's requests; GET by-id returns 403/404 for another caller's request (no data). Server-side, at the handler/service layer within the group.</step>
+    <step order="4">App-only SPE upload: implement submitted-document upload via SpeFileStore app-only, keyed on documentId (link to the 030 submitted-document linkage), with authz-before-stream — verify entitlement + requester==caller BEFORE any bytes stream; an unauthorized upload returns 403 with no bytes written; never expose a Graph pointer.</step>
+    <step order="5">Cache: if my-requests/participation reads are Redis-cached, ensure invalidation on submit (ADR-009) so a new request appears for its owner immediately.</step>
+    <step order="6">Tests: KEEP-path integration tests in tests/unit/Sprk.Bff.Api.Tests/ — user A cannot see user B's requests (list + by-id, the NFR-08 negative), an unauthorized upload returns 403 with no bytes, requester is attributed to the caller Contact, and no OBO token is acquired (app-only assertion). NO Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests (ADR-038).</step>
+    <step order="7">Build: dotnet publish -c Release — report compressed size + delta vs 46.90 MB. State the Placement Justification in the task notes / PR body.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the app-only SPE upload or the requester==caller read cannot be satisfied without OBO — i.e. any reused component (SpeFileStore upload path, Dataverse read, or Contact attribution) requires an OBO/user token with no app-only variant — STOP and raise 🔔 Human Input Required (ADR-028/NFR-01: no OBO on any SPA path). Do NOT introduce OBO to make the upload/read work. Present the component + the app-only gap + options.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="terminal">Shell, /conflict-check</tool>
+    <tool name="npm">Not required for this task (client my-requests UI is 037)</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** — Tier-2 requester==caller predicate on the Front Door reads (list + by-id) + requester Contact attribution on submit</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/** — app-only SpeFileStore submitted-document upload (documentId-keyed, authz-before-stream)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** — NFR-08 negative (A cannot see B), unauthorized-upload-403-no-bytes, requester-attribution, no-OBO KEEP-path integration tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given user A's requests, when user A calls GET my-requests, then only A's own sprk_servicerequests are returned (Tier-2 requester==caller).</criterion>
+    <criterion testable="true">Negative (NFR-08): given a request owned by user B, when user A calls GET by-id for it, then the server returns 403/404 with NO record data — A never sees B's request.</criterion>
+    <criterion testable="true">Given a submit, when the caller is resolved, then sprk_requester is attributed to the caller's Contact (lazily resolved-or-created by oid) — not a licensed systemuser.</criterion>
+    <criterion testable="true">Given a document upload, when it streams, then it goes through SpeFileStore app-only keyed on documentId with NO OBO and NO Graph pointer exposed to the client.</criterion>
+    <criterion testable="true">Negative (authz-before-stream): given an unauthorized upload (caller lacks entitlement or requester!=caller), when attempted, then the server returns 403 and NO bytes are written to SPE.</criterion>
+    <criterion testable="true">Given the reads + upload, when reviewed, then no OBO/user token is acquired downstream (app-only assertion in tests).</criterion>
+    <criterion testable="true">Given the BFF build, when dotnet publish -c Release runs, then compressed size is reported with delta vs 46.90 MB and is ≤60 MB.</criterion>
+  </acceptance-criteria>
+  <notes>Spec FR-17 (line 67) + NFR-08. This task completes the 031 hardening seam (requester==caller Tier-2 + app-only upload). Reuse AccessibleRecordSetService.ComposeAsync (predicate shape), 023's lazy Contact-by-oid, and SpeFileStore app-only. Tier-1 module entitlement stays on the group filter; Tier-2 record scope is here. 037 renders the my-requests reads this task enforces. §10 BFF: Placement Justification + publish size + conflict-check mandatory. No OBO on any path (ADR-028/A3).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; run /conflict-check + code-review + adr-check at Step 9.5; escalate on any OBO dependency.</protocol>
+  </execution>
+</task>

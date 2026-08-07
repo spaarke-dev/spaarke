@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Teams personal-tab manifest + CSP frame-ancestors + Teams theme bridging</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:011</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New-file creation (manifest, staticwebapp.config.json CSP) + theme-bridge wiring; not core .cs/auth logic; STANDARD per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Config + manifest authoring against a proven teams-app-r1 recipe — literal execution.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>After 011 lands, runs in parallel-group B with 012/017; touches manifest + SWA config + theme bridge, not the shared frame that 013 edits.</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend, deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Package the same SWA as a Teams personal-tab app: author the Teams manifest, set staticwebapp.config.json
+    CSP frame-ancestors to allow Teams origins (no X-Frame-Options), and bridge the Teams theme (light/dark/
+    high-contrast) into the Fluent v9 provider. Build on the teams-app-r1 prior art; do not rebuild host detection.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Teams personal-tab + SWA hosting + Fluent v9 theming specialist.</role>
+
+  <goal>
+    A Teams personal-tab manifest pointing at the SWA content URL; staticwebapp.config.json CSP
+    frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft with no X-Frame-Options;
+    a Teams theme bridge that maps Teams light/dark/contrast to the Fluent v9 theme. The app loads and renders
+    correctly inside Teams (including dark) framed by Teams.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-04 + design.md F4 + ux-brief §4 (Teams theme is a required state) + the Entra/Teams config recipe
+      in spec Dependencies. teams-app-r1 already proved host detection + Teams host adapter selecting the workforce
+      strategy + MSAL v5 NAA live — R2 adopts that host; this task adds the packaging + framing + theme-bridge layer.
+      The SWA framing requirement is exact: CSP frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft,
+      no X-Frame-Options. The Teams JS SDK init must be a no-op outside Teams.
+    </background>
+    <relevant-files>
+      <file>src/client/external-spa/staticwebapp.config.json</file>
+      <file>src/client/external-spa/src/host/TeamsHostAdapter.ts</file>
+      <file>src/client/external-spa/src/App.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (useTheme/ThemeToggle)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+    </relevant-files>
+    <dependencies>011 (shell scaffold — the theme bridge feeds the shell's FluentProvider; the manifest points at the built shell).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">CSP frame-ancestors MUST be exactly 'self' https://teams.microsoft.com https://*.cloud.microsoft with NO X-Frame-Options header (spec FR-04 / Dependencies recipe).</constraint>
+    <constraint source="project">Reuse the teams-app-r1 host detection + Teams host adapter; do not rebuild them; this task adds packaging/framing/theme only (§11).</constraint>
+    <constraint source="ADR-021">Teams theme (light/dark/high-contrast) MUST bridge to the Fluent v9 theme via semantic tokens; zero hardcoded hex; the app renders correctly in Teams dark.</constraint>
+    <constraint source="project">Teams JS SDK init MUST be a no-op outside Teams (browser path unaffected).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Teams host adapter" location="src/client/external-spa/src/host/TeamsHostAdapter.ts">detectTeamsHost :102 — reuse for theme-change subscription + no-op-outside-Teams init.</pattern>
+      <pattern name="Fluent theme" location="src/client/shared/Spaarke.UI.Components/src/index.ts">useTheme/ThemeToggle — the FluentProvider the Teams theme bridges into.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Author the Teams personal-tab manifest (app id, name, personal-tab contentUrl = SWA host, valid domains) per the teams-app-r1 recipe; include an icons/color set.</step>
+    <step order="2">Set staticwebapp.config.json CSP frame-ancestors to 'self' https://teams.microsoft.com https://*.cloud.microsoft and ensure NO X-Frame-Options header is emitted.</step>
+    <step order="3">Implement the Teams theme bridge: subscribe to Teams theme changes (via TeamsHostAdapter) and map light/dark/contrast to the Fluent v9 theme fed to the shell FluentProvider; no-op outside Teams.</step>
+    <step order="4">Build (npm install --legacy-peer-deps --no-audit --no-fund; npm run build:prod); verify zero errors and that the config is emitted in the build output.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="6">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TS/React (build:prod)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Teams personal-tab manifest (src/client/external-spa/teams/ or equivalent)</output>
+    <output type="code">src/client/external-spa/staticwebapp.config.json</output>
+    <output type="code">src/client/external-spa/src/ (Teams theme bridge)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the SWA config, when inspected, then CSP frame-ancestors is exactly 'self' https://teams.microsoft.com https://*.cloud.microsoft and no X-Frame-Options header is present.</criterion>
+    <criterion testable="true">Given the app loaded in the Teams personal tab, when Teams is in dark theme, then the shell renders in dark via the Fluent v9 bridge (semantic tokens adapt; zero hardcoded hex).</criterion>
+    <criterion testable="true">Given the app loaded in a plain browser, when it initializes, then the Teams JS SDK init is a no-op and the browser experience is unaffected.</criterion>
+    <criterion testable="true">The manifest is a personal tab pointing at the SWA content URL with valid domains for the SWA host.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Teams dark render"><steps><step>Load the app in the Teams personal tab</step><step>Set Teams to dark theme</step></steps><expected>shell renders dark via Fluent bridge; no console errors</expected></test>
+    <test name="Teams high-contrast"><steps><step>Set Teams to high-contrast</step></steps><expected>Fluent high-contrast theme applied; readable</expected></test>
+    <test name="Browser no-op"><steps><step>Load in a plain browser</step></steps><expected>Teams SDK init no-op; app works normally</expected></test>
+  </ui-tests>
+
+  <notes>
+    Entra/Teams config recipe (pre-authorized Teams client app-ids, NAA brk-multihub:// redirect, v1 audience) is in
+    spec Dependencies and is applied at the app-registration level (ops) — this task is the SWA-side manifest + framing
+    + theme. The operator-gated Teams live E2E is a P1 prerequisite handled at deploy (task 019).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+
+  <notes>
+    Completed 2026-08-06. All three packaging surfaces (manifest, CSP frame-ancestors, Teams theme bridge)
+    were found ALREADY DELIVERED via inherited teams-app-r1 artifacts (`src/client/external-spa/appPackage/manifest.json`,
+    `staticwebapp.config.json`, `host/TeamsHostAdapter.ts`) — same SWA/Teams app, same Entra app `1e40baad-…`,
+    byte-exact CSP already present. Verified each against R2's acceptance criteria rather than re-authoring:
+    (1) CSP `frame-ancestors 'self' https://teams.microsoft.com https://*.cloud.microsoft`, no `X-Frame-Options` —
+    confirmed exact, unchanged. (2) Teams dark-theme bridge — `TeamsHostAdapter.wireTheme()` already feeds
+    `setUserThemePreference()` into the shared `@spaarke/ui-components` cascade that `App.tsx` consumes; zero
+    hardcoded hex confirmed via repo-wide grep of `src/client/external-spa/src`. (3) Browser no-op — `main.tsx`'s
+    `detectTeamsHost()` race + `bootstrapStandalone()` branch confirmed unchanged/unaffected. (4) Manifest personal
+    tab + valid domains — confirmed present, `webApplicationInfo`/`validDomains`/`staticTabs` byte-exact (untouched,
+    since a mismatch silently breaks Teams SSO).
+
+    Only change made: updated `appPackage/manifest.json` `version` (1.0.0 → 1.1.0), `name.full`, and
+    `description.{short,full}` to reflect R2's broader "Legal Department Service Portal" workspace-shell framing
+    (was teams-app-r1's narrower "Spaarke Collaboration Workspace" copy) — same tab (`entityId`), same
+    `contentUrl`/`validDomains`/`webApplicationInfo`, text-only. `TeamsHostAdapter.ts` was NOT modified (hard
+    constraint — auth/theme-selection file; task 011 already threads `teamsHost` through it unchanged).
+
+    Deviation / discovered gap: filed **ISS-001** (`notes/defer-issues.md`, GitHub issue
+    https://github.com/spaarke-dev/spaarke/issues/744) — Teams high-contrast ('contrast') theme currently maps to
+    'dark' (not a dedicated `teamsHighContrastTheme`) because the SHARED `@spaarke/ui-components` theme cascade
+    (`ThemePreference` type + `resolveCodePageTheme`) has no third state wired in, despite ADR-021 listing
+    `teamsHighContrastTheme` as a MUST-supported Code Page state. Fixing this requires a cross-cutting shared-lib
+    change (blast radius = every PCF + Code Page) and touching `TeamsHostAdapter.ts`, both out of this task's
+    scope (task explicitly barred from modifying `TeamsHostAdapter.ts`). Recommended as a small dedicated follow-up.
+
+    Verification: `npx tsc --noEmit` clean (no TS files changed by this task); `node -e "JSON.parse(...)"` confirms
+    manifest.json valid JSON; `git diff` confirms the manifest edit touches ONLY `version`/`name.full`/`description`
+    — `id`/`developer`/`icons`/`accentColor`/`staticTabs`/`permissions`/`validDomains`/`webApplicationInfo` are
+    byte-exact unchanged. Quality gates (code-review + adr-check, FULL rigor override) both clean — no findings.
+    Full build (`npm run build`) intentionally NOT run per orchestrator instruction (main session runs the
+    authoritative wave build). TASK-INDEX.md intentionally NOT edited (main session aggregates wave status).
+
+    Acceptance criteria: all 4 met — (1) CSP exact ✅ (2) Teams dark renders via bridge, zero hardcoded hex ✅
+    (3) browser no-op unaffected ✅ (4) manifest personal tab + valid domains ✅.
+  </notes>
+</task>

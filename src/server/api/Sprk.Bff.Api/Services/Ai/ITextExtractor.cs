@@ -39,6 +39,23 @@ public interface ITextExtractor
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Task 040 (spaarkeai-compose-r6, FR-06): extract the STRUCTURED document layout (paragraph roles +
+    /// tables in document order) via Azure Document Intelligence <c>prebuilt-layout</c> — the structured
+    /// twin of the flat-text <see cref="ExtractAsync(Stream, string, CancellationToken)"/> path, sharing
+    /// the same configuration, size limits, timeout, and circuit breaker in the real implementation.
+    /// Declared as a default interface method (Failed result) so existing implementations/test fakes
+    /// remain source-compatible; <see cref="TextExtractorService"/> overrides with the real analysis.
+    /// No Redis caching (the ADR-009 extraction cache stores flat text only; layout consumers project
+    /// content for editing, not repeated LLM input).
+    /// </summary>
+    Task<LayoutExtractionResult> ExtractLayoutAsync(
+        Stream fileStream,
+        string fileName,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(LayoutExtractionResult.Failed(
+            "Structured layout extraction is not supported by this text extractor."));
+
+    /// <summary>
     /// Check if a file extension is supported for extraction.
     /// </summary>
     bool IsSupported(string extension);

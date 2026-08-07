@@ -4,7 +4,7 @@
     <title>Endpoint + client wiring for template selection/merge</title>
     <phase>3 Template part-merge</phase>
     <gate>blocked until 031</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies `.cs` (Compose endpoint) AND `.tsx` (Compose client) on the `bff-api` + frontend hot path — end-to-end wiring of the template-merge capability across the BFF/client boundary. FULL per root CLAUDE.md §8 (modifying `.cs`/`.tsx`, tags include `compose`/`frontend`). Step 9.5 code-review + adr-check run.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -133,6 +133,7 @@
     <criterion testable="true">TASK-INDEX.md shows task 032 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
   </acceptance-criteria>
 
+  <completion-note>COMPLETED 2026-08-07 (isolated-worktree agent; cherry-picked a1f005033). POST /api/compose/documents/{speId}/apply-template {driveId,templateIdOrName,variables?} -> 200 {templateName,versionId,eTag,mergeWarnings?,contentModel?,contentModelWarnings?} (ADR-040 additive); endpoint mints app-only Dataverse token for the ORG-SHARED template read (CommunicationTemplateEndpoints:95-110 pattern) while document legs stay user-OBO; ComposeService.ApplyTemplateAsync = download -> ComposeTemplatePartMergeEngine.Merge -> ReplaceFileContentAsUserAsync -> re-project. Client: Apply-firm-template affordance in ComposeFormatToolbar (POML said ComposeToolbar - retired; deviation noted) + ComposeApplyTemplateDialog (name/id input v1; PICKER deferred to 052-adjacent - POML ui-test "lists available templates" NOT met as written); dirty/transient guard; warnings fold into saveDegradationWarnings; re-mount via requestLoad (whole-package change - correct existing machinery). 10 server tests + 8 client jest; suite 1104/1104 merged; publish 46.99 MB ~0 delta; CVE clean. Step 9.5 review agent launched on the merged SHAs; triage recorded in notes when returned.</completion-note>
   <notes>
     Spec FR-05; Placement &amp; New Components (Path A, additive endpoint). Wiring only — 030 owns the merge, 031 owns
     storage/variables. The dark-mode `&lt;ui-tests&gt;` satisfy the ADR-021 check required for frontend-tagged tasks.

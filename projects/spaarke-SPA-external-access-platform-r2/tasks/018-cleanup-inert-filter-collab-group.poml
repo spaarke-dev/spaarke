@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Delete inert ExternalCallerAuthorizationFilter + remove transitional /api/v1/collab group</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:015,016</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF deletion with blast radius (endpoints + filter + policy wiring); brownfield; must prove zero callers before removal; tags bff-api.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius BFF deletion requiring caller-graph judgment before an irreversible removal — opus per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF deletion on the shared external-access surface (Api/ExternalAccess/**, Api/Filters/**); blast radius; must follow 015/016 and run alone with /conflict-check.</parallel-reason>
+    <deps>015,016</deps>
+    <tags>bff-api, refactoring</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Delete the now-inert ExternalCallerAuthorizationFilter and remove the transitional /api/v1/collab endpoint group
+    (MapWorkforceCollaborationEndpoints + WorkforcePrincipalContextEndpoint + WorkforceCollaborationDownloadEndpoint +
+    WorkforceCallerAuthorizationFilter), since the collaboration surface is now served principal-agnostically via
+    CallerPrincipalResolver / ExternalCollaboration. Prove zero clients call /api/v1/collab BEFORE deleting.
+  </prompt>
+
+  <role>SPAARKE platform developer + BFF engineer. Follow ADRs strictly. Disciplined at safe deletion — caller-graph analysis before removal; suite-green after.</role>
+
+  <goal>
+    ExternalCallerAuthorizationFilter (inert, superseded by CiamContactPrincipalStrategy, zero callers) deleted; the
+    transitional /api/v1/collab group and its endpoints + filter (MapWorkforceCollaborationEndpoints,
+    WorkforcePrincipalContextEndpoint, WorkforceCollaborationDownloadEndpoint, WorkforceCallerAuthorizationFilter)
+    removed. The full BFF suite is green, no route regression on /api/v1/external, and publish stays ≤60 MB.
+  </goal>
+
+  <context>
+    <background>
+      Per spec Scope→Cleanup + teams-app-r1 deviations D2/§7: ExternalCallerAuthorizationFilter (:29) is now inert — its
+      logic is reproduced in CiamContactPrincipalStrategy, zero callers. /api/v1/collab (MapWorkforceCollaborationEndpoints
+      :133 → :142) was a transitional group superseded by the principal-agnostic ExternalCollaboration surface on
+      /api/v1/external. Deletion is safe ONLY once no client calls /api/v1/collab. This runs after 015 (framework) + 016
+      (OC as module over ExternalCollaboration) so the replacement path is proven live first.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/ExternalCallerAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/WorkforceCallerAuthorizationFilter.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/WorkforcePrincipalContextEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/WorkforceCollaborationDownloadEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs</file>
+      <file>src/client/external-spa/src/</file>
+    </relevant-files>
+    <dependencies>015 (module framework) + 016 (OC registered over ExternalCollaboration) — the replacement path must be live before deletion.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">§10 BFF-touching: Placement Justification in the PR for the removal (cite .claude/constraints/bff-extensions.md); run /conflict-check BEFORE the PR (teams-app-r1 shares this exact surface); verify publish ≤60 MB, report delta vs 46.90 MB.</constraint>
+    <constraint source="project">Deletion is gated on proving ZERO clients call /api/v1/collab — grep all client surfaces (external-spa, any other SPA/PCF/solution) + integration tests before removing anything.</constraint>
+    <constraint source="ADR-008">Keep the ExternalCollaboration route-group policy + CallerPrincipalAuthorizationFilter intact on /api/v1/external; only the transitional collab group + inert filter are removed.</constraint>
+    <constraint source="ADR-038">Remove/adjust the collab group's tests per the deletion; keep the KEEP-path suite green; no orphaned test references.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/r2-coordination-response.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deletion targets" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs">MapWorkforceCollaborationEndpoints :133 → /api/v1/collab :142; the transitional group to remove.</pattern>
+      <pattern name="Inert filter" location="src/server/api/Sprk.Bff.Api/Api/Filters/ExternalCallerAuthorizationFilter.cs">:29 — superseded by CiamContactPrincipalStrategy, zero callers; delete.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /conflict-check against teams-app-r1 for Api/ExternalAccess/** + Api/Filters/** before any edit; record the result.</step>
+    <step order="2">Prove zero callers: grep ALL client surfaces (external-spa + every other client) and integration tests for /api/v1/collab and the workforce-collab endpoints; enumerate hits.</step>
+    <step order="3">If ANY client still calls /api/v1/collab, STOP and invoke the escalation trigger — do not delete.</step>
+    <step order="4">Delete ExternalCallerAuthorizationFilter.cs (inert) and remove its DI registration/wiring.</step>
+    <step order="5">Remove MapWorkforceCollaborationEndpoints, WorkforcePrincipalContextEndpoint, WorkforceCollaborationDownloadEndpoint, and WorkforceCallerAuthorizationFilter, plus the /api/v1/collab group mapping.</step>
+    <step order="6">Remove/adjust the collab group's tests; ensure no orphaned references to the deleted types remain.</step>
+    <step order="7">dotnet build + dotnet test — the full BFF suite must be green; confirm /api/v1/external routes are unaffected; no new HIGH CVE.</step>
+    <step order="8">dotnet publish -c Release; record compressed size + delta vs 46.90 MB baseline.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY client (grep across all client surfaces) still calls /api/v1/collab or the workforce-collab endpoints, STOP and escalate per CLAUDE.md §6 — do NOT delete the group until the caller is migrated.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell / grep</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/ (ExternalCallerAuthorizationFilter + WorkforceCallerAuthorizationFilter deleted)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ (collab group + endpoints removed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (collab tests removed/adjusted)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a repo-wide grep, when searching all client surfaces + tests for /api/v1/collab, then zero live callers exist BEFORE deletion (evidence recorded).</criterion>
+    <criterion testable="true">ExternalCallerAuthorizationFilter, WorkforceCallerAuthorizationFilter, MapWorkforceCollaborationEndpoints, WorkforcePrincipalContextEndpoint, and WorkforceCollaborationDownloadEndpoint no longer exist; the /api/v1/collab group is unmapped.</criterion>
+    <criterion testable="true">The /api/v1/external ExternalCollaboration group + CallerPrincipalAuthorizationFilter are intact (no route regression).</criterion>
+    <criterion testable="true">The full BFF suite is green with no orphaned references; no new HIGH CVE; publish ≤60 MB with delta vs 46.90 MB reported.</criterion>
+    <criterion testable="true">Negative gate: if a caller had been found, the deletion would NOT proceed (escalation fires).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    §10 BFF-touching deletion — Placement Justification + /conflict-check (teams-app-r1 shares this exact surface) +
+    ≤60 MB. Prescriptive mode because the order (prove-zero-callers → delete → verify) is safety-critical and the
+    deletion is irreversible within the PR. teams-app-r1 deviations D2/§7 are the source authority for calling these inert.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist. Run /conflict-check before the BFF PR.</protocol>
+  </execution>
+</task>

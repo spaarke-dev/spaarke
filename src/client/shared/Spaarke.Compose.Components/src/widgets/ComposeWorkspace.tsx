@@ -138,6 +138,8 @@ import {
 import { useDocumentActions } from '@spaarke/document-operations';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
+// FR-05 (task 032, spaarkeai-compose-r6): "Apply firm template" dialog — 030 part-merge wiring.
+import { ComposeApplyTemplateDialog } from './ComposeApplyTemplateDialog';
 // Return-from-Word re-anchor UX (task 054 — BUILT; mounted here by task 103, gap 3.5).
 import { ComposeReanchorBanner } from './ComposeReanchorBanner';
 import { ComposeExternalChangeBanner } from './ComposeExternalChangeBanner';
@@ -1054,6 +1056,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // server-log-only) — retained and folded into saveDegradationWarnings on the FIRST
           // model-path save, where the loss they describe materializes.
           contentModelWarnings?: Array<{ code: string; count: number }> | null;
+          // Task 041 (FR-06, PDF intake): 'pdf' = `content` is the docx SYNTHESIZED server-side from
+          // the PDF's canonical-model projection (task 040). Parsed defensively (older BFF omits it).
+          sourceFormat?: string | null;
         };
 
         // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
@@ -1101,6 +1106,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
           // G1 (FR-01, task 020): normalize undefined (older BFF / Path B continuation) to `null`.
           origin: payload.origin ?? null,
+          // Task 041 (FR-06, PDF intake): the source-format marker + a client-minted transient dedup
+          // key for the PDF's create-on-save routing (repeated saves of this session dedup to ONE new
+          // docx record — the G7 mechanism, reused). Only PDF-sourced loads carry either.
+          sourceFormat: payload.sourceFormat === 'pdf' ? 'pdf' : null,
+          transientKey: payload.sourceFormat === 'pdf' ? mintTransientKey() : undefined,
         });
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -1343,10 +1353,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // minted so the fork gets its OWN dedup identity, and `forkNew` tells the server to SKIP the
       // transient-key dedup lookup for this call (a deliberate new document, not a new version).
       const forkNew = saveMode === 'new';
+      // Task 041 (FR-06, PDF intake): a PDF-sourced doc (the mounted docx was SYNTHESIZED from a PDF,
+      // task 040) must NEVER take the replace path — that would write docx bytes onto the `.pdf`
+      // drive-item. EVERY save while sourceFormat==='pdf' routes create-on-save (a NEW Word document;
+      // the original PDF stays untouched — the honest "saves as a docx version" contract), with the
+      // load-minted documentRef.transientKey deduping repeated saves onto ONE new record (G7). On
+      // success, saveSucceeded re-targets documentRef to the new docx identity + clears sourceFormat,
+      // so subsequent saves take the normal replace path.
+      const pdfSourced = state.sourceFormat === 'pdf';
       // FR-05 (task 100): a TRANSIENT (Browse/Upload) draft has NO SPE drive-item — it persists via
       // create-on-save into the client-resolved BU container, not the replace path. Branch on the
       // absence of a real speDriveItemId (mountTransient sets it to ''), OR on a deliberate Save-New fork.
-      const isTransientCreate = forkNew || !state.documentRef.speDriveItemId;
+      const isTransientCreate = forkNew || !state.documentRef.speDriveItemId || pdfSourced;
       // G7: the dedup key to send on a create-on-save. A fork mints a fresh key (its own identity going
       // forward); a normal transient save reuses the mount-time key so repeated saves dedup to ONE record.
       const effectiveTransientKey = forkNew ? mintTransientKey() : state.documentRef.transientKey;
@@ -1521,9 +1539,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             containerId: saveContainerId,
             tenantId,
             sessionId: state.sessionId,
-            displayName: state.documentRef.fileName ?? null,
+            // Task 041 (FR-06): a PDF-sourced create-on-save names the NEW document as Word — swap
+            // the .pdf extension for .docx (the saved bytes ARE docx; a ".pdf"-named docx would
+            // mislead every downstream consumer). Non-PDF creates keep the existing name verbatim.
+            displayName: pdfSourced
+              ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
+              : (state.documentRef.fileName ?? null),
             transientKey: effectiveTransientKey,
             forkNew,
+            // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): on a PDF-sourced create,
+            // send the SOURCE PDF's sprk_document id so the server files the new Word document
+            // ALONGSIDE it (inherits the record's matter/project/… links). Undefined for a Path-B
+            // PDF (no record — nothing to inherit) and for every non-PDF create (unchanged).
+            sourceDocumentRecordId: pdfSourced ? (state.documentRef.sprkDocumentId ?? undefined) : undefined,
           };
           if (bornInEditorRender) {
             // Shape 1 — born-in-editor create-on-save. task 012 amendment: `buildContentModel()` now folds
@@ -1534,7 +1562,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           } else if (usedModelPath && importedBuilt) {
             // Shape 2 — imported transient create-on-save, MODEL shape: the merged model + the retained
             // ORIGINAL bytes as the render carrier.
-            requestBody = { ...createCommon, contentModel: importedBuilt.model, content: encodeRetained(state.docxBytes!) };
+            requestBody = {
+              ...createCommon,
+              contentModel: importedBuilt.model,
+              content: encodeRetained(state.docxBytes!),
+            };
           } else {
             // Shape 3 — transitional op-log create-on-save (unchanged): retained ORIGINAL bytes as the
             // baseline + the tracked op-log so the server applies redlines via ComposeShadowPatchEngine —
@@ -1822,6 +1854,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       state.loadedContentModelWarnings,
       state.origin,
       state.versionId,
+      // Task 041 review B-LOW-1: the PDF create-on-save routing reads this — listed explicitly
+      // (previously masked by documentRef replacing on every sourceFormat transition).
+      state.sourceFormat,
       bffBaseUrl,
       effectiveDriveId,
       tenantId,
@@ -1860,6 +1895,102 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       console.warn('[ComposeWorkspace] refresh-profile request failed (non-fatal):', err);
     }
   }, [state.documentRef?.sprkDocumentId, state.documentRef?.speDriveItemId, state.etag, bffBaseUrl, tenantId]);
+
+  // -------------------------------------------------------------------------
+  // FR-05 (task 032, spaarkeai-compose-r6) — "Apply firm template" (030 engine + 031 resolver,
+  // wired end-to-end). POST /api/compose/documents/{speId}/apply-template merges the PERSISTED
+  // bytes into the resolved firm/matter template's chrome server-side and persists a NEW SPE
+  // version; on 200 this host surfaces the merge degradation warnings through the EXISTING
+  // saveDegradationWarnings banner family and re-mounts from the server-authoritative merged
+  // bytes via the EXISTING requestLoad remount (the same path reload-from-source / the external-
+  // change refresh use — bytes + projection + contentModel + paraIdMap adopt atomically). The
+  // affordance is GUARDED to a saved (non-dirty, non-transient) document — the server merges
+  // persisted bytes, never unsaved editor state (see `applyTemplateDisabledReason` below).
+  // -------------------------------------------------------------------------
+  const [applyTemplateOpen, setApplyTemplateOpen] = React.useState(false);
+  const [isApplyingTemplate, setIsApplyingTemplate] = React.useState(false);
+  const [applyTemplateError, setApplyTemplateError] = React.useState<string | null>(null);
+
+  // (hoisted above handleApplyTemplate — its apply-time dirty re-check reads this binding; 032 F3)
+  const [isDirty, setIsDirty] = React.useState<boolean>(false);
+
+  const handleApplyTemplate = React.useCallback(
+    async (templateIdOrName: string): Promise<void> => {
+      const speId = state.documentRef?.speDriveItemId;
+      if (!speId || !effectiveDriveId || !bffBaseUrl) return;
+      // 032 Step-9.5 F3: re-check dirtiness at APPLY time, not just toolbar-render time — a
+      // programmatic edit (Assistant redline via the bridge) landing while the dialog is open would
+      // otherwise be silently discarded by the post-merge remount.
+      if (isDirty) {
+        setApplyTemplateError('The document has unsaved changes. Save first, then apply the template.');
+        return;
+      }
+      setIsApplyingTemplate(true);
+      setApplyTemplateError(null);
+      try {
+        const response = await authenticatedFetch(
+          `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(speId)}/apply-template`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ driveId: effectiveDriveId, templateIdOrName }),
+          }
+        );
+
+        if (!response.ok) {
+          // Extract ProblemDetails.detail so the dialog shows the actual server-side reason
+          // (mirrors the save-path error extraction).
+          let detail = '';
+          try {
+            const problem = (await response.clone().json()) as { detail?: string; title?: string };
+            detail = problem.detail ?? problem.title ?? '';
+          } catch {
+            detail = '';
+          }
+          setApplyTemplateError(
+            response.status === 404
+              ? detail || `Template "${templateIdOrName}" was not found. Check the template name or ID.`
+              : detail || `Failed to apply the template (HTTP ${response.status}).`
+          );
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          templateName?: string;
+          versionId?: string;
+          // The 030 engine's template-merge-* degradation warnings + the post-merge canonical
+          // projection's flatten warnings — folded into the EXISTING save-degradation banner
+          // family (loud, never silent — operator principle).
+          mergeWarnings?: Array<{ code: string; count: number }> | null;
+          contentModelWarnings?: Array<{ code: string; count: number }> | null;
+        };
+
+        const warnings = mergeDegradationWarnings(payload.mergeWarnings ?? [], payload.contentModelWarnings ?? []);
+        setApplyTemplateOpen(false);
+
+        // Re-mount from the server-authoritative merged bytes — the SAME requestLoad remount the
+        // reload-from-source path uses. 032 Step-9.5 F2: the merge warnings ride INSIDE requestLoad
+        // (carryDegradationWarnings) — a separate pre-dispatch would be wiped by the reducer's
+        // INITIAL_STATE reset before ever painting. docxBridge.ts remains the docx↔editor
+        // round-trip beneath the remount.
+        if (state.documentRef) {
+          dispatch({
+            kind: 'requestLoad',
+            documentRef: state.documentRef,
+            sessionId: state.sessionId,
+            carryDegradationWarnings: warnings.length > 0 ? warnings : null,
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setApplyTemplateError(`Failed to apply the template: ${message}`);
+      } finally {
+        setIsApplyingTemplate(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.documentRef, state.sessionId, effectiveDriveId, bffBaseUrl, isDirty]
+  );
 
   // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
   // document to the DMS" chip (ConversationPane) drives the SAME create-on-save / save-to-matter
@@ -2630,7 +2761,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // Dirty flag is UI-only (drives the Save button's enabled/disabled state
   // in ComposeToolbar). The reducer's status enum doesn't distinguish clean
   // vs dirty inside `loaded`; a local flag is the least-invasive surface.
-  const [isDirty, setIsDirty] = React.useState<boolean>(false);
   const handleDirtyChange = React.useCallback((dirty: boolean): void => {
     setIsDirty(dirty);
   }, []);
@@ -3371,8 +3501,36 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // draft) and not mid-save.
   const isSavingNow = state.status === 'saving';
   const hasWordDocument = toolbarDocumentId.length > 0 && bffBaseUrl.length > 0;
-  const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing;
+  // Task 041 review B-MEDIUM-1: a PDF-sourced mount must NOT open in Word — the persisted item is
+  // the .pdf (Word can't edit it), and the C3 "id stable across the flush" invariant breaks: the
+  // flush IS a create-on-save that re-targets documentRef, so the pre-flush closure would open the
+  // OLD PDF record while the just-flushed edits live in the new docx. Save first (which clears
+  // sourceFormat and re-targets), then Word actions re-enable against the new docx identity.
+  const isPdfSourced = state.sourceFormat === 'pdf';
+  const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing || isPdfSourced;
   const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
+
+  // FR-05 (task 032): "Apply firm template" gating. The button renders only for a PERSISTED doc
+  // (an SPE drive-item exists — the server merges the SAVED bytes; a transient draft has nothing
+  // persisted to merge onto). It is DISABLED-with-tooltip (not hidden) while there is unsaved work
+  // or a save/apply in flight, so the user learns WHY instead of the affordance vanishing.
+  const canShowApplyTemplate =
+    (state.status === 'loaded' || state.status === 'saving') &&
+    !!state.documentRef?.speDriveItemId &&
+    !!effectiveDriveId &&
+    bffBaseUrl.length > 0;
+  const applyTemplateDisabledReason = isApplyingTemplate
+    ? 'Applying template…'
+    : isSavingNow
+      ? 'Saving…'
+      : // Task 041 review B-MEDIUM-2: the persisted item behind a PDF-sourced mount IS the .pdf —
+        // the server-side merge would receive %PDF- bytes (the server also refuses with a typed
+        // 422). Disabled-with-reason, mirroring the server's honest copy.
+        isPdfSourced
+        ? 'Save as a Word document first (a PDF opened in Compose saves as a new Word document), then apply the template'
+        : isDirty || hasTransientDraft
+          ? 'Save your changes first — the firm template is applied to the saved document'
+          : undefined;
 
   // C3 fix (UAT 2026-07-20): Open-in-Word FLUSHES a save first so Word opens the CURRENT bytes —
   // including pending AI redlines as native w:ins/w:del. Redlines (and settled edits) only reach SPE via
@@ -3504,6 +3662,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           {/* Banner stack — errors / warnings / checkout status / assistant pending */}
           <ComposeBannerStack
             errorMessage={state.errorMessage}
+            // Task 041 (FR-06, PDF intake): the honest-lossiness notice while the mounted doc is
+            // PDF-sourced; cleared by the reducer after the first successful save (new docx identity).
+            pdfSourceNotice={state.sourceFormat === 'pdf'}
             // UAT #10/#11 (task 052): when the save failed with a Word co-authoring lock (423), show the
             // honest "Open in Word" bar with Retry (re-run the save once Word is closed) + Reload-from-Word
             // (pull Word's latest version as the new baseline). No fake "Unlock" — none exists.
@@ -3632,6 +3793,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
               onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
               isRefreshingProfile={isRefreshingProfile}
+              // FR-05 (task 032): "Apply firm template" — opens the template-select dialog. Wired
+              // only for a persisted doc (SPE source exists); disabled-with-tooltip while
+              // dirty/transient/saving (the server merges the PERSISTED bytes).
+              onApplyTemplate={
+                canShowApplyTemplate
+                  ? () => {
+                      setApplyTemplateError(null);
+                      setApplyTemplateOpen(true);
+                    }
+                  : undefined
+              }
+              applyTemplateDisabledReason={applyTemplateDisabledReason}
               // "Open Document" — opens the source Dataverse Document in the shared preview modal
               // (RichFilePreviewDialog + BFF preview-url). Wired only for a doc with a preview
               // source (a promoted sprk_document); undefined → the toolbar button hides.
@@ -3725,6 +3898,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           }}
         />
       ) : null}
+
+      {/* FR-05 (task 032) — "Apply firm template" dialog. Presentation lives in
+          ComposeApplyTemplateDialog (FormModal preset — ADR-021/ADR-050); this host owns the
+          POST + post-apply remount (handleApplyTemplate above). onClose no-ops while the apply
+          is in flight (FormModal busy contract — never abandon a mid-flight merge silently). */}
+      <ComposeApplyTemplateDialog
+        open={applyTemplateOpen}
+        isApplying={isApplyingTemplate}
+        errorMessage={applyTemplateError}
+        onApply={templateIdOrName => void handleApplyTemplate(templateIdOrName)}
+        onClose={() => {
+          if (isApplyingTemplate) return;
+          setApplyTemplateOpen(false);
+          setApplyTemplateError(null);
+        }}
+      />
 
       {/*
         Task 051: Multi-tab conflict dialog (FR-16 verbatim labels). Rendered

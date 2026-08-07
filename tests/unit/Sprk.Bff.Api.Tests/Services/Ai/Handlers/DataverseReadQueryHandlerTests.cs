@@ -395,6 +395,25 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
         description.Should().Contain("dataverse.describe");
     }
 
+    [Fact]
+    public void Metadata_Description_CarriesLiteralDateGuidanceForRelativeDateFilters()
+    {
+        // Live UAT (2026-08-05): "how many overdue tasks" produced a query with an
+        // unsupported GETDATE() call. The tool already told the model GETDATE() is
+        // unsupported but never told it what to do INSTEAD — this pins the fix: the
+        // description must point the model at the current-date value already injected
+        // into its system context (SprkChatAgentFactory "## Current Date" directive)
+        // and instruct it to compose a literal date predicate.
+        var description = CreateHandler().Metadata.Description;
+        description.Should().Contain("GETDATE()",
+            because: "the unsupported-function name must still be named explicitly");
+        description.Should().Contain("current date already given to you in your system context",
+            because: "the model must be told to source the literal from its injected system context, not invent or ask for one");
+        description.Should().ContainEquivalentOf("relative-date filters",
+            because: "overdue/due-today/due-this-week are the concrete failure case from live UAT");
+        description.Should().Contain("dynamic date functions are not supported");
+    }
+
     // ═════════════════════════════════════════════════════════════════════════════
     // shared plumbing
     // ═════════════════════════════════════════════════════════════════════════════

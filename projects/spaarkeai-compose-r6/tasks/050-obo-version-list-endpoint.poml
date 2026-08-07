@@ -4,7 +4,7 @@
     <title>New OBO (user-context) list-versions + open-prior-version (read-only) endpoint</title>
     <phase>5 Documents version-history open UX (read-only)</phase>
     <gate>dep:002</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF endpoint on the OBO (user-context) auth path; tags include bff/auth; modifies `.cs`; changes the public API surface and introduces an authorization boundary (a user must not read another user's document version). CLAUDE.md §8 — auth-path-touching + new endpoint + `.cs` change → FULL; code-review + adr-check run at Step 9.5.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -113,6 +113,7 @@
     <criterion testable="true">No-regression: `Services/Compose`/facade purity holds (no `Microsoft.Graph` above `SpeFileStore`, no AI internals); BFF publish ≤60 MB (absolute + delta vs task-003 baseline reported); no new HIGH CVE; all unit tests pass and build is green.</criterion>
   </acceptance-criteria>
 
+  <completion-note>COMPLETED 2026-08-07 (parallel wave, isolated-worktree agent; cherry-picked a9739a77a). DocumentVersionEndpoints: GET /api/obo/drives/{driveId}/items/{itemId}/versions (+/{versionId}/content exact bytes, read-only) - OBO only, RequireAuthorization + graph-read rate limit, UnauthorizedAccessException->403 (deliberate deviation from sibling 401 idiom to satisfy the never-bytes criterion), facade-null->404; ListFileVersionsAsUserAsync added to ISpeFileOperations/DriveItemOperations/SpeFileStore mirroring GetCurrentVersionIdAsUserAsync; DownloadFileVersionAsUserAsync reused unchanged. Mapped unconditionally (EndpointMappingExtensions next to MapOBOEndpoints; no new DI - S F.1 trivially symmetric). 6 seam tests (list/open-v3-exact-bytes/negative-auth-never-bytes/no-restore-route/unauth-401/item-404). 1068/1068 agent-side; 1094/1094 merged wave. S11 justification in agent report + notes/050-obo-version-endpoint.md. Live-SPE prior-version-bytes check remains the env-blocked human gate (task 002 S5). Wave Step 9.5 review ran on the merged commits.</completion-note>
   <notes>Spec FR-07 + Success Criterion 4; plan.md §5 Phase 5. NEW endpoint → §11 justification emitted. OBO auth path → FULL rigor + negative authorization criterion. Reuse `DownloadFileVersionAsUserAsync:842`; do NOT reuse the admin `ContainerItemEndpoints.cs:48` auth path. Restore/branch-from explicitly out of scope. Blocks task 051 (client entry point).</notes>
 
   <execution>

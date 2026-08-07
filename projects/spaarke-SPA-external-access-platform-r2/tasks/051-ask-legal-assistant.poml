@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Ask Legal assistant (bounded: policy_search + launch_wizard; workforce-plane app-only; no file ingest)</title>
+    <phase>P5 Collaboration Surfaces</phase>
+    <gate>blocked-until:050,012,034</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>AI on the external plane, app-only (no OBO), security-critical (tags bff-api/auth/frontend); implements the task-050 security design; a scope-trim omission = cross-user data leak.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>App-only AI grounding with server-side entitlement security-trim + closed tool catalog on the external plane — high-blast-radius security reasoning per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds an AI endpoint group to the shared BFF AI surface + mounts the assistant pane on the shell; gated by 050 sign-off; /conflict-check required.</parallel-reason>
+    <deps>050,012,034</deps>
+    <tags>bff-api, auth, frontend</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build the "Ask Legal" assistant per the task-050 signed-off security design: a NEW workforce-plane, entitlement-scoped,
+    APP-ONLY (no OBO) assistant endpoint exposing an ADR-039 closed tool catalog of EXACTLY TWO tools — policy_search (RAG
+    over the task-034 P&amp;P policy index, entitlement/status-trimmed) and launch_wizard (route to a defined wizard via the
+    surface-launch spine). Mount the shared context-agnostic SprkChat as the dockable assistant pane (workforce users only,
+    not outside-counsel). The chat composer is TEXT-ONLY — there is NO file-upload / attach / drop affordance at all.
+    Do NOT proceed unless task 050 is signed off.
+  </prompt>
+
+  <role>SPAARKE platform developer + BFF AI engineer + Fluent v9 frontend engineer. Follow ADRs strictly. Expert in app-only AI grounding, ADR-039 closed tool catalogs, RAG security-trim, and mounting the context-agnostic SprkChat with pluggable auth.</role>
+
+  <goal>
+    A working Ask Legal assistant: (1) a NEW workforce-plane, entitlement-scoped, app-only BFF endpoint group with an
+    ADR-039 closed catalog of exactly two tools (policy_search RAG-grounded on the P&amp;P index with server-side
+    entitlement/status trim; launch_wizard routing only to defined wizards); (2) SprkChat mounted as the dockable assistant
+    pane on the workspace shell for workforce users only, composer text-only (no upload affordance). All enforcement is
+    server-side per the task-050 design; negative "no cross-scope leakage" tests pass per tool + for grounding; publish ≤60 MB.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-26 (refined 2026-08-06) + NFR-EXT-AI + design.md §12(B). Ask Legal does EXACTLY TWO things: policy_search
+      (RAG over the P&amp;P library — instant, non-authoritative) + launch_wizard (surface-launch to a defined wizard: NDA /
+      Policy Question / Invention / Trademark / etc.). EXPLICITLY EXCLUDED: no upload→summarize/analyze, no data queries beyond
+      P&amp;P, no file-ingest tool; file analysis lives ONLY inside wizards. UI: the composer is text-only — NO paperclip / drop
+      zone (removing the ingest surface is itself a security control). Workforce-internal only (single-scheme, NOT CIAM dual-scheme);
+      NOT shown to external/outside-counsel. App-only RAG grounding (no OBO RetrievePrincipalAccess); the core /api/ai/chat is
+      OBO/core-user and unusable. This task IMPLEMENTS the task-050 signed-off design (grounding trim, tool-catalog escape-proof,
+      launch_wizard routing safety, per-tool authz, audit). Reuse: SprkChat (context-agnostic, pluggable auth), ADR-039
+      AgentToolCatalogProjector (external two-tool projection), ChatKnowledgeScope, sprk_aipersona persona prompt, the task-034
+      P&amp;P AI Search policy index + its governance-state trim fields, the surface-launch spine (ASSISTANT-SURFACE-LAUNCH-MECHANISM.md),
+      CallerPrincipalResolver (workforce plane Tier-1/Tier-2), and the widget/pane shell from task 012.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/</file>
+      <file>src/client/external-spa/</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/external-assistant-security-design.md</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+    <dependencies>050 (the signed-off security design this task implements — MUST be signed off first); 012 (widget registry + tabbed workspace + dockable assistant pane the SprkChat mounts into); 034 (P&amp;P document architecture — the AI Search policy index + governance-state trim fields policy_search grounds on).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT start until task 050 (security spike) is human-signed-off; implement the design in notes/external-assistant-security-design.md exactly — grounding trim, two-tool catalog, launch_wizard routing safety, per-tool authz, audit.</constraint>
+    <constraint source="NFR-EXT-AI">Enforcement is SERVER-SIDE (tool catalog + grounding security-trim + per-tool authz), NOT prompt-based. The assistant MUST NOT ground on or return content outside the caller's Tier-1 + Tier-2 scope; a negative "no cross-scope leakage" test is required per tool + for grounding.</constraint>
+    <constraint source="ADR-039">The external assistant catalog is EXACTLY TWO tools (policy_search, launch_wizard) via the AgentToolCatalogProjector external projection — no core-user tools, no file-ingest tool reachable. launch_wizard routes ONLY to allow-listed defined wizards.</constraint>
+    <constraint source="ADR-013">Use the Services/Ai/PublicContracts/ facade; do NOT inject AI-internal types (IOpenAiClient/IPlaybookService) into the external endpoint. App-only RAG grounding — no OBO RetrievePrincipalAccess.</constraint>
+    <constraint source="project">§10 BFF Hygiene: state a Placement Justification in the PR for the new assistant endpoint group (cite .claude/constraints/bff-extensions.md); run /conflict-check BEFORE the PR; verify publish ≤60 MB compressed (dotnet publish -c Release; report absolute + delta vs baseline); verify no new HIGH CVE.</constraint>
+    <constraint source="ADR-021">The assistant pane uses Fluent v9 tokens, zero hex; the chat composer has NO file-upload / attach / drop affordance; the pane is dockable (left/right) and renders correctly in dark + Teams themes.</constraint>
+    <constraint source="project">The assistant is workforce-internal only — NOT rendered for external/outside-counsel (CIAM) users; the endpoint is single-scheme workforce-plane, not CIAM dual-scheme.</constraint>
+    <constraint source="ADR-038">Add/update tests in tests/unit/Sprk.Bff.Api.Tests/ (+ KEEP-path integration); the negative cross-scope-leakage tests are mandatory; no Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/external-assistant-security-design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Closed two-tool catalog" location=".claude/adr/ADR-039-grounded-execution-closed-catalogs.md">Project the external catalog to exactly two tools via AgentToolCatalogProjector; the server-side projection is the security boundary, not the persona prompt.</pattern>
+      <pattern name="Context-agnostic SprkChat mount" location="src/client/shared/Spaarke.UI.Components/src/components/SprkChat/">Mount SprkChat with pluggable auth into the shell's dockable assistant pane; composer text-only (no upload affordance).</pattern>
+      <pattern name="Surface-launch routing" location="docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md">launch_wizard resolves consumerType → surfaceLaunchRegistry → handleSurfaceLaunch; only defined wizards are reachable.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm task 050 is human-signed-off; load notes/external-assistant-security-design.md and restate the enforcement contract this task implements. If not signed off, STOP.</step>
+    <step order="2">Run /conflict-check against the shared BFF AI surface + external-access surface before editing; record the result.</step>
+    <step order="3">Add the NEW workforce-plane, entitlement-scoped, app-only assistant endpoint group (single-scheme, ExternalCollaboration/workforce plane; via Services/Ai/PublicContracts facade; no AI-internal type injection; no OBO).</step>
+    <step order="4">Wire the ADR-039 external tool-catalog projection to EXACTLY TWO tools: policy_search (RAG over the task-034 P&amp;P index with server-side entitlement + published/not-restricted/effective trim) + launch_wizard (allow-listed defined wizards only). No file-ingest tool, no core-user tools.</step>
+    <step order="5">Implement per-tool app-only authz + the grounding security-trim exactly per the task-050 design; wire audit logging of asks/answers/tools/grounding-sources.</step>
+    <step order="6">Mount SprkChat as the dockable assistant pane in the workspace shell (from task 012) for WORKFORCE users only; composer TEXT-ONLY — remove/omit any upload/attach/drop affordance; Fluent v9 tokens, zero hex.</step>
+    <step order="7">Add negative tests: out-of-entitlement question → no grounded leakage; catalog excludes all core-user tools + the file-ingest tool; launch_wizard rejects an undefined wizard id; no OBO on any path; assistant not rendered for outside-counsel.</step>
+    <step order="8">Run dotnet build + dotnet test (full BFF suite green); dotnet list package --vulnerable (no new HIGH CVE); dotnet publish -c Release and record compressed size + delta vs baseline.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the P&amp;P RAG grounding cannot be entitlement-trimmed app-only per the task-050 spike (server-side filter cannot guarantee no cross-scope leakage), STOP and escalate — do NOT ship a grounding path that can leak out-of-entitlement content.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="npm">Build the external-spa / shared UI</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (new workforce-plane app-only assistant endpoint group + two-tool catalog projection + grounding trim + audit)</output>
+    <output type="code">src/client/external-spa/ (SprkChat mounted as dockable assistant pane, workforce-only, text-only composer)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (negative cross-scope-leakage + catalog + routing tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a workforce SPA user, when they ask a policy question, then policy_search returns answers grounded ONLY on published/not-restricted/effective P&amp;P within the caller's Tier-1 entitlement (app-only, no OBO).</criterion>
+    <criterion testable="true">Negative — grounding: given an out-of-entitlement question, when policy_search runs, then NO grounded content outside the caller's Tier-1/Tier-2 scope is returned (test green).</criterion>
+    <criterion testable="true">Negative — catalog: the external tool catalog contains EXACTLY policy_search + launch_wizard; all core-user tools AND any file-ingest tool are absent/unreachable (test green).</criterion>
+    <criterion testable="true">Negative — routing: launch_wizard routes only to an allow-listed defined wizard; an undefined/injected wizard id is rejected server-side (test green).</criterion>
+    <criterion testable="true">Negative — UI: the chat composer renders NO file-upload / attach / drop affordance (no paperclip, no drop zone); the assistant pane is NOT rendered for external/outside-counsel users.</criterion>
+    <criterion testable="true">Negative — auth: no OBO on any assistant path (app-only broker only); the endpoint is single-scheme workforce-plane.</criterion>
+    <criterion testable="true">The full BFF suite is green; no new HIGH CVE; publish ≤60 MB compressed with delta reported; Placement Justification stated in PR + /conflict-check run.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>SprkChat (context-agnostic, pluggable auth), ADR-039 AgentToolCatalogProjector (closed catalog), ChatKnowledgeScope, sprk_aipersona persona prompt, the core /api/ai/chat endpoint. grep: no workforce-plane app-only assistant endpoint exists — /api/ai/chat is OBO/core-user (unusable for the external plane).</existing>
+    <extension>Partial — REUSE SprkChat + the ADR-039 catalog + grounding seams as-is; the ONLY new surface is a workforce-plane app-only endpoint group + its two-tool external projection. The core /api/ai/chat cannot be extended because it assumes an OBO core-user Dataverse identity.</extension>
+    <cost-of-doing-nothing>Without the new app-only endpoint, workforce SPA users have no way to search P&amp;P or route to wizards from the portal; reusing /api/ai/chat would require an OBO core-user token the external plane does not have, and any un-trimmed grounding path would leak out-of-entitlement policy content — the exact failure NFR-EXT-AI exists to prevent.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Assistant pane renders (workforce)">
+      <steps><step>Sign in as a workforce user; open the Legal Front Door; dock the assistant pane (left, then right)</step><step>Ask a policy question; trigger launch_wizard for an NDA</step></steps>
+      <expected>Pane docks both sides; grounded answer renders; wizard launches; NO paperclip/upload/drop affordance in the composer; no console errors</expected>
+    </test>
+    <test name="Not shown to outside-counsel">
+      <steps><step>Sign in as an external/outside-counsel (CIAM) user; open the portal</step></steps>
+      <expected>The Ask Legal assistant pane is not rendered/available</expected>
+    </test>
+    <test name="Dark + Teams theme (ADR-021)">
+      <steps><step>Toggle dark theme, then Teams theme, with the assistant pane open</step></steps>
+      <expected>Fluent tokens adapt; zero hardcoded hex; layout intact</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    §10 BFF-touching + AI-on-external-plane: gated by the task-050 human sign-off. Placement Justification in PR + /conflict-check
+    + publish ≤60 MB. Reuse SprkChat + ADR-039 catalog + surface-launch spine; the security boundary is server-side, not the
+    persona prompt. Text-only composer (no ingest surface) is itself a security control per FR-26.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Verify task 050 sign-off first; load all &lt;knowledge&gt;&lt;files&gt;; follow the task-execute pre-execution checklist; run /conflict-check before the BFF PR.</protocol>
+  </execution>
+</task>

@@ -153,7 +153,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         return set.Contains(recordId);
     }
 
-    // ── systemuser plane: ADR-034 membership ONLY (automatic) ────────────────────────────────────
+    // ── systemuser plane: ADR-034 membership ∪ the caller's own contact grants ───────────────────
+    // (§6.5 Path-B amendment of design §5, spaarke-SPA-external-access-platform-r2 UAT 2026-08-07,
+    //  owner directive — "parallel workforce/contact access"): an internal system-user who is ALSO a
+    //  granted contact sees BOTH their ADR-034 membership AND their contact's project grants, so
+    //  internal staff can sign in to the external SPA to "see what's there" and shepherd external
+    //  users. Still strictly the person's OWN access on both planes — never "all projects" (NFR-08).
     private async Task<AccessibleRecordSet> ComposeForSystemUserAsync(
         WorkforcePrincipal principal, string entityType, CancellationToken ct)
     {
@@ -168,10 +173,39 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         var ids = new HashSet<Guid>(membership.Ids);
 
+        // Contact-grants union — grants are sprk_project-scoped in R1, so this term only applies when
+        // enumerating projects (design §5 gap #2). Prefer the derived contact (sprk_primarycontact);
+        // fall back to a verified-email match when the systemuser has no linked contact.
+        var contactGrantsApplied = false;
+        if (string.Equals(entityType, ProjectEntity, StringComparison.OrdinalIgnoreCase))
+        {
+            Guid? grantContactId =
+                principal.ContactId is { } cid && cid != Guid.Empty ? cid : null;
+
+            if (grantContactId is null && !string.IsNullOrWhiteSpace(principal.Email))
+            {
+                grantContactId = await _participations
+                    .ResolveExternalContactAsync(oid: null, email: principal.Email, ct)
+                    .ConfigureAwait(false);
+            }
+
+            if (grantContactId is { } resolved && resolved != Guid.Empty)
+            {
+                var participations = await _participations
+                    .GetParticipationsAsync(resolved, ct)
+                    .ConfigureAwait(false);
+                foreach (var p in participations)
+                {
+                    ids.Add(p.ProjectId);
+                }
+                contactGrantsApplied = true;
+            }
+        }
+
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
-            "{Count} records (ADR-034 membership, automatic).",
-            systemUserId, entityType, ids.Count);
+            "{Count} records (ADR-034 membership; contact-grants union applied: {ContactGrants}).",
+            systemUserId, entityType, ids.Count, contactGrantsApplied);
 
         return new AccessibleRecordSet
         {
@@ -179,7 +213,7 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             EntityType = entityType,
             RecordIds = ids,
             Sources = new AccessibleRecordSetSources(
-                SystemUserMembership: true, ContactGrants: false, StandingGrantMembership: false),
+                SystemUserMembership: true, ContactGrants: contactGrantsApplied, StandingGrantMembership: false),
         };
     }
 

@@ -75,9 +75,18 @@
           "content": "filename: MutualNDA_AcmeCorp.pdf\nmimeType: application/pdf"
         },
         "candidates": [
-          { "bindingId": "651194cd-0000-0000-0000-000000000001", "description": "Summarize the focused document into a chat-friendly summary." },
-          { "bindingId": "ed92d769-0000-0000-0000-000000000002", "description": "Classify an agreement document and extract its type, parties, and key terms." },
-          { "bindingId": "121194cd-0000-0000-0000-000000000003", "description": "Produce a structured AI summary of a document's obligations and dates." }
+          {
+            "bindingId": "651194cd-0000-0000-0000-000000000001",
+            "description": "Summarize the focused document into a chat-friendly summary."
+          },
+          {
+            "bindingId": "ed92d769-0000-0000-0000-000000000002",
+            "description": "Classify an agreement document and extract its type, parties, and key terms."
+          },
+          {
+            "bindingId": "121194cd-0000-0000-0000-000000000003",
+            "description": "Produce a structured AI summary of a document's obligations and dates."
+          }
         ]
       },
       "output": {

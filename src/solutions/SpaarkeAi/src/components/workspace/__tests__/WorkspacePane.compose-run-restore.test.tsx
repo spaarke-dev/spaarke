@@ -240,7 +240,12 @@ describe('WorkspacePane item #13 — persist-on-open', () => {
     expect(snap?.tabs).toHaveLength(1);
     expect(snap?.tabs[0].instanceKey).toBe('upload:file-1');
     expect(snap?.tabs[0].sessionId).toBe('session-home');
-    expect(snap?.tabs[0].displayName).toBe('NDA.docx');
+    // spaarkeai-assistant-enhancements-r2 Phase 0 Fix 2: the tab's displayName
+    // is now derived from the seed filename via `deriveComposeTabLabel`
+    // (extension-stripped + truncated), not the raw dispatched `displayName`.
+    // "NDA.docx" strips to "NDA" (3 chars — under the truncation threshold,
+    // so no ellipsis).
+    expect(snap?.tabs[0].displayName).toBe('NDA');
   });
 });
 
@@ -257,8 +262,10 @@ describe('WorkspacePane item #13 — explicit close (agency)', () => {
     await screen.findByTestId('compose-stub');
     await waitFor(() => expect(readPersisted()?.tabs).toHaveLength(1));
 
-    // Explicit close via the tab's close affordance (aria-label "Close NDA.docx").
-    const closeBtn = await screen.findByRole('button', { name: /close nda\.docx/i });
+    // Explicit close via the tab's close affordance (aria-label "Close NDA" —
+    // Fix 2 truncates the derived displayName to "NDA", see the persist-on-open
+    // test above for the truncation rationale).
+    const closeBtn = await screen.findByRole('button', { name: /close nda/i });
     await act(async () => {
       closeBtn.click();
     });
@@ -297,8 +304,10 @@ describe('WorkspacePane item #13 — cold-load restore', () => {
     // Seed-injection: composeSessionId threaded so ComposeWorkspace resumes the findings-bearing session.
     expect(stub).toHaveAttribute('data-session', 'sess-restore');
     expect(stub).toHaveAttribute('data-file', 'file-9');
-    // The restored tab header is present.
-    expect(await screen.findByRole('tab', { name: /restored\.docx/i })).toBeInTheDocument();
+    // The restored tab header is present. Fix 2: displayName is re-derived
+    // from the seed filename on reopen — "Restored.docx" strips to "Restored"
+    // (exactly 8 chars, at the truncation threshold — no ellipsis).
+    expect(await screen.findByRole('tab', { name: /^restored$/i })).toBeInTheDocument();
   });
 
   it('does NOT resume (no spinner) when the persisted run is absent / not in-flight', async () => {

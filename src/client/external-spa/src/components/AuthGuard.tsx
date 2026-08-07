@@ -18,8 +18,7 @@ import { useNavigate } from 'react-router-dom';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { Spinner } from '@fluentui/react-components';
-import { MSAL_BFF_SCOPE } from '../config';
-import { captureReturnTo, consumeReturnTo } from '../auth/msal-auth';
+import { captureReturnTo, consumeReturnTo, getActiveLoginScope } from '../auth/msal-auth';
 
 interface AuthGuardProps {
   children: React.ReactNode;
@@ -41,8 +40,12 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
     if (!isAuthenticated && inProgress === InteractionStatus.None) {
       // Preserve the intended deep link (e.g. an emailed /project/{id}) across the redirect.
       captureReturnTo();
+      // Request the BFF scope for the CURRENTLY-SELECTED plane's authority (task 013): CIAM by
+      // default (byte-for-byte unchanged), or the workforce scope when the browser realm chooser
+      // picked "My organization". A CIAM instance cannot mint a workforce-audience token, so the
+      // scope must track the plane the mounted MSAL instance was built for.
       void instance.loginRedirect({
-        scopes: [MSAL_BFF_SCOPE],
+        scopes: [getActiveLoginScope()],
       });
     }
   }, [isAuthenticated, inProgress, instance]);

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Module-entitlement resolver (App-Role internal + per-Contact external strategies)</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:020</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags `bff-api`, `auth`; new BFF auth-entitlement core; modifies `.cs`; blocks 022/023/026 — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth entitlement core with high blast radius (Tier-1 gating for every module, both planes); ADR-010 interface-vs-concrete judgment; must mirror the shipped `CallerPrincipalResolver` strategy pattern exactly.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Auth entitlement core on the shared external-access surface (coordination with teams-app-r1); blocks 022/023/026. Must land alone.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Build the module-entitlement resolver (Tier-1): an `IModuleEntitlementResolver` interface with TWO concrete strategies — an App-Role strategy (internal; reads the roles claim from the validated workforce token, NO Graph call) and a Contact-entitlement strategy (external; reads the per-Contact entitlement rows from task 020's schema). This is the Tier-1 "which modules can you open" layer, independent of Tier-2 record scope.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF auth engineer fluent in Minimal API DI, claims-based authorization, and the shipped `CallerPrincipalResolver` strategy pattern.</role>
+  <goal>New BFF code exists under `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/`: `IModuleEntitlementResolver` + `ModuleEntitlementResolver` (dispatches by plane) + `AppRoleEntitlementStrategy` (internal, token-claim read) + `ContactEntitlementStrategy` (external, reuses task 020 grant surface). Registered in DI. Unit tests in `tests/unit/Sprk.Bff.Api.Tests/` cover both strategies incl. negatives. Consumed by task 022's `/me` endpoint.</goal>
+  <context>
+    <background>FR-08: internal entitlement resolved from Entra App-Role claims (per-module roles assignable to groups; org-wide fallback "any authenticated workforce user"). R2 ships one `FrontDoorUser` role but the resolver MUST support per-module roles later without rework. The role claim is read from the token — NO Graph call. FR-09: external (CIAM) entitlement is per-Contact (curated), reusing/extending R1's grant surface (now the task 020 schema). NFR-08: Tier-1 (module entitlement) is INDEPENDENT of Tier-2 (record scope); App Roles gate Tier-1 only. ADR-010 Tension resolved path C: two real strategies justify the interface.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs — THE reference impl to mirror: `ICallerPrincipalStrategy` :147 (`Plane`, `ResolveAsync`), `CallerPrincipalResolver` :166 (dispatch), `CiamContactPrincipalStrategy` :244, `WorkforcePrincipalStrategy` :328, plane selection via `DeterminePlane`. Copy this two-strategy + dispatcher shape for the entitlement resolver.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs — resolve-by-oid :231 / bind-oid :323; the Contact grant surface the external strategy reuses (do not re-implement Contact lookup).</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs :70 — resolver registration site; add the entitlement resolver + strategies here alongside the existing `CallerPrincipalResolver` registration.</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/module-entitlement-schema-decision.md — task 020's logical names the ContactEntitlementStrategy binds to.</file>
+    </relevant-files>
+    <dependencies>Task 020 (schema) provides the entitlement logical names. Blocks 022 (/me endpoint reads this resolver), 023 (attribution), 026 (admin UI grants against this surface).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-010">Introduce `IModuleEntitlementResolver` ONLY because it has ≥2 real implementations (App-Role + Contact strategies) — this satisfies the ADR-010 testing-seam allowance (spec ADR Tension path C). Do NOT add speculative single-impl interfaces elsewhere in this task. Scope: entitlement resolver only.</constraint>
+    <constraint source="spec-FR08">The App-Role strategy MUST read the roles claim from the validated token — NO Graph call. The role→module mapping is data (task 020), so adding a second per-module role later requires zero resolver refactor. Scope: AppRoleEntitlementStrategy only.</constraint>
+    <constraint source="spec-NFR08">This resolver returns Tier-1 module entitlement ONLY; it MUST NOT compute or leak Tier-2 record scope. Scope: entitlement resolver return contract.</constraint>
+    <constraint source="ADR-001">Minimal API + DI minimalism; register concretes for the strategies and the interface for the resolver seam (ADR-010). Scope: DI registration in ExternalAccessModule.cs.</constraint>
+    <constraint source="project">Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and report compressed size + delta vs 46.90 MB baseline (incl PDBs); no new HIGH CVE; run `/conflict-check` before the PR (teams-app-r1 shares this surface).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="strategy-resolver" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">Interface + N concrete strategies + a dispatcher that selects by plane. Mirror this exact shape for the entitlement resolver.</pattern>
+      <pattern name="contact-grant-reuse" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">Reuse resolve-by-oid (:231) for Contact identity; the external strategy reads task 020 grant rows, not a re-implemented lookup.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-08/FR-09 + NFR-08 + ADR-010 Tension (path C). Read `CallerPrincipalResolver.cs` in full to internalize the strategy+dispatcher shape. Read task 020's schema decision note for the entitlement logical names.</step>
+    <step order="2">Define `IModuleEntitlementResolver` (e.g. `Task&lt;ModuleEntitlement&gt; ResolveAsync(CallerPrincipal principal, ...)` returning the set of entitled module ids) and `ModuleEntitlement` return type (Tier-1 only). Define an internal `IModuleEntitlementStrategy { Plane, ResolveAsync }` mirroring `ICallerPrincipalStrategy`.</step>
+    <step order="3">Implement `AppRoleEntitlementStrategy` (workforce plane): read the roles claim from the validated token (ClaimsPrincipal), map role names → module ids via task 020's role→module mapping, apply the "any authenticated workforce user" org-wide fallback. NO Graph call.</step>
+    <step order="4">Implement `ContactEntitlementStrategy` (CIAM plane): resolve the Contact (reuse `ExternalParticipationService` resolve-by-oid), read that Contact's per-module entitlement rows from task 020's schema.</step>
+    <step order="5">Implement `ModuleEntitlementResolver` dispatcher: select strategy by `CallerPrincipal.Plane` (mirror `DeterminePlane`); return the union of entitled module ids.</step>
+    <step order="6">Register in `ExternalAccessModule.cs` (:70): `AddScoped&lt;IModuleEntitlementResolver, ModuleEntitlementResolver&gt;()` + both strategies as `AddScoped&lt;IModuleEntitlementStrategy, ...&gt;()`.</step>
+    <step order="7">Add unit tests in `tests/unit/Sprk.Bff.Api.Tests/` per ADR-038 (no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests): App-Role strategy maps `FrontDoorUser` claim → Front Door module; NO role claim → not entitled (negative); Contact strategy returns granted modules; a Contact with no rows → empty (negative); dispatcher routes by plane.</step>
+    <step order="8">Build + test: `dotnet build` + `dotnet test` the BFF test project. Run `dotnet publish -c Release` and record compressed size + delta.</step>
+    <step order="9">Run `/conflict-check`; write Placement Justification + publish-size delta into the PR/task notes.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="11">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/</step>
+  </steps>
+  <escalation>
+    <trigger>If the App-Role roles claim is NOT present in the validated workforce token as delivered by teams-app-r1's scheme (i.e. entitlement cannot be read without a Graph call), STOP — a Graph-call fallback changes the auth model (NFR "no Graph call") and needs owner sign-off (§6).</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/IModuleEntitlementResolver.cs (+ ModuleEntitlementResolver, AppRoleEntitlementStrategy, ContactEntitlementStrategy)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs (DI registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (entitlement resolver + strategy tests)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a workforce token carrying the `FrontDoorUser` role claim, when the resolver runs, then the Front Door module id is in the entitled set (no Graph call made).</criterion>
+    <criterion testable="true">Given a workforce token with NO role claim and no org-wide fallback module, when the resolver runs, then the entitled set excludes gated modules (negative authz case).</criterion>
+    <criterion testable="true">Given a CIAM Contact with a per-module entitlement row, when the resolver runs on the CIAM plane, then that module id is entitled; a Contact with no rows yields an empty set (negative).</criterion>
+    <criterion testable="true">Given a second per-module App-Role added later as a data row, when the resolver runs, then it resolves the new module with NO code change to the resolver/strategies (FR-08 no-rework).</criterion>
+    <criterion testable="true">Given the resolver output, when inspected, then it contains Tier-1 module ids ONLY and no Tier-2 record identifiers (NFR-08 separation).</criterion>
+    <criterion testable="true">Given `dotnet publish -c Release`, when measured, then compressed size is reported with delta vs 46.90 MB baseline and is ≤60 MB; `dotnet test` BFF suite passes; `dotnet list package --vulnerable` shows no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>`CallerPrincipalResolver.cs` (Tier-2 caller/record-scope resolution) and R1 `/api/v1/external/me` (returns Project participations only). Grep of `Infrastructure/ExternalAccess/**` shows no Tier-1 module-entitlement resolver.</existing>
+    <extension>No. `CallerPrincipalResolver` computes the accessible-record-set (Tier-2), a different concern; entitlement (Tier-1 "which modules") is a new, independent layer. We reuse its strategy PATTERN and the Contact-lookup service, but the resolver itself is new surface.</extension>
+    <cost-of-doing-nothing>Without it, `/me` (task 022) has no way to decide which module cards a user may see; the launcher cannot gate modules, and internal App-Role entitlement (Contact-free) is unrepresentable in server logic.</cost-of-doing-nothing>
+  </justification>
+  <notes>Two-strategy shape is a byte-for-byte mirror of `CallerPrincipalResolver` (interface + strategies + dispatch by plane) so a future third plane is one `AddScoped` + one `DeterminePlane` branch. Do NOT conflate with Tier-2: this resolver never touches `IAccessibleRecordSetService`. spec ADR-010 Tension path C is the justification for the interface.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; §10 gate (Placement Justification + publish size + conflict-check) at Step 9.5.</protocol>
+  </execution>
+</task>

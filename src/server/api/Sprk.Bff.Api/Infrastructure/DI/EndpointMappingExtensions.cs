@@ -127,6 +127,14 @@ public static class EndpointMappingExtensions
         app.MapDocumentsBulkEndpoints();
         app.MapUploadEndpoints();
         app.MapOBOEndpoints();
+
+        // OBO (user-context) document version-history: list + open-prior-version, READ-ONLY —
+        // spaarkeai-compose-r6 task 050 (FR-07 / Success Criterion 4). UNCONDITIONAL mapping per
+        // bff-extensions.md §F.1; the backing ISpeFileOperations facade is registered
+        // unconditionally in DocumentsModule (no new service, no flag). NOT the app-only admin
+        // version surface (MapContainerItemEndpoints) — different auth path by design (ADR-028).
+        app.MapDocumentVersionEndpoints();
+
         app.MapDocumentOperationsEndpoints();
 
         // Compose drafting workspace endpoints (/api/compose/*) — spaarkeai-compose-r1.

@@ -23,10 +23,12 @@ import {
   DocumentRegular,
   DocumentPdfRegular,
   DocumentTextRegular,
+  HistoryRegular,
   TableRegular,
   SlideTextRegular,
 } from "@fluentui/react-icons";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
+import { VersionHistoryModal } from "./VersionHistoryModal";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +39,10 @@ interface IDocument {
   sprk_documentname: string;
   sprk_documentdescription?: string;
   sprk_filetype?: string;
+  /** SPE drive id — required for the version-history affordance (task 051). */
+  sprk_graphdriveid?: string;
+  /** SPE item id — required for the version-history affordance (task 051). */
+  sprk_graphitemid?: string;
   statuscode?: number;
   "statuscode@OData.Community.Display.V1.FormattedValue"?: string;
   createdon?: string;
@@ -210,7 +216,7 @@ async function fetchDocuments(): Promise<IDocument[]> {
 
   const result = await xrm.WebApi.retrieveMultipleRecords(
     "sprk_document",
-    "?$select=sprk_documentid,sprk_documentname,sprk_documentdescription,sprk_filetype,statuscode,createdon,modifiedon&$orderby=modifiedon desc&$top=200"
+    "?$select=sprk_documentid,sprk_documentname,sprk_documentdescription,sprk_filetype,sprk_graphdriveid,sprk_graphitemid,statuscode,createdon,modifiedon&$orderby=modifiedon desc&$top=200"
   );
   return result?.entities ?? [];
 }
@@ -224,10 +230,15 @@ function openRecord(documentId: string): void {
 // DocumentRow
 // ---------------------------------------------------------------------------
 
-const DocumentRow: React.FC<{ doc: IDocument }> = React.memo(({ doc }) => {
+const DocumentRow: React.FC<{
+  doc: IDocument;
+  onShowVersionHistory: (doc: IDocument) => void;
+}> = React.memo(({ doc, onShowVersionHistory }) => {
   const styles = useStyles();
   const Icon = getFileIcon(doc.sprk_filetype);
   const statusLabel = doc["statuscode@OData.Community.Display.V1.FormattedValue"];
+  // Version history needs the SPE identifiers (task-050 OBO endpoint contract).
+  const hasSpeIds = Boolean(doc.sprk_graphdriveid && doc.sprk_graphitemid);
 
   return (
     <div
@@ -262,6 +273,21 @@ const DocumentRow: React.FC<{ doc: IDocument }> = React.memo(({ doc }) => {
           )}
         </div>
       </div>
+      {hasSpeIds && (
+        <Tooltip content="Version history" relationship="label">
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<HistoryRegular />}
+            aria-label={`Version history for ${doc.sprk_documentname}`}
+            onClick={(e) => {
+              e.stopPropagation();
+              onShowVersionHistory(doc);
+            }}
+            onDoubleClick={(e) => e.stopPropagation()}
+          />
+        </Tooltip>
+      )}
     </div>
   );
 });
@@ -277,6 +303,8 @@ export const App: React.FC = () => {
   const [documents, setDocuments] = React.useState<IDocument[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
+  /** Document whose version history is open (null = modal closed). Task 051. */
+  const [versionHistoryDoc, setVersionHistoryDoc] = React.useState<IDocument | null>(null);
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
@@ -334,9 +362,25 @@ export const App: React.FC = () => {
         ) : (
           <div className={styles.list} role="list" aria-label={`${documents.length} documents`}>
             {documents.map((doc) => (
-              <DocumentRow key={doc.sprk_documentid} doc={doc} />
+              <DocumentRow
+                key={doc.sprk_documentid}
+                doc={doc}
+                onShowVersionHistory={setVersionHistoryDoc}
+              />
             ))}
           </div>
+        )}
+
+        {/* Version-history modal (task 051) — OBO list + open prior version read-only */}
+        {versionHistoryDoc && versionHistoryDoc.sprk_graphdriveid && versionHistoryDoc.sprk_graphitemid && (
+          <VersionHistoryModal
+            open={true}
+            onClose={() => setVersionHistoryDoc(null)}
+            documentName={versionHistoryDoc.sprk_documentname}
+            fileType={versionHistoryDoc.sprk_filetype}
+            driveId={versionHistoryDoc.sprk_graphdriveid}
+            itemId={versionHistoryDoc.sprk_graphitemid}
+          />
         )}
       </div>
     </FluentProvider>

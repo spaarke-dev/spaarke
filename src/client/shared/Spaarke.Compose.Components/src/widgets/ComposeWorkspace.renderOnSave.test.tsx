@@ -153,37 +153,49 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
   return { ok: false, status: 404, json: async () => [], text: async () => '' } as unknown as Response;
 });
 
-jest.mock('@spaarke/auth', () => ({
-  authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-  ApiError: class ApiError extends Error {
-    status: number;
-    constructor(message: string, status: number) {
-      super(message);
-      this.status = status;
-    }
-  },
-  useAuth: () => ({
-    isAuthenticated: true,
-    getAccessToken: async () => 'test-token',
+jest.mock(
+  '@spaarke/auth',
+  () => ({
     authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-    tenantId: 'test-tenant',
-    logout: jest.fn(),
+    ApiError: class ApiError extends Error {
+      status: number;
+      constructor(message: string, status: number) {
+        super(message);
+        this.status = status;
+      }
+    },
+    useAuth: () => ({
+      isAuthenticated: true,
+      getAccessToken: async () => 'test-token',
+      authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
+      tenantId: 'test-tenant',
+      logout: jest.fn(),
+    }),
+    // `virtual` lets this suite run even when the sibling lib's `dist/` is not built locally (the
+    // pre-existing condition that stops the other ComposeWorkspace.*.test suites in a fresh clone);
+    // with dist built (CI) the mock behaves identically.
   }),
-  // `virtual` lets this suite run even when the sibling lib's `dist/` is not built locally (the
-  // pre-existing condition that stops the other ComposeWorkspace.*.test suites in a fresh clone);
-  // with dist built (CI) the mock behaves identically.
-}), { virtual: true });
+  { virtual: true }
+);
 
-jest.mock('@spaarke/ui-components', () => ({
-  createXrmNavigationService: () => ({ openLookup: jest.fn() }),
-  createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
-  SendEmailDialog: () => null,
-  SprkModal: () => null,
-  RichFilePreviewDialog: () => null,
-}), { virtual: true });
-jest.mock('@spaarke/document-operations', () => ({
-  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
-}), { virtual: true });
+jest.mock(
+  '@spaarke/ui-components',
+  () => ({
+    createXrmNavigationService: () => ({ openLookup: jest.fn() }),
+    createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
+    SendEmailDialog: () => null,
+    SprkModal: () => null,
+    RichFilePreviewDialog: () => null,
+  }),
+  { virtual: true }
+);
+jest.mock(
+  '@spaarke/document-operations',
+  () => ({
+    useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
+  }),
+  { virtual: true }
+);
 jest.mock('@spaarke/ai-widgets/events', () => ({
   useDispatchPaneEvent: () => jest.fn(),
   usePaneEvent: () => undefined,

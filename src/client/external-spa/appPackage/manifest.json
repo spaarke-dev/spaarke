@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.29/MicrosoftTeams.schema.json",
   "manifestVersion": "1.29",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "id": "23610794-67de-4e6c-be61-ff80cc8cbe7f",
   "developer": {
     "name": "Spaarke",
@@ -11,11 +11,11 @@
   },
   "name": {
     "short": "Spaarke",
-    "full": "Spaarke Collaboration Workspace"
+    "full": "Spaarke Legal Department Service Portal"
   },
   "description": {
-    "short": "Access your Spaarke projects and documents",
-    "full": "Spaarke's collaboration workspace brings your projects and documents into Teams. Sign in with your organization account to view the projects and documents your membership grants access to, and download files securely \u00e2\u20ac\u201d the same collaboration core available in the standalone Spaarke workspace, now inside Teams."
+    "short": "Your legal department service portal \u2014 assigned work, requests, and more",
+    "full": "Spaarke's Legal Department Service Portal brings your entitled workspace modules into Teams: assigned projects and documents, request submission (NDA, policies and procedures), and status tracking. Sign in with your organization account to see only the modules and records you're entitled to, and download files securely \u2014 the same portal shell available standalone, now inside Teams."
   },
   "icons": {
     "color": "color.png",
@@ -28,14 +28,10 @@
       "name": "Spaarke",
       "contentUrl": "https://green-dune-0c4f1221e.7.azurestaticapps.net",
       "websiteUrl": "https://green-dune-0c4f1221e.7.azurestaticapps.net",
-      "scopes": [
-        "personal"
-      ]
+      "scopes": ["personal"]
     }
   ],
-  "permissions": [
-    "identity"
-  ],
+  "permissions": ["identity"],
   "validDomains": [
     "green-dune-0c4f1221e.7.azurestaticapps.net",
     "spaarke-bff-dev.azurewebsites.net",
@@ -44,6 +40,6 @@
   ],
   "webApplicationInfo": {
     "id": "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-    "resource": "api://1e40baad-e065-4aea-a8d4-4b7ab273458c"
+    "resource": "api://green-dune-0c4f1221e.7.azurestaticapps.net/1e40baad-e065-4aea-a8d4-4b7ab273458c"
   }
 }
