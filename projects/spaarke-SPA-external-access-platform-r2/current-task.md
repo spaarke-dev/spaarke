@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **018 ✅ COMPLETE** — inert filter + /api/v1/collab group deleted (uncommitted; user-gated commit) |
-| **Status** | done — build 0-err, 10155 tests pass (+2 PRE-EXISTING merge failures, see ISS-018-1), publish 48.38 MB, no CVE, no route regression |
-| **Next Action** | **User decision**: (a) commit+push 018, and (b) ISS-018-1 — 2 pre-existing `DataverseEntitySchemaTests` failures inherited from master merge (Documents/schema, NOT task 018) → fix now or `/defer`. Then **019** — deploy P1 (⚠️ operator-gated). |
-| **Pre-conditions** | Changes staged, NOT committed. conflict-check = SOFT warn only. |
+| **Task** | **P1 COMPLETE (010–019 all ✅)** — 018 committed (`213f3ea8a`); 019 deployed from worktree 2026-08-07 |
+| **Status** | P1 shell foundation shipped to dev. BFF → spaarke-bff-dev (healthz ✅); client → swa-spaarke-external-spa-dev (https://green-dune-0c4f1221e.7.azurestaticapps.net). Smoke checks green (incl. /api/v1/collab now 404 — 018 removal live). |
+| **Next Action** | **Owner**: (a) live authenticated E2E — CIAM + workforce browser sign-in + Teams tab SSO/dark-theme/module-data (agent can't; needs creds); (b) `/merge-to-master` now that P1 is done (worktree workflow); (c) ISS-018-1 — 2 pre-existing `DataverseEntitySchemaTests` failures from master merge (Documents/schema, `/defer`). Then **P2 (020+)** entitlement — owner wave-gate + schema sign-off. |
+| **Pre-conditions** | Worktree current w/ master (0 behind); conflict-check clean (only `smart-todo-decoupling-r3` shares `WorkspaceHomePage.tsx` — merge-time coordination). |
 
 ### Task 018 progress (this session)
 - **Conflict-check**: SOFT warn — `smart-todo-decoupling-r3` has unmerged changes in `Api/ExternalAccess/` on DISJOINT files (ExternalProjectDtos.cs, ExternalProjectDataEndpoints.cs, ExternalTodoDtoTests.cs). No overlap with deletion targets. teams-app-r1 FR-22 already merged to master.

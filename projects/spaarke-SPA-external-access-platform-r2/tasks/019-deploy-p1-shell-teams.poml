@@ -4,7 +4,7 @@
     <title>Deploy module-host shell + Teams package (SWA)</title>
     <phase>P1 Module-host foundation</phase>
     <gate>blocked-until:012,013,014,016,017</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment task following a prescribed SWA deploy recipe; not code authoring; STANDARD per CLAUDE.md §8.</rigor-reason>
     <model-tier>sonnet</model-tier>
