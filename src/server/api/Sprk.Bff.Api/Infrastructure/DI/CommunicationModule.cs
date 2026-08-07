@@ -246,6 +246,13 @@ public static class CommunicationModule
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
 
+        // FR-B3 (task 043): the user-upload ("Save to Spaarke") capture entry point — the email sibling of
+        // IncomingCommunicationProcessor (Graph-webhook) and MessagingIngestor (ACS). Routes a hand-filed email
+        // through the SAME Association Engine + enrichment so a saved email becomes an intelligence-bearing
+        // sprk_communication, not merely a sprk_document archive. Registered UNCONDITIONALLY (ADR-010 concrete;
+        // §10 unconditional DI) — all deps are singletons; OfficeService consumes it best-effort (optional ctor).
+        services.AddSingleton<EmailUploadCaptureService>();
+
         // Direction-agnostic enrichment orchestrator (ADR-045 / FR-08). Invoked by BOTH the inbound
         // processor and the outbound send path so received and sent communications get identical
         // treatment. Registered UNCONDITIONALLY (consumed unconditionally by both callers per ADR-032;

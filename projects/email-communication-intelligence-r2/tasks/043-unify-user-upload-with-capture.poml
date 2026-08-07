@@ -4,7 +4,7 @@
     <title>Unify user-upload ("Save to Spaarke") with the capture pipeline — same engine + dedup (FR-B3)</title>
     <phase>4 Pillar B — Unified filing surfaces</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF Office upload code (`Services/Office/**`, .cs) to route through the Communication engine + dedup; resolves the structural capture-vs-upload split. tags include bff-api + communication. FULL per task-create Step 3.5.5 → code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

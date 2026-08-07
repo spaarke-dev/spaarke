@@ -39,7 +39,7 @@
 | 040 | Add-in realignment (FR-B0 a–d) | 4·B | 🔲 | 004 | sonnet·high | ✅ true (PB-a) |
 | 041 | Real Spaarke intake folder — re-scoped (mech-1 = config, documented; mech-2 → 043) | 4·B | ✅ | — | sonnet·high | ✅ true (PB-a) |
 | 042 | Drag-to-matter + engine pre-select + ribbon quick-save | 4·B | ✅ | 041 | **opus·high (Option B)** | ✅ true (PB-b) |
-| 043 | Unify user-upload with capture (engine + dedup) — absorbs FR-B1 add-in drag-target (from 041) | 4·B | 🔲 | 021,024 | sonnet·high | ❌ false |
+| 043 | Unify user-upload with capture (engine + dedup) — absorbs FR-B1 add-in drag-target (from 041) | 4·B | ✅ | 021,024 | sonnet·high | ❌ false |
 | 044 | Deploy Pillar B add-in (Azure SWA) | 4·B | 🔲 | 040,042 | sonnet·med | ❌ false |
 | 045 | Pillar B BFF deploy (size/CVE) | 4·B | 🔲 | 041,043 | sonnet·med | ❌ false |
 | 050 | Reconciliation grid — enhance DataGrid + Needs-review config | 5·E | 🔲 | — | sonnet·high | ❌ false (shared lib) |
