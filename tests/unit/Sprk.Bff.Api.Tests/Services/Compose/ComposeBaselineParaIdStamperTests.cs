@@ -300,7 +300,25 @@ public sealed class ComposeBaselineParaIdStamperTests
             idsInBytes.Should().NotBeEmpty($"{Path.GetFileName(path)} has at least one body paragraph");
             idsInBytes.Should().OnlyContain(id => !string.IsNullOrEmpty(id),
                 $"every editable paragraph in {Path.GetFileName(path)} must carry a persisted paraId after ingest");
-            idsInBytes.Should().OnlyHaveUniqueItems($"paraIds must be unique across {Path.GetFileName(path)}");
+
+            // Task 013 re-baseline: MintAndPersist is FILL-GAPS-ONLY by its safety contract (an existing
+            // real id is authoritative - it never rewrites one), so a source document that ALREADY carries
+            // duplicate ids (the NDA: identical ids in a construct's mc:Choice and mc:Fallback text-box
+            // copies) keeps those duplicates at ingest; the RENDER path's AssignParaIds dedups them at
+            // save. The uniqueness contract here is therefore: minting introduces NO NEW duplicates.
+            var sourceDuplicates = ParaIdsOf(original)
+                .Where(id => !string.IsNullOrEmpty(id))
+                .GroupBy(id => id!, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .SelectMany(g => g)
+                .ToList();
+            var resultDuplicates = idsInBytes
+                .GroupBy(id => id!, StringComparer.OrdinalIgnoreCase)
+                .Where(g => g.Count() > 1)
+                .SelectMany(g => g)
+                .ToList();
+            resultDuplicates.Should().BeEquivalentTo(sourceDuplicates,
+                $"minting must introduce NO NEW duplicate paraIds in {Path.GetFileName(path)} - pre-existing source duplicates are preserved by the fill-gaps-only contract");
         }
     }
 }

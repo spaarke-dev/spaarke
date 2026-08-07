@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Documents surface version-history entry point (AllDocuments)</title>
+    <phase>5 Documents version-history open UX (read-only)</phase>
+    <gate>dep:050</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend implementation modifying `.tsx` on a shared solution surface (`AllDocuments`), consuming a new authorization-bearing endpoint, with a new user-reachable entry point. CLAUDE.md §8 — code implementation + `.tsx` change + frontend tag → FULL; includes `&lt;ui-tests&gt;` with an ADR-021 dark-mode check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>plan.md §5 Phase 5 assigns sonnet: well-specified UI affordance (list versions + open a prior version read-only) wired onto an existing endpoint (task 050) and the existing Documents list; no novel algorithm or architectural decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared `AllDocuments` solution surface and the `Spaarke.Compose.Components` client family that overlaps `analysis-hub-r1` / `agreements-r1` / `spaarkeai-compose-r5`. Depends on task 050's endpoint contract → serialize after 050; run `/conflict-check` before the client PR.</parallel-reason>
+    <deps>050</deps>
+    <tags>frontend, compose</tags>
+    <estimated-effort>M (2-4d)</estimated-effort>
+  </metadata>
+
+  <prompt>Add a user-reachable version-history entry point to the Documents surface (`src/solutions/AllDocuments/src/App.tsx`, a Dataverse-record list with no SPE/version affordances today). The affordance lists a document's SPE versions and opens a selected prior version READ-ONLY (exact bytes) via the new OBO endpoint from task 050. Set honest read-only UX copy — this views prior versions, it does not restore or branch.</prompt>
+
+  <role>SPAARKE platform developer with React 18 + Fluent UI v9 code-page experience (the `AllDocuments` solution) and `@spaarke/auth` client-fetch familiarity (ADR-028). Follow ADRs strictly.</role>
+
+  <goal>The Documents surface exposes a version-history affordance: from a document row the user can open a version list (rendered from the task-050 OBO list-versions endpoint) and open a selected prior version read-only, receiving the exact bytes. UX copy makes clear it is view-only (no restore/branch). The affordance fetches through `@spaarke/auth` (OBO token; ADR-028), is theme-token-driven (ADR-021 light + dark), and is covered by `&lt;ui-tests&gt;`.</goal>
+
+  <context>
+    <background>Per spec FR-07 + Success Criterion 4: task 050 delivers the OBO list + open-prior-version endpoint, but FR-07's endpoint has no user-reachable surface without a client entry point. The Documents surface today (`AllDocuments/src/App.tsx`) is a Dataverse-record list with no SPE/version affordances. This task adds the affordance and wires it to the task-050 endpoint. This is the "safety net made real" — the product-visible half of render-on-save's version-history guarantee.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/AllDocuments/src/App.tsx (Documents surface — add the version-history entry point/affordance)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ (the task-050 OBO list + open-prior-version endpoint contract)</file>
+      <file>src/client/shared/Spaarke.Compose.Components/** (shared client family — reuse existing fetch/modal patterns; NEVER delete docxBridge.ts)</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">The OBO list-versions + open-prior-version endpoint contract this client consumes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Client fetches go through `@spaarke/auth` (the calling user's OBO token) — do NOT invent a second auth path or call the admin/app-only version endpoint. The affordance only ever hits the task-050 OBO endpoint.</constraint>
+    <constraint source="ADR-021">Theme tokens only — the version-history affordance (list, open button, read-only banner) uses Fluent v9 theme tokens; no hard-coded colors; legible in both light and dark. Include a dark-mode ui-test.</constraint>
+    <constraint source="project">SCOPE: view/open read-only ONLY. UX copy MUST NOT imply restore or branch-from (deferred). The opened prior version is read-only bytes. NEVER delete `docxBridge.ts`.</constraint>
+    <constraint source="project">Reuse the existing modal/list patterns in the Documents surface and `Spaarke.Compose.Components` (default to reuse, §11) — no new component library. Run `/conflict-check` before the client PR (shared `AllDocuments` + `Spaarke.Compose.Components` overlaps `analysis-hub-r1`/`agreements-r1`/`spaarkeai-compose-r5`).</constraint>
+    <constraint source="project">Node installs: use `npm install --legacy-peer-deps --no-audit --no-fund` (not `npm ci`) per root §12 for the Vite solution.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Documents version-history client affordance</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Documents surface" location="src/solutions/AllDocuments/src/App.tsx">The Dataverse-record list to attach the version-history entry point to; add a row-level affordance opening the version list.</pattern>
+      <pattern name="Auth client fetch" location="src/client/shared/Spaarke.Compose.Components">Reuse the existing `@spaarke/auth` fetch pattern for the OBO endpoint calls; reuse an existing modal/list for the version chooser.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all &lt;knowledge&gt;&lt;files&gt;. Declare RIGOR LEVEL: FULL (reason: `.tsx` frontend change + new entry point). Confirm the task-050 endpoint contract (list + open-prior-version shapes).</step>
+    <step order="1">Read `AllDocuments/src/App.tsx` and identify where a row-level version-history affordance fits. Reuse an existing modal/list pattern (MODAL-DECISION-CRITERIA) rather than a new component.</step>
+    <step order="2">Add the affordance: from a document, open a version list populated by the task-050 OBO list-versions endpoint (via `@spaarke/auth`), showing version label/timestamp/size. Selecting a version opens that prior version READ-ONLY (exact bytes) via the open-prior-version endpoint.</step>
+    <step order="3">Add honest read-only UX copy (a banner/label): "Viewing a prior version (read-only)" — no restore/branch affordance. Theme-token styling only (ADR-021).</step>
+    <step order="4">Add the &lt;ui-tests&gt; below, including the ADR-021 dark-mode check.</step>
+    <step order="5">Build the solution (`npm install --legacy-peer-deps --no-audit --no-fund` then build). Run `/conflict-check` before the client PR.</step>
+    <step order="6">Run/verify: solution build green; ui-tests pass; the affordance opens a prior version read-only end-to-end against the task-050 endpoint.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the task-050 endpoint contract is not yet stable/available, this task is BLOCKED — STOP and escalate rather than inventing a second (e.g. admin/app-only) fetch path, which would violate the OBO authorization model (ADR-028).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: `src/solutions/AllDocuments/src/App.tsx` — a Dataverse-record list with NO SPE/version affordances (grep: no version-history / DownloadFileVersion reference in the solution today).</existing>
+    <extension>Extend — add the affordance to the existing Documents surface and reuse the existing modal/list + `@spaarke/auth` fetch patterns rather than introducing a new component library or a new page.</extension>
+    <cost-of-doing-nothing>Without a client entry point, task 050's OBO endpoint has no user-reachable surface — a user cannot open v3 after v4 from the Documents surface, so FR-07 delivers nothing product-visible and Success Criterion 4 fails.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="open-version-list">
+      <steps><step>From a document row in the Documents surface, open the version-history affordance.</step></steps>
+      <expected>A list of the document's prior versions renders (label/timestamp/size), fetched via the OBO endpoint through `@spaarke/auth`.</expected>
+    </test>
+    <test name="open-prior-version-read-only">
+      <steps><step>Select v3 while v4 is the latest and open it.</step></steps>
+      <expected>v3 opens read-only (exact bytes) with a "read-only / viewing prior version" banner; no restore or branch affordance is present.</expected>
+    </test>
+    <test name="dark-mode">
+      <steps><step>Load the version-history affordance in ADR-021 dark theme.</step></steps>
+      <expected>The list, open button, and read-only banner use Fluent v9 theme tokens (no hard-coded colors) and remain legible in both light and dark.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Install (`--legacy-peer-deps --no-audit --no-fund`) + build the `AllDocuments` solution; run ui/client tests.</tool>
+    <tool name="terminal">Run `/conflict-check` on the shared `AllDocuments` + `Spaarke.Compose.Components` surface.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/AllDocuments/src/App.tsx (version-history entry point)</output>
+    <output type="test">src/solutions/AllDocuments/ (ui-tests for the affordance)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a document with prior versions, when the user opens the version-history affordance on the Documents surface, then the version list renders (label/timestamp/size) fetched via the task-050 OBO endpoint through `@spaarke/auth`.</criterion>
+    <criterion testable="true">Given versions v3 and v4, when the user opens v3, then it opens read-only with exact bytes and a read-only banner; no restore/branch affordance exists.</criterion>
+    <criterion testable="true">Given ADR-021 dark mode, when the affordance displays, then it uses theme tokens (no hard-coded colors) and is legible in both themes.</criterion>
+    <criterion testable="true">Negative: the affordance never calls the admin/app-only version endpoint and never exposes a restore/branch action (out of scope).</criterion>
+    <criterion testable="true">Solution build is green; ui-tests pass; `docxBridge.ts` is not deleted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-07 + Success Criterion 4; plan.md §5 Phase 5. NEW client entry point → §11 justification emitted. Depends on task 050's OBO endpoint contract. View/open read-only only — no restore/branch UX. frontend tag → ui-tests incl. ADR-021 dark-mode.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

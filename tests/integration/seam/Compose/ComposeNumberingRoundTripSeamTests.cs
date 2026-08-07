@@ -14,6 +14,13 @@
 // divergence is documented in projects/spaarkeai-compose-fidelity-r4.5/notes/task-033-numbering-roundtrip-notes.md
 // rather than "fixed" by weakening an assertion — a green-but-wrong assertion here would hide a real
 // NFR-02 numbering-exactness defect.
+//
+// UPDATED by spaarkeai-compose-r6 task 021 (020-R1): the write-side StartsNewList contract changed —
+// StartsNewList=false now CONTINUES an ordered run across intervening non-list blocks (the renderer no
+// longer clears its current instance on every non-ordered block); StartsNewList=true remains the
+// explicit restart. Section 3 below asserts BOTH sides of the updated contract. Golden-label parity for
+// IMPORTED documents (carrier round-trip over the §1.5 exemplars) lives in
+// ComposeNumberingCanonicalModelSeamTests.cs.
 
 using System.Collections.Generic;
 using System.Linq;
@@ -127,43 +134,71 @@ public sealed class ComposeNumberingRoundTripSeamTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
-    // 3. TWO separate ordered lists, broken by an intervening paragraph — the write side's "restart"
-    //    pattern (RenderBlocks: any non-ordered-list block resets currentOrderedNumId, so the NEXT
-    //    ordered item allocates a FRESH w:num instance with a level-0 w:startOverride=1, intending the
-    //    second list to display "1." again). This is a routine document shape (two numbered lists
-    //    separated by prose), not a contrived edge case.
+    // 3. Ordered lists broken by an intervening paragraph — the ComposeBlock.StartsNewList CONTRACT
+    //    (UPDATED by spaarkeai-compose-r6 task 021 / review finding 020-R1): StartsNewList=false
+    //    CONTINUES the current ordered run across intervening non-list blocks (Word's per-numId counter
+    //    behavior — RenderBlocks no longer clears its current instance on every non-ordered block);
+    //    StartsNewList=true remains the EXPLICIT restart (a fresh w:num instance with a level-0
+    //    w:startOverride=1). The live client mapper (docxBridge.buildContentModel) flags every distinct
+    //    top-level ordered list StartsNewList=true, so routine two-list documents still restart.
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
     [Fact]
-    public void RoundTrip_TwoOrderedListsSeparatedByAParagraph_ReadSideLabelsMatchWriteSideRestartIntent()
+    public void RoundTrip_OrderedRunInterruptedByAParagraph_ContinuesWhenStartsNewListIsFalse()
     {
         var model = new ComposeContentModel
         {
             Blocks = new[]
             {
-                ListItem(0, ordered: true, "First A"),                 // list 1, numId N   -> "1."
-                ListItem(0, ordered: true, "First B"),                 // list 1, numId N   -> "2."
-                Paragraph("Some intervening prose that breaks the ordered run."),
-                ListItem(0, ordered: true, "Second A"),                // list 2, FRESH numId (write side intends restart) -> "1."
-                ListItem(0, ordered: true, "Second B"),                // list 2, same fresh numId -> "2."
+                ListItem(0, ordered: true, "First A", startsNewList: true), // numId N -> "1."
+                ListItem(0, ordered: true, "First B"),                       // numId N -> "2."
+                Paragraph("Some intervening prose inside the same numbered run."),
+                ListItem(0, ordered: true, "Continued C"),                   // SAME numId N (contract: continue) -> "3."
+                ListItem(0, ordered: true, "Continued D"),                   // numId N -> "4."
             },
         };
 
-        // The write-side's INTENDED labels, per ComposeDocumentRenderer.RenderBlocks: any non-ordered-list
-        // block resets currentOrderedNumId to null, so "Second A" allocates plan.NewOrderedInstance() — a
-        // BRAND NEW w:num instance carrying a level-0 w:startOverride=1 (AddNumberingDefinitions). The
-        // renderer's OWN authored bytes therefore intend list 2 to restart at "1.".
+        // The write-side's INTENDED labels per the (task-021) StartsNewList contract: the interruption
+        // does NOT break the run, so the renderer keeps ONE w:num instance throughout and Word's
+        // per-numId counter continues 3., 4. — the same behavior the read side's NumberingComputationEngine
+        // replays (its instance-scoped counters continue across non-numbered paragraphs by construction).
+        var writeSideIntendedLabels = new[] { "1.", "2.", null, "3.", "4." };
+
+        var readSideComputedLabels = RoundTripComputedLabels(model);
+
+        readSideComputedLabels.Should().Equal(writeSideIntendedLabels,
+            "StartsNewList=false continues the current ordered run across intervening prose (task 021 / " +
+            "020-R1 contract); if read and write disagree here the counter models have forked and must be " +
+            "reconciled (root CLAUDE.md §6.5), not papered over by weakening this assertion.");
+    }
+
+    [Fact]
+    public void RoundTrip_TwoOrderedListsSeparatedByAParagraph_ExplicitStartsNewListRestartsAtOne()
+    {
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                ListItem(0, ordered: true, "First A", startsNewList: true),  // list 1 -> "1."
+                ListItem(0, ordered: true, "First B"),                        // list 1 -> "2."
+                Paragraph("Some intervening prose that separates two distinct lists."),
+                ListItem(0, ordered: true, "Second A", startsNewList: true),  // list 2, FRESH instance -> "1."
+                ListItem(0, ordered: true, "Second B"),                        // list 2 -> "2."
+            },
+        };
+
+        // The explicit restart: "Second A" flags StartsNewList=true, so the write side allocates a BRAND
+        // NEW w:num instance carrying a level-0 w:startOverride=1 (AddNumberingDefinitions) — list 2
+        // restarts at "1.". This is exactly what the live client mapper emits for a second top-level
+        // ordered list, so the routine two-list document shape keeps restarting.
         var writeSideIntendedLabels = new[] { "1.", "2.", null, "1.", "2." };
 
         var readSideComputedLabels = RoundTripComputedLabels(model);
 
         readSideComputedLabels.Should().Equal(writeSideIntendedLabels,
-            "the write side authors a FRESH w:num instance + startOverride=1 for the second ordered list " +
-            "(intending a restart at \"1.\"); the read side's NumberingComputationEngine counter is keyed " +
-            "by (abstractNumId, level) ONLY (never numId) — if the two disagree here, the read-side counter " +
-            "model has forked from what the write side actually authors for this routine two-list document " +
-            "shape, and must be reconciled (root CLAUDE.md §6.5 / this task's escalation trigger), not papered " +
-            "over by weakening this assertion.");
+            "an explicit StartsNewList=true authors a fresh w:num instance + startOverride=1; the read " +
+            "side's numId-scoped counters (DEF-03 fix) must honor the restart — a disagreement here is a " +
+            "counter-model fork to reconcile (root CLAUDE.md §6.5), not an assertion to weaken.");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════

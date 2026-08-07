@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Retire ComposeShadowPatchEngine + ComposeBaselineParaIdStamper from the save path</title>
+    <phase>1 Render-on-save core</phase>
+    <gate>blocked — requires 010 (Imported cutover finalized: render-from-model is the default save path + count-gate dropped) [transitively 011 renderer + 020 model + 001 amendment]. RE-SEQUENCED 2026-08-05: retire surgical from the save path only AFTER the cutover (010) makes render-from-model the default. Run /conflict-check before the BFF PR.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core BFF save-path change (tags bff/compose) removing the surgical patcher/count-gate; governed by the ADR amendment — FULL per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified retirement of a known code path once 010/011 land; sonnet default per §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Brownfield removal on a contested surface requiring careful reachability analysis; high per §8.5.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Compose save-path wiring — most-contested BFF surface (overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1, spaarke-ai-architecture-redesign-r2, agreements-r1, analysis-hub-r1). Serialize all Compose edits.</parallel-reason>
+    <deps>010</deps>
+    <tags>bff, compose</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Remove ComposeShadowPatchEngine and the ComposeBaselineParaIdStamper count-gate from the SaveAsync path, retaining the surgical engine ONLY for the transitional clean-apply path explicitly permitted by the ADR-049 amendment. Prove by static reachability that no normal save invokes the surgical patcher or the count-gate.</prompt>
+  <role>SPAARKE platform developer. Deep expertise in the Compose save path, reachability analysis, and the ADR-049 Path-B amendment. Follow ADRs strictly.</role>
+  <goal>No code path reachable from ComposeService.SaveAsync (for a normal save) invokes ComposeShadowPatchEngine or the ComposeBaselineParaIdStamper count-gate; both types remain in the codebase for the transitional clean-apply path; docxBridge.ts is untouched; the BFF builds green and the NDA-class w14:paraId/count mismatch no longer refuses a save.</goal>
+
+  <context>
+    <background>spec FR-02: the count-gate (ComposeBaselineParaIdStamper.cs:113) and ComposeShadowPatchEngine are removed from the save path once render-on-save (010/011) is in place. The surgical engine is retained only for a transitional clean-apply path the amendment permits — it is NOT deleted. This task finalizes the retirement wiring and proves reachability.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — remove surgical-patch + count-gate invocations from the save path.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs:113 — the count-gate; ensure it is not reached from a normal SaveAsync (retain the type).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs — retained ONLY for transitional clean-apply per the amendment; do not delete.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Imported cutover finalized (render-from-model is the default save path; count-gate dropped) — so the surgical patcher/stamper are unreferenced by the save path and safe to retire. (RE-SEQUENCED 2026-08-05: was deps 001,011; 010 transitively covers both + the model hub. ADR-049 amendment retains the surgical engine only for the transitional clean-apply path.)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Scope: retain ComposeShadowPatchEngine ONLY for the transitional clean-apply path named in the task-001 amendment; MUST NOT invoke it (or the count-gate) from a normal save.</constraint>
+    <constraint source="project">Scope: NEVER delete docxBridge.ts and do NOT delete ComposeShadowPatchEngine or ComposeBaselineParaIdStamper types — retire them from the save path only.</constraint>
+    <constraint source="ADR-007">Scope: keep Services/Compose byte[]-in / projection-out; no Microsoft.Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-013">Scope: NO AI-internal types in Services/Compose; consume Services/Ai/PublicContracts/ seams only if needed — no fork.</constraint>
+    <constraint source="ADR-039">Scope: engine frozen — no new AI dispatch endpoint.</constraint>
+    <constraint source="project">Scope (Placement Justification, root §10): modify-only of existing Services/Compose — cite .claude/constraints/bff-extensions.md in the PR, verify publish size ≤60 MB (absolute + delta vs task-003 baseline), verify no new HIGH CVE, run /conflict-check before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Save-path retirement; reachability analysis; transitional clean-apply</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+    </files>
+    <patterns>
+      <pattern name="Transitional retention" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs">Keep the engine as a retained type for the clean-apply path the amendment permits; only sever its save-path invocation.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: FULL, model-tier sonnet, effort high. Confirm 001 merged + 011 in place (gate); run /conflict-check for Services/Compose.</step>
+    <step order="1">Enumerate every call site of ComposeShadowPatchEngine + the count-gate reachable from SaveAsync.</step>
+    <step order="2">Sever those invocations from the normal save path; retain the types + the transitional clean-apply path.</step>
+    <step order="3">Static-verify (grep/reachability) that no normal-save code path reaches the surgical patcher or count-gate.</step>
+    <step order="4">Build the BFF; measure publish size vs the task-003 baseline; run dotnet list package --vulnerable.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document the reachability evidence + placement decision + publish-size delta + any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the surgical patcher / count-gate turns out to be reachable from a save path that is NOT the transitional clean-apply path the amendment permits, STOP and escalate per root §6.5 rather than silently deleting or force-routing around it.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given SaveAsync for a normal save, when statically traced, then no reachable path invokes ComposeShadowPatchEngine or the ComposeBaselineParaIdStamper count-gate.</criterion>
+    <criterion testable="true">Given the codebase after this task, when inspected, then ComposeShadowPatchEngine and ComposeBaselineParaIdStamper types still exist (retained for transitional clean-apply) and docxBridge.ts is unchanged.</criterion>
+    <criterion testable="true">Given an imported document with a w14:paraId/count mismatch, when saved, then the save is not refused.</criterion>
+    <criterion testable="true">Negative: no Services/Compose type is deleted and no Microsoft.Graph / AI-internal type is introduced.</criterion>
+    <criterion testable="true">Publish size ≤60 MB with absolute + delta reported; no new HIGH CVE; BFF builds green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Critical path 001→010→011→012→013→014. Completes the save-path pivot; 013 then proves no-422 + edits-land + new-version by tests. spec FR-02.
+
+COMPLETED 2026-08-06 — commits 70be80006 (Phase A: canonical model on load/upload/project mounts, one-mint-two-walks id agreement) · 2fc8ff530 (Phase C: comment-bake retired — the last ContentModel-reachable engine caller; comments ride the model incl. carrier part APPEND; revision-author fallback; post-save model return; transitional op-log Warning telemetry) · 3e4a9f456 (P-2 ScanCarrierBytes extraction + ADR-049 FR-08 coverage note) · 09b79eaae (THE CLIENT CUTOVER: buildImportedContentModel merge-with-loaded-model mapper + diffTokens redlining; save-routing flip {contentModel, content|baselineVersionId}; 026-F5 warning-family separation) · 7e4cd1822 (Step-9.5 fixes F1-F5 + ADR-049 point-4 Path-B micro-amendment).
+
+SCOPE NOTE (directional): the POML's server-only framing was insufficient — without the client cutover, the current client's imported dirty saves still posted op-log → engine, so criterion 1 could not hold in practice. The accumulated 010/026-review obligations (client cutover, comment-bake retirement, warning separation, FR-08 note, P-10/P-2) were executed as part of this task per current-task.md.
+
+ACCEPTANCE: (1) static reachability — every engine/count-gate site reachable from SaveAsync is inside the ContentModel-null TRANSITIONAL shape (notes §18 table); post-cutover shapes never enter it; comments-bake removed. (2) Both types retained (stamper actively used for load-side MintAndPersist ingest); docxBridge.ts exists (extended, never deleted). (3) NDA w14:paraId/count mismatch saves without refusal (ComposeServiceImportedRenderSaveTests, real projector+renderer). (4) No Services/Compose type deleted; no Graph/AI-internal using added. (5) Publish 46.91 MB clean-worktree (+0.01 vs baseline, ceiling 60); no new HIGH CVE (pre-existing Crypto.Xml only); BFF green.
+
+STEP 9.5: adr-check PASS 8/8 (its one §6.5 finding — amendment point-4 wording narrower than the reachable transitional set — resolved same-task as its recommended Path-B micro-amendment). code-review REQUEST-CHANGES → all findings fixed same-task (F1 formatting-signature untouched-predicate; F2 imported-thread anchor id shape; F3 editorIsDirty gate — clean saves keep FR-06a byte-identity; F4 build-time snapshot adoption; F5 dirty-on-failure). F6/F7 minors + residuals routed to 013 (notes §18). Suites: server Compose 979/982 (3 pre-existing NDA reds — 013/027 own); client 78/78; tsc 28-error pre-existing baseline.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

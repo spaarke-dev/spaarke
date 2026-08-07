@@ -119,6 +119,49 @@ public enum ComposeProjectionStatus
 /// </summary>
 public sealed record ComposeProjectionWarning(string Code, int Count, string? Detail = null);
 
+/// <summary>
+/// Task 020 (spaarkeai-compose-r6, FR-03) — the result of projecting a <c>.docx</c> into the CANONICAL
+/// content model (<see cref="ComposeContentModel"/>) via
+/// <see cref="ComposeDocxProjectionBuilder.BuildContentModel"/>: the render-on-save hub's imported-doc
+/// SOURCE. Sibling of <see cref="ComposeDocxProjection"/> (the HTML read/browse projection) — same
+/// builder, same traversal idioms, different output shape. NOT a second body model (root §11 / the
+/// task's extension-only escalation trigger): <see cref="Model"/> IS the one existing
+/// <see cref="ComposeContentModel"/>; this record is only the status/warnings envelope around it,
+/// mirroring <see cref="ComposeDocxProjection"/>'s own envelope convention.
+/// </summary>
+/// <remarks>
+/// TOTAL / lenient by construction (the ADR-049 Path-B flatten-tier posture): projection NEVER throws —
+/// an unreadable source degrades to <see cref="ComposeProjectionStatus.Failed"/> with an empty model,
+/// and every construct the thin model cannot carry flattens to its nearest editable form (or is dropped)
+/// with a counted <see cref="Warnings"/> entry, never a hard-fail. Per-feature fidelity (numbering
+/// labels, tables, headers/footers, tracked-changes, hard-tier) is widened by tasks 021–026 THROUGH this
+/// same model; the flatten warning codes are the seam those tasks retire one by one.
+/// </remarks>
+public sealed record ComposeCanonicalModelProjection
+{
+    /// <summary>Mirrors <see cref="ComposeDocxProjection.Status"/>: Success (clean), Partial (projected
+    /// with counted fidelity warnings — still renderable), Failed (unreadable/empty/over-cap source;
+    /// <see cref="Model"/> is empty and MUST NOT be rendered over a non-empty original).</summary>
+    public required ComposeProjectionStatus Status { get; init; }
+
+    /// <summary>The canonical content model — the single hub every source projects INTO and
+    /// <see cref="ComposeDocumentRenderer.SynthesizeDocument"/> renders OUT of. Empty when
+    /// <see cref="Status"/> is <see cref="ComposeProjectionStatus.Failed"/>.</summary>
+    public ComposeContentModel Model { get; init; } = new();
+
+    /// <summary>Counted flatten/degradation warnings (codes + counts only — Tier-1 safe, no document
+    /// text). On a COMPLETED walk, non-empty warnings ⇒ <see cref="ComposeProjectionStatus.Partial"/>;
+    /// a <see cref="Failed"/> envelope also carries its diagnostic code here (review finding 020-R15).</summary>
+    public IReadOnlyList<ComposeProjectionWarning> Warnings { get; init; } = Array.Empty<ComposeProjectionWarning>();
+
+    /// <summary>Fail-closed factory — mirrors <see cref="ComposeDocxProjection.Failed"/>.</summary>
+    public static ComposeCanonicalModelProjection Failed(string code) => new()
+    {
+        Status = ComposeProjectionStatus.Failed,
+        Warnings = new[] { new ComposeProjectionWarning(code, 1) },
+    };
+}
+
 // =============================================================================================
 // FR-01 (task 011) — intra-paragraph OFFSET-ADDRESSING TABLE types.
 // The D2 fine anchor's deterministic server-side resolver: (paraId, editor-offset) → run split.

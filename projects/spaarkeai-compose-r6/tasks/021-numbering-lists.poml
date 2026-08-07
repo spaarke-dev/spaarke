@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Numbering / lists through the canonical model (reuse NumberingComputationEngine) — golden-label parity vs corpus exemplars</title>
+    <phase>2 Canonical model + fidelity widening</phase>
+    <gate>dep:020</gate>
+    <status>completed</status>
+    <completion-note>COMPLETED 2026-08-06 (commits cc9ac812b + 3ca774e28, pushed). Design: carry the numbering
+      IDENTITY, reference the SCHEME — ComposeBlock.NumId (source w:numId; ListItem only; additive JSON +
+      optional client-contract field) captured by BuildContentModel; renderer ListRenderState references a
+      carrier-known id DIRECTLY (Word per-instance counters ⇒ golden parity BY CONSTRUCTION; numbering.xml
+      BYTE-IDENTICAL on a fully carrier-referencing render), maps unknown ids per-distinct-source-id
+      (continuity survives blank-package synthesize), and honors the StartsNewList contract for born-in-editor
+      items via PER-LEVEL run state (020-R1 closed; nested-sibling restarts + ordered-in-ordered inheritance
+      per flattened-TipTap level transitions; also fixes the live nested-bullet-restarts-parent bug).
+      NumberingComputationEngine REUSED untouched (no parallel path); ordered-list-continuity-lost warning
+      RETIRED. Carrier numbering scanned via READ-ONLY side open (autoSave-rewrite hazard eliminated) with
+      (instance,level) kind classification (foreign-carrier wrong-kind guard, task-030 relevant) and
+      ComposePatchException wrapping; AppendSection defensive list path given the same scan+merge discipline.
+      ACCEPTANCE: ComposeNumberingCanonicalModelSeamTests — carrier round-trip computed-label SEQUENCES ==
+      manifest §1.5 golden Word labels (rows 9/10/11/13) via the reused engine (ParaIdMap.ComputedNumber);
+      stability + numbering.xml byte-identity across all five exemplars; R4.5 agreement file updated to the
+      new write-side contract (both sides asserted). Step 9.5: adr-check PASS 8/8; code-review
+      REQUEST-CHANGES → F1/F2/F4/F5/F6 fixed, F3 documented-deferral (client numId carry-through → 010/012).
+      Gates: suite 691/694 (3 pre-existing NDA-class reds, stash-verified §F.3); ADR-013 facade green;
+      publish 46.89 MB incl PDBs clean-worktree (+0.01 vs parent; −1.36 vs 48.25 baseline; local-tree pdb
+      measurement artifact documented); no new HIGH CVE. DEVIATIONS routed: custom-style-linked numbering +
+      localized heading ids → 026; client mapper numId preservation → 010/012. Record:
+      notes/020-canonical-hub-design.md §11 + §11.1.</completion-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared Services/Compose files on the most-contested BFF surface; numbering fidelity is a legal-correctness bar (wrong label = wrong legal reference). Save/projection change requires ADR-038 seam DoD + golden-label parity assertion. code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per plan.md §5 Phase 2 — reuse of the existing NumberingComputationEngine through the canonical model; well-specified feature-adapter work with a golden-label acceptance oracle, not new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Services/Compose files (ComposeDocxProjectionBuilder / ComposeDocumentRenderer) — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + agreements-r1/analysis-hub-r1. Serializes behind 020 and against 022-026. Run /conflict-check before the BFF PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, compose</tags>
+    <estimated-effort>3-6 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Route numbering / lists through the canonical document model (from task 020), REUSING the R4.5
+    NumberingComputationEngine (ComposeDocxProjectionBuilder.cs:1357, deterministic numId-scoped per ECMA-376) — do
+    NOT re-implement numbering. Prove numbering/list constructs load → edit → save → reopen round-trip through the
+    model without hard-fail, and computed numbering labels match Word (R4.5 golden labels) for the corpus numbering
+    exemplars.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in OOXML numbering (w:numbering / w:numPr / numId / ilvl), the R4.5 NumberingComputationEngine, and the Compose canonical model + render-on-save author. Follow ADRs strictly; keep Services/Compose byte[]-in / projection-out.</role>
+
+  <goal>Numbering and lists flow through the canonical model: the projection captures numId/ilvl and the renderer authors valid w:numbering/w:numPr on the render-on-save path, with numbering labels computed by the reused NumberingComputationEngine. A seam slice proves each numbering/list construct round-trips (load→edit→save→reopen) without hard-fail and that computed labels match the R4.5 golden labels for the corpus numbering exemplars.</goal>
+
+  <context>
+    <background>Spec FR-03/FR-04: numbering/lists are a near-term fidelity feature that must round-trip through the canonical model without hard-fail. R4.5 already built the deterministic NumberingComputationEngine (numId-scoped, ECMA-376) — R6 reuses it through the model, it does not re-implement numbering. Golden labels from the corpus exemplars are the acceptance oracle.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="new">tests/integration/seam/Compose/</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The generalized canonical document model (the single hub numbering flows through).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Save renders numbering from the canonical model per the Path-B amendment — NO surgical byte-patch, NO text-search on the save path.</constraint>
+    <constraint source="ADR-007">Services/Compose stays byte[]-in / projection-out; NO Microsoft.Graph above SpeFileStore.</constraint>
+    <constraint source="ADR-013">No AI-internal types in Services/Compose (Tier-1 NetArchTest); consume PublicContracts seams only, NO fork of Services/Ai.</constraint>
+    <constraint source="ADR-039">Engine frozen — no new AI dispatch endpoint.</constraint>
+    <constraint source="ADR-040">Persist the canonical-model/projection payload per the existing pattern.</constraint>
+    <constraint source="ADR-038">Add through-the-wire seam slices in tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests.</constraint>
+    <constraint source="ADR-029/010">Report BFF publish size + delta vs ~49.63 MB incl. PDBs; ≤60 MB ceiling; minimal DI.</constraint>
+    <constraint source="project">REUSE NumberingComputationEngine (ComposeDocxProjectionBuilder.cs:1357) — do NOT re-implement (FR-03). NEVER delete docxBridge.ts. Run /conflict-check before the BFF PR; state Placement Justification citing .claude/constraints/bff-extensions.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML numbering + Compose canonical model</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Numbering engine (reuse)" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs">NumberingComputationEngine:1357 — deterministic, numId-scoped; compute labels through it, do not re-implement.</pattern>
+      <pattern name="Render-from-model author" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs">SynthesizeDocument:102 / AppendSection:142 — author valid w:numbering/w:numPr here from the canonical model.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL FULL + reason. Confirm task 020 canonical model is in place.</step>
+    <step order="1">Read the canonical model's block/inline shape (task 020) and the NumberingComputationEngine (:1357). Map how numId/ilvl are captured in the projection and computed as labels.</step>
+    <step order="2">Route numbering/lists through the canonical model: projection captures numId/ilvl/list membership; the renderer authors valid w:numbering/w:numPr on the save path; labels are computed by the reused NumberingComputationEngine.</step>
+    <step order="3">Add a seam slice in tests/integration/seam/Compose/: each corpus numbering exemplar loads → edit → save → reopen without hard-fail; assert computed numbering labels equal the R4.5 golden labels.</step>
+    <step order="4">Run dotnet publish -c Release; report absolute size + delta vs ~49.63 MB. Run /conflict-check; state Placement Justification.</step>
+    <step order="5">Run/verify: BFF build + this task's seam slice + Tier-1 NetArchTest pass.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a numbering/list construct cannot round-trip through the canonical model without hard-fail (e.g. a multi-level scheme the model cannot represent), STOP and escalate per §6.5 — do NOT emit a 422 and do NOT re-implement a parallel numbering engine. Hard-tier degradation belongs in task 026, not here.</trigger>
+    <trigger>If computed labels diverge from Word's golden labels, treat it as a NumberingComputationEngine reuse defect and escalate rather than forking the engine.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF; run the seam slice + Tier-1 NetArchTest.</tool>
+    <tool name="terminal">Run /conflict-check before the BFF PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (numbering through the model)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (author w:numbering/w:numPr)</output>
+    <output type="test">tests/integration/seam/Compose/ (numbering/list round-trip + golden-label parity)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a corpus numbering exemplar, when it loads → edit → save → reopen, then numbering/lists round-trip through the canonical model without hard-fail.</criterion>
+    <criterion testable="true">Given the corpus numbering exemplars, when numbering is computed, then labels match Word (R4.5 golden labels) via the reused NumberingComputationEngine.</criterion>
+    <criterion testable="true">Given a save, then w:numbering/w:numPr is authored from the canonical model on the render-on-save path with no surgical byte-patch and no text-search.</criterion>
+    <criterion testable="true">Negative / no-regression: numbering is NOT re-implemented (engine reused); Tier-1 NetArchTest passes; docxBridge.ts not deleted; BFF publish ≤60 MB with delta reported vs ~49.63 MB; seam slice uses no banned mock/DI/ctor shapes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-03/FR-04; plan.md §5 Phase 2. Reuse NumberingComputationEngine (:1357). Builds on 020; seam-tested with the rest in 027. parallel-safe=false. Run /conflict-check before the BFF PR.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check, FULL/BFF). Enforce §10 publish-size gate and /conflict-check.</protocol>
+  </execution>
+</task>

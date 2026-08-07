@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Draft ADR-049 Path-B amendment (render-on-save save path)</title>
+    <phase>0 Foundations &amp; gates</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Architecture-decision change (ADR amendment) with repo-wide blast radius; gates all Phase-1 code — FULL per root §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-migration / architectural decision authoring — high blast radius; opus per §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes to .claude/adr/ — main-session only per root §3 (sub-agents cannot write .claude/); forced parallel-safe:false.</parallel-reason>
+    <deps>none</deps>
+    <tags>adr, docs</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Amend ADR-049 with a Path-B amendment block (per root §6.5) that codifies the render-on-save save path: save re-derives a fresh docx from the canonical model into a new immutable SPE version, superseding I-4 (byte-identical untouched subtrees) and the line-40 "no re-derive on save" rule FOR THE SAVE PATH ONLY. This amendment MUST merge with or before the dependent Phase-1 code — it is a codified prior-decision change, not a silent deviation.</prompt>
+  <role>SPAARKE platform developer and architecture-decision author. Expertise in Compose OOXML fidelity, ADR authoring, and the root §6.5 ADR Conflict Resolution Protocol. Follow ADRs strictly.</role>
+  <goal>ADR-049 carries a new dated Path-B amendment block codifying the four render-on-save points; the read/reference-path invariants (R4.5) and all auth/security ADRs are untouched; the amendment cites the R6 spec ADR-Tensions table and is written so it can merge with or before task 010.</goal>
+
+  <context>
+    <background>Every R3→R5 Compose save failure was the same anchor-reconciliation bug class (latest: AppligentNDA_Signed.docx hard-fails 422). R6 pivots to render-on-save, which directly re-derives the docx on save — the exact opposite of ADR-049 I-4 + line-40. Per root §6.5 this is a legitimate Path-B amendment (context changed; the invariants were guardrails against naive-re-render fidelity loss, now mitigated by a widened canonical model + tiered adapters + version-history safety net). spec.md "ADR Tensions" already specifies the four amendment points.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-049-compose-shadow-document.md — the existing Path-B amendment block already in this ADR (which superseded the R3 paragraph-diff decision); mirror its structure/tone/heading pattern for this new amendment.</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r6/spec.md — "ADR Tensions" section (the four amendment points, verbatim source).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks; this task gates Phase 1.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root-CLAUDE §6.5">Scope: author this as a Path-B amendment (context-changed) — surface it explicitly, cite the spec ADR-Tensions table, and state that it MUST merge with/before dependent code (tasks 010/011/012). Do NOT frame it as a project-scoped exception (Path A) or a silent deviation.</constraint>
+    <constraint source="root-CLAUDE §3">Scope: this file lives under .claude/adr/ — apply the edit in the MAIN SESSION only; a sub-agent Edit here is denied by design.</constraint>
+    <constraint source="ADR-049">Scope: supersede I-4 (untouched-subtree byte-identity) and line-40 (no re-derive on save) FOR THE SAVE PATH ONLY. The R4.5 read/reference-path invariants (one reader, deterministic numbering, citation layer) and I-7 (no write-path text-search — satisfied trivially by rendering) MUST remain in force and be stated as unchanged.</constraint>
+    <constraint source="root-CLAUDE §6">Scope: MUST NOT weaken, reinterpret, or touch any auth/security/compliance ADR; the amendment is confined to the Compose save-path fidelity decision.</constraint>
+    <constraint source="project">Scope: codify exactly the four points from spec — (1) save renders a new immutable version from the canonical model, no surgical anchoring on the save path; (2) version history is the fidelity safety net (append-only; prior versions retrievable via FR-07); (3) representative-corpus round-trip is a release gate (FR-08); (4) the surgical ComposeShadowPatchEngine is retained ONLY for a transitional clean-apply path.</constraint>
+    <constraint source="project">Scope: add a CHANGELOG-style entry line to the ADR (date 2026-08-05, author spaarkeai-compose-r6) per the ADR's existing amendment convention; do NOT alter unrelated ADR sections.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR amendment authoring; Compose render-on-save; §6.5 resolution protocol</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r6/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Path-B amendment block" location=".claude/adr/ADR-049-compose-shadow-document.md">Copy the heading level, dated-amendment convention, and "supersedes …" phrasing of the existing R3-paragraph-diff amendment already in the file.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: FULL, model-tier opus, and that this is a main-session-only .claude/adr/ edit. Load ADR-049 and the spec ADR-Tensions section.</step>
+    <step order="1">Read ADR-049 in full; locate the existing Path-B amendment block and note its heading/date/supersedes convention.</step>
+    <step order="2">Draft the new dated Path-B amendment block codifying the four points; explicitly scope the I-4 + line-40 supersession to the save path; state I-7 satisfied-trivially and the R4.5 read/reference invariants unchanged.</step>
+    <step order="3">Apply the edit to ADR-049 (main session); add the CHANGELOG-style amendment line.</step>
+    <step order="4">Write a one-page summary to projects/spaarkeai-compose-r6/notes/adr049-amendment-summary.md linking the amendment to spec FR-01/FR-02/FR-08 and stating the merge-with/before-Phase-1 obligation.</step>
+    <step order="5">Add a CHANGELOG entry to .claude/CHANGELOG.md (main session) per root §18 (every PR touching .claude requires it).</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If codifying the amendment would require superseding any invariant BEYOND the save path (e.g., touching the R4.5 read/reference I-4 used by the stateless browse projector, or any auth/security ADR), STOP and escalate per root §6 / §6.5 rather than broadening the amendment.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-049-compose-shadow-document.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+    <output type="docs">projects/spaarkeai-compose-r6/notes/adr049-amendment-summary.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given ADR-049, when read after this task, then it contains a new dated Path-B amendment block codifying all four spec points (render-on-save; version-history safety net; corpus round-trip release gate; surgical engine retained only for transitional clean-apply).</criterion>
+    <criterion testable="true">Given the amendment, when it scopes I-4 + line-40 supersession, then the supersession is explicitly limited to the save path and states I-7 is satisfied trivially by rendering.</criterion>
+    <criterion testable="true">Negative: the amendment does NOT alter the R4.5 read/reference-path invariants (one reader, deterministic numbering, citation layer) — those remain stated as in force.</criterion>
+    <criterion testable="true">Negative: no auth/security/compliance ADR and no unrelated ADR-049 section is modified.</criterion>
+    <criterion testable="true">A CHANGELOG entry is added to .claude/CHANGELOG.md and the amendment states it MUST merge with/before Phase-1 code (tasks 010/011/012).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec ADR-Tensions table is the verbatim source for the four points. This task gates Phase 1 — 010/011/012 carry deps on 001 and a &lt;gate&gt; on the merged amendment. Path-B per root §6.5; house-style precedent is the existing Path-B block already in ADR-049.
+
+--- COMPLETION SUMMARY (2026-08-05) ---
+Added the "R6 Path-B Amendment" block to .claude/adr/ADR-049-compose-shadow-document.md (inserted between the R4.5 Read/Reference Fidelity section and Integration, mirroring the existing Path-B block's format). Supersedes I-4 + line-40 MUST NOT for the SAVE PATH ONLY; codifies the four spec points; Scope guard preserves I-7 (trivially satisfied) + R4.5 F-1…F-5 + all auth/security ADRs. Added a dated CHANGELOG entry (.claude/CHANGELOG.md [Unreleased]). Wrote notes/adr049-amendment-summary.md (traceability to FR-01/02/07/08 + the Path-B merge-with/before-Phase-1 obligation). All 5 acceptance criteria met; escalation trigger did not fire (scope confined to save path). Docs-only → Step 9.5 gates N/A. Outputs: ADR-049, .claude/CHANGELOG.md, notes/adr049-amendment-summary.md.
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

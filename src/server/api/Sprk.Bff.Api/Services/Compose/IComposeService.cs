@@ -92,6 +92,24 @@ public interface IComposeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Task 012 (spaarkeai-compose-r6, the client cutover): the EDIT-MOUNT projection bundle for the
+    /// upload / browse-project doors. Extends <see cref="ProjectDocument"/> (same builder, same walk
+    /// idioms — root §11 extension, not a fork) with the two additional facts an editable mount needs
+    /// on the render-on-save path: (1) the bytes are paraId-MINTED first (in-memory, fail-open — the
+    /// same ingest stamp <see cref="LoadAsync"/> applies) so the HTML projection the editor mounts and
+    /// the canonical <see cref="ComposeMountProjection.ContentModel"/> the client retains AGREE on every
+    /// paragraph id (two independent walks would otherwise mint different ids for id-less paragraphs);
+    /// (2) the canonical content model itself, which the client's imported-save mapper merges editor
+    /// state onto and re-posts as <c>SaveComposeDocumentRequest.ContentModel</c> (preserving every
+    /// server-set field). Pure / synchronous — no I/O, no Graph (ADR-007). Fail-closed like
+    /// <see cref="ProjectDocument"/>: an unreadable source returns the original bytes, a Failed HTML
+    /// projection, and a null model — never throws.
+    /// </summary>
+    ComposeMountProjection ProjectForMount(
+        ReadOnlyMemory<byte> content,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Load an existing document into the Compose workspace. Used by both Path A (open from
     /// an existing <c>sprk_document</c> record — caller passes both
     /// <see cref="LoadComposeDocumentRequest.DocumentRecordId"/> and the resolved SPE
@@ -469,6 +487,27 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     public IReadOnlyList<ImportedComment> ImportedComments { get; init; } = Array.Empty<ImportedComment>();
 
     /// <summary>
+    /// Task 012 (spaarkeai-compose-r6, the client cutover): the CANONICAL content model projected from
+    /// the SAME minted load-time bytes the HTML <see cref="Projection"/> is built from (one mint, two
+    /// walks — paraIds agree by construction). The client RETAINS this as the loaded model and, on an
+    /// imported dirty save, merges its editor state onto it (untouched blocks pass through VERBATIM,
+    /// preserving every server-set field: numbering identity, table structural facts, page breaks,
+    /// comments + anchors, revision/format-change facts) and re-posts it as
+    /// <c>SaveComposeDocumentRequest.ContentModel</c> + a baseline source — the render-on-save (a1)
+    /// shape that replaces the transitional op-log path. Null when the canonical projection failed
+    /// (unreadable / over-cap source) — the client then falls back to the transitional op-log save
+    /// shape; never fails Load (best-effort, mirrors <see cref="Projection"/>'s posture).
+    /// </summary>
+    public ComposeContentModel? ContentModel { get; init; }
+
+    /// <summary>Task 013 (012-review F7): the canonical-model projection's counted flatten warnings
+    /// (codes + counts, Tier-1 safe) for THIS load - what the thin model could not carry (text boxes,
+    /// drawings, ...). Previously server-log-only, so the save that MATERIALIZES the loss showed the
+    /// user nothing; the client folds these into the FIRST model-path save's degradation banner.
+    /// Null when the projection was clean or failed.</summary>
+    public IReadOnlyList<ComposeProjectionWarning>? ContentModelWarnings { get; init; }
+
+    /// <summary>
     /// G1 (FR-01, task 020): the persisted <see cref="ComposeOrigin"/> marker for Path A loads (an
     /// existing <c>sprk_document</c> record — <see cref="ComposeDocumentResult.DocumentRecordId"/> is
     /// non-null). Read from the <c>sprk_composeorigin</c> Dataverse field; <c>null</c> for Path B
@@ -522,6 +561,39 @@ public sealed record ImportedRevision(
     [property: JsonPropertyName("anchorText")] string AnchorText,
     [property: JsonPropertyName("paragraphHint")] int ParagraphHint,
     [property: JsonPropertyName("paraId")] string? ParaId);
+
+/// <summary>
+/// Task 012 (spaarkeai-compose-r6) — the edit-mount projection bundle returned by
+/// <see cref="IComposeService.ProjectForMount"/> for the upload / browse-project doors. NOT a new body
+/// model (root §11): <see cref="Projection"/> is the one existing HTML projection and
+/// <see cref="ContentModel"/> the one existing canonical model; this record only bundles them with the
+/// paraId-minted bytes both were built from so the three stay id-consistent on the client.
+/// </summary>
+public sealed record ComposeMountProjection
+{
+    /// <summary>The (possibly) paraId-minted bytes BOTH projections were built from. Identical to the
+    /// input when no paragraph needed a mint (the ingest stamp is idempotent + fail-open). The door
+    /// returns these to the client as the retained mount bytes so the editor's node ids, the retained
+    /// model's block ids, and the save-time carrier stay one id universe.</summary>
+    public required ReadOnlyMemory<byte> Content { get; init; }
+
+    /// <summary>True when minting mutated the bytes (at least one id-less paragraph gained an id) —
+    /// lets the stateless browse door omit the (large) content echo when nothing changed.</summary>
+    public required bool Minted { get; init; }
+
+    /// <summary>The HTML editor projection — the SAME shape <see cref="IComposeService.ProjectDocument"/>
+    /// returns and <see cref="LoadComposeDocumentResult.Projection"/> carries.</summary>
+    public required ComposeDocxProjection Projection { get; init; }
+
+    /// <summary>The canonical content model (see <see cref="LoadComposeDocumentResult.ContentModel"/> for
+    /// the retention/re-post contract). Null when the canonical projection failed — the client falls back
+    /// to the transitional op-log save shape.</summary>
+    public ComposeContentModel? ContentModel { get; init; }
+
+    /// <summary>Task 013 (012-review F7): the canonical projection's flatten warnings - see
+    /// <see cref="LoadComposeDocumentResult.ContentModelWarnings"/>. Null when clean or failed.</summary>
+    public IReadOnlyList<ComposeProjectionWarning>? ContentModelWarnings { get; init; }
+}
 
 /// <summary>Save request payload.</summary>
 /// <remarks>
@@ -731,6 +803,24 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// applied and never silently dropped. Null on every non-stale save (the common case).
     /// </summary>
     public ReanchorSummary? ReanchorSummary { get; init; }
+
+    /// <summary>
+    /// Task 026 (FR-04 graceful degradation — success-with-warnings): the render-side DEGRADATION
+    /// warnings this save produced (codes + counts only, no document content) — content the authoring
+    /// engine had to simplify or drop (filtered comment anchors, failed tracked-format-change parse
+    /// gates, unresolvable hyperlink targets). Populated on the born-in-editor render path
+    /// (ContentModel present); null/empty = nothing degraded. The save still SUCCEEDS — a hard-tier
+    /// construct is never a 422 (the graceful-degradation guarantee); the prior version remains
+    /// retrievable via SPE version history (FR-07 safety net).
+    /// </summary>
+    public IReadOnlyList<ComposeProjectionWarning>? DegradationWarnings { get; init; }
+
+    /// <summary>Task 012 (the client cutover): the canonical model projected from the FINAL persisted
+    /// bytes — populated ONLY on render-path saves (the request carried a ContentModel). The client
+    /// adopts it as its new retained loaded model and re-baselines its edit snapshot so the next dirty
+    /// save merges against the just-persisted state. Null on op-log/clean saves or when the post-save
+    /// projection failed (the client then keeps the model it posted as its merge base).</summary>
+    public ComposeContentModel? ContentModel { get; init; }
 
     /// <summary>
     /// Prong 1 (task 055 — keep-edits graceful degradation). Populated ONLY when the loaded-doc apply

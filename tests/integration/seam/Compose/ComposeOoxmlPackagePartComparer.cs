@@ -171,7 +171,7 @@ internal static class ComposeOoxmlPackagePartComparer
     /// Deliberately generic (walks the part graph rather than enumerating typed SDK properties like
     /// <c>HeaderParts</c>/<c>FooterParts</c>) so no future part TYPE needs a comparer code change.
     /// </summary>
-    private static IEnumerable<OpenXmlPart> EnumerateAllParts(OpenXmlPackage package)
+    internal static IEnumerable<OpenXmlPart> EnumerateAllParts(OpenXmlPackage package)
     {
         var visited = new HashSet<string>(StringComparer.Ordinal);
         var queue = new Queue<OpenXmlPart>(package.Parts.Select(p => p.OpenXmlPart));
@@ -193,7 +193,7 @@ internal static class ComposeOoxmlPackagePartComparer
         }
     }
 
-    private static byte[] ReadPartBytes(OpenXmlPart part)
+    internal static byte[] ReadPartBytes(OpenXmlPart part)
     {
         using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
         using var ms = new MemoryStream();

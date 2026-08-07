@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Deploy + UAT gate (Phase 1) — BFF + sprk_spaarkeai together</title>
+    <phase>1 Render-on-save core</phase>
+    <gate>blocked — requires 013 (render-on-save seam + regression tests green) + 027 (fidelity seam suite green). RE-SEQUENCED 2026-08-05: the cutover + fidelity ship together (anti-clobber, BFF + sprk_spaarkeai), so deploy gates on BOTH test suites.</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy + manual UAT gate; no new production code — STANDARD per root §8 (deploy discipline).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy + UAT run; sonnet default per §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Irreversible co-deploy with anti-clobber verify + live NDA UAT; high per §8.5.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the shared BFF + sprk_spaarkeai artifacts on the most-contested surface; must serialize and run /conflict-check first.</parallel-reason>
+    <deps>013, 027</deps>
+    <tags>deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the Phase-1 render-on-save cutover — BFF (Sprk.Bff.Api) and the sprk_spaarkeai code page together — with anti-clobber verification (live artifact is a strict superset before deploy) and a /conflict-check gate, then run manual UAT saving the live NDA to confirm the 422 is gone in the deployed environment.</prompt>
+  <role>SPAARKE platform developer. Expertise in BFF deployment (bff-deploy), code-page deployment (code-page-deploy), anti-clobber verification, and Compose UAT. Follow ADRs strictly.</role>
+  <goal>The render-on-save Phase-1 change is deployed (BFF + sprk_spaarkeai together, anti-clobber-verified), /conflict-check passed before the PR, and a manual NDA UAT in the deployed environment confirms the save succeeds (no 422), the edit lands, and a new version is produced — with a deploy + UAT record in project notes.</goal>
+
+  <context>
+    <background>spec NFR-04 deploy discipline: BFF + sprk_spaarkeai deploy together; anti-clobber verify (live artifact is a strict superset before deploy); /conflict-check before every BFF PR. Success Criterion 1 requires the NDA save to succeed in a real environment, not just in seam tests. This is the Phase-1 cutover gate before Phase 2 widening begins.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/ — the BFF artifact to publish/deploy.</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/ — the sprk_spaarkeai code page deployed alongside the BFF.</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/AppligentNDA_Signed.docx — the UAT document.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">Seam + regression tests green (no 422 proven in CI before deploy).</dependency>
+      <dependency task="027" status="pending">Fidelity seam suite green (per-feature round-trip + hard-tier warns-not-fails) — ships with the cutover (RE-SEQUENCED 2026-08-05).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: deploy BFF + sprk_spaarkeai TOGETHER; perform anti-clobber verification (confirm the live artifact is a strict superset) BEFORE deploying — do not clobber sibling-worktree changes on the shared surface.</constraint>
+    <constraint source="project">Scope: run /conflict-check before the BFF PR (most-contested surface); resolve any flagged overlap with spaarkeai-compose-r1..r5 / spaarke-ai-architecture-redesign-r2 / agreements-r1 / analysis-hub-r1 before deploying.</constraint>
+    <constraint source="project">Scope: this is a deploy/UAT gate — do NOT introduce new production code here; if UAT fails, escalate rather than hot-patching in this task.</constraint>
+    <constraint source="ADR-029">Scope: confirm the deployed BFF publish size ≤60 MB compressed (report absolute + delta vs the task-003 baseline) as part of the deploy record.</constraint>
+    <constraint source="project">Scope: commit with --no-verify and the co-author trailer Co-Authored-By: Claude Opus 4.8 &lt;noreply@anthropic.com&gt; per NFR-04.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF + code-page co-deploy; anti-clobber; Compose UAT</topic>
+    <files>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Co-deploy" location=".claude/skills/bff-deploy/SKILL.md">Deploy BFF via bff-deploy and the code page via code-page-deploy in the same cutover; anti-clobber verify first.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: STANDARD, model-tier sonnet, effort high. Confirm 013 tests are green (gate).</step>
+    <step order="1">Run /conflict-check for Services/Compose + ComposeWorkspace before the PR; resolve any overlap.</step>
+    <step order="2">Anti-clobber verify: confirm the live BFF + sprk_spaarkeai artifacts are a strict superset of what this branch replaces.</step>
+    <step order="3">Publish the BFF; confirm compressed size ≤60 MB (report absolute + delta vs task-003 baseline).</step>
+    <step order="4">Deploy BFF (bff-deploy) + sprk_spaarkeai (code-page-deploy) together.</step>
+    <step order="5">Run manual NDA UAT in the deployed environment: load → edit → save; confirm no 422, edit lands, new version produced.</step>
+    <step order="6">Record the deploy + UAT result in projects/spaarkeai-compose-r6/notes/phase1-deploy-uat.md.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /conflict-check flags an unresolved overlap on the shared surface, if anti-clobber verification shows the live artifact is NOT a strict superset, or if the NDA UAT still 422s, STOP and escalate per root §6 — do not force the deploy or hot-patch inside this gate task.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-compose-r6/notes/phase1-deploy-uat.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given /conflict-check, when run before the PR, then it passes (or all flagged overlaps are resolved) and the result is recorded.</criterion>
+    <criterion testable="true">Given the deploy, when performed, then BFF + sprk_spaarkeai are deployed together after anti-clobber verification confirms the live artifact is a strict superset.</criterion>
+    <criterion testable="true">Given the deployed environment, when the NDA is loaded → edited → saved, then the save succeeds (no 422), the edit lands, and a new version is produced.</criterion>
+    <criterion testable="true">Negative: if UAT fails, the task escalates rather than hot-patching production code inside this gate.</criterion>
+    <criterion testable="true">Deployed BFF publish size ≤60 MB with absolute + delta recorded in the deploy note.</criterion>
+  </acceptance-criteria>
+
+  <completion-note>COMPLETED 2026-08-06. Deployed SHA d01007a38 (incl. master merge 11fe9cfd8). Anti-clobber initially FAILED (assistant-enhancements-r2 session live on dev: BFF 5 deploys that day + sprk_spaarkeai 11:15Z) -> operator chose option A (freeze r2 deploys; r2 re-coordinates at its merge). Publish 46.94 MB incl PDBs (+0.03 vs 46.91 baseline). BFF hash-verified + healthz green; sprk_spaarkeai 5.3 MB with R6 markers verified; routes 401-not-404. UAT on the operator's REAL Corteva signed NDA: PASS - repeated saves no-422, redlines land, SPE versions accumulate, prior version opened intact in Word (002's live gate closed at the storage layer). Loud degradation fired as designed (indentation x84 / paragraph-style x85 / section-break x6). Defects D1-D7 triaged in notes/phase1-deploy-uat.md - NONE hot-patched per gate constraint; D1 (duplicate sprk_document per save-session) proven PRE-EXISTING (2 records pre-date the deploy; all 6 records share one sprk_graphitemid - file layer correct). Recommended new fix tasks: D1 upsert, D2 quote-mangling in suggestion pipeline (D3 is its consequence), D4 Restore-from-Source, D6/D7 UX. Corteva NDA = corpus row-4 candidate pending confidentiality sign-off.</completion-note>
+  <notes>Phase-1 cutover gate; critical path 001→010→011→012→013→014→(Phase 2). Accepted consequence per spec: the NDA 422 stays live in prod until this deploy ships. spec NFR-04 + Success Criterion 1.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
