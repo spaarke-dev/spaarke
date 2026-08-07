@@ -109,6 +109,24 @@ CIAM path preserved byte-for-byte: same deny codes/statuses (`sdap.access.deny.c
 
 ---
 
+## 8b. ⚠️ SHARED workforce Entra app changes — COORDINATION REQUIRED (added 2026-08-07)
+
+All Teams/NAA auth changes were made on the **shared platform app `1e40baad` = "SDAP-BFF-SPE-API"** (object id `c2aab303-…`, tenant `a221a95e` Spaarke Dev) — the SAME app R2 builds its module framework on. **These are shared-infra changes, not teams-app-r1-local; R2 must be aware of / own them.** The complete set applied for the Teams host:
+
+| # | Change on `1e40baad` | Why | Risk to R2 |
+|---|---|---|---|
+| 1 | `signInAudience` = `AzureADMultipleOrgs` (multitenant) | Workforce users from any customer tenant (Teams) | Low — additive; CIAM path unaffected |
+| 2 | Pre-authorize Teams **web** client `5e3ce6c0-2b1f-4285-8d4b-75ee78787346` on `access_as_user` | Teams web NAA/SSO | Additive |
+| 3 | Pre-authorize Teams **desktop/mobile** client `1fec8e78-bce4-4aaf-ab1b-5451cc387264` on `access_as_user` | Teams desktop NAA/SSO | Additive |
+| 4 | Pre-authorize **Microsoft Authentication Broker** `29d9ed98-a469-4536-ade2-f981bc1d605e` on `access_as_user` (**2026-08-07**) | Teams **desktop** WAM/OneAuth broker was denied the resource ("access denied", `AADSTS`/OneAuth 2002) — the silent Windows-broker flow needs the broker pre-authorized | Additive; **flagged for R2 review** — it lets the MS WAM broker obtain `access_as_user` silently |
+| 5 | SPA redirect URIs added: `https://green-dune-0c4f1221e.7.azurestaticapps.net`, `brk-multihub://green-dune-…`, `brk-1fec8e78-…://green-dune-…`, `brk-5e3ce6c0-…://green-dune-…` | NAA broker reply addresses (`brk-multihub` was the `AADSTS700046` fix) | The `brk-…` URIs made an `/adminconsent?...` URL fail with **`AADSTS7000471`** (brk scheme reserved for brokered flows) — grant admin consent via the **portal**, not a bare consent URL |
+
+**Governance ask**: the shared **workforce Entra app config is platform-owned** (R2 territory). teams-app-r1's changes above should be **reviewed + absorbed into R2's ownership** of `1e40baad`; future changes to this app coordinated (not made per-consumer). The exposed scopes (`access_as_user` / `access_as_external_user` / `SDAP.Access` / `user_impersonation`) were preserved throughout (verified). Backup of the pre-change `api` object: `c:/tmp/entra-api.json` (session-local).
+
+**Open item for R2**: is the broker (`29d9ed98`) pre-authorization the sanctioned NAA-desktop pattern, or should desktop NAA be solved differently (e.g. domain-qualified `webApplicationInfo.resource` for the Teams-SSO fallback + a BFF `ValidAudiences` entry)? teams-app-r1 chose the broker pre-auth as the least-invasive unblock; R2 owns the final call.
+
+---
+
 ## 9. Operator-gated remainder
 
 Code + gates + publish-size (46.90 MB compressed incl PDBs, vs ~49.63 MB baseline — under the 60 MB ceiling) are complete and committed. Still operator-gated (a coding agent cannot deploy shared infra + sign into a live Teams client):
