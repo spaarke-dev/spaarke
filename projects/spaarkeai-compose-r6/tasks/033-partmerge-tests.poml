@@ -4,7 +4,7 @@
     <title>Part-merge tests + Placement/Component Justification</title>
     <phase>3 Template part-merge</phase>
     <gate>blocked until 032</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Plan.md §5 Phase 3 declares STANDARD. However this task modifies `tests/**` with `testing`/`seam` tags, so the TEST-MODIFYING override (root CLAUDE.md §8) applies UNCONDITIONALLY — Step 9.5 code-review + adr-check run regardless of the declared STANDARD level. Author the task at STANDARD per plan; the gates still fire via the override.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -109,6 +109,7 @@
     <criterion testable="true">TASK-INDEX.md shows task 033 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
   </acceptance-criteria>
 
+  <completion-note>COMPLETED 2026-08-07 (isolated-worktree agent; cherry-picked 77e4d9dfc). ComposeTemplateChromeProvenanceSeamTests (1 file, 3 facts) — gap-fill vs 030/032 coverage (assessment table in agent report): NEW at the wire: styles.xml provenance (contested Heading1 — template color wins on PERSISTED bytes; FirmBody survives), footer part via sectPr FooterReference, OpenXmlValidator on wire bytes, no-dangling-rId scans, mergeWarnings-empty assertions; PLUS the notes-§21 imported-carrier slices on REAL corpus docs: multi-author-redline-synthetic (ins/del authors, delText, rPrChange/pPrChange, mark-deletion, tracked hyperlink rel by URI, grafted anchored comment carried) and nda-interrupted-clauses (real numId collision remapped, template UpperRoman intact, table carried, real Heading1 collision template-wins). Suite 1069/1069 single-run. FIXTURE FINDING (not production): nda-interrupted-clauses.docx carries 8 pre-existing spec-invalid w14:paraId >= 0x80000000 — NDA slice uses baseline-diff validator (self-destructs to strict when fixture cleaned); fixture regeneration recommended at wrap-up. Placement + §11 justification recorded in notes §23. Step 9.5 lean review launched on the merged SHA.</completion-note>
   <notes>
     Spec Success Criterion 3; §11 Component Justification. Closes the Phase 3 slice: the standing regression net that the
     part-merge adopts the firm template's chrome. Declared STANDARD per plan.md, but the TEST-MODIFYING override (root

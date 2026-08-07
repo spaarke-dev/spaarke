@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **033 IN FLIGHT** (exec-033 agent, isolated worktree): chrome-provenance seam suite + the §21 imported-carrier wire slice (assess-then-fill-gaps vs 030/032 coverage; test-only). Wave-2 review CLOSED at db1cc3406 (two HIGHs fixed: §F.1 NullComposeTemplateSource + carryDegradationWarnings through requestLoad; + isDirty apply-time re-check hoisted, ispersonal org-shared guard). Publish post-fixes 47.00 MB (ceiling 60); CVE clean. |
-| **Next task** | On 033 return: cherry-pick, verify, Step 9.5 (TEST-MODIFYING → FULL), close Phase 3 COMPLETE. Then Phase 4: 040 (PDF intake, opus/FULL) → 041/042. Then 090 wrap-up (test-diet gate; needs 042 + 052? — check TASK-INDEX deps: 090 needs 014✅,027✅,033,042,052,061✅). 052 = check what remains in Phase 5 (051 done). Follow-ups ledger: If-Match apply replace; ApiError 404 branch; 051 popup fallback; #690 double-run dedup; D1-D7 operator approval; flaky CreateOnSaveTests FakeTimeProvider. Branch ~45+ behind master — reconcile at next PR. |
-| **Status** | 033 agent running; all pushed through db1cc3406 |
-| **Next Action** | Triage 033 return → close-out → 040. |
+| **Task** | NONE ACTIVE — **PHASE 3 COMPLETE** (030-033 all ✅; 033 closed at 77e4d9dfc, suite 1069/1069). Lean Step 9.5 review of 033 IN FLIGHT — triage on return. Phases done: 0,1,2,3,5,6 (product-side). |
+| **Next task** | **Phase 4: 040 — PDF → canonical model** (opus/FULL, extends DocumentIntelligenceService/DocumentParserRouter; deps 020 ✅) → 041/042. Then 052 (check remaining Phase-5 scope), then **090 wrap-up** (needs 033✅,042,052,061✅ + 014✅,027✅; /test-diet gate + anti-clobber deploy + ADR-049 amendment merge check). Follow-ups ledger in notes §23. Branch ~45+ behind master — reconcile at next PR (+/conflict-check). |
+| **Status** | Pushing Phase-3 close-out |
+| **Next Action** | Triage 033 review on return. On "continue": task-execute 040 (main session or agent — touches Services/Ai + Compose load path; Compose-serialized). |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are

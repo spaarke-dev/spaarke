@@ -37,7 +37,7 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | 030 | Part-merge engine in Services/Compose (body → firm/matter .dotx) | 3 | 020 | P3 | false | FULL | opus/high | ✅ |
 | 031 | Template storage/variable rendering reuse (template entity + ITemplateEngine) | 3 | 030 | P3 | false | STANDARD | sonnet/high | ✅ |
 | 032 | Endpoint + client wiring for template selection/merge | 3 | 031 | P3 | false | FULL | sonnet/high | ✅ |
-| 033 | Part-merge tests + Placement/Component Justification | 3 | 032 | P3 | false | STANDARD | sonnet/high | 🔲 |
+| 033 | Part-merge tests + Placement/Component Justification | 3 | 032 | P3 | false | STANDARD | sonnet/high | ✅ |
 | 040 | PDF → canonical model via DocumentIntelligenceService/DocumentParserRouter | 4 | 020 | P4 | false | FULL | opus/high | 🔲 |
 | 041 | Open PDF in Compose → edit → save as docx version (client wiring) | 4 | 040 | P4 | false | FULL | sonnet/high | 🔲 |
 | 042 | PDF intake tests + lossiness-expectation UX | 4 | 041 | P4 | false | STANDARD | sonnet/high | 🔲 |

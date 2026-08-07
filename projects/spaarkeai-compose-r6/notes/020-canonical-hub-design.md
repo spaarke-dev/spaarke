@@ -947,3 +947,25 @@ Fidelity gate corpus baseline: 5 pass / 5 warn / 0 fail; NDA warn-not-fail (no 4
 Next: 032 (endpoint+client wiring consuming 030 engine + 031 facade), 033 (provenance seam incl.
 imported-carrier slice per §21), 051/052 (version-history client), 061 (CI gate wiring on
 fidelity-gate-result.json; coordinate LFS with PR #690's approach).
+
+## §23 — Waves 2+3 close: 032/051/061 + 033 → PHASE 3 COMPLETE (2026-08-07)
+
+Wave-2 (032 apply-template + 051 version-history client + 061 CI gate) closed at db1cc3406 after Step 9.5
+triage: §F.1 FAIL fixed (NullComposeTemplateSource in AddNullObjectsForCompoundOff — endpoint unconditional,
+real impl compound-gated), merge warnings now ride requestLoad.carryDegradationWarnings (were wiped by
+INITIAL_STATE before paint), apply-time isDirty re-check (hoisted decl), app-only template read enforces
+org-shared (ispersonal filter + id-path refusal). 033 (77e4d9dfc) completes Phase 3: chrome-provenance
+seam + imported-carrier wire slices on real corpus bytes (coverage table in agent report; suite 1069/1069).
+
+**Phase-3 Placement + §11 record (033 deliverable)**: ComposeTemplatePartMergeEngine in Services/Compose —
+pure OOXML byte[]-in/out, no Graph/AI internals (ADR-007/013), consumed via ComposeService.ApplyTemplateAsync
+behind /api/compose; template resolution isolated at the IComposeTemplateSource PublicContracts facade
+(031); unconditional DI + Null peer (§F.1 symmetric post-fix); no new packages; publish 47.00 MB.
+§11: only overlap = WordTemplateService (text substitution — different algorithm class, extension rejected);
+cost-of-nothing = Success Criterion 3 fails outright; altChunk banned by FR-05.
+
+**Follow-ups ledger (accumulated)**: If-Match on apply replace (TOCTOU vs sibling tab); ApiError-typed 404
+branch in handleApplyTemplate (dead response.ok idiom); 051 window.open popup-blocker fallback + 60s blob
+revoke + index-0 Current badge; nda-interrupted-clauses.docx paraId regeneration (spec-invalid >= 0x80000000);
+corpus-manifest §3 consumer rows; #690 FidelityGate double-run dedup; flaky ComposeServiceCreateOnSaveTests
+FakeTimeProvider fix (owning project); D1-D7 UAT fix tasks awaiting operator scope approval.
