@@ -47,6 +47,21 @@ Owner UAT of the deployed SWA surfaced:
 - **To see data in UAT**: grant a test CIAM/workforce user access to a test `sprk_project` (admin endpoint `/api/v1/external-access/invite-and-grant` or `/grant`), then re-test. This is provisioning + P2-adjacent, not a P1 code defect.
 - Note: standalone **workforce** browser login (realm chooser "My organization") depends on the workforce-plane auth policy = **P2 task 024**; the CIAM ("Partner") path is the primary P1-tested path.
 
+## UAT round 2 (2026-08-07) — access model + partner provisioning
+Owner UAT continued; two outcomes delivered.
+
+### (2) System-user path ("My organization") — access-model fix shipped
+Empty grids for a workforce **system-user** were root-caused to the design-§5 rule "systemuser = ADR-034 membership only" (contact grants ignored). Owner directive → **parallel workforce/contact access**: system-user accessible set now = membership ∪ the caller's OWN contact grants (project-scoped). Code + tests + redeploy done (commit `ed991bc79`; see `access-model-systemuser-contact-grant-union.md`). **Verified end-to-end via Dataverse**: systemuser `1d02f31c` → `sprk_primarycontact` `8e9918a9` (spaarke.com contact) → active Full-Access grants to **Project 1** (`b12496d1…`) + project `3e34a21a` → both now surface. Owner to confirm in-browser.
+
+### (1) Partner path (hotmail) — CIAM account provisioned
+- Dataverse pre-state (reads): hotmail contact `2e419a4f…` existed with a Full-Access grant to **Project 1**, `sprk_externalobjectid` null (email-resolvable).
+- **CIAM sign-in bug found (hand to operator / P4 task 042)**: the "Partner" sign-in page shows *"This account does not exist … `<aadSelfSignup>create a new one</aadSelfSignup>`"* with the self-signup tag rendered as **literal text** → self-service sign-up is NOT properly enabled in the CIAM user flow. External self-onboarding is broken.
+- **Provisioned via the invite endpoint** (`POST /api/v1/external-access/invite`, workforce token from `az`, audience `api://1e40baad…`): after fixing a config gap (below), returned `200 {status:"Provisioned"}`; oid `06646385-cbbc-4321-a458-f631e0096328` bound to the contact. Onboarding email sent to hotmail (non-fatal path). Password is delivered via SSPR "Forgot password".
+- **Owner last step**: "Partner" → sign in as `ralph.schroeder@hotmail.com` → set password (onboarding email or "Forgot password"/SSPR) → email+oid resolves the contact → **Project 1** appears. ⚠️ SSPR must be configured in the CIAM user flow — verify (P4 task 042); if reset is unavailable, that's the next CIAM config gap.
+
+### Shared-dev config change made (document → runbook)
+- `spaarke-bff-dev` was **missing all `ExternalAccess__*` settings**; `ExternalAccess:PortalUrl` is required by the invite handler (threw `InvalidOperationException` → 500). **Set** `ExternalAccess__PortalUrl=https://green-dune-0c4f1221e.7.azurestaticapps.net` via `az webapp config appsettings set` + restart. This belongs in `docs/guides/auth-deployment-setup.md` §3 (operator App Service settings) for all environments. (CIAM provisioner was already configured: `Ciam__GraphProvisioner__*` + cert `ciam-graph-provisioner-cert`.)
+
 ## Remaining verification — OWNER (live authenticated E2E)
 Cannot be done by the agent (needs credentials/tenant/Teams):
 - [ ] CIAM sign-in in a browser → reaches the workspace launcher; entitled widgets render.
