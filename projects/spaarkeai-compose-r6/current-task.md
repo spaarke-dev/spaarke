@@ -1,13 +1,13 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-06 (post-014 close-out — PHASE 1 DEPLOYED + UAT PASSED; Phases 3/4/5/6 all unblocked)
+> **Last Updated**: 2026-08-07 (task 030 implemented; Step 9.5 reviewers in flight)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. **014 COMPLETE**: render-on-save cutover LIVE on dev (BFF `spaarke-bff-dev` + `sprk_spaarkeai`, deployed SHA `d01007a38`, hash-verified, atomic window held). UAT on the operator's real Corteva signed NDA PASSED — no 422, redlines land, versions accumulate, prior-version-intact confirmed in Word (002's live gate closed). |
+| **Task** | **030 — Part-merge engine** (FULL rigor, Fable@high). IMPLEMENTED + committed `976cb1057`: `ComposeTemplatePartMergeEngine` (template-as-base direct part-merge; style-collision template-wins + transitive graft; numId remap onto verbatim clones; r:-ns rel reconciliation; comments/footnotes/endnotes id-remapped merge; loud `template-merge-*` warnings) + unconditional singleton in ComposeModule + 7 engine tests. Suite 1031/1031. Step 9.5 IN FLIGHT: code-review + adr-check background agents + clean-worktree publish/CVE on the SHA. |
 | **Next task** | Operator choice — all now unblocked: **030** (part-merge engine, opus/FULL), **040** (PDF intake, opus/FULL), **050** (OBO version-history endpoint, opus/FULL), **060** (CI fidelity harness, sonnet/FULL). ALSO on the table: UAT defect fix tasks D1-D7 (see notes/phase1-deploy-uat.md defect register) — operator may want D1 (duplicate sprk_document records) + D2 (quote→`2` mangling) prioritized before new phases. |
 | **Status** | 014 closed; deploy + UAT record at notes/phase1-deploy-uat.md |
 | **Next Action** | On "continue": ask/confirm which of 030/040/050/060 (or a D-fix task) to start, then task-execute it. Task creation for D1-D7 fixes = scope addition → operator approval first. |
