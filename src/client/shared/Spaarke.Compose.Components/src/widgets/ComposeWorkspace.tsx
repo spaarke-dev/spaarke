@@ -1547,6 +1547,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               : (state.documentRef.fileName ?? null),
             transientKey: effectiveTransientKey,
             forkNew,
+            // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): on a PDF-sourced create,
+            // send the SOURCE PDF's sprk_document id so the server files the new Word document
+            // ALONGSIDE it (inherits the record's matter/project/… links). Undefined for a Path-B
+            // PDF (no record — nothing to inherit) and for every non-PDF create (unchanged).
+            sourceDocumentRecordId: pdfSourced ? (state.documentRef.sprkDocumentId ?? undefined) : undefined,
           };
           if (bornInEditorRender) {
             // Shape 1 — born-in-editor create-on-save. task 012 amendment: `buildContentModel()` now folds

@@ -1505,6 +1505,9 @@ public static class ComposeEndpoints
             // forkNew forces a fresh record ("Save New Document").
             TransientKey = body.TransientKey,
             ForkNew = body.ForkNew,
+            // Task 041 B-MED-3 (option C): the source record whose links the new document inherits
+            // (PDF-sourced create-on-save — filed alongside the source PDF).
+            SourceDocumentRecordId = body.SourceDocumentRecordId,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -2411,7 +2414,12 @@ public sealed record SaveComposeDocumentBody(
     /// <summary>G7 (FR-06, task 022): the deliberate <b>Save New Document</b> fork — <c>true</c> skips the
     /// transient-key dedup and mints a fresh record. Default <c>false</c> = <b>Save Version</b> (replace/dedup).
     /// See <see cref="SaveComposeDocumentRequest.ForkNew"/>.</summary>
-    [property: JsonPropertyName("forkNew")] bool ForkNew = false);
+    [property: JsonPropertyName("forkNew")] bool ForkNew = false,
+    // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): the SOURCE sprk_document record this
+    // create derives from — sent by the client on a PDF-sourced create-on-save so the new Word document
+    // INHERITS the source PDF's record links (matter/project/… — filed alongside the PDF). Optional/
+    // trailing (ADR-040 additive); null = no inheritance (every pre-existing flow).
+    [property: JsonPropertyName("sourceDocumentRecordId")] Guid? SourceDocumentRecordId = null);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentBody(

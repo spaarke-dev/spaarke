@@ -845,6 +845,16 @@ public sealed record SaveComposeDocumentRequest
     /// in place / dedup — the primary action).
     /// </summary>
     public bool ForkNew { get; init; }
+
+    /// <summary>
+    /// Task 041 B-MED-3 (operator resolution 2026-08-07, option C): the SOURCE <c>sprk_document</c>
+    /// record a PDF-sourced create-on-save derives from. When present, the created record INHERITS
+    /// the source's record-link lookups (matter/related-matter/project/related-project/invoice/
+    /// work-assignment — the ADR-024 document link set) so the new Word document files ALONGSIDE the
+    /// source PDF. Null on every pre-existing flow (no inheritance). Create-on-save only — the
+    /// idempotent existing-row branch never mutates links.
+    /// </summary>
+    public Guid? SourceDocumentRecordId { get; init; }
 }
 
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>
@@ -1044,6 +1054,15 @@ public sealed record PromoteComposeDocumentRequest
     /// alt-key and replace in place instead of minting a duplicate. See <see cref="SaveComposeDocumentRequest.TransientKey"/>.
     /// </summary>
     public string? TransientKey { get; init; }
+
+    /// <summary>
+    /// Task 041 B-MED-3 (operator resolution 2026-08-07, option C): the SOURCE <c>sprk_document</c>
+    /// whose record-link lookups (ADR-024 document link set) the created row INHERITS — a PDF-sourced
+    /// create-on-save files the new Word document ALONGSIDE the source PDF (same matter/project/…).
+    /// Best-effort (a failed source read logs and proceeds — never fails the save); ignored on the
+    /// idempotent existing-row path. Null = no inheritance (every pre-existing flow).
+    /// </summary>
+    public Guid? SourceDocumentRecordId { get; init; }
 }
 
 /// <summary>Promote outcome — resolved <c>sprk_documentid</c> + a flag distinguishing

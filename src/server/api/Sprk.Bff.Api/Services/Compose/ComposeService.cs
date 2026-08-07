@@ -73,6 +73,20 @@ public class ComposeService : IComposeService
     // content (I-7/NFR-02).
     private const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
 
+    // Task 041 B-MED-3 (option C): the sprk_document record-link lookup vocabulary (ADR-024 — the
+    // SAME closed set AttachmentDocumentAssociationRung follows, type-agnostic by design). A
+    // PDF-sourced create-on-save copies every non-empty lookup from the source PDF's record onto the
+    // new Word document's record so the two file side-by-side under the same matter/project/….
+    private static readonly string[] DocumentAssociationLookupAttributes =
+    {
+        "sprk_matter",
+        "sprk_relatedmatter",
+        "sprk_project",
+        "sprk_relatedproject",
+        "sprk_invoice",
+        "sprk_workassignment",
+    };
+
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
     // These string keys are the Compose contract the future OutcomeCard renders; keep stable.
@@ -1448,6 +1462,8 @@ public class ComposeService : IComposeService
             // row, so the next create-on-save with the same key dedups via the alt-key (see the transient
             // branch above). Null on the replace path / older clients — no dedup identity, unchanged behavior.
             TransientKey = request.TransientKey,
+            // Task 041 B-MED-3 (option C): the source PDF's record — the new row inherits its record links.
+            SourceDocumentRecordId = request.SourceDocumentRecordId,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -2571,6 +2587,62 @@ public class ComposeService : IComposeService
         if (!string.IsNullOrWhiteSpace(request.FilePath))
         {
             entity[FilePathAttribute] = request.FilePath!;
+        }
+
+        // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): a PDF-sourced create-on-save
+        // INHERITS the source PDF record's link lookups so the new Word document files ALONGSIDE the
+        // PDF (same matter/project/… — containers are BU-level, so placement is already shared; the
+        // RECORD association is what was missing). The copied set is the ADR-024 sprk_document link
+        // vocabulary (mirrors AttachmentDocumentAssociationRung's map). Best-effort: a failed source
+        // read logs LOUDLY and the create proceeds unassociated (mirrors the source having no links —
+        // never fails the save); the idempotent existing-row branch above never reaches here, so an
+        // existing record's links are never mutated.
+        if (request.SourceDocumentRecordId is { } sourceRecordId)
+        {
+            try
+            {
+                var sourceEntity = await _dataverse.RetrieveAsync(
+                        DocumentLogicalName,
+                        sourceRecordId,
+                        DocumentAssociationLookupAttributes,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                var inherited = 0;
+                if (sourceEntity is not null)
+                {
+                    foreach (var lookup in DocumentAssociationLookupAttributes)
+                    {
+                        var reference = sourceEntity.GetAttributeValue<EntityReference>(lookup);
+                        if (reference is null || reference.Id == Guid.Empty)
+                        {
+                            continue;
+                        }
+
+                        entity[lookup] = new EntityReference(reference.LogicalName, reference.Id);
+                        inherited++;
+                    }
+                }
+
+                if (inherited > 0)
+                {
+                    _logger.LogInformation(
+                        "Compose promote: inherited {Count} record link(s) from source document {SourceRecordId} (PDF-sourced create — filed alongside the source).",
+                        inherited, sourceRecordId);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Compose promote: source document {SourceRecordId} carries no record links to inherit — the new document is created unassociated (mirrors the source).",
+                        sourceRecordId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose promote: link inheritance from source document {SourceRecordId} failed — creating the new document UNASSOCIATED (the save itself is not affected). Associate manually or re-file from the Documents surface.",
+                    sourceRecordId);
+            }
         }
 
         Guid newId;
