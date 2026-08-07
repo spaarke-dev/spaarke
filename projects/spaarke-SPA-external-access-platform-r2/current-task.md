@@ -1,16 +1,24 @@
 # Current Task State — spaarke-SPA-external-access-platform-r2
 
-> **Last Updated**: 2026-08-06 (context-handoff — P1 code complete through 016; next = 018)
+> **Last Updated**: 2026-08-07 (task-execute 018 — deletions + edits done; verifying build/test)
 > **Recovery**: read Quick Recovery below, then `design.md` §12 + this file's "Key integration seams". Resume with `/project-continue` or "work on task 018".
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — **P1 nearly done (010–017 ✅ except 018/019)** |
-| **Status** | not-started (016 ✅; ready for 018) |
-| **Next Action** | **018** — remove inert `ExternalCallerAuthorizationFilter` + transitional `/api/v1/collab` group (+ WorkforceCaller* endpoints) once no client calls it; BFF deletion, O/x FULL; deps 015,016 ✅. Then **019** — deploy P1 (SWA + Teams + BFF; deps 012,013,014,016,017 ✅). |
-| **Pre-conditions** | `dotnet build src/server/api/Sprk.Bff.Api/` green ✅; `npm run build` (external-spa) green ✅; `/conflict-check` before the 018 BFF PR. **BFF publish baseline now 48.29 MB compressed** (was 46.91; +1.38 at 016 — likely dependency/restore drift, under all §10 thresholds). |
+| **Task** | **018 ✅ COMPLETE** — inert filter + /api/v1/collab group deleted (uncommitted; user-gated commit) |
+| **Status** | done — build 0-err, 10155 tests pass (+2 PRE-EXISTING merge failures, see ISS-018-1), publish 48.38 MB, no CVE, no route regression |
+| **Next Action** | **User decision**: (a) commit+push 018, and (b) ISS-018-1 — 2 pre-existing `DataverseEntitySchemaTests` failures inherited from master merge (Documents/schema, NOT task 018) → fix now or `/defer`. Then **019** — deploy P1 (⚠️ operator-gated). |
+| **Pre-conditions** | Changes staged, NOT committed. conflict-check = SOFT warn only. |
+
+### Task 018 progress (this session)
+- **Conflict-check**: SOFT warn — `smart-todo-decoupling-r3` has unmerged changes in `Api/ExternalAccess/` on DISJOINT files (ExternalProjectDtos.cs, ExternalProjectDataEndpoints.cs, ExternalTodoDtoTests.cs). No overlap with deletion targets. teams-app-r1 FR-22 already merged to master.
+- **Zero callers proven**: no client surface (external-spa/PCF/solutions) or test calls `/api/v1/collab` — all `/collab` hits were server-side definitions.
+- **DELETED (git rm)**: `Api/Filters/ExternalCallerAuthorizationFilter.cs` (zero callers, inert), `Api/Filters/WorkforceCallerAuthorizationFilter.cs`, `Api/ExternalAccess/WorkforcePrincipalContextEndpoint.cs`, `Api/ExternalAccess/WorkforceCollaborationDownloadEndpoint.cs`, `Api/ExternalAccess/Dtos/WorkforcePrincipalContextResponse.cs`, `tests/unit/.../Api/ExternalAccess/WorkforceCollaborationDownloadEndpointTests.cs`.
+- **EDITED**: `ExternalAccessEndpoints.cs` (removed MapWorkforceCollaborationEndpoints call + method + updated class doc to two-group); `WorkforcePrincipalResolverTests.cs` (surgical — removed the deleted-filter tests + BuildFilterContext/NextSpy helpers + unused usings; resolver tests kept); `ExternalAccessIntegrationTests.cs` + e2e `access-level-enforcement.spec.ts` (comment/@see rename to CallerPrincipalAuthorizationFilter).
+- **KEPT (not in scope)**: `WorkforcePrincipalResolver`+`IWorkforcePrincipalResolver` (ACTIVELY used by CallerPrincipalResolver — the KEEP path), `WorkforcePrincipal`/`WorkforceDenyReason`/`WorkforcePrincipalResolution`, `AccessibleRecordSetAuthorizationFilter` (now unattached — parked for P2 task 022/030), `CallerPrincipalAuthorizationFilter`, `ExternalParticipationService`, `ExternalCallerContext`.
+- **KNOWN RESIDUE (documented)**: comment/doc-string refs to the deleted type names remain in kept files — (a) intentional lineage history ("reproduces the old X"); (b) pre-existing stale current-state comments in ExternalProjectDataEndpoints.cs (NOT edited — smart-todo conflict risk), ExternalUserContextEndpoint.cs, ExternalCallerContext.cs, ExternalDataService.cs (predate task 018 / drifted at 015). Zero CODE references remain (build proves it).
 
 ### Task 016 — COMPLETE (2026-08-06)
 Outside Counsel widgets (CIAM plane) on the shell. **Reused existing `<DataGrid configId>` + `BffDataverseClient`** (both unmodified — zero hand-rolled grids, §11). New: `services/gridDataverseClient.ts`, `widgets/{GridWidgetBody,Projects,Matters,WorkAssignments,Documents,Invoices}Widget.tsx`; registry lazyLoaders now real; BFF `AddExternalModule` ×5 + `TryGetRecordId` EntityReference case; 5 `sprk_gridconfiguration` records authored. Lookup labels via flat FetchXML formatted values (no `<link-entity>` — respects 015's guard). **D-016-1 (§6.5 Path A)**: Matters Tier-2 predicate intentionally always-empty/fail-closed (no `sprk_matter`→project lookup + no Contact→Org affiliation resolver) → R1 "coming soon" empty state (R1 parity, no over-exposure). Verify: tsc/npm build green, dotnet build 0-err, 9803 tests pass, publish 48.29 MB, no CVE. Notes: `notes/task-016-deviations.md`.

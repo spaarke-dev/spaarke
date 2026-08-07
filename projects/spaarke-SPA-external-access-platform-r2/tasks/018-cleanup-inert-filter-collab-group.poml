@@ -4,7 +4,7 @@
     <title>Delete inert ExternalCallerAuthorizationFilter + remove transitional /api/v1/collab group</title>
     <phase>P1 Module-host foundation</phase>
     <gate>blocked-until:015,016</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF deletion with blast radius (endpoints + filter + policy wiring); brownfield; must prove zero callers before removal; tags bff-api.</rigor-reason>
     <model-tier>opus</model-tier>

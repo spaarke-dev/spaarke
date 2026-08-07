@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// <summary>
 /// Maps all external access API endpoints.
 ///
-/// Three route groups:
+/// Two route groups:
 ///   /api/v1/external        — PRINCIPAL-AGNOSTIC collaboration endpoints (teams-app-r1 task 025 ·
 ///                             R2 FR-22 · Option A). Dual-scheme: accepts BOTH the CIAM "Ciam" scheme
 ///                             AND the workforce default scheme via <see cref="AuthPolicies.ExternalCollaboration"/>,
@@ -17,11 +17,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///                             Teams workforce host through ONE endpoint set. CIAM behavior is
 ///                             unchanged (FR-15 — the CIAM strategy reproduces the old filter exactly).
 ///   /api/v1/external-access — internal management endpoints. Workforce default scheme (Azure AD JWT).
-///   /api/v1/collab          — TRANSITIONAL workforce collaboration group (ADR-028 A2 · task 020/030).
-///                             Its /me + download are now also served principal-agnostically under
-///                             /api/v1/external (task 025 consolidation, R2 guardrail #5); the SPA +
-///                             Teams host call /api/v1/external/*. Kept for one release for any direct
-///                             caller and SLATED FOR REMOVAL — do not add new endpoints here.
+///
+/// The transitional /api/v1/collab workforce group (ADR-028 A2 · teams-app-r1 task 020/030) was
+/// removed by R2 task 018 — its /me + download were consolidated onto the principal-agnostic
+/// /api/v1/external surface (task 025), leaving it with no first-party caller.
 ///
 /// ADR-001: Minimal API — no controllers.
 /// ADR-008: Authorization applied per-endpoint or via route group — no global middleware; the
@@ -37,7 +36,6 @@ public static class ExternalAccessEndpoints
     {
         MapExternalUserEndpoints(app);
         MapInternalManagementEndpoints(app);
-        MapWorkforceCollaborationEndpoints(app);
     }
 
     // =========================================================================
@@ -126,75 +124,4 @@ public static class ExternalAccessEndpoints
         adminGroup.MapProvisionProjectEndpoint();
     }
 
-    // =========================================================================
-    // Workforce collaboration endpoints — workforce Entra (Teams host) authentication
-    // (ADR-028 Amendment A2 · teams-app-r1 FR-04)
-    //
-    // TRANSITIONAL (teams-app-r1 task 025 · R2 guardrail #5): /me + document download are now ALSO
-    // served principal-agnostically under /api/v1/external (task 025). The external SPA and the Teams
-    // host both call /api/v1/external/*, so this group has no remaining first-party caller. Kept for
-    // one release for any direct caller; SLATED FOR REMOVAL — do NOT add new endpoints here. Removal
-    // note: delete this method + WorkforcePrincipalContextEndpoint + WorkforceCollaborationDownloadEndpoint
-    // once no client calls /api/v1/collab/* (tracked in notes/r2-coordination-response.md §7).
-    // =========================================================================
-
-    private static void MapWorkforceCollaborationEndpoints(WebApplication app)
-    {
-        // Workforce DEFAULT JwtBearer scheme (NOT the CIAM pin) — Teams-host workforce tokens
-        // authenticate here. RequireAuthorization() applies the default-scheme JWT policy; the
-        // per-endpoint WorkforceCallerAuthorizationFilter then resolves the caller to a systemuser /
-        // contact-only principal (ADR-028 A2 / FR-04) and DENIES an unresolvable caller. ADR-008:
-        // per-endpoint filter, no global middleware. Tasks 021 (contact-anchored membership) + 022
-        // (accessible-record-set enforcement) extend this group with data/download endpoints that
-        // compose on the resolved principal.
-        var collabGroup = app.MapGroup("/api/v1/collab")
-            .WithTags("Workforce Collaboration")
-            .RequireAuthorization();
-
-        // GET /api/v1/collab/me — Returns the caller's resolved workforce principal (kind + ids).
-        collabGroup.MapGet("/me", WorkforcePrincipalContextEndpoint.Handle)
-            .WithName("GetWorkforcePrincipalContext")
-            .WithSummary("Get the authenticated workforce caller's resolved collaboration principal")
-            .WithDescription(
-                "Resolves the workforce (Teams-host) caller via AAD oid → systemuser (with derived " +
-                "contactId), else oid/verified-email → contact, else DENY. Returns the resolved " +
-                "principal kind + ids. Requires a valid workforce Entra JWT (default scheme); an " +
-                "unresolvable caller receives 401 (missing identity) or 403 (not provisioned).")
-            .Produces<Dtos.WorkforcePrincipalContextResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError)
-            .AddWorkforceCallerAuthorizationFilter();
-
-        // GET /api/v1/collab/projects/{projectId}/documents/{documentId}/content — broker-only
-        // document download for ALL workforce collaboration principals (teams-app-r1 FR-07 / task 030).
-        // Authz-before-stream, no Graph pointer to the client, app-only SPE (no OBO on any plane).
-        //
-        // Filter order is load-bearing (filters run in the order added — outermost first):
-        //   1. AddWorkforceCallerAuthorizationFilter()  — resolves the WorkforcePrincipal (task 020)
-        //   2. AddAccessibleRecordSetAuthorizationFilter("sprk_project", "projectId") — enforces
-        //      project ∈ accessible(principal) (task 022) and DENIES (403, zero bytes) a non-member
-        //      BEFORE the handler — hence before any SPE pointer resolution or byte streaming.
-        // The handler then adds document→project scoping and streams app-only via SpeFileStore.
-        collabGroup.MapGet(
-                "/projects/{projectId:guid}/documents/{documentId:guid}/content",
-                WorkforceCollaborationDownloadEndpoint.DownloadDocumentContent)
-            .WithName("DownloadWorkforceCollaborationDocument")
-            .WithSummary("Download a Secure Project document's content for a workforce collaboration principal")
-            .WithDescription(
-                "Streams a Secure Project document's bytes to a workforce-authenticated collaboration " +
-                "caller (systemuser / contact-with-grant / contact-with-standing-grant). Broker-only " +
-                "(app-only SPE, no OBO on any plane) with authz-before-stream: project access is enforced " +
-                "by the accessible-record-set filter and document→project scoping by the handler BEFORE " +
-                "any bytes stream. A non-member receives 403 with no bytes; no driveId/itemId or other " +
-                "Graph pointer ever reaches the client (success or error).")
-            .Produces(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status500InternalServerError)
-            .AddWorkforceCallerAuthorizationFilter()
-            .AddAccessibleRecordSetAuthorizationFilter("sprk_project", "projectId");
-    }
 }

@@ -22,7 +22,7 @@ Legend: 🔲 not-started · ✅ completed · Tier S=sonnet O=opus · Eff h=high 
 | 015 | FR-22 module/widget-data framework generalization | P1 | ✅ | 010 | O/x | FULL | — (core BFF) |
 | 016 | Outside Counsel widgets (Projects/Matters/Work Assignments/Documents/Invoices) | P1 | ✅ | 012,015 | S/h | FULL | — |
 | 017 | Cleanup dead Power Pages proxy/config | P1 | ✅ | 011 | S/h | STANDARD | Group B |
-| 018 | Cleanup inert filter + /api/v1/collab | P1 | 🔲 | 015,016 | O/x | FULL | — (BFF deletion) |
+| 018 | Cleanup inert filter + /api/v1/collab | P1 | ✅ | 015,016 | O/x | FULL | — (BFF deletion) |
 | 019 | Deploy P1 (workspace shell + Teams, SWA) | P1 | 🔲 | 012,013,014,016,017 | S/h | STANDARD | — (deploy) |
 | 020 | Module/widget-entitlement Dataverse schema | P2 | 🔲 | 015 | S/h | FULL | — (schema) |
 | 021 | Entitlement resolver (App-Role + Contact strategies) | P2 | 🔲 | 020 | O/h | FULL | — (auth core) |

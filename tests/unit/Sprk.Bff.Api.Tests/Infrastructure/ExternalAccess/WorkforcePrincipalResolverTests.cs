@@ -1,23 +1,22 @@
-// teams-app-r1 Task 020 — WorkforcePrincipalResolver + WorkforceCallerAuthorizationFilter tests.
+// teams-app-r1 Task 020 — WorkforcePrincipalResolver tests.
 //
 // Verifies the ADR-028 A2 / FR-04 contract — a validated workforce token resolves to EXACTLY one of:
 //   (a) systemuser principal (systemuserId + derived contactId),
 //   (b) contact-only principal (contactId, by AAD oid OR verified-email fallback),
 //   (c) explicit DENY — never a silent pass-through with an unscoped principal.
-// Plus the endpoint-filter deny → 401/403 mapping (the collaboration authorization gate).
 //
 // Module-boundary mocks only (IDataverseService, IIdentityNormalizationService) per tests/CLAUDE.md
 // Do's; these tests protect the auth-spine principal contract that tasks 021/022 compose on.
+// (The WorkforceCallerAuthorizationFilter deny→401/403 endpoint-filter tests were removed with that
+//  transitional filter in R2 task 018; the resolver — still consumed by CallerPrincipalResolver — stays.)
 
 using System.Security.Claims;
 using FluentAssertions;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Services.Ai.Membership;
@@ -199,85 +198,6 @@ public class WorkforcePrincipalResolverTests
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Endpoint filter — deny → 401/403, success → sets principal + calls next
-    // ─────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public async Task Filter_PrincipalNotResolved_Returns403AndDoesNotCallNext()
-    {
-        // Arrange
-        var resolver = new Mock<IWorkforcePrincipalResolver>();
-        resolver
-            .Setup(x => x.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
-                WorkforceDenyReason.PrincipalNotResolved, WorkforcePrincipalResolver.DenyPrincipalNotResolved));
-
-        var filter = new WorkforceCallerAuthorizationFilter(
-            resolver.Object, NullLogger<WorkforceCallerAuthorizationFilter>.Instance);
-
-        var (context, nextCalled) = BuildFilterContext();
-
-        // Act
-        var result = await filter.InvokeAsync(context, nextCalled.Next);
-
-        // Assert — 403, not a silent pass-through.
-        result.Should().BeAssignableTo<IStatusCodeHttpResult>();
-        ((IStatusCodeHttpResult)result!).StatusCode.Should().Be(StatusCodes.Status403Forbidden);
-        nextCalled.WasCalled.Should().BeFalse();
-        context.HttpContext.Items.Should().NotContainKey(WorkforcePrincipal.HttpContextItemsKey);
-    }
-
-    [Fact]
-    public async Task Filter_MissingIdentityClaims_Returns401AndDoesNotCallNext()
-    {
-        // Arrange
-        var resolver = new Mock<IWorkforcePrincipalResolver>();
-        resolver
-            .Setup(x => x.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WorkforcePrincipalResolution.Denied(
-                WorkforceDenyReason.MissingIdentityClaims, WorkforcePrincipalResolver.DenyMissingIdentityClaims));
-
-        var filter = new WorkforceCallerAuthorizationFilter(
-            resolver.Object, NullLogger<WorkforceCallerAuthorizationFilter>.Instance);
-
-        var (context, nextCalled) = BuildFilterContext();
-
-        // Act
-        var result = await filter.InvokeAsync(context, nextCalled.Next);
-
-        // Assert
-        result.Should().BeAssignableTo<IStatusCodeHttpResult>();
-        ((IStatusCodeHttpResult)result!).StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
-        nextCalled.WasCalled.Should().BeFalse();
-    }
-
-    [Fact]
-    public async Task Filter_ResolvedPrincipal_SetsPrincipalOnItemsAndCallsNext()
-    {
-        // Arrange
-        var resolver = new Mock<IWorkforcePrincipalResolver>();
-        resolver
-            .Setup(x => x.ResolveAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(WorkforcePrincipalResolution.ForSystemUser(
-                TestSystemUserId, TestContactId, TestOid.ToString("D"), TestTenantId));
-
-        var filter = new WorkforceCallerAuthorizationFilter(
-            resolver.Object, NullLogger<WorkforceCallerAuthorizationFilter>.Instance);
-
-        var (context, nextCalled) = BuildFilterContext();
-
-        // Act
-        var result = await filter.InvokeAsync(context, nextCalled.Next);
-
-        // Assert — pipeline continued and the principal is available to downstream handlers.
-        nextCalled.WasCalled.Should().BeTrue();
-        result.Should().Be("next-sentinel");
-        context.HttpContext.Items[WorkforcePrincipal.HttpContextItemsKey]
-            .Should().BeOfType<WorkforcePrincipal>()
-            .Which.SystemUserId.Should().Be(TestSystemUserId);
-    }
-
-    // ─────────────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────────────
 
@@ -325,28 +245,6 @@ public class WorkforcePrincipalResolverTests
                         Equals(c.Values[0], oid))),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(collection);
-    }
-
-    private static (EndpointFilterInvocationContext Context, NextSpy Next) BuildFilterContext()
-    {
-        var httpContext = new DefaultHttpContext
-        {
-            User = BuildUser(oid: TestOid, tid: TestTenantId)
-        };
-        var context = EndpointFilterInvocationContext.Create(httpContext);
-        return (context, new NextSpy());
-    }
-
-    /// <summary>Records whether the endpoint-filter <c>next</c> delegate was invoked.</summary>
-    private sealed class NextSpy
-    {
-        public bool WasCalled { get; private set; }
-
-        public ValueTask<object?> Next(EndpointFilterInvocationContext _)
-        {
-            WasCalled = true;
-            return ValueTask.FromResult<object?>("next-sentinel");
-        }
     }
 
     /// <summary>Dictionary-backed <see cref="ITenantCache"/> — resolves systemuser-lookup cache
