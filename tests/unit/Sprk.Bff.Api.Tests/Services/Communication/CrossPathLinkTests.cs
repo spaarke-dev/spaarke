@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// <summary>
 /// FR-C4 (task 025): proves the cross-path reconciliation contract of <see cref="CrossPathLink"/> — a captured
 /// <c>sprk_communication</c> and a user-saved <c>sprk_document</c> archive of the SAME email are LINKED (not
-/// duplicated) via the document's <c>sprk_linkedcommunication</c> lookup. The link is idempotent (single-valued lookup;
+/// duplicated) via the document's existing <c>sprk_relatedcommunication</c> lookup. The link is idempotent (single-valued lookup;
 /// re-processing does not re-write) and non-fatal (NFR-04 — a failure degrades, never throws out of capture/upload).
 /// The generic-seam boundary (<see cref="IGenericEntityService"/>) is mocked.
 /// </summary>
@@ -71,7 +71,7 @@ public class CrossPathLinkTests
     {
         var generic = new Mock<IGenericEntityService>();
         generic.Setup(g => g.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("column sprk_linkedcommunication does not exist yet"));
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse retrieve failure on sprk_relatedcommunication"));
 
         var linked = await CrossPathLink.LinkDocumentToCommunicationAsync(
             generic.Object, Guid.NewGuid(), Guid.NewGuid(), Logger, CancellationToken.None);

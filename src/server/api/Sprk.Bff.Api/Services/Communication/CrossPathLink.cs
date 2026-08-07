@@ -24,16 +24,24 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <para>Idempotent: the link is only written when the document is not already linked to this communication (a
 /// single-valued lookup cannot duplicate; re-processing / SB redelivery is a no-op). Best-effort / non-fatal (NFR-04):
 /// every failure logs and degrades — the link is written via the generic seam (NOT the atomic document build), so
-/// capture/upload NEVER fails on the gated <c>sprk_linkedcommunication</c> column being absent before its schema deploy
-/// (contract-first — mirrors task 022 <see cref="DeliveryContextMerge"/>).</para>
+/// capture/upload NEVER fails on the write (contract-first, non-fatal — mirrors task 022 <see cref="DeliveryContextMerge"/>).
+/// The link reuses the existing <c>sprk_relatedcommunication</c> lookup (see <see cref="LinkedCommunicationAttribute"/>);
+/// no gated column is introduced by FR-C4.</para>
 /// </remarks>
 public static class CrossPathLink
 {
     private const string DocumentLogicalName = "sprk_document";
     private const string CommunicationLogicalName = "sprk_communication";
 
-    /// <summary>The document → communication cross-path lookup (FR-C4). Gated schema, managed solution (ADR-027).</summary>
-    public const string LinkedCommunicationAttribute = "sprk_linkedcommunication";
+    /// <summary>
+    /// The document → communication cross-path lookup (FR-C4). REUSES the pre-existing
+    /// <c>sprk_relatedcommunication</c> lookup on <c>sprk_document</c> (target <c>sprk_communication</c>, N:1) —
+    /// the sibling of <c>sprk_relatedmatter</c>/<c>sprk_relatedproject</c> ("the confirmed related record this
+    /// document points at"), which is exactly the FR-C4 semantic. No new column is created (§11 — reuse over a
+    /// redundant parallel <c>sprk_linkedcommunication</c>; the 029 POML's "no lookup targets sprk_communication"
+    /// claim was wrong). The const NAME is feature-scoped (the FR-C4 LINK); the STORAGE is the existing field.
+    /// </summary>
+    public const string LinkedCommunicationAttribute = "sprk_relatedcommunication";
 
     /// <summary>Email Message-ID header (RFC 5322) stored on the archive document — the shared join key.</summary>
     public const string EmailMessageIdAttribute = "sprk_emailmessageid";

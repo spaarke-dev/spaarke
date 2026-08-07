@@ -4,7 +4,7 @@
     <title>sprk_document.sprk_linkedcommunication lookup (FR-C4 cross-path reconciliation) — GATED schema</title>
     <phase>2 Pillar C — De-duplication</phase>
     <gate>operator-go-ahead</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>One new lookup column via dataverse-create-schema; no .cs change (the consuming code shipped in task 025). STANDARD per task-create Step 3.5.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,7 +82,9 @@
     <criterion testable="true">End-to-end: capture an email + user-save its `.eml` archive (either order) → the archive document's `sprk_linkedcommunication` points at the captured communication (task-025 code + this lookup).</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-C4 "the review surface resolves to one email". Enables the task-025 code (merged) end-to-end. Sibling of task 023/027/028 (schema-c). GATED on operator go-ahead. Forward-only (pre-existing rows stay null until their next cross-path touch).</notes>
+  <notes>spec FR-C4 "the review surface resolves to one email". Enables the task-025 code (merged) end-to-end. Sibling of task 023/027/028 (schema-c). GATED on operator go-ahead. Forward-only (pre-existing rows stay null until their next cross-path touch).
+
+RESOLVED BY REUSE — 2026-08-06 (operator §11 challenge). NO new column created. `sprk_document` ALREADY has `sprk_relatedcommunication` (Lookup → `sprk_communication`, N:1) — the sibling of `sprk_relatedmatter`/`sprk_relatedproject` ("the confirmed related record this document points at"), which is EXACTLY the FR-C4 semantic and has ZERO conflicting consumers (verified by grep). The POML `<existing>` claim ("No lookup on sprk_document targets sprk_communication") was WRONG — it missed this field. Adding a parallel `sprk_linkedcommunication` would have been the §11 violation. Action taken: rewired `CrossPathLink.LinkedCommunicationAttribute` from `sprk_linkedcommunication` → `sprk_relatedcommunication` (const name kept — feature-scoped to the FR-C4 LINK; storage is the existing field); updated caller comments + tests. Verified live in spaarkedev1 (Lookup → sprk_communication) + cross-path/dedup/integration tests 36/36 green. NOTE (per operator, dev = UNMANAGED solutions): the "managed solution (ADR-027)" language in this POML is a distribution concern, not a dev step.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

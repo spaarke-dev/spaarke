@@ -159,8 +159,8 @@ public class OfficeDocumentPersistence
         // ── FR-C4 (task 025): link this email-archive document to its captured communication ──
         // Capture-then-upload order: the canonical communication was resolved above; link the just-created document
         // to it so the reconciliation surface shows ONE email (not the captured communication + this archive as two
-        // rows). Non-fatal / contract-first (NFR-04): the link is written via the generic seam, degrading until the
-        // gated sprk_linkedcommunication column exists — it never fails the save. The reverse order (upload-then-
+        // rows). Non-fatal / contract-first (NFR-04): the link is written via the generic seam onto the existing
+        // sprk_relatedcommunication lookup — it never fails the save. The reverse order (upload-then-
         // capture) is linked from IncomingCommunicationProcessor when the communication is later created.
         await LinkDocumentToCanonicalCommunicationAsync(documentId, canonicalCommunicationId, cancellationToken);
 
@@ -222,7 +222,7 @@ public class OfficeDocumentPersistence
     /// captured the same email (resolved by <see cref="MergeUploaderAndResolveCanonicalAsync"/>). No-op when the
     /// generic seam is unavailable (bare test ctor) or no canonical was found (upload-then-capture — the reverse path
     /// links later from capture). Best-effort / non-fatal (NFR-04): the link is written via the generic seam so it
-    /// degrades until the gated <c>sprk_linkedcommunication</c> column exists; it never fails the save.
+    /// writes the existing <c>sprk_relatedcommunication</c> lookup; it never fails the save.
     /// </summary>
     private async Task LinkDocumentToCanonicalCommunicationAsync(
         Guid documentId, Guid? canonicalCommunicationId, CancellationToken ct)

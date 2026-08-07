@@ -320,7 +320,7 @@ public sealed class IncomingCommunicationProcessor
         // captured here, link that archive document to this new canonical communication — so the reconciliation
         // surface shows ONE email, not the archive document + this communication as two rows. The reverse order
         // (capture-then-upload) is linked from OfficeDocumentPersistence when the document is created. Idempotent
-        // (single-valued lookup) + non-fatal (NFR-04, contract-first behind the gated sprk_linkedcommunication column).
+        // (single-valued lookup) + non-fatal (NFR-04, contract-first onto the existing sprk_relatedcommunication lookup).
         await CrossPathLink.FindAndLinkArchiveDocumentsAsync(
             _genericEntityService, message.InternetMessageId, communicationId, _logger, ct);
 

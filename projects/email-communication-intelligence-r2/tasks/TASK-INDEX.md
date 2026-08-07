@@ -4,7 +4,7 @@
 > **Revised 2026-08-05**: spikes 001/002 retired (gate-after-write + Tier-2-deferred decisions); see Resolved decisions below.
 > **Status legend**: 🔲 not-started · 🔄 in-progress · ✅ completed · ⛔ blocked · ⏸️ deferred
 > **Execution**: via `task-execute` per task (Sonnet 5 @ high default; `<model-tier>`/`<effort>` per POML).
-> **⚠️ Execution intentionally NOT started** — operator review gate (per pipeline run choice).
+> **Execution status (2026-08-06)**: Pillars C + D largely complete; Pillar B code done (041/042/043 ✅; 040 blocked on gated 004). Pillar-C dedup schema in place (027/028 operator-created + verified live; 029 resolved by reuse of `sprk_relatedcommunication`). Remaining: operator-gated backend (004/010 + downstream), Pillar E (contended shared-lib), deploys (paused).
 
 ## Registry
 
@@ -26,9 +26,9 @@
 | 023 | Indexed `sprk_document.sprk_canonicalhash` column (forward-only) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
 | 024 | SPE content dedup Tier-1 — **gate-after-write** (quickXorHash detector) | 2·C | ✅ | 023 | **opus·high** | ❌ false |
 | 025 | Cross-path reconciliation (comm ↔ document via message-id) | 2·C | ✅ | 021 | sonnet·high | ❌ false |
-| 027 | `sprk_document.sprk_canonicaldocument` self-lookup (FR-C3 graduate-on-divergence) — **GATED schema** | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
-| 028 | `sprk_communication.sprk_deliveredmailboxes` + `sprk_savedbyusers` memo (FR-C2 context-merge) — **GATED schema** | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
-| 029 | `sprk_document.sprk_linkedcommunication` lookup (FR-C4 cross-path reconciliation) — **GATED schema** | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
+| 027 | `sprk_document.sprk_canonicaldocument` self-lookup (FR-C3 graduate-on-divergence) — schema (operator-created, verified live) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
+| 028 | `sprk_communication.sprk_deliveredmailboxes` + `sprk_savedbyusers` memo (FR-C2 context-merge) — schema (operator-created, verified live) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
+| 029 | FR-C4 cross-path reconciliation — **RESOLVED BY REUSE** of existing `sprk_document.sprk_relatedcommunication` (no new column; code rewired) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
 | 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025,027,028,029 | sonnet·med | ❌ false |
 | 030 | Fix FR-06 RAG grounding — ParentEntity tagging (both sites) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |
 | 031 | Batched identifier query (≈175→≤7) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |

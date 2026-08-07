@@ -1627,7 +1627,7 @@ public class CommunicationIntegrationTests
         // FR-C4 (task 025), upload-then-capture order: the user "Save to Spaarke"-d this email's .eml archive
         // (a sprk_document with the same internet-message-id) BEFORE the mailbox capture ran. When capture creates
         // the canonical sprk_communication, that pre-existing archive document is LINKED to it (its
-        // sprk_linkedcommunication lookup is set) — so the reconciliation surface shows ONE email, not two rows.
+        // existing sprk_relatedcommunication lookup is set) — so the reconciliation surface shows ONE email, not two rows.
         const string internetMessageId = "<msg-fr-c4-capture@partner.com>";
         const string recipientEmail = "mailbox-central@spaarke.com";
         const string graphMessageId = "AAMkAGE1-fr-c4-capture";
