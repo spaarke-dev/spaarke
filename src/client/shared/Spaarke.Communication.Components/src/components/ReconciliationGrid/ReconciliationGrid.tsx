@@ -53,6 +53,27 @@ import {
   type DataGridParentContext,
 } from '@spaarke/ui-components';
 import { TRIAGE_COLUMN_RENDERERS } from './triageColumnRenderers';
+import { RelatedToCell } from './RelatedToCell';
+import type { EmailConnectionsReviewProps } from '../EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
+
+/**
+ * Host binding that turns the reconciliation grid's association column into an
+ * interactive "Related to" cell (task 052, FR-E3). The host resolves each row to
+ * the `EmailConnectionsReview` props (`writeContext` with `hostRecordId` ===
+ * `communicationId`, picker webApi, catalog, the optional create-new intent) —
+ * the cell reuses that component wholesale (ADR-024 single write path). Left
+ * unset, the association column keeps its static status badge.
+ */
+export interface RelatedToGridBinding {
+  /** Resolve a grid row to the `EmailConnectionsReview` props for its Related-to picker. */
+  resolveReview: (record: Record<string, unknown>) => EmailConnectionsReviewProps;
+  /** NFR-10 handshake — fired with the row when its association is confirmed (Fields/Tasks tabs scope on it). */
+  onConfirmed?: (record: Record<string, unknown>) => void;
+  /** Grid column the interactive Related-to cell binds to (default `sprk_associationstatus`). */
+  columnField?: string;
+}
+
+const DEFAULT_RELATED_TO_COLUMN = 'sprk_associationstatus';
 
 /**
  * Placeholder GUID for the "Needs-review" `sprk_gridconfiguration` record.
@@ -178,6 +199,8 @@ export interface ReconciliationGridProps {
   membershipResolver?: MembershipResolver;
   /** OPTIONAL — drill-through context (e.g. a Matter the review queue is scoped to). */
   parentContext?: DataGridParentContext;
+  /** OPTIONAL — turns the association column into an interactive "Related to" cell (task 052, FR-E3) that reuses `EmailConnectionsReview`. Left unset, that column keeps its static status badge. */
+  relatedTo?: RelatedToGridBinding;
   /** OPTIONAL — additional class merged after component classes. */
   className?: string;
 }
@@ -194,12 +217,28 @@ export const ReconciliationGrid: React.FC<ReconciliationGridProps> = ({
   hostFilters,
   membershipResolver,
   parentContext,
+  relatedTo,
   className,
 }) => {
-  const mergedColumnRenderers = React.useMemo<NonNullable<DataGridOverrides['columnRenderers']>>(
-    () => ({ ...DEFAULT_COLUMN_RENDERERS, ...columnRenderers }),
-    [columnRenderers]
-  );
+  const mergedColumnRenderers = React.useMemo<NonNullable<DataGridOverrides['columnRenderers']>>(() => {
+    const merged: NonNullable<DataGridOverrides['columnRenderers']> = {
+      ...DEFAULT_COLUMN_RENDERERS,
+      ...columnRenderers,
+    };
+    // When a host wires `relatedTo`, the association column becomes the interactive
+    // "Related to" cell (task 052) — injected LAST so it wins over the static
+    // status badge on that column.
+    if (relatedTo) {
+      const field = relatedTo.columnField ?? DEFAULT_RELATED_TO_COLUMN;
+      merged[field] = (_value, record) => (
+        <RelatedToCell
+          review={relatedTo.resolveReview(record)}
+          onConfirmed={relatedTo.onConfirmed ? () => relatedTo.onConfirmed!(record) : undefined}
+        />
+      );
+    }
+    return merged;
+  }, [columnRenderers, relatedTo]);
   const overrides = React.useMemo<DataGridOverrides>(
     () => ({ columnRenderers: mergedColumnRenderers }),
     [mergedColumnRenderers]

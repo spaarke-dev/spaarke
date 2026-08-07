@@ -38,7 +38,7 @@ import {
   MenuList,
   MenuItem,
 } from '@fluentui/react-components';
-import { Search20Regular } from '@fluentui/react-icons';
+import { Search20Regular, DocumentAdd20Regular } from '@fluentui/react-icons';
 import { getXrmForPicker } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
@@ -67,6 +67,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     linkAnotherCatalog,
     readOnly = false,
     onAssociationsChanged,
+    onCreateNewRecord,
   } = props;
   const s = useConnectionsReviewStyles();
 
@@ -246,6 +247,30 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
                 </MenuList>
               </MenuPopover>
             </Menu>
+          </div>
+        )}
+
+        {/* Create new record — the "Create-new-and-link" new-vs-related intent
+            (email-communication-intelligence-r2 task 052, FR-E3). Rendered ONLY
+            when the host wires `onCreateNewRecord` (the reconciliation Related-to
+            cell does; existing consumers like EmailWorkspace omit it → this tile
+            never appears there — additive + backward-compatible). A single click
+            fires the host's create-new intent; the created record is then filed
+            via the SAME additive regarding path (no second write path). */}
+        {onCreateNewRecord && !readOnly && (
+          <div className={s.cardCell}>
+            <button
+              type="button"
+              className={s.linkCard}
+              disabled={busy}
+              onClick={onCreateNewRecord}
+              data-testid="create-new-record"
+            >
+              <span className={s.linkCardLabel}>Create new record</span>
+              <span className={s.linkCardIconRow}>
+                <DocumentAdd20Regular className={s.linkCardIcon} aria-hidden="true" />
+              </span>
+            </button>
           </div>
         )}
       </div>
