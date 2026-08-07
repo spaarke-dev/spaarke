@@ -330,6 +330,61 @@ describe('useSaveFlow', () => {
     });
   });
 
+  describe('401 retry (task 040 / FR-B0)', () => {
+    it('startSave retries exactly once on 401 and succeeds', async () => {
+      // First attempt: 401 (expired token). Retry attempt: 202 success.
+      // `startSave` reads the response via `.text()` (then JSON.parses it) —
+      // see the raw fetch call this replaces, further up in useSaveFlow.ts.
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 }).mockResolvedValueOnce({
+        ok: true,
+        status: 202,
+        text: async () => JSON.stringify(mockSaveResponse),
+      });
+
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken }));
+
+      act(() => {
+        result.current.setSelectedEntity(mockEntity);
+      });
+
+      await act(async () => {
+        await result.current.startSave(mockContext);
+      });
+
+      // Not surfaced as an unhandled error or a second auth path — the retry
+      // succeeded transparently.
+      expect(result.current.error).toBeNull();
+      // The first two fetch calls are the save POST's initial attempt + its
+      // single 401 retry (a successful save also kicks off fire-and-forget
+      // job-status polling + an SSE connect, which may add further calls not
+      // relevant to this assertion).
+      expect(mockFetch.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(mockFetch.mock.calls[0][0]).toContain('/office/save');
+      expect(mockFetch.mock.calls[1][0]).toContain('/office/save');
+      // getAccessToken called at least once for the initial attempt + once for the retry.
+      expect(mockGetAccessToken.mock.calls.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('startSave does not loop indefinitely — a second 401 surfaces as a normal error, not an unhandled exception', async () => {
+      mockFetch.mockResolvedValueOnce({ ok: false, status: 401 }).mockResolvedValueOnce({ ok: false, status: 401 });
+
+      const onError = jest.fn();
+      const { result } = renderHook(() => useSaveFlow({ getAccessToken: mockGetAccessToken, onError }));
+
+      act(() => {
+        result.current.setSelectedEntity(mockEntity);
+      });
+
+      await act(async () => {
+        await result.current.startSave(mockContext);
+      });
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(result.current.flowState).toBe('error');
+      expect(result.current.error).not.toBeNull();
+    });
+  });
+
   describe('Duplicate Detection', () => {
     it('handles duplicate response', async () => {
       const duplicateResponse = {

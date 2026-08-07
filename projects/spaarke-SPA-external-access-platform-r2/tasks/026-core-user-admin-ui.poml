@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Core-user admin UI: grant/revoke module entitlement + record grants</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags `frontend`, `fluent-ui`; modifies `.tsx`; user-facing admin surface with grant/revoke authz round-trip — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuse-heavy Fluent v9 surface built on the existing `AccessGrantModal`; well-specified against the ux-brief; no net-new UX invention.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>021</deps>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Build the core-user admin UI: a Fluent v9 (dark-mode) surface to grant/revoke module entitlement (external, per-Contact) + record grants, reusing the existing `AccessGrantModal` — do NOT hand-roll the dialog. Grant + revoke must round-trip from the UI (no curl), calling the BFF entitlement/grant endpoints (task 021 surface).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 React engineer fluent in `@spaarke/ui-components`, `SprkModal` presets, `AccessGrantModal`, and dark-mode/Teams-theme semantic tokens.</role>
+  <goal>An admin surface (MDA command-bar-launched dialog per ux-brief §3) lets a core user grant + revoke module entitlement (external per-Contact) and record grants via the existing `AccessGrantModal`, round-tripping to the BFF. Renders correctly in light, dark, and Teams theme (zero hardcoded hex). ui-tests cover render, dark+Teams, and a full grant→revoke round-trip. No hand-rolled dialog.</goal>
+  <context>
+    <background>FR-12: a Fluent v9 (dark-mode, ADR-021) admin surface grants/revokes module entitlement (external) and record grants, and invokes invite-and-grant/provision for Outside Counsel. Acceptance: a core user performs grant + revoke from UI (no curl), renders in dark mode. ux-brief §2 persona "Core-user admin (MDA): grant/revoke module + record access without curl → grant/revoke round-trip from a UI; no PowerShell/API-only step". ux-brief §3: "Core-user admin UI → MDA command-bar surface → grant/revoke dialog → `AccessGrantModal` (direct reuse), `ChoiceModal`/`ConfirmModal`". §11: build on the shared library; ALL dialogs via `SprkModal` presets; NO hand-rolled UI.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/ — DIRECT REUSE (do NOT hand-roll). The grant/revoke dialog component.</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts:273 — `SprkModal` + presets export (`ConfirmModal`, `ChoiceModal`, `FormModal`) for confirm/choice steps.</file>
+      <file>src/client/shared/Spaarke.UI.Components/ — `useTheme`/`ThemeToggle` for theme; semantic tokens via `makeStyles`/`tokens`.</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md — §3 (admin surface mapping), §4 (nine required states incl. dark + Teams + narrow width).</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/IModuleEntitlementResolver.cs (task 021) + the entitlement/grant write endpoints — the BFF surface the UI grant/revoke calls.</file>
+    </relevant-files>
+    <dependencies>Task 021 (resolver + grant surface) provides the entitlement/grant endpoints the UI calls. Reuses `AccessGrantModal` + `@spaarke/ui-components`.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only (`makeStyles`/`tokens`); ZERO hardcoded hex/RGB/shadow/typography; verified in light, dark, AND Teams theme. Scope: the admin surface.</constraint>
+    <constraint source="ADR-050">ALL dialogs via `SprkModal` presets; the grant/revoke dialog is the existing `AccessGrantModal` (direct reuse) — do NOT hand-roll a Dialog. Scope: every dialog in this surface.</constraint>
+    <constraint source="project-§11">Build on `@spaarke/ui-components`; any deviation from a shared component must clear the three-question gate in the justification element. Do NOT fork `LegalWorkspaceApp`. Scope: this surface.</constraint>
+    <constraint source="spec-NFR06">Grant/revoke are UX triggers ONLY; the authorization decision is server-enforced. The UI must reflect the server result (a failed/denied grant surfaces as an error state, not a silent success). Scope: grant/revoke round-trip handling.</constraint>
+    <constraint source="ux-brief">Demonstrate all applicable required states from §4: loading, empty, error, dark mode, Teams theme, keyboard-only, narrow width. Scope: this surface's states.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="access-grant-modal-reuse" location="src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/">Direct reuse for grant/revoke; wire its callbacks to the BFF entitlement/grant endpoints.</pattern>
+      <pattern name="sprk-modal-presets" location="src/client/shared/Spaarke.UI.Components/src/components/index.ts">`ConfirmModal`/`ChoiceModal` for confirm/choose steps around grant/revoke; never a raw Fluent Dialog.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec FR-12 + ux-brief §2/§3/§4 + ADR-021/ADR-050. Read `AccessGrantModal/` to confirm its props/callbacks and the grant/revoke contract it expects.</step>
+    <step order="2">Build the admin surface (MDA command-bar-launched per ux-brief §3): a host component that opens `AccessGrantModal` for module-entitlement grant (external per-Contact) + record grants, and a revoke path (with `ConfirmModal` confirmation).</step>
+    <step order="3">Wire grant/revoke callbacks to the BFF entitlement/grant endpoints (task 021 surface). On success, reflect the new state; on server denial/error, surface the error state (NFR-06 — server is truth). Trigger `/me` cache invalidation is server-side (task 022), so re-read reflects it.</step>
+    <step order="4">Theme: use `useTheme` + semantic tokens; verify light, dark, and Teams theme; zero hardcoded hex. Handle narrow-width (Teams personal-tab) + keyboard-only.</step>
+    <step order="5">Add ui-tests (see ui-tests block): renders without console errors; dark + Teams theme adapt; a full grant→revoke round-trip from the UI (no curl) reflects the server result.</step>
+    <step order="6">Build the client (`npm run build:prod` for the relevant surface); resolve type/lint errors.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/</step>
+  </steps>
+  <escalation>
+    <trigger>If `AccessGrantModal` cannot express module-entitlement grant (only record grants), STOP before hand-rolling — surface the gap and confirm with the owner whether to extend `AccessGrantModal` (§11 extend-don't-fork) vs add a preset, rather than building a bespoke dialog (§6).</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build TS/React</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">Admin UI surface (grant/revoke) composing `AccessGrantModal` + `SprkModal` presets — under the relevant `src/solutions/**` or admin surface path</output>
+    <output type="test">ui-tests: render, dark+Teams, grant→revoke round-trip</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a core user, when they grant a module entitlement to an external Contact via the UI, then the grant round-trips to the BFF and the entitlement is created (no curl/PowerShell step).</criterion>
+    <criterion testable="true">Given an existing grant, when the core user revokes it via the UI (with `ConfirmModal`), then the revoke round-trips and the entitlement is removed.</criterion>
+    <criterion testable="true">Given a server denial/error on grant, when it returns, then the UI shows an error state (not a silent success) — server is the authorization truth (NFR-06).</criterion>
+    <criterion testable="true">Given the surface, when rendered in light, dark, and Teams theme, then semantic tokens adapt with zero hardcoded hex.</criterion>
+    <criterion testable="true">Given the dialog, when operated keyboard-only at narrow (Teams personal-tab) width, then it remains usable (required states, ux-brief §4).</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Renders"><steps><step>Mount the admin surface and open the grant dialog</step></steps><expected>no console errors; `AccessGrantModal` renders</expected></test>
+    <test name="Dark Mode + Teams theme (ADR-021)"><steps><step>toggle dark mode via ThemeToggle</step><step>apply Teams theme (light/dark/high-contrast)</step><step>verify semantic tokens adapt</step></steps><expected>zero hardcoded hex; adapts in all themes</expected></test>
+    <test name="Grant/revoke round-trip"><steps><step>grant a module entitlement to a test Contact</step><step>confirm it persists (re-read)</step><step>revoke it via ConfirmModal</step></steps><expected>grant and revoke both round-trip to the BFF; UI reflects server result; no curl used</expected></test>
+  </ui-tests>
+  <justification>
+    <existing>`AccessGrantModal` (`src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/`) — the existing grant/revoke dialog. The admin HOST surface (command-bar launch + wiring) does not yet exist for this project (grep of admin surfaces: onboarding was API-only, DI-029-01).</existing>
+    <extension>Yes for the dialog (direct reuse of `AccessGrantModal` + `SprkModal` presets); the thin host/launch surface is new because no core-user admin surface exists to grant/revoke without curl.</extension>
+    <cost-of-doing-nothing>Without it, no module is operable by its core-user persona without curl/PowerShell (FR-12 acceptance fails); admins cannot grant/revoke external module entitlement through a UI.</cost-of-doing-nothing>
+  </justification>
+  <notes>Direct reuse of `AccessGrantModal` is mandatory (ux-brief §3 + §11) — do NOT hand-roll. If the modal only covers record grants today, the escalation trigger governs (extend it, don't fork). Grant/revoke MUST round-trip from the UI per FR-12 acceptance (no curl). Server-side `/me` invalidation (task 022) makes the change visible on re-read.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; use the fluent-v9-component skill for component conventions.</protocol>
+  </execution>
+</task>

@@ -150,14 +150,13 @@ export function csvFilename(entityName: string, savedQueryName: string, date: Da
 export function exportCsv(
   records: ReadonlyArray<Record<string, unknown>>,
   columns: ReadonlyArray<ResolvedColumn>,
-  // savedQueryName + entityName accepted for signature compatibility with the
+  // _savedQueryName + _entityName accepted for signature compatibility with the
   // public spec; they do not affect the body of the CSV (only the filename).
-  // The arguments are intentionally retained so future callers can rely on this
+  // The arguments are intentionally retained (underscore-prefixed per TS
+  // noUnusedParameters convention) so future callers can rely on this
   // signature when wiring custom filename derivations.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  savedQueryName: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  entityName: string
+  _savedQueryName: string,
+  _entityName: string
 ): Blob {
   const lines: string[] = [];
 

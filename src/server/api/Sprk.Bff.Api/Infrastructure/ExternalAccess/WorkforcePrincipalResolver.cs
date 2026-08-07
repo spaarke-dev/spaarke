@@ -142,7 +142,7 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
                 callerOid, suid, derivedContactId is not null);
 
             return WorkforcePrincipalResolution.ForSystemUser(
-                suid, derivedContactId, callerOid.ToString("D"), tenantId);
+                suid, derivedContactId, callerOid.ToString("D"), tenantId, ExtractVerifiedEmail(user));
         }
 
         // ── (b) contact-only branch — AAD oid / verified email → contact ──

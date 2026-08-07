@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Deploy module-host shell + Teams package (SWA)</title>
+    <phase>P1 Module-host foundation</phase>
+    <gate>blocked-until:012,013,014,016,017</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task following a prescribed SWA deploy recipe; not code authoring; STANDARD per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Executes a documented deploy workflow (deploy-external-spa.yml / office-addins-deploy) — literal, prescriptive.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy task; depends on all P1 build tasks landing first; single serial deployment of the shell + Teams package.</parallel-reason>
+    <deps>012,013,014,016,017</deps>
+    <tags>deploy, ci-cd</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the assembled P1 module-host shell (registry + launcher + dual-plane auth + Assigned Work) and the Teams
+    personal-tab package to the external-spa SWA, using deploy-external-spa.yml / the office-addins-deploy (SWA) path.
+    Verify the deployed app loads in the browser (both planes) and in the Teams tab. The teams-app-r1 operator-gated
+    BFF redeploy is a prerequisite.
+  </prompt>
+
+  <role>SPAARKE platform developer + release engineer. Follow ADRs strictly. SWA deployment specialist.</role>
+
+  <goal>
+    The P1 shell + Teams package deployed to the external-spa SWA (swa-spaarke-external-spa-dev) via the CI deploy
+    path; the deployed URL loads and authenticates in the browser (CIAM + workforce) and in the Teams personal tab
+    (Teams SSO, dark theme), with the CSP frame-ancestors config live. Deployment recorded in project notes.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-04/FR-06 + design.md F4 + Prerequisites: R2 P1 builds on the teams-app-r1 operator-gated BFF
+      rebuild+redeploy to spaarke-bff-dev + live Teams E2E (shared-infra ops). The client deploy uses
+      deploy-external-spa.yml (manual workflow_dispatch; Vite prod build; SWA swa-spaarke-external-spa-dev). The Teams
+      manifest (task 014) is packaged with the deploy. This is the P1 integration checkpoint that closes the shell
+      foundation phase.
+    </background>
+    <relevant-files>
+      <file>.github/workflows/deploy-external-spa.yml</file>
+      <file>src/client/external-spa/staticwebapp.config.json</file>
+      <file>src/client/external-spa/ (built shell + Teams manifest)</file>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+    </relevant-files>
+    <dependencies>012 (launcher), 013 (auth bootstrap), 014 (Teams package), 016 (Assigned Work module), 017 (cleanup). teams-app-r1 operator-gated BFF redeploy is an external prerequisite.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy via deploy-external-spa.yml / office-addins-deploy (SWA) to swa-spaarke-external-spa-dev; do NOT hand-deploy outside the CI path.</constraint>
+    <constraint source="project">Confirm the teams-app-r1 operator-gated BFF redeploy to spaarke-bff-dev has completed BEFORE running the Teams live E2E (shared-infra prerequisite).</constraint>
+    <constraint source="NFR-03">No plaintext secrets in the deploy; SWA deploy token / Key Vault references by name only.</constraint>
+    <constraint source="project">The deployed CSP frame-ancestors config (task 014) MUST be live on the SWA (Teams framing works; no X-Frame-Options).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+      <file>.claude/skills/ci-cd/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="External SPA deploy" location=".github/workflows/deploy-external-spa.yml">Manual workflow_dispatch; Vite prod build; SWA swa-spaarke-external-spa-dev — the deploy recipe.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Confirm the teams-app-r1 operator-gated BFF redeploy to spaarke-bff-dev has completed (prerequisite); if not, coordinate/wait before the Teams E2E.</step>
+    <step order="2">Build the shell prod bundle (npm run build:prod) and confirm the Teams manifest + staticwebapp.config.json (CSP frame-ancestors) are included in the deploy artifact.</step>
+    <step order="3">Trigger deploy-external-spa.yml (workflow_dispatch) to swa-spaarke-external-spa-dev; monitor to green.</step>
+    <step order="4">Verify the deployed URL in a browser: CIAM sign-in reaches the launcher; workforce sign-in reaches the launcher; the correct entitled cards render.</step>
+    <step order="5">Verify the Teams personal tab: silent Teams SSO loads the launcher, renders in Teams dark theme, and loads module data.</step>
+    <step order="6">Record the deployment (URL, workflow run, verification results) in project notes.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build TS/React (build:prod)</tool>
+    <tool name="terminal">Shell / gh workflow</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (P1 deployment record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given deploy-external-spa.yml, when triggered, then it completes green and the shell is live on swa-spaarke-external-spa-dev.</criterion>
+    <criterion testable="true">The deployed URL authenticates both planes in a browser (CIAM + workforce) and each reaches its entitled launcher.</criterion>
+    <criterion testable="true">The Teams personal tab loads via silent Teams SSO, renders in Teams dark theme, and loads module data; CSP frame-ancestors is live (no X-Frame-Options).</criterion>
+    <criterion testable="true">The teams-app-r1 BFF redeploy prerequisite is confirmed complete before the Teams E2E; no plaintext secrets in the deploy.</criterion>
+    <criterion testable="true">The deployment is recorded in project notes (URL, run, verification).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Prescriptive: the shared-infra BFF redeploy (teams-app-r1 §9) must precede the Teams live E2E. This closes the P1
+    module-host foundation phase; access-control/entitlement depth (P2), Legal Front Door (P3), and hardening (P4)
+    follow. Coordinate with teams-app-r1 (shared external-access surface) via /conflict-check if any BFF change rides along.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -185,6 +185,16 @@ public static class CommunicationModule
         // NormalizedMessage.Bcc (mapped at the Graph boundary); Bcc-only delivery associates deterministically.
         // Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
         services.AddSingleton<IAssociationRung, RecipientAliasRung>();         // rung 0 — recipient-alias
+        // rung 0 (tier) — tracking-token reader (FR-A1 / task 013). Reads the HMAC-signed footer token task 012
+        // stamps on outbound Spaarke communications, VERIFIES the signature via ITrackingTokenSigner (010) BEFORE
+        // trusting the bound record (ADR-028 verify-before-trust / NFR-07), and emits a signed-valid match at 1.0
+        // (auto-file-eligible) or a bare/edited textual reference at 0.65 (corroborating). Reuses
+        // Kind=ExplicitReference so NO AssociationStatusMapper change is required (a verified, Spaarke-minted token
+        // IS the strongest explicit reference; the mapper collapses same-kind matches per target to their MAX).
+        // Reads only the envelope (BodyText/BodyHtml incl. quoted history) + RegardingFieldMap + the signer — no
+        // Dataverse, no AI (ADR-013). Best-effort/non-fatal (NFR-04): a forged/absent/deleted footer degrades to
+        // no-match. Registered unconditionally (mirrors the other deterministic rungs; ADR-010).
+        services.AddSingleton<IAssociationRung, TrackingTokenRung>();          // rung 0 — tracking-token reader
         services.AddSingleton<IAssociationRung, ThreadContinuityRung>();       // rung 1 — thread continuity
         services.AddSingleton<IAssociationRung, ParticipantCorrelationRung>(); // rung 2 — participant correlation
         // rung 3 — structural detectors (NFR-04: adding a detector is a new IStructuralDetector

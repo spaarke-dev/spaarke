@@ -120,9 +120,7 @@ describe('buildImportedContentModel — verbatim pass-through', () => {
 
   it('passes an untouched table through by identity, preserving table/row/cell structural facts', () => {
     const editor = makeEditor();
-    editor.commands.setContent(
-      '<table><tbody><tr><td><p>Term</p></td><td><p>Meaning</p></td></tr></tbody></table>'
-    );
+    editor.commands.setContent('<table><tbody><tr><td><p>Term</p></td><td><p>Meaning</p></td></tr></tbody></table>');
     stamp(editor, ['CCCC0001', 'CCCC0002']);
     const snapshot = captureParaIdSnapshot(editor);
 
@@ -238,7 +236,10 @@ describe('buildImportedContentModel — diff-driven user edits (trackChanges)', 
     editor.commands.insertContentAt({ from: 5, to: 10 }, 'swift');
     // Delete the second paragraph entirely (node spans [21, 27) after the same-length replace).
     const firstParaSize = editor.state.doc.content.firstChild!.nodeSize;
-    editor.commands.deleteRange({ from: firstParaSize, to: firstParaSize + editor.state.doc.content.child(1).nodeSize });
+    editor.commands.deleteRange({
+      from: firstParaSize,
+      to: firstParaSize + editor.state.doc.content.child(1).nodeSize,
+    });
 
     const loaded: ComposeContentModel = {
       blocks: [
@@ -625,9 +626,7 @@ describe('buildImportedContentModel — fidelity warnings', () => {
 
   it('rebuilds a shape-changed table once, preserving table-level + positional cell facts', () => {
     const editor = makeEditor();
-    editor.commands.setContent(
-      '<table><tbody><tr><td><p>A</p></td></tr><tr><td><p>B</p></td></tr></tbody></table>'
-    );
+    editor.commands.setContent('<table><tbody><tr><td><p>A</p></td></tr><tr><td><p>B</p></td></tr></tbody></table>');
     stamp(editor, ['AAAA0001', 'BBBB0002']);
     const snapshot = captureParaIdSnapshot(editor);
 
@@ -638,9 +637,7 @@ describe('buildImportedContentModel — fidelity warnings', () => {
           table: {
             rows: [
               {
-                cells: [
-                  { blocks: [{ kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'A' }] }], gridSpan: 2 },
-                ],
+                cells: [{ blocks: [{ kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'A' }] }], gridSpan: 2 }],
               },
             ],
             styleId: 'TableGrid',
@@ -680,9 +677,7 @@ describe('buildImportedContentModel — formatting-only edits (F1, step-9.5 revi
     editor.commands.setMark('bold');
 
     const loaded: ComposeContentModel = {
-      blocks: [
-        { kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'Make this bold' }], pageBreakBefore: true },
-      ],
+      blocks: [{ kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'Make this bold' }], pageBreakBefore: true }],
     };
 
     const { model } = buildImportedContentModel(editor, loaded, snapshot, {
@@ -750,9 +745,7 @@ describe('buildImportedContentModel — input immutability', () => {
 
     buildImportedContentModel(editor, loaded, snapshot, {
       trackChanges: true,
-      sessionThreads: [
-        { id: 'thread-1', author: 'Ann', timestamp: '2026-08-01T00:00:00Z', text: 'Note', replies: [] },
-      ],
+      sessionThreads: [{ id: 'thread-1', author: 'Ann', timestamp: '2026-08-01T00:00:00Z', text: 'Note', replies: [] }],
     });
 
     expect(JSON.stringify(loaded)).toBe(before);

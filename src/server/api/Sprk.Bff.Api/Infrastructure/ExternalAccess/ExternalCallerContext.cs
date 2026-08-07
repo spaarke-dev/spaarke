@@ -146,6 +146,11 @@ public sealed class WorkforcePrincipal
     /// <summary>The workforce tenant id (<c>tid</c> claim).</summary>
     public required string TenantId { get; init; }
 
+    /// <summary>The caller's tenant-verified email/UPN (from token claims). Used as the fallback key to
+    /// find the caller's contact-grants when a <see cref="WorkforcePrincipalKind.SystemUser"/> has no
+    /// derived <see cref="ContactId"/> (no <c>sprk_primarycontact</c> link). May be empty.</summary>
+    public string Email { get; init; } = string.Empty;
+
     /// <summary>True when this is a systemuser principal (ADR-034 membership plane).</summary>
     public bool IsSystemUser => Kind == WorkforcePrincipalKind.SystemUser;
 
@@ -192,16 +197,19 @@ public sealed class WorkforcePrincipalResolution
     public static WorkforcePrincipalResolution Resolved(WorkforcePrincipal principal)
         => new() { Principal = principal ?? throw new ArgumentNullException(nameof(principal)) };
 
-    /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId).</summary>
+    /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId + verified email).
+    /// <paramref name="email"/> is the fallback key for the caller's contact-grants when the systemuser
+    /// has no derived contact (see <see cref="WorkforcePrincipal.Email"/>).</summary>
     public static WorkforcePrincipalResolution ForSystemUser(
-        Guid systemUserId, Guid? derivedContactId, string oid, string tenantId)
+        Guid systemUserId, Guid? derivedContactId, string oid, string tenantId, string? email = null)
         => Resolved(new WorkforcePrincipal
         {
             Kind = WorkforcePrincipalKind.SystemUser,
             SystemUserId = systemUserId,
             ContactId = derivedContactId,
             Oid = oid,
-            TenantId = tenantId
+            TenantId = tenantId,
+            Email = email ?? string.Empty
         });
 
     /// <summary>Constructs a contact-only outcome (contactId anchor).</summary>

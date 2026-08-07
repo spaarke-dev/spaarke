@@ -298,7 +298,10 @@
         "catalogStatus": "existing"
       },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
-      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 023 (FR-05)" }
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "email-communication-intelligence-r1 task 023 (FR-05)"
+      }
     },
     {
       "caseId": "GU-139",
@@ -315,7 +318,10 @@
         "catalogStatus": "existing"
       },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
-      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 030 (FR-09)" }
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "email-communication-intelligence-r1 task 030 (FR-09)"
+      }
     },
     {
       "caseId": "GU-140",
@@ -332,7 +338,10 @@
         "catalogStatus": "existing"
       },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
-      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 040 (FR-14)" }
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "email-communication-intelligence-r1 task 040 (FR-14)"
+      }
     },
     {
       "caseId": "GU-018",
@@ -2379,7 +2388,10 @@
         "catalogStatus": "existing"
       },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
-      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-assistant-enhancements-r2 task 022 (FR-B3/B5)" }
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "spaarkeai-assistant-enhancements-r2 task 022 (FR-B3/B5)"
+      }
     }
   ]
 }

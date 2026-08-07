@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { EntitySearchResult } from './useEntitySearch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
+import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import {
   type ProblemDetails,
   mapProblemDetailsToMessage,
@@ -342,7 +343,7 @@ async function computeIdempotencyKey(request: SaveRequest): Promise<string> {
  *   jobStatus,
  *   error,
  * } = useSaveFlow({
- *   getAccessToken: () => authService.getAccessToken(['user_impersonation']),
+ *   getAccessToken: () => authService.getAccessToken(),
  *   onComplete: (docId, url) => navigateToDocument(url),
  *   onError: (error) => showNotification(error),
  * });
@@ -524,24 +525,23 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
   // the previous snapshot-once pattern would silently 401 once the cached token
   // expired. Each call delegates to the caller's provider cache (MSAL NAA / silent),
   // so this is cheap when the token is still warm.
+  //
+  // Task 040 / FR-B0: this is plain JSON (not SSE/XHR), so it is NOT a D-AUTH-7
+  // exception site — it now routes through `authenticatedJsonFetch` for a
+  // single-retry-on-401, same as every other JSON BFF call in this package. The
+  // hook still takes an injected `getAccessToken` (no hard `@spaarke/auth`
+  // import) — `authenticatedJsonFetch` re-invokes that same getter for the
+  // retry attempt.
   const pollJobStatus = useCallback(
     async (jobId: string) => {
       try {
         const accessToken = await getAccessToken();
-        const response = await fetch(`${apiBaseUrl}/api/office/jobs/${jobId}`, {
-          headers: {
-            // D-AUTH-7 exception site (updated task 072): the Office Add-in bootstrap
-            // now composes `@spaarke/auth`'s `SpaarkeAuthProvider` + `OfficeNaaStrategy`
-            // (see shared/services/AuthService.ts), but this hook stays decoupled from
-            // any specific auth library — it takes an injected `getAccessToken`
-            // function (host-agnostic, per the shared-component design principle in
-            // src/client/shared/CLAUDE.md), not a hard `@spaarke/auth` import. Bearer
-            // literal stays; staleness is eliminated by the per-call
-            // `await getAccessToken()` above.
-            Authorization: `Bearer ${accessToken}`,
-          },
-          signal: abortControllerRef.current?.signal,
-        });
+        const response = await authenticatedJsonFetch(
+          `${apiBaseUrl}/api/office/jobs/${jobId}`,
+          abortControllerRef.current?.signal ? { signal: abortControllerRef.current.signal } : {},
+          accessToken,
+          { getRetryToken: getAccessToken }
+        );
 
         if (!response.ok) {
           // Increment retry counter on failure
@@ -885,21 +885,27 @@ export function useSaveFlow(options: UseSaveFlowOptions): UseSaveFlowResult {
         // Submit save request.
         // Auth v2 (D-AUTH-7, updated task 072): acquire token inline — no snapshot.
         // This hook stays decoupled from `@spaarke/auth` by design (injected
-        // `getAccessToken`, not a hard import — see the pollJobStatus D-AUTH-7 note
-        // above for the full rationale). Per-call `getAccessToken()` eliminates
-        // staleness; the Bearer literal is the documented exception.
+        // `getAccessToken`, not a hard import). Per-call `getAccessToken()`
+        // eliminates staleness.
+        // Task 040 / FR-B0: this is plain JSON, not SSE/XHR — routed through
+        // `authenticatedJsonFetch` for a single-retry-on-401 (was a raw `fetch`
+        // + Bearer literal with no retry).
         console.log('[SaveFlow] Sending request:', JSON.stringify(serverRequest, null, 2));
         const saveToken = await getAccessToken();
-        const response = await fetch(`${apiBaseUrl}/api/office/save`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${saveToken}`,
-            'X-Idempotency-Key': idempotencyKey,
+        const response = await authenticatedJsonFetch(
+          `${apiBaseUrl}/api/office/save`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Idempotency-Key': idempotencyKey,
+            },
+            body: JSON.stringify(serverRequest),
+            signal: abortControllerRef.current.signal,
           },
-          body: JSON.stringify(serverRequest),
-          signal: abortControllerRef.current.signal,
-        });
+          saveToken,
+          { getRetryToken: getAccessToken }
+        );
 
         // Get raw response text first for debugging
         const responseText = await response.text();

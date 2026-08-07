@@ -201,8 +201,17 @@ module.exports = async (env, options) => {
             },
           },
           {
+            // Word manifest (task 040 / FR-B0): parameterized to the same unified
+            // form as the Outlook manifest above — no hardcoded SWA origin. The
+            // dev-authored source uses the `https://localhost:3000` placeholder
+            // (parity with the Outlook manifest's convention); this substitutes
+            // the resolved per-mode `ADDIN_BASE_URL` (localhost for dev, deployed
+            // SWA for prod) at build time. Previously hardcoded the production SWA
+            // origin unconditionally (`https://icy-desert-0bfdbb61e...`), so dev
+            // builds pointed at production — that bug is what this transform fixes.
             from: './word/word-manifest.xml',
-            to: 'word/manifest.xml'
+            to: 'word/manifest.xml',
+            transform: (content) => content.toString().split('https://localhost:3000').join(ENV_CONFIG.ADDIN_BASE_URL),
           },
           { from: './shared/assets', to: 'assets', noErrorOnMissing: true },
           // Mock Office.js for browser testing

@@ -205,6 +205,150 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         }
     }
 
+    // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): a PDF-sourced create-on-save
+    // carries the SOURCE sprk_document id and the new record INHERITS the source's record links
+    // (ADR-024 document link set) — the new Word document files ALONGSIDE the source PDF.
+    [Fact]
+    public async Task CreateOnSave_WithSourceDocumentRecordId_InheritsSourceRecordLinks()
+    {
+        // ── Arrange ────────────────────────────────────────────────────────────────────────────
+        const string containerId = "b!container-bu-pdf";
+        const string mintedSpeItemId = "spe-item-pdf-docx-001";
+        const string resolvedDriveId = "drive-pdf-001";
+        var newDocumentId = Guid.NewGuid();
+        var sourceDocumentId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        var projectId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(resolvedDriveId);
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: mintedSpeItemId, Name: "Corteva NDA.docx", ParentId: null,
+                Size: DraftBytes.Length, CreatedDateTime: DateTimeOffset.UtcNow,
+                LastModifiedDateTime: DateTimeOffset.UtcNow, ETag: "\"v1\"",
+                IsFolder: false, WebUrl: null, DriveId: resolvedDriveId));
+
+        // The SOURCE PDF's record carries a matter + a project link (and empty/absent others).
+        var sourceEntity = new Entity("sprk_document", sourceDocumentId);
+        sourceEntity["sprk_matter"] = new EntityReference("sprk_matter", matterId);
+        sourceEntity["sprk_project"] = new EntityReference("sprk_project", projectId);
+        string[]? retrievedColumns = null;
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveAsync(
+                "sprk_document", sourceDocumentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string[], CancellationToken>((_, _, cols, _) => retrievedColumns = cols)
+            .ReturnsAsync(sourceEntity);
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        Entity? createdEntity = null;
+        _fixture.DataverseMock
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
+            .ReturnsAsync(newDocumentId);
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // ── Act: the PDF-sourced create body the 041 client sends (sourceDocumentRecordId present) ──
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                containerId,
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId = string.Empty,
+                content = DraftBytes,
+                displayName = "Corteva NDA.docx",
+                sourceDocumentRecordId = sourceDocumentId,
+            });
+
+        // ── Assert ─────────────────────────────────────────────────────────────────────────────
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        createdEntity.Should().NotBeNull("a new sprk_document row was created");
+        createdEntity!.GetAttributeValue<EntityReference>("sprk_matter").Should().NotBeNull(
+            "the new Word document inherits the source PDF's matter link (filed alongside it)");
+        createdEntity.GetAttributeValue<EntityReference>("sprk_matter")!.Id.Should().Be(matterId);
+        createdEntity.GetAttributeValue<EntityReference>("sprk_project")!.Id.Should().Be(projectId);
+        createdEntity.Contains("sprk_invoice").Should().BeFalse(
+            "lookups the source does not carry are NOT invented on the new record");
+        retrievedColumns.Should().BeEquivalentTo(
+            new[] { "sprk_matter", "sprk_relatedmatter", "sprk_project", "sprk_relatedproject", "sprk_invoice", "sprk_workassignment" },
+            "the inheritance reads exactly the ADR-024 document link vocabulary");
+    }
+
+    // Task 041 B-MED-3: link-inheritance is BEST-EFFORT — a failed source read must not fail the save.
+    [Fact]
+    public async Task CreateOnSave_WhenSourceRecordReadFails_StillCreatesTheDocumentUnassociated()
+    {
+        const string containerId = "b!container-bu-pdf-2";
+        var newDocumentId = Guid.NewGuid();
+        var sourceDocumentId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("drive-pdf-002");
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: "spe-item-pdf-002", Name: "x.docx", ParentId: null, Size: DraftBytes.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v1\"", IsFolder: false, WebUrl: null, DriveId: "drive-pdf-002"));
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveAsync(
+                "sprk_document", sourceDocumentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("source record unreadable"));
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        Entity? createdEntity = null;
+        _fixture.DataverseMock
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
+            .ReturnsAsync(newDocumentId);
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                containerId,
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId = string.Empty,
+                content = DraftBytes,
+                displayName = "x.docx",
+                sourceDocumentRecordId = sourceDocumentId,
+            });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "link inheritance is best-effort — a failed source read never fails the save");
+        createdEntity.Should().NotBeNull();
+        createdEntity!.Contains("sprk_matter").Should().BeFalse("no links could be inherited");
+    }
+
     [Fact]
     public async Task CreateOnSave_WhenContainerIdMissing_Returns400()
     {

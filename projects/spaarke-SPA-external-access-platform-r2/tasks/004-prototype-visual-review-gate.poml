@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Owner visual-approval gate + component map (design-review checklist)</title>
+    <phase>P0 UX Design + Prototype</phase>
+    <gate>blocked-until:003</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Verification + documentation gate — no new code is written; produces a component map and runs the design-review checklist. Per §8 MINIMAL row (inventory/verification), FULL gates skipped.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Checklist verification + document authoring against a fixed rubric (ux-brief §4); no architectural judgment.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gate task — must run after 003 completes and blocks all downstream production frontend; cannot run concurrently with the surfaces it verifies.</parallel-reason>
+    <deps>003</deps>
+    <tags>frontend, e2e-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Verify every P0 prototype surface (tasks 001+003) against the ux-brief §4 nine-state design-review checklist, produce a surface→shared-component map, and drive the owner visual-approval that closes P0 and unblocks production frontend (P1/P3). This is NOT a build task — write no new feature code.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Design-review + UX-verification discipline; ux-brief fluency.</role>
+  <goal>A component map exists at projects/spaarke-SPA-external-access-platform-r2/notes/p0-component-map.md mapping each ux-brief §3 surface (shell chrome, card launcher, realm chooser, typed intake, my-requests, NDA status, upload) to the exact @spaarke/ui-components primitive(s) it consumes; a completed nine-state design-review checklist (per surface) records pass/fail against ux-brief §4; and the owner's visual approval is captured, closing P0 and marking P1/P3 frontend unblocked.</goal>
+  <context>
+    <background>ux-brief §6: the P0 prototype builds each §3 surface to the §4 state checklist; owner visual-approval closes P0, and P1/P3 production frontend tasks cite this brief + the approved prototype as their build target. This gate ensures no surface is "done" until all nine required states (loading/empty/error/unentitled/dark/Teams/keyboard/narrow) are demonstrated, and produces the traceability artifact (component map) downstream tasks reference to satisfy the §11 reuse mandate.</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md (§3 surface→component map source; §4 nine-state checklist; §6 how the brief is used)</file>
+      <file>c:/code_files/spaarke-prototype/projects/{experiment-folder}/ (the task-001/003 experiment to verify)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (success criteria; FR-01..FR-17 acceptance)</file>
+    </relevant-files>
+    <dependencies>Tasks 001 (shell/launcher/realm chooser) and 003 (Front Door screens) must be complete and runnable; task 002 seed feeds them.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">This is a verification + documentation gate — write NO new feature/UI code. Only the component map + checklist documents are produced.</constraint>
+    <constraint source="project">The component map MUST name the exact shared component per surface (ActionCard/ActionCardRow, SprkModal preset name, ThemeToggle, Fluent primitive) — a surface with no shared-component backing is flagged as a §11 violation for the owner.</constraint>
+    <constraint source="project">The nine-state checklist MUST be evaluated per surface against the running prototype (not from memory): loading, empty, error, unentitled/denied, dark, Teams theme, keyboard-only, narrow width.</constraint>
+    <constraint source="project">Owner visual-approval is a hard gate: P1/P3 production frontend does not start until this task records the owner's approval. If any surface fails a required state, record it as a blocking finding and do NOT mark P0 approved.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="Design-review checklist" location="projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md">§4 nine required states are the rubric; §3 table is the surface→component source of truth.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load ux-brief (§3/§4/§6) + spec success criteria; start the task-001/003 experiment dev server.</step>
+    <step order="2">For each ux-brief §3 surface, record the exact @spaarke/ui-components primitive(s) it consumes into notes/p0-component-map.md; flag any surface lacking shared-component backing as a §11 finding.</step>
+    <step order="3">For each surface, run the nine-state design-review checklist against the running prototype; record pass/fail per state with a short note or screenshot reference.</step>
+    <step order="4">Compile blocking findings (any failed required state or §11 violation) into a findings section; if none, state "no blocking findings".</step>
+    <step order="5">Present the component map + checklist results to the owner and request visual approval; record the owner's decision (approved / changes-requested) with date in the document.</step>
+    <step order="6">If approved: note in the document that P0 is closed and P1/P3 production frontend is unblocked (they cite this brief + approved prototype). If changes-requested: list the follow-up items and leave P0 open.</step>
+    <step order="7">Update projects/spaarke-SPA-external-access-platform-r2/tasks/TASK-INDEX.md: set this task's status to ✅ completed (only after the owner decision is recorded).</step>
+    <step order="8">Document any deviations or deferred UX items in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If a surface fails a required §4 state or lacks shared-component backing (§11), do NOT record owner approval — surface the blocking finding to the owner and keep P0 open until resolved.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Run the prototype experiment for visual verification (dev server)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/p0-component-map.md (surface→shared-component map + nine-state checklist results + owner-approval record)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the component map, when reviewed, then every ux-brief §3 surface (shell chrome, card launcher, realm chooser, typed intake, my-requests, NDA status, upload) maps to a named @spaarke/ui-components primitive or is explicitly flagged as a §11 finding.</criterion>
+    <criterion testable="true">Given the design-review checklist, when completed, then each surface has a recorded pass/fail for all nine ux-brief §4 states, evaluated against the running prototype.</criterion>
+    <criterion testable="true">Given a surface that fails a required state, when the gate runs, then it is recorded as a blocking finding and owner approval is NOT recorded (P0 stays open).</criterion>
+    <criterion testable="true">Given all surfaces pass, when the owner reviews, then the owner's visual-approval decision + date is captured in p0-component-map.md and the document states P1/P3 frontend is unblocked.</criterion>
+    <criterion testable="true">Negative: no new feature/UI code is committed by this task (git diff shows only the notes document + TASK-INDEX update).</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Nine-state verification pass">
+      <steps>
+        <step>Run the prototype; for each surface exercise loading, empty, error, unentitled, dark, Teams, keyboard, narrow</step>
+      </steps>
+      <expected>Each state observed and recorded; failures logged as blocking findings</expected>
+    </test>
+  </ui-tests>
+  <notes>ux-brief §6 defines this gate: owner visual-approval closes P0 and P1/P3 cite the brief + approved prototype as build target. This is the gate that blocks all production frontend — treat owner approval as a hard, recorded decision. No new code.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; run the prototype and evaluate against ux-brief §4 rather than from memory.</protocol>
+  </execution>
+</task>

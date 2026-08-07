@@ -129,4 +129,50 @@ public class DocumentIntelligenceService
 
         return ParseDocumentAsync(content, fileName, cancellationToken);
     }
+
+    /// <summary>
+    /// Task 040 (spaarkeai-compose-r6, FR-06): parses a document into the STRUCTURED layout contract
+    /// (<see cref="PublicContracts.DocumentLayout"/> — paragraphs-with-roles + tables in document
+    /// order) via Azure Document Intelligence <c>prebuilt-layout</c>. The structured twin of
+    /// <see cref="ParseDocumentAsync(byte[], string, CancellationToken)"/>: same delegate-to-
+    /// <see cref="ITextExtractor"/> shape, same throw-on-failure contract. First consumer: the Compose
+    /// PDF intake (via <c>DocumentParserRouter.ParseDocumentLayoutAsync</c> and the
+    /// <see cref="PublicContracts.IComposePdfIntakeSource"/> facade).
+    /// </summary>
+    /// <param name="content">Raw document bytes (PDF, DOCX, …).</param>
+    /// <param name="fileName">File name used to determine the extraction method.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The structured <see cref="PublicContracts.DocumentLayout"/> on success.
+    /// Throws <see cref="InvalidOperationException"/> when layout extraction fails.</returns>
+    public virtual async Task<PublicContracts.DocumentLayout> ParseDocumentLayoutAsync(
+        byte[] content,
+        string fileName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+
+        _logger.LogDebug(
+            "DocumentIntelligenceService: layout-parsing {FileName} ({Bytes} bytes)",
+            fileName, content.Length);
+
+        using var stream = new MemoryStream(content, writable: false);
+        var result = await _textExtractor.ExtractLayoutAsync(stream, fileName, cancellationToken);
+
+        if (!result.Success || result.Layout is null)
+        {
+            var errorMessage = result.ErrorMessage ?? "Layout extraction failed without a message.";
+            _logger.LogWarning(
+                "DocumentIntelligenceService: layout extraction failed for {FileName}: {Error}",
+                fileName, errorMessage);
+            throw new InvalidOperationException(
+                $"Azure Document Intelligence failed to extract layout from '{fileName}': {errorMessage}");
+        }
+
+        _logger.LogDebug(
+            "DocumentIntelligenceService: layout-parsed {FileName} ({Pages} pages, {Blocks} blocks)",
+            fileName, result.Layout.PageCount, result.Layout.Blocks.Count);
+
+        return result.Layout;
+    }
 }

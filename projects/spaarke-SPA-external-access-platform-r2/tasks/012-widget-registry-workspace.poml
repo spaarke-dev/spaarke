@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Widget registry + tabbed role-defaulted workspace + pinned Quick Start first tab + entitlement-gated widget library (/me-driven visibility)</title>
+    <phase>P1 Workspace-shell foundation</phase>
+    <gate>blocked-until:011</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>NEW frontend surface (modifying/creating .tsx) that is the entitlement-honest routing core of the shell; entitlement gating is a security-adjacent invariant (unentitled widget neither shown nor routable); role-defaulting per persona.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified frontend build over an existing registry pattern + the shell scaffold; Sonnet 5 @ high per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011</deps>
+    <tags>frontend, fluent-ui</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    On the workspace shell (task 011), build the external widget registry (WorkspaceWidgetRegistry pattern), a tabbed
+    role-defaulted widget workspace, a PINNED "Quick Start" first tab (role-relevant action cards + "More Services"), and an
+    entitlement-gated widget library — all driven by /me. A widget the caller is NOT entitled to is neither in the library nor
+    routable (entitlement-honest, negative criterion). Role-default the widget set per persona (workforce, outside-counsel, admin).
+  </prompt>
+
+  <role>SPAARKE platform developer + Fluent v9 / React 18 frontend engineer. Follow ADRs strictly. Skilled at registry-driven, entitlement-gated UI composition using an existing registry pattern.</role>
+
+  <goal>
+    An external WorkspaceWidgetRegistry (adopting the SpaarkeAi WorkspaceWidgetRegistry pattern) that registers each widget as
+    { id, title, icon, defaultForRoles, requiredEntitlement, lazyLoader }; a tabbed workspace that opens the caller's
+    role-defaulted widgets as tabs behind the pinned Quick Start first tab; a Quick Start pinned-tab body of role-relevant
+    ActionCards + a "More Services" SprkModal; and an entitlement-gated widget library (SprkModal) listing ONLY widgets the
+    caller is entitled to per /me. Unentitled widgets are absent from the library AND non-routable. Actual data widgets are
+    tasks 016+ — 012 registers them as placeholders with the correct entitlement/role metadata.
+  </goal>
+
+  <context>
+    <background>
+      Per design.md §12(A) + spec.md FR-01 (code-side registry registers each widget as {id,title,icon,route,lazyLoader,requiredEntitlement};
+      unknown widgets degrade gracefully) + FR-02 (shell renders ONLY entitled surfaces per /me; an unentitled one is neither shown
+      nor routable) + notes/workspace-shell-foundation.md role-defaulted widget sets: workforce = My Requests · Inventions · Messages ·
+      Policy Library; outside-counsel = Projects · Matters · Work Assignments · Documents · Invoices; admin = Access Admin (+ Messages).
+      Quick Start (pinned first tab) = "do" (wizards): NDA Assessment · Submit Policy Question · Invention Submission · Trademark
+      Search Request · More Services. The registry adopts the existing WorkspaceWidgetRegistry pattern (do not fork LegalWorkspaceApp).
+      /me returns the caller's entitled modules/widgets (delivered by the P2 entitlement endpoint; in P1 the client consumes the /me
+      contract — mock where the endpoint is not yet deployed, but gate on the real contract shape).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts (registry PATTERN to adopt)</file>
+      <file>src/client/external-spa/src/ (shell scaffold from task 011 — tab host, pinned Quick Start slot, pane layout)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx (Quick Start cards)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCardRow.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (SprkModal presets — line ~273 — for More Services + widget library)</file>
+      <file>src/client/external-spa/src/api/ (/me client — role + entitlement source)</file>
+      <file>spaarke-prototype/projects/2026-08-external-access-module-host/src/widgetRegistry.tsx (approved prototype registry + role defaults)</file>
+      <file>spaarke-prototype/projects/2026-08-external-access-module-host/src/components/WidgetLibraryModal.tsx (approved prototype widget library)</file>
+      <file>spaarke-prototype/projects/2026-08-external-access-module-host/src/components/quickstart/ (approved prototype Quick Start)</file>
+    </relevant-files>
+    <dependencies>011 (the workspace shell scaffold — tab host, pinned Quick Start slot, pane layout, assistant dock — this task mounts the registry + widgets + library into it).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 + React 18; semantic tokens ONLY; zero hardcoded hex; light/dark + Teams-theme parity (scope: registry-rendered tabs, Quick Start cards, widget library modal).</constraint>
+    <constraint source="ADR-050">The widget library + "More Services" are SprkModal + presets — no hand-rolled dialogs (scope: shell-level modals).</constraint>
+    <constraint source="NFR-06">Entitlement gating is UX-honest but NOT the security boundary: the client hides/omits unentitled widgets; server-side authz (Tier-1 entitlement + Tier-2 predicate) remains the enforcement (tasks 015/022). The client MUST NOT be the only gate.</constraint>
+    <constraint source="project">Adopt the WorkspaceWidgetRegistry PATTERN; do NOT fork LegalWorkspaceApp (Xrm-bound) and do NOT re-host Xrm-coupled existing widgets — external widgets are new and ride BffDataverseClient (§11).</constraint>
+    <constraint source="project">Widget visibility is /me-driven: role-default the initial tab set per persona; the widget library lists ONLY entitled widgets; an unentitled widget id is not routable (guard the tab-open/route path).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/workspace-shell-foundation.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="WorkspaceWidgetRegistry" location="src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts">Adopt the registry-of-descriptors pattern; extend the descriptor with requiredEntitlement + defaultForRoles for entitlement-gated, role-defaulted external widgets.</pattern>
+      <pattern name="Quick Start cards" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx">Quick Start pinned-tab body = ActionCardRow of role-relevant wizards + a More Services SprkModal.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the WorkspaceWidgetRegistry pattern + the approved prototype registry/library/Quick Start; map the descriptor shape {id,title,icon,defaultForRoles,requiredEntitlement,lazyLoader}.</step>
+    <step order="2">Implement the external widget registry over the shell (task 011) with placeholder widget descriptors for all P1 personas (workforce, outside-counsel, admin) — real data widgets are tasks 016+; register them with correct entitlement + role metadata.</step>
+    <step order="3">Wire /me → resolve the caller's role + entitled widget ids; open the role-defaulted widget set as tabs behind the pinned Quick Start first tab; consume the real /me contract (mock the payload where the endpoint is not yet deployed).</step>
+    <step order="4">Populate the pinned Quick Start tab body: role-relevant ActionCards (NDA Assessment · Submit Policy Question · Invention Submission · Trademark Search Request) + a "More Services" SprkModal listing all wizards.</step>
+    <step order="5">Build the entitlement-gated widget library (SprkModal): list ONLY widgets the caller is entitled to per /me; opening one adds its tab. Guard the tab-open/route path so an unentitled widget id cannot be opened even by direct route (negative).</step>
+    <step order="6">Run npm run build:prod; confirm green + zero console errors; run the ui-tests below.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the external-spa (npm run build:prod)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/ (external WorkspaceWidgetRegistry + role-defaulted tabbed workspace + Quick Start pinned-tab body + entitlement-gated widget library modal)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a workforce caller per /me, when the workspace loads, then the pinned Quick Start tab is first and the role-defaulted widget tabs (My Requests · Inventions · Messages · Policy Library) open behind it; an outside-counsel caller instead gets Projects · Matters · Work Assignments · Documents · Invoices; an admin caller gets Access Admin (+ Messages).</criterion>
+    <criterion testable="true">Given the widget library, when opened, then it lists ONLY the widgets the caller is entitled to per /me (SprkModal).</criterion>
+    <criterion testable="true">Negative (entitlement-honest): a widget the caller is NOT entitled to is absent from the library AND cannot be opened by direct route/tab-id — the tab-open path is guarded (no client-only leak; server still enforces).</criterion>
+    <criterion testable="true">Given the Quick Start pinned tab, when rendered, then role-relevant wizard ActionCards + a "More Services" SprkModal are present; the Quick Start tab is non-closable.</criterion>
+    <criterion testable="true">Given an unknown/unregistered widget id, when routed, then it degrades gracefully (no crash) per FR-01.</criterion>
+    <criterion testable="true">Given dark mode AND the Teams theme, when toggled, then registry tabs, Quick Start cards, and the widget library adapt via semantic tokens with zero hardcoded hex (ADR-021).</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts is the widget/tab-mounting PATTERN (internal SpaarkeAi); grep finds no external entitlement-gated widget workspace or /me-driven role-defaulted library on external-spa.</existing>
+    <extension>Yes for the registry pattern (adopt it); No for a ready-made surface — the entitlement-gated, role-defaulted external widget workspace + library + Quick Start pinned tab is new client surface. It reuses the pattern + ActionCard/SprkModal primitives; only the external composition + entitlement gating are new.</extension>
+    <cost-of-doing-nothing>Without it, the shell (task 011) has no way to show the right widgets to the right persona and no entitlement-honest gate — an unentitled user could route to a widget it should not see (FR-02 fails), and "add a capability = register a widget" (the unifying platform model) has no client home.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Role-defaulted render"><steps><step>Load workspace as a workforce /me payload</step><step>Reload as an outside-counsel payload, then an admin payload</step></steps><expected>correct role-default widget tabs behind the pinned Quick Start tab per persona; no console errors</expected></test>
+    <test name="Entitlement-honest library"><steps><step>Open the widget library</step><step>Attempt to route to an unentitled widget id</step></steps><expected>library lists only entitled widgets; unentitled id is not routable (graceful deny)</expected></test>
+    <test name="Dark+Teams theme (ADR-021)"><steps><step>Toggle dark mode</step><step>Toggle the Teams theme</step></steps><expected>tokens adapt; zero hardcoded hex</expected></test>
+  </ui-tests>
+
+  <notes>
+    NEW surface (justification above). Entitlement gating here is UX-honest only — server-side Tier-1/Tier-2 enforcement lives in
+    tasks 015 (module framework) + 022 (/me endpoint). Register data widgets as placeholders with correct entitlement/role metadata;
+    task 016 fills the outside-counsel widgets, and FR-23–27 land the workforce widgets/quick-starts later. Anchor visuals to the
+    approved P0 prototype (widgetRegistry.tsx, WidgetLibraryModal.tsx, quickstart/).
+  </notes>
+
+  <notes phase="completion" date="2026-08-06">
+    Implemented: src/client/external-spa/src/api/me-client.ts (Plane + MeEntitlementsResponse contract, client-side
+    mock gated on the real teamsHost signal, dev-only ?dv_persona override); src/client/external-spa/src/registry/widgetRegistry.ts
+    (WIDGET_DEFINITIONS — 11 entries — + isEntitled/isWidgetEntitled/isEntitledToWidgetId/defaultWidgetIdsFor/libraryWidgetsFor/
+    getWidgetLazyComponent); src/client/external-spa/src/registry/PlaceholderWidgetBody.tsx (shared body every definition resolves
+    to, pending task 016+); src/client/external-spa/src/components/shell/WidgetLibraryModal.tsx (NEW, FormModal + ActionCard grid);
+    src/client/external-spa/src/components/shell/QuickStartPane.tsx (REWRITTEN — role-gated ActionCardRow + FormModal "More
+    Services", reuses widgetRegistry.isEntitled to avoid duplicate gating logic); src/client/external-spa/src/pages/WorkspaceHomePage.tsx
+    (REWRITTEN — fetches /me, seeds role-defaulted tabs behind the pinned Quick Start tab via onEntitledOpenWidget, the single
+    tab-open choke point); src/client/external-spa/src/App.tsx (1-line: thread teamsHost to WorkspaceHomePage).
+    Deviations from the literal descriptor shape in the goal ({id,title,icon,defaultForRoles,requiredEntitlement,lazyLoader}):
+    added `planes` (hard plane gate independent of the entitlement string) and `ariaLabel`/`description` (library-card display) —
+    both additive, not contradicting the authored shape. `npm run build:prod` does not exist for this Vite Code Page (confirmed
+    consistent with task 011's finding); verified instead with `npx tsc --noEmit` (clean, 0 errors) per the orchestrating session's
+    explicit instruction — full `npm run build` intentionally deferred to the orchestrating session's end-of-wave build.
+    Quality gates: code-review (self-invoked, FULL rigor) found one duplication (QuickStartPane's local isActionEntitled vs
+    widgetRegistry's isWidgetEntitled) — fixed by extracting the shared `isEntitled(me, EntitlementGate)` helper; no other
+    Critical/Warning findings. adr-check (self-invoked): zero hits for hardcoded hex, Fluent v8 imports, raw fetch/Authorization
+    headers, PublicClientApplication, or accessToken:string across all task-012 files — clean on ADR-021/050/028/022.
+    Full detail: notes/task-012-deviations.md.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist. Build with npm run build:prod.</protocol>
+  </execution>
+</task>

@@ -725,3 +725,59 @@ jobs:
           echo "- [ ] Configure deployment environments" >> $GITHUB_STEP_SUMMARY
           echo "- [ ] Set up monitoring and alerting" >> $GITHUB_STEP_SUMMARY
           echo "- [ ] Complete service registrations for test coverage" >> $GITHUB_STEP_SUMMARY
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Compose fidelity gate (FR-08, spaarkeai-compose-r6 tasks 060/061 +
+  # ADR-049 R6 amendment point 3) — RELEASE-GATING.
+  #
+  # Runs the corpus round-trip fidelity harness
+  # (tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs):
+  # every `.docx` under tests/fixtures/compose-corpus/ is driven through one
+  # full render-on-save wire round trip (load → edit → save → reopen) and
+  # classified pass/warn/fail. FAIL-class results fail their xUnit Theory —
+  # that non-zero `dotnet test` exit IS the gate; no continue-on-error here
+  # by design (an advisory gate would defeat spec FR-08).
+  #
+  # Deliberately a SEPARATE self-contained job (same rationale as eval-gate):
+  # existing jobs are owned by ci-cd-unit-test-remediation-r1 and are not
+  # modified. `lfs: true` on checkout pulls the Git-LFS `.docx` corpus bytes
+  # (same mechanism as PR #690's build-test fix); a missing-LFS checkout
+  # fails LOUDLY via ComposeCorpusFixtureLocator's PK-signature guard — it
+  # can never silently skip the gate. The per-document breakdown
+  # (fidelity-gate-result.json, written next to the test assembly by the
+  # harness's result sink) is uploaded as an artifact even on red.
+  # ──────────────────────────────────────────────────────────────────────────
+  compose-fidelity-gate:
+    name: Compose Fidelity Gate (Corpus Round-Trip)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (with Git-LFS corpus fixtures)
+        uses: actions/checkout@v6
+        with:
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Fidelity gate (corpus round-trip — merge-blocking)
+        shell: pwsh
+        run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug --filter "FullyQualifiedName~FidelityGate"
+
+      - name: Upload fidelity-gate-result.json (per-document breakdown)
+        uses: actions/upload-artifact@v6
+        if: always()   # the breakdown matters MOST when the gate is red
+        with:
+          name: fidelity-gate-result
+          path: tests/unit/Sprk.Bff.Api.Tests/bin/**/fidelity-gate-result.json
+          if-no-files-found: warn  # absent only if the run crashed pre-sink; the test step is already red then

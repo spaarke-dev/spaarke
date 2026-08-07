@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Legal-side processing handoff: submitted requests route/assign to legal in existing MDA</title>
+    <phase>P4 Hardening + Front Door depth</phase>
+    <gate>blocked-until:036</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Routing/assignment configuration + verification on the existing sprk_servicerequest schema; no new review surface. Tags dataverse/bff-api — code-review + adr-check apply if BFF code is touched.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Routing on an already-defined schema (owner/team assignment + status) surfacing to the existing MDA; well-specified, no novel architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Routing depends on the P3 sprk_servicerequest schema (task 036) and may set ownership/assignment on the submit path shared with Front Door endpoints; must not race concurrent servicerequest/BFF changes.</parallel-reason>
+    <deps>036</deps>
+    <tags>dataverse, bff-api</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Ensure a submitted sprk_servicerequest is correctly created AND routed/assigned so it surfaces to
+    legal in the EXISTING internal model-driven app — R2 builds NO new legal-review surface (FR-21).
+    Verify a submitted request appears and is actionable for legal in the existing MDA.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Familiar with Dataverse ownership/assignment routing, model-driven app views, and the sprk_servicerequest intake schema.</role>
+
+  <goal>
+    A submitted sprk_servicerequest (created via the Front Door submit path from P3) is routed/assigned
+    to legal (owner/team + status) such that it is visible and actionable in the existing internal MDA —
+    with no new review UI built. Verified by a submit → appears-in-MDA → legal-can-act round-trip.
+  </goal>
+
+  <context>
+    <background>
+      FR-21: Submitted requests route/assign to legal for review in the existing internal model-driven
+      app — R2 builds no new legal-review surface (owner decision). R2's obligation is that a submitted
+      sprk_servicerequest is correctly created + routed so it surfaces to legal in the MDA. Acceptance: a
+      submitted request appears + is actionable for legal in the existing MDA (no new review UI). The
+      intake schema (requester, request type, status workflow, submitted-document linkage, polymorphic
+      regarding per ADR-024) was extended from the stub in P3 (task 036, FR-13).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ (Front Door submit endpoint that creates sprk_servicerequest)</file>
+      <file>docs/data-model/ (sprk_servicerequest schema — extended in P3 task 036)</file>
+      <file>docs/guides/ (existing MDA / legal app reference)</file>
+    </relevant-files>
+    <dependencies>Task 036 (P3 sprk_servicerequest intake schema — requester, type, status, document linkage) complete; this task routes/assigns those records to legal.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-21 — build NO new legal-review UI/surface; the handoff MUST use the existing internal MDA (ownership/assignment + status + a view/queue that already exists or is a config-only MDA view) — scope: legal handoff only.</constraint>
+    <constraint source="ADR-024">Preserve the polymorphic regarding on sprk_servicerequest when routing/assigning; do not break the regarding relationship — scope: servicerequest routing.</constraint>
+    <constraint source="ADR-034">If assignment uses a legal team/owner, express it via the established ownership/membership model; do not invent a parallel access mechanism — scope: assignment target.</constraint>
+    <constraint source="project">§10 BFF hygiene (only IF this task adds/changes BFF code on the submit/routing path): state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); run dotnet publish -c Release and report compressed size + delta vs 46.90 MB baseline (≤60 MB); no new HIGH CVE; add/update tests in tests/unit/Sprk.Bff.Api.Tests/ (+ KEEP-path integration). Run /conflict-check before the BFF PR (external-access surface shared with teams-app-r1).</constraint>
+    <constraint source="ADR-038">Any test added is KEEP-path integration; no Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests; the end-to-end appears-in-MDA behavior is verified against live/seam Dataverse, not a mock — scope: this task's tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic regarding" location=".claude/adr/ADR-024-polymorphic-resolver-pattern.md">sprk_servicerequest regarding must survive routing/assignment.</pattern>
+      <pattern name="User-record membership" location=".claude/adr/ADR-034-user-record-membership.md">The ownership/membership model to target when assigning to a legal team/owner.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the P3 sprk_servicerequest schema (task 036 output) and the Front Door submit path; confirm what a submitted request carries (requester Contact, request type, status, document linkage, regarding).</step>
+    <step order="2">Determine the existing internal MDA + the legal owner/team target; confirm there is (or add config-only) a view/queue in that MDA where legal sees submitted requests. Do NOT build a new review UI.</step>
+    <step order="3">Implement/verify routing: on submit, the request is assigned to the legal owner/team and set to the correct submitted/for-review status so it surfaces in the MDA view — preserving polymorphic regarding (ADR-024). Prefer config (assignment/business rule/ownership) over new code; add minimal BFF code only if the submit path must set owner/status.</step>
+    <step order="4">If BFF code is added, apply §10: Placement Justification in PR, publish-size delta vs 46.90 MB, no new HIGH CVE, tests in tests/unit/Sprk.Bff.Api.Tests/, /conflict-check.</step>
+    <step order="5">Verify the round-trip: submit a request as a Front Door user; confirm it appears in the existing MDA legal view and a legal user can open/act on it. Capture evidence in the task notes.</step>
+    <step order="6">Add a KEEP-path integration/seam assertion that a submitted request lands with the legal owner/team + expected status (verified against live/seam Dataverse, not a mock), if a test seam exists.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET (if BFF code touched)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ (only if submit path must set owner/status) OR Dataverse routing config</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (MDA appears/actionable verification evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Front Door user submits a request, when it is created, then the sprk_servicerequest is routed/assigned to the legal owner/team and set to the for-review status so it appears in the existing internal MDA view.</criterion>
+    <criterion testable="true">Given a submitted request in the MDA, when a legal user opens it, then it is actionable (assignable/editable per their MDA rights) — with NO new R2-built review UI.</criterion>
+    <criterion testable="true">Given routing/assignment, when applied, then the polymorphic regarding on sprk_servicerequest is preserved (ADR-024) and no parallel access mechanism is introduced (ADR-034 ownership/membership used).</criterion>
+    <criterion testable="true">Given BFF code is touched, when the PR is opened, then Placement Justification is stated, publish ≤60 MB (delta reported), no new HIGH CVE, and tests are KEEP-path with no Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    FR-21 is explicitly a "no new review surface" task — the deliverable is correct creation + routing so
+    legal sees the request in the EXISTING MDA. Favor Dataverse config (ownership/assignment/business
+    rule + an MDA view) over new BFF code; only touch the submit path if it must stamp owner/status.
+    Depends on the P3 schema (task 036).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Deploy P5 (SWA + BFF)</title>
+    <phase>P5 Collaboration Surfaces</phase>
+    <gate>blocked-until:051,052</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task (deploy tag); no new code logic — orchestrates the external-spa SWA build + BFF redeploy for the Ask Legal assistant + cross-boundary messaging. STANDARD per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy sequence using existing skills; no design judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy task — mutates shared dev infra (spaarke-bff-dev + the external-spa SWA); must run alone after all P5 code lands; coordinate the shared BFF redeploy.</parallel-reason>
+    <deps>051,052</deps>
+    <tags>deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy Phase P5: build + deploy the external-spa SWA with the Ask Legal assistant pane + the cross-boundary Messages tab,
+    and redeploy the BFF (Sprk.Bff.Api) with the workforce-plane app-only assistant endpoint (two-tool catalog + grounding trim)
+    and the external /api/v1/external/.../threads group. Prescriptive sequence — this mutates shared dev infra.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Release engineer fluent in the external-spa SWA deploy (deploy-external-spa.yml) + bff-deploy (App Service) and shared-BFF-infra coordination.</role>
+
+  <goal>
+    The P5 external-spa SWA is deployed with the Ask Legal assistant pane (workforce-only, text-only composer) + the Messages
+    tab, and the BFF is redeployed to spaarke-bff-dev with the app-only assistant endpoint + the external thread group.
+    Post-deploy smoke: a workforce user gets a grounded P&amp;P answer + can launch a wizard; an MDA user and an external contact
+    exchange messages on one thread; sprk_isinternalonly stays hidden from the contact. The deploy is recorded in notes/ with
+    the published size + smoke result.
+  </goal>
+
+  <context>
+    <background>
+      P5 completes the Collaboration Surfaces: task 050 (security spike, signed off), 051 (Ask Legal assistant — BFF app-only
+      endpoint + SprkChat pane), 052 (cross-boundary messaging — external thread group + ConversationView). This task deploys
+      the external-spa SWA + the BFF so the P5 surface is live in dev. The BFF (spaarke-bff-dev) is shared infra — coordinate the
+      redeploy (do not race concurrent BFF deploys); the external-spa deploys via the deploy-external-spa.yml SWA workflow.
+    </background>
+    <relevant-files>
+      <file>.claude/skills/bff-deploy/SKILL.md — BFF deploy to Azure App Service (spaarke-bff-dev).</file>
+      <file>.github/workflows/deploy-external-spa.yml — external-spa SWA deploy workflow.</file>
+      <file>src/client/external-spa/ — the SWA app to build + deploy.</file>
+      <file>src/server/api/Sprk.Bff.Api/ — the BFF to publish + deploy.</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/external-assistant-security-design.md — the task-050 contract the deployed assistant must honor.</file>
+    </relevant-files>
+    <dependencies>051 (Ask Legal assistant) + 052 (cross-boundary messaging) complete + merged.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Publish size ≤60 MB compressed; report the final compressed size + delta vs baseline (incl PDBs) in the deploy notes. Scope: BFF publish artifact.</constraint>
+    <constraint source="project">Run /conflict-check and confirm the shared spaarke-bff-dev redeploy is coordinated (not racing another BFF deploy) BEFORE deploying. Scope: pre-deploy gate.</constraint>
+    <constraint source="spec-NFR03">No plaintext secrets; Key Vault references by name. Scope: deploy configuration.</constraint>
+    <constraint source="project">Prescriptive sequence — deploy steps run in the exact order below (BFF publish/size gate → BFF deploy → SWA build/deploy → smoke). Deployment is irreversible-ish on shared infra. Scope: this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/office-addins-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy" location=".claude/skills/bff-deploy/SKILL.md">Publish -c Release, verify size gate, deploy to spaarke-bff-dev.</pattern>
+      <pattern name="external-spa SWA deploy" location=".github/workflows/deploy-external-spa.yml">Build the external-spa and deploy to the Static Web App.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /conflict-check and confirm the shared spaarke-bff-dev redeploy is coordinated (this P5 deploy follows/includes any pending BFF redeploy — never races it).</step>
+    <step order="2">dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; measure compressed size; assert ≤60 MB and record delta vs baseline. HARD STOP if ≥60 MB.</step>
+    <step order="3">Deploy the BFF to spaarke-bff-dev via bff-deploy (Key Vault references intact; no plaintext secrets).</step>
+    <step order="4">Build + deploy the external-spa SWA (assistant pane + Messages tab) via the deploy-external-spa.yml workflow.</step>
+    <step order="5">Post-deploy smoke: a workforce user gets a grounded P&amp;P answer via policy_search + launches a wizard via launch_wizard (no upload affordance present); an MDA user and an external contact exchange messages on one thread; sprk_isinternalonly is hidden from the contact; a non-participant contact sees nothing.</step>
+    <step order="6">Record the deploy (published size, delta, smoke results, timestamp) in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the published BFF is ≥55 MB (architecture-review threshold) or ≥60 MB (HARD STOP), or if the shared spaarke-bff-dev redeploy is NOT coordinated, STOP and escalate to the operator (§6 / §10) before deploying to shared infra.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish .NET</tool>
+    <tool name="npm">Build the external-spa SWA</tool>
+    <tool name="terminal">Shell / az / SWA CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (P5 deploy record: size, delta, smoke results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the P5 BFF is deployed to spaarke-bff-dev, when a workforce user asks a policy question, then policy_search returns a grounded P&amp;P answer and launch_wizard opens a defined wizard; no upload affordance is present (negative).</criterion>
+    <criterion testable="true">Given the deployed external-spa SWA, when an MDA user and an external contact post to one thread, then both messages appear; sprk_isinternalonly is hidden from the contact and a non-participant contact sees nothing (negative).</criterion>
+    <criterion testable="true">Given the publish artifact, when measured, then compressed size is ≤60 MB and the delta vs baseline is recorded (HARD STOP if ≥60 MB).</criterion>
+    <criterion testable="true">Given the deploy configuration, when inspected, then no plaintext secrets are present and Key Vault references resolve by name (NFR-03).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Shared-infra deploy: spaarke-bff-dev is shared — coordination (not racing) is the load-bearing precondition. Prescriptive
+    order is mandatory (BFF size gate → BFF deploy → SWA deploy → smoke). This is a deploy task: no new code logic — if a smoke
+    test fails, the fix belongs in the originating P5 code task (051/052), not here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow the task-execute pre-execution checklist; invoke bff-deploy + the external-spa SWA workflow for the actual deploy steps.</protocol>
+  </execution>
+</task>

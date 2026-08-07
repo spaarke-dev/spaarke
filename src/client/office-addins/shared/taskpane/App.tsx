@@ -338,7 +338,9 @@ export const App: React.FC<AppProps> = ({
           <SaveView
             hostAdapter={hostAdapter}
             getAccessToken={async () => {
-              const token = await authService.getAccessToken(['user_impersonation']);
+              // Task 040 / FR-B0: `AuthService.getAccessToken()` ignores any
+              // scope argument (see AuthService.ts) — removed as dead code.
+              const token = await authService.getAccessToken();
               return token || '';
             }}
             apiBaseUrl={process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net'}

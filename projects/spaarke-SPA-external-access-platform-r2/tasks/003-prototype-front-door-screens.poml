@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Prototype Legal Front Door screens (typed intake WizardModal, my-requests, NDA status, upload)</title>
+    <phase>P0 UX Design + Prototype</phase>
+    <gate>blocked-until:002</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Extends the task-001 experiment with new prototype screens (NOT production code); frontend/fluent-ui surface, no ADR-graded blast radius. FULL gates skipped per §8 STANDARD row.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded, fully-specified frontend screens built from named SprkModal presets and a named template; no architectural or ADR-migration judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Extends the single task-001 experiment folder (shared surface); concurrent edits to the same experiment would collide. Serialize after 002.</parallel-reason>
+    <deps>002</deps>
+    <tags>frontend, prototype, fluent-ui</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Build the Legal Front Door prototype screens inside the task-001 experiment: a multi-step typed-intake WizardModal, single-step intake via FormModal, a my-requests list with status chips filtered to requester==caller, an NDA read-only status timeline, and document upload with explicit progress/error. All dialogs use SprkModal presets from @spaarke/ui-components; consume the task-002 seed; NO hand-rolled dialogs.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 UX-prototype expertise; SprkModal preset + modal-decision-criteria fluency.</role>
+  <goal>The task-001 experiment renders the ux-brief §3 Front Door surfaces: (1) typed intake — WizardModal multi-step (pick type → typed form → review → submit → confirmation) with single-step types via FormModal; (2) my-requests — list + status chips filtered to requester==caller from the task-002 seed; (3) NDA workflow — read-only status timeline up to "approved + ready for signature"; (4) document upload — inline drop/pick with explicit progress + error states (PreviewModal for submitted docs). Every surface demonstrates the ux-brief §4 nine-state checklist.</goal>
+  <context>
+    <background>Spec FR-14 (generic typed-intake framework), FR-15 (NDA up to "ready for signature", e-sign deferred), FR-16 (Policy &amp; Procedures), FR-17 (self-service submitter sees only their own requests — Tier-2 requester==caller; app-only upload). ux-brief §3 maps each surface to shared components: WizardModal/FormModal for intake, list + status Badge + PreviewModal for my-requests, Fluent timeline/steps + ConfirmModal for NDA, R1 DocumentUploadPage pattern + BrowseModal for upload.</background>
+    <relevant-files>
+      <file>c:/code_files/spaarke-prototype/projects/_templates/multi-step-dialog-variant-template.tsx (canonical multi-step dialog template to base the WizardModal intake on)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/seed/presets/{external-access-r2-personas}.ts (task-002 preset providing personas + service requests)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/index.ts (SprkModal preset exports: FormModal, WizardModal, ConfirmModal, PreviewModal, BrowseModal, ChoiceModal — line ~273)</file>
+      <file>src/client/external-spa/src/pages/DocumentUploadPage.tsx (R1 upload pattern to reproduce in the prototype — reference only)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md (§3 Legal Front Door / My requests / NDA / Document upload rows; §4 required states)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-14/15/16/17)</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md (which preset for which surface)</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md (SprkModal shell + preset wiring recipe)</file>
+    </relevant-files>
+    <dependencies>Task 001 provides the experiment shell + launcher; task 002 provides the sprk_servicerequest + persona seed this task binds to.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Build in the spaarke-prototype task-001 experiment folder ONLY; do NOT modify production src/. R1 DocumentUploadPage is a look reference, not an import.</constraint>
+    <constraint source="ADR-050">Every dialog in these screens is a SprkModal preset (WizardModal / FormModal / PreviewModal / ConfirmModal / BrowseModal) — NO raw Fluent Dialog and NO hand-rolled modal shell.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens via makeStyles/tokens; zero hardcoded hex/RGB/shadow/typography across all four surfaces.</constraint>
+    <constraint source="ADR-022">Fluent v9 + React 18.</constraint>
+    <constraint source="project">Shared-library mandate (§11): compose @spaarke/ui-components presets + Fluent primitives (DataGrid/list, Badge, timeline/steps); base the multi-step intake on multi-step-dialog-variant-template.tsx. No bespoke dialog.</constraint>
+    <constraint source="project">my-requests MUST filter to requester==caller in the mock data path (Tier-2 requester-owned, FR-17) — demonstrate that persona A cannot see persona B's requests in the prototype.</constraint>
+    <constraint source="project">NDA status timeline is READ-ONLY and stops at "approved + ready for signature" — do NOT prototype an e-signature step (FR-15 deferral).</constraint>
+    <constraint source="project">Demonstrate all nine ux-brief §4 states per surface: loading, empty, error, unentitled/denied, dark, Teams theme, keyboard-only, narrow width.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/patterns/ui/modal-shell.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Multi-step dialog" location="c:/code_files/spaarke-prototype/projects/_templates/multi-step-dialog-variant-template.tsx">Base the WizardModal typed-intake flow on this template (step→step→review→submit→confirm).</pattern>
+      <pattern name="SprkModal presets" location="src/client/shared/Spaarke.UI.Components/src/components/index.ts">Import WizardModal/FormModal/PreviewModal/ConfirmModal/BrowseModal (~line 273); wire per MODAL-DESIGN-SYSTEM.md.</pattern>
+      <pattern name="Modal decision" location="docs/standards/MODAL-DECISION-CRITERIA.md">Confirm the preset choice per surface before wiring.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load knowledge files (FR-14/15/16/17, ux-brief §3/§4, ADR-050, MODAL-DECISION-CRITERIA/DESIGN-SYSTEM) and read the multi-step-dialog template + SprkModal preset exports.</step>
+    <step order="2">Build the typed-intake WizardModal: pick request type (NDA / Policy &amp; Procedures) → typed form → review → submit → confirmation; wire single-step request types via FormModal. Persist to the mock seed on submit.</step>
+    <step order="3">Build my-requests: a Fluent list/DataGrid + status Badge chips, bound to task-002 service requests, filtered to requester==caller for the active persona; row click opens submitted-doc via PreviewModal.</step>
+    <step order="4">Build the NDA read-only status timeline (Fluent timeline/steps) up to "approved + ready for signature"; ConfirmModal on submit. No e-sign step.</step>
+    <step order="5">Build document upload: inline drop/pick with explicit progress + error states (reproduce R1 DocumentUploadPage pattern in the prototype); BrowseModal where picking an existing document.</step>
+    <step order="6">Wire mock toggles demonstrating all nine ux-brief §4 states for each of the four surfaces (loading/empty/error/unentitled/dark/Teams/keyboard/narrow).</step>
+    <step order="7">Update the experiment README with the Front Door surfaces + state toggles.</step>
+    <step order="8">Run the ui-tests below (renders, dark+Teams, keyboard, narrow width) and capture results.</step>
+    <step order="9">Update projects/spaarke-SPA-external-access-platform-r2/tasks/TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations (e.g., a surface needing a preset not yet in the library) in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If a Front Door surface cannot be built from an existing SprkModal preset / shared primitive and would require net-new bespoke UI, STOP and surface the §11 three-question gate to the owner before hand-rolling.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build/run the prototype experiment (npm install --legacy-peer-deps --no-audit --no-fund; dev server / HMR)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">c:/code_files/spaarke-prototype/projects/{experiment-folder}/ (Front Door screens: typed intake, my-requests, NDA status, upload)</output>
+    <output type="docs">c:/code_files/spaarke-prototype/projects/{experiment-folder}/README.md (updated with Front Door surfaces)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the typed-intake flow, when a persona picks NDA and completes the WizardModal steps, then a review step shows entered values and submit produces a confirmation + a new seeded service request.</criterion>
+    <criterion testable="true">Given a single-step request type, when opened, then it renders via FormModal (not WizardModal).</criterion>
+    <criterion testable="true">Given persona A active in my-requests, when the list renders, then only A's requests appear; switching to persona B shows only B's — persona A's requests are absent (requester==caller, FR-17).</criterion>
+    <criterion testable="true">Given the NDA status timeline, when rendered, then it shows read-only states up to "approved + ready for signature" and NO e-signature step (FR-15).</criterion>
+    <criterion testable="true">Given the upload surface, when a file is dropped, then explicit progress is shown and an induced failure surfaces an error state (not a silent failure).</criterion>
+    <criterion testable="true">Given all four surfaces, when dark mode and the Teams theme are toggled, then they adapt via semantic tokens with zero hardcoded hex (grep confirms).</criterion>
+    <criterion testable="true">Given keyboard-only navigation and a narrow Teams-personal-tab width, when each surface renders, then all controls are reachable with visible focus and layout reflows without horizontal overflow.</criterion>
+    <criterion testable="true">Negative: no dialog uses a raw Fluent Dialog or hand-rolled modal — every dialog is a SprkModal preset (grep for Dialog usage confirms only SprkModal presets).</criterion>
+    <criterion testable="true">Negative: no file under this worktree's production src/ is modified.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Renders">
+      <steps>
+        <step>Start the experiment dev server</step>
+        <step>Open typed intake, my-requests, NDA status, and upload surfaces</step>
+      </steps>
+      <expected>All four render; no console errors</expected>
+    </test>
+    <test name="Dark Mode + Teams theme (ADR-021)">
+      <steps>
+        <step>Toggle dark mode via ThemeToggle</step>
+        <step>Switch to the Teams theme</step>
+        <step>Verify semantic tokens adapt across all four surfaces incl. modals</step>
+      </steps>
+      <expected>Zero hardcoded hex; dark and Teams themes adapt correctly</expected>
+    </test>
+    <test name="Keyboard-only">
+      <steps>
+        <step>Tab through the WizardModal steps, my-requests list, and upload controls</step>
+      </steps>
+      <expected>All interactive elements reachable; visible focus; modal focus-trap works</expected>
+    </test>
+    <test name="Narrow width (Teams personal-tab)">
+      <steps>
+        <step>Resize to Teams personal-tab width</step>
+        <step>Render each surface + open each modal</step>
+      </steps>
+      <expected>No horizontal overflow; modals size correctly per MODAL-DESIGN-SYSTEM caps</expected>
+    </test>
+  </ui-tests>
+  <notes>ux-brief §3 rows: Legal Front Door typed intake, My requests, NDA workflow status, Document upload. §4 nine-state checklist is the done-bar per surface. FR-15: stop at "ready for signature". FR-17: requester==caller isolation is the headline Tier-2 demonstration. Base intake on multi-step-dialog-variant-template.tsx; all dialogs via SprkModal presets (ADR-050).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; use fluent-v9-component conventions and the SprkModal preset wiring recipe.</protocol>
+  </execution>
+</task>
