@@ -131,6 +131,40 @@ public class DocumentParserRouter
         }
     }
 
+    /// <summary>
+    /// Task 040 (spaarkeai-compose-r6, FR-06): parses a document into the STRUCTURED layout contract
+    /// (<see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentLayout"/>) — the structured twin of
+    /// <see cref="ParseDocumentAsync"/>, keeping this router the single parse entry point for both
+    /// contracts. Routing today: ALWAYS Azure Document Intelligence
+    /// (<see cref="DocumentIntelligenceService.ParseDocumentLayoutAsync"/>) — LlamaParse emits
+    /// markdown-shaped text and does not satisfy the structured-layout contract (paragraph roles +
+    /// table grid), and Azure DI natively OCRs scanned/image PDFs on the layout model, so the
+    /// scanned-document preference that applies to the flat-text path does not apply here. If
+    /// LlamaParse (or another parser) grows a structured-layout mode, its routing slots in HERE —
+    /// callers keep this single entry.
+    /// </summary>
+    /// <param name="content">Raw document bytes (must not be null or empty).</param>
+    /// <param name="fileName">File name including extension.</param>
+    /// <param name="mimeType">MIME type (reserved for future routing decisions; unused today).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The structured layout. Throws <see cref="InvalidOperationException"/> on failure
+    /// (same contract as <see cref="DocumentIntelligenceService.ParseDocumentLayoutAsync"/>).</returns>
+    public async Task<Sprk.Bff.Api.Services.Ai.PublicContracts.DocumentLayout> ParseDocumentLayoutAsync(
+        byte[] content,
+        string fileName,
+        string mimeType,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+
+        _logger.LogDebug(
+            "DocumentParserRouter: routing {FileName} to DocumentIntelligenceService for structured layout (mimeType={MimeType})",
+            fileName, mimeType);
+
+        return await _docIntelService.ParseDocumentLayoutAsync(content, fileName, cancellationToken);
+    }
+
     // -------------------------------------------------------------------------
     // Private helpers
     // -------------------------------------------------------------------------

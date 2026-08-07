@@ -1,16 +1,16 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-06 (post-014 close-out — PHASE 1 DEPLOYED + UAT PASSED; Phases 3/4/5/6 all unblocked)
+> **Last Updated**: 2026-08-07 (by context-handoff — clean boundary post-Phase-3; next 040)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. **014 COMPLETE**: render-on-save cutover LIVE on dev (BFF `spaarke-bff-dev` + `sprk_spaarkeai`, deployed SHA `d01007a38`, hash-verified, atomic window held). UAT on the operator's real Corteva signed NDA PASSED — no 422, redlines land, versions accumulate, prior-version-intact confirmed in Word (002's live gate closed). |
-| **Next task** | Operator choice — all now unblocked: **030** (part-merge engine, opus/FULL), **040** (PDF intake, opus/FULL), **050** (OBO version-history endpoint, opus/FULL), **060** (CI fidelity harness, sonnet/FULL). ALSO on the table: UAT defect fix tasks D1-D7 (see notes/phase1-deploy-uat.md defect register) — operator may want D1 (duplicate sprk_document records) + D2 (quote→`2` mangling) prioritized before new phases. |
-| **Status** | 014 closed; deploy + UAT record at notes/phase1-deploy-uat.md |
-| **Next Action** | On "continue": ask/confirm which of 030/040/050/060 (or a D-fix task) to start, then task-execute it. Task creation for D1-D7 fixes = scope addition → operator approval first. |
+| **Task** | **040 ✅ + 041 ✅ COMPLETE** — PDF intake end-to-end. Commits: `5ae5a4246` (040 impl) + `2d72046aa` (wire fix) + `f0f9a34ec` (040 triage: all HIGH/MED) + `c73055d33` (041 client) + `48d17ac31` (041 triage: A-HIGH-1 replace-target guard, apply-template both legs, Word-actions gate, grid clamp). Both Step 9.5 reviews PASS-WITH-FINDINGS, every HIGH/MEDIUM fixed same-session except B-MED-3 (container placement — recorded DECISION POINT). Full record: `notes/040-pdf-intake.md`. Server 390/390 + 18/18; client tsc clean + 48/48. |
+| **Step** | Phase 4 remainder: task **042** next. **B-MED-3 RESOLVED** (operator 2026-08-07, option C): PDF-sourced create-on-save inherits the source PDF record's ADR-024 link lookups (`81ac8d695` — server inheritance + client sourceDocumentRecordId + 2 contract tests; contract suite 6/6). |
+| **Status** | ALL work committed + pushed through `81ac8d695`; no agents in flight |
+| **Next Action** | On "continue": task-execute **042** (PDF intake tests + lossiness UX) — BINDING scope = "042 test plan" in `notes/040-pdf-intake.md` (reducer lifecycle, flow negatives, banner, endpoint 503-vs-422 mapping, B-LOW-3 invariant, A-LOW-2 display fix) + an inheritance flow assertion (client sends sourceDocumentRecordId only when pdfSourced ∧ Path-A). Then 052 → 090 wrap-up. Publish baseline 47.00 MB. |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are

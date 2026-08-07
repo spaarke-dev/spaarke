@@ -4,7 +4,7 @@
     <title>Part-merge engine in Services/Compose (body → firm/matter `.dotx`: styles/numbering/theme/headers/footers/`sectPr`)</title>
     <phase>3 Template part-merge</phase>
     <gate>blocked until 020</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New OOXML part-merge component in `.cs` on the `bff-api` hot path (`Services/Compose/`), NEW-surface, architectural blast radius (house-style chrome applied to every document). FULL per root CLAUDE.md §8 (modifying `.cs`, tags include `compose`/BFF, NEW-surface). Step 9.5 code-review + adr-check run.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -131,6 +131,19 @@
     <criterion testable="true">TASK-INDEX.md shows task 030 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
   </acceptance-criteria>
 
+  <completion-note>COMPLETED 2026-08-07. Commits 976cb1057 (engine + DI + 7 tests) + c9c1b24f2
+    (review round: ALL 030 code-review findings fixed — F1 adopted-sectPr rel reconcile, F2 per-hosting-part
+    rel carry for story/numbering content, F3 early story clones in collect/remap, F4 collision-proof id
+    minting, F5 schema-order numbering insertion, F6 lvlPicBulletId carry, F7 unresolvable numbering
+    stripped LOUDLY, F8 fixed-point style/numbering closure, F9 dangling story refs stripped, F10 hyperlink
+    unwrap keeps text, F12 VBA stripped loudly, commentsExtended threading loss warned; +8 carrier-class
+    tests). Design: TEMPLATE-AS-BASE direct part-merge (ChangeDocumentType; template chrome structurally
+    free; NOT altChunk). ComposeTemplatePartMergeEngine.Merge(bodyDocx, templateDotx, warnings) -> byte[];
+    unconditional singleton (ComposeModule). Step 9.5: adr-check PASS all 7 axes zero violations;
+    code-review findings all fixed same-task. Suite 1039/1039; publish 46.98 MB (+0.04 vs 46.94 baseline,
+    ceiling 60); CVE clean; conflict-check clean (no open PR touches Services/Compose). Known deferred:
+    modern comment threading (commentsExtended) not carried (warned); mixed-attribute orphan-rel package
+    bloat on the rare dual-dangling-ref element (cosmetic).</completion-note>
   <notes>
     Spec FR-05 (LOCKED, owner 2026-08-05); §11 part-merge component row; Placement &amp; New Components. This is the
     house-style chrome engine — the flagship Phase 3 output. Reuse `ComposeDocumentRenderer` (body) + the `template`

@@ -86,6 +86,29 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// List ALL versions of a drive-item using the caller's OBO identity (user-context,
+    /// per-item delegated permission — NEVER app-only). Graph route
+    /// <c>drives/{driveId}/items/{itemId}/versions</c>, mapped to the
+    /// <see cref="VersionInfoDto"/> projection (id/label + lastModified timestamp + size),
+    /// newest first. Returns <c>null</c> when the item is not found (facade-translated —
+    /// no <c>Microsoft.Graph</c> type or exception crosses this boundary, ADR-007).
+    /// Throws <see cref="UnauthorizedAccessException"/> when the calling user is not
+    /// authorized to read the item (Graph 403 under the user's own token).
+    /// </summary>
+    /// <remarks>
+    /// spaarkeai-compose-r6 task 050 (spec FR-07 / Success Criterion 4): the user-context
+    /// version-history list backing <c>GET /api/obo/drives/{driveId}/items/{itemId}/versions</c>.
+    /// Same Graph call shape as <see cref="GetCurrentVersionIdAsUserAsync"/>, but returns the
+    /// FULL mapped list instead of just the newest id (per task 002's inventory,
+    /// <c>notes/spe-versioning-verify.md</c> §3). Read-only — no restore/branch surface.
+    /// </remarks>
+    Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under the user's OBO
     /// identity. PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c>, minting a
     /// fresh drive-item, and returns its <see cref="FileHandleDto"/> (id + name + size + etag +

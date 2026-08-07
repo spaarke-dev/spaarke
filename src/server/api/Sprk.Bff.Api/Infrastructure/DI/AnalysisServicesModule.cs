@@ -202,6 +202,16 @@ public static class AnalysisServicesModule
             services.AddAiModule(configuration);
             Console.WriteLine("\u2713 AI Platform Foundation module enabled (DocumentParserRouter, SemanticDocumentChunker, RagQueryBuilder)");
 
+            // Task 040 (spaarkeai-compose-r6, FR-06) \u2014 the Compose PDF-intake PublicContracts facade:
+            // thin composition over DocumentParserRouter (registered by AddAiModule above) exposing
+            // Azure DI prebuilt-layout as the neutral DocumentLayout contract (ADR-013 \u2014 Compose
+            // consumes the facade, never Ai internals). Registered INSIDE the compound gate; \u00a7F.1
+            // symmetry for the unconditional Compose load endpoint is completed by
+            // NullComposePdfIntakeSource in AddNullObjectsForCompoundOff.
+            services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource,
+                Sprk.Bff.Api.Services.Ai.ComposePdfIntakeSource>();
+            Console.WriteLine("\u2713 Compose PDF intake facade enabled (prebuilt-layout via DocumentParserRouter \u2014 task 040, FR-06)");
+
             AddInsightsCache(services);
             Console.WriteLine("\u2713 Insights playbook execution cache enabled (D-P13, ADR-009)");
 
@@ -448,6 +458,19 @@ public static class AnalysisServicesModule
     {
         // L1 — IBriefingAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
         services.AddScoped<IBriefingAi, NullBriefingAi>();
+
+        // 032 Step-9.5 F1 — IComposeTemplateSource compound-OFF peer (§F.1): the apply-template endpoint
+        // maps unconditionally; real impl registers in AddDeliveryServices (compound-ON only). Null peer
+        // resolves templates to not-found (clean 404), never a DI 500.
+        services.AddSingleton<IComposeTemplateSource, Sprk.Bff.Api.Services.Ai.PublicContracts.NullComposeTemplateSource>();
+
+        // Task 040 (spaarkeai-compose-r6, FR-06) — IComposePdfIntakeSource compound-OFF peer (§F.1):
+        // the Compose load endpoint maps unconditionally; real impl registers in the compound-ON
+        // branch (beside AddAiModule — it wraps DocumentParserRouter). Null peer resolves every parse
+        // to null → the load path fails a PDF open with a clear "PDF intake unavailable" message,
+        // never a DI 500. Docx loads are untouched (the facade is only consulted for PDF sources).
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource,
+            Sprk.Bff.Api.Services.Ai.PublicContracts.NullComposePdfIntakeSource>();
 
         // ── L1 (cont.) — 2026-06-04 audit Migration PR #1 ────────────────────────────────
         // The four PublicContracts facade Null peers. Closes the LATENT BUG #1 gap
@@ -1315,6 +1338,8 @@ public static class AnalysisServicesModule
     {
         services.AddSingleton<ITemplateEngine, TemplateEngine>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IWordTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.WordTemplateService>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource,
+            Sprk.Bff.Api.Services.Ai.Delivery.ComposeTemplateSource>(); // FR-05 (spaarkeai-compose-r6 task 031) — resolved firm/matter .dotx for the Compose part-merge path: REUSES the native template-entity fetch (EmailTemplateService pattern) + IWordTemplateService {{variable}} render; PublicContracts facade per ADR-013 (Compose consumes the facade, never Ai internals). Stateless. NOTE: this registration is INSIDE the AI compound gate (AddDeliveryServices) — §F.1 symmetry for the unconditional apply-template endpoint is completed by NullComposeTemplateSource in AddNullObjectsForCompoundOff (032 Step-9.5 F1)
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.EmailTemplateService>();
     }
 

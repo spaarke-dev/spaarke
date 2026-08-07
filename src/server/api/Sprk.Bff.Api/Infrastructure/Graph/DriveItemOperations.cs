@@ -959,6 +959,79 @@ public class DriveItemOperations
     }
 
     /// <summary>
+    /// List ALL versions of a drive-item under the caller's OBO identity (user-context —
+    /// the calling user's own delegated permission on the item, never app-only). Targets the
+    /// Graph <c>drives/{driveId}/items/{itemId}/versions</c> route (the same call shape as
+    /// <see cref="GetCurrentVersionIdAsUserAsync"/>) and maps each version to the
+    /// <see cref="VersionInfoDto"/> projection, newest first. Returns <c>null</c> when the
+    /// item is not found (ADR-007 — 404 → null, no Graph type leaks); throws
+    /// <see cref="UnauthorizedAccessException"/> on Graph 403 (caller not authorized).
+    /// spaarkeai-compose-r6 task 050 (FR-07 version-history list).
+    /// </summary>
+    public async Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+    {
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "ListFileVersionsAsUser");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+
+        _logger.LogInformation(
+            "Listing versions of file {ItemId} in drive {DriveId} (OBO)", itemId, driveId);
+
+        try
+        {
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+            var versions = await graphClient.Drives[driveId].Items[itemId]
+                .Versions.GetAsync(cancellationToken: ct);
+
+            if (versions?.Value == null)
+            {
+                _logger.LogWarning(
+                    "No versions returned for file {ItemId} in drive {DriveId}", itemId, driveId);
+                return Array.Empty<VersionInfoDto>();
+            }
+
+            // Newest first — the natural order for a version-history UX (mirrors the
+            // "current version = most-recently-modified" convention GetCurrentVersionIdAsUserAsync uses).
+            var mapped = versions.Value
+                .Where(v => v.Id != null)
+                .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
+                .Select(v => new VersionInfoDto(
+                    Id: v.Id!,
+                    ETag: null,
+                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
+                    Size: v.Size ?? 0))
+                .ToList();
+
+            _logger.LogInformation(
+                "Listed {Count} versions of file {ItemId} (OBO)", mapped.Count, itemId);
+            return mapped;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(
+                "File {ItemId} not found in drive {DriveId} when listing versions", itemId, driveId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        {
+            _logger.LogWarning(
+                "Access denied listing versions of file {ItemId}: {Error}", itemId, ex.Message);
+            throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "Graph API error listing file versions: {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to list file versions: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
     /// Get preview URL for a file using app-only authentication.
     /// Returns ephemeral URL that expires in ~10 minutes.
     /// Used for server-side file viewing with correlation ID tracking.

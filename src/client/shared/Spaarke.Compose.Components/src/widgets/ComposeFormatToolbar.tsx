@@ -143,6 +143,7 @@ import {
   ArrowDownload24Regular,
   Mail24Regular,
   DocumentWordRegular,
+  PaintBrush24Regular,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -277,6 +278,15 @@ export interface ComposeFormatToolbarProps {
   /** UAT #9 (task 054): true while a manual profile re-run is in flight — shows a spinner on the
    *  Refresh-Profile button so the (otherwise silent 202) click gives visible feedback. */
   isRefreshingProfile?: boolean;
+  /** FR-05 (spaarkeai-compose-r6 task 032): "Apply firm template" handler — opens the host's
+   *  template-select dialog. Renders the button when set (the host wires it only for a PERSISTED
+   *  doc — the server merges the SAVED bytes). Undefined → the button hides (mirrors the
+   *  onRefreshProfile gating pattern). */
+  onApplyTemplate?: () => void;
+  /** FR-05 (task 032): when set, the Apply-firm-template button is DISABLED and this text becomes
+   *  its tooltip (e.g. "Save your changes first…" while the editor is dirty/transient — the merge
+   *  applies to the persisted bytes, never unsaved editor state). */
+  applyTemplateDisabledReason?: string;
 
   // ---- Review (ai-advanced-capabilities-nda-r1 UAT round-2 items #1/#2) — icon-only dropdown,
   //      right-aligned, rendered ONLY when an NDA advisory review is present. Two independent
@@ -424,6 +434,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onReloadFromSource,
     onOpenDocument,
     isRefreshingProfile,
+    onApplyTemplate,
+    applyTemplateDisabledReason,
     trackChangesEnabled,
     onToggleTrackChanges,
     hasReview,
@@ -796,6 +808,24 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             disabled={controlDisabled}
             onClick={onReloadFromSource}
             data-testid="compose-format-reload-from-source"
+          />
+        </Tooltip>
+      ) : null}
+
+      {/* FR-05 (spaarkeai-compose-r6 task 032) — "Apply firm template": opens the host's
+          template-select dialog (ComposeApplyTemplateDialog). Gated like its neighbors (hidden when
+          the host wires no handler — an unpersisted doc has nothing saved to merge onto); DISABLED
+          with an explanatory tooltip while dirty/transient/saving (`applyTemplateDisabledReason` —
+          the server merges the PERSISTED bytes). Semantic tokens only (ADR-021). */}
+      {onApplyTemplate ? (
+        <Tooltip content={applyTemplateDisabledReason ?? 'Apply firm template'} relationship="description" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<PaintBrush24Regular />}
+            aria-label="Apply firm template"
+            disabled={controlDisabled || Boolean(applyTemplateDisabledReason)}
+            onClick={onApplyTemplate}
+            data-testid="compose-format-apply-template"
           />
         </Tooltip>
       ) : null}

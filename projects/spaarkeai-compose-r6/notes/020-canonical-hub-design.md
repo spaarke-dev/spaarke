@@ -896,3 +896,87 @@ corpus fixture (025-F6).
 ---
 
 *Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010/012/013/027 records. Checkpoint in `current-task.md`.*
+
+## §21 — Task 030: ComposeTemplatePartMergeEngine (2026-08-07)
+
+**Design**: TEMPLATE-AS-BASE. The merged package IS the .dotx re-typed to Document — template chrome
+(styles/numbering/theme/headers/footers/sectPr + their rIds) is structurally free; only grafted content
+reconciles. NOT altChunk (FR-05). Commits: 976cb1057 (initial) + c9c1b24f2 (review round).
+
+**The merge pipeline** (Merge(bodyDocx, templateDotx, warnings) -> byte[]):
+1. VBA stripped loudly if template was macro-enabled (`template-merge-macros-stripped`).
+2. Template body reset; trailing sectPr kept (or adopted from source + WARNED + joins rel reconcile — F1).
+3. Story clones (comments/footnotes/endnotes the body anchors) prepared EARLY so they participate in
+   style/numbering collection + remap (F3); dangling story refs stripped loudly (F9).
+4. FIXED-POINT dependency closure over source catalogs: styles pull basedOn/link/next + style-attached
+   numIds; numbering pulls numStyleLink/styleLink + per-level pStyle (F8).
+5. Style graft: template WINS collisions (that is house style); missing defs grafted.
+6. Numbering graft: num+abstractNum(+numPicBullet, F6) cloned VERBATIM under offset ids at schema-correct
+   slots (numPicBullet* -> abstractNum* -> num* -> numIdMacAtCleanup — F5); identity preserved, never
+   recomputed. Unresolvable numbering refs STRIPPED (renders visibly unnumbered) + warned — never left to
+   silently capture the template's same-id scheme (F7).
+7. Story attach with collision-proof id minting (taken-set checked per mint — F4); body refs remapped.
+8. Rel reconciliation PER HOSTING PART (F2): main-part roots vs source main; carried story/numbering
+   content vs its own source->target part pair. Hyperlink/external re-added by URI; parts deep-copied via
+   cross-package AddPart. Unresolvable: hyperlinks UNWRAP (text survives — F10), others drop smallest
+   run-child host; one aggregated `template-merge-unresolved-reference` warning.
+
+**Warning codes**: template-merge-{missing-sectpr, template-has-no-styles, macros-stripped,
+numbering-unresolved, story-reference-dropped, comment-threading-dropped, unresolved-reference}.
+
+**Step 9.5**: adr-check PASS (7 axes, zero violations). Code-review surfaced 2 Critical + 6 Major + 3
+Minor — ALL fixed same-task in c9c1b24f2; test gaps closed with 8 carrier-class tests (footnote-with-
+hyperlink part-local rels, adopted-sectPr header refs, comment carry, footnote id collision, dangling
+story ref, numPicBullet/numIdMacAtCleanup schema order, dangling drawing/hyperlink loud drops, happy-path
+zero-warnings). 15/15 engine; 1039/1039 Compose+arch; publish 46.98 MB; CVE clean.
+
+**Known deferred**: commentsExtended threading/resolution not carried (warned loudly); orphan-rel package
+bloat when ONE element carries both a resolvable and an unresolvable r-ref (cosmetic). For 032/033: the
+endpoint (032) feeds rendered bodies; 033's seam suite should include an IMPORTED carrier slice through
+the wire (the review's core lesson: the carrier class is where the bodies are buried).
+
+## §22 — Parallel wave 031+050+060 (2026-08-07, operator-directed parallel task-execute)
+
+First parallel wave of the project: 031 (main session, Compose-serialized surface) + 050/060 (background
+agents in ISOLATED git worktrees — avoids concurrent-dotnet collisions; commits cherry-picked back:
+050=a9739a77a, 060=42b9e6592). Merged suite 1094/1094. Wave publish/CVE measured at close. Records in the
+three POML completion-notes + notes/050-obo-version-endpoint.md. The known master-side flaky class
+(ComposeServiceCreateOnSaveTests fire-and-forget timing — 3rd/4th occurrences under parallel load, always
+green isolated + on rerun) should get a FakeTimeProvider fix from its owning project.
+Fidelity gate corpus baseline: 5 pass / 5 warn / 0 fail; NDA warn-not-fail (no 422).
+Next: 032 (endpoint+client wiring consuming 030 engine + 031 facade), 033 (provenance seam incl.
+imported-carrier slice per §21), 051/052 (version-history client), 061 (CI gate wiring on
+fidelity-gate-result.json; coordinate LFS with PR #690's approach).
+
+## §23 — Waves 2+3 close: 032/051/061 + 033 → PHASE 3 COMPLETE (2026-08-07)
+
+Wave-2 (032 apply-template + 051 version-history client + 061 CI gate) closed at db1cc3406 after Step 9.5
+triage: §F.1 FAIL fixed (NullComposeTemplateSource in AddNullObjectsForCompoundOff — endpoint unconditional,
+real impl compound-gated), merge warnings now ride requestLoad.carryDegradationWarnings (were wiped by
+INITIAL_STATE before paint), apply-time isDirty re-check (hoisted decl), app-only template read enforces
+org-shared (ispersonal filter + id-path refusal). 033 (77e4d9dfc) completes Phase 3: chrome-provenance
+seam + imported-carrier wire slices on real corpus bytes (coverage table in agent report; suite 1069/1069).
+
+**Phase-3 Placement + §11 record (033 deliverable)**: ComposeTemplatePartMergeEngine in Services/Compose —
+pure OOXML byte[]-in/out, no Graph/AI internals (ADR-007/013), consumed via ComposeService.ApplyTemplateAsync
+behind /api/compose; template resolution isolated at the IComposeTemplateSource PublicContracts facade
+(031); unconditional DI + Null peer (§F.1 symmetric post-fix); no new packages; publish 47.00 MB.
+§11: only overlap = WordTemplateService (text substitution — different algorithm class, extension rejected);
+cost-of-nothing = Success Criterion 3 fails outright; altChunk banned by FR-05.
+
+**Follow-ups ledger (accumulated)**: If-Match on apply replace (TOCTOU vs sibling tab); ApiError-typed 404
+branch in handleApplyTemplate (dead response.ok idiom); 051 window.open popup-blocker fallback + 60s blob
+revoke + index-0 Current badge; nda-interrupted-clauses.docx paraId regeneration (spec-invalid >= 0x80000000);
+corpus-manifest §3 consumer rows; #690 FidelityGate double-run dedup; flaky ComposeServiceCreateOnSaveTests
+FakeTimeProvider fix (owning project); D1-D7 UAT fix tasks awaiting operator scope approval.
+
+### §23 addendum — 033 Step 9.5 verdict (2026-08-07)
+
+PASS, empirically probed (reviewer RAN the 3 facts + scratch-probed the graft helper and validator
+baselines against raw corpus bytes): oracles discriminate (template-color pin still distinguishes vs the
+NDA's color-less Heading1; footer resolved via real rId graph traversal; baseline-diff self-destructs to
+strict-empty as claimed — 8 distinct pre-existing paraId errors confirmed). Zero blocking findings.
+Two LOW hardening notes added to the follow-ups ledger: (a) baseline set-Contains loses multiplicity at
+:306 (multiset diff would close a duplicate-paragraph mask; other oracles compensate today); (b) graft
+helper InsertAt(...,0) would misplace commentRangeStart if the target paragraph ever gains a pPr
+(self-policing via the strict validator today). PHASE 3 FULLY CLOSED — implementation + tests + gates.

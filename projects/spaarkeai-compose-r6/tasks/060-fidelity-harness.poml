@@ -4,7 +4,7 @@
     <title>Round-trip fidelity harness — round-trip the corpus; fail on hard-fail/regression</title>
     <phase>6 Round-trip fidelity harness (CI release gate)</phase>
     <gate>dep:027,004</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING (adds `tests/**` harness, tags include testing) → FULL gate UNCONDITIONALLY per CLAUDE.md §8 override row; also builds the release-gating fidelity harness (high blast radius on the CI signal). code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -94,6 +94,7 @@
     <criterion testable="true">The harness emits a machine-readable per-document/per-feature result consumable by CI (task 061); no `Mock&lt;HttpMessageHandler&gt;`, DI-registration, or ctor-null tests.</criterion>
   </acceptance-criteria>
 
+  <completion-note>COMPLETED 2026-08-07 (parallel wave, isolated-worktree agent; cherry-picked 42b9e6592). ComposeFidelityGateHarnessTests: dynamic MemberData over the task-004 corpus locator (new docs auto-covered); per-doc wire round-trip (load -> marker edit -> save -> reopen); classification pass|warn|fail (hard-tier warns NEVER fail; FAIL = non-success HTTP incl. 422 / lost edit); fidelity-gate-result.json (one entry per doc) for 061 CI gate; red-gate proven via corrupted-docx classifier probe. Corpus: 5 pass / 5 warn / 0 fail - NDA warn-not-fail NO 422 (escalation trigger did not fire). 11/11; merged wave 1094/1094. Wave Step 9.5 review ran on the merged commits.</completion-note>
   <notes>Spec FR-08 + Success Criterion 5 + ADR-049 amendment point 3 (corpus round-trip is a release gate); plan.md §5 Phase 6. Modify/extend test surface (reuses corpus + byte-diff machinery → no new-component justification). Seeded with the NDA (task 004). Feeds task 061 (CI wiring).</notes>
 
   <execution>
