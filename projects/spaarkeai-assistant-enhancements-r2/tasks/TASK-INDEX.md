@@ -36,7 +36,7 @@ Tier: `sonnet` (default) · `opus` (high-blast/judgment) — effort: `high` (def
 | 039 | Deploy + verify D | 4 D | 🔲 | 030-038 | sonnet / high | STANDARD | none (deploy) |
 | 040 | Email variant in SerializedWidgetState + guard (FR-C2 client) | 5 C | ✅ | 001 | sonnet / high | FULL | Group C1 (shared-lib) |
 | 041 | Email variant in WorkspaceTabVisibleState + derive/format (FR-C2 server) | 5 C | ✅ (visible-state shape 041 + persisted `EmailTabWidgetData` carrier + `TryDeriveVisibleState` producer 041b — Path 1 per owner; committed 580cbda48) | 001 | sonnet / high | FULL | Group C1 (BFF) |
-| 042 | getAgentVisibleState on email widget + eml-render (FR-C1/C4) | 5 C | ✅ FR-C1 (carrier type + getVisibleState 042a/c @580cbda48; producer 042b @94955e609 — email tab populates widgetData from useEmailWorkspaceRecord) · 🔔 **FR-C4 escalated** (no on-demand doc-body agent tool exists; see notes/c-fr-c4-escalation.md — owner decision pending) | 040 | **opus / xhigh** | FULL | Group C2 (email widget) |
+| 042 | getAgentVisibleState on email widget + eml-render (FR-C1/C4) | 5 C | ✅ **FR-C1** (carrier 042a/c @580cbda48 + producer 042b @94955e609 — email tab populates widgetData) · ✅ **FR-C4** via 042c-fr-c4 **B1** @95f936cdb (owner-chosen §6.5 Path A: additive SprkChat host-send seam + one-shot documentId decorate + email-summarize chip + focus-stamp fix) | 040 | **opus / xhigh** | FULL | Group C2 (email widget) |
 | 043 | Deploy + verify C | 5 C | 🔲 | 040,041,042 | sonnet / high | STANDARD | none (deploy) |
 | 090 | Project wrap-up (gates, test-diet, cleanup, docs) | 9 | 🔲 | 002,013,025,039,043 | sonnet / high | FULL | none (final) |
 
