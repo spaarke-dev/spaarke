@@ -122,7 +122,7 @@ public sealed class ComposeTemplateSource : IComposeTemplateSource
     {
         if (Guid.TryParse(templateIdOrName, out var id))
         {
-            var response = await client.GetAsync($"templates({id})?$select=templateid,title", ct);
+            var response = await client.GetAsync($"templates({id})?$select=templateid,title,ispersonal", ct);
             if (!response.IsSuccessStatusCode)
             {
                 if (response.StatusCode != System.Net.HttpStatusCode.NotFound)
@@ -131,16 +131,24 @@ public sealed class ComposeTemplateSource : IComposeTemplateSource
                 }
                 return null;
             }
-            return await response.Content.ReadFromJsonAsync<TemplateRecord>(JsonOptions, ct);
+            var byId = await response.Content.ReadFromJsonAsync<TemplateRecord>(JsonOptions, ct);
+            if (byId?.IsPersonal == true)
+            {
+                // 032 Step-9.5 F4: the app-only read serves ORG-SHARED templates only — a personal
+                // template resolved under the app identity would leak another user's content.
+                _logger.LogWarning("Compose template {TemplateId} is personal — refused under the app-only org-shared read", id);
+                return null;
+            }
+            return byId;
         }
 
         // Exact-title lookup (mirrors EmailTemplateService's fetch-by-name convention).
         // Wave-review F1: OData-escape THEN URL-encode — a title like "M&A Engagement Letter" must not
-        // fracture the query string (query-option injection is bounded by the caller's own token, but the
+        // fracture the query string (the production caller passes an APP-ONLY token (org-shared read; ispersonal-filtered), so encoding is load-bearing, and the
         // lookup would 400 → false "not found").
         var escaped = Uri.EscapeDataString(templateIdOrName.Replace("'", "''"));
         var listResponse = await client.GetAsync(
-            $"templates?$select=templateid,title&$filter=title eq '{escaped}'&$top=1", ct);
+            $"templates?$select=templateid,title&$filter=title eq '{escaped}' and ispersonal eq false&$top=1", ct);
         if (!listResponse.IsSuccessStatusCode)
         {
             _logger.LogWarning("Compose template title lookup failed: {Status}", listResponse.StatusCode);
@@ -178,6 +186,7 @@ public sealed class ComposeTemplateSource : IComposeTemplateSource
     {
         [JsonPropertyName("templateid")] public Guid TemplateId { get; init; }
         [JsonPropertyName("title")] public string? Title { get; init; }
+        [JsonPropertyName("ispersonal")] public bool? IsPersonal { get; init; }
     }
 
     private sealed record TemplateRecordList

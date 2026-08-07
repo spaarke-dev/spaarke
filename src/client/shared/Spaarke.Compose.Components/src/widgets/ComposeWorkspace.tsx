@@ -1882,10 +1882,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [isApplyingTemplate, setIsApplyingTemplate] = React.useState(false);
   const [applyTemplateError, setApplyTemplateError] = React.useState<string | null>(null);
 
+  // (hoisted above handleApplyTemplate — its apply-time dirty re-check reads this binding; 032 F3)
+  const [isDirty, setIsDirty] = React.useState<boolean>(false);
+
   const handleApplyTemplate = React.useCallback(
     async (templateIdOrName: string): Promise<void> => {
       const speId = state.documentRef?.speDriveItemId;
       if (!speId || !effectiveDriveId || !bffBaseUrl) return;
+      // 032 Step-9.5 F3: re-check dirtiness at APPLY time, not just toolbar-render time — a
+      // programmatic edit (Assistant redline via the bridge) landing while the dialog is open would
+      // otherwise be silently discarded by the post-merge remount.
+      if (isDirty) {
+        setApplyTemplateError('The document has unsaved changes. Save first, then apply the template.');
+        return;
+      }
       setIsApplyingTemplate(true);
       setApplyTemplateError(null);
       try {
@@ -1927,21 +1937,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         };
 
         const warnings = mergeDegradationWarnings(payload.mergeWarnings ?? [], payload.contentModelWarnings ?? []);
-        dispatch({
-          kind: 'saveDegradationWarnings',
-          warnings: warnings.length > 0 ? warnings : null,
-        });
-
         setApplyTemplateOpen(false);
 
         // Re-mount from the server-authoritative merged bytes — the SAME requestLoad remount the
-        // reload-from-source path uses. The guard ensured a clean (saved) editor, so nothing is
-        // discarded. docxBridge.ts remains the docx↔editor round-trip beneath the remount.
+        // reload-from-source path uses. 032 Step-9.5 F2: the merge warnings ride INSIDE requestLoad
+        // (carryDegradationWarnings) — a separate pre-dispatch would be wiped by the reducer's
+        // INITIAL_STATE reset before ever painting. docxBridge.ts remains the docx↔editor
+        // round-trip beneath the remount.
         if (state.documentRef) {
           dispatch({
             kind: 'requestLoad',
             documentRef: state.documentRef,
             sessionId: state.sessionId,
+            carryDegradationWarnings: warnings.length > 0 ? warnings : null,
           });
         }
       } catch (err) {
@@ -1952,7 +1960,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [state.documentRef, state.sessionId, effectiveDriveId, bffBaseUrl]
+    [state.documentRef, state.sessionId, effectiveDriveId, bffBaseUrl, isDirty]
   );
 
   // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
@@ -2724,7 +2732,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // Dirty flag is UI-only (drives the Save button's enabled/disabled state
   // in ComposeToolbar). The reducer's status enum doesn't distinguish clean
   // vs dirty inside `loaded`; a local flag is the least-invasive surface.
-  const [isDirty, setIsDirty] = React.useState<boolean>(false);
   const handleDirtyChange = React.useCallback((dirty: boolean): void => {
     setIsDirty(dirty);
   }, []);

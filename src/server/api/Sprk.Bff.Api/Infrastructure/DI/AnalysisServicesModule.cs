@@ -449,6 +449,11 @@ public static class AnalysisServicesModule
         // L1 — IBriefingAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
         services.AddScoped<IBriefingAi, NullBriefingAi>();
 
+        // 032 Step-9.5 F1 — IComposeTemplateSource compound-OFF peer (§F.1): the apply-template endpoint
+        // maps unconditionally; real impl registers in AddDeliveryServices (compound-ON only). Null peer
+        // resolves templates to not-found (clean 404), never a DI 500.
+        services.AddSingleton<IComposeTemplateSource, Sprk.Bff.Api.Services.Ai.PublicContracts.NullComposeTemplateSource>();
+
         // ── L1 (cont.) — 2026-06-04 audit Migration PR #1 ────────────────────────────────
         // The four PublicContracts facade Null peers. Closes the LATENT BUG #1 gap
         // (bff-ai-architecture-audit-r1 W4 §4.5 + DR-003) where IInsightsAi was registered
@@ -1316,7 +1321,7 @@ public static class AnalysisServicesModule
         services.AddSingleton<ITemplateEngine, TemplateEngine>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IWordTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.WordTemplateService>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource,
-            Sprk.Bff.Api.Services.Ai.Delivery.ComposeTemplateSource>(); // FR-05 (spaarkeai-compose-r6 task 031) — resolved firm/matter .dotx for the Compose part-merge path: REUSES the native template-entity fetch (EmailTemplateService pattern) + IWordTemplateService {{variable}} render; PublicContracts facade per ADR-013 (Compose consumes the facade, never Ai internals). Stateless; registered UNCONDITIONALLY (symmetric per bff-extensions.md §F.1)
+            Sprk.Bff.Api.Services.Ai.Delivery.ComposeTemplateSource>(); // FR-05 (spaarkeai-compose-r6 task 031) — resolved firm/matter .dotx for the Compose part-merge path: REUSES the native template-entity fetch (EmailTemplateService pattern) + IWordTemplateService {{variable}} render; PublicContracts facade per ADR-013 (Compose consumes the facade, never Ai internals). Stateless. NOTE: this registration is INSIDE the AI compound gate (AddDeliveryServices) — §F.1 symmetry for the unconditional apply-template endpoint is completed by NullComposeTemplateSource in AddNullObjectsForCompoundOff (032 Step-9.5 F1)
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.EmailTemplateService>();
     }
 

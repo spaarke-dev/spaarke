@@ -29,7 +29,7 @@ public interface IComposeTemplateSource
     /// (the raw stored bytes are returned — byte-faithful for variable-free house templates).</param>
     /// <param name="dataverseUrl">Environment URL (same caller-supplied convention as the sibling
     /// template services).</param>
-    /// <param name="accessToken">Caller's Dataverse access token (user-context).</param>
+    /// <param name="accessToken">Dataverse access token. The production caller (apply-template endpoint) passes an APP-ONLY token — templates are org-shared assets (personal templates are refused by the implementation).</param>
     /// <param name="cancellationToken">Cancellation.</param>
     Task<ComposeResolvedTemplate?> ResolveAsync(
         string templateIdOrName,

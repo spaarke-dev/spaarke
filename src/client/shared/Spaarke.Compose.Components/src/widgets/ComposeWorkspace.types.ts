@@ -262,7 +262,7 @@ export type ComposeWorkspaceAction =
   // G8 (FR-07, task 030): `externalChange` (default false) carries the external-change flag THROUGH a
   // remount — a clean-editor auto-remount dispatches requestLoad with externalChange:true so the
   // banner still renders after loadSucceeded. Every other requestLoad (initial open / Search) omits it.
-  | { kind: 'requestLoad'; documentRef: ComposeDocumentRef; sessionId: string; externalChange?: boolean }
+  | { kind: 'requestLoad'; documentRef: ComposeDocumentRef; sessionId: string; externalChange?: boolean; carryDegradationWarnings?: Array<{ code: string; count: number }> | null }
   | {
       kind: 'loadSucceeded';
       docxBytes: ArrayBuffer;
@@ -448,6 +448,10 @@ export function composeWorkspaceReducer(
         // banner still renders after loadSucceeded (which spreads ...state). Defaults false for every
         // normal load (initial open / Search).
         externalChangePending: action.externalChange ?? false,
+        // 032 Step-9.5 F2: requestLoad resets to INITIAL_STATE, which WIPES a just-dispatched
+        // degradation banner. Apply-template's merge warnings exist ONLY in the apply response —
+        // carry them through the remount or they are silently lost (loud-not-silent principle).
+        saveDegradationWarnings: action.carryDegradationWarnings ?? null,
       };
     case 'loadSucceeded':
       return {
