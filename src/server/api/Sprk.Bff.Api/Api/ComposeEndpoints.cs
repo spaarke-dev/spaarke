@@ -1320,6 +1320,19 @@ public static class ComposeEndpoints
         {
             return BadRequest(ex.Message);
         }
+        catch (ComposePdfIntakeException ex)
+        {
+            // Task 040 Step-9.5 HIGH-1: honest PDF-intake ProblemDetails — 503 (intake unavailable,
+            // retryable) vs 422 (this document is not projectable) — carrying the service's real
+            // message instead of collapsing into the generic 500 catch-all. MUST precede the
+            // InvalidOperationException catch below (this type derives from it).
+            logger.LogWarning(ex, "Compose load: PDF intake refused (unavailable={Unavailable}). TraceId={TraceId}",
+                ex.Unavailable, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
+                title: ex.Unavailable ? "PDF Intake Unavailable" : "PDF Not Editable",
+                detail: ex.Message);
+        }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {
             logger.LogWarning(ex, "Compose load: SPE drive-item not found. TraceId={TraceId}", httpContext.TraceIdentifier);
@@ -1543,6 +1556,18 @@ public static class ComposeEndpoints
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (ComposePdfIntakeException ex)
+        {
+            // Task 040 Step-9.5 HIGH-2: a save baseline resolved to PDF bytes (rogue/stale caller —
+            // the 041 client saves PDF-sourced docs via create-on-save). Refuse with the honest 422
+            // instead of a deep OOXML failure surfacing as a generic 500. MUST precede the
+            // InvalidOperationException catch below (this type derives from it).
+            logger.LogWarning(ex, "Compose save: PDF baseline refused. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
+                title: ex.Unavailable ? "PDF Intake Unavailable" : "PDF Cannot Be Saved In Place",
+                detail: ex.Message);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {

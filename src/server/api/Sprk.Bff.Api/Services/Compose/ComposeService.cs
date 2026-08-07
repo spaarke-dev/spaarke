@@ -508,7 +508,9 @@ public class ComposeService : IComposeService
         // intake facts first (source-level: fixed-layout reflow, page chrome, list/table
         // approximation), then whatever the synthesized-docx re-projection added. Same client
         // surface as the docx flatten warnings (the 041 honest-lossiness banner reads these).
-        if (pdfIntakeWarnings is { Count: > 0 } && contentModel is not null)
+        // Step-9.5 LOW-7: merged UNCONDITIONALLY — even if the synthesized-docx re-projection
+        // failed (contentModel null, op-log fallback), the intake facts must still reach the client.
+        if (pdfIntakeWarnings is { Count: > 0 })
         {
             contentModelWarnings = contentModelWarnings is null
                 ? pdfIntakeWarnings
@@ -602,16 +604,24 @@ public class ComposeService : IComposeService
         // (no version history / lookup unavailable) never fails Load; the client then relies on the
         // retained-bytes Content fast-path.
         string? versionId = null;
-        try
+        // Step-9.5 MEDIUM-3 (task 040): a PDF-sourced load returns SYNTHESIZED docx Content — the
+        // `.pdf` item's version id would be a booby trap (a post-refresh save re-fetching it as the
+        // "retained docx baseline" would hand %PDF- bytes to the OOXML engine). Leave it null so the
+        // save path uses the retained-bytes fast-path or the client's create-on-save routing (041);
+        // ResolveSaveBaselineAsync additionally sniff-guards every resolved baseline (HIGH-2).
+        if (sourceFormat is null)
         {
-            versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose load: current-version-id lookup failed for drive={DriveId} item={DocumentSpeId}; the save path will use the retained-bytes fast-path",
-                request.DriveId, request.DocumentSpeId);
+            try
+            {
+                versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose load: current-version-id lookup failed for drive={DriveId} item={DocumentSpeId}; the save path will use the retained-bytes fast-path",
+                    request.DriveId, request.DocumentSpeId);
+            }
         }
 
         // 3) Ensure a ChatSession bound to the document. For Path A (Document row present),
@@ -724,21 +734,30 @@ public class ComposeService : IComposeService
     }
 
     /// <summary>
-    /// Task 040 (FR-06): PDF source detection — file extension OR the <c>%PDF-</c> magic bytes, so a
-    /// mis-named file lands on the branch its bytes belong to (a docx named <c>.pdf</c> still parses:
-    /// Azure DI's layout model accepts Office documents; a PDF named <c>.docx</c> would otherwise
-    /// fail-closed on the OOXML projection).
+    /// Task 040 (FR-06): PDF source detection — BYTES FIRST (Step-9.5 MEDIUM-5), extension as
+    /// tiebreak, so a mis-named file lands on the branch its bytes belong to: a docx (PK-zip) named
+    /// <c>.pdf</c> takes the native full-fidelity OOXML path (NOT the lossy reflow), and a PDF named
+    /// <c>.docx</c> takes the intake path (it would otherwise fail-closed on the OOXML projection).
+    /// Only when the bytes are neither signature does the extension decide.
     /// </summary>
     private static bool IsPdfSource(string? fileName, ReadOnlySpan<byte> content)
     {
-        if (fileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true)
+        // %PDF- → PDF regardless of name.
+        if (content.Length >= 5
+            && content[0] == (byte)'%' && content[1] == (byte)'P' && content[2] == (byte)'D'
+            && content[3] == (byte)'F' && content[4] == (byte)'-')
         {
             return true;
         }
 
-        return content.Length >= 5
-            && content[0] == (byte)'%' && content[1] == (byte)'P' && content[2] == (byte)'D'
-            && content[3] == (byte)'F' && content[4] == (byte)'-';
+        // PK\x03\x04 (OOXML zip container) → NOT a PDF regardless of name.
+        if (content.Length >= 4
+            && content[0] == 0x50 && content[1] == 0x4B && content[2] == 0x03 && content[3] == 0x04)
+        {
+            return false;
+        }
+
+        return fileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     /// <summary>
@@ -756,27 +775,35 @@ public class ComposeService : IComposeService
     {
         if (_pdfIntakeSource is null)
         {
-            throw new InvalidOperationException(
+            // Step-9.5 HIGH-1: TYPED throw — the load endpoint maps Unavailable=true to a 503
+            // ProblemDetails carrying this exact message (never the generic catch-all 500).
+            throw new ComposePdfIntakeException(
                 "PDF intake is unavailable: AI document parsing is disabled on this host " +
-                "(Analysis:Enabled + DocumentIntelligence:Enabled required).");
+                "(Analysis:Enabled + DocumentIntelligence:Enabled required).",
+                unavailable: true);
         }
 
         var layout = await _pdfIntakeSource.ParseAsync(pdfBytes.ToArray(), fileName, cancellationToken)
             .ConfigureAwait(false);
         if (layout is null)
         {
-            throw new InvalidOperationException(
+            // Cause is collapsed at the facade's null boundary (corrupt file vs service failure —
+            // the facade logged the specific reason); surface the retryable framing (503).
+            throw new ComposePdfIntakeException(
                 $"PDF intake failed: the document layout could not be extracted from '{fileName}'. " +
-                "The file may be corrupt or the document-parsing service is unavailable.");
+                "The file may be corrupt or the document-parsing service is unavailable.",
+                unavailable: true);
         }
 
         var projection = _pdfModelProjector.Project(layout);
         if (projection.Status == ComposeProjectionStatus.Failed)
         {
             // The projector's only Failed outcome is "nothing projectable" — mounting an empty
-            // editor over a non-empty PDF would be a silent lie (projection contract).
-            throw new InvalidOperationException(
-                $"PDF intake failed: no editable content could be projected from '{fileName}'.");
+            // editor over a non-empty PDF would be a silent lie (projection contract). 422 — the
+            // document itself is the problem; retrying won't change the outcome.
+            throw new ComposePdfIntakeException(
+                $"PDF intake failed: no editable content could be projected from '{fileName}'.",
+                unavailable: false);
         }
 
         // Render the model through the ONE renderer (render-on-save hub) — the synthesized docx is a
@@ -1547,8 +1574,10 @@ public class ComposeService : IComposeService
             //      save's assert).
             if (!request.Content.IsEmpty)
             {
+                var carrierContent = request.Content.ToArray();
+                GuardBaselineIsNotPdf(carrierContent);
                 var carrierRendered = _documentRenderer.RenderIntoCarrier(
-                    request.Content.ToArray(), request.ContentModel, revisionAuthor, renderDegradations);
+                    carrierContent, request.ContentModel, revisionAuthor, renderDegradations);
                 return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
             }
 
@@ -1556,6 +1585,7 @@ public class ComposeService : IComposeService
             {
                 var carrierBytes = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
                     .ConfigureAwait(false);
+                GuardBaselineIsNotPdf(carrierBytes);
                 var carrierRendered = _documentRenderer.RenderIntoCarrier(
                     carrierBytes, request.ContentModel, revisionAuthor, renderDegradations);
                 return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
@@ -1573,7 +1603,9 @@ public class ComposeService : IComposeService
         // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
         if (!request.Content.IsEmpty)
         {
-            return (request.Content.ToArray(), null);
+            var retained = request.Content.ToArray();
+            GuardBaselineIsNotPdf(retained);
+            return (retained, null);
         }
 
         // (b) FR-06 primary: re-fetch the LOAD-TIME SPE version by versionId (task 002), behind the
@@ -1582,6 +1614,7 @@ public class ComposeService : IComposeService
         {
             var baseline = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
                 .ConfigureAwait(false);
+            GuardBaselineIsNotPdf(baseline);
             return (baseline, null);
         }
 
@@ -1591,6 +1624,30 @@ public class ComposeService : IComposeService
             "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
             "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
             nameof(request));
+    }
+
+    /// <summary>
+    /// Task 040 Step-9.5 fix (HIGH-2): every resolved SAVE BASELINE must be an OOXML package, never a
+    /// PDF. Before 040, a PDF could not reach a save (Load fail-closed on the OOXML projection); now a
+    /// PDF load succeeds with SYNTHESIZED docx Content and a rogue/stale caller could hand the engine
+    /// %PDF- bytes (a re-fetched PDF-item version, or the raw PDF echoed as "retained bytes") — which
+    /// would either throw deep inside the OOXML stack as a generic 500, or worse, write docx bytes
+    /// over the .pdf item. Sniff once here (the single choke point every baseline passes through) and
+    /// refuse LOUDLY with the honest instruction (the 041 client saves PDFs via create-on-save; the
+    /// endpoint maps this to 422).
+    /// </summary>
+    private static void GuardBaselineIsNotPdf(ReadOnlySpan<byte> baseline)
+    {
+        if (baseline.Length >= 5
+            && baseline[0] == (byte)'%' && baseline[1] == (byte)'P' && baseline[2] == (byte)'D'
+            && baseline[3] == (byte)'F' && baseline[4] == (byte)'-')
+        {
+            throw new ComposePdfIntakeException(
+                "Compose save: the save baseline resolved to PDF bytes. A document opened from a PDF " +
+                "saves as a NEW Word document (create-on-save) — it cannot replace the PDF in place. " +
+                "Re-open the document and save again.",
+                unavailable: false);
+        }
     }
 
     /// <summary>Whether the request carries the full coordinate set for an FR-06 load-time-version

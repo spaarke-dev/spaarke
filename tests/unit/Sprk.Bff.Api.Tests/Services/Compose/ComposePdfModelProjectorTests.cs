@@ -238,6 +238,94 @@ public class ComposePdfModelProjectorTests
         composeTable.Rows[1].Cells[0].Blocks.Should().BeEmpty();
     }
 
+    [Fact]
+    public void Project_OverlappingTableAnchors_ConsolidatesTextInsteadOfDropping()
+    {
+        // Step-9.5 MEDIUM-4: (0,0) spans the whole 2x2; a second anchor at (1,1) overlaps a covered
+        // position. Its text must be CONSOLIDATED into the covering cell and counted — never dropped.
+        var table = new DocumentLayoutTable(
+            RowCount: 2,
+            ColumnCount: 2,
+            Cells: new[]
+            {
+                new DocumentLayoutTableCell(0, 0, 2, 2, "A", IsHeader: false),
+                new DocumentLayoutTableCell(1, 1, 1, 1, "X", IsHeader: false),
+            },
+            PageNumber: 1);
+        var layout = new DocumentLayout { PageCount = 1, Blocks = new[] { new DocumentLayoutBlock { Table = table } } };
+
+        var result = _sut.Project(layout);
+
+        var anchor = result.Model.Blocks.Single().Table!.Rows[0].Cells[0];
+        anchor.Blocks.Should().HaveCount(2, "the overlapped anchor's text is consolidated into the covering cell");
+        anchor.Blocks[1].Runs[0].Text.Should().Be("X");
+        result.Warnings.Should().ContainSingle(w => w.Code == ComposePdfModelProjector.WarningTableCellConsolidated)
+            .Which.Count.Should().Be(1);
+    }
+
+    [Fact]
+    public void Project_OutOfOrderTableAnchors_ReconstructInReadingOrder()
+    {
+        // Step-9.5 MEDIUM-4 variant: the rowSpan-2 anchor at (0,0) arrives AFTER the plain cell at
+        // (1,0). Reading-order processing places the rowSpan first, so (1,0)'s text consolidates into
+        // the merge anchor instead of leaving a Restart with no Continue beneath it.
+        var table = new DocumentLayoutTable(
+            RowCount: 2,
+            ColumnCount: 2,
+            Cells: new[]
+            {
+                new DocumentLayoutTableCell(1, 0, 1, 1, "late", IsHeader: false),
+                new DocumentLayoutTableCell(0, 0, 2, 1, "tall", IsHeader: false),
+                new DocumentLayoutTableCell(0, 1, 1, 1, "B", IsHeader: false),
+                new DocumentLayoutTableCell(1, 1, 1, 1, "D", IsHeader: false),
+            },
+            PageNumber: 1);
+        var layout = new DocumentLayout { PageCount = 1, Blocks = new[] { new DocumentLayoutBlock { Table = table } } };
+
+        var result = _sut.Project(layout);
+
+        var rows = result.Model.Blocks.Single().Table!.Rows;
+        rows[0].Cells[0].VMerge.Should().Be(ComposeVerticalMerge.Restart);
+        rows[1].Cells[0].VMerge.Should().Be(ComposeVerticalMerge.Continue);
+        rows[0].Cells[0].Blocks.Select(b => b.Runs[0].Text).Should().Contain("late");
+        result.Warnings.Should().ContainSingle(w => w.Code == ComposePdfModelProjector.WarningTableCellConsolidated);
+    }
+
+    [Fact]
+    public void Project_OversizedTableSpans_AreClampedToTheGrid()
+    {
+        var table = new DocumentLayoutTable(
+            RowCount: 2,
+            ColumnCount: 2,
+            Cells: new[]
+            {
+                new DocumentLayoutTableCell(0, 0, 99, 99, "big", IsHeader: false),
+                new DocumentLayoutTableCell(0, 1, 1, 1, "B", IsHeader: false),
+            },
+            PageNumber: 1);
+        var layout = new DocumentLayout { PageCount = 1, Blocks = new[] { new DocumentLayoutBlock { Table = table } } };
+
+        var result = _sut.Project(layout);
+
+        var rows = result.Model.Blocks.Single().Table!.Rows;
+        // Clamped to 2x2: anchor GridSpan 2... but (0,1) was claimed by the "B" anchor? Reading order
+        // processes (0,0) first → its span covers (0,1); "B" consolidates. Assert grid stays legal.
+        rows.Should().HaveCount(2);
+        rows[0].Cells[0].GridSpan.Should().Be(2);
+        rows[1].Cells[0].VMerge.Should().Be(ComposeVerticalMerge.Continue);
+    }
+
+    [Fact]
+    public void Project_BareBulletGlyph_StaysProseNotAListItem()
+    {
+        var layout = new DocumentLayout { PageCount = 1, Blocks = new[] { Para("•"), Para("• real item") } };
+
+        var result = _sut.Project(layout);
+
+        result.Model.Blocks[0].Kind.Should().Be(ComposeBlockKind.Paragraph);
+        result.Model.Blocks[1].Kind.Should().Be(ComposeBlockKind.ListItem);
+    }
+
     // ---------------------------------------------------------------------
     // Failure posture
     // ---------------------------------------------------------------------
@@ -260,6 +348,9 @@ public class ComposePdfModelProjectorTests
         result.Status.Should().Be(ComposeProjectionStatus.Failed);
         result.Model.Blocks.Should().BeEmpty();
         result.Warnings.Should().ContainSingle(w => w.Code == ComposePdfModelProjector.WarningEmpty);
+        // Step-9.5 LOW-8: the Failed result KEEPS its diagnostics — "why it was empty" rides along.
+        result.Warnings.Should().ContainSingle(w => w.Code == ComposePdfModelProjector.WarningPageChromeDropped)
+            .Which.Count.Should().Be(1);
     }
 
     // ---------------------------------------------------------------------

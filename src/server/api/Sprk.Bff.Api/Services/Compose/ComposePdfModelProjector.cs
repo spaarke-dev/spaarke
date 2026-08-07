@@ -68,6 +68,11 @@ public sealed class ComposePdfModelProjector
     /// <summary>Table emitted with the renderer's default chrome (PDF border styling not extractable).</summary>
     public const string WarningTableStyleApproximated = "pdf-intake-table-style-approximated";
 
+    /// <summary>Step-9.5 MEDIUM-4: a table anchor cell overlapped a position already covered by another
+    /// anchor's span (Azure DI emits inconsistent spans on complex merged tables) — its text was
+    /// CONSOLIDATED into the covering cell rather than silently dropped.</summary>
+    public const string WarningTableCellConsolidated = "pdf-intake-table-cell-consolidated";
+
     /// <summary>No projectable content — the only Failed outcome.</summary>
     public const string WarningEmpty = "pdf-intake-empty";
 
@@ -91,12 +96,13 @@ public sealed class ComposePdfModelProjector
         var formulasFlattened = 0;
         var listsApproximated = 0;
         var tablesApproximated = 0;
+        var tableCellsConsolidated = 0;
 
         foreach (var block in layout.Blocks)
         {
             if (block.Table is { } table)
             {
-                var composeTable = ProjectTable(table);
+                var composeTable = ProjectTable(table, ref tableCellsConsolidated);
                 if (composeTable is not null)
                 {
                     blocks.Add(new ComposeBlock { Kind = ComposeBlockKind.Table, Table = composeTable });
@@ -156,27 +162,32 @@ public sealed class ComposePdfModelProjector
             }
         }
 
-        if (blocks.Count == 0)
-        {
-            // The only hard outcome: nothing projectable. NEVER mount an empty editor over a
-            // non-empty PDF — fail the open loudly instead (projection contract: Failed model
-            // MUST NOT be rendered).
-            return new ComposeCanonicalModelProjection
-            {
-                Status = ComposeProjectionStatus.Failed,
-                Model = new ComposeContentModel(),
-                Warnings = new[] { new ComposeProjectionWarning(WarningEmpty, 1) },
-            };
-        }
-
-        // Document-level honest-lossiness fact, always present (count = source page count so the
-        // client can phrase "reflowed from N fixed pages").
-        warnings.Add(new ComposeProjectionWarning(WarningFixedLayoutReflowed, Math.Max(1, layout.PageCount)));
+        // The counted per-construct facts — shared by BOTH outcomes (Step-9.5 LOW-8: a Failed-empty
+        // result keeps its diagnostics — "why it was empty" must not be thrown away).
         if (pageChromeDropped > 0) warnings.Add(new ComposeProjectionWarning(WarningPageChromeDropped, pageChromeDropped));
         if (footnotesInlined > 0) warnings.Add(new ComposeProjectionWarning(WarningFootnoteInlined, footnotesInlined));
         if (formulasFlattened > 0) warnings.Add(new ComposeProjectionWarning(WarningFormulaFlattened, formulasFlattened));
         if (listsApproximated > 0) warnings.Add(new ComposeProjectionWarning(WarningListApproximated, listsApproximated));
         if (tablesApproximated > 0) warnings.Add(new ComposeProjectionWarning(WarningTableStyleApproximated, tablesApproximated));
+        if (tableCellsConsolidated > 0) warnings.Add(new ComposeProjectionWarning(WarningTableCellConsolidated, tableCellsConsolidated));
+
+        if (blocks.Count == 0)
+        {
+            // The only hard outcome: nothing projectable. NEVER mount an empty editor over a
+            // non-empty PDF — fail the open loudly instead (projection contract: Failed model
+            // MUST NOT be rendered). The diagnostic counters above ride along (LOW-8).
+            warnings.Insert(0, new ComposeProjectionWarning(WarningEmpty, 1));
+            return new ComposeCanonicalModelProjection
+            {
+                Status = ComposeProjectionStatus.Failed,
+                Model = new ComposeContentModel(),
+                Warnings = warnings,
+            };
+        }
+
+        // Document-level honest-lossiness fact, always present (count = source page count so the
+        // client can phrase "reflowed from N fixed pages"). First in the list — the banner leads with it.
+        warnings.Insert(0, new ComposeProjectionWarning(WarningFixedLayoutReflowed, Math.Max(1, layout.PageCount)));
 
         return new ComposeCanonicalModelProjection
         {
@@ -219,15 +230,56 @@ public sealed class ComposePdfModelProjector
         return true;
     }
 
+    /// <summary>How a grid position is occupied during reconstruction.</summary>
+    private enum SlotKind
+    {
+        /// <summary>An anchor cell (emits a real cell).</summary>
+        Anchor,
+
+        /// <summary>Absorbed horizontally by an anchor's GridSpan (emits nothing).</summary>
+        HorizontalCover,
+
+        /// <summary>Synthesized vertical-merge continuation under an anchor's RowSpan (emits a
+        /// <see cref="ComposeVerticalMerge.Continue"/> cell with the anchor's GridSpan).</summary>
+        VerticalContinue,
+    }
+
+    /// <summary>Mutable reconstruction slot — <see cref="OwnerOrSelf"/> is the ANCHOR builder that
+    /// covers this position (an anchor owns itself; cover/continue slots point at their anchor), the
+    /// consolidation target for overlapping analysis anchors.</summary>
+    private sealed class Slot
+    {
+        public required SlotKind Kind { get; init; }
+
+        /// <summary>The covering anchor for cover/continue slots; null for an anchor (see
+        /// <see cref="OwnerOrSelf"/>).</summary>
+        public Slot? Owner { get; init; }
+
+        public Slot OwnerOrSelf => Owner ?? this;
+
+        public List<ComposeBlock> Blocks { get; } = new();
+
+        public bool IsHeader { get; set; }
+
+        public int GridSpan { get; set; } = 1;
+
+        public bool IsMergeRestart { get; set; }
+    }
+
     /// <summary>
     /// Projects a layout table into a <see cref="ComposeTable"/>, reconstructing the full grid from
     /// anchor cells: <c>ColumnSpan</c> → <see cref="ComposeTableCell.GridSpan"/>; <c>RowSpan</c> →
     /// <see cref="ComposeVerticalMerge.Restart"/> on the anchor plus synthesized
     /// <see cref="ComposeVerticalMerge.Continue"/> cells in the covered rows (Word requires the
-    /// continuation cells to exist for the grid to align). Returns null for a degenerate table
-    /// (no rows/columns/cells) — the caller simply skips it.
+    /// continuation cells to exist for the grid to align). Anchors are processed in READING ORDER
+    /// (row, then column — Step-9.5 MEDIUM-4: the analysis does not guarantee order, and span coverage
+    /// is order-sensitive). An anchor whose position is already covered by another anchor's span
+    /// (overlapping/inconsistent analysis spans on complex merged tables) has its TEXT CONSOLIDATED
+    /// into the covering anchor's cell — never silently dropped — and is counted via
+    /// <paramref name="consolidatedCells"/> (→ <see cref="WarningTableCellConsolidated"/>).
+    /// Returns null for a degenerate table (no rows/columns/cells) — the caller simply skips it.
     /// </summary>
-    private static ComposeTable? ProjectTable(DocumentLayoutTable table)
+    private static ComposeTable? ProjectTable(DocumentLayoutTable table, ref int consolidatedCells)
     {
         if (table.RowCount <= 0 || table.ColumnCount <= 0 || table.Cells.Count == 0)
         {
@@ -237,49 +289,69 @@ public sealed class ComposePdfModelProjector
         var rowCount = table.RowCount;
         var columnCount = table.ColumnCount;
 
-        // Grid of projected cells; null = not yet covered.
-        var grid = new ComposeTableCell?[rowCount, columnCount];
+        // Grid of reconstruction slots; null = hole (no anchor covered it).
+        var grid = new Slot?[rowCount, columnCount];
 
-        foreach (var cell in table.Cells)
+        // Reading order — coverage is order-sensitive (see doc comment).
+        var orderedCells = table.Cells
+            .OrderBy(c => c.RowIndex)
+            .ThenBy(c => c.ColumnIndex)
+            .ToList();
+
+        foreach (var cell in orderedCells)
         {
             var r = cell.RowIndex;
             var c = cell.ColumnIndex;
-            if (r < 0 || r >= rowCount || c < 0 || c >= columnCount || grid[r, c] is not null)
+            if (r < 0 || r >= rowCount || c < 0 || c >= columnCount)
             {
-                continue; // out-of-grid / duplicate anchors are analysis noise — skip, grid fill below heals the hole
+                // Out-of-grid anchors are analysis noise; text (if any) is unplaceable — count it so
+                // the drop is never silent.
+                if (cell.Text.Length > 0)
+                {
+                    consolidatedCells++;
+                }
+                continue;
+            }
+
+            if (grid[r, c] is { } taken)
+            {
+                // MEDIUM-4: overlapping/duplicate anchor — consolidate its text into the COVERING
+                // anchor's cell rather than dropping it.
+                if (cell.Text.Length > 0)
+                {
+                    taken.OwnerOrSelf.Blocks.Add(ParagraphBlock(cell.Text));
+                    consolidatedCells++;
+                }
+                continue;
             }
 
             var rowSpan = Math.Clamp(cell.RowSpan, 1, rowCount - r);
             var colSpan = Math.Clamp(cell.ColumnSpan, 1, columnCount - c);
 
-            grid[r, c] = new ComposeTableCell
+            var anchor = new Slot { Kind = SlotKind.Anchor };
+            anchor.IsHeader = cell.IsHeader;
+            anchor.GridSpan = colSpan;
+            anchor.IsMergeRestart = rowSpan > 1;
+            if (cell.Text.Length > 0)
             {
-                Blocks = cell.Text.Length == 0
-                    ? Array.Empty<ComposeBlock>()
-                    : new[] { ParagraphBlock(cell.Text) },
-                IsHeader = cell.IsHeader,
-                GridSpan = colSpan,
-                VMerge = rowSpan > 1 ? ComposeVerticalMerge.Restart : ComposeVerticalMerge.None,
-            };
+                anchor.Blocks.Add(ParagraphBlock(cell.Text));
+            }
 
-            // Horizontal coverage on the anchor row: no cell entries (GridSpan absorbs the columns).
+            grid[r, c] = anchor;
+
+            // Horizontal coverage on the anchor row (GridSpan absorbs these columns).
             for (var cc = c + 1; cc < c + colSpan; cc++)
             {
-                grid[r, cc] ??= HorizontalCoverSentinel;
+                grid[r, cc] ??= new Slot { Kind = SlotKind.HorizontalCover, Owner = anchor };
             }
 
             // Vertical coverage: synthesized Continue cells (same GridSpan so columns stay aligned).
             for (var rr = r + 1; rr < r + rowSpan; rr++)
             {
-                grid[rr, c] ??= new ComposeTableCell
-                {
-                    Blocks = Array.Empty<ComposeBlock>(),
-                    GridSpan = colSpan,
-                    VMerge = ComposeVerticalMerge.Continue,
-                };
+                grid[rr, c] ??= new Slot { Kind = SlotKind.VerticalContinue, Owner = anchor };
                 for (var cc = c + 1; cc < c + colSpan; cc++)
                 {
-                    grid[rr, cc] ??= HorizontalCoverSentinel;
+                    grid[rr, cc] ??= new Slot { Kind = SlotKind.HorizontalCover, Owner = anchor };
                 }
             }
         }
@@ -290,15 +362,37 @@ public sealed class ComposePdfModelProjector
             var cells = new List<ComposeTableCell>(columnCount);
             for (var c = 0; c < columnCount; c++)
             {
-                var cell = grid[r, c];
-                if (ReferenceEquals(cell, HorizontalCoverSentinel))
+                var slot = grid[r, c];
+                if (slot?.Kind == SlotKind.HorizontalCover)
                 {
                     continue; // absorbed by a GridSpan to the left
                 }
 
-                // Analysis holes (positions no anchor covered) become empty cells so the grid stays
-                // rectangular — Word requires every row to span the full grid.
-                cells.Add(cell ?? new ComposeTableCell { Blocks = Array.Empty<ComposeBlock>() });
+                if (slot is null)
+                {
+                    // Analysis holes become empty cells so the grid stays rectangular — Word requires
+                    // every row to span the full grid.
+                    cells.Add(new ComposeTableCell { Blocks = Array.Empty<ComposeBlock>() });
+                }
+                else if (slot.Kind == SlotKind.VerticalContinue)
+                {
+                    cells.Add(new ComposeTableCell
+                    {
+                        Blocks = Array.Empty<ComposeBlock>(),
+                        GridSpan = slot.OwnerOrSelf.GridSpan,
+                        VMerge = ComposeVerticalMerge.Continue,
+                    });
+                }
+                else
+                {
+                    cells.Add(new ComposeTableCell
+                    {
+                        Blocks = slot.Blocks.Count == 0 ? Array.Empty<ComposeBlock>() : slot.Blocks.ToArray(),
+                        IsHeader = slot.IsHeader,
+                        GridSpan = slot.GridSpan,
+                        VMerge = slot.IsMergeRestart ? ComposeVerticalMerge.Restart : ComposeVerticalMerge.None,
+                    });
+                }
             }
 
             var repeatAsHeader = r == 0 && cells.Count > 0 && cells.All(cc => cc.IsHeader || cc.VMerge == ComposeVerticalMerge.Continue);
@@ -314,6 +408,4 @@ public sealed class ComposePdfModelProjector
         };
     }
 
-    // Sentinel marking a grid position absorbed horizontally by a GridSpan (never emitted).
-    private static readonly ComposeTableCell HorizontalCoverSentinel = new();
 }
