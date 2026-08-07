@@ -324,6 +324,24 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
 
+        // POST /api/communications/{communicationId}/create-task — Job C AD-HOC create (task 056b / FR-E5). The Tasks
+        // reconcile tab's "+ New task" (a task the reviewer AUTHORED, not proposed by the engine) POSTs here with the
+        // task form + the confirmed record as the regarding. Reuses the SAME create-task path as an applied proposal —
+        // IActionSeam.CreateTaskAsync + the caller-impersonated FR-E5 PATCH + ONE append-only Applied audit row — with
+        // NO proposal row / NO citation / NO open-walk (there is nothing extracted to verify). Association gating is the
+        // UI's (NFR-10): the caller supplies the confirmed record, matching the applied-proposal sibling's posture.
+        // Caller resolved server-side (403 fail-closed); a blank subject / missing regarding (422) or a failed
+        // create/patch (422) are refused. Registered unconditionally (ADR-010/032). r1 builds no UI.
+        group.MapPost("/{communicationId:guid}/create-task", CreateAdHocTaskAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("CreateCommunicationAdHocTask")
+            .WithDescription("Job C ad-hoc create (FR-E5 \"+ New task\"): create a reviewer-authored sprk_event (type=task) regarding the confirmed record via IActionSeam.CreateTaskAsync, PATCH the FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row — the SAME create-task path as an applied proposal, minus the proposal/citation. Caller resolved server-side (403 fail-closed); blank subject / missing regarding (422), or failed create/patch (422) are refused.")
+            .Accepts<CreateAdHocTaskRequest>("application/json")
+            .Produces<CreateAdHocTaskResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("VerifyCommunicationAccount")
@@ -998,6 +1016,29 @@ public static class CommunicationEndpoints
         CancellationToken ct)
     {
         var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job C ad-hoc create (task 056b / FR-E5 "+ New task"). Creates a reviewer-authored sprk_event regarding the
+    // confirmed record via the same audited create-task path as an applied proposal (no proposal / no citation). The
+    // caller is resolved server-side (fail-closed 403); failures surface as RFC 7807 ProblemDetails
+    // (403/422/500). The body carries the task form + the confirmed record as the regarding.
+    private static async Task<IResult> CreateAdHocTaskAsync(
+        Guid communicationId,
+        [FromBody] CreateAdHocTaskRequest? request,
+        ICommunicationCreateTaskApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return Results.Problem(
+                title: "Bad Request",
+                detail: "A request body with at least a task subject and the regarding record is required.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var result = await applyService.CreateAdHocAsync(communicationId, request, context.User, ct);
         return TypedResults.Ok(result);
     }
 
