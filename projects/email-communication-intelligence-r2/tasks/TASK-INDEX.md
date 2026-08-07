@@ -11,7 +11,7 @@
 | # | Task | Phase | Status | deps | model·effort | parallel-safe |
 |---|---|---|---|---|---|---|
 | 003 | R1 close-out — reconcile 013 + pin golden misfile emails | 0 | ✅ | — | sonnet·high | ✅ true |
-| 004 | Entra NAA app-registration verify/provision | 0 | 🔲 | — | sonnet·med | ✅ true |
+| 004 | Entra NAA app-registration verify/provision | 0 | ✅ | — | sonnet·med | ✅ true |
 | 010 | HMAC footer/token signing helper (Key Vault) | 1·A | 🔲 | — | **opus·xhigh** | ❌ false |
 | 011 | Footer config (operator app setting, per-tenant) | 1·A | ✅ | — | sonnet·high | ❌ false |
 | 012 | Inject signed footer on outbound send path | 1·A | 🔲 | 010,011 | sonnet·high | ❌ false |
