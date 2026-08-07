@@ -73,7 +73,17 @@ public sealed class ComposeTemplateSource : IComposeTemplateSource
             return null;
         }
 
-        var bytes = Convert.FromBase64String(attachment.DocumentBody);
+        byte[] bytes;
+        try
+        {
+            bytes = Convert.FromBase64String(attachment.DocumentBody);
+        }
+        catch (FormatException)
+        {
+            _logger.LogWarning("Compose template {Template}: attachment {File} has corrupt base64 documentbody",
+                record.Title, attachment.FileName);
+            return null; // loud upstream "template unavailable", never a 500
+        }
         var rendered = false;
 
         if (variables is { Count: > 0 })
@@ -113,15 +123,29 @@ public sealed class ComposeTemplateSource : IComposeTemplateSource
         if (Guid.TryParse(templateIdOrName, out var id))
         {
             var response = await client.GetAsync($"templates({id})?$select=templateid,title", ct);
-            if (!response.IsSuccessStatusCode) return null;
+            if (!response.IsSuccessStatusCode)
+            {
+                if (response.StatusCode != System.Net.HttpStatusCode.NotFound)
+                {
+                    _logger.LogWarning("Compose template fetch failed (NOT a not-found): {Status}", response.StatusCode);
+                }
+                return null;
+            }
             return await response.Content.ReadFromJsonAsync<TemplateRecord>(JsonOptions, ct);
         }
 
         // Exact-title lookup (mirrors EmailTemplateService's fetch-by-name convention).
-        var escaped = templateIdOrName.Replace("'", "''");
+        // Wave-review F1: OData-escape THEN URL-encode — a title like "M&A Engagement Letter" must not
+        // fracture the query string (query-option injection is bounded by the caller's own token, but the
+        // lookup would 400 → false "not found").
+        var escaped = Uri.EscapeDataString(templateIdOrName.Replace("'", "''"));
         var listResponse = await client.GetAsync(
             $"templates?$select=templateid,title&$filter=title eq '{escaped}'&$top=1", ct);
-        if (!listResponse.IsSuccessStatusCode) return null;
+        if (!listResponse.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Compose template title lookup failed: {Status}", listResponse.StatusCode);
+            return null;
+        }
         var list = await listResponse.Content.ReadFromJsonAsync<TemplateRecordList>(JsonOptions, ct);
         return list?.Value?.FirstOrDefault();
     }
@@ -134,8 +158,13 @@ public sealed class ComposeTemplateSource : IComposeTemplateSource
         var response = await client.GetAsync(
             $"annotations?$select=filename,documentbody,modifiedon" +
             $"&$filter=_objectid_value eq {templateId} and isdocument eq true" +
-            $"&$orderby=modifiedon desc", ct);
-        if (!response.IsSuccessStatusCode) return null;
+            $" and (endswith(filename,'.dotx') or endswith(filename,'.docx'))" +
+            $"&$orderby=modifiedon desc&$top=5", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogWarning("Compose template attachment fetch failed: {Status}", response.StatusCode);
+            return null;
+        }
 
         var list = await response.Content.ReadFromJsonAsync<TemplateAttachmentList>(JsonOptions, ct);
         return list?.Value?.FirstOrDefault(a =>
