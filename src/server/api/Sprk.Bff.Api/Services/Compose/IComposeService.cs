@@ -248,6 +248,80 @@ public interface IComposeService
     Task<ComposeAnnotationsState> SaveComposeAnnotationsAsync(
         SaveComposeAnnotationsRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Task 032 (spaarkeai-compose-r6, FR-05) — apply a RESOLVED firm/matter template to a PERSISTED
+    /// Compose document: downloads the document's current SPE bytes (OBO), merges its BODY into the
+    /// template's chrome via the single <see cref="ComposeTemplatePartMergeEngine"/> (task 030 —
+    /// styles/numbering/theme/headers/footers/sectPr from the TEMPLATE, body from the DOCUMENT; never
+    /// re-implemented here), persists the merged result as a NEW SPE version through the existing
+    /// replace path, and re-projects the persisted bytes into the canonical content model so the
+    /// client can re-mount on the response.
+    /// </summary>
+    /// <remarks>
+    /// The merge applies to the PERSISTED bytes — the client guards apply-template on a saved
+    /// (non-dirty, non-transient) document. Template STORAGE/variable resolution is the caller's
+    /// concern (the endpoint resolves via <c>IComposeTemplateSource</c>, the ADR-013-sanctioned
+    /// PublicContracts facade); this method receives only the resolved <c>.dotx</c> bytes —
+    /// <c>Services/Compose</c> stays pure (no AI internals, no Graph types — ADR-007/ADR-013).
+    /// </remarks>
+    /// <param name="httpContext">HTTP context for OBO auth into Graph. Required.</param>
+    /// <param name="driveId">SPE drive (container) id. Required.</param>
+    /// <param name="documentSpeId">SPE drive-item id of the persisted document. Required.</param>
+    /// <param name="resolvedTemplateBytes">The resolved firm/matter <c>.dotx</c> package bytes
+    /// (task 031's <c>IComposeTemplateSource.ResolveAsync</c> output). Required, non-empty.</param>
+    /// <param name="templateName">Display name of the applied template (for the result/logging).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>An <see cref="ApplyComposeTemplateResult"/> with the new SPE version id/etag, the
+    /// merge degradation warnings (loud, never silent), and the post-merge canonical content model.</returns>
+    Task<ApplyComposeTemplateResult> ApplyTemplateAsync(
+        HttpContext httpContext,
+        string driveId,
+        string documentSpeId,
+        byte[] resolvedTemplateBytes,
+        string templateName,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Task 032 (spaarkeai-compose-r6, FR-05) — outcome of
+/// <see cref="IComposeService.ApplyTemplateAsync"/>: the new SPE version the merged document was
+/// persisted as, the 030 engine's degradation warnings, and the post-merge canonical model the
+/// client adopts on re-mount. Standalone (not a <see cref="ComposeDocumentResult"/> — apply-template
+/// is session-less; the client re-mounts via the existing Load path).
+/// </summary>
+public sealed record ApplyComposeTemplateResult
+{
+    /// <summary>SPE drive-item id (unchanged — the merge replaces content in place).</summary>
+    public required string DocumentSpeId { get; init; }
+
+    /// <summary>SPE drive id (echoed from the replace response when available).</summary>
+    public string? DriveId { get; init; }
+
+    /// <summary>New SPE version committed by the merge (mirrors the Save path's
+    /// <see cref="SaveComposeDocumentResult.VersionId"/> convention).</summary>
+    public required string VersionId { get; init; }
+
+    /// <summary>Updated ETag after the replace (Graph response ETag).</summary>
+    public string? ETag { get; init; }
+
+    /// <summary>New file size after the merge.</summary>
+    public long? Size { get; init; }
+
+    /// <summary>The applied template's display name (the <c>template</c> record's title).</summary>
+    public required string TemplateName { get; init; }
+
+    /// <summary>The 030 engine's <c>template-merge-*</c> degradation warnings (codes + counts) —
+    /// loud, never silent (operator principle). Null when the merge was clean.</summary>
+    public IReadOnlyList<ComposeProjectionWarning>? MergeWarnings { get; init; }
+
+    /// <summary>The canonical content model re-projected from the PERSISTED merged bytes (mirrors the
+    /// post-save re-projection) — the client adopts it/re-mounts on the response. Null when the
+    /// post-merge projection failed (best-effort; the merge itself still succeeded).</summary>
+    public ComposeContentModel? ContentModel { get; init; }
+
+    /// <summary>The post-merge canonical projection's flatten warnings. Null when clean or failed.</summary>
+    public IReadOnlyList<ComposeProjectionWarning>? ContentModelWarnings { get; init; }
 }
 
 // ---------------------------------------------------------------------------

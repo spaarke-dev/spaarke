@@ -138,6 +138,8 @@ import {
 import { useDocumentActions } from '@spaarke/document-operations';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
+// FR-05 (task 032, spaarkeai-compose-r6): "Apply firm template" dialog — 030 part-merge wiring.
+import { ComposeApplyTemplateDialog } from './ComposeApplyTemplateDialog';
 // Return-from-Word re-anchor UX (task 054 — BUILT; mounted here by task 103, gap 3.5).
 import { ComposeReanchorBanner } from './ComposeReanchorBanner';
 import { ComposeExternalChangeBanner } from './ComposeExternalChangeBanner';
@@ -1534,7 +1536,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           } else if (usedModelPath && importedBuilt) {
             // Shape 2 — imported transient create-on-save, MODEL shape: the merged model + the retained
             // ORIGINAL bytes as the render carrier.
-            requestBody = { ...createCommon, contentModel: importedBuilt.model, content: encodeRetained(state.docxBytes!) };
+            requestBody = {
+              ...createCommon,
+              contentModel: importedBuilt.model,
+              content: encodeRetained(state.docxBytes!),
+            };
           } else {
             // Shape 3 — transitional op-log create-on-save (unchanged): retained ORIGINAL bytes as the
             // baseline + the tracked op-log so the server applies redlines via ComposeShadowPatchEngine —
@@ -1860,6 +1866,94 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       console.warn('[ComposeWorkspace] refresh-profile request failed (non-fatal):', err);
     }
   }, [state.documentRef?.sprkDocumentId, state.documentRef?.speDriveItemId, state.etag, bffBaseUrl, tenantId]);
+
+  // -------------------------------------------------------------------------
+  // FR-05 (task 032, spaarkeai-compose-r6) — "Apply firm template" (030 engine + 031 resolver,
+  // wired end-to-end). POST /api/compose/documents/{speId}/apply-template merges the PERSISTED
+  // bytes into the resolved firm/matter template's chrome server-side and persists a NEW SPE
+  // version; on 200 this host surfaces the merge degradation warnings through the EXISTING
+  // saveDegradationWarnings banner family and re-mounts from the server-authoritative merged
+  // bytes via the EXISTING requestLoad remount (the same path reload-from-source / the external-
+  // change refresh use — bytes + projection + contentModel + paraIdMap adopt atomically). The
+  // affordance is GUARDED to a saved (non-dirty, non-transient) document — the server merges
+  // persisted bytes, never unsaved editor state (see `applyTemplateDisabledReason` below).
+  // -------------------------------------------------------------------------
+  const [applyTemplateOpen, setApplyTemplateOpen] = React.useState(false);
+  const [isApplyingTemplate, setIsApplyingTemplate] = React.useState(false);
+  const [applyTemplateError, setApplyTemplateError] = React.useState<string | null>(null);
+
+  const handleApplyTemplate = React.useCallback(
+    async (templateIdOrName: string): Promise<void> => {
+      const speId = state.documentRef?.speDriveItemId;
+      if (!speId || !effectiveDriveId || !bffBaseUrl) return;
+      setIsApplyingTemplate(true);
+      setApplyTemplateError(null);
+      try {
+        const response = await authenticatedFetch(
+          `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(speId)}/apply-template`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ driveId: effectiveDriveId, templateIdOrName }),
+          }
+        );
+
+        if (!response.ok) {
+          // Extract ProblemDetails.detail so the dialog shows the actual server-side reason
+          // (mirrors the save-path error extraction).
+          let detail = '';
+          try {
+            const problem = (await response.clone().json()) as { detail?: string; title?: string };
+            detail = problem.detail ?? problem.title ?? '';
+          } catch {
+            detail = '';
+          }
+          setApplyTemplateError(
+            response.status === 404
+              ? detail || `Template "${templateIdOrName}" was not found. Check the template name or ID.`
+              : detail || `Failed to apply the template (HTTP ${response.status}).`
+          );
+          return;
+        }
+
+        const payload = (await response.json()) as {
+          templateName?: string;
+          versionId?: string;
+          // The 030 engine's template-merge-* degradation warnings + the post-merge canonical
+          // projection's flatten warnings — folded into the EXISTING save-degradation banner
+          // family (loud, never silent — operator principle).
+          mergeWarnings?: Array<{ code: string; count: number }> | null;
+          contentModelWarnings?: Array<{ code: string; count: number }> | null;
+        };
+
+        const warnings = mergeDegradationWarnings(payload.mergeWarnings ?? [], payload.contentModelWarnings ?? []);
+        dispatch({
+          kind: 'saveDegradationWarnings',
+          warnings: warnings.length > 0 ? warnings : null,
+        });
+
+        setApplyTemplateOpen(false);
+
+        // Re-mount from the server-authoritative merged bytes — the SAME requestLoad remount the
+        // reload-from-source path uses. The guard ensured a clean (saved) editor, so nothing is
+        // discarded. docxBridge.ts remains the docx↔editor round-trip beneath the remount.
+        if (state.documentRef) {
+          dispatch({
+            kind: 'requestLoad',
+            documentRef: state.documentRef,
+            sessionId: state.sessionId,
+          });
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setApplyTemplateError(`Failed to apply the template: ${message}`);
+      } finally {
+        setIsApplyingTemplate(false);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.documentRef, state.sessionId, effectiveDriveId, bffBaseUrl]
+  );
 
   // FIX #1b — publish the editor's Save into the cross-pane bridge so the Assistant's "Add the
   // document to the DMS" chip (ConversationPane) drives the SAME create-on-save / save-to-matter
@@ -3374,6 +3468,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing;
   const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
 
+  // FR-05 (task 032): "Apply firm template" gating. The button renders only for a PERSISTED doc
+  // (an SPE drive-item exists — the server merges the SAVED bytes; a transient draft has nothing
+  // persisted to merge onto). It is DISABLED-with-tooltip (not hidden) while there is unsaved work
+  // or a save/apply in flight, so the user learns WHY instead of the affordance vanishing.
+  const canShowApplyTemplate =
+    (state.status === 'loaded' || state.status === 'saving') &&
+    !!state.documentRef?.speDriveItemId &&
+    !!effectiveDriveId &&
+    bffBaseUrl.length > 0;
+  const applyTemplateDisabledReason = isApplyingTemplate
+    ? 'Applying template…'
+    : isSavingNow
+      ? 'Saving…'
+      : isDirty || hasTransientDraft
+        ? 'Save your changes first — the firm template is applied to the saved document'
+        : undefined;
+
   // C3 fix (UAT 2026-07-20): Open-in-Word FLUSHES a save first so Word opens the CURRENT bytes —
   // including pending AI redlines as native w:ins/w:del. Redlines (and settled edits) only reach SPE via
   // a save; Open-in-Word used to open the last-PERSISTED bytes, so a redline the user had on screen never
@@ -3632,6 +3743,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // sprk_document to re-profile). Undefined for a transient/unpromoted mount → the button hides.
               onRefreshProfile={state.documentRef?.sprkDocumentId ? () => void triggerRefreshProfile() : undefined}
               isRefreshingProfile={isRefreshingProfile}
+              // FR-05 (task 032): "Apply firm template" — opens the template-select dialog. Wired
+              // only for a persisted doc (SPE source exists); disabled-with-tooltip while
+              // dirty/transient/saving (the server merges the PERSISTED bytes).
+              onApplyTemplate={
+                canShowApplyTemplate
+                  ? () => {
+                      setApplyTemplateError(null);
+                      setApplyTemplateOpen(true);
+                    }
+                  : undefined
+              }
+              applyTemplateDisabledReason={applyTemplateDisabledReason}
               // "Open Document" — opens the source Dataverse Document in the shared preview modal
               // (RichFilePreviewDialog + BFF preview-url). Wired only for a doc with a preview
               // source (a promoted sprk_document); undefined → the toolbar button hides.
@@ -3725,6 +3848,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           }}
         />
       ) : null}
+
+      {/* FR-05 (task 032) — "Apply firm template" dialog. Presentation lives in
+          ComposeApplyTemplateDialog (FormModal preset — ADR-021/ADR-050); this host owns the
+          POST + post-apply remount (handleApplyTemplate above). onClose no-ops while the apply
+          is in flight (FormModal busy contract — never abandon a mid-flight merge silently). */}
+      <ComposeApplyTemplateDialog
+        open={applyTemplateOpen}
+        isApplying={isApplyingTemplate}
+        errorMessage={applyTemplateError}
+        onApply={templateIdOrName => void handleApplyTemplate(templateIdOrName)}
+        onClose={() => {
+          if (isApplyingTemplate) return;
+          setApplyTemplateOpen(false);
+          setApplyTemplateError(null);
+        }}
+      />
 
       {/*
         Task 051: Multi-tab conflict dialog (FR-16 verbatim labels). Rendered

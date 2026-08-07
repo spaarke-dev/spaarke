@@ -596,6 +596,13 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
     public Mock<IGenericEntityService> DataverseMock { get; } = new(MockBehavior.Loose);
     public Mock<IPostUploadIndexingEnqueuer> IndexingMock { get; } = new(MockBehavior.Loose);
 
+    /// <summary>Task 032 (spaarkeai-compose-r6, FR-05): the template-resolution module boundary for the
+    /// apply-template seam (`ComposeApplyTemplateSeamTests`). The REAL `ComposeTemplateSource` performs
+    /// Dataverse Web-API HTTP with a real app-only token — external by definition, so it is doubled here
+    /// exactly like the SPE/Dataverse-entity boundaries above (ADR-038 "mock at module boundaries"). The
+    /// REAL ComposeService + ComposeTemplatePartMergeEngine stay in play.</summary>
+    public Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource> TemplateSourceMock { get; } = new(MockBehavior.Loose);
+
     /// <summary>Resets the boundary mocks between tests (xUnit runs a class's [Fact]s sequentially
     /// against the same IClassFixture instance).</summary>
     public void ResetBoundaries()
@@ -603,6 +610,7 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
         SpeMock.Reset();
         DataverseMock.Reset();
         IndexingMock.Reset();
+        TemplateSourceMock.Reset();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -722,6 +730,18 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 
             services.RemoveAll<IPostUploadIndexingEnqueuer>();
             services.AddSingleton(IndexingMock.Object);
+
+            // Task 032 (FR-05): the apply-template endpoint's two external boundaries —
+            // (a) IComposeTemplateSource (real impl does Dataverse HTTP; doubled like the entity
+            //     boundary above), and
+            // (b) the central TokenCredential (Program.cs registers a real Azure credential whose
+            //     GetTokenAsync would attempt live auth in the test host) → a static fake token.
+            // Inert for every other seam suite sharing this fixture (nothing else resolves them
+            // on their request paths).
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource>();
+            services.AddSingleton(TemplateSourceMock.Object);
+            services.RemoveAll<Azure.Core.TokenCredential>();
+            services.AddSingleton<Azure.Core.TokenCredential>(new ComposeFidelitySeamFakeTokenCredential());
         });
     }
 
@@ -731,6 +751,19 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         return client;
     }
+}
+
+/// <summary>Task 032 (FR-05): static fake for the central <see cref="Azure.Core.TokenCredential"/> —
+/// the apply-template endpoint mints an app-only Dataverse token before resolving the template; a
+/// live credential would attempt real auth in the test host. Never inspected beyond being passed to
+/// the (mocked) IComposeTemplateSource.</summary>
+internal sealed class ComposeFidelitySeamFakeTokenCredential : Azure.Core.TokenCredential
+{
+    public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+        => new("seam-fake-dataverse-token", DateTimeOffset.UtcNow.AddHours(1));
+
+    public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+        => new(new Azure.Core.AccessToken("seam-fake-dataverse-token", DateTimeOffset.UtcNow.AddHours(1)));
 }
 
 /// <summary>Fake auth handler emitting oid + tid (+ name) claims — the Save/create-on-save endpoints

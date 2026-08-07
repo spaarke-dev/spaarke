@@ -164,6 +164,12 @@ public class ComposeService : IComposeService
     // path's single paraId authority (also feeds imported-revision/comment paraId resolution). Pure/
     // stateless; optional + defaults to a fresh instance so existing test constructors compile unchanged.
     private readonly ComposeDocxProjectionBuilder _projectionBuilder;
+    // Task 032 (spaarkeai-compose-r6, FR-05): the 030 house-style chrome engine — merges the document's
+    // BODY into a firm/matter .dotx template's chrome (styles/numbering/theme/headers/footers/sectPr from
+    // the TEMPLATE). Consumed ONLY by ApplyTemplateAsync; pure OOXML byte[]-in/byte[]-out (ADR-007/013).
+    // Optional + defaults to a fresh instance (stateless, thread-safe) so existing test constructors
+    // compile unchanged; DI resolves the registered singleton in every host (ComposeModule.cs).
+    private readonly ComposeTemplatePartMergeEngine _partMergeEngine;
     // FR-08 (task 050): the raw distributed cache handle for the save-path version stamp (Redis, ADR-009 —
     // NOT IMemoryCache). Optional + defaults null so existing test constructors keep compiling; DI resolves
     // the real IDistributedCache (AddStackExchangeRedisCache) in every non-test host. Null in a bare test
@@ -192,7 +198,8 @@ public class ComposeService : IComposeService
         ComposeDocumentRenderer? documentRenderer = null,
         DocxAnnotationReader? annotationReader = null,
         ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
-        ComposeDocxProjectionBuilder? projectionBuilder = null)
+        ComposeDocxProjectionBuilder? projectionBuilder = null,
+        ComposeTemplatePartMergeEngine? partMergeEngine = null)
     {
         _spe = spe;
         _sessions = sessions;
@@ -209,6 +216,9 @@ public class ComposeService : IComposeService
         _annotationReader = annotationReader ?? new DocxAnnotationReader();
         _baselineParaIdStamper = baselineParaIdStamper ?? new ComposeBaselineParaIdStamper();
         _projectionBuilder = projectionBuilder ?? new ComposeDocxProjectionBuilder();
+        // Task 032 (FR-05): mirrors the _patchEngine idiom — stateless singleton-shaped, so a fresh
+        // instance is functionally identical to the DI-registered one.
+        _partMergeEngine = partMergeEngine ?? new ComposeTemplatePartMergeEngine();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // FR-08 (task 050): ADR-009 Redis when present in every non-test host, null (no staleness
@@ -260,6 +270,111 @@ public class ComposeService : IComposeService
             ContentModel = mountModel,
             // Task 013 (012-review F7): flatten warnings ride to the client with the model.
             ContentModelWarnings = mountModel is not null && canonical.Warnings.Count > 0 ? canonical.Warnings : null,
+        };
+    }
+
+    /// <inheritdoc />
+    // Task 032 (spaarkeai-compose-r6, FR-05) — the apply-template orchestration: download the PERSISTED
+    // bytes (mirror LoadAsync's fetch idiom), merge via the ONE 030 engine (never re-implemented),
+    // persist via the existing ReplaceFileContentAsUserAsync idiom (new SPE version — the prior version
+    // stays retrievable, FR-07 safety net), and re-project the persisted bytes (mirror the post-save
+    // re-projection) so the client re-mounts on the response. No Graph type crosses this method
+    // (ADR-007); no AI internals (ADR-013 — the resolved template bytes arrive from the endpoint's
+    // PublicContracts facade call); no AI dispatch (ADR-039).
+    public async Task<ApplyComposeTemplateResult> ApplyTemplateAsync(
+        HttpContext httpContext,
+        string driveId,
+        string documentSpeId,
+        byte[] resolvedTemplateBytes,
+        string templateName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(driveId))
+            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(driveId));
+        if (string.IsNullOrWhiteSpace(documentSpeId))
+            throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(documentSpeId));
+        ArgumentNullException.ThrowIfNull(resolvedTemplateBytes);
+        if (resolvedTemplateBytes.Length == 0)
+            throw new ArgumentException("Resolved template bytes must not be empty.", nameof(resolvedTemplateBytes));
+
+        _logger.LogInformation(
+            "Compose apply-template: drive={DriveId} driveItem={DocumentSpeId} template={TemplateName}",
+            driveId, documentSpeId, templateName);
+
+        // 1) Download the CURRENT persisted bytes (the merge applies to the SAVED document — the client
+        //    guards apply on a non-dirty, non-transient mount). Mirrors LoadAsync's buffered fetch.
+        var stream = await _spe.DownloadFileAsUserAsync(httpContext, driveId, documentSpeId, cancellationToken)
+            .ConfigureAwait(false);
+        if (stream is null)
+        {
+            throw new InvalidOperationException(
+                $"SPE drive-item not found: drive={driveId} item={documentSpeId}");
+        }
+
+        byte[] currentBytes;
+        await using (stream.ConfigureAwait(false))
+        {
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            currentBytes = buffer.ToArray();
+        }
+
+        // 2) The ONE 030 part-merge: template chrome (styles/numbering/theme/headers/footers/sectPr)
+        //    + document body. Degradations are collected loudly (template-merge-* codes), never silent.
+        var mergeWarnings = new List<ComposeProjectionWarning>();
+        var merged = _partMergeEngine.Merge(currentBytes, resolvedTemplateBytes, mergeWarnings);
+
+        // 3) Ingest-stamp paraIds into the merged package (fill-gaps-only, idempotent, fail-open —
+        //    the SAME MintAndPersist pass LoadAsync/ProjectForMount apply) so the re-projection below
+        //    and the client's next Load agree on every paragraph id.
+        var stamp = _baselineParaIdStamper.MintAndPersist(merged);
+        var finalBytes = stamp.Mutated ? stamp.Bytes : merged;
+
+        // 4) Persist as a NEW SPE version via the existing replace idiom (the prior version remains
+        //    retrievable through SPE version history — FR-07 safety net).
+        FileHandleDto? replaced;
+        using (var replaceStream = new MemoryStream(finalBytes, writable: false))
+        {
+            replaced = await _spe.ReplaceFileContentAsUserAsync(
+                    httpContext, driveId, documentSpeId, replaceStream, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (replaced is null || string.IsNullOrEmpty(replaced.Id))
+        {
+            throw new InvalidOperationException(
+                $"SPE apply-template failed: drive-item not found or version not returned. drive={driveId} item={documentSpeId}");
+        }
+
+        // FR-08 alignment: stamp the just-written version as the next save's staleness assert-baseline
+        // (best-effort — mirrors SaveAsync's post-write stamp; a Redis miss never fails the merge).
+        await SetSaveVersionStampAsync(documentSpeId, replaced.ETag, DateTimeOffset.UtcNow, cancellationToken)
+            .ConfigureAwait(false);
+
+        // 5) Re-project the PERSISTED bytes into the canonical model (mirror the post-save
+        //    re-projection) so the client can adopt/re-mount from the response. Best-effort: a failed
+        //    projection returns null — the merge itself already succeeded and persisted.
+        var savedProjection = _projectionBuilder.BuildContentModel(finalBytes, cancellationToken);
+        var contentModel = savedProjection.Status == ComposeProjectionStatus.Failed ? null : savedProjection.Model;
+        var contentModelWarnings = contentModel is not null && savedProjection.Warnings.Count > 0
+            ? savedProjection.Warnings
+            : null;
+
+        _logger.LogInformation(
+            "Compose apply-template: merged + persisted drive={DriveId} driveItem={DocumentSpeId} template={TemplateName} newVersion={VersionId} mergeWarnings={WarningCount}",
+            driveId, documentSpeId, templateName, replaced.Id, mergeWarnings.Count);
+
+        return new ApplyComposeTemplateResult
+        {
+            DocumentSpeId = documentSpeId,
+            DriveId = replaced.DriveId ?? driveId,
+            VersionId = replaced.Id,
+            ETag = replaced.ETag,
+            Size = replaced.Size,
+            TemplateName = templateName,
+            MergeWarnings = mergeWarnings.Count > 0 ? mergeWarnings : null,
+            ContentModel = contentModel,
+            ContentModelWarnings = contentModelWarnings,
         };
     }
 
