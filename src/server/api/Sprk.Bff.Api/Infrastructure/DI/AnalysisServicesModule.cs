@@ -1315,6 +1315,8 @@ public static class AnalysisServicesModule
     {
         services.AddSingleton<ITemplateEngine, TemplateEngine>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IWordTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.WordTemplateService>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource,
+            Sprk.Bff.Api.Services.Ai.Delivery.ComposeTemplateSource>(); // FR-05 (spaarkeai-compose-r6 task 031) — resolved firm/matter .dotx for the Compose part-merge path: REUSES the native template-entity fetch (EmailTemplateService pattern) + IWordTemplateService {{variable}} render; PublicContracts facade per ADR-013 (Compose consumes the facade, never Ai internals). Stateless; registered UNCONDITIONALLY (symmetric per bff-extensions.md §F.1)
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService, Sprk.Bff.Api.Services.Ai.Delivery.EmailTemplateService>();
     }
 
