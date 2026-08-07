@@ -30,6 +30,23 @@ The POML prescribed `deploy-external-spa.yml` / `deploy-bff-api.yml` (CI `workfl
 | SWA `/` | 200 | 200 ✅ |
 | SWA `/project/abc` (deep link) | 200 | 200 via navigationFallback ✅ |
 
+## UAT round 1 (2026-08-07) — findings + fix
+Owner UAT of the deployed SWA surfaced:
+1. Shell renders correctly (branded header, Quick Start + widget tabs, Ask Legal pane).
+2. App showed "Jane Smith (Mock)" with NO login prompt.
+3. Clicking Projects triggered a real MSAL login (ralph.schroeder@spaarke.com).
+4. Data grids mount but show no data.
+
+**Root cause of #2/#3 — DEV MOCK leaked into the worktree build.** `src/client/external-spa/.env.local` (gitignored, local-dev) contains `VITE_DEV_MOCK=true`. Vite loads `.env.local` for `npm run build`, so the first deployed bundle baked in mock mode (hardcoded mock user + AuthGuard short-circuit), while the data client (`BffDataverseClient`) still did real MSAL token acquisition → mid-app login. CI is unaffected (`.env.local` not in the repo).
+
+**Fix (redeployed 2026-08-07):** rebuilt with `VITE_DEV_MOCK=false` (process env overrides `.env.local`) — Vite tree-shook the mock branch out (`grep -c externalfirm.com dist/assets/app.js` → 0). Redeployed to the SWA. Now the real dual-plane bootstrap runs (realm chooser → CIAM/workforce login); header shows the real signed-in user. Memory: `deploy-from-worktree-not-ci.md` updated with the `.env.local` gotcha.
+
+**#4 (no data) — EXPECTED P1 behavior, not a bug:**
+- **Tier-1 entitlements (`/me`) are still MOCKED** — `me-client.ts` returns a hardcoded per-plane payload by design (task 012); the real endpoint is **P2 task 022**. So the default tab set + any `/me` persona name are placeholder in P1.
+- **Data grids call the REAL BFF Tier-2** (`/api/v1/external/api/dataverse/*`, per-caller record scope). Empty = **fail-closed** for a caller with no `sprk_externalrecordaccess` grants. ralph.schroeder@spaarke.com has no project grants → "no access to any projects" is correct.
+- **To see data in UAT**: grant a test CIAM/workforce user access to a test `sprk_project` (admin endpoint `/api/v1/external-access/invite-and-grant` or `/grant`), then re-test. This is provisioning + P2-adjacent, not a P1 code defect.
+- Note: standalone **workforce** browser login (realm chooser "My organization") depends on the workforce-plane auth policy = **P2 task 024**; the CIAM ("Partner") path is the primary P1-tested path.
+
 ## Remaining verification — OWNER (live authenticated E2E)
 Cannot be done by the agent (needs credentials/tenant/Teams):
 - [ ] CIAM sign-in in a browser → reaches the workspace launcher; entitled widgets render.
