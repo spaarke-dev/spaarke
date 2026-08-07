@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Services.Communication.Engine.Detectors;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Membership;
 using Sprk.Bff.Api.Services.Communication.Threads;
+using Sprk.Bff.Api.Services.Communication.Tracking;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 
@@ -242,6 +243,12 @@ public static class CommunicationModule
         services.AddSingleton<AutoFileGate>();
         // Tracking-footer resolver (FR-A1 / ADR-018) — unconditional (ADR-010); pure config resolution.
         services.AddSingleton<TrackingFooterGate>();
+        // Tracking-token HMAC signer (FR-A1 / NFR-07 / task 010). Registered UNCONDITIONALLY (ADR-010; the
+        // FEATURE gate lives in 011's TrackingFooterOptions.Enabled, not the registration). Placement: lives in
+        // Services/Communication/Tracking beside its sole callers — the send path (012) + TrackingTokenRung
+        // (013) — per §10 BFF hygiene. Injects the CENTRAL TokenCredential (Program.cs) to reach Key Vault; no
+        // credential is new-ed here (ADR-028). Singleton: holds the TTL key cache (thread-safe).
+        services.AddSingleton<ITrackingTokenSigner, TrackingTokenSigner>();
         services.AddSingleton<AssociationStatusMapper>();
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
