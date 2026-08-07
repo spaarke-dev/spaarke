@@ -28,14 +28,10 @@
       "name": "Spaarke",
       "contentUrl": "https://green-dune-0c4f1221e.7.azurestaticapps.net",
       "websiteUrl": "https://green-dune-0c4f1221e.7.azurestaticapps.net",
-      "scopes": [
-        "personal"
-      ]
+      "scopes": ["personal"]
     }
   ],
-  "permissions": [
-    "identity"
-  ],
+  "permissions": ["identity"],
   "validDomains": [
     "green-dune-0c4f1221e.7.azurestaticapps.net",
     "spaarke-bff-dev.azurewebsites.net",
@@ -44,6 +40,6 @@
   ],
   "webApplicationInfo": {
     "id": "1e40baad-e065-4aea-a8d4-4b7ab273458c",
-    "resource": "api://1e40baad-e065-4aea-a8d4-4b7ab273458c"
+    "resource": "api://green-dune-0c4f1221e.7.azurestaticapps.net/1e40baad-e065-4aea-a8d4-4b7ab273458c"
   }
 }

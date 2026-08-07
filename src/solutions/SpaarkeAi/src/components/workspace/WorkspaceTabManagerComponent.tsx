@@ -653,7 +653,7 @@ export function WorkspaceTabManagerComponent({
                         styles.tabLabel,
                         isSelected && styles.tabLabelSelected,
                       )}
-                      title={tab.displayName}
+                      title={tab.tooltip ?? tab.displayName}
                     >
                       {tab.displayName}
                     </span>

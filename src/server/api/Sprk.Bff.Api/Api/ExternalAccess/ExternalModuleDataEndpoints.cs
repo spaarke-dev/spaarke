@@ -171,19 +171,47 @@ public static class ExternalModuleDataEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_FETCHXML_ENTITY_MISMATCH" });
         }
 
+        // Compute the caller's Tier-2 accessible set for this module ONCE (a pure read of the already-
+        // resolved principal). An empty set means the caller can see nothing in this module: return 0
+        // rows WITHOUT querying Dataverse (matches ScopeRows' fail-closed contract, and avoids emitting
+        // an invalid empty `IN ()` condition). This is the intended state for the "matters" module today
+        // (D-016-1: always-empty predicate → clean "coming soon" empty state instead of a 500).
+        var accessibleIds = module.AccessibleRecordIds(principal);
+        if (accessibleIds.Count == 0)
+        {
+            logger.LogInformation(
+                "[EXT-MODULE] Fetch module={Module} entity={Entity}: caller has empty accessible set — 0 rows (no query).",
+                module.Name, module.RecordEntity);
+            return Results.Ok(new FetchResponseDto(
+                Array.Empty<IReadOnlyDictionary<string, object?>>(), MoreRecords: false, PagingCookie: null));
+        }
+
         try
         {
-            // App-only execution (broker-only, no OBO), then Tier-2 scope the rows to the caller's set.
-            var result = await fetchService.ExecuteAsync(request, ct).ConfigureAwait(false);
+            // Push the Tier-2 record scope INTO the FetchXML as a server-side <filter> on the module's
+            // RecordIdAttribute (IN the accessible ids) BEFORE execution, so Dataverse returns ONLY
+            // accessible rows. This replaces the prior "fetch one unfiltered page, then drop non-matching
+            // rows in memory" approach, which silently returned 0 rows whenever the accessible records
+            // fell outside the first page of a large/sparse table (e.g. sprk_document: 49 project-linked
+            // of 828 total → page 1 was almost all null-project rows). See
+            // notes/grid-widget-empty-diagnosis.md. ScopeRows below is retained as defense-in-depth.
+            var scopedFetchXml = Tier2ScopeFilterInjector.Inject(request.FetchXml, module.RecordIdAttribute, accessibleIds);
+            var scopedRequest = request with { FetchXml = scopedFetchXml };
+
+            // App-only execution (broker-only, no OBO), then Tier-2 scope the rows to the caller's set
+            // (defense-in-depth — the server-side filter above is the primary control).
+            var result = await fetchService.ExecuteAsync(scopedRequest, ct).ConfigureAwait(false);
             var scoped = module.ScopeRows(principal, result.Entities);
 
             logger.LogInformation(
-                "[EXT-MODULE] Fetch module={Module} entity={Entity}: {Returned}/{Total} rows after Tier-2 scope.",
+                "[EXT-MODULE] Fetch module={Module} entity={Entity}: {Returned}/{Total} rows after Tier-2 scope (server-side filtered).",
                 module.Name, module.RecordEntity, scoped.Count, result.Entities.Count);
 
-            // Paging metadata is intentionally NOT propagated: post-scope row counts differ from the
-            // Dataverse page, so a cross-page cookie would be misleading. R1 BffDataverseClient does not
-            // page this surface (pagingCookie is always undefined). Documented in task-015 notes.
+            // Paging metadata intentionally NOT propagated: R1 BffDataverseClient sends pagingCookie
+            // undefined and does not page this surface. With server-side scoping the returned page now
+            // holds only accessible rows; per-module config `behavior.pageSize` is sized to cover a
+            // realistic per-caller accessible set in one page. Documented in
+            // notes/grid-widget-empty-diagnosis.md.
             return Results.Ok(new FetchResponseDto(scoped, MoreRecords: false, PagingCookie: null));
         }
         catch (FetchXmlParseException)
