@@ -42,6 +42,7 @@ public sealed class CommunicationProposalApplySeamTests
 
     private const int ActionProposed = 100000001;
     private const int ActionApplied = 100000005;
+    private const int ActionOverriden = 100000003;
     private const int ActorTypeHuman = 100000001;
     private const int FieldTypeDateTime = 100000004;
 
@@ -219,6 +220,75 @@ public sealed class CommunicationProposalApplySeamTests
         (await act.Should().ThrowAsync<SdapProblemException>())
             .Which.StatusCode.Should().Be(500);
         _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // FR-E4 (task 055a) — a human OVERRIDE applies the reviewer's edited value (not the AI's), through the SAME
+    // impersonated write, and records a distinct Overriden audit row carrying BOTH the AI proposal and the applied value.
+    [Fact]
+    public async Task ApplyAsync_WithOverrideValue_AppliesHumanEditedValueAndWritesOverridenAuditRow()
+    {
+        var sut = BuildSut();
+        UpdateRecordRequest? applied = null;
+        _actionSeam
+            .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<UpdateRecordRequest, CancellationToken>((r, _) => applied = r)
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { TargetField }, null));
+
+        // The reviewer overrides the AI's proposed "2026-08-15" with their own "2026-09-20".
+        var result = await sut.ApplyAsync(
+            ReviewLogId, new ApplyProposalRequest("2026-09-20"), new ClaimsPrincipal(), CancellationToken.None);
+
+        // The record write carried the HUMAN value, still under the confirming user's impersonation.
+        applied.Should().NotBeNull();
+        applied!.ImpersonateSystemUserId.Should().Be(CallerSystemUserId);
+        applied.FieldMappings.Should().ContainSingle(m =>
+            m.Field == TargetField && m.Type == ActionFieldType.String && m.Value == "2026-09-20");
+
+        // Exactly one append-only OVERRIDEN audit row (actor = the confirming human) whose stored suggestion records
+        // the applied override value + the overridden flag (self-contained: AI proposed 08-15 / human applied 09-20).
+        _generic.Verify(g => g.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == "sprk_emailreviewlog"
+                && ((OptionSetValue)e["sprk_action"]).Value == ActionOverriden
+                && ((OptionSetValue)e["sprk_actortype"]).Value == ActorTypeHuman
+                && ((string)e["sprk_aisuggestion"]).Contains("\"appliedValue\":\"2026-09-20\"")
+                && ((string)e["sprk_aisuggestion"]).Contains("\"overridden\":true")),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+        result.AuditLogId.Should().Be(AuditLogId);
+    }
+
+    // FR-E4 (task 055a) — an override that equals the AI's proposed value is NOT an override: it applies as a plain
+    // Applied row (the override path only engages when the human's value actually differs).
+    [Fact]
+    public async Task ApplyAsync_WithOverrideEqualToProposedValue_AppliesAsPlainAppliedRow()
+    {
+        var sut = BuildSut();
+
+        await sut.ApplyAsync(
+            ReviewLogId, new ApplyProposalRequest("2026-08-15"), new ClaimsPrincipal(), CancellationToken.None);
+
+        _generic.Verify(g => g.CreateAsync(
+            It.Is<Entity>(e => ((OptionSetValue)e["sprk_action"]).Value == ActionApplied),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    // FR-E4 (task 055a) NEGATIVE — an override does NOT bypass the apply-time allow-list gate: a non-allow-listed
+    // field is still refused (403) and nothing is written, even when a human override value is supplied.
+    [Fact]
+    public async Task ApplyAsync_WithOverrideValue_WhenFieldNotAllowListed_StillRefuses403AndNeverWrites()
+    {
+        _allowListRows = new EntityCollection(); // no enabled allow-list row for this (entity, field)
+        var sut = BuildSut();
+
+        var act = () => sut.ApplyAsync(
+            ReviewLogId, new ApplyProposalRequest("2026-09-20"), new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.StatusCode.Should().Be(403);
+        _actionSeam.Verify(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private static Entity ProposedRow()

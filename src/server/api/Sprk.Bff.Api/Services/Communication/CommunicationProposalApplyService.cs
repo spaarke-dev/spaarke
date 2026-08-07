@@ -45,7 +45,24 @@ public interface ICommunicationProposalApplyService
     /// unverifiable citation (422), or a failed coercion/PATCH (422).
     /// </summary>
     Task<ApplyProposalResult> ApplyAsync(Guid reviewLogId, ClaimsPrincipal? caller, CancellationToken ct);
+
+    /// <summary>
+    /// Overload accepting an optional human OVERRIDE value (FR-E4, task 055a). When
+    /// <paramref name="request"/>.<see cref="ApplyProposalRequest.OverrideValue"/> is non-empty and differs from the
+    /// stored proposed value, the reviewer's value is applied INSTEAD of the AI's — through the IDENTICAL apply-time
+    /// guards (allow-list re-validation, citation re-verify, fail-loud coercion, impersonated write) — and the audit
+    /// row is written as <c>Overriden</c> (never a second write path). When <paramref name="request"/> is null or
+    /// carries no override, behavior is identical to the three-argument overload (apply the stored value, <c>Applied</c>
+    /// audit).
+    /// </summary>
+    Task<ApplyProposalResult> ApplyAsync(Guid reviewLogId, ApplyProposalRequest? request, ClaimsPrincipal? caller, CancellationToken ct);
 }
+
+/// <summary>
+/// Optional request body for the Job B apply endpoint (FR-E4, task 055a). Carries the reviewer's edited value when
+/// they override the AI's proposed value before Accept. Absent/blank ⇒ the stored proposed value is applied unchanged.
+/// </summary>
+public sealed record ApplyProposalRequest(string? OverrideValue);
 
 /// <summary>Result of a successful <see cref="ICommunicationProposalApplyService.ApplyAsync"/>.</summary>
 public sealed record ApplyProposalResult(
@@ -97,7 +114,12 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
     }
 
     /// <inheritdoc />
-    public async Task<ApplyProposalResult> ApplyAsync(Guid reviewLogId, ClaimsPrincipal? caller, CancellationToken ct)
+    public Task<ApplyProposalResult> ApplyAsync(Guid reviewLogId, ClaimsPrincipal? caller, CancellationToken ct)
+        => ApplyAsync(reviewLogId, request: null, caller, ct);
+
+    /// <inheritdoc />
+    public async Task<ApplyProposalResult> ApplyAsync(
+        Guid reviewLogId, ApplyProposalRequest? request, ClaimsPrincipal? caller, CancellationToken ct)
     {
         // (1) Resolve the confirming caller server-side; fail closed (403) — NEVER app-only, never client-supplied.
         var resolution = await _callerResolver.ResolveAsync(caller, ct).ConfigureAwait(false);
@@ -200,14 +222,23 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
                 statusCode: 422);
         }
 
-        // (7) Coerce the value fail-loud per the allow-listed field type.
-        if (!EmailUpdateFieldCoercion.TryCoerce(allowedFieldType, suggestion.NewValue, out var coercedValue)
+        // (7) Determine the value to apply: the reviewer's OVERRIDE when supplied (FR-E4, task 055a), else the AI's
+        //     stored proposed value. Either way it flows through the SAME fail-loud coercion, the SAME allow-list gate
+        //     (step 5), the SAME citation re-verify (step 6), and the SAME impersonated write (step 8) — an override
+        //     changes only the VALUE, never a guard and never the write path.
+        var overrideValue = request?.OverrideValue?.Trim();
+        var isOverride = !string.IsNullOrEmpty(overrideValue)
+            && !string.Equals(overrideValue, suggestion.NewValue, StringComparison.Ordinal);
+        var effectiveValue = isOverride ? overrideValue! : suggestion.NewValue;
+
+        // Coerce the value fail-loud per the allow-listed field type.
+        if (!EmailUpdateFieldCoercion.TryCoerce(allowedFieldType, effectiveValue, out var coercedValue)
             || coercedValue is null)
         {
             throw new SdapProblemException(
                 code: "VALUE_COERCION_FAILED",
                 title: "Value Coercion Failed",
-                detail: $"The proposed value '{suggestion.NewValue}' could not be coerced to field type '{allowedFieldType}'.",
+                detail: $"The {(isOverride ? "override" : "proposed")} value '{effectiveValue}' could not be coerced to field type '{allowedFieldType}'.",
                 statusCode: 422);
         }
 
@@ -244,7 +275,7 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         {
             auditLogId = await WriteAppliedAuditRowAsync(
                 communicationRef.Id, targetEntity, targetRecordId, targetField,
-                suggestion, suggestionJson, callerSystemUserId, ct).ConfigureAwait(false);
+                suggestion, suggestionJson, callerSystemUserId, isOverride, effectiveValue, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -382,15 +413,19 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
 
     private async Task<Guid> WriteAppliedAuditRowAsync(
         Guid communicationId, string targetEntity, Guid targetRecordId, string targetField,
-        ProposalSuggestion suggestion, string? suggestionJson, Guid callerSystemUserId, CancellationToken ct)
+        ProposalSuggestion suggestion, string? suggestionJson, Guid callerSystemUserId,
+        bool isOverride, string? appliedValue, CancellationToken ct)
     {
-        var name = $"Applied update: {targetEntity}.{targetField}";
+        // An override is a DISTINCT terminal action (Overriden, actor = the confirming human) — the audit row records
+        // that the human applied a value OTHER than the AI's proposal (FR-E4, task 055a); a plain accept stays Applied.
+        var verb = isOverride ? "Overrode" : "Applied";
+        var name = $"{verb} update: {targetEntity}.{targetField}";
         var entity = new Entity(ReviewLogEntity)
         {
             ["sprk_name"] = Truncate(name, 850),
             ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
             ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeHuman),
-            ["sprk_action"] = new OptionSetValue(ReviewActionApplied),
+            ["sprk_action"] = new OptionSetValue(isOverride ? ReviewActionOverriden : ReviewActionApplied),
             ["sprk_actor"] = Truncate(callerSystemUserId.ToString(), 200),
             ["sprk_targetentity"] = Truncate(targetEntity, 100),
             ["sprk_targetrecordid"] = Truncate(targetRecordId.ToString(), 100),
@@ -401,12 +436,40 @@ public sealed class CommunicationProposalApplyService : ICommunicationProposalAp
         if (suggestion.Confidence.HasValue)
             entity["sprk_confidence"] = (decimal)suggestion.Confidence.Value;
 
-        // Carry the machine suggestion forward so the Applied row is self-contained (AI proposed / human approved /
-        // old→new / citation / confidence).
-        if (!string.IsNullOrWhiteSpace(suggestionJson))
-            entity["sprk_aisuggestion"] = suggestionJson;
+        // Carry the machine suggestion forward so the row is self-contained (AI proposed / human approved / old→new /
+        // citation / confidence). On an override, augment it with the human-applied value + an `overridden` flag so the
+        // audit row records BOTH what the AI proposed and what the human actually wrote.
+        var storedSuggestion = isOverride
+            ? AugmentSuggestionWithOverride(suggestionJson, appliedValue)
+            : suggestionJson;
+        if (!string.IsNullOrWhiteSpace(storedSuggestion))
+            entity["sprk_aisuggestion"] = storedSuggestion;
 
         return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Returns <paramref name="suggestionJson"/> with <c>appliedValue</c> + <c>overridden:true</c> added, so an
+    /// override audit row records the AI proposal AND the human-applied value in one self-contained payload. Falls back
+    /// to a minimal object when the original JSON is absent/unparseable (never throws — audit fidelity is best-effort
+    /// on the JSON augmentation only; the row itself is always written).
+    /// </summary>
+    private static string AugmentSuggestionWithOverride(string? suggestionJson, string? appliedValue)
+    {
+        try
+        {
+            var node = string.IsNullOrWhiteSpace(suggestionJson)
+                ? new System.Text.Json.Nodes.JsonObject()
+                : System.Text.Json.Nodes.JsonNode.Parse(suggestionJson) as System.Text.Json.Nodes.JsonObject
+                    ?? new System.Text.Json.Nodes.JsonObject();
+            node["appliedValue"] = appliedValue;
+            node["overridden"] = true;
+            return node.ToJsonString();
+        }
+        catch (JsonException)
+        {
+            return suggestionJson ?? string.Empty;
+        }
     }
 
     private static ProposalSuggestion? ParseSuggestion(string? json)

@@ -280,7 +280,8 @@ public static class CommunicationEndpoints
         group.MapPost("/proposals/{reviewLogId:guid}/apply", ApplyProposalAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("ApplyCommunicationProposal")
-            .WithDescription("Job B apply (FR-10): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .WithDescription("Job B apply (FR-10 / FR-E4): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only audit row. An optional body {\"overrideValue\":\"…\"} (FR-E4) applies the reviewer's EDITED value instead of the AI's — through the same allow-list + citation + coercion guards, recorded as an Overriden audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .Accepts<ApplyProposalRequest>("application/json")
             .Produces<ApplyProposalResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
@@ -945,11 +946,13 @@ public static class CommunicationEndpoints
     // via SdapProblemException (403/404/409/422/500).
     private static async Task<IResult> ApplyProposalAsync(
         Guid reviewLogId,
+        [FromBody] ApplyProposalRequest? request,
         ICommunicationProposalApplyService applyService,
         HttpContext context,
         CancellationToken ct)
     {
-        var result = await applyService.ApplyAsync(reviewLogId, context.User, ct);
+        // Optional body carries the reviewer's edited value (FR-E4); absent/blank ⇒ apply the stored proposed value.
+        var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
         return TypedResults.Ok(result);
     }
 
