@@ -4,7 +4,7 @@
     <title>Task/deadline reconcile tab (Job C) — FormModal editable task form, create-and-complete + ad-hoc, nothing deadline-bearing auto-finalizes (ADR-015)</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
     <gate>deps 034,052,053 complete (Job C apply/create-task kind + confirmed association + shell)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>User-facing write surface (.tsx) creating deadline-bearing tasks under audit; correctness-critical (ADR-015 no-auto-finalize + NFR-10 gating); net-new tab; §8 FULL.</rigor-reason>
     <model-tier>sonnet</model-tier>
