@@ -8,9 +8,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **040 ✅ + 041 ✅ COMPLETE** — PDF intake end-to-end. Commits: `5ae5a4246` (040 impl) + `2d72046aa` (wire fix) + `f0f9a34ec` (040 triage: all HIGH/MED) + `c73055d33` (041 client) + `48d17ac31` (041 triage: A-HIGH-1 replace-target guard, apply-template both legs, Word-actions gate, grid clamp). Both Step 9.5 reviews PASS-WITH-FINDINGS, every HIGH/MEDIUM fixed same-session except B-MED-3 (container placement — recorded DECISION POINT). Full record: `notes/040-pdf-intake.md`. Server 390/390 + 18/18; client tsc clean + 48/48. |
-| **Step** | Phase 4 remainder: task **042** next |
-| **Status** | ALL work committed; push pending this checkpoint; no agents in flight |
-| **Next Action** | On "continue": task-execute **042** (PDF intake tests + lossiness UX) — its BINDING scope = the "042 test plan" section in `notes/040-pdf-intake.md` (reducer lifecycle, flow negatives, banner, server endpoint mapping, B-LOW-3 invariant, A-LOW-2 display fix) + surface the B-MED-3 container-placement decision to the operator. Then 052 → 090 wrap-up. Publish baseline 47.00 MB. |
+| **Step** | Phase 4 remainder: task **042** next. **B-MED-3 RESOLVED** (operator 2026-08-07, option C): PDF-sourced create-on-save inherits the source PDF record's ADR-024 link lookups (`81ac8d695` — server inheritance + client sourceDocumentRecordId + 2 contract tests; contract suite 6/6). |
+| **Status** | ALL work committed + pushed through `81ac8d695`; no agents in flight |
+| **Next Action** | On "continue": task-execute **042** (PDF intake tests + lossiness UX) — BINDING scope = "042 test plan" in `notes/040-pdf-intake.md` (reducer lifecycle, flow negatives, banner, endpoint 503-vs-422 mapping, B-LOW-3 invariant, A-LOW-2 display fix) + an inheritance flow assertion (client sends sourceDocumentRecordId only when pdfSourced ∧ Path-A). Then 052 → 090 wrap-up. Publish baseline 47.00 MB. |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are

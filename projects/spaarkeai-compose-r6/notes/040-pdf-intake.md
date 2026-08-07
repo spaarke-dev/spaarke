@@ -130,7 +130,7 @@ staleness bug), ADR-021/ADR-040 compliance, and the eight-site non-PDF no-op aud
 | A-MED-2 | Span-coverage collision over-widened rows (invalid Word grid) | **FIXED** — anchors clamp to the contiguous free run; S1 invariant test (sum(GridSpan)==columnCount) |
 | A-LOW-1 | Out-of-grid anchor text counted as "consolidated" but actually dropped | **FIXED** — own `pdf-intake-table-cell-dropped` code + client copy |
 | B-LOW-1/2/4 | triggerSave deps; missing banner copy for the table codes; fileName-undefined asymmetry | **FIXED** all three |
-| B-MED-3 | New docx lands in the BU container (not the source PDF's container/matter) with no parent association | **DEFERRED — DECISION POINT for 042/operator UAT**: current behavior = the established create-on-save flow (BU container). Options: create in the source item's drive; or accept + document. Needs owner call |
+| B-MED-3 | New docx had no record (matter) association | **RESOLVED — operator decision 2026-08-07 (option C, `81ac8d695`)**: containers are BU-level so placement was already shared; the fix is RECORD-link inheritance — the PDF-sourced create sends `sourceDocumentRecordId` and the promote-create copies the source record's ADR-024 link lookups (matter/relatedmatter/project/relatedproject/invoice/workassignment) onto the new row → the Word document files ALONGSIDE the PDF. Best-effort (failed read → loud log, save proceeds unassociated); mirrors the source (no links → none invented); Path-B PDFs (no record) inherit nothing. +2 through-the-wire contract tests |
 | A-LOW-2 | Intake warnings reach the wire but never DISPLAY in the op-log-fallback case | **DEFERRED → 042** |
 | B-LOW-3 | Redundant-but-defensive versionId re-baseline branch | **KEPT**; 042 pins the invariant with a test |
 
