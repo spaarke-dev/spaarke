@@ -316,6 +316,59 @@ public class ComposePdfModelProjectorTests
     }
 
     [Fact]
+    public void Project_SpanCoverageCollision_ClampsGridSpanSoRowsStayGridWidth()
+    {
+        // Step-9.5 A-MEDIUM-2 (041 review, scenario S1): A=(0,1) spans 2 rows; B=(1,0) claims
+        // colSpan 2 — B's sweep hits A's Continue at (1,1). Without the clamp, row 1 emitted
+        // B(GridSpan 2) PLUS A's Continue → width 3 in a 2-column table (invalid Word grid).
+        var table = new DocumentLayoutTable(
+            RowCount: 2,
+            ColumnCount: 2,
+            Cells: new[]
+            {
+                new DocumentLayoutTableCell(0, 0, 1, 1, "A0", IsHeader: false),
+                new DocumentLayoutTableCell(0, 1, 2, 1, "tall", IsHeader: false),
+                new DocumentLayoutTableCell(1, 0, 1, 2, "wide", IsHeader: false),
+            },
+            PageNumber: 1);
+        var layout = new DocumentLayout { PageCount = 1, Blocks = new[] { new DocumentLayoutBlock { Table = table } } };
+
+        var result = _sut.Project(layout);
+
+        var rows = result.Model.Blocks.Single().Table!.Rows;
+        foreach (var row in rows)
+        {
+            row.Cells.Sum(c => c.GridSpan).Should().Be(2, "every row must span exactly the grid width");
+        }
+        rows[1].Cells[0].Blocks.Single().Runs[0].Text.Should().Be("wide");
+        rows[1].Cells[0].GridSpan.Should().Be(1, "the sweep clamps at A's Continue cell");
+        rows[1].Cells[1].VMerge.Should().Be(ComposeVerticalMerge.Continue);
+    }
+
+    [Fact]
+    public void Project_OutOfGridAnchorText_IsCountedAsDroppedNotConsolidated()
+    {
+        // Step-9.5 A-LOW-1: an out-of-grid anchor has no covering cell — its text is unplaceable
+        // and must be counted under the DROPPED code (the consolidated count must not lie).
+        var table = new DocumentLayoutTable(
+            RowCount: 1,
+            ColumnCount: 1,
+            Cells: new[]
+            {
+                new DocumentLayoutTableCell(0, 0, 1, 1, "A", IsHeader: false),
+                new DocumentLayoutTableCell(5, 9, 1, 1, "lost", IsHeader: false),
+            },
+            PageNumber: 1);
+        var layout = new DocumentLayout { PageCount = 1, Blocks = new[] { new DocumentLayoutBlock { Table = table } } };
+
+        var result = _sut.Project(layout);
+
+        result.Warnings.Should().ContainSingle(w => w.Code == ComposePdfModelProjector.WarningTableCellDropped)
+            .Which.Count.Should().Be(1);
+        result.Warnings.Should().NotContain(w => w.Code == ComposePdfModelProjector.WarningTableCellConsolidated);
+    }
+
+    [Fact]
     public void Project_BareBulletGlyph_StaysProseNotAListItem()
     {
         var layout = new DocumentLayout { PageCount = 1, Blocks = new[] { Para("•"), Para("• real item") } };

@@ -73,6 +73,11 @@ public sealed class ComposePdfModelProjector
     /// CONSOLIDATED into the covering cell rather than silently dropped.</summary>
     public const string WarningTableCellConsolidated = "pdf-intake-table-cell-consolidated";
 
+    /// <summary>Step-9.5 A-LOW-1 (041 review): a table anchor cell sat OUTSIDE the reported grid
+    /// (analysis noise) — there is no covering cell to consolidate into, so its text could not be
+    /// placed. Counted honestly under its own code (never conflated with consolidation).</summary>
+    public const string WarningTableCellDropped = "pdf-intake-table-cell-dropped";
+
     /// <summary>No projectable content — the only Failed outcome.</summary>
     public const string WarningEmpty = "pdf-intake-empty";
 
@@ -97,12 +102,13 @@ public sealed class ComposePdfModelProjector
         var listsApproximated = 0;
         var tablesApproximated = 0;
         var tableCellsConsolidated = 0;
+        var tableCellsDropped = 0;
 
         foreach (var block in layout.Blocks)
         {
             if (block.Table is { } table)
             {
-                var composeTable = ProjectTable(table, ref tableCellsConsolidated);
+                var composeTable = ProjectTable(table, ref tableCellsConsolidated, ref tableCellsDropped);
                 if (composeTable is not null)
                 {
                     blocks.Add(new ComposeBlock { Kind = ComposeBlockKind.Table, Table = composeTable });
@@ -170,6 +176,7 @@ public sealed class ComposePdfModelProjector
         if (listsApproximated > 0) warnings.Add(new ComposeProjectionWarning(WarningListApproximated, listsApproximated));
         if (tablesApproximated > 0) warnings.Add(new ComposeProjectionWarning(WarningTableStyleApproximated, tablesApproximated));
         if (tableCellsConsolidated > 0) warnings.Add(new ComposeProjectionWarning(WarningTableCellConsolidated, tableCellsConsolidated));
+        if (tableCellsDropped > 0) warnings.Add(new ComposeProjectionWarning(WarningTableCellDropped, tableCellsDropped));
 
         if (blocks.Count == 0)
         {
@@ -279,7 +286,7 @@ public sealed class ComposePdfModelProjector
     /// <paramref name="consolidatedCells"/> (→ <see cref="WarningTableCellConsolidated"/>).
     /// Returns null for a degenerate table (no rows/columns/cells) — the caller simply skips it.
     /// </summary>
-    private static ComposeTable? ProjectTable(DocumentLayoutTable table, ref int consolidatedCells)
+    private static ComposeTable? ProjectTable(DocumentLayoutTable table, ref int consolidatedCells, ref int droppedCells)
     {
         if (table.RowCount <= 0 || table.ColumnCount <= 0 || table.Cells.Count == 0)
         {
@@ -304,11 +311,12 @@ public sealed class ComposePdfModelProjector
             var c = cell.ColumnIndex;
             if (r < 0 || r >= rowCount || c < 0 || c >= columnCount)
             {
-                // Out-of-grid anchors are analysis noise; text (if any) is unplaceable — count it so
-                // the drop is never silent.
+                // A-LOW-1: out-of-grid anchors are analysis noise; there is NO covering cell to
+                // consolidate into — the text is unplaceable. Counted under its own DROPPED code so
+                // the user-facing count never lies about what happened.
                 if (cell.Text.Length > 0)
                 {
-                    consolidatedCells++;
+                    droppedCells++;
                 }
                 continue;
             }
@@ -327,6 +335,25 @@ public sealed class ComposePdfModelProjector
 
             var rowSpan = Math.Clamp(cell.RowSpan, 1, rowCount - r);
             var colSpan = Math.Clamp(cell.ColumnSpan, 1, columnCount - c);
+
+            // Step-9.5 A-MEDIUM-2 (041 review): shrink spans to the CONTIGUOUS FREE run. An
+            // already-occupied slot inside the sweep (e.g. a prior anchor's vertical Continue) must
+            // not be double-covered — the old `??=` skip left THIS anchor's GridSpan at full width
+            // while the occupied slot still emitted its own cell, over-widening the row (an invalid
+            // Word grid). Geometry-only approximation (no text involved) — covered by the table's
+            // pdf-intake-table-style-approximated posture.
+            var freeCols = 1;
+            while (freeCols < colSpan && grid[r, c + freeCols] is null)
+            {
+                freeCols++;
+            }
+            colSpan = freeCols;
+            var freeRows = 1;
+            while (freeRows < rowSpan && grid[r + freeRows, c] is null)
+            {
+                freeRows++;
+            }
+            rowSpan = freeRows;
 
             var anchor = new Slot { Kind = SlotKind.Anchor };
             anchor.IsHeader = cell.IsHeader;

@@ -1849,6 +1849,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       state.loadedContentModelWarnings,
       state.origin,
       state.versionId,
+      // Task 041 review B-LOW-1: the PDF create-on-save routing reads this — listed explicitly
+      // (previously masked by documentRef replacing on every sourceFormat transition).
+      state.sourceFormat,
       bffBaseUrl,
       effectiveDriveId,
       tenantId,
@@ -3493,7 +3496,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // draft) and not mid-save.
   const isSavingNow = state.status === 'saving';
   const hasWordDocument = toolbarDocumentId.length > 0 && bffBaseUrl.length > 0;
-  const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing;
+  // Task 041 review B-MEDIUM-1: a PDF-sourced mount must NOT open in Word — the persisted item is
+  // the .pdf (Word can't edit it), and the C3 "id stable across the flush" invariant breaks: the
+  // flush IS a create-on-save that re-targets documentRef, so the pre-flush closure would open the
+  // OLD PDF record while the just-flushed edits live in the new docx. Save first (which clears
+  // sourceFormat and re-targets), then Word actions re-enable against the new docx identity.
+  const isPdfSourced = state.sourceFormat === 'pdf';
+  const wordActionsDisabled = isSavingNow || !hasWordDocument || isWordActing || isPdfSourced;
   const canSaveNow = !isSavingNow && bffBaseUrl.length > 0 && (isDirty || hasTransientDraft);
 
   // FR-05 (task 032): "Apply firm template" gating. The button renders only for a PERSISTED doc
@@ -3509,9 +3518,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     ? 'Applying template…'
     : isSavingNow
       ? 'Saving…'
-      : isDirty || hasTransientDraft
-        ? 'Save your changes first — the firm template is applied to the saved document'
-        : undefined;
+      : // Task 041 review B-MEDIUM-2: the persisted item behind a PDF-sourced mount IS the .pdf —
+        // the server-side merge would receive %PDF- bytes (the server also refuses with a typed
+        // 422). Disabled-with-reason, mirroring the server's honest copy.
+        isPdfSourced
+        ? 'Save as a Word document first (a PDF opened in Compose saves as a new Word document), then apply the template'
+        : isDirty || hasTransientDraft
+          ? 'Save your changes first — the firm template is applied to the saved document'
+          : undefined;
 
   // C3 fix (UAT 2026-07-20): Open-in-Word FLUSHES a save first so Word opens the CURRENT bytes —
   // including pending AI redlines as native w:ins/w:del. Redlines (and settled edits) only reach SPE via

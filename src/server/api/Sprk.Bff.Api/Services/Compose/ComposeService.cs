@@ -333,6 +333,21 @@ public class ComposeService : IComposeService
             currentBytes = buffer.ToArray();
         }
 
+        // Step-9.5 A-MEDIUM-1 (task 041 review): apply-template merges the item's CURRENT bytes —
+        // for a PDF item (a PDF-sourced Compose mount that has not saved yet) that would hand %PDF-
+        // bytes to the OOXML part-merge and die deep in the stack as a generic 500. Refuse with the
+        // typed 422 and the honest instruction instead (the client also disables the affordance while
+        // sourceFormat === 'pdf').
+        if (currentBytes.Length >= 5
+            && currentBytes[0] == (byte)'%' && currentBytes[1] == (byte)'P' && currentBytes[2] == (byte)'D'
+            && currentBytes[3] == (byte)'F' && currentBytes[4] == (byte)'-')
+        {
+            throw new ComposePdfIntakeException(
+                "Apply template: this document is a PDF. Save it as a Word document first " +
+                "(a PDF opened in Compose saves as a new Word document), then apply the template.",
+                unavailable: false);
+        }
+
         // 2) The ONE 030 part-merge: template chrome (styles/numbering/theme/headers/footers/sectPr)
         //    + document body. Degradations are collected loudly (template-merge-* codes), never silent.
         var mergeWarnings = new List<ComposeProjectionWarning>();
@@ -1096,6 +1111,22 @@ public class ComposeService : IComposeService
                     httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
                 .ConfigureAwait(false);
             preWriteETag = currentMetadata?.ETag;
+
+            // Step-9.5 A-HIGH-1 (task 041 review): the replace-path save must NEVER write onto a
+            // `.pdf` drive item. GuardBaselineIsNotPdf covers the BASELINE bytes, but under version
+            // skew (new BFF + a Compose client predating 041's create-on-save routing) the client
+            // sends a perfectly valid SYNTHESIZED-docx baseline while the replace TARGET is still the
+            // PDF — the write would corrupt the item for every non-Compose consumer (preview,
+            // download, Word). The metadata is already in hand at this choke point (zero extra Graph
+            // calls); refuse with the typed 422 the endpoints map honestly.
+            if (currentMetadata?.Name?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                throw new ComposePdfIntakeException(
+                    "Compose save: the target document is a PDF. A document opened from a PDF saves " +
+                    "as a NEW Word document (create-on-save) — it cannot be replaced in place. " +
+                    "Reload the document in Compose and save again.",
+                    unavailable: false);
+            }
 
             if (preWriteETag is not null && request.ContentModel is null && (hasOperations || hasComments))
             {

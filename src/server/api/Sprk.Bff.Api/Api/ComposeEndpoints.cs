@@ -1727,6 +1727,17 @@ public static class ComposeEndpoints
         {
             return BadRequest(ex.Message);
         }
+        catch (ComposePdfIntakeException ex)
+        {
+            // Step-9.5 A-MEDIUM-1 (task 041 review): a PDF item cannot take a template merge — honest
+            // typed ProblemDetails instead of a deep OOXML failure as a generic 500. MUST precede the
+            // InvalidOperationException catch below (this type derives from it).
+            logger.LogWarning(ex, "Compose apply-template: PDF target refused. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
+                title: ex.Unavailable ? "PDF Intake Unavailable" : "Template Cannot Apply To A PDF",
+                detail: ex.Message);
+        }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {
             logger.LogWarning(ex, "Compose apply-template: SPE drive-item not found. TraceId={TraceId}", httpContext.TraceIdentifier);

@@ -206,6 +206,8 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'pdf-intake-formula-flattened': 'A formula was converted to plain text.',
   'pdf-intake-list-approximated': 'A bulleted line was converted to a list item.',
   'pdf-intake-table-style-approximated': "A table's PDF styling was replaced with standard table formatting.",
+  'pdf-intake-table-cell-consolidated': 'Overlapping table cells were combined into one cell.',
+  'pdf-intake-table-cell-dropped': "A table cell's text could not be placed and was left out — please check the table.",
 };
 
 /** One human-readable line per warning; known codes get friendly copy (+ ×N when repeated). */

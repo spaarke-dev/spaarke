@@ -688,10 +688,12 @@ export function composeWorkspaceReducer(
               sprkDocumentId: action.sprkDocumentId ?? state.documentRef.sprkDocumentId,
               // Task 041 (FR-06): a PDF-sourced save just created a NEW Word document — reflect the
               // .docx name locally (triggerSave sent it as the create displayName) so subsequent
-              // replace-path saves and the toolbar show the document's real identity.
+              // replace-path saves and the toolbar show the document's real identity. Review
+              // B-LOW-4: the undefined-name fallback MIRRORS triggerSave's ('document.pdf' →
+              // 'document.docx') so local state never diverges from the server record.
               fileName:
-                state.sourceFormat === 'pdf' && state.documentRef.fileName
-                  ? state.documentRef.fileName.replace(/\.pdf$/i, '') + '.docx'
+                state.sourceFormat === 'pdf'
+                  ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
                   : state.documentRef.fileName,
               // gap 1.7: carry the server-minted SPE id back so the mount is no longer transient
               // (empty speDriveItemId) — a second Save now targets the real drive-item.
