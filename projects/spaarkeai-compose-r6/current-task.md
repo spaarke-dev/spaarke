@@ -1,55 +1,43 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-06 (by context-handoff, post-027 close-out — clean boundary; PHASE 1 + PHASE 2 FULLY COMPLETE; next stop is the 014 HUMAN GATE)
+> **Last Updated**: 2026-08-06 (post-014 close-out — PHASE 1 DEPLOYED + UAT PASSED; Phases 3/4/5/6 all unblocked)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — clean boundary. **027 COMPLETE** — and with it EVERY task on the render-on-save critical path except the deploy gate: 001/002/003/004 (Phase 0) · 020/011/021-026 (Phase 2) · 010/012/013/027 (Phase 1 + fidelity DoD) all ✅. |
-| **Next task** | **014 — Deploy + UAT gate (render-on-save + fidelity) — BFF + sprk_spaarkeai together** (`tasks/014-*.poml`; deps 013 ✅ + 027 ✅ SATISFIED). ⚠️ **HUMAN-IN-LOOP** — deployment is not safe to run unattended (project Phase-1 gating note + root §6). DO NOT auto-execute on a bare "continue": present the deploy plan and get explicit operator go-ahead. |
-| **Status** | 027 closed at `6b00765e9`; to be pushed |
-| **Next Action** | Push, then STOP at the human gate: on "continue", read `tasks/014-*.poml`, present the deploy/UAT plan (incl. the pre-deploy master merge + /conflict-check), and WAIT for operator confirmation. |
+| **Task** | NONE ACTIVE — clean boundary. **014 COMPLETE**: render-on-save cutover LIVE on dev (BFF `spaarke-bff-dev` + `sprk_spaarkeai`, deployed SHA `d01007a38`, hash-verified, atomic window held). UAT on the operator's real Corteva signed NDA PASSED — no 422, redlines land, versions accumulate, prior-version-intact confirmed in Word (002's live gate closed). |
+| **Next task** | Operator choice — all now unblocked: **030** (part-merge engine, opus/FULL), **040** (PDF intake, opus/FULL), **050** (OBO version-history endpoint, opus/FULL), **060** (CI fidelity harness, sonnet/FULL). ALSO on the table: UAT defect fix tasks D1-D7 (see notes/phase1-deploy-uat.md defect register) — operator may want D1 (duplicate sprk_document records) + D2 (quote→`2` mangling) prioritized before new phases. |
+| **Status** | 014 closed; deploy + UAT record at notes/phase1-deploy-uat.md |
+| **Next Action** | On "continue": ask/confirm which of 030/040/050/060 (or a D-fix task) to start, then task-execute it. Task creation for D1-D7 fixes = scope addition → operator approval first. |
 
 ### Critical Context (3 sentences)
-027 commits: f7bd052f0 (ComposeFidelityRoundTripSeamTests — 11 wire slices, self-proving driver, goldens
-from manifest §1.5, ZERO adapter gaps; NEW multi-author-redline-synthetic.docx corpus fixture §1.7 filling
-025-F6; T-2 narrative refresh) + 6b00765e9 (review strengthenings F1-F6). Suites: full Compose 1020/1020
-ZERO reds; publish 46.91 MB flat; zero production-code changes. The adr-check agent hit the session usage
-limit mid-run — its axes were verified inline with evidence and recorded transparently in the POML note.
-
-### 014 PRE-DEPLOY OBLIGATIONS (from the standing items + notes §20)
-1. ✅ **DONE 2026-08-06** (worktree-sync Update Only, merge commit `11fe9cfd8` pushed): origin/master
-   (67 commits) merged in — conflicts keep-both in `.claude/CHANGELOG.md` + `projects/INDEX.md` only;
-   BFF build 0 errors; Compose suite 1024/1024 green (one first-run flake in master-side
-   `ComposeServiceCreateOnSaveTests.SaveAsync_WhenBackgroundProfileThrows…` — passes isolated + on
-   re-run, NOT ours); CVE scan CLEAN (Crypto.Xml HIGHs resolved by the merge). /conflict-check re-run:
-   one live overlap — **PR #743** (`assistant-enhancements-r2`) touches `ComposeWorkspace.tsx`
-   (DI-02 flush-on-unmount via the same `triggerSave` path — semantically compatible; whichever
-   merges second resolves a textual conflict there + trivial `projects/INDEX.md`).
-2. **BFF + `sprk_spaarkeai` deploy TOGETHER** (atomic window): an old client on the new server drops
-   separate-comments LOUDLY (`comments-ignored`) — acceptable only within the window.
-3. Ops notes (notes §20): dashboards should chart the `TRANSITIONAL op-log save shape` Warning decay
-   (its hitting zero = the signal to delete the transitional path + engine/count-gate); watch save
-   latency on very large docs (post-save re-projection) at UAT.
-4. UAT focus: the NDA end-to-end (load → edit → save → no 422 → reopen), imported-doc redlines in real
-   Word, clean-save byte-identity (FR-06a), comment round-trip, version history retrievability (002's
-   live v3-after-v4 human gate is still open).
-
-### Remaining project phases after 014
-Phases 3-7: 030-033 (template part-merge) · 040-042 (PDF intake) · 050-052 (version history UX) ·
-060/061 (CI fidelity harness — seeds from the corpus incl. the new §1.7 fixture) · 090 (wrap-up,
-/test-diet gate). Check TASK-INDEX deps as each unblocks.
+Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are
+FROZEN per operator option A (r2 re-coordinates at its merge — "when it is ready to merge and deploy
+we'll coordinate"). UAT defects D1-D7 are triaged in notes/phase1-deploy-uat.md — D1 (dup records per
+save-session) is proven PRE-EXISTING (pre-deploy records exist; all 6 rows share one sprk_graphitemid);
+D2 (curly quotes → digit 2 in AI-suggested text) lives in the suggestion pipeline NOT Services/Compose,
+and D3 (placement failure) is its likely consequence. NONE were hot-patched (gate constraint honored).
 
 ### Standing items
 - Operator principle: best fidelity on common cases; rare shapes degrade LOUDLY, never silently.
+  UAT evidence: indentation ×84 + paragraph-style ×85 flatten warnings on a REAL NDA → these two
+  move to the FRONT of the fidelity-widener backlog (notes §16).
 - NEVER delete docxBridge.ts. Commit --no-verify + Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>.
+- /conflict-check before every BFF PR. PR #743 overlap on ComposeWorkspace.tsx pending (second merger
+  resolves). Publish baseline now **46.94 MB incl. PDBs** (post-master-merge, task 014).
+- Corteva NDA (notes/, UNTRACKED — real signed agreement) = corpus row-4 candidate; needs operator
+  confidentiality sign-off before committing (task 060 decision point).
 - Execution shape per task: implement → slice → commit → Step 9.5 (two background agents on the SHA) +
-  clean-worktree publish (46.91 MB baseline) → fix commit → close-out.
+  clean-worktree publish → fix commit → close-out.
 - Client baselines: tsc 28 pre-existing sibling-dist errors; full-jest 10 pre-existing
   stepOperationInterceptor reds (untouched since compose-r5).
-- Sign-offs R4/R5 RESOLVED to warned baselines; fidelity-widener backlog notes §16.
+
+### Remaining project phases
+Phases 3-7: 030-033 (template part-merge) · 040-042 (PDF intake) · 050-052 (version-history UX — UAT
+finding 9 confirms users look for this in-app) · 060/061 (CI fidelity harness — seed candidates: §1.7
+fixture + Corteva NDA pending sign-off) · 090 (wrap-up, /test-diet gate; deps 014 ✅ + 027 ✅ + 033/042/052/061).
 
 ## Steps completed this task
 (none — no active task)
@@ -58,4 +46,4 @@ Phases 3-7: 030-033 (template part-merge) · 040-042 (PDF intake) · 050-052 (ve
 (none)
 
 ## Decisions
-(none — see notes §20 for 027's record)
+(none — see notes/phase1-deploy-uat.md for 014's record incl. the anti-clobber option-A decision)

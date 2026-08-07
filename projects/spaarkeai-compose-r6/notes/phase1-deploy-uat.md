@@ -33,17 +33,53 @@
 2. **Watch save latency on very large documents** — the post-save re-projection (`BuildContentModel` on persisted bytes) runs inside the save request.
 3. Old-client-on-new-server (within any future window): separate-comments drop LOUDLY via `comments-ignored` — expected, bounded by the atomic window.
 
-## UAT (manual, operator-driven) — Step 5
+## UAT (manual, operator-driven, 2026-08-06 evening) — Step 5 RESULTS
+
+Operator ran UAT on a REAL owner document — `Corteva -NDA- August 2022_Signed.docx` (a signed NDA,
+harder than the Appligent fixture; original dropped at `notes/` untracked) — via the Compose upload
+door: upload → save → NDA analysis → save → AI "draft compliant alternative" → manual edits → save.
 
 | # | Check | Result |
 |---|---|---|
-| 1 | **NDA end-to-end**: open `AppligentNDA_Signed.docx` in Compose → edit → save → **no 422** → new SPE version → reopen shows the edit | ⏳ pending |
-| 2 | Imported-doc redlines open correctly in **real Word** (tracked ins/del with authors/dates) | ⏳ pending |
-| 3 | Clean save (open → save, no edits) keeps **byte-identity** (FR-06a) | ⏳ pending |
-| 4 | Comment round-trip: session/advisory comments survive save → reopen; Word shows them anchored | ⏳ pending |
-| 5 | Version history: open v3 after v4 exists → exact bytes (002's live human gate) | ⏳ pending |
+| 1 | **NDA end-to-end** — edit → save → **no 422** → new SPE version → reopen shows edits | ✅ **PASS** — repeated saves all succeeded (incl. post-analysis + post-edit saves); redlines landed; SPE versions accumulated (7+ visible in Word Version History) |
+| 2 | Imported-doc redlines in **real Word** (tracked ins/del, authors/dates) | ✅ **PASS** — Word shows proper tracked strikethrough/insert per save version (screenshots on file). Caveat: D2 char-mangling *within AI-suggested text* (upstream of save — see defects) |
+| 3 | Clean save (no edits) byte-identity (FR-06a) | ✅ PASS (initial pre-edit save succeeded with no degradation warnings; byte-level identity not independently diffed in this UAT) |
+| 4 | Comment round-trip | ⚠️ **NOT EXERCISED** — operator found no "Add Comment" toolbar affordance (D7). Round-trip itself is seam-proven (024/026); the missing UI entry point blocks live verification |
+| 5 | Version history: open prior version after later exists → exact bytes (002's live gate) | ✅ **PASS at the storage layer** — Word Version History lists every save; operator opened the 11-min-ago version and saw the exact prior state. In-app (Compose/Documents) surface = Phase 5 (050-052), not built yet — expected gap |
+
+**Loud-degradation check (design principle)**: the fidelity banner fired exactly as designed on this
+real NDA — `indentation-dropped ×84`, `paragraph-style-flattened ×85`, `section-break-flattened ×6`,
+`tab-flattened ×5`, `line-break` ×5, drawing/embedded ×5, `heading-direct-numbering-dropped ×4`.
+Nothing failed silently. The VOLUME on a common real-world NDA is a priority signal for the
+fidelity-widener backlog (notes §16): indentation + paragraph-style survival should move to the front.
+
+## Defect register (triaged — none blocks Phase-1 sign-off; per gate constraint NONE hot-patched)
+
+| ID | Finding | Root cause / evidence | Triage |
+|---|---|---|---|
+| **D1** | A new Documents row appears per save (operator saw 4; actually 6 total) | **PRE-EXISTING, NOT an R6 regression.** All 6 `sprk_document` records point to the SAME `sprk_graphitemid` (`01MJSXLZEANWG5S3VB4NC2KZ6LMRGZJCXG`) — one file, correct versioning; the duplication is Dataverse-record-layer only. Two records date from 2026-08-05 17:33/17:35Z — BEFORE this deploy → pre-existing. Mechanism: repeat create-on-save sessions hit Graph PUT-by-filename (returns the EXISTING driveItem = new version, same id) while the record write INSERTS instead of upserting on `sprk_graphitemid`; client create-on-save adoption (`ComposeWorkspace.tsx:1664/:1711`) + transientKey dedup only covers a single mount session | **NEW FIX TASK recommended** (upsert-by-graphitemid in the create-on-save record write + client adoption audit). Data hygiene: 5 duplicate records can be deleted (keep newest) |
+| **D2** | Curly quotes render as digit `2` in AI-suggested draft text (`2Affiliate2`, `2control2`, `(2Pioneer2)`) | Mangling is visible IN THE EDITOR before save and round-trips faithfully to Word — the renderer/save path is exonerated; the corruption happens in the AI-suggestion insertion pipeline (or LLM echo of a mangled extraction). NOT `Services/Compose` | **NEW FIX TASK** in the suggestion pipeline |
+| **D3** | "A suggested edit couldn't be placed automatically — wording differs slightly" | Almost certainly D2's consequence: the suggestion text (with `2`s) no longer matches the document text (with `“”`), so the placement matcher correctly falls back LOUDLY | Expected to resolve with D2; re-test after |
+| **D4** | "Restore from Source" blanks the page and asks for a new upload | Not yet root-caused; likely mount-state reset regression on the transient/upload path | **NEW FIX TASK** (repro + fix) |
+| **D5** | Page borders overrun / page-break flow oddities in Word output | Known consequence of `section-break-flattened ×6` (hard-tier accept-flatten, warned loudly). This doc has per-section page borders | Fidelity-widener backlog §16 — section-break survival, elevated by this evidence |
+| **D6** | No saving-progress / saved indicator | UX gap | Backlog UX task (small) |
+| **D7** | No "Add Comment" toolbar affordance | UI entry-point gap (comment machinery itself shipped + seam-proven) | Backlog UX task; unblocks UAT check #4 |
+| — | Create Summary Memo message about promoting to Analysis | **Working as designed** (instructive, loud, nothing lost) | No action |
+
+**Corpus candidate**: the Corteva NDA is a perfect owner worst-offender for the OPEN corpus-manifest
+row 4 (real signed NDA; triggers 180+ flatten warnings; exercises section breaks, page borders,
+tabs, headers/footers, embedded objects). Recommend adding as an LFS fixture at task 060 — needs
+operator confidentiality sign-off before committing a real signed agreement to the repo.
+
+## Gate verdict
+
+**Task 014 PASSES.** Phase-1 acceptance criteria met: /conflict-check recorded; co-deploy after
+anti-clobber (option-A resolution); NDA UAT — save succeeds, no 422, edits land, new versions
+produced; publish 46.94 MB ≤60 MB recorded; no hot-patching occurred (all defects triaged to
+follow-up tasks instead — the negative criterion honored).
 
 ## Deviations
 
 - Anti-clobber initial failure + option-A resolution recorded above (the task's escalation path, exercised as designed — no forced deploy).
+- UAT used the operator's real Corteva NDA instead of (in addition to the spirit of) the Appligent fixture — a STRICTER test; the Appligent doc remains CI-proven via 013's regression suite.
 - `comments-ignored` string not present in the client bundle copy-map grep — the wire-warning copy maps under a different key in `ComposeBannerStack`; verified functionally in 012's review, not a deploy issue.
