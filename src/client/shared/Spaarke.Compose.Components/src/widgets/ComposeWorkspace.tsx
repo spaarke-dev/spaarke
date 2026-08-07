@@ -1778,10 +1778,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // `contentModel`) already CLEARED them in the reducer, so a subsequent model save does not repeat
         // them — the adopted post-save model reflects the loss. An op-log / byte-identical save does NOT
         // fold them (nothing was flattened on that path) and keeps them retained for a later model save.
+        // Task 042 / A-LOW-2 (041 review): the pdf-intake-* facts materialized at LOAD (the intake
+        // already reflowed the PDF into the synthesized carrier), so they surface on the first save
+        // EVEN when the save took the op-log/byte-passthrough path (usedModelPath false) — the docx
+        // flatten warnings keep their model-path-only fold (their loss materializes only when a
+        // model render runs).
+        const heldWarnings = state.loadedContentModelWarnings ?? [];
         const mergedSaveWarnings = mergeDegradationWarnings(
           payload.degradationWarnings ?? [],
           usedModelPath && importedBuilt ? importedBuilt.warnings : [],
-          usedModelPath ? (state.loadedContentModelWarnings ?? []) : []
+          usedModelPath
+            ? heldWarnings
+            : heldWarnings.filter(w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-'))
         );
         dispatch({
           kind: 'saveDegradationWarnings',

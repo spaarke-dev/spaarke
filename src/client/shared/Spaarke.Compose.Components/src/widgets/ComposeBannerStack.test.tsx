@@ -347,3 +347,112 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 042 (FR-06, PDF intake) — the "Opened from PDF" honest-lossiness notice
+// (041-review binding test plan: render / honest copy / dismiss / re-warn / retire).
+// ---------------------------------------------------------------------------
+
+describe('ComposeBannerStack — "Opened from PDF" honest-lossiness notice (task 042 / FR-06)', () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it('renders the notice with HONEST copy: fixed-layout, new-Word-document, version history — and NO "identical to source" claim', () => {
+    renderStack({ pdfSourceNotice: true });
+
+    const banner = screen.getByTestId('compose-workspace-pdf-source-banner');
+    expect(banner).toBeInTheDocument();
+    expect(screen.getByText('Opened from PDF')).toBeInTheDocument();
+    // Honesty contract (spec FR-06): fixed-layout lossiness + save-creates-new-Word-doc + the
+    // version-history safety net — and never a false fidelity claim.
+    expect(banner.textContent).toMatch(/fixed-layout PDF/i);
+    expect(banner.textContent).toMatch(/new Word document/i);
+    expect(banner.textContent).toMatch(/version history/i);
+    expect(banner.textContent).not.toMatch(/identical to (the )?source/i);
+  });
+
+  it('does not render when pdfSourceNotice is false/omitted (native docx loads unchanged)', () => {
+    renderStack({});
+    expect(screen.queryByTestId('compose-workspace-pdf-source-banner')).not.toBeInTheDocument();
+  });
+
+  it('dismiss hides the notice; a FRESH PDF open (false → true transition) re-warns', async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderStack({ pdfSourceNotice: true });
+
+    await user.click(screen.getByTestId('compose-workspace-pdf-source-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-pdf-source-banner')).not.toBeInTheDocument();
+
+    // The parent drops the prop between documents (requestLoad resets sourceFormat)…
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <ComposeBannerStack
+          errorMessage={null}
+          checkoutStatus="idle"
+          checkoutLockedBy={null}
+          checkoutFailureMessage={null}
+          importWarnings={[]}
+          pendingAssistantInsert={null}
+          pdfSourceNotice={false}
+        />
+      </FluentProvider>
+    );
+    // …and a fresh PDF open re-warns (honesty over convenience — per-open, not per-session).
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <ComposeBannerStack
+          errorMessage={null}
+          checkoutStatus="idle"
+          checkoutLockedBy={null}
+          checkoutFailureMessage={null}
+          importWarnings={[]}
+          pendingAssistantInsert={null}
+          pdfSourceNotice={true}
+        />
+      </FluentProvider>
+    );
+    expect(screen.getByTestId('compose-workspace-pdf-source-banner')).toBeInTheDocument();
+  });
+
+  it('retires when the parent clears the prop after the first successful save (new docx identity)', () => {
+    const { rerender } = renderStack({ pdfSourceNotice: true });
+    expect(screen.getByTestId('compose-workspace-pdf-source-banner')).toBeInTheDocument();
+
+    rerender(
+      <FluentProvider theme={webLightTheme}>
+        <ComposeBannerStack
+          errorMessage={null}
+          checkoutStatus="idle"
+          checkoutLockedBy={null}
+          checkoutFailureMessage={null}
+          importWarnings={[]}
+          pendingAssistantInsert={null}
+          pdfSourceNotice={false}
+        />
+      </FluentProvider>
+    );
+    expect(screen.queryByTestId('compose-workspace-pdf-source-banner')).not.toBeInTheDocument();
+  });
+
+  it('renders correctly under the dark theme (ADR-021 — semantic tokens only, no hardcoded colors)', () => {
+    renderStack({ pdfSourceNotice: true }, webDarkTheme);
+    expect(screen.getByTestId('compose-workspace-pdf-source-banner')).toBeInTheDocument();
+  });
+
+  it('pdf-intake-* degradation codes carry friendly copy in the save-warning banner (no raw codes shown to the user)', () => {
+    renderStack({
+      saveDegradationWarnings: [
+        { code: 'pdf-intake-fixed-layout-reflowed', count: 2 },
+        { code: 'pdf-intake-table-cell-consolidated', count: 1 },
+        { code: 'pdf-intake-table-cell-dropped', count: 1 },
+      ],
+    });
+    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    expect(banner.textContent).toMatch(/reflowed from the fixed PDF page layout/i);
+    expect(banner.textContent).toMatch(/combined into one cell/i);
+    expect(banner.textContent).toMatch(/could not be placed/i);
+    // Friendly copy exists for every code — the raw kebab code never leaks into the sentence.
+    expect(banner.textContent).not.toMatch(/pdf-intake-fixed-layout-reflowed/);
+  });
+});

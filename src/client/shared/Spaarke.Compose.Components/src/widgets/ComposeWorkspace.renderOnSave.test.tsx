@@ -73,6 +73,10 @@ const config: {
   /** Sibling F4: expose adoptBaselineSnapshot on the handle (false = older editor build → the
    * workspace must fall back to recaptureBaselineSnapshot). */
   exposeAdoptBaseline: boolean;
+  /** Task 042 (FR-06): the Load response's sourceFormat marker ('pdf' = PDF-sourced mount). */
+  loadSourceFormat: string | undefined;
+  /** Task 042: the Load response's fileName (drives the .pdf → .docx displayName swap). */
+  loadFileName: string;
 } = {
   loadContentModel: undefined,
   loadContentModelWarnings: undefined,
@@ -82,6 +86,8 @@ const config: {
   builtResult: { model: BUILT_MODEL, warnings: [], snapshot: BUILT_SNAPSHOT },
   editorDirty: true,
   exposeAdoptBaseline: true,
+  loadSourceFormat: undefined,
+  loadFileName: 'contract.docx',
 };
 
 const saveRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -137,8 +143,9 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
         documentRecordId: 'sprk-doc-1',
         content: CONTENT_B64,
         eTag: 'etag-1',
-        versionId: 'v-load',
-        fileName: 'contract.docx',
+        // Task 042: a PDF-sourced load suppresses the version id (server MEDIUM-3 contract).
+        versionId: config.loadSourceFormat === 'pdf' ? null : 'v-load',
+        fileName: config.loadFileName,
         size: 500,
         anchoredAnnotations: [],
         definedTermsTracking: [],
@@ -147,6 +154,7 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
         contentModel: config.loadContentModel,
         contentModelWarnings: config.loadContentModelWarnings,
         origin: config.loadOrigin,
+        sourceFormat: config.loadSourceFormat,
       }),
     } as unknown as Response;
   }
@@ -333,6 +341,8 @@ beforeEach(() => {
   config.builtResult = { model: BUILT_MODEL, warnings: [], snapshot: BUILT_SNAPSHOT };
   config.editorDirty = true;
   config.exposeAdoptBaseline = true;
+  config.loadSourceFormat = undefined;
+  config.loadFileName = 'contract.docx';
 });
 
 async function waitForEditor(): Promise<void> {
@@ -605,5 +615,91 @@ describe('ComposeWorkspace — born-in-editor branches unchanged except the comm
     expect(saveRequests[1].body.comments).toBeUndefined();
     expect(saveRequests[1].body.operationLog).toBeUndefined();
     expect(saveRequests[1].body.baselineVersionId).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 042 (FR-06, PDF intake) — the PDF-sourced save ROUTING (041-review binding test plan):
+// every save while sourceFormat==='pdf' takes the create-on-save route (a NEW Word document; the
+// .pdf item is NEVER the replace target), with the .docx-swapped displayName, the load-minted
+// transient dedup key, and the B-MED-3 sourceDocumentRecordId; after the first success the doc
+// re-targets and the SECOND save is a normal replace onto the NEW item.
+// ---------------------------------------------------------------------------
+
+function renderStoredPdf() {
+  return render(
+    <FluentProvider theme={webLightTheme}>
+      <ComposeWorkspace
+        initialDocumentRef={{ speDriveItemId: SPE_ID, sprkDocumentId: 'sprk-doc-1', fileName: 'Corteva NDA.pdf' }}
+        initialSessionId={DOC_SESSION}
+        bffBaseUrl="https://bff.example.test"
+        driveId={DRIVE_ID}
+        tenantId="tenant-1"
+        containerId="bu-container-1"
+      />
+    </FluentProvider>
+  );
+}
+
+describe('ComposeWorkspace — PDF-sourced save routing (task 042 / FR-06)', () => {
+  beforeEach(() => {
+    config.loadSourceFormat = 'pdf';
+    config.loadFileName = 'Corteva NDA.pdf';
+    config.loadContentModel = LOADED_MODEL;
+  });
+
+  it('a dirty PDF-sourced save posts CREATE-ON-SAVE (never the replace route) with the .docx name, the dedup key, and the source record id', async () => {
+    renderStoredPdf();
+    await waitForEditor();
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    const { url, body } = saveRequests[0];
+    // The route: a NEW Word document — the .pdf item is never the replace target.
+    expect(url).toContain('/api/compose/documents/create-on-save');
+    expect(url).not.toContain(`/documents/${SPE_ID}/save`);
+    // The 041 contract: .docx-swapped display name, load-minted dedup key, B-MED-3 inheritance id.
+    expect(body.displayName).toBe('Corteva NDA.docx');
+    expect(typeof body.transientKey).toBe('string');
+    expect((body.transientKey as string).length).toBeGreaterThan(0);
+    expect(body.sourceDocumentRecordId).toBe('sprk-doc-1');
+    expect(body.forkNew).toBe(false);
+    // Model shape (dirty imported create): merged model + retained synthesized bytes as carrier.
+    expect(body.contentModel).toEqual(BUILT_MODEL);
+    expect(body.content).toBe(CONTENT_B64);
+    expect(body.containerId).toBe('bu-container-1');
+  });
+
+  it('a CLEAN PDF-sourced save still creates (Shape-3 byte passthrough) — never the replace route', async () => {
+    config.editorDirty = false;
+    renderStoredPdf();
+    await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    const { url, body } = saveRequests[0];
+    expect(url).toContain('/api/compose/documents/create-on-save');
+    expect(body.contentModel).toBeUndefined(); // clean → no model render, byte passthrough
+    expect(body.content).toBe(CONTENT_B64);
+    expect(body.displayName).toBe('Corteva NDA.docx');
+    expect(body.sourceDocumentRecordId).toBe('sprk-doc-1');
+  });
+
+  it('after the first successful save the doc re-targets: the SECOND save replaces onto the NEW docx item (sourceFormat cleared)', async () => {
+    renderStoredPdf();
+    await waitForEditor();
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+    expect(saveRequests[0].url).toContain('/api/compose/documents/create-on-save');
+
+    // The create response minted 'spe-created-1' — saveSucceeded re-targeted documentRef and
+    // cleared sourceFormat, so the next save is a NORMAL replace on the NEW item.
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(2));
+    expect(saveRequests[1].url).toContain('/api/compose/documents/spe-created-1/save');
+    expect(saveRequests[1].body.sourceDocumentRecordId).toBeUndefined();
   });
 });
