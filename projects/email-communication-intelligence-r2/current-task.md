@@ -48,12 +48,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 050 ✅ COMPLETE (2026-08-07) |
+| **Task File** | tasks/050-reconciliation-grid.poml |
+| **Title** | Reconciliation grid — enhance DataGrid + "Needs review" sprk_gridconfiguration over sprk_communication (Email) |
+| **Phase** | 5 Pillar E — Reconciliation UI |
+| **Status** | completed — `ReconciliationGrid.tsx` + `needs-review.gridconfiguration.json` + 4 RTL tests in `@spaarke/communication-components`; build green, jest 162/162; Step 9.5 code-review ACCEPT + adr-check 0. **NO DataGrid-framework edit** (seams pre-shipped). Option-set values verified vs `AssociationStatusCodes.cs`/`CommunicationType` (Email=100000000). Operator-gated: live dual-mount (code-page + SpaarkeAi widget) + visual dark-mode contrast (jsdom-verified only). Deviation: subject is the DataGrid primary/clickable column (framework bypasses columnRenderers for isPrimaryName), body-preview is an adjacent custom column. **`NEEDS_REVIEW_CONFIG_ID` is a placeholder GUID — task 059 must update it to the seeded record id.** |
+| **Started** | 2026-08-07 |
+| **Rigor** | FULL · sonnet·high · directional |
+| **Pillar E next** | 051/052/057 dep 050 (now ✅); 053 startable; 054←053; 055←052,053; 056←034✅,052,053. All `parallel-safe:false` (sequential main-session, /conflict-check before each shared PR). |
+
+### KEY FINDING (de-risking — escalation trigger did NOT fire)
+The shipped `@spaarke/ui-components` DataGrid framework **already exposes every seam 050 needs** — NO framework edit required (zero `dataset-grid-framework-r2` contention):
+- `DataGridProps.onRecordOpen?` (DataGrid.tsx:170) — supplied handler fully replaces `defaultRecordOpen` (`effectiveRecordOpen = onRecordOpen ?? defaultRecordOpen`, L1140; default = `Xrm.Navigation.navigateTo`).
+- `DataGridProps.onRecordAction?` (L173) — per-row action seam.
+- `DataGridOverrides.columnRenderers?` (configResolution.ts:42) — per-field custom cells.
+- `DataGridProps.dataverseClient?` (L117, injectable → ADR-012 context-agnostic dual-mount), `hostFilters?` (L135), `membershipResolver?` (L154, FR-E7/057).
+**Deviation from POML step 2** (which said "add the seams to configResolution.ts/DataGrid.tsx"): seams already exist → do NOT touch the shared framework. 050 = author `ReconciliationGrid.tsx` + `needs-review.gridconfiguration.json` + tests in `@spaarke/communication-components` (NEW files, additive). §11 reuse-first win.
 
 ---
 

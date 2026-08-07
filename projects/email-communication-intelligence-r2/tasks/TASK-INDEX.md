@@ -42,7 +42,7 @@
 | 043 | Unify user-upload with capture (engine + dedup) — absorbs FR-B1 add-in drag-target (from 041) | 4·B | ✅ | 021,024 | sonnet·high | ❌ false |
 | 044 | Deploy Pillar B add-in (Azure SWA) | 4·B | 🔲 | 040,042 | sonnet·med | ❌ false |
 | 045 | Pillar B BFF deploy (size/CVE) | 4·B | 🔲 | 041,043 | sonnet·med | ❌ false |
-| 050 | Reconciliation grid — enhance DataGrid + Needs-review config | 5·E | 🔲 | — | sonnet·high | ❌ false (shared lib) |
+| 050 | Reconciliation grid — **`ReconciliationGrid` + Needs-review config (NO DataGrid-framework edit — all seams already shipped; zero dataset-grid-r2 contention)** | 5·E | ✅ | — | sonnet·high | ❌ false (shared lib) |
 | 051 | Triage as grid columns | 5·E | 🔲 | 050 | sonnet·high | ❌ false |
 | 052 | Related-to card-picker (reuse EmailConnectionsReview) | 5·E | 🔲 | 050 | sonnet·high | ❌ false |
 | 053 | Browse shell + one normalized reader (attachment folding) | 5·E | 🔲 | 050 | **opus·xhigh** | ❌ false |

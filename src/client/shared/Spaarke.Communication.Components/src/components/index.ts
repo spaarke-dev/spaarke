@@ -15,3 +15,8 @@ export * from './EmailRecipients';
 export * from './EmailAssociationsAndTracking';
 export * from './EmailComposeActions';
 export * from './EmailWorkspace';
+
+// ReconciliationGrid - Pillar E "Needs review" grid over sprk_communication
+// (email-communication-intelligence-r2 task 050, FR-E2). Thin wrapper over the
+// shared `<DataGrid configId={...} />` framework — see ReconciliationGrid.tsx.
+export * from './ReconciliationGrid';
