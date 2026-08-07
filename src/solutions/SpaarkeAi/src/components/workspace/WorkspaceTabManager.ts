@@ -81,6 +81,14 @@ export interface SerializableWorkspaceTab {
   widgetData: unknown;
   /** Human-readable display label persisted alongside the tab. */
   displayName: string;
+  /**
+   * Optional full-length hover tooltip (spaarkeai-assistant-enhancements-r2
+   * Phase 0 Fix 2). Display-only — persisted alongside `displayName` so a
+   * truncated Compose tab label (e.g. "Corteva…") still shows its full
+   * filename on hover after a page refresh / tab restore. Absent when the
+   * tab's `displayName` is already the complete label (no truncation).
+   */
+  tooltip?: string;
 }
 
 /** Persistence snapshot returned by serializeForPersistence(). */
@@ -158,6 +166,14 @@ export interface WorkspaceTab {
   isLoading: boolean;
   /** Human-readable display label (falls back to widgetType if registry lacks displayName). */
   displayName: string;
+  /**
+   * Optional full-length hover tooltip (spaarkeai-assistant-enhancements-r2
+   * Phase 0 Fix 2). Display-only, threaded through from `addTab`'s optional
+   * 4th argument. `WorkspaceTabManagerComponent` renders `tooltip ??
+   * displayName` as the tab's `title` — undefined here just falls back to
+   * showing `displayName` twice (identical pre-existing behavior).
+   */
+  tooltip?: string;
   /**
    * R6 Pillar 9 visibility contract — when true, the tab's contents appear
    * in the per-turn agent prompt snapshot; when false, the tab is private
@@ -357,9 +373,13 @@ export class WorkspaceTabManager {
    * @param widgetType  - Widget type string from the server event.
    * @param widgetData  - Arbitrary payload to pass to the widget component.
    * @param displayName - Optional display label; defaults to widgetType.
+   * @param tooltip     - Optional full-length hover tooltip (spaarkeai-assistant-
+   *                      enhancements-r2 Phase 0 Fix 2), e.g. the full Compose
+   *                      document filename when `displayName` is a truncated
+   *                      form of it. Omit when `displayName` is already complete.
    * @returns The new tab's stable id.
    */
-  addTab(widgetType: string, widgetData: unknown, displayName?: string): string {
+  addTab(widgetType: string, widgetData: unknown, displayName?: string, tooltip?: string): string {
     // Enforce MAX_WORKSPACE_TABS — evict the oldest non-Home tab when at cap.
     const nonHomeIndices = this._tabs
       .map((t, i) => (t.kind === "widget" ? i : -1))
@@ -383,6 +403,7 @@ export class WorkspaceTabManager {
       Component: null,
       isLoading: true,
       displayName: displayName ?? widgetType,
+      tooltip,
       // R6 Pillar 9 default: user-created tabs are private by default.
       // The agent toggles to true via the "Add to Assistant" affordance.
       visibleToAssistant: false,
@@ -709,6 +730,7 @@ export class WorkspaceTabManager {
         widgetType: t.widgetType,
         widgetData: t.widgetData,
         displayName: t.displayName,
+        ...(t.tooltip ? { tooltip: t.tooltip } : {}),
       }));
 
     return {
@@ -798,6 +820,7 @@ export class WorkspaceTabManager {
         Component,
         isLoading: false,
         displayName: t.displayName,
+        tooltip: t.tooltip,
         // R6 Pillar 9 default: restored tabs default to private. Server-side
         // visibility state is reconciled by the workspace-state fetch path.
         visibleToAssistant: false,
