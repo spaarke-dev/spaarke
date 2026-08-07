@@ -44,7 +44,7 @@ async function bootstrapStandalone(root: Root): Promise<void> {
   root.render(
     <React.StrictMode>
       <MsalProvider instance={msalInstance}>
-        <App />
+        <App teamsHost={false} />
       </MsalProvider>
     </React.StrictMode>
   );
@@ -69,7 +69,7 @@ async function bootstrapTeams(root: Root): Promise<void> {
   root.render(
     <React.StrictMode>
       <MsalProvider instance={adapter.getMsalInstance()}>
-        <App />
+        <App teamsHost={true} />
       </MsalProvider>
     </React.StrictMode>
   );

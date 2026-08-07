@@ -4,7 +4,7 @@
     <title>Extract the workspace-shell from external-spa (branded portal header + tab host + pane layout + dockable left/right assistant pane + sessionStorage)</title>
     <phase>P1 Workspace-shell foundation</phase>
     <gate>blocked-until:004,010</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend chassis refactor of the external-spa (modifying .tsx); the shell is the base every P1/P3/P5 widget mounts on; visual + theme correctness (dark + Teams) + CIAM sessionStorage preservation are load-bearing.</rigor-reason>
     <model-tier>sonnet</model-tier>

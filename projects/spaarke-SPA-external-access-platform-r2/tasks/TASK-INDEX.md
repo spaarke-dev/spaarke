@@ -15,7 +15,7 @@ Legend: 🔲 not-started · ✅ completed · Tier S=sonnet O=opus · Eff h=high 
 | 003 | Prototype Legal Front Door screens | P0 | ✅ | 002 | S/h | STANDARD | — |
 | 004 | Owner visual-approval gate (workspace-shell signed off) | P0 | ✅ | 003 | S/m | MINIMAL | — |
 | 010 | ADR-028 Amendment A3 | P1 | ✅ | none | O/h | FULL | — (.claude/ main-session) |
-| 011 | Workspace-shell scaffold (portal header + tab host + pane layout + dockable assistant) | P1 | 🔲 | 004,010 | S/h | FULL | — (shell base) |
+| 011 | Workspace-shell scaffold (portal header + tab host + pane layout + dockable assistant) | P1 | ✅ | 004,010 | S/h | FULL | — (shell base) |
 | 012 | Widget registry + tabbed workspace + pinned Quick Start + entitlement-gated widget library | P1 | 🔲 | 011 | S/h | FULL | Group B |
 | 013 | Dual-plane auth bootstrap (CIAM + realm discovery) | P1 | 🔲 | 011 | O/h | FULL | — (auth) |
 | 014 | Teams app packaging (manifest + CSP + theme) | P1 | 🔲 | 011 | S/h | STANDARD | Group B |

@@ -10,10 +10,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **011 — Workspace-shell scaffold** (not-started; next) |
+| **Task** | none active — **011 ✅ complete**; next = P1 Group B |
 | **Step** | — |
-| **Status** | not-started (010 ✅ complete) |
-| **Next Action** | `task-execute` on **011** (portal header + tab host + pane layout + dockable assistant). Deps 004,010 both ✅. Then Group B {012,014,017}. |
+| **Status** | not-started (011 done; ready for Group B) |
+| **Next Action** | P1 **Group B {012, 014, 017}** — all prereq 011 ✅. 012 (widget registry + role-defaulted tabs + widget library + populate Quick Start) is the direct follow-on; 014 (Teams packaging) + 017 (dead Power Pages proxy cleanup) parallel-safe. Then 013 → 015 → 016 → 018 → 019. |
+
+### Task 011 — COMPLETE (2026-08-06)
+Workspace-shell chassis extracted into `src/client/external-spa`. **Build green** (`npm run build` — Vite, not `build:prod`; SPA is a code page not PCF, owner-confirmed), **`tsc --noEmit` clean**. Code-review done (2 minor React-hygiene warnings fixed: atomic tab-state; stable callback deps). ADR-021/022/028/050 + §11 compliant.
+- **New** `components/shell/`: `TabStrip` (§11 corner-× exception), `PortalWorkspaceShell` (tabs+dock chassis), `QuickStartPane` (shared `SectionPanel`+`ActionCardRow`+`ChoiceModal`), `AssistantPane` (placeholder → SprkChat is FR-26/051), `useWorkspaceTabs`, `index.ts`.
+- **Rewrote** `AppHeader`→branded portal header (shared `ThemeToggle`); `App.tsx`+`main.tsx` thread `teamsHost`; `WorkspaceHomePage`→shell host.
+- **Preserved** R1 dashboard via `git mv` → `pages/OutsideCounselDashboard.tsx` (task 016 re-homes as widgets).
+- **Auth untouched** (NFR-05): `auth/**`, `TeamsHostAdapter`, `AuthGuard`, `config.ts` unchanged.
+- Deviations + §11 justifications: `notes/task-011-deviations.md`. UI `<ui-tests>` deferred to owner browser (`npm run dev`).
+- **Extension seam for 012**: `PortalWorkspaceShell` takes `widgetTabs` + `renderWidget(id)`; `useWorkspaceTabs.openTab` is the placeholder path 012 replaces with the real entitlement-gated registry.
 
 ### Task 010 — COMPLETE (2026-08-06)
 ADR-028 **Amendment A3** authored (concise-only, additive after A2). Ratifies the dual-plane module-host platform + shipped principal-agnostic endpoint pattern (`CallerPrincipalResolver`/`ExternalCollaboration` dual-scheme/plane-by-iss+tid/third-plane seam) as canonical, with Tier-1⟂Tier-2 invariant. CHANGELOG entry added; TASK-INDEX 010 ✅; POML status=completed. Quality gates skipped (documentation-only). **Escalation trigger did NOT fire** — A2 covers only the collaboration product line, not the platform generalization. Not yet committed (owner-gated).

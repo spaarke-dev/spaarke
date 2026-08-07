@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Button, FluentProvider, makeStyles, tokens, Text, webDarkTheme } from '@fluentui/react-components';
 import type { Theme } from '@fluentui/react-components';
 import { useMsal } from '@azure/msal-react';
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, useNavigate, useLocation } from 'react-router-dom';
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
@@ -116,17 +116,23 @@ const AppShell: React.FC<{
   isDark: boolean;
   onToggleDark: () => void;
   portalUser: PortalUser | null;
-}> = ({ isDark, onToggleDark, portalUser }) => {
+  teamsHost: boolean;
+  onSignOut: () => void;
+}> = ({ isDark, onToggleDark, portalUser, teamsHost, onSignOut }) => {
   const styles = useStyles();
   const navigate = useNavigate();
+  const location = useLocation();
 
   return (
     <div className={styles.root}>
       <AppHeader
         isDark={isDark}
-        onToggleDark={onToggleDark}
         portalUser={portalUser}
         onSettingsClick={() => navigate('/settings')}
+        onSignOut={onSignOut}
+        teamsHost={teamsHost}
+        // The tall welcome band only reads on the workspace landing.
+        showWelcomeBand={location.pathname === '/'}
       />
 
       <main className={styles.content}>
@@ -170,13 +176,13 @@ const AppShell: React.FC<{
  * - ErrorBoundary wrapping all route content
  * - AppHeader with Spaarke logo, user settings link, and theme toggle
  */
-export const App: React.FC = () => {
+export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) => {
   // Use shared 4-level theme cascade: localStorage > URL flags > navbar DOM > system preference.
   // resolveCodePageTheme() handles all levels including system preference fallback when
   // Dataverse context is unavailable (which is always the case for this external SPA).
   const [theme, setTheme] = React.useState<Theme>(resolveCodePageTheme);
 
-  const { accounts } = useMsal();
+  const { accounts, instance } = useMsal();
   const portalUser =
     import.meta.env.VITE_DEV_MOCK === 'true'
       ? {
@@ -206,10 +212,23 @@ export const App: React.FC = () => {
     setTheme(resolveCodePageTheme());
   }, [isDark]);
 
+  // Sign out via MSAL logout (standard redirect). Auth-config/storage untouched (NFR-05).
+  // No-op in dev mock mode (no live MSAL instance to log out of).
+  const handleSignOut = React.useCallback(() => {
+    if (import.meta.env.VITE_DEV_MOCK === 'true') return;
+    void instance.logoutRedirect();
+  }, [instance]);
+
   return (
     <FluentProvider theme={theme} style={{ height: '100%' }}>
       <BrowserRouter>
-        <AppShell isDark={isDark} onToggleDark={handleToggleDark} portalUser={portalUser} />
+        <AppShell
+          isDark={isDark}
+          onToggleDark={handleToggleDark}
+          portalUser={portalUser}
+          teamsHost={teamsHost}
+          onSignOut={handleSignOut}
+        />
       </BrowserRouter>
     </FluentProvider>
   );
