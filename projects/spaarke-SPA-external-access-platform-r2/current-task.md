@@ -1,6 +1,7 @@
 # Current Task State — spaarke-SPA-external-access-platform-r2
 
-> **Last Updated**: 2026-08-06 (P1 foundation complete through 015; next = 016)
+> **Last Updated**: 2026-08-06 (context-handoff — P1 code complete through 016; next = 018)
+> **Recovery**: read Quick Recovery below, then `design.md` §12 + this file's "Key integration seams". Resume with `/project-continue` or "work on task 018".
 
 ## Quick Recovery
 
@@ -28,12 +29,14 @@ Outside Counsel widgets (CIAM plane) on the shell. **Reused existing `<DataGrid 
 | 018 cleanup inert filter + /api/v1/collab | 🔲 | deps 015,016 |
 | 019 deploy P1 | 🔲 | deps 012,013,014,016,017 |
 
-## Commits (pushed to origin/work/spaarke-SPA-external-access-platform-r2)
+## Commits (ALL pushed to origin/work/spaarke-SPA-external-access-platform-r2)
 - `9646d10a2` P0 outcome + task re-decomposition
 - `037b1fba8` #010 ADR-028 A3
 - `c94068c05` #011 workspace-shell scaffold
 - `ca5aa53d3` #012/#014/#017 Group B
-- **#013 + #015 committed locally? NO — not yet committed** (verified green; awaiting owner commit+push)
+- `8b7bda37c` #013/#015 dual-plane auth bootstrap + FR-22 framework generalization
+- `2bdc461da` #016 Outside Counsel widgets ← HEAD
+- Working tree clean. No open PR (worktree workflow — `/merge-to-master` when ready).
 
 ## Key integration seams for 016
 - Client widget: register a widget def in `src/registry/widgetRegistry.ts`; its body consumes the BFF via the **BffDataverseClient** read group `/api/v1/external/api/dataverse/*` (015) — Tier-2 scoped, app-only, un-forked (set `bffBaseUrl={host}/api/v1/external`). Do NOT re-host the Xrm-bound `pages/OutsideCounselDashboard.tsx` — build new widgets on BffDataverseClient (design.md §12 / §11).
