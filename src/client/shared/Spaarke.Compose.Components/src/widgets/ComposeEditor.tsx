@@ -685,6 +685,16 @@ export interface ComposeEditorProps {
    *  Refresh-Profile button so the click gives visible feedback (the re-run is otherwise a silent 202). */
   isRefreshingProfile?: boolean;
 
+  /** FR-05 (spaarkeai-compose-r6 task 032): "Apply firm template" handler — pure forwarder to the
+   *  format toolbar (the host owns the template-select dialog + the apply-template POST). Renders the
+   *  toolbar button when set (the host wires it only for a PERSISTED doc — the server merges the
+   *  SAVED bytes). */
+  onApplyTemplate?: () => void;
+
+  /** FR-05 (task 032): when set, the Apply-firm-template toolbar button is disabled and this text is
+   *  its tooltip (dirty/transient/saving — the merge applies to the persisted bytes only). */
+  applyTemplateDisabledReason?: string;
+
   /**
    * FR-23 (task 044) — display name attributed to comment threads/replies the CURRENT user creates
    * via the comment-thread panel. Resolved by the host (no network call happens here — ADR-028);
@@ -1842,6 +1852,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onReloadFromSource,
       onOpenDocument,
       isRefreshingProfile,
+      onApplyTemplate,
+      applyTemplateDisabledReason,
       commentAuthor = 'You',
       advisoryCommentAuthor = 'AI Advisory Review',
       reviewSummary,
@@ -3076,6 +3088,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onReloadFromSource={onReloadFromSource}
           onOpenDocument={onOpenDocument}
           isRefreshingProfile={isRefreshingProfile}
+          onApplyTemplate={onApplyTemplate}
+          applyTemplateDisabledReason={applyTemplateDisabledReason}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
           // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is

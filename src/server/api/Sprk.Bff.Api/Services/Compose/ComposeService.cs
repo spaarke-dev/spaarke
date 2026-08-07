@@ -82,6 +82,20 @@ public class ComposeService : IComposeService
     private const string CanonicalHashAttribute = "sprk_canonicalhash";
     private const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
 
+    // Task 041 B-MED-3 (option C): the sprk_document record-link lookup vocabulary (ADR-024 — the
+    // SAME closed set AttachmentDocumentAssociationRung follows, type-agnostic by design). A
+    // PDF-sourced create-on-save copies every non-empty lookup from the source PDF's record onto the
+    // new Word document's record so the two file side-by-side under the same matter/project/….
+    private static readonly string[] DocumentAssociationLookupAttributes =
+    {
+        "sprk_matter",
+        "sprk_relatedmatter",
+        "sprk_project",
+        "sprk_relatedproject",
+        "sprk_invoice",
+        "sprk_workassignment",
+    };
+
     // FR-05 create-on-save backbone — the consumer-declared ordered step set the
     // JobAwareCompletionStateProjector projects (container → record → profile-analysis → indexing).
     // These string keys are the Compose contract the future OutcomeCard renders; keep stable.
@@ -179,6 +193,20 @@ public class ComposeService : IComposeService
     // path's single paraId authority (also feeds imported-revision/comment paraId resolution). Pure/
     // stateless; optional + defaults to a fresh instance so existing test constructors compile unchanged.
     private readonly ComposeDocxProjectionBuilder _projectionBuilder;
+    // Task 032 (spaarkeai-compose-r6, FR-05): the 030 house-style chrome engine — merges the document's
+    // BODY into a firm/matter .dotx template's chrome (styles/numbering/theme/headers/footers/sectPr from
+    // the TEMPLATE). Consumed ONLY by ApplyTemplateAsync; pure OOXML byte[]-in/byte[]-out (ADR-007/013).
+    // Optional + defaults to a fresh instance (stateless, thread-safe) so existing test constructors
+    // compile unchanged; DI resolves the registered singleton in every host (ComposeModule.cs).
+    private readonly ComposeTemplatePartMergeEngine _partMergeEngine;
+    // Task 040 (spaarkeai-compose-r6, FR-06): the PublicContracts PDF-intake facade (ADR-013 — Compose
+    // consumes the facade, never Services/Ai internals) + the pure DocumentLayout→canonical-model
+    // projector. The facade is optional + defaults null (bare test ctor / compound-OFF hosts resolve the
+    // NullComposePdfIntakeSource peer via DI); null here means a PDF load fails LOUDLY with a clear
+    // "PDF intake unavailable" message — never a silent empty mount. The projector mirrors the
+    // _patchEngine idiom (stateless singleton-shaped; fresh instance ≡ DI-registered one).
+    private readonly Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource? _pdfIntakeSource;
+    private readonly ComposePdfModelProjector _pdfModelProjector;
     // FR-08 (task 050): the raw distributed cache handle for the save-path version stamp (Redis, ADR-009 —
     // NOT IMemoryCache). Optional + defaults null so existing test constructors keep compiling; DI resolves
     // the real IDistributedCache (AddStackExchangeRedisCache) in every non-test host. Null in a bare test
@@ -208,6 +236,11 @@ public class ComposeService : IComposeService
         DocxAnnotationReader? annotationReader = null,
         ComposeBaselineParaIdStamper? baselineParaIdStamper = null,
         ComposeDocxProjectionBuilder? projectionBuilder = null,
+        ComposeTemplatePartMergeEngine? partMergeEngine = null,
+        Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource? pdfIntakeSource = null,
+        ComposePdfModelProjector? pdfModelProjector = null,
+        // FR-C3 (email-communication-intelligence-r2, merged from master 2026-08-07): content-dedup
+        // graduate-on-divergence detector — union of both branches' trailing optional params.
         ContentDedupDetector? dedupDetector = null)
     {
         _spe = spe;
@@ -225,6 +258,13 @@ public class ComposeService : IComposeService
         _annotationReader = annotationReader ?? new DocxAnnotationReader();
         _baselineParaIdStamper = baselineParaIdStamper ?? new ComposeBaselineParaIdStamper();
         _projectionBuilder = projectionBuilder ?? new ComposeDocxProjectionBuilder();
+        // Task 032 (FR-05): mirrors the _patchEngine idiom — stateless singleton-shaped, so a fresh
+        // instance is functionally identical to the DI-registered one.
+        _partMergeEngine = partMergeEngine ?? new ComposeTemplatePartMergeEngine();
+        // Task 040 (FR-06): facade stays null in a bare test ctor (PDF loads then fail loudly);
+        // the projector mirrors the stateless-singleton idiom above.
+        _pdfIntakeSource = pdfIntakeSource;
+        _pdfModelProjector = pdfModelProjector ?? new ComposePdfModelProjector();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         // FR-C3 (email-communication-intelligence-r2): null in a bare test constructor (dedup hook = no-op),
@@ -283,6 +323,126 @@ public class ComposeService : IComposeService
     }
 
     /// <inheritdoc />
+    // Task 032 (spaarkeai-compose-r6, FR-05) — the apply-template orchestration: download the PERSISTED
+    // bytes (mirror LoadAsync's fetch idiom), merge via the ONE 030 engine (never re-implemented),
+    // persist via the existing ReplaceFileContentAsUserAsync idiom (new SPE version — the prior version
+    // stays retrievable, FR-07 safety net), and re-project the persisted bytes (mirror the post-save
+    // re-projection) so the client re-mounts on the response. No Graph type crosses this method
+    // (ADR-007); no AI internals (ADR-013 — the resolved template bytes arrive from the endpoint's
+    // PublicContracts facade call); no AI dispatch (ADR-039).
+    public async Task<ApplyComposeTemplateResult> ApplyTemplateAsync(
+        HttpContext httpContext,
+        string driveId,
+        string documentSpeId,
+        byte[] resolvedTemplateBytes,
+        string templateName,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(driveId))
+            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(driveId));
+        if (string.IsNullOrWhiteSpace(documentSpeId))
+            throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(documentSpeId));
+        ArgumentNullException.ThrowIfNull(resolvedTemplateBytes);
+        if (resolvedTemplateBytes.Length == 0)
+            throw new ArgumentException("Resolved template bytes must not be empty.", nameof(resolvedTemplateBytes));
+
+        _logger.LogInformation(
+            "Compose apply-template: drive={DriveId} driveItem={DocumentSpeId} template={TemplateName}",
+            driveId, documentSpeId, templateName);
+
+        // 1) Download the CURRENT persisted bytes (the merge applies to the SAVED document — the client
+        //    guards apply on a non-dirty, non-transient mount). Mirrors LoadAsync's buffered fetch.
+        var stream = await _spe.DownloadFileAsUserAsync(httpContext, driveId, documentSpeId, cancellationToken)
+            .ConfigureAwait(false);
+        if (stream is null)
+        {
+            throw new InvalidOperationException(
+                $"SPE drive-item not found: drive={driveId} item={documentSpeId}");
+        }
+
+        byte[] currentBytes;
+        await using (stream.ConfigureAwait(false))
+        {
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            currentBytes = buffer.ToArray();
+        }
+
+        // Step-9.5 A-MEDIUM-1 (task 041 review): apply-template merges the item's CURRENT bytes —
+        // for a PDF item (a PDF-sourced Compose mount that has not saved yet) that would hand %PDF-
+        // bytes to the OOXML part-merge and die deep in the stack as a generic 500. Refuse with the
+        // typed 422 and the honest instruction instead (the client also disables the affordance while
+        // sourceFormat === 'pdf').
+        if (currentBytes.Length >= 5
+            && currentBytes[0] == (byte)'%' && currentBytes[1] == (byte)'P' && currentBytes[2] == (byte)'D'
+            && currentBytes[3] == (byte)'F' && currentBytes[4] == (byte)'-')
+        {
+            throw new ComposePdfIntakeException(
+                "Apply template: this document is a PDF. Save it as a Word document first " +
+                "(a PDF opened in Compose saves as a new Word document), then apply the template.",
+                unavailable: false);
+        }
+
+        // 2) The ONE 030 part-merge: template chrome (styles/numbering/theme/headers/footers/sectPr)
+        //    + document body. Degradations are collected loudly (template-merge-* codes), never silent.
+        var mergeWarnings = new List<ComposeProjectionWarning>();
+        var merged = _partMergeEngine.Merge(currentBytes, resolvedTemplateBytes, mergeWarnings);
+
+        // 3) Ingest-stamp paraIds into the merged package (fill-gaps-only, idempotent, fail-open —
+        //    the SAME MintAndPersist pass LoadAsync/ProjectForMount apply) so the re-projection below
+        //    and the client's next Load agree on every paragraph id.
+        var stamp = _baselineParaIdStamper.MintAndPersist(merged);
+        var finalBytes = stamp.Mutated ? stamp.Bytes : merged;
+
+        // 4) Persist as a NEW SPE version via the existing replace idiom (the prior version remains
+        //    retrievable through SPE version history — FR-07 safety net).
+        FileHandleDto? replaced;
+        using (var replaceStream = new MemoryStream(finalBytes, writable: false))
+        {
+            replaced = await _spe.ReplaceFileContentAsUserAsync(
+                    httpContext, driveId, documentSpeId, replaceStream, cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        if (replaced is null || string.IsNullOrEmpty(replaced.Id))
+        {
+            throw new InvalidOperationException(
+                $"SPE apply-template failed: drive-item not found or version not returned. drive={driveId} item={documentSpeId}");
+        }
+
+        // FR-08 alignment: stamp the just-written version as the next save's staleness assert-baseline
+        // (best-effort — mirrors SaveAsync's post-write stamp; a Redis miss never fails the merge).
+        await SetSaveVersionStampAsync(documentSpeId, replaced.ETag, DateTimeOffset.UtcNow, cancellationToken)
+            .ConfigureAwait(false);
+
+        // 5) Re-project the PERSISTED bytes into the canonical model (mirror the post-save
+        //    re-projection) so the client can adopt/re-mount from the response. Best-effort: a failed
+        //    projection returns null — the merge itself already succeeded and persisted.
+        var savedProjection = _projectionBuilder.BuildContentModel(finalBytes, cancellationToken);
+        var contentModel = savedProjection.Status == ComposeProjectionStatus.Failed ? null : savedProjection.Model;
+        var contentModelWarnings = contentModel is not null && savedProjection.Warnings.Count > 0
+            ? savedProjection.Warnings
+            : null;
+
+        _logger.LogInformation(
+            "Compose apply-template: merged + persisted drive={DriveId} driveItem={DocumentSpeId} template={TemplateName} newVersion={VersionId} mergeWarnings={WarningCount}",
+            driveId, documentSpeId, templateName, replaced.Id, mergeWarnings.Count);
+
+        return new ApplyComposeTemplateResult
+        {
+            DocumentSpeId = documentSpeId,
+            DriveId = replaced.DriveId ?? driveId,
+            VersionId = replaced.Id,
+            ETag = replaced.ETag,
+            Size = replaced.Size,
+            TemplateName = templateName,
+            MergeWarnings = mergeWarnings.Count > 0 ? mergeWarnings : null,
+            ContentModel = contentModel,
+            ContentModelWarnings = contentModelWarnings,
+        };
+    }
+
+    /// <inheritdoc />
     public async Task<LoadComposeDocumentResult> LoadAsync(
         LoadComposeDocumentRequest request,
         HttpContext httpContext,
@@ -324,6 +484,27 @@ public class ComposeService : IComposeService
             using var buffer = new MemoryStream(capacity: (int)Math.Min(metadata.Size ?? 0, int.MaxValue));
             await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
             content = buffer.ToArray();
+        }
+
+        // Task 040 (spaarkeai-compose-r6, FR-06 — PDF intake): a PDF source projects through the SAME
+        // canonical hub as docx, then IS a docx from here on. Detection is extension OR magic-bytes
+        // (a mis-named file lands on the branch its BYTES belong to). The branch: PublicContracts
+        // intake facade (Azure DI prebuilt-layout via the existing parse stack — ADR-013, no
+        // Services/Ai fork) → ComposePdfModelProjector (DocumentLayout → ComposeContentModel, counted
+        // pdf-intake-* degradations, never a construct hard-fail) → SynthesizeDocument (the ONE
+        // renderer) → the synthesized .docx replaces `content`, and the ENTIRE existing pipeline below
+        // (paraId mint, HTML projection, canonical re-projection, annotation read) runs UNCHANGED —
+        // "PDF projects into the same model docx projects into" holds by construction. Unavailability
+        // (compound gate OFF / parse failure / nothing projectable) throws a CLEAR message — never a
+        // silent empty mount over a non-empty PDF (honest-lossiness principle).
+        IReadOnlyList<ComposeProjectionWarning>? pdfIntakeWarnings = null;
+        string? sourceFormat = null;
+        if (IsPdfSource(metadata.Name, content.Span))
+        {
+            sourceFormat = "pdf";
+            (content, pdfIntakeWarnings) = await ProjectPdfToDocxAsync(
+                    content, metadata.Name ?? request.DocumentSpeId, request.DriveId, request.DocumentSpeId, cancellationToken)
+                .ConfigureAwait(false);
         }
 
         // FR-01 (task 010, ingest — design §5, I-1/I-3): mint + PERSIST a w14:paraId into the retained
@@ -373,6 +554,18 @@ public class ComposeService : IComposeService
         var contentModelWarnings = contentModel is not null && canonicalProjection.Warnings.Count > 0
             ? canonicalProjection.Warnings
             : null;
+        // Task 040 (FR-06): the PDF intake's counted degradations ride WITH the model warnings —
+        // intake facts first (source-level: fixed-layout reflow, page chrome, list/table
+        // approximation), then whatever the synthesized-docx re-projection added. Same client
+        // surface as the docx flatten warnings (the 041 honest-lossiness banner reads these).
+        // Step-9.5 LOW-7: merged UNCONDITIONALLY — even if the synthesized-docx re-projection
+        // failed (contentModel null, op-log fallback), the intake facts must still reach the client.
+        if (pdfIntakeWarnings is { Count: > 0 })
+        {
+            contentModelWarnings = contentModelWarnings is null
+                ? pdfIntakeWarnings
+                : pdfIntakeWarnings.Concat(contentModelWarnings).ToList();
+        }
         if (canonicalProjection.Status == ComposeProjectionStatus.Failed)
         {
             _logger.LogWarning(
@@ -461,16 +654,24 @@ public class ComposeService : IComposeService
         // (no version history / lookup unavailable) never fails Load; the client then relies on the
         // retained-bytes Content fast-path.
         string? versionId = null;
-        try
+        // Step-9.5 MEDIUM-3 (task 040): a PDF-sourced load returns SYNTHESIZED docx Content — the
+        // `.pdf` item's version id would be a booby trap (a post-refresh save re-fetching it as the
+        // "retained docx baseline" would hand %PDF- bytes to the OOXML engine). Leave it null so the
+        // save path uses the retained-bytes fast-path or the client's create-on-save routing (041);
+        // ResolveSaveBaselineAsync additionally sniff-guards every resolved baseline (HIGH-2).
+        if (sourceFormat is null)
         {
-            versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose load: current-version-id lookup failed for drive={DriveId} item={DocumentSpeId}; the save path will use the retained-bytes fast-path",
-                request.DriveId, request.DocumentSpeId);
+            try
+            {
+                versionId = await _spe.GetCurrentVersionIdAsUserAsync(httpContext, request.DriveId, request.DocumentSpeId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose load: current-version-id lookup failed for drive={DriveId} item={DocumentSpeId}; the save path will use the retained-bytes fast-path",
+                    request.DriveId, request.DocumentSpeId);
+            }
         }
 
         // 3) Ensure a ChatSession bound to the document. For Path A (Document row present),
@@ -578,7 +779,95 @@ public class ComposeService : IComposeService
             ContentModel = contentModel,
             ContentModelWarnings = contentModelWarnings,
             Origin = origin,
+            SourceFormat = sourceFormat,
         };
+    }
+
+    /// <summary>
+    /// Task 040 (FR-06): PDF source detection — BYTES FIRST (Step-9.5 MEDIUM-5), extension as
+    /// tiebreak, so a mis-named file lands on the branch its bytes belong to: a docx (PK-zip) named
+    /// <c>.pdf</c> takes the native full-fidelity OOXML path (NOT the lossy reflow), and a PDF named
+    /// <c>.docx</c> takes the intake path (it would otherwise fail-closed on the OOXML projection).
+    /// Only when the bytes are neither signature does the extension decide.
+    /// </summary>
+    private static bool IsPdfSource(string? fileName, ReadOnlySpan<byte> content)
+    {
+        // %PDF- → PDF regardless of name.
+        if (content.Length >= 5
+            && content[0] == (byte)'%' && content[1] == (byte)'P' && content[2] == (byte)'D'
+            && content[3] == (byte)'F' && content[4] == (byte)'-')
+        {
+            return true;
+        }
+
+        // PK\x03\x04 (OOXML zip container) → NOT a PDF regardless of name.
+        if (content.Length >= 4
+            && content[0] == 0x50 && content[1] == 0x4B && content[2] == 0x03 && content[3] == 0x04)
+        {
+            return false;
+        }
+
+        return fileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    /// <summary>
+    /// Task 040 (FR-06): the PDF → canonical model → synthesized-docx intake leg. Throws
+    /// <see cref="InvalidOperationException"/> with a clear, user-presentable reason on
+    /// unavailability/failure — the Compose load endpoint surfaces it as a ProblemDetails failure,
+    /// never a silent empty mount. Counts-only logging (privacy — no document text).
+    /// </summary>
+    private async Task<(ReadOnlyMemory<byte> DocxBytes, IReadOnlyList<ComposeProjectionWarning> IntakeWarnings)> ProjectPdfToDocxAsync(
+        ReadOnlyMemory<byte> pdfBytes,
+        string fileName,
+        string driveId,
+        string documentSpeId,
+        CancellationToken cancellationToken)
+    {
+        if (_pdfIntakeSource is null)
+        {
+            // Step-9.5 HIGH-1: TYPED throw — the load endpoint maps Unavailable=true to a 503
+            // ProblemDetails carrying this exact message (never the generic catch-all 500).
+            throw new ComposePdfIntakeException(
+                "PDF intake is unavailable: AI document parsing is disabled on this host " +
+                "(Analysis:Enabled + DocumentIntelligence:Enabled required).",
+                unavailable: true);
+        }
+
+        var layout = await _pdfIntakeSource.ParseAsync(pdfBytes.ToArray(), fileName, cancellationToken)
+            .ConfigureAwait(false);
+        if (layout is null)
+        {
+            // Cause is collapsed at the facade's null boundary (corrupt file vs service failure —
+            // the facade logged the specific reason); surface the retryable framing (503).
+            throw new ComposePdfIntakeException(
+                $"PDF intake failed: the document layout could not be extracted from '{fileName}'. " +
+                "The file may be corrupt or the document-parsing service is unavailable.",
+                unavailable: true);
+        }
+
+        var projection = _pdfModelProjector.Project(layout);
+        if (projection.Status == ComposeProjectionStatus.Failed)
+        {
+            // The projector's only Failed outcome is "nothing projectable" — mounting an empty
+            // editor over a non-empty PDF would be a silent lie (projection contract). 422 — the
+            // document itself is the problem; retrying won't change the outcome.
+            throw new ComposePdfIntakeException(
+                $"PDF intake failed: no editable content could be projected from '{fileName}'.",
+                unavailable: false);
+        }
+
+        // Render the model through the ONE renderer (render-on-save hub) — the synthesized docx is a
+        // first-class imported carrier for everything downstream (paraIds minted by the renderer).
+        var intakeWarnings = new List<ComposeProjectionWarning>(projection.Warnings);
+        var docxBytes = _documentRenderer.SynthesizeDocument(projection.Model, author: "Spaarke Compose", intakeWarnings);
+
+        _logger.LogInformation(
+            "Compose load: PDF intake projected drive={DriveId} item={DocumentSpeId} into the canonical model " +
+            "({Pages} source pages, {Blocks} blocks); degradations={Warnings}",
+            driveId, documentSpeId, layout.PageCount, projection.Model.Blocks.Count,
+            string.Join(",", intakeWarnings.Select(w => $"{w.Code}:{w.Count}")));
+
+        return (docxBytes, intakeWarnings);
     }
 
     /// <summary>
@@ -857,6 +1146,22 @@ public class ComposeService : IComposeService
                     httpContext, request.DriveId!, request.DocumentSpeId!, cancellationToken)
                 .ConfigureAwait(false);
             preWriteETag = currentMetadata?.ETag;
+
+            // Step-9.5 A-HIGH-1 (task 041 review): the replace-path save must NEVER write onto a
+            // `.pdf` drive item. GuardBaselineIsNotPdf covers the BASELINE bytes, but under version
+            // skew (new BFF + a Compose client predating 041's create-on-save routing) the client
+            // sends a perfectly valid SYNTHESIZED-docx baseline while the replace TARGET is still the
+            // PDF — the write would corrupt the item for every non-Compose consumer (preview,
+            // download, Word). The metadata is already in hand at this choke point (zero extra Graph
+            // calls); refuse with the typed 422 the endpoints map honestly.
+            if (currentMetadata?.Name?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                throw new ComposePdfIntakeException(
+                    "Compose save: the target document is a PDF. A document opened from a PDF saves " +
+                    "as a NEW Word document (create-on-save) — it cannot be replaced in place. " +
+                    "Reload the document in Compose and save again.",
+                    unavailable: false);
+            }
 
             if (preWriteETag is not null && request.ContentModel is null && (hasOperations || hasComments))
             {
@@ -1178,6 +1483,8 @@ public class ComposeService : IComposeService
             // row, so the next create-on-save with the same key dedups via the alt-key (see the transient
             // branch above). Null on the replace path / older clients — no dedup identity, unchanged behavior.
             TransientKey = request.TransientKey,
+            // Task 041 B-MED-3 (option C): the source PDF's record — the new row inherits its record links.
+            SourceDocumentRecordId = request.SourceDocumentRecordId,
         };
 
         var promotion = await PromoteIfEphemeralAsync(promoteRequest, httpContext, cancellationToken)
@@ -1335,8 +1642,10 @@ public class ComposeService : IComposeService
             //      save's assert).
             if (!request.Content.IsEmpty)
             {
+                var carrierContent = request.Content.ToArray();
+                GuardBaselineIsNotPdf(carrierContent);
                 var carrierRendered = _documentRenderer.RenderIntoCarrier(
-                    request.Content.ToArray(), request.ContentModel, revisionAuthor, renderDegradations);
+                    carrierContent, request.ContentModel, revisionAuthor, renderDegradations);
                 return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
             }
 
@@ -1344,6 +1653,7 @@ public class ComposeService : IComposeService
             {
                 var carrierBytes = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
                     .ConfigureAwait(false);
+                GuardBaselineIsNotPdf(carrierBytes);
                 var carrierRendered = _documentRenderer.RenderIntoCarrier(
                     carrierBytes, request.ContentModel, revisionAuthor, renderDegradations);
                 return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
@@ -1361,7 +1671,9 @@ public class ComposeService : IComposeService
         // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
         if (!request.Content.IsEmpty)
         {
-            return (request.Content.ToArray(), null);
+            var retained = request.Content.ToArray();
+            GuardBaselineIsNotPdf(retained);
+            return (retained, null);
         }
 
         // (b) FR-06 primary: re-fetch the LOAD-TIME SPE version by versionId (task 002), behind the
@@ -1370,6 +1682,7 @@ public class ComposeService : IComposeService
         {
             var baseline = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
                 .ConfigureAwait(false);
+            GuardBaselineIsNotPdf(baseline);
             return (baseline, null);
         }
 
@@ -1379,6 +1692,30 @@ public class ComposeService : IComposeService
             "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
             "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
             nameof(request));
+    }
+
+    /// <summary>
+    /// Task 040 Step-9.5 fix (HIGH-2): every resolved SAVE BASELINE must be an OOXML package, never a
+    /// PDF. Before 040, a PDF could not reach a save (Load fail-closed on the OOXML projection); now a
+    /// PDF load succeeds with SYNTHESIZED docx Content and a rogue/stale caller could hand the engine
+    /// %PDF- bytes (a re-fetched PDF-item version, or the raw PDF echoed as "retained bytes") — which
+    /// would either throw deep inside the OOXML stack as a generic 500, or worse, write docx bytes
+    /// over the .pdf item. Sniff once here (the single choke point every baseline passes through) and
+    /// refuse LOUDLY with the honest instruction (the 041 client saves PDFs via create-on-save; the
+    /// endpoint maps this to 422).
+    /// </summary>
+    private static void GuardBaselineIsNotPdf(ReadOnlySpan<byte> baseline)
+    {
+        if (baseline.Length >= 5
+            && baseline[0] == (byte)'%' && baseline[1] == (byte)'P' && baseline[2] == (byte)'D'
+            && baseline[3] == (byte)'F' && baseline[4] == (byte)'-')
+        {
+            throw new ComposePdfIntakeException(
+                "Compose save: the save baseline resolved to PDF bytes. A document opened from a PDF " +
+                "saves as a NEW Word document (create-on-save) — it cannot replace the PDF in place. " +
+                "Re-open the document and save again.",
+                unavailable: false);
+        }
     }
 
     /// <summary>Whether the request carries the full coordinate set for an FR-06 load-time-version
@@ -2280,7 +2617,65 @@ public class ComposeService : IComposeService
             entity[FilePathAttribute] = request.FilePath!;
         }
 
+        // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): a PDF-sourced create-on-save
+        // INHERITS the source PDF record's link lookups so the new Word document files ALONGSIDE the
+        // PDF (same matter/project/… — containers are BU-level, so placement is already shared; the
+        // RECORD association is what was missing). The copied set is the ADR-024 sprk_document link
+        // vocabulary (mirrors AttachmentDocumentAssociationRung's map). Best-effort: a failed source
+        // read logs LOUDLY and the create proceeds unassociated (mirrors the source having no links —
+        // never fails the save); the idempotent existing-row branch above never reaches here, so an
+        // existing record's links are never mutated.
+        if (request.SourceDocumentRecordId is { } sourceRecordId)
+        {
+            try
+            {
+                var sourceEntity = await _dataverse.RetrieveAsync(
+                        DocumentLogicalName,
+                        sourceRecordId,
+                        DocumentAssociationLookupAttributes,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+
+                var inherited = 0;
+                if (sourceEntity is not null)
+                {
+                    foreach (var lookup in DocumentAssociationLookupAttributes)
+                    {
+                        var reference = sourceEntity.GetAttributeValue<EntityReference>(lookup);
+                        if (reference is null || reference.Id == Guid.Empty)
+                        {
+                            continue;
+                        }
+
+                        entity[lookup] = new EntityReference(reference.LogicalName, reference.Id);
+                        inherited++;
+                    }
+                }
+
+                if (inherited > 0)
+                {
+                    _logger.LogInformation(
+                        "Compose promote: inherited {Count} record link(s) from source document {SourceRecordId} (PDF-sourced create — filed alongside the source).",
+                        inherited, sourceRecordId);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "Compose promote: source document {SourceRecordId} carries no record links to inherit — the new document is created unassociated (mirrors the source).",
+                        sourceRecordId);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Compose promote: link inheritance from source document {SourceRecordId} failed — creating the new document UNASSOCIATED (the save itself is not affected). Associate manually or re-file from the Documents surface.",
+                    sourceRecordId);
+            }
+        }
+
         // ── FR-C3 content-dedup, graduate-on-divergence (CREATE branch) ─────────────────────────────
+        // (email-communication-intelligence-r2, merged from master 2026-08-07 — runs AFTER the B-MED-3
+        // link inheritance above; the two blocks stamp disjoint attribute sets on the same new entity.)
         // Read the just-uploaded item's content identity (quickXorHash) and record it. On a byte-identical
         // hit against an existing CANONICAL, LINK this editable copy (sprk_canonicaldocument) rather than
         // suppressing it: a Compose document is a living document that diverges on first edit — the idempotent
