@@ -2772,10 +2772,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // save path exports (a plain session comment's text passes through unchanged).
     const collectSessionThreadInputs = (): ImportedModelThreadInput[] => {
       const importedIds = new Set(initialCommentThreads.map(t => t.id));
-      const threads = [
-        ...commentThreadsRef.current.filter(t => !importedIds.has(t.id)),
-        ...advisoryComments.threads,
-      ];
+      const threads = [...commentThreadsRef.current.filter(t => !importedIds.has(t.id)), ...advisoryComments.threads];
       return threads.map(t => ({
         id: t.id,
         author: t.author,

@@ -95,9 +95,7 @@ describe('fetchEnginePreSelection', () => {
     // Record number (from the RecordNameMatch contributor) surfaces as displayInfo.
     expect(result!.predicted.displayInfo).toBe('REAL-2026-123');
     // Endpoint is the by-message-id/{id}/suggestions route with the id URL-encoded.
-    expect(mockGet).toHaveBeenCalledWith(
-      expect.stringContaining('/api/office/communications/by-message-id/')
-    );
+    expect(mockGet).toHaveBeenCalledWith(expect.stringContaining('/api/office/communications/by-message-id/'));
     expect(mockGet).toHaveBeenCalledWith(expect.stringContaining('/suggestions'));
   });
 

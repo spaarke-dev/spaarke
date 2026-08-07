@@ -1534,7 +1534,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           } else if (usedModelPath && importedBuilt) {
             // Shape 2 — imported transient create-on-save, MODEL shape: the merged model + the retained
             // ORIGINAL bytes as the render carrier.
-            requestBody = { ...createCommon, contentModel: importedBuilt.model, content: encodeRetained(state.docxBytes!) };
+            requestBody = {
+              ...createCommon,
+              contentModel: importedBuilt.model,
+              content: encodeRetained(state.docxBytes!),
+            };
           } else {
             // Shape 3 — transitional op-log create-on-save (unchanged): retained ORIGINAL bytes as the
             // baseline + the tracked op-log so the server applies redlines via ComposeShadowPatchEngine —

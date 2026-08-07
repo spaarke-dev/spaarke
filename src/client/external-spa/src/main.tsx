@@ -95,13 +95,15 @@ function extractAuthDiagnostics(err: unknown): string {
     const aadsts = `${String(any.message ?? '')} ${String(any.errorMessage ?? '')}`.match(/AADSTS\d+/);
     if (aadsts) parts.push(`AADSTS=${aadsts[0]}`);
     if (parts.length === 0) {
-      try { return `${label}: ${JSON.stringify(any).slice(0, 400)}`; } catch { return `${label}: (unserializable)`; }
+      try {
+        return `${label}: ${JSON.stringify(any).slice(0, 400)}`;
+      } catch {
+        return `${label}: (unserializable)`;
+      }
     }
     return `${label}: ${parts.join('  ·  ')}`;
   };
-  const cause = (err as { cause?: unknown } | null)?.cause as
-    | { naaError?: unknown; ssoError?: unknown }
-    | undefined;
+  const cause = (err as { cause?: unknown } | null)?.cause as { naaError?: unknown; ssoError?: unknown } | undefined;
   const lines = [describe('top', err)];
   if (cause && typeof cause === 'object') {
     lines.push(describe('NAA', cause.naaError));

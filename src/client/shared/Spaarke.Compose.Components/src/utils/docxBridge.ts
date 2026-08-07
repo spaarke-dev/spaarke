@@ -912,7 +912,12 @@ function formattingUnchanged(segments: readonly InlineSegment[], loaded: Compose
     for (let i = 0; i < r.text.length; i++) {
       if (r.text[i] === '\n') continue;
       loadedText.push(r.text[i]);
-      loadedFormats.push({ bold: r.bold ?? false, italic: r.italic ?? false, underline: r.underline ?? false, href: r.href });
+      loadedFormats.push({
+        bold: r.bold ?? false,
+        italic: r.italic ?? false,
+        underline: r.underline ?? false,
+        href: r.href,
+      });
     }
   }
   if (editorText.length !== loadedFormats.length || editorText.join('') !== loadedText.join('')) {
@@ -924,7 +929,11 @@ function formattingUnchanged(segments: readonly InlineSegment[], loaded: Compose
   });
 }
 
-function editablePropsMatch(u: EditorLeafUnit, loaded: ComposeContentBlock, alignment: ComposeAlignment | undefined): boolean {
+function editablePropsMatch(
+  u: EditorLeafUnit,
+  loaded: ComposeContentBlock,
+  alignment: ComposeAlignment | undefined
+): boolean {
   if (loaded.kind !== u.blockKind) return false;
   if (u.blockKind === 'Heading' && (loaded.level ?? 1) !== (u.level ?? 1)) return false;
   if (u.blockKind === 'ListItem') {
@@ -946,7 +955,9 @@ function mergeLeafBlock(u: EditorLeafUnit, loaded: ComposeContentBlock, ctx: Map
     .join('');
   const baseline = paraId !== undefined ? ctx.snapshot.get(paraId) : undefined;
   const hasNonImportedRevisionMarks = segments.some(
-    s => (s.insertion !== undefined && !isImportedMark(s.insertion)) || (s.deletion !== undefined && !isImportedMark(s.deletion))
+    s =>
+      (s.insertion !== undefined && !isImportedMark(s.insertion)) ||
+      (s.deletion !== undefined && !isImportedMark(s.deletion))
   );
   const hasSessionAnchors = segments.some(s => s.commentIds.some(id => !isPreservedCommentId(ctx, id)));
   // F1 (step-9.5 review): a formatting-only edit leaves the reject TEXT untouched — the per-char
@@ -1036,7 +1047,11 @@ function rowNodesOf(table: TipTapNode): TipTapNode[] {
   return (table.content ?? []).filter(r => r.type === 'tableRow');
 }
 
-function mergeCellBlocks(cellNode: TipTapNode, loadedBlocks: readonly ComposeContentBlock[], ctx: MapperContext): ComposeContentBlock[] {
+function mergeCellBlocks(
+  cellNode: TipTapNode,
+  loadedBlocks: readonly ComposeContentBlock[],
+  ctx: MapperContext
+): ComposeContentBlock[] {
   const units: EditorUnit[] = [];
   flattenEditorUnits(cellNode.content ?? [], 0, units);
   return mergeBlockLists(units, loadedBlocks, ctx);
@@ -1122,7 +1137,11 @@ function mergeTableBlock(u: EditorTableUnit, loaded: ComposeContentBlock, ctx: M
  * elsewhere in the editor (moved) are left for their editor-position match. Remaining unmatched
  * loaded blocks flush at the end the same way.
  */
-function mergeBlockLists(units: readonly EditorUnit[], loadedBlocks: readonly ComposeContentBlock[], ctx: MapperContext): ComposeContentBlock[] {
+function mergeBlockLists(
+  units: readonly EditorUnit[],
+  loadedBlocks: readonly ComposeContentBlock[],
+  ctx: MapperContext
+): ComposeContentBlock[] {
   const out: ComposeContentBlock[] = [];
   const anchors = loadedBlocks.map(loadedAnchorParaId);
   const anchorToIndex = new Map<string, number>();
