@@ -34,3 +34,12 @@ Report back and we'll mark D+C verification closed (as with A/B).
 
 ## Note
 compose-r6 (PR #745) merged to master just before this deploy and had already co-deployed its own BFF + code page (UAT passed on a real Corteva NDA per its commit log). This deploy is from the combined master, so it (re)ships the current Compose subsystem alongside this project's Phase C/D additions — expected, master is the source of truth.
+
+---
+
+## UAT round 1 (2026-08-07) — 2 defects fixed + REDEPLOYED
+Owner UAT found: (1)(2) Assistant couldn't see the open email/document tab; (4) history restore didn't load the document + Workspace pane spun (blob:404). Root causes + fixes (commit `fc60c259a`, merged to master `c564d4974`):
+- **Fix #1 (server, issues 1+2)** — `BuildWorkspaceStateBlock` now makes the ACTIVE tab (focus-stamp) content-visible regardless of `visibleToAssistant` (completes owner-approved ADR-015 Path A active-tab-as-consent; every user tab defaults false + no UI flips it, so the active tab was filtered out before the FR-A3 hoist). Background non-opted-in tabs stay excluded. +2 tests (36/36).
+- **Fix #2 (client, issue 4)** — DocumentViewer was dispatched with a `fetchPreviewUrl` CLOSURE that JSON round-trip strips on restore; now re-derives from stable `documentId` via `GET /api/documents/{id}/preview-url`, treats blob:/data: as absent, resolves null on failure (no infinite spinner). +5 tests (19/19). CAVEAT: the specific `blob:…ERR_FILE_NOT_FOUND` lines could NOT be tied to persisted widgetData — if they persist post-redeploy, capture DevTools (which element holds each blob: src) → residual source likely Compose/MDA chunk. SignalR notifications 401 is a separate pre-existing auth-timing item (not this bug).
+
+**Redeploy 2026-08-07**: BFF 48.45 MB (hash-verified, healthz 200); code page `sprk_spaarkeai` 5187 KB (publish needed one retry — transient `0x80071151` concurrent-publish from another project). From master `c564d4974` (incl. email-communication-intelligence-r2 +40, merged clean). Smoke: healthz 200, `preview-url` re-fetch in bundle. **Owner re-UAT pending** (esp. items 1/2/4 + the blob:404 DevTools check).
