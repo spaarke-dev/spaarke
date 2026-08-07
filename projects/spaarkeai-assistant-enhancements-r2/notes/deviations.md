@@ -1,5 +1,17 @@
 # Deviations Log — spaarkeai-assistant-enhancements-r2
 
+## Task 042c-fr-c4 (FR-C4) — additive host-send seam on shared `SprkChat` — §6.5 Path A
+
+**Date**: 2026-08-06 (owner-approved "B1" for FR-C4, 2026-08-06)
+**Spec/ADR rule challenged**: spec MUST — "MUST inject active-tab context via the existing `onDecorateOutboundBody` seam — **MUST NOT fork `SprkChat`**."
+**Conflict**: FR-C4 ("summarize this email" → full body fetched on-demand, NOT injected every turn) requires a real **SendMessage** turn so `request.DocumentId` drives `DocumentContextService.InjectDocumentContextAsync` (the on-demand body render). A SendMessage turn is produced ONLY by `SprkChat.handleSend`, and `ISprkChatProps` exposes **no host programmatic-send prop and no composer-prefill prop** (verified, types.ts:805+). A deterministic click affordance (ADR-039 — no NL classifier) therefore cannot produce the needed turn without a host→send seam on `SprkChat`. The alternatives are worse: task-038-style Binding dispatch is the Option-A path the owner rejected; a client NL classifier violates ADR-039; attaching `emlDocumentId` on every email-active turn violates FR-C4 "not every turn"; a ConversationPane-direct SSE call reimplements SprkChat's streaming transcript (a true fork).
+**Decision (§6.5 Path A — project-scoped exception)**: add ONE optional, additive host-send prop pair to `SprkChat` (mirrors the EXISTING `injectLocalMessage`/`onLocalMessageInjected` opt-in pattern): a non-null `pendingOutboundMessage` slot + not-streaming → `SprkChat` calls its OWN `handleSend` once, then acks via `onOutboundConsumed`. The one-shot `documentId` still rides the **UNCHANGED** `onDecorateOutboundBody` seam. This is additive/optional (undefined ⇒ byte-identical behavior for every existing consumer) and reuses SprkChat's own send path — an EXTENSION, not a divergent fork — so it honors the rule's intent (don't reinvent/duplicate the chat component) while crossing its literal text. Touches shared `@spaarke/ui-components` (version bump; rebuild before code-page deploy).
+**Companion fix (client-only, required)**: the active-tab focus stamp's `emlDocumentId` goes stale when the user browses emails WITHIN an active tab — `WorkspaceTabManager.updateTab` fires `_notifyPersistChange` but not `_notifyActiveTabChange` (:515-523). Re-broadcast `active_widget_changed` (existing ADR-030 event) on email-tab `widgetData` change so the chip targets the correct email. Both subscribers tolerate the extra broadcast idempotently.
+**Alternatives considered + rejected**: B2 (Binding dispatch — Option-A family, not chosen; needs summarize Binding to take an arbitrary documentId operand); C (defer FR-C4 — owner chose to build it now per "no defers"/"robustness over build-ease").
+**Verification obligation**: SprkChat send-seam is one-shot (sends exactly once per arm; existing consumers unaffected); ConversationPane attaches `documentId` to exactly the invoked turn and NO other; focus-stamp refreshes on in-tab email change; ADR-021 dark-mode no-regression on the affordance.
+
+
+
 ## Task 034 (FR-D9) — ADR-024 MUST-NOT #5 exception: server-side regarding-resolver logic duplicated in the Dataverse layer — §6.5 Path A
 
 **Date**: 2026-08-06 (owner-approved Path B for FR-D9; this is the resulting resolver-placement exception)

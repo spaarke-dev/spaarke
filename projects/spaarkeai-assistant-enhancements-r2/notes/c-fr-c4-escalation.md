@@ -27,3 +27,20 @@ FR-C1 (see the email) ships + deploys with D now; FR-C4 (full-body summarize) be
 
 ## Recommendation
 **Option B** — reuse the document-injection path scoped on-demand. Best robustness-per-effort, ADR-compliant, no new closed-catalog surface, and it makes an email behave like a document for the one turn the user asks about it (which is exactly the mental model). Add as task 042c-fr-c4 (client trigger + turn-scoped documentId), deploy with 043.
+
+---
+
+## UPDATE 2026-08-06 — Option B investigation hit a SprkChat wall (2nd escalation)
+The opus agent (042c-fr-c4) verified the `documentId` ATTACH is clean (one-shot ref in `handleDecorateOutboundBodyWithRevise`, mirrors the `activeContext`/`modelTierOverride` decorate), and confirmed server turn-scoping (`request.DocumentId` injects for one turn, never persisted to session). **But the SEND TRIGGER blocks it:** a `SendMessage` turn (which runs `DocumentContextService`) is produced ONLY by `SprkChat.handleSend`, and `ISprkChatProps` exposes **no host programmatic-send prop and no composer-prefill prop** (scanned types.ts:805+). The task-038 "Reanalyze" chip flows through `chips.dispatchBinding` (the **dispatch/Action** path), NOT SendMessage — so it can't carry `ChatSendMessageRequest.DocumentId` into `DocumentContextService`. A deterministic click → SendMessage therefore needs a NEW send seam on shared `SprkChat` = spec MUST-NOT ("MUST NOT fork SprkChat") + guardrail (d).
+
+**Companion bug found (real, independent):** the active-tab focus stamp's `emlDocumentId` goes STALE when the user browses emails *within* an active tab — `WorkspaceTabManager.updateTab` fires `_notifyPersistChange` but not `_notifyActiveTabChange` (:515-523). FR-C1's server visibility is fine (reads persisted `widgetData`); only a client chip reading the stamp would target the wrong email. Fix if we build a client chip: re-broadcast `active_widget_changed` (existing ADR-030 event) on email-tab `widgetData` change — client-only, low risk.
+
+### The impossible triangle (pick two)
+- deterministic click + on-demand(one turn) → needs a SprkChat send/prefill seam (**B1**).
+- no SprkChat change + on-demand → Binding dispatch (**B2**, = Option A dispatch family owner rejected) OR a NL classifier (ADR-039 violation — no).
+- no SprkChat change + deterministic → attach emlDocumentId every-turn-while-email-active (violates FR-C4 "not every turn").
+
+### Real choice → B1 vs C
+- **B1 (recommended)** — add ONE optional, additive host-send prop pair on `SprkChat` (mirrors the existing `injectLocalMessage`/`onLocalMessageInjected` pattern): non-null slot + not-streaming → SprkChat calls its own `handleSend` once + acks; the one-shot `documentId` still rides the UNCHANGED `onDecorateOutboundBody` seam. Additive/optional (zero change for existing consumers; not a divergent copy → arguably an EXTENSION, not a fork), + the companion focus-stamp fix. Touches shared `@spaarke/ui-components` (version bump). Truest realization of the owner's Option B. **§6.5 Path A exception** on "MUST NOT fork SprkChat" — needs explicit owner sign-off.
+- **C** — defer FR-C4; ship FR-C1 (already done + committed 94955e609). Zero shared-lib risk; the summarize-full-body verb becomes a scoped follow-on. "summarize this email" runs on the compact snippet until then.
+- **B2 (not recommended)** — chip → dispatch the summarize Binding at `emlDocumentId`. No SprkChat change, but it's the Option A dispatch family the owner did NOT choose, and likely needs the Binding to accept an arbitrary documentId operand (catalog/BFF nuance).
