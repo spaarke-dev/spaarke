@@ -52,7 +52,11 @@ import { useEmailComposeActions } from '../EmailComposeActions';
 import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding } from '../../logic/connections';
 import { launchCreate, type CreateKind } from '../../logic/actions';
 import { CollapsibleSection } from './CollapsibleSection';
-import { COMMUNICATION_ENTITY, mapRowToEmailCardItem, deriveEmailWorkspaceVisibleState } from './EmailWorkspace.mapping';
+import {
+  COMMUNICATION_ENTITY,
+  mapRowToEmailCardItem,
+  deriveEmailWorkspaceVisibleState,
+} from './EmailWorkspace.mapping';
 import { useEmailWorkspaceRecord } from './useEmailWorkspaceRecord';
 import type { EmailWorkspaceProps } from './EmailWorkspace.types';
 

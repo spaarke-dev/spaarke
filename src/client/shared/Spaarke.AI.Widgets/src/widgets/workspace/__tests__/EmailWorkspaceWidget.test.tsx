@@ -77,14 +77,7 @@ describe('EmailWorkspaceWidget — persisted Email carrier producer (FR-C1)', ()
     const onDataChange = jest.fn();
 
     await act(async () => {
-      render(
-        <EmailWorkspaceWidget
-          data={null}
-          widgetType="email"
-          tabId="wstab-1-email"
-          onDataChange={onDataChange}
-        />
-      );
+      render(<EmailWorkspaceWidget data={null} widgetType="email" tabId="wstab-1-email" onDataChange={onDataChange} />);
     });
 
     expect(onDataChange).toHaveBeenCalledTimes(1);
@@ -105,14 +98,7 @@ describe('EmailWorkspaceWidget — persisted Email carrier producer (FR-C1)', ()
     const onDataChange = jest.fn();
 
     await act(async () => {
-      render(
-        <EmailWorkspaceWidget
-          data={null}
-          widgetType="email"
-          tabId="wstab-1-email"
-          onDataChange={onDataChange}
-        />
-      );
+      render(<EmailWorkspaceWidget data={null} widgetType="email" tabId="wstab-1-email" onDataChange={onDataChange} />);
     });
 
     expect(onDataChange).not.toHaveBeenCalled();

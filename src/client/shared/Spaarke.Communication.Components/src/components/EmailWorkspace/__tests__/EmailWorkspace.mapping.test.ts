@@ -117,8 +117,6 @@ describe('deriveEmailWorkspaceVisibleState — compact persisted-carrier shape (
   it('returns null when the identity minimum (subject/from/date) is incomplete — never persists a carrier the agent-visible derivation would reject', () => {
     expect(deriveEmailWorkspaceVisibleState(buildRecordState({ subject: null }), null)).toBeNull();
     expect(deriveEmailWorkspaceVisibleState(buildRecordState({ from: null }), null)).toBeNull();
-    expect(
-      deriveEmailWorkspaceVisibleState(buildRecordState({ sentAt: null, receivedDate: null }), null)
-    ).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ sentAt: null, receivedDate: null }), null)).toBeNull();
   });
 });

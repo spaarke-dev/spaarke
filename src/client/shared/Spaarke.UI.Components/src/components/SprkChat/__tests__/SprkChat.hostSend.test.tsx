@@ -97,12 +97,7 @@ function Harness(props: Partial<ISprkChatProps>): React.JSX.Element {
   const [pending, setPending] = React.useState<string | null>(null);
   armSlot = setPending;
   return (
-    <SprkChat
-      {...apiProps}
-      {...props}
-      pendingOutboundMessage={pending}
-      onOutboundConsumed={() => setPending(null)}
-    />
+    <SprkChat {...apiProps} {...props} pendingOutboundMessage={pending} onOutboundConsumed={() => setPending(null)} />
   );
 }
 
@@ -141,7 +136,12 @@ describe('SprkChat — one-shot host→send seam (task 042c-fr-c4 / FR-C4)', () 
     const onOutboundConsumedSpy = jest.fn();
     // Wire a spy INTO the harness's own ack so we can assert it fired, while the
     // harness still clears its slot.
-    await mountAndAwaitSession({ onDecorateOutboundBody: (b) => { onOutboundConsumedSpy(); return b; } });
+    await mountAndAwaitSession({
+      onDecorateOutboundBody: b => {
+        onOutboundConsumedSpy();
+        return b;
+      },
+    });
 
     expect(messagesCalls()).toHaveLength(0);
 
@@ -157,7 +157,7 @@ describe('SprkChat — one-shot host→send seam (task 042c-fr-c4 / FR-C4)', () 
     // A few extra render/microtask ticks must NOT produce a second send — the
     // slot was consumed + cleared by the ack (onOutboundConsumed → setPending(null)).
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise(r => setTimeout(r, 10));
     });
     expect(messagesCalls()).toHaveLength(1);
   });
@@ -173,7 +173,7 @@ describe('SprkChat — one-shot host→send seam (task 042c-fr-c4 / FR-C4)', () 
     // Let the first stream settle (isStreaming returns false), then re-arm with
     // the SAME string — the null-reset between arms means it sends again.
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise(r => setTimeout(r, 10));
     });
 
     await act(async () => {
@@ -195,7 +195,7 @@ describe('SprkChat — one-shot host→send seam (task 042c-fr-c4 / FR-C4)', () 
     });
 
     await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
+      await new Promise(r => setTimeout(r, 10));
     });
     expect(messagesCalls()).toHaveLength(0);
   });

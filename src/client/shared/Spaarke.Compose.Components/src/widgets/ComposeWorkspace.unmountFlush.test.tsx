@@ -155,10 +155,7 @@ jest.mock('./ComposeEditor', () => {
   const ReactLib = require('react');
   return {
     ComposeEditor: ReactLib.forwardRef(
-      (
-        props: { onDirtyChange?: (d: boolean) => void; canSave?: boolean },
-        ref: React.Ref<unknown>
-      ) => {
+      (props: { onDirtyChange?: (d: boolean) => void; canSave?: boolean }, ref: React.Ref<unknown>) => {
         editorProps.current = props;
         ReactLib.useEffect(() => {
           if (shouldStartDirty) {

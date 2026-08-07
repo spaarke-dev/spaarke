@@ -65,11 +65,7 @@ import { dashboardWidgetVisibility, emailWidgetVisibility, tableWidgetVisibility
 // ---------------------------------------------------------------------------
 
 function isEmailTabWidgetData(value: unknown): value is EmailTabWidgetData {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    (value as { kind?: unknown }).kind === 'Email'
-  );
+  return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'Email';
 }
 
 const emailWorkspaceTabVisibility: RegistryGetAgentVisibleState = (widgetData: unknown) => {

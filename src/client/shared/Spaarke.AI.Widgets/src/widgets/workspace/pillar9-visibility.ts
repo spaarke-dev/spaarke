@@ -500,11 +500,12 @@ export const emailWidgetVisibility: RegistryGetAgentVisibleState = (
   // `snippet` — prefer the widget's own snippet field; fall back to
   // `selectionText` (current selection), mirroring the DocumentViewer
   // precedent for the "content the user is currently looking at" signal.
-  const snippetRaw = isString(widgetData.snippet) && widgetData.snippet.length > 0
-    ? widgetData.snippet
-    : isString(widgetData.selectionText) && widgetData.selectionText.length > 0
-      ? widgetData.selectionText
-      : null;
+  const snippetRaw =
+    isString(widgetData.snippet) && widgetData.snippet.length > 0
+      ? widgetData.snippet
+      : isString(widgetData.selectionText) && widgetData.selectionText.length > 0
+        ? widgetData.selectionText
+        : null;
   const snippet = snippetRaw !== null ? truncate(snippetRaw, EMAIL_SNIPPET_CAP_CHARS) : null;
 
   return {
