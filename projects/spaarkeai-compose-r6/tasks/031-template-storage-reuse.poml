@@ -4,7 +4,7 @@
     <title>Template storage/variable rendering reuse (`template` entity + `ITemplateEngine`)</title>
     <phase>3 Template part-merge</phase>
     <gate>blocked until 030</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Reuses existing storage/variable-rendering surfaces (Dataverse `template` entity + `ITemplateEngine`/Handlebars) to supply the part-merge engine — no new subsystem, no architectural change. STANDARD per root CLAUDE.md §8 (reuse of existing surface with project constraints; not a NEW abstraction).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -107,6 +107,7 @@
     <criterion testable="true">TASK-INDEX.md shows task 031 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
   </acceptance-criteria>
 
+  <completion-note>COMPLETED 2026-08-07 (parallel wave with 050/060). Commit 5c162e37b: IComposeTemplateSource (PublicContracts facade, ADR-013-clean consumption path for 032) + ComposeTemplateSource (Ai/Delivery beside EmailTemplateService/WordTemplateService): native template-entity Web-API fetch (id or exact title; .dotx = newest annotation attachment) + EXISTING IWordTemplateService {{variable}} render (skipped when no variables - byte-faithful); render failure degrades LOUDLY to unrendered template. Registered unconditionally (AnalysisServicesModule). No new packages/subsystem/documenttemplate. STANDARD rigor - no Step 9.5 gates; wave-level review ran anyway. Suite green.</completion-note>
   <notes>
     Spec FR-05 (LOCKED); §11 reuse (no parallel subsystem). This is the storage/variable half of Phase 3 — 030 owns the
     OOXML merge, this task feeds it the resolved firm/matter `.dotx`. Reuse `WordTemplateService`/`ITemplateEngine`; do

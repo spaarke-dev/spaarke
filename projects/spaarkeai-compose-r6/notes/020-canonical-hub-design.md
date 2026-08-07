@@ -934,3 +934,16 @@ zero-warnings). 15/15 engine; 1039/1039 Compose+arch; publish 46.98 MB; CVE clea
 bloat when ONE element carries both a resolvable and an unresolvable r-ref (cosmetic). For 032/033: the
 endpoint (032) feeds rendered bodies; 033's seam suite should include an IMPORTED carrier slice through
 the wire (the review's core lesson: the carrier class is where the bodies are buried).
+
+## §22 — Parallel wave 031+050+060 (2026-08-07, operator-directed parallel task-execute)
+
+First parallel wave of the project: 031 (main session, Compose-serialized surface) + 050/060 (background
+agents in ISOLATED git worktrees — avoids concurrent-dotnet collisions; commits cherry-picked back:
+050=a9739a77a, 060=42b9e6592). Merged suite 1094/1094. Wave publish/CVE measured at close. Records in the
+three POML completion-notes + notes/050-obo-version-endpoint.md. The known master-side flaky class
+(ComposeServiceCreateOnSaveTests fire-and-forget timing — 3rd/4th occurrences under parallel load, always
+green isolated + on rerun) should get a FakeTimeProvider fix from its owning project.
+Fidelity gate corpus baseline: 5 pass / 5 warn / 0 fail; NDA warn-not-fail (no 422).
+Next: 032 (endpoint+client wiring consuming 030 engine + 031 facade), 033 (provenance seam incl.
+imported-carrier slice per §21), 051/052 (version-history client), 061 (CI gate wiring on
+fidelity-gate-result.json; coordinate LFS with PR #690's approach).

@@ -35,16 +35,16 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | 026 | Hard-tier graceful degradation (text boxes/drawings/fields/content controls → accept-flatten + warning) | 2 | 020 | none | false | FULL | sonnet/high | ✅ |
 | 027 | Fidelity seam tests across the corpus | 2 | 021,022,023,024,025,026,012 | none | false | FULL | sonnet/high | ✅ |
 | 030 | Part-merge engine in Services/Compose (body → firm/matter .dotx) | 3 | 020 | P3 | false | FULL | opus/high | ✅ |
-| 031 | Template storage/variable rendering reuse (template entity + ITemplateEngine) | 3 | 030 | P3 | false | STANDARD | sonnet/high | 🔲 |
+| 031 | Template storage/variable rendering reuse (template entity + ITemplateEngine) | 3 | 030 | P3 | false | STANDARD | sonnet/high | ✅ |
 | 032 | Endpoint + client wiring for template selection/merge | 3 | 031 | P3 | false | FULL | sonnet/high | 🔲 |
 | 033 | Part-merge tests + Placement/Component Justification | 3 | 032 | P3 | false | STANDARD | sonnet/high | 🔲 |
 | 040 | PDF → canonical model via DocumentIntelligenceService/DocumentParserRouter | 4 | 020 | P4 | false | FULL | opus/high | 🔲 |
 | 041 | Open PDF in Compose → edit → save as docx version (client wiring) | 4 | 040 | P4 | false | FULL | sonnet/high | 🔲 |
 | 042 | PDF intake tests + lossiness-expectation UX | 4 | 041 | P4 | false | STANDARD | sonnet/high | 🔲 |
-| 050 | New OBO list-versions + open-prior-version (read-only) endpoint | 5 | 002 | P5 | false | FULL | opus/high | 🔲 |
+| 050 | New OBO list-versions + open-prior-version (read-only) endpoint | 5 | 002 | P5 | false | FULL | opus/high | ✅ |
 | 051 | Documents surface version-history entry point (AllDocuments) | 5 | 050 | P5 | false | FULL | sonnet/high | 🔲 |
 | 052 | Version-history tests — open v3 after v4 = exact bytes (+ authz negative) | 5 | 050, 051 | P5 | false | FULL | sonnet/high | 🔲 |
-| 060 | Round-trip fidelity harness — fail on hard-fail/regression | 6 | 027, 004 | none | false | FULL | sonnet/high | 🔲 |
+| 060 | Round-trip fidelity harness — fail on hard-fail/regression | 6 | 027, 004 | none | false | FULL | sonnet/high | ✅ |
 | 061 | Wire fidelity harness into CI as a release gate | 6 | 060 | none | false | FULL | sonnet/high | 🔲 |
 | 090 | Project wrap-up — anti-clobber deploy, ADR-049 amendment, /test-diet, 6 criteria | 7 | 014,027,033,042,052,061 | none | false | STANDARD | sonnet/high | 🔲 |
 
