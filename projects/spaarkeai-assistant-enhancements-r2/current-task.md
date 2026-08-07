@@ -1,12 +1,26 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-06 (context-handoff — Phase D impl 030-038 + DI-01/DI-02 ALL DONE + committed; PR #743 open; branch synced to master @ 7f3930c5c; next = 039 deploy OR Phase C)
+> **Last Updated**: 2026-08-06 (context-handoff — Phase A/B E2E CLEARED; Phase C FR-C1 DONE; FR-C4 B1 in flight; ALL DEPLOYS PAUSED per owner)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
-## Quick Recovery (READ THIS FIRST)
+## ⭐ CURRENT STATE (2026-08-06 — Phase C in progress; deploys PAUSED)
+
+| Field | Value |
+|-------|-------|
+| **Where** | Phase D done+committed (PR #743). **Phase A/B owner E2E CLEARED** (013/025 → ✅). **Phase C (email visibility) in progress.** |
+| **Phase C — FR-C1 DONE (committed)** | Assistant now sees an open email's subject/from/date end-to-end via the **owner-chosen Path 1** (persisted `EmailTabWidgetData` carrier, modeled on DocumentViewer). Commits: `f1f50b0f0` (040/041 visible-state shape) · `580cbda48` (041b server carrier+TryDeriveVisibleState + 042a/c client carrier-type+getVisibleState) · `94955e609` (042b producer — email tab populates widgetData from useEmailWorkspaceRecord). Both build gates green; ADR-015 clean (emlDocumentId never in prompt; snippet capped 200). |
+| **Phase C — FR-C4 IN FLIGHT** | Owner chose **B1** (§6.5 Path A, recorded in deviations.md `eda334d06`): additive host-send seam on shared `SprkChat` (`pendingOutboundMessage`/`onOutboundConsumed`, mirrors injectLocalMessage) + one-shot `documentId` decorate + deterministic "Summarize this email" chip on email-tab focus + companion focus-stamp-staleness fix. **Opus agent a1f6ed0cc1314555c running.** Verified turn-scoping is client-only (request.DocumentId injects one turn, ChatEndpoints:663; never persisted to session). |
+| **🚫 DEPLOYS PAUSED** | Owner: "pause any deploy." **039** (deploy D) + **043** (deploy C) both parked — no outward-facing deploy until explicit go. All work stays implement→build→test→commit. Shared libs changed (Compose for DI-02; @spaarke/ui-components for FR-C4 B1) → rebuild before any code-page deploy. |
+| **Next Action (explicit)** | Await FR-C4 B1 agent (a1f6ed0cc1314555c). On completion: run Phase C build gate (both packages), commit, flip 040/041/042 → ✅ + add 042c-fr-c4 row in TASK-INDEX. Then HOLD at "ready to deploy" (deploys paused) — offer owner either the batched D+C deploy (on their go) or 090 wrap-up PREP (gates/test-diet/docs, no-deploy). Do NOT deploy without explicit owner go. |
+| **Escalations this stretch (all resolved)** | Phase C decomposition was under-scoped (extended visible-state OUTPUT unions but not the persisted INPUT carrier). 3 clean escalations → owner decisions: (1) Path 1 persisted carrier [not ADR-015 amendment]; (2) FR-C4 Option B [reuse doc-injection]; (3) FR-C4 B1 [additive SprkChat seam, since SprkChat has no host-send prop]. Notes: c-architecture-gap.md, c-fr-c4-escalation.md, deviations.md. |
+| **Working tree** | Branch `work/spaarkeai-assistant-enhancements-r2`; last committed `eda334d06`; 0 behind master; PR #743 open. (FR-C4 B1 agent has uncommitted edits in flight — will commit on its completion.) |
+
+---
+
+## Quick Recovery (READ THIS FIRST — Phase D history below; see CURRENT STATE above for Phase C)
 
 | Field | Value |
 |-------|-------|
