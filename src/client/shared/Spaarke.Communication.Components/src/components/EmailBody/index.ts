@@ -7,4 +7,4 @@
  * `EmailReadingPaneShell` `renderBody(selectedId)` slot.
  */
 export { EmailBodyView } from './EmailBodyView';
-export type { EmailBodyViewProps, AuthenticatedFetchFn } from './EmailBodyView.types';
+export type { EmailBodyViewProps, AuthenticatedFetchFn, ReconciliationAttachmentContent } from './EmailBodyView.types';

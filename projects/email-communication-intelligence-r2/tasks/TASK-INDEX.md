@@ -45,7 +45,7 @@
 | 050 | Reconciliation grid — **`ReconciliationGrid` + Needs-review config (NO DataGrid-framework edit — all seams already shipped; zero dataset-grid-r2 contention)** | 5·E | ✅ | — | sonnet·high | ❌ false (shared lib) |
 | 051 | Triage as grid columns | 5·E | 🔲 | 050 | sonnet·high | ❌ false |
 | 052 | Related-to card-picker (reuse EmailConnectionsReview) | 5·E | 🔲 | 050 | sonnet·high | ❌ false |
-| 053 | Browse shell + one normalized reader (attachment folding) | 5·E | 🔲 | 050 | **opus·xhigh** | ❌ false |
+| 053 | Browse shell + one normalized reader (attachment folding) — **`ReconciliationBrowseShell` (SprkModal+nav two-pane; NOT BrowseModal preset — owner-approved ADR-050 Path C, see notes/053) + `EmailBodyView` attachment-text folding; reuses EmailReadingPaneShell(hideList)/AttachmentList** | 5·E | ✅ | 050 | **opus·xhigh** | ❌ false |
 | 054 | Citation navigation — ParaIdMap + resolveCitation (reuse Compose) | 5·E | 🔲 | 053 | **opus·xhigh** | ❌ false |
 | 055 | Field-update reconcile tab (Job B, editable, apply-under-audit) | 5·E | 🔲 | 052,053 | sonnet·high | ❌ false |
 | 056 | Task/deadline reconcile tab (Job C, create-and-complete + ad-hoc) | 5·E | 🔲 | 034,052,053 | sonnet·high | ❌ false |

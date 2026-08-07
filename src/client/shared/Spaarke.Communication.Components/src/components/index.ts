@@ -6,6 +6,7 @@
  */
 
 export * from './AttachmentList';
+export * from './ReconciliationBrowseShell';
 export * from './EmailCardList';
 export * from './EmailViewSelector';
 export * from './EmailReadingPaneShell';
