@@ -66,10 +66,15 @@ public sealed class ExternalModuleDataContractTests : IClassFixture<ExternalAcce
     {
         using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA });
 
+        // spaarke-SPA-external-access-platform-r2 Task 016 (2026-08-06) registered sprk_matter as a
+        // module (an ALWAYS-EMPTY Tier-2 predicate — see ExternalAccessModule.cs D-016-1), so it no
+        // longer exercises the "no registered module" fail-closed branch this test targets. `contact`
+        // is a stable stand-in: an OOB Dataverse entity that will never have an external module
+        // registered (no widget reads Contact rows via this seam) — same fail-closed assertion.
         var response = await client.PostAsJsonAsync(FetchPath, new
         {
-            entityName = "sprk_matter", // no module registered for sprk_matter in task 015
-            fetchXml = "<fetch><entity name=\"sprk_matter\"><attribute name=\"sprk_matterid\"/></entity></fetch>",
+            entityName = "contact", // no module registered for contact
+            fetchXml = "<fetch><entity name=\"contact\"><attribute name=\"contactid\"/></entity></fetch>",
             pagingCookie = (string?)null,
         });
 

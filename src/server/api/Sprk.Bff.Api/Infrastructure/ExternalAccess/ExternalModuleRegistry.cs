@@ -15,6 +15,20 @@
 //
 // Broker-only (ADR-028 A1/A2/A3 · NFR-02): the predicate is a pure in-memory read of the resolved
 // principal — no OBO, no Graph SDK / AI-internal types, no downstream token exchange.
+//
+// spaarke-SPA-external-access-platform-r2 Task 016 (2026-08-06) — TryGetRecordId EntityReference
+// support. A module's RecordIdAttribute need not be the module's own primary-id attribute: it is
+// "the attribute on each row checked for membership in AccessibleRecordIds(principal)". Task 016
+// registers document/invoice/work-assignment modules whose Tier-2 scope is derived from the
+// caller's ACCESSIBLE PROJECT ids (already precomputed on CallerPrincipal — no extra I/O), by
+// pointing RecordIdAttribute at the child entity's typed lookup BACK to sprk_project
+// (sprk_document.sprk_project, sprk_invoice.sprk_project, sprk_workassignment.sprk_regardingproject)
+// instead of the child's own primary id. A FetchXML lookup attribute is projected by the Dataverse
+// SDK as an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> (not a raw Guid/string), so
+// TryGetRecordId gained an EntityReference case below — purely additive, the existing Guid/string
+// cases (used by the collaboration/sprk_project module's own-primary-id scoping) are unchanged.
+
+using Microsoft.Xrm.Sdk;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -118,6 +132,11 @@ public sealed class ExternalModuleDescriptor
             case Guid g:
                 id = g;
                 return g != Guid.Empty;
+            case EntityReference er:
+                // Lookup-typed attributes (e.g. a child entity's FK back to sprk_project) are
+                // projected by the SDK as EntityReference, not a raw Guid — see file-header note.
+                id = er.Id;
+                return er.Id != Guid.Empty;
             case string s when Guid.TryParse(s, out var parsed):
                 id = parsed;
                 return parsed != Guid.Empty;

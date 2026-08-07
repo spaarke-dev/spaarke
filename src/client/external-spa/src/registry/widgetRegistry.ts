@@ -73,6 +73,19 @@ export interface WidgetDefinition {
 const placeholderLoader = (): Promise<{ default: WidgetBodyComponent }> =>
   import('./PlaceholderWidgetBody').then((m) => ({ default: m.PlaceholderWidgetBody }));
 
+// Outside-counsel (ciam) data widgets (task 016) — each a thin `<DataGrid configId=… />` binding
+// (see `widgets/GridWidgetBody.tsx`), swapped in for the task-012 placeholder.
+const projectsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
+  import('../widgets/ProjectsWidget').then((m) => ({ default: m.ProjectsWidgetBody }));
+const mattersLoader = (): Promise<{ default: WidgetBodyComponent }> =>
+  import('../widgets/MattersWidget').then((m) => ({ default: m.MattersWidgetBody }));
+const workAssignmentsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
+  import('../widgets/WorkAssignmentsWidget').then((m) => ({ default: m.WorkAssignmentsWidgetBody }));
+const documentsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
+  import('../widgets/DocumentsWidget').then((m) => ({ default: m.DocumentsWidgetBody }));
+const invoicesLoader = (): Promise<{ default: WidgetBodyComponent }> =>
+  import('../widgets/InvoicesWidget').then((m) => ({ default: m.InvoicesWidgetBody }));
+
 /**
  * All registered widgets. Role-default coverage (workspace-shell-foundation.md):
  *   - workforce: My Requests · Inventions · Messages · Policy Library
@@ -149,7 +162,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     planes: ['ciam'],
     requiredEntitlement: 'assigned-work',
     defaultForRoles: ['ciam'],
-    lazyLoader: placeholderLoader,
+    lazyLoader: projectsLoader,
   },
   {
     id: 'matters',
@@ -160,7 +173,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     planes: ['ciam'],
     requiredEntitlement: 'assigned-work',
     defaultForRoles: ['ciam'],
-    lazyLoader: placeholderLoader,
+    lazyLoader: mattersLoader,
   },
   {
     id: 'work-assignments',
@@ -171,7 +184,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     planes: ['ciam'],
     requiredEntitlement: 'assigned-work',
     defaultForRoles: ['ciam'],
-    lazyLoader: placeholderLoader,
+    lazyLoader: workAssignmentsLoader,
   },
   {
     id: 'documents',
@@ -182,7 +195,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     planes: ['ciam'],
     requiredEntitlement: 'assigned-work',
     defaultForRoles: ['ciam'],
-    lazyLoader: placeholderLoader,
+    lazyLoader: documentsLoader,
   },
   {
     id: 'invoices',
@@ -193,7 +206,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     planes: ['ciam'],
     requiredEntitlement: 'assigned-work',
     defaultForRoles: ['ciam'],
-    lazyLoader: placeholderLoader,
+    lazyLoader: invoicesLoader,
   },
   // ── Core-user admin (MDA) ──────────────────────────────────────────────────
   {

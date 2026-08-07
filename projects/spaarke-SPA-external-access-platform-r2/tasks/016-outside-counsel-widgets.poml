@@ -4,7 +4,7 @@
     <title>Refactor Outside Counsel surfaces into WIDGETS: Projects · Matters · Work Assignments · Documents · Invoices (DataGrid-config sprk_gridconfiguration + BffDataverseClient read)</title>
     <phase>P1 Workspace-shell foundation</phase>
     <gate>blocked-until:012,015</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Refactors the R1 Outside-Counsel workspace (modifying .tsx) into registered widgets with an R1-parity obligation; touches BFF read surface (bff-api tag) + DataGrid config; participation-scoped read correctness is load-bearing.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -129,6 +129,24 @@
     read seam is generalized by task 015, so this task mostly authors grid config + thin wrappers + registry entries; add read
     endpoints only if 015's path does not cover an entity, and if so apply §10 (Placement Justification + /conflict-check +
     publish ≤60 MB). This delivers spec Success Criterion 5 (Outside Counsel works unchanged as a registered surface).
+
+    COMPLETED 2026-08-06. Full deviations + verification in
+    projects/spaarke-SPA-external-access-platform-r2/notes/task-016-deviations.md. Summary: 5 sprk_gridconfiguration
+    records authored (inline FetchXML, read-only command bar); 5 thin DataGrid widget wrappers + a shared
+    createGridWidgetBody factory + a gridDataverseClient singleton wired to /api/v1/external; widgetRegistry.ts
+    lazyLoaders swapped from placeholder to real. BFF: registered 5 more ExternalModuleDescriptor entries
+    (documents/invoices/work-assignments/matters/grid-configuration) in ExternalAccessModule.cs, reusing the SAME
+    accessible-project-id predicate as "collaboration" by pointing RecordIdAttribute at each child's project-lookup
+    (sprk_document.sprk_project, sprk_invoice.sprk_project, sprk_workassignment.sprk_regardingproject) instead of its
+    own primary id — required one small additive fix to ExternalModuleRegistry.TryGetRecordId (EntityReference case).
+    Matters is a documented Path-A exception (CLAUDE.md §6.5): always-empty Tier-2 predicate (fail-closed) because
+    sprk_matter has no lookup back to sprk_project and no Contact→Organization affiliation resolver exists — paired
+    with R1's own verbatim "Matter-level workspace access is coming soon" stub copy, so this is R1-parity-preserving,
+    not a regression. All verification green: npx tsc --noEmit clean, npm run build succeeded, dotnet build 0 errors,
+    dotnet test 9803/0/101-skipped, publish 48.29 MB (+1.38 MB vs 46.91 MB baseline, well under 60 MB ceiling), no
+    vulnerable packages. Quality gates (code-review + adr-check) self-invoked per Step 9.5: 2 findings fixed
+    (per-call HashSet allocation → static field; explicit read-only command-bar lockdown), 0 Critical, 0 ADR
+    violations.
   </notes>
 
   <execution>

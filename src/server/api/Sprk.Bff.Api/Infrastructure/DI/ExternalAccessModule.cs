@@ -14,6 +14,26 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 public static class ExternalAccessModule
 {
     /// <summary>
+    /// Static allow-list of the outside-counsel widget <c>sprk_gridconfiguration</c> record ids
+    /// authored by task 016 (2026-08-06). See the "grid-configuration" module registration below.
+    /// </summary>
+    /// <summary>
+    /// Shared empty-set singleton for always-fail-closed predicates (e.g. the "matters" module,
+    /// D-016-1) — avoids allocating a new empty <see cref="HashSet{T}"/> on every predicate call
+    /// (code-review Step 4 perf nit).
+    /// </summary>
+    private static readonly IReadOnlySet<Guid> EmptyRecordIds = new HashSet<Guid>();
+
+    private static readonly IReadOnlySet<Guid> OutsideCounselGridConfigurationIds = new HashSet<Guid>
+    {
+        Guid.Parse("61711823-1092-f111-b8dc-7ced8ddc4a05"), // Projects
+        Guid.Parse("3af4102c-1092-f111-b8dc-7ced8ddc4a05"), // Documents
+        Guid.Parse("3ff4102c-1092-f111-b8dc-7ced8ddc4a05"), // Invoices
+        Guid.Parse("42f4102c-1092-f111-b8dc-7ced8ddc4a05"), // Work Assignments
+        Guid.Parse("583a2a33-1092-f111-b8dc-7ced8ddc4a05"), // Matters
+    };
+
+    /// <summary>
     /// Adds external access services: participation data loading and project data queries.
     /// </summary>
     public static IServiceCollection AddExternalAccess(this IServiceCollection services)
@@ -109,6 +129,79 @@ public static class ExternalAccessModule
             RecordEntity = "sprk_project",
             RecordIdAttribute = "sprk_projectid",
             AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+        });
+
+        // Task 016 (2026-08-06) — outside-counsel widget modules (Documents / Invoices / Work
+        // Assignments / Matters / grid-configuration schema reads), registered the same way as
+        // "collaboration" above — one AddExternalModule call each, no framework/route/filter change.
+        //
+        // Documents / Invoices / Work Assignments are PROJECT-DERIVED: each child entity carries a
+        // typed lookup back to sprk_project (sprk_document.sprk_project, sprk_invoice.sprk_project,
+        // sprk_workassignment.sprk_regardingproject — all confirmed in docs/data-model). Their Tier-2
+        // predicate reuses the SAME accessible-project-id set the collaboration module already
+        // exposes on CallerPrincipal (no extra Dataverse round-trip — the predicate stays a pure,
+        // synchronous read of the principal, matching the descriptor's delegate contract) —
+        // RecordIdAttribute is pointed at the child's project-lookup attribute rather than the
+        // child's own primary id (see ExternalModuleRegistry.cs TryGetRecordId's EntityReference
+        // case, added by this task). Each widget's inline FetchXML projects that lookup attribute
+        // (hidden from the grid's visible columns via layoutXml) so ScopeRows can evaluate it.
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "documents",
+            RecordEntity = "sprk_document",
+            RecordIdAttribute = "sprk_project",
+            AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+        });
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "invoices",
+            RecordEntity = "sprk_invoice",
+            RecordIdAttribute = "sprk_project",
+            AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+        });
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "work-assignments",
+            RecordEntity = "sprk_workassignment",
+            RecordIdAttribute = "sprk_regardingproject",
+            AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+        });
+
+        // Matters (D-016-1, documented Path-A exception — see notes/task-016-deviations.md):
+        // sprk_matter has NO lookup back to sprk_project in the current schema (confirmed against
+        // docs/data-model/sprk_matter-related-tables.md + entity-relationship-model.md — Matter and
+        // Project are PEER top-level parents, not nested). The only candidate scope source
+        // (sprk_matter.sprk_assignedoutsidecounsel → sprk_organization) cannot be evaluated because
+        // CallerPrincipal carries no organization affiliation for the calling Contact (no such
+        // resolution exists anywhere in this codebase today — building one is a new capability, out
+        // of this task's minimal-BFF-touch scope). Registering the module with an ALWAYS-EMPTY
+        // accessible set is the fail-closed (NFR-08-safe — never over-exposes) choice; combined with
+        // the grid config's emptyStateMessage ("Matter-level workspace access is coming soon" — the
+        // VERBATIM R1 OutsideCounselDashboard stub copy), this is R1-parity-preserving, not a
+        // regression. Follow-up: a real Matter Tier-2 predicate needs Contact→Organization
+        // affiliation resolution as a new capability.
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "matters",
+            RecordEntity = "sprk_matter",
+            RecordIdAttribute = "sprk_matterid",
+            AccessibleRecordIds = _ => EmptyRecordIds,
+        });
+
+        // grid-configuration (D-016-2): every <DataGrid configId=…/> widget fetches its own
+        // sprk_gridconfiguration record via BffDataverseClient.retrieveRecord BEFORE it can resolve
+        // an entity/fetchXml at all (DataGrid.tsx fetchConfigRecord) — that read goes through this
+        // SAME Tier-2-gated seam (GET /api/dataverse/record/{entity}/{id}), so sprk_gridconfiguration
+        // must ALSO be a registered module or every widget's config load is denied and no grid ever
+        // renders. A grid-configuration record carries only column/layout metadata (no tenant PII, no
+        // Graph pointer) — safe to expose by a small static allow-list of the exact config record ids
+        // task 016 authored (NOT "all gridconfiguration records"), fail-closed to any other id.
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "grid-configuration",
+            RecordEntity = "sprk_gridconfiguration",
+            RecordIdAttribute = "sprk_gridconfigurationid",
+            AccessibleRecordIds = _ => OutsideCounselGridConfigurationIds,
         });
 
         // Accessible-record-set composition + enforcement gate (teams-app-r1 task 022, spec FR-06 /
