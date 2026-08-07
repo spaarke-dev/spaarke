@@ -77,6 +77,8 @@ const config: {
   loadSourceFormat: string | undefined;
   /** Task 042: the Load response's fileName (drives the .pdf → .docx displayName swap). */
   loadFileName: string;
+  /** Task 042 (042-review MED-3): fail the NEXT create-on-save with a 500 (retry-flow coverage). */
+  failNextCreateOnSave: boolean;
 } = {
   loadContentModel: undefined,
   loadContentModelWarnings: undefined,
@@ -88,6 +90,7 @@ const config: {
   exposeAdoptBaseline: true,
   loadSourceFormat: undefined,
   loadFileName: 'contract.docx',
+  failNextCreateOnSave: false,
 };
 
 const saveRequests: Array<{ url: string; body: Record<string, unknown> }> = [];
@@ -112,6 +115,16 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
 
   if (url.includes('/api/compose/documents/create-on-save')) {
     saveRequests.push({ url, body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
+    if (config.failNextCreateOnSave) {
+      config.failNextCreateOnSave = false; // one-shot: the retry succeeds
+      return {
+        ok: false,
+        status: 500,
+        json: async () => ({ detail: 'transient create failure' }),
+        text: async () => 'transient create failure',
+        clone() { return this; },
+      } as unknown as Response;
+    }
     return saveResponse('spe-created-1');
   }
   if (url.includes('/api/compose/documents/') && url.includes('/save')) {
@@ -343,6 +356,7 @@ beforeEach(() => {
   config.exposeAdoptBaseline = true;
   config.loadSourceFormat = undefined;
   config.loadFileName = 'contract.docx';
+  config.failNextCreateOnSave = false;
 });
 
 async function waitForEditor(): Promise<void> {
@@ -652,6 +666,11 @@ describe('ComposeWorkspace — PDF-sourced save routing (task 042 / FR-06)', () 
     renderStoredPdf();
     await waitForEditor();
 
+    // 042-review LOW-1: the end-to-end lossiness-UX wire — the workspace RENDERS the "Opened from
+    // PDF" banner from the load payload's sourceFormat (asserted BEFORE the save, which clears the
+    // marker and deliberately retires the banner).
+    expect(screen.getByTestId('compose-workspace-pdf-source-banner')).toBeInTheDocument();
+
     await clickSave();
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
@@ -669,6 +688,50 @@ describe('ComposeWorkspace — PDF-sourced save routing (task 042 / FR-06)', () 
     expect(body.contentModel).toEqual(BUILT_MODEL);
     expect(body.content).toBe(CONTENT_B64);
     expect(body.containerId).toBe('bu-container-1');
+
+    // …and after the successful save the banner RETIRES (the doc is a native docx now).
+    expect(screen.queryByTestId('compose-workspace-pdf-source-banner')).not.toBeInTheDocument();
+  });
+
+  it('a FAILED create retries with the SAME transient key — one PDF never dedups into two Word documents (042-review MED-3)', async () => {
+    config.failNextCreateOnSave = true;
+    renderStoredPdf();
+    await waitForEditor();
+
+    await clickSave(); // fails (500) — sourceFormat + key retained by the reducer
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+    await clickSave(); // retry — succeeds
+    await waitFor(() => expect(saveRequests).toHaveLength(2));
+
+    expect(saveRequests[0].url).toContain('/create-on-save');
+    expect(saveRequests[1].url).toContain('/create-on-save');
+    // The G7 dedup contract: the retry POSTs the SAME load-minted key, so the server's
+    // transient-key alt-key resolves ONE record — never a duplicate Word document.
+    expect(saveRequests[1].body.transientKey).toBe(saveRequests[0].body.transientKey);
+  });
+
+  it("'Save New Document' (forkNew) on a PDF doc mints a FRESH key — a deliberate second document gets its own dedup identity", async () => {
+    renderStoredPdf();
+    await waitForEditor();
+
+    await clickSave(); // the normal PDF create — uses the load-minted key
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+    const loadMintedKey = saveRequests[0].body.transientKey;
+
+    // Drive the Save split-button's 'new' fork exactly as the real UI does — the consolidated
+    // toolbar lives inside ComposeEditor, whose onSave prop threads the mode into triggerSave.
+    await act(async () => {
+      (editorProps.current.onSave as unknown as (mode?: 'version' | 'new') => void)?.('new');
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(saveRequests).toHaveLength(2));
+
+    expect(saveRequests[1].url).toContain('/create-on-save');
+    expect(saveRequests[1].body.forkNew).toBe(true);
+    expect(typeof saveRequests[1].body.transientKey).toBe('string');
+    expect(saveRequests[1].body.transientKey).not.toBe(loadMintedKey);
   });
 
   it('a CLEAN PDF-sourced save still creates (Shape-3 byte passthrough) — never the replace route', async () => {

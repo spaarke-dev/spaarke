@@ -1782,7 +1782,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // already reflowed the PDF into the synthesized carrier), so they surface on the first save
         // EVEN when the save took the op-log/byte-passthrough path (usedModelPath false) — the docx
         // flatten warnings keep their model-path-only fold (their loss materializes only when a
-        // model render runs).
+        // model render runs). ACCEPTED-HONEST (042-review LOW-2): on repeated op-log-path saves the
+        // pdf-intake facts re-surface with each save (nothing on that path clears
+        // loadedContentModelWarnings) — deliberate: every persisted artifact embodies the intake
+        // loss, and the banner is dismissible; a model-path save clears them via the reducer as before.
         const heldWarnings = state.loadedContentModelWarnings ?? [];
         const mergedSaveWarnings = mergeDegradationWarnings(
           payload.degradationWarnings ?? [],

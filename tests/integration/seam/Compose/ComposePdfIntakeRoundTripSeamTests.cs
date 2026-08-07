@@ -244,7 +244,11 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
             bodyText.Should().Contain(EditMarker, "the user's edit landed in the rendered docx");
             bodyText.Should().Contain("MUTUAL NON-DISCLOSURE AGREEMENT", "the NDA content round-tripped");
             bodyText.Should().Contain("Two (2) years", "the term table's cells round-tripped");
-            bodyText.Should().NotContain("CONFIDENTIAL\n", "page chrome was dropped, not inlined into the body");
+            // 042-review MEDIUM-1: assert the RAW chrome tokens (w:t run text never contains literal
+            // newlines, so a "\n"-suffixed NotContain was vacuous). Ordinal case-sensitive — the
+            // uppercase header token cannot collide with the body prose's "Confidential Information".
+            bodyText.Should().NotContain("CONFIDENTIAL", "the PageHeader chrome was dropped, not inlined into the body");
+            bodyText.Should().NotContain("Page 1 of 2", "the PageNumber chrome was dropped, not inlined into the body");
         }
 
         // B-MED-3: the new record inherits the source PDF's matter link (filed alongside it).
@@ -326,6 +330,45 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
             "an unprojectable PDF fails the open LOUDLY — never a silent empty editor over a non-empty PDF");
+    }
+
+    [Fact]
+    public async Task ApplyTemplate_OntoAPdfItem_Returns422WithTheHonestInstruction()
+    {
+        _fixture.ResetBoundaries();
+
+        // 042-review MEDIUM-2 (binding-plan item): the apply-template guard (041-review A-MED-1) —
+        // the template RESOLVES fine, but the target item's downloaded bytes are %PDF-, so the
+        // typed 422 fires BEFORE the OOXML part-merge can die deep in the stack as a 500.
+        _fixture.TemplateSourceMock
+            .Setup(t => t.ResolveAsync(
+                It.IsAny<string>(), It.IsAny<Dictionary<string, object?>?>(),
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ComposeResolvedTemplate(
+                TemplateBytes: new byte[] { 0x50, 0x4B, 0x03, 0x04 },
+                TemplateName: "Firm Template",
+                FileName: "firm.dotx",
+                VariablesRendered: false));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(
+                It.IsAny<HttpContext>(), PdfDriveId, PdfItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(PdfBytes, writable: false));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/compose/documents/{PdfItemId}/apply-template",
+            new { driveId = PdfDriveId, templateIdOrName = "Firm Template" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
+            "a template merge onto %PDF- bytes must refuse with the typed 422, never a deep-OOXML 500");
+        var problem = JsonNode.Parse(await response.Content.ReadAsStringAsync())!.AsObject();
+        problem["detail"]!.GetValue<string>().Should().Contain("Save it as a Word document first",
+            "the refusal carries the honest instruction");
+        // The refusal fired BEFORE any write.
+        _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

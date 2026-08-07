@@ -342,6 +342,13 @@ describe('composeWorkspaceReducer — sourceFormat lifecycle (task 042 / FR-06 P
     });
     expect(upper.documentRef?.fileName).toBe('SIGNED AGREEMENT.docx');
 
+    // 042-review LOW-3: a fileName with NO extension — the .pdf-strip regex no-ops and .docx appends.
+    let bare = pdfLoadedState('Corteva NDA');
+    bare = composeWorkspaceReducer(bare, {
+      kind: 'saveSucceeded', documentSpeId: 'spe-z', etag: null,
+    });
+    expect(bare.documentRef?.fileName).toBe('Corteva NDA.docx');
+
     let noName = pdfLoadedState(null);
     noName = composeWorkspaceReducer(noName, {
       kind: 'saveSucceeded', documentSpeId: 'spe-y', etag: null,
