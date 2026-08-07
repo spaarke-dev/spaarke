@@ -449,6 +449,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onAttachmentRemoved,
   injectLocalMessage,
   onLocalMessageInjected,
+  // spaarkeai-assistant-enhancements-r2 task 042c-fr-c4 (FR-C4) — one-shot
+  // host→send seam (mirrors injectLocalMessage/onLocalMessageInjected). Both
+  // optional; existing consumers ignore.
+  pendingOutboundMessage,
+  onOutboundConsumed,
   onBeforeSendMessage,
   // R6 Pillar 8 task 097b / TIER-C surface completion — fires whenever the
   // internal messages array changes. Optional; ADR-012 context-agnostic.
@@ -2436,6 +2441,45 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // handleSend is stable (useCallback on session, isStreaming, addMessage, startStream).
     // Re-subscribe only when handleSend changes (i.e. when the underlying session changes).
   }, [handleSend]);
+
+  // ── task 042c-fr-c4 (FR-C4): one-shot host→send seam ─────────────────────
+  //
+  // When the host transitions `pendingOutboundMessage` from null → a non-null
+  // string, invoke SprkChat's OWN `handleSend` exactly once (the SAME path a
+  // composer click takes — so `onBeforeSendMessage` + `onDecorateOutboundBody`
+  // still run and the turn is a real SendMessage turn), then ack via
+  // `onOutboundConsumed` so the host clears the slot.
+  //
+  // Guards (mirror injectLocalMessage's one-shot + null-reset idiom):
+  //   - `lastOutboundConsumedRef` records the value we last sent so re-renders
+  //     with the same armed value never re-fire; the ref resets to null when
+  //     the slot returns to null, so re-arming with the SAME string (after a
+  //     null) sends again.
+  //   - We do NOT consume (set the ref / call handleSend / ack) while there is
+  //     no session or a stream is in flight — the slot stays pending and the
+  //     effect re-runs when `isStreaming`/`session` change, so a busy component
+  //     never drops the request (and a message is never lost by acking before
+  //     an actual send). This matches handleSend's own `!session || isStreaming`
+  //     early-return guard.
+  const lastOutboundConsumedRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!pendingOutboundMessage) {
+      lastOutboundConsumedRef.current = null;
+      return;
+    }
+    if (lastOutboundConsumedRef.current === pendingOutboundMessage) return;
+    // Wait for a ready, idle component — do NOT consume yet.
+    if (!session || isStreaming) return;
+    lastOutboundConsumedRef.current = pendingOutboundMessage;
+    handleSend(pendingOutboundMessage);
+    if (onOutboundConsumed) {
+      try {
+        onOutboundConsumed();
+      } catch {
+        // Host callback errors must not break the send lifecycle.
+      }
+    }
+  }, [pendingOutboundMessage, session, isStreaming, handleSend, onOutboundConsumed]);
 
   // Handle playbook chip selection — switches context to the selected playbook
   const handlePlaybookChipClick = React.useCallback(

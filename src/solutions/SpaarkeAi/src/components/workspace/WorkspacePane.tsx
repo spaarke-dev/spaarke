@@ -2054,6 +2054,30 @@ export function WorkspacePane(): React.JSX.Element {
       if (event.tabId) {
         manager.updateTab(event.tabId, event.widgetData ?? null);
         syncState();
+        // task 042c-fr-c4 (FR-C4) companion focus-stamp fix. `WorkspaceTabManager.updateTab`
+        // fires `_notifyPersistChange` but NOT `_notifyActiveTabChange` (:515-523), so when the
+        // user browses emails WITHIN the active email tab (each pick re-fires `widget_update` with
+        // a fresh `emlDocumentId`), the ConversationPane focus stamp goes stale — the deterministic
+        // "Summarize this email" chip would target the previously-viewed email. When the updated tab
+        // IS the active tab AND its data is an Email payload, re-broadcast `active_widget_changed`
+        // (the EXISTING ADR-030 event — no new type) so the stamp refreshes to the current email.
+        // Both subscribers tolerate the extra broadcast idempotently: `ReviewCompleteToast` only sets
+        // `activeWidgetTypeRef`; ConversationPane's `fireProactiveSuggestion` is once-per-tabId
+        // guarded (so this never causes a proactive-suggest re-fire).
+        const updated = manager.getSnapshot();
+        if (updated.activeTabId === event.tabId) {
+          const activeTab = updated.tabs.find((t) => t.id === event.tabId);
+          const widgetData = activeTab?.widgetData as { kind?: unknown } | null | undefined;
+          if (activeTab && widgetData != null && widgetData.kind === 'Email') {
+            broadcastActiveTabChange({
+              tabId: activeTab.id,
+              widgetType: activeTab.widgetType,
+              widgetData: activeTab.widgetData,
+              displayName: activeTab.displayName,
+              kind: activeTab.kind,
+            });
+          }
+        }
       }
     } else if (event.type === 'widget_action') {
       // Forward widget_action events are handled by the widget itself via

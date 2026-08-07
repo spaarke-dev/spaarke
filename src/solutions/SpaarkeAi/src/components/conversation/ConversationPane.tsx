@@ -101,7 +101,7 @@ import { formatComposeActionResultMarkdown, extractComposeEditExplanation } from
 import { makeLocalAssistantMessage, makeComposeEditControlsMessage, makeSavedToDmsMessage, buildFileConfirmationMessage, buildComposeAttachedToAssistantMessage, makeFileStatusMessage } from "./summarizeRouting";
 import { routeReviseIntent } from "./composeReviseRouting";
 import { detectDraftDocumentIntent } from "./composeDraftRouting";
-import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip, getDocumentReviewCapability } from "./localActionChips";
+import { LOCAL_CHIP, buildReviseInComposeChip, buildNdaReviewChip, buildEmailSummarizeChip, getDocumentReviewCapability } from "./localActionChips";
 import { buildChipPreference, recordChipUsage } from "./chipPreference";
 import {
   detectReviseThisDocumentIntent,
@@ -332,6 +332,23 @@ function recordSuggestTrace(entry: SuggestTraceEntry): void {
  */
 function buildReanalyzeChip(bindingId: string): ConsumerChip {
   return { label: "Reanalyze", bindingId };
+}
+
+/**
+ * task 042c-fr-c4 (FR-C4) — pull the active email tab's `.eml` archive document id out of the
+ * focus-stamp's `compactState` (the tab's `EmailTabWidgetData`, kind==='Email'; see
+ * `@spaarke/ai-widgets` WorkspaceTab.ts). Returns the id only when it is a non-empty string, so
+ * an email with no `.eml` archive yet (`emlDocumentId: null`) never yields a null-document send.
+ * Typed structurally (reads `unknown`) to avoid coupling ConversationPane to the widget-data union.
+ */
+function readActiveEmailDocId(compactState: unknown): string | null {
+  if (compactState && typeof compactState === "object") {
+    const data = compactState as { kind?: unknown; emlDocumentId?: unknown };
+    if (data.kind === "Email" && typeof data.emlDocumentId === "string" && data.emlDocumentId.length > 0) {
+      return data.emlDocumentId;
+    }
+  }
+  return null;
 }
 
 export function ConversationPane(): React.JSX.Element {
@@ -694,6 +711,17 @@ export function ConversationPane(): React.JSX.Element {
   // Mirrors the `wizardAutoRunHandledRef` once-per-key idiom above.
   const suggestedTabIdsRef = React.useRef<Set<string>>(new Set());
 
+  // task 042c-fr-c4 (FR-C4) — one-shot email-summarize wiring.
+  //  - `pendingEmailDocRef` holds the active email's `emlDocumentId` for exactly the NEXT
+  //    outbound turn. `handleDecorateOutboundBodyWithRevise` reads it, stamps it as that turn's
+  //    `body.documentId` (the server injects the .eml body for that turn only — ADR-015 on-demand,
+  //    never every-turn), and CLEARS it. Ref (not state) — a read-on-send value, no re-render.
+  //  - `pendingOutboundMessage` is the one-slot host→send request passed to <SprkChat>; SprkChat
+  //    sends it once (running the decorate seam above) then acks via `onOutboundConsumed`, which
+  //    clears this state back to null. State (not ref) because SprkChat re-reads it as a prop.
+  const pendingEmailDocRef = React.useRef<string | null>(null);
+  const [pendingOutboundMessage, setPendingOutboundMessage] = React.useState<string | null>(null);
+
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
 
@@ -921,6 +949,14 @@ export function ConversationPane(): React.JSX.Element {
         // whatever the carrier itself delivered rather than replacing it.
         ...(activeTabFocusRef.current?.contextType === "document" && reanalyzeBindingIdRef.current
           ? [buildReanalyzeChip(reanalyzeBindingIdRef.current)]
+          : []),
+        // task 042c-fr-c4 (FR-C4): the deterministic "Summarize this email" chip, folded into
+        // whatever carrier delivers alongside it — shown ONLY when the active tab is an email
+        // context (ADR-039 deterministic; no classifier) AND the tab exposes a non-null
+        // `emlDocumentId` (guarded by readActiveEmailDocId → never a null-document send).
+        ...(activeTabFocusRef.current?.contextType === "email" &&
+        readActiveEmailDocId(activeTabFocusRef.current?.compactState)
+          ? [buildEmailSummarizeChip()]
           : []),
       ],
       []
@@ -1697,6 +1733,20 @@ export function ConversationPane(): React.JSX.Element {
           // SAME mount-in-Compose + dispatch-nda-review flow the old top-of-pane card used.
           handleReviewNda();
           return;
+        case LOCAL_CHIP.emailSummarize: {
+          // task 042c-fr-c4 (FR-C4): arm the one-shot email-summarize flow. Read the FOCUSED email
+          // tab's `emlDocumentId` off the focus stamp (the tab's persisted EmailTabWidgetData), set
+          // it as the one-shot decorate handle, and arm SprkChat's host→send slot. SprkChat sends
+          // "Summarize this email" once → handleDecorateOutboundBodyWithRevise attaches
+          // `documentId=emlDocumentId` to THAT turn only → the server injects the .eml body for that
+          // turn (ADR-015 on-demand, never every-turn). Guard: no emlDocumentId ⇒ do nothing (the
+          // chip is not offered without one, but this is belt-and-braces — never a null send).
+          const emlDocId = readActiveEmailDocId(activeTabFocusRef.current?.compactState);
+          if (!emlDocId) return;
+          pendingEmailDocRef.current = emlDocId;
+          setPendingOutboundMessage("Summarize this email");
+          return;
+        }
         case LOCAL_CHIP.agreementReviewConfirmQuick:
         case LOCAL_CHIP.agreementReviewConfirmThorough:
         case LOCAL_CHIP.agreementReviewGeneral:
@@ -2112,6 +2162,17 @@ export function ConversationPane(): React.JSX.Element {
       // needed here.
       if (activeTabFocusRef.current != null) {
         body.activeContext = activeTabFocusRef.current;
+      }
+
+      // task 042c-fr-c4 (FR-C4): one-shot email-body handle. When the "Summarize this email" chip
+      // armed `pendingEmailDocRef`, attach it as THIS turn's `documentId` and CLEAR the ref
+      // immediately — so ONLY the invoked turn carries it (the server's per-turn injection renders
+      // the .eml body for that one turn; `request.DocumentId` is never persisted to session). Every
+      // normal turn on an email tab (ref unset) attaches NO documentId — ADR-015 on-demand, not
+      // ambient/every-turn. Same additive style as the activeContext/modelTierOverride stamps above.
+      if (pendingEmailDocRef.current) {
+        body.documentId = pendingEmailDocRef.current;
+        pendingEmailDocRef.current = null;
       }
 
       const messageText = typeof body.message === "string" ? body.message : "";
@@ -2553,6 +2614,22 @@ export function ConversationPane(): React.JSX.Element {
           // this direct seed never double-renders once getAppendedLocalChips ALSO contributes it.
           chips.acceptChips([
             { targetBindingId: reanalyzeBindingIdRef.current, chipLabel: "Reanalyze" },
+          ]);
+        }
+      }
+      // task 042c-fr-c4 (FR-C4) — an email-context tab gets the deterministic "Summarize this
+      // email" chip (ADR-039: click affordance, NO classifier). Seed it directly on focus so it
+      // shows even when the proactive-suggest turn (022) returns zero chips — the SAME determinism
+      // gap task 038's Reanalyze seed closes (getAppendedLocalChips only folds a chip in ALONGSIDE
+      // a non-empty carrier). Guarded on a non-null `emlDocumentId` (never offer a null-document
+      // send) and, like the Reanalyze seed, skipped mid-dispatch (`chips.dispatching`) so it never
+      // re-populates the strip while a click is in flight. De-duped by bindingId against
+      // getAppendedLocalChips (identical local id), so it never double-renders.
+      if (focusStamp.contextType === "email") {
+        const emlDocId = readActiveEmailDocId(focusStamp.compactState);
+        if (emlDocId && !chips.dispatching) {
+          chips.acceptChips([
+            { targetBindingId: LOCAL_CHIP.emailSummarize, chipLabel: "Summarize this email" },
           ]);
         }
       }
@@ -3058,6 +3135,11 @@ export function ConversationPane(): React.JSX.Element {
               onAttachmentRemoved={attachments.handleAttachmentRemoved}
               injectLocalMessage={injection.pendingInjection}
               onLocalMessageInjected={injection.handleLocalMessageInjected}
+              // task 042c-fr-c4 (FR-C4): one-shot host→send seam for the deterministic
+              // "Summarize this email" chip. SprkChat sends the armed message once (running the
+              // decorate seam that attaches the one-turn documentId), then acks so we clear the slot.
+              pendingOutboundMessage={pendingOutboundMessage}
+              onOutboundConsumed={() => setPendingOutboundMessage(null)}
               onBeforeSendMessage={handleBeforeSendMessage}
               onMessagesChange={(msgs) => {
                 // CHAT-4: keep the local transcript-length in sync so the get-started cards toggle
