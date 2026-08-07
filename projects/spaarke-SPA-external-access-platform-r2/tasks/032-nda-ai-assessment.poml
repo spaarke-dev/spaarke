@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>NDA upload → AI assessment → 3 outcomes (sign-as-is + e-sign stub / minor-edits + redline / review → submit-wizard pre-filled)</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:031</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-sensitive AI on the external plane (app-only, no OBO), new BFF endpoint group, shared external-access + AI surfaces, spans client (3-outcome UI) + BFF + JPS config; tags bff-api/auth — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The CENTERPIECE — orchestrates classify→assess→map→branch across the agreement-review AI machine, an app-only broker re-host of an OBO-only pre-fill/analysis path, and a 3-outcome contract; high blast radius + auth-sensitive + ADR-013/§10 placement judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Auth-sensitive; touches the shared external-access BFF surface + AI PublicContracts; builds on 031's Front Door group; must not race another BFF editor (conflict-check with teams-app-r1).</parallel-reason>
+    <deps>031</deps>
+    <tags>bff-api, auth, frontend, ai</tags>
+    <estimated-effort>3-4 days</estimated-effort>
+  </metadata>
+  <prompt>Build the FR-23 NDA AI assessment: a workforce-plane, entitlement-scoped, app-only (NO OBO) BFF endpoint POST /api/v1/external/legal-front-door/nda/assess that stages an uploaded NDA to SPE app-only, runs an AI compliance assessment against the Spaarke NDA Standard by REUSING the agreement-review Action ({overallRisk}) + DocumentClassifierHandler (NDA) + AppOnlyAnalysisService, maps overallRisk to one of three outcomes via ComposeSummaryPageGenerator.BuildRecommendation triage logic, and returns {outcome, message, redlineDocumentId?, prefill?}. Wire the client 3-outcome UI: (a) compliant → sign-as-is + e-sign STUB link; (b) minor → edit list + a MOCK/pending redline (real synthesis gated by SPIKE 033 — do NOT build the redline synthesizer here); (c) review → "Submit NDA request" button opening the 031 intake wizard PRE-FILLED from the uploaded doc.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. ASP.NET Minimal API endpoint groups (ADR-008 route-group filters, ADR-019 ProblemDetails), broker-only external auth (ADR-028 +A1/A3, no OBO), AI via the Services/Ai/PublicContracts facade (ADR-013/§10), SPE via SpeFileStore app-only (ADR-007), Fluent v9 + React 18 client (ADR-021).</role>
+  <goal>An NDA uploaded by a workforce Front Door user is assessed and triaged to one of three outcomes: (a) fully compliant → "sign as is" message + an e-signature STUB link; (b) minor/low-risk → an edit list + a redline artifact reference (MOCK/pending — outcome-(b) synthesis is gated by SPIKE 033); (c) requires legal review → the 031 intake wizard opens pre-filled from the uploaded document. The endpoint POST /api/v1/external/legal-front-door/nda/assess runs app-only on the workforce-external plane (never OBO), returns {outcome: compliant|minor|review, message, redlineDocumentId?, prefill?}, and an unclassifiable/non-NDA document routes to manual (review) rather than a wrong outcome.</goal>
+  <context>
+    <background>FR-23 (the amendment centerpiece): on NDA upload, run an AI compliance assessment against the Spaarke NDA Standard and return one of three outcomes each with a distinct next action (see spec.md lines 247-253). Grounded reuse: the triage classification is ~80% reuse — agreement-review.action.json returns {overallRisk: Low|Medium|High|Critical, flaggedSections[…]}; overallRisk maps almost verbatim (Low→sign-as-is, Medium→minor-edits, High/Critical→review); the disposition logic exists in ComposeSummaryPageGenerator.BuildRecommendation:90-102; NDA detection + (c) pre-fill reuse DocumentClassifierHandler (NDA) + AppOnlyAnalysisService (app-only MI path exists) + the pre-fill engine (MatterPreFillService/IWorkspacePrefillAi → PreFillResponse{fields,confidence,prefilledFields[]}); the Standard is NdaStandard KNW-011 (NdaStandardClauseProvider, 16 clauses B1-B16). Net-new: (1) the triage orchestrator + the external app-only endpoint; (2) outcome-(b) auto-redline is the genuinely novel/hard piece and is ADR-tensioned with the advisory-only posture — DO NOT build it here; it is MOCK/pending SPIKE 033; (3) OBO-decoupling — bytes-in (external SPE broker read) + email export need app-only variants. This task delivers (1) + the client 3-outcome UI + outcomes (a) and (c) fully, and (b) as a mock. 031 supplies the intake wizard the (c) pre-fill drives.</background>
+    <relevant-files>
+      <file>infra/dataverse/actions/agreement-review.action.json (the review Action → {overallRisk, flaggedSections[…]} — REUSE as-is; the triage input)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/**/ComposeSummaryPageGenerator.cs:90-102 (BuildRecommendation — the triage/disposition logic to reuse for overallRisk→outcome mapping)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/**/DocumentClassifierHandler.cs (NDA classification)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/**/AppOnlyAnalysisService.cs (app-only classify/pre-fill — the no-OBO path to re-host)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/** (the AI facade — external endpoint consumes AI through here, ADR-013/§10; no AI-internal types leak to the external surface)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/NdaStandardEndpoints.cs + NdaStandardClauseProvider (Baseline NDA Standard KNW-011, clauses B1-B16)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/**/MatterPreFillService.cs / IWorkspacePrefillAi (PreFillResponse{fields,confidence,prefilledFields[]} — the (c) form pre-fill engine, OBO today → app-only re-host)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** + Infrastructure/ExternalAccess/CallerPrincipalResolver.cs + Api/Filters/CallerPrincipalAuthorizationFilter.cs (the external group + group filter to reuse; workforce-plane policy from task 024)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/**/SpeFileStore.cs (app-only SPE staging/download, ADR-007; key on documentId, no Graph pointer exposure)</file>
+      <file>src/client/external-spa/** (the 031 typed-intake driver + Front Door module — mount the NDA upload + 3-outcome UI; drive the (c) pre-filled wizard)</file>
+      <file>.claude/constraints/bff-extensions.md (binding BFF governance — Placement Justification + publish size)</file>
+    </relevant-files>
+    <dependencies>031 (typed-intake framework + MapFrontDoorEndpoints group + intake wizard) must be complete — outcome (c) opens that wizard pre-filled. 030 supplies sprk_servicerequest fields the (c) submission writes. 024 supplies the workforce-plane external-app auth policy the endpoint uses. Outcome-(b) real redline build is gated by SPIKE 033 (this task mocks it).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-028">Broker-only: the NDA-assess endpoint runs on the workforce-external plane, app-only downstream (SPE + AI + Dataverse) — the caller token authenticates ONLY to the BFF and is NEVER exchanged for an OBO token. No OBO on any path in this task.</constraint>
+    <constraint source="ADR-013">Consume AI ONLY through Services/Ai/PublicContracts/ — do NOT inject IOpenAiClient / IPlaybookService / classifier internals or other AI-internal types into the external endpoint. No AI-internal type leaks to the external surface (§10 / refined ADR-013).</constraint>
+    <constraint source="ADR-007">All SPE reads/writes go through SpeFileStore app-only; authz-before-stream; key on documentId; never expose a Graph drive/item pointer to the client.</constraint>
+    <constraint source="ADR-008">The endpoint is part of a route-group with a group-level authorization filter (reuse CallerPrincipalAuthorizationFilter under the Front Door group) — no per-endpoint ad-hoc middleware, no global middleware. ADR-019 ProblemDetails for all errors.</constraint>
+    <constraint source="project">Outcome (b) redline is MOCK/pending in R2 — return a placeholder redline reference (or an explicit "redline pending" marker) and DO NOT build a finding→edit synthesizer or call ComposeShadowPatchEngine to auto-apply redlines. The real (b) surface + artifact is gated by SPIKE 033 (spec.md line 253 ADR tension: agreement-review is advisory-only, MUST NOT auto-apply redlines).</constraint>
+    <constraint source="project">REUSE the existing NDA plumbing — do NOT author a new risk enum, a new NDA Standard, or a new triage rule set. Use agreement-review.action.json's {overallRisk} + BuildRecommendation's disposition + NdaStandard KNW-011 + DocumentClassifierHandler + AppOnlyAnalysisService (owner decision 2026-08-06).</constraint>
+    <constraint source="project">BFF addition: state the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); run dotnet publish -c Release and report compressed size + delta vs baseline 46.90 MB incl PDBs (ceiling ≤60 MB, escalate ≥+5 MB single-task); run /conflict-check before the BFF PR (teams-app-r1 shares Api/ExternalAccess/** + Infrastructure/ExternalAccess/**; AI cluster shares Services/Ai/**).</constraint>
+    <constraint source="ADR-021">Client 3-outcome UI in Fluent v9 semantic tokens only; zero hardcoded hex; verified light/dark/Teams theme + narrow Teams personal-tab width; dialogs via @spaarke/ui-components presets (no hand-rolled Dialog, §11/ADR-050).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-013-openai-facade.md</file>
+      <file>.claude/adr/ADR-039-agent-tool-catalog.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/review-additions-analysis.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="AI facade" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">Consume classify/assess/pre-fill through the PublicContracts facade; the external endpoint never touches AI internals (ADR-013/§10).</pattern>
+      <pattern name="Triage disposition" location="src/server/api/Sprk.Bff.Api/Services/Ai/**/ComposeSummaryPageGenerator.cs:90-102">Reuse BuildRecommendation as the overallRisk→outcome mapping (Low→compliant, Medium→minor, High/Critical→review).</pattern>
+      <pattern name="External group + filter" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/">Author the nda/assess route under the Front Door group with the group-level CallerPrincipalAuthorizationFilter on the workforce-plane policy.</pattern>
+      <pattern name="App-only pre-fill" location="src/server/api/Sprk.Bff.Api/Services/Ai/**/AppOnlyAnalysisService.cs">Re-host the OBO MatterPreFillService pre-fill through the app-only path for outcome (c).</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-23 (lines 247-253) + review-additions-analysis.md item 1 + ADR-028/013/007/008/039 + bff-extensions.md. Read the reuse targets: agreement-review.action.json, ComposeSummaryPageGenerator.BuildRecommendation, DocumentClassifierHandler, AppOnlyAnalysisService, NdaStandardClauseProvider, MatterPreFillService/IWorkspacePrefillAi, the PublicContracts facade. Run /conflict-check for the external-access + AI BFF surfaces.</step>
+    <step order="2">Author the NDA-intake extraction Action + one sprk_playbookconsumer binding row (zero executor code) for the outcome-(c) pre-fill (mirror how the workspace pre-fill Action is bound). Validate the JPS via jps-validate.</step>
+    <step order="3">BFF: add POST /api/v1/external/legal-front-door/nda/assess under the Front Door group (031) with the group-level CallerPrincipalAuthorizationFilter on the workforce-plane external-app policy (024). App-only: stage the uploaded NDA via SpeFileStore (key on documentId), classify via DocumentClassifierHandler, assess via the agreement-review Action through the PublicContracts facade, and map {overallRisk} → outcome via reused BuildRecommendation disposition. ProblemDetails for errors.</step>
+    <step order="4">BFF: build the outcome branches. (a) compliant → {outcome:"compliant", message, esignStubUrl}. (b) minor → {outcome:"minor", message, editList, redlineDocumentId: MOCK/pending} — DO NOT synthesize a real redline (gated by SPIKE 033); return a placeholder/"redline pending" marker. (c) review → {outcome:"review", message, prefill: PreFillResponse from the app-only pre-fill Action}. Unclassifiable/non-NDA → route to review (manual) — never emit a wrong compliant/minor outcome.</step>
+    <step order="5">Client (external-spa): build the NDA upload + 3-outcome UI in the Front Door module. (a) render the sign-as-is message + the e-sign STUB link; (b) render the edit list + a MOCK redline download/email affordance (email reuses the FR-24 path; wire in 037); (c) render a "Submit NDA request" button that opens the 031 intake wizard PRE-FILLED from prefill. Fluent v9 tokens; presets only.</step>
+    <step order="6">Tests: KEEP-path integration tests in tests/unit/Sprk.Bff.Api.Tests/ exercising the real endpoint-group wiring for all 3 outcomes + the unclassifiable→review negative + a no-OBO assertion (the endpoint never acquires an OBO token). NO Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests (ADR-038). Client component tests for the 3-outcome render + the (c) pre-filled wizard hand-off.</step>
+    <step order="7">Build: npm run build:prod (client); dotnet publish -c Release — report compressed size + delta vs 46.90 MB. State the Placement Justification in the task notes / PR body.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document deviations + the outcome-(b) mock boundary (what SPIKE 033 must resolve) in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If outcome (a) or (c) cannot be built app-only — i.e. any reused component (pre-fill, classifier, assessment, SPE read, or email export) requires an OBO/user token that has no app-only variant and cannot be re-hosted broker-only — STOP and raise 🔔 Human Input Required (NFR-01 / ADR-028: no OBO on any SPA path). Do NOT introduce OBO to make the assessment work. Present the specific component + the app-only gap + options (defer, new app-only variant, scope cut).</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="npm">Build/test the external-spa client (build:prod)</tool>
+    <tool name="terminal">Shell, /conflict-check, jps-validate</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/** — POST /api/v1/external/legal-front-door/nda/assess (app-only, workforce-plane, 3-outcome) + triage orchestrator via PublicContracts</output>
+    <output type="code">infra/dataverse/actions/** — NDA-intake extraction Action + one sprk_playbookconsumer binding row (no executor code)</output>
+    <output type="code">src/client/external-spa/** — NDA upload + 3-outcome UI; outcome-(c) pre-filled 031 wizard hand-off</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** — 3-outcome + unclassifiable→review + no-OBO KEEP-path integration tests; client 3-outcome component tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a fully-compliant NDA (agreement-review overallRisk=Low), when POST nda/assess runs, then it returns {outcome:"compliant", message, esignStubUrl} and the client shows the sign-as-is message + the e-sign STUB link.</criterion>
+    <criterion testable="true">Given a minor/low-risk NDA (overallRisk=Medium), when nda/assess runs, then it returns {outcome:"minor", message, editList, redlineDocumentId} where redlineDocumentId is a MOCK/pending marker (no real synthesized redline; 033 gates the real one) and the client shows the edit list + a download/email affordance.</criterion>
+    <criterion testable="true">Given a review-required NDA (overallRisk=High|Critical), when nda/assess runs, then it returns {outcome:"review", message, prefill} and the client opens the 031 intake wizard pre-filled from prefill.</criterion>
+    <criterion testable="true">Negative (unclassifiable): given a non-NDA or unclassifiable document, when nda/assess runs, then it routes to outcome "review" (manual) — it NEVER returns "compliant" or "minor" for a document it could not assess.</criterion>
+    <criterion testable="true">Negative (no OBO): the endpoint runs app-only on the workforce-external plane — a test asserts no OBO/user token is acquired downstream (SPE + AI + Dataverse are all app-only).</criterion>
+    <criterion testable="true">Given the endpoint consumes AI, when reviewed, then it depends ONLY on Services/Ai/PublicContracts/ types — no IOpenAiClient/classifier-internal type appears in the external endpoint (ADR-013/§10).</criterion>
+    <criterion testable="true">Given the BFF build, when dotnet publish -c Release runs, then compressed size is reported with delta vs 46.90 MB and is ≤60 MB.</criterion>
+    <criterion testable="true">Given the 3-outcome UI, when rendered in light/dark/Teams theme at narrow width, then semantic tokens adapt with zero hardcoded hex and no console errors.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>agreement-review.action.json + ComposeSummaryPageGenerator.BuildRecommendation:90-102 + DocumentClassifierHandler + AppOnlyAnalysisService + NdaStandardClauseProvider (KNW-011) + MatterPreFillService/IWorkspacePrefillAi already deliver classify + risk-assess + disposition + pre-fill — verified in review-additions-analysis.md item 1 (~80% reuse). What does NOT exist: an external-plane, app-only, workforce-scoped NDA-assess endpoint returning the 3-outcome contract; the existing pre-fill/analysis is OBO/workforce-only.</existing>
+    <extension>Yes for the AI machine (reuse the Action, disposition, classifier, Standard, pre-fill as-is via the PublicContracts facade); No for the endpoint (net-new external group route + triage orchestrator), because the OBO-only paths must be re-hosted broker-only/app-only — a genuine new surface justified by FR-23.</extension>
+    <cost-of-doing-nothing>Without the app-only external endpoint + triage orchestrator, a workforce Front Door user cannot get an NDA assessed on the SPA (the OBO/core-user pre-fill/analysis path is unreachable from the external plane) — FR-23 (the amendment centerpiece) has no delivery, and every NDA falls back to manual legal review with no auto-fill.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Three outcomes render">
+      <steps><step>Upload an NDA in the Front Door module</step><step>Exercise each outcome (compliant / minor / review) via seeded assessment results</step></steps>
+      <expected>(a) sign-as-is + e-sign stub link; (b) edit list + mock redline affordance; (c) "Submit NDA request" opens the pre-filled 031 wizard; no console errors</expected>
+    </test>
+    <test name="Dark + Teams theme (ADR-021)">
+      <steps><step>Toggle dark mode via ThemeToggle</step><step>Load inside a Teams-theme host (light/dark/high-contrast) at narrow width</step></steps>
+      <expected>Zero hardcoded hex; tokens adapt across light/dark/Teams; readable at Teams personal-tab width</expected>
+    </test>
+    <test name="Unclassifiable routes to review">
+      <steps><step>Upload a non-NDA document</step></steps>
+      <expected>Client shows the review outcome (manual) — never a compliant/minor result</expected>
+    </test>
+  </ui-tests>
+  <notes>Spec FR-23 (lines 247-253) — the amendment CENTERPIECE. Reuse ALL existing NDA plumbing (owner 2026-08-06). Outcome (b) redline is MOCK/pending — the real business-user redline surface + artifact is gated by SPIKE 033 (do NOT build the synthesizer here; it is ADR-tensioned with the advisory-only posture). §10 BFF: Placement Justification + publish size + conflict-check mandatory. No OBO on any path (ADR-028/A3); AI only via PublicContracts (ADR-013/§10). Use build:prod (NOT build) per CLAUDE.md §12 / AP-1.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; run /conflict-check + code-review + adr-check at Step 9.5; escalate on any OBO dependency.</protocol>
+  </execution>
+</task>

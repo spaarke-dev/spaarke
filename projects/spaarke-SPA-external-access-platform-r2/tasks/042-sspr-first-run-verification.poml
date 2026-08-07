@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Verify + document CIAM SSPR first-run (forgot-password → set → first sign-in)</title>
+    <phase>P4 Hardening + Front Door depth</phase>
+    <gate>blocked-until:019</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Live verification + documentation of an existing provisioning path; no production .cs change. Tags testing/docs.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Procedural live verification + guide authoring following a known flow; no novel reasoning.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs a live sign-in against shared CIAM infra (provisions a real external user); must not race concurrent live-auth tasks.</parallel-reason>
+    <deps>019</deps>
+    <tags>testing, docs</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Verify the freshly-provisioned CIAM external user Self-Service Password Reset (SSPR) first-run path
+    end-to-end — "Forgot password" → set a new password → first successful sign-in — and capture it as a
+    concrete operational guide so operators can reproduce and troubleshoot it.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Familiar with Entra External ID (CIAM) SSPR, local email accounts with forceChangePasswordNextSignIn, and out-of-band temp-password delivery.</role>
+
+  <goal>
+    A completed live verification that a newly provisioned CIAM user (created with a temp password +
+    forceChangePasswordNextSignIn, per CiamUserProvisioningService) can complete SSPR "Forgot password",
+    set a new password, and sign in for the first time — plus a step-by-step guide doc capturing the
+    exact flow, prerequisites, and troubleshooting.
+  </goal>
+
+  <context>
+    <background>
+      FR-20: Verify + document the freshly-provisioned CIAM user SSPR "Forgot password" → set → first
+      sign-in path. Acceptance: a new external user completes SSPR and signs in. The provisioner creates
+      local email accounts with a cryptographically-generated temp password,
+      forceChangePasswordNextSignIn=true, and passwordPolicies=DisablePasswordExpiration; the temp
+      password is delivered out-of-band via SSPR (never returned/logged) — see
+      CiamUserProvisioningService.cs (CreateCiamUserAsync :57, BuildCiamUser :85). R2 has not yet
+      verified this first-run path on live CIAM.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/CiamUserProvisioningService.cs</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>docs/guides/ (target for the new SSPR first-run guide)</file>
+    </relevant-files>
+    <dependencies>Task 019 (external routes / live external sign-in path) complete — provides the live surface a newly provisioned user signs into.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">The verified path stays broker-only for CIAM (external token authenticates to the BFF only; no OBO downstream); the guide MUST NOT instruct returning or logging the temp password — SSPR is the out-of-band reset — scope: CIAM external sign-in only.</constraint>
+    <constraint source="ADR-038">This is a live verification of a live-only property — do NOT substitute an in-process mock; if the flow cannot be exercised live, record it as unverified rather than false-green — scope: this verification.</constraint>
+    <constraint source="project">The guide is a docs deliverable; place it under docs/guides/ (operational procedure) and cross-link from the project notes. Do NOT create a new review UI or code surface — verification + documentation only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Operational guide authoring" location=".claude/skills/docs-guide/SKILL.md">Structure for a Spaarke operational guide (prerequisites, steps, verification, troubleshooting).</pattern>
+      <pattern name="CIAM local-account provisioning" location="src/server/api/Sprk.Bff.Api/Services/Registration/CiamUserProvisioningService.cs">forceChangePasswordNextSignIn + DisablePasswordExpiration + out-of-band SSPR delivery — the exact account shape the SSPR first-run applies to.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Confirm SSPR is enabled/configured on the CIAM tenant for the user flow; note the prerequisites (authentication methods, SSPR policy) in the guide draft.</step>
+    <step order="2">Provision a fresh CIAM external user (via the R1 invite/provision path) and confirm the account is created with forceChangePasswordNextSignIn=true (temp password NOT surfaced to the operator).</step>
+    <step order="3">Complete the SSPR "Forgot password" flow for that user: trigger reset, receive the code/link via the configured method, and set a new password.</step>
+    <step order="4">Perform the first sign-in with the new password against the live external surface (from task 019) and confirm the user reaches the app.</step>
+    <step order="5">Author the guide doc under docs/guides/ capturing: prerequisites, provisioning shape, SSPR reset steps, first sign-in, and troubleshooting (common failure modes — e.g. SSPR not enabled, no auth method registered, temp-password expiry).</step>
+    <step order="6">Cross-link the guide from projects/spaarke-SPA-external-access-platform-r2/notes/ and record verification evidence (screenshots/notes; no secrets).</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/ (CIAM SSPR first-run verification guide)</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (verification evidence + cross-link)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a freshly provisioned CIAM external user, when the operator completes SSPR "Forgot password" → set new password → first sign-in against the live external surface, then the user signs in successfully (verified live, not mocked).</criterion>
+    <criterion testable="true">Given the verification, when complete, then a guide doc exists under docs/guides/ with prerequisites, step-by-step flow, and troubleshooting, and it never instructs returning/logging the temp password.</criterion>
+    <criterion testable="true">Given the flow cannot be exercised live (e.g. SSPR not enabled), when the task runs, then it records the path as unverified with the concrete blocker — it does NOT claim success via a mock.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    The temp password is delivered out-of-band via SSPR by design (CiamUserProvisioningService) — it is
+    never returned to the caller or logged. This task VERIFIES that this is actually usable end-to-end
+    for a new external user and captures the operational recipe. No new code or review UI — verification
+    + documentation only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

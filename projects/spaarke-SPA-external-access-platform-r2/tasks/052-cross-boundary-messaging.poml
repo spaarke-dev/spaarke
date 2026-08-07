@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Cross-boundary messaging (external thread endpoint + ConversationView widget + thread-on-request)</title>
+    <phase>P5 Collaboration Surfaces</phase>
+    <gate>blocked-until:015</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds an app-only external thread endpoint on the heavily-shared Services/Communication surface (tags bff-api/frontend); mixed-principal participation-scoping with fail-closed sprk_isinternalonly filtering — a scoping omission = cross-boundary message leak.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>App-only (no OBO) participation-scoped write/read on a shared communication surface with mixed systemuser+contact principals — high-blast-radius, heavily-coordinated surface per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Services/Communication/** is a heavily-shared BFF surface (email-r5, messaging-r1/r2/r3, notification-spine); concurrent edits collide; /conflict-check mandatory.</parallel-reason>
+    <deps>015</deps>
+    <tags>bff-api, frontend</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Enable cross-boundary messaging so an internal MDA/core user (systemuser) and an external workspace user (contact)
+    chat in the SAME thread. Add ONE thin NEW /api/v1/external/.../threads endpoint group on the ExternalCollaboration
+    policy — app-only, participation-scoped to the contact's sprk_communicationparticipant rows, re-running
+    CommunicationAccessFilter with IsInternalUser=false. Reuse sprk_communicationthread, AcsIdentityService (mints for the
+    contact too, no OBO), and the ConversationView widget as-is. MDA posts via the existing internal /send; external posts
+    via the new broker write; both land on the same thread. This is the SAME thread-on-request spine as FR-24/037.
+  </prompt>
+
+  <role>SPAARKE platform developer + BFF communication engineer + Fluent v9 frontend engineer. Follow ADRs strictly. Expert in app-only participation-scoped access on the shared Communication surface, mixed-principal (systemuser+contact) threads, and mounting ConversationView.</role>
+
+  <goal>
+    A working cross-boundary thread: ONE new app-only, participation-scoped /api/v1/external/.../threads endpoint group
+    (ExternalCollaboration policy) + external ACS mint + the external contact added to ACS membership reconciliation, with
+    the ConversationView widget mounted on the workspace shell. An MDA user and an external contact exchange messages on one
+    sprk_communicationthread; sprk_isinternalonly messages are never returned to the contact (fail-closed); non-participant
+    contacts see nothing; no OBO on the external path; publish ≤60 MB.
+  </goal>
+
+  <context>
+    <background>
+      Per spec FR-27 (2026-08-06) + design.md §12(D) (FR-24 + FR-27 share ONE thread-on-request model). Surface the Messaging
+      feature as a tab within the Legal Front Door module (not a top-level launcher card) so a systemuser (internal MDA) and a
+      contact (external workspace) chat in the same thread. REUSE AS-IS: sprk_communicationparticipant (mixed-principal
+      junction), sprk_communicationthread, ConversationView / ConversationWorkspace, and server-side AcsIdentityService (mints
+      ACS identity for both principal types; no browser ACS token — polling UI; no OBO). NEW: ONE thin
+      /api/v1/external/.../threads group (ExternalCollaboration policy, app-only, participation-scoped to the contact's junction
+      rows, re-running CommunicationAccessFilter with IsInternalUser=false) + external ACS mint + adding the external contact to
+      the ACS membership reconciliation. MDA posts via existing internal /send; external posts via the new broker write; both land
+      on the same sprk_thread. sprk_isinternalonly already fails closed. This is the SAME thread-on-request spine as FR-24/037
+      (task 037). Services/Communication/** is heavily shared (email-r5, messaging-r1/r2/r3, notification-spine) → /conflict-check
+      before every PR.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/</file>
+      <file>src/client/external-spa/</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/</file>
+    </relevant-files>
+    <dependencies>015 (FR-22 module/widget-data framework generalization — the per-module CallerPrincipalResolver strategy/predicate registration this external thread group registers over).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">§10 BFF Hygiene + ADR-040/§10 Communication surface: state a Placement Justification in the PR for the new external thread group (cite .claude/constraints/bff-extensions.md); run /conflict-check BEFORE every PR (Services/Communication/** shared by email-r5, messaging-r1/r2/r3, notification-spine); verify publish ≤60 MB compressed + no new HIGH CVE.</constraint>
+    <constraint source="project">The external path is app-only (broker write), NO OBO (NFR-01). External reads/writes are participation-scoped to the contact's sprk_communicationparticipant rows via CommunicationAccessFilter with IsInternalUser=false.</constraint>
+    <constraint source="project">sprk_isinternalonly messages MUST NEVER be returned to the contact (fail-closed — verify the existing filter holds for the external plane). A non-participant contact sees nothing.</constraint>
+    <constraint source="project">Reuse AS-IS: sprk_communicationthread, sprk_communicationparticipant, AcsIdentityService, ConversationView/ConversationWorkspace — do NOT fork them. MDA posts via existing internal /send; external via the new broker write; both land on the same thread.</constraint>
+    <constraint source="ADR-008">The external thread group uses group-level route policies + endpoint filters (ExternalCollaboration), not global middleware.</constraint>
+    <constraint source="ADR-021">The ConversationView is mounted with Fluent v9 tokens, zero hex; renders correctly in dark + Teams themes.</constraint>
+    <constraint source="ADR-038">Add/update tests in tests/unit/Sprk.Bff.Api.Tests/ (+ KEEP-path integration); the negative participation-scope + sprk_isinternalonly tests are mandatory; no Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="ExternalCollaboration app-only group" location="src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs">Register the external thread group on the ExternalCollaboration policy (app-only, no OBO); participation-scope via CommunicationAccessFilter IsInternalUser=false.</pattern>
+      <pattern name="Mixed-principal ACS mint" location="src/server/api/Sprk.Bff.Api/Services/Communication/">AcsIdentityService mints ACS identity for systemuser AND contact (no browser token, no OBO); add the external contact to the ACS membership reconciliation.</pattern>
+      <pattern name="Thread-on-request spine" location="src/server/api/Sprk.Bff.Api/Services/Communication/">The same spine FR-24/037 uses — reuse sprk_communicationthread + ConversationView; do not fork.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check against Services/Communication/** (email-r5, messaging-r1/r2/r3, notification-spine) before editing; record the result.</step>
+    <step order="2">Read the existing internal /send + CommunicationAccessFilter + AcsIdentityService + sprk_communicationparticipant/thread + ConversationView; map how internal threads are scoped and how IsInternalUser is applied today.</step>
+    <step order="3">Add ONE thin NEW /api/v1/external/.../threads endpoint group on the ExternalCollaboration policy — app-only, participation-scoped to the contact's sprk_communicationparticipant rows, re-running CommunicationAccessFilter with IsInternalUser=false. No OBO.</step>
+    <step order="4">Wire the external broker write (external contact posts) so it lands on the SAME sprk_communicationthread as the MDA-side internal /send; extend AcsIdentityService/membership reconciliation to include the external contact (mint, no OBO).</step>
+    <step order="5">Mount the ConversationView widget on the workspace shell as a Messages tab within the Legal Front Door (reuse as-is; Fluent v9 tokens, zero hex).</step>
+    <step order="6">Add negative tests: sprk_isinternalonly never returned to the contact (fail-closed); a non-participant contact sees nothing; external path is app-only (no OBO); external write lands on the same thread as internal /send.</step>
+    <step order="7">Run dotnet build + dotnet test (full BFF suite green); dotnet list package --vulnerable (no new HIGH CVE); dotnet publish -c Release and record compressed size + delta vs baseline.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If serving the external thread path would require OBO (no viable app-only participation-scoped read/write exists), STOP and escalate per NFR-01 — the external communication path MUST be app-only, never OBO.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="npm">Build the external-spa / shared UI</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (new /api/v1/external/.../threads group + external ACS mint + membership reconciliation)</output>
+    <output type="code">src/client/external-spa/ (ConversationView mounted as a Messages tab)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (participation-scope + sprk_isinternalonly + same-thread tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an MDA user (systemuser) and an external user (contact) on the same sprk_communicationthread, when each posts, then both messages appear in the one thread (MDA via internal /send, external via the new broker write).</criterion>
+    <criterion testable="true">Negative — internal-only: sprk_isinternalonly messages are NEVER returned to the contact (fail-closed test green).</criterion>
+    <criterion testable="true">Negative — participation scope: a non-participant contact (no sprk_communicationparticipant row on the thread) sees nothing (test green).</criterion>
+    <criterion testable="true">Negative — auth: the external thread path is app-only with no OBO; the group is on the ExternalCollaboration policy with CommunicationAccessFilter IsInternalUser=false.</criterion>
+    <criterion testable="true">Reuse verified: sprk_communicationthread / sprk_communicationparticipant / AcsIdentityService / ConversationView are used as-is (not forked).</criterion>
+    <criterion testable="true">The full BFF suite is green; no new HIGH CVE; publish ≤60 MB compressed with delta reported; Placement Justification stated in PR + /conflict-check run against Services/Communication/**.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>sprk_communicationparticipant (mixed systemuser+contact), sprk_communicationthread, ConversationView/ConversationWorkspace, AcsIdentityService (mints both principal types, no OBO), the internal /send + CommunicationAccessFilter. grep: reads are systemuser-impersonated today — no app-only, participation-scoped external thread group exists.</existing>
+    <extension>Partial — REUSE the thread/junction/ACS/ConversationView spine as-is; the ONLY new surface is ONE thin /api/v1/external/.../threads group (app-only, participation-scoped) + external ACS mint + membership reconciliation. The internal path assumes systemuser impersonation and cannot serve the app-only contact plane.</extension>
+    <cost-of-doing-nothing>Without the external thread group, an external contact cannot participate in a thread with the law department; the FR-24 feedback loop + FR-27 cross-boundary chat both fail on the external side, and any attempt to reuse the systemuser-impersonated read path on the contact plane would leak or fail-closed incorrectly.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Messages tab renders cross-boundary thread">
+      <steps><step>Open the Legal Front Door as an external contact who participates in a thread; open the Messages tab</step><step>Post a message; verify the MDA-side reply appears</step></steps>
+      <expected>Both principals' messages render in one thread; no sprk_isinternalonly content shown; no console errors</expected>
+    </test>
+    <test name="Non-participant sees nothing">
+      <steps><step>Open the Messages tab as a contact with no participant row on the thread</step></steps>
+      <expected>No thread content is shown</expected>
+    </test>
+    <test name="Dark + Teams theme (ADR-021)">
+      <steps><step>Toggle dark theme, then Teams theme, with the Messages tab open</step></steps>
+      <expected>Fluent tokens adapt; zero hardcoded hex; layout intact</expected>
+    </test>
+  </ui-tests>
+
+  <notes>
+    §10 BFF-touching + heavily-shared Communication surface: /conflict-check before EVERY PR (email-r5, messaging-r1/r2/r3,
+    notification-spine). Placement Justification in PR + publish ≤60 MB. Same thread-on-request spine as FR-24/037. App-only,
+    no OBO. sprk_isinternalonly already fails closed — verify it holds on the external plane.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist; run /conflict-check against Services/Communication/** before the BFF PR.</protocol>
+  </execution>
+</task>

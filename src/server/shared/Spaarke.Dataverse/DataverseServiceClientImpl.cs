@@ -1,3 +1,4 @@
+using System.ServiceModel;
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Configuration;
@@ -603,6 +604,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         if (request.FileType != null)
             document["sprk_filetype"] = request.FileType;
+
+        if (request.CanonicalHash != null)
+            document["sprk_canonicalhash"] = request.CanonicalHash; // FR-C3 content-dedup identity (task 023 column)
 
         if (request.Status.HasValue)
             document["statuscode"] = new OptionSetValue((int)request.Status.Value);
@@ -1925,10 +1929,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             foreach (var field in fields)
             {
-                if (field.Value != null)
-                {
-                    entity[field.Key] = field.Value;
-                }
+                // C# null → SKIP (preserve "only update the fields I provided" semantics — every existing
+                // caller relies on this). DBNull.Value → explicit CLEAR (set the attribute to null so the SDK
+                // clears the column / severs a lookup) — the only way to null a field through this generic
+                // seam. Added for FR-C3 graduate-on-divergence (clearing sprk_canonicaldocument); no existing
+                // caller passes DBNull, so behavior is unchanged for them.
+                if (field.Value is null)
+                    continue;
+                entity[field.Key] = field.Value is DBNull ? null : field.Value;
             }
 
             await _serviceClient.UpdateAsync(entity, ct);
@@ -2434,6 +2442,82 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             graphMessageId, exists);
 
         return exists;
+    }
+
+    /// <inheritdoc />
+    public async Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRaceProofAsync(
+        Entity communication, string? internetMessageId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(communication);
+
+        // No canonical key → the task-020 alternate key does not apply (multiple null-keyed rows are
+        // permitted). Create unguarded via the raw client; the caller keeps its NFR-04 non-fatal wrapper.
+        if (string.IsNullOrWhiteSpace(internetMessageId))
+        {
+            var plainId = await _serviceClient.CreateAsync(communication, ct);
+            return (plainId, false);
+        }
+
+        try
+        {
+            var id = await _serviceClient.CreateAsync(communication, ct);
+            _logger.LogInformation(
+                "[DATAVERSE] Created sprk_communication {Id} (first writer for internetMessageId)", id);
+            return (id, false);
+        }
+        catch (Exception ex) when (IsAlternateKeyDuplicate(ex))
+        {
+            // Another writer won the race for this internet-message-id — the task-020 UNIQUE alternate key
+            // rejected our insert (0x80060892). Reconcile to the canonical row instead of throwing (NFR-02:
+            // structural dedup closes the check-then-insert race window app-level pre-checks cannot).
+            _logger.LogInformation(
+                "[DATAVERSE] sprk_communication create lost the race for internetMessageId {InternetMessageId} " +
+                "(alternate-key duplicate) — reconciling to the canonical row", internetMessageId);
+
+            var existing = await GetCommunicationByInternetMessageIdAsync(internetMessageId, ct);
+            if (existing is not null)
+                return (existing.Id, true);
+
+            // Very rare: the key reported a duplicate but the canonical row can't be re-read (e.g. deleted
+            // between the fault and the reconcile query). Surface a wrapped failure so the caller's NFR-04
+            // non-fatal wrapper logs + degrades rather than silently dropping the message.
+            throw new InvalidOperationException(
+                $"sprk_communication alternate-key duplicate for internetMessageId '{internetMessageId}', " +
+                "but the canonical row could not be reconciled.");
+        }
+    }
+
+    /// <summary>
+    /// True when <paramref name="ex"/> (or any inner exception) is the Dataverse alternate-key duplicate
+    /// fault raised by a UNIQUE key (e.g. the task-020 key on <c>sprk_internetmessageid</c>). Walks the
+    /// exception chain because <c>ServiceClient.CreateAsync</c> may surface the fault directly OR wrapped
+    /// (<c>DataverseOperationException</c> / a re-thrown <c>InvalidOperationException</c>). Matches the typed
+    /// <c>OrganizationServiceFault.ErrorCode</c> <c>0x80060892</c> first (deterministic), with a message
+    /// fallback mirroring the existing duplicate-association idiom in <see cref="AssociateAsync"/>.
+    /// <para>
+    /// Pure classification (Exception → bool) — the correctness core of the race-proof create (FR-C1 /
+    /// NFR-02). Exposed <c>public static</c> so it is (a) unit-testable through the public surface without a
+    /// live ServiceClient (ADR-038: test pure logic, not the un-fakeable SDK boundary) and (b) reusable by
+    /// the upload→communication dedup path (task 043), which must classify the SAME duplicate-key fault.
+    /// </para>
+    /// </summary>
+    public static bool IsAlternateKeyDuplicate(Exception ex)
+    {
+        for (Exception? e = ex; e is not null; e = e.InnerException)
+        {
+            if (e is FaultException<OrganizationServiceFault> fault
+                && fault.Detail?.ErrorCode == unchecked((int)0x80060892))
+                return true;
+
+            var m = e.Message;
+            if (!string.IsNullOrEmpty(m) && (
+                m.Contains("0x80060892", StringComparison.OrdinalIgnoreCase) ||
+                m.Contains("Entity Key", StringComparison.OrdinalIgnoreCase) ||
+                (m.Contains("duplicate", StringComparison.OrdinalIgnoreCase)
+                 && m.Contains("already exists", StringComparison.OrdinalIgnoreCase))))
+                return true;
+        }
+        return false;
     }
 
     // ========================================

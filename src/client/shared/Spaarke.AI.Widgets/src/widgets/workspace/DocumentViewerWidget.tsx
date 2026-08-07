@@ -62,6 +62,7 @@ import * as React from 'react';
 import { makeStyles, mergeClasses, tokens, Spinner, Text } from '@fluentui/react-components';
 import { RichFilePreview, type IRichFilePreviewProps } from '@spaarke/ui-components';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
+import { AiSessionContext } from '../../providers/AiSessionProvider';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -155,22 +156,64 @@ function isDocumentViewerData(value: unknown): value is DocumentViewerWidgetData
 }
 
 /**
+ * A URL that will NOT survive a page reload — an in-memory `blob:`/`data:`
+ * object URL created by `URL.createObjectURL(...)` (or a base64 data URI) in a
+ * PRIOR page session. Once the session is gone (History reopen after a
+ * cache-clear/reload), the handle is dead and the iframe/preview 404s with
+ * `net::ERR_FILE_NOT_FOUND`. Such a URL MUST be treated as ABSENT and the
+ * preview re-derived from the stable `documentId` — NEVER reused.
+ *
+ * spaarkeai-assistant-enhancements-r2 FR-D restore defect (owner UAT 2026-08-07):
+ * a restored document tab must reload its file from the server, not from a
+ * persisted ephemeral URL.
+ */
+export function isEphemeralPreviewUrl(url: string | null | undefined): boolean {
+  if (typeof url !== 'string') return false;
+  return url.startsWith('blob:') || url.startsWith('data:');
+}
+
+/**
+ * Read the stable Dataverse `sprk_document` id off the payload defensively —
+ * works even when the payload failed the primary runtime type guard (e.g. a
+ * restored persisted shape whose live `fetchPreviewUrl` closure was stripped by
+ * JSON serialization). Returns undefined when no usable id is present.
+ */
+export function readStableDocumentId(data: unknown): string | undefined {
+  if (data === null || typeof data !== 'object') return undefined;
+  const id = (data as { documentId?: unknown }).documentId;
+  return typeof id === 'string' && id.length > 0 ? id : undefined;
+}
+
+/**
  * Resolve the `fetchPreviewUrl` closure for the renderer. Precedence:
  *   1. `data.fetchPreviewUrl` (caller-provided closure — full control over
  *      async/auth behavior; ADR-028 fresh-token retrieval lives here).
- *   2. `data.previewUrl` (static URL — wrap in an async resolver).
- *   3. Fallback: async resolver returning null. The renderer's existing
- *      error/retry path handles this case gracefully (per task 013
- *      acceptance criteria), so R4 text-only dispatch sites continue to
- *      mount safely without crashing.
+ *   2. `data.previewUrl` (static URL — wrap in an async resolver), but ONLY a
+ *      DURABLE one. A persisted `blob:`/`data:` URL is a dead handle after a
+ *      reload (FR-D restore defect): it is skipped so the resolver falls through
+ *      to (3) and re-derives from the stable id.
+ *   3. `reFetchFromDocumentId` — re-derive a FRESH server preview URL from the
+ *      stable `documentId` via the existing BFF `/api/documents/{id}/preview-url`
+ *      surface (ADR-007 document hop; ADR-028 authenticatedFetch). This is what
+ *      makes a RESTORED document tab load: the persisted widgetData lost its live
+ *      `fetchPreviewUrl` closure (functions don't serialize), leaving only the id.
+ *   4. Fallback: async resolver returning null. The renderer's existing
+ *      error/retry path handles this gracefully (RESOLVES — never an infinite
+ *      spinner), so R4 text-only dispatch sites continue to mount safely.
  */
-function resolveFetchPreviewUrl(data: DocumentViewerWidgetData): () => Promise<string | null> {
+function resolveFetchPreviewUrl(
+  data: DocumentViewerWidgetData,
+  reFetchFromDocumentId: (() => Promise<string | null>) | null
+): () => Promise<string | null> {
   if (typeof data.fetchPreviewUrl === 'function') {
     return data.fetchPreviewUrl;
   }
-  if (typeof data.previewUrl === 'string' && data.previewUrl.length > 0) {
+  if (typeof data.previewUrl === 'string' && data.previewUrl.length > 0 && !isEphemeralPreviewUrl(data.previewUrl)) {
     const url = data.previewUrl;
     return async () => url;
+  }
+  if (reFetchFromDocumentId) {
+    return reFetchFromDocumentId;
   }
   return async () => null;
 }
@@ -200,9 +243,12 @@ function resolveDocumentId(data: DocumentViewerWidgetData): string {
  * NOT throw — the widget is a back-compat surface and must not regress R4
  * dispatch behavior.
  */
-function mapPayloadToRendererProps(data: DocumentViewerWidgetData): IRichFilePreviewProps {
+function mapPayloadToRendererProps(
+  data: DocumentViewerWidgetData,
+  reFetchFromDocumentId: (() => Promise<string | null>) | null
+): IRichFilePreviewProps {
   const documentId = resolveDocumentId(data);
-  const fetchPreviewUrl = resolveFetchPreviewUrl(data);
+  const fetchPreviewUrl = resolveFetchPreviewUrl(data, reFetchFromDocumentId);
 
   const warnUnwired = (action: string): void => {
     // Dev-only signal. Production builds suppress this via console
@@ -264,24 +310,68 @@ const DocumentViewerWidget: React.FC<WorkspaceWidgetProps<DocumentViewerWidgetDa
 
   // Defensive narrowing at the widget boundary. When narrowing fails we
   // still mount the renderer with a synthesized "Unknown file" name + a
-  // null-resolving fetch — the renderer's empty state surfaces and the
-  // widget does not crash.
+  // re-derive-from-id (or null) fetch — the renderer's empty state surfaces
+  // and the widget does not crash.
   const isValid = isDocumentViewerData(data);
+
+  // FR-D restore fix (owner UAT 2026-08-07): re-derive the preview from the
+  // STABLE `documentId` via the existing BFF `/api/documents/{id}/preview-url`
+  // surface — the SAME fresh path `ConversationPane.fetchSavedPreviewUrl` /
+  // `analysisFileResolution` use (§11 reuse; ADR-007 document hop; ADR-028
+  // authenticatedFetch — no token snapshot). On restore the persisted
+  // widgetData has lost its live `fetchPreviewUrl` closure (functions don't
+  // serialize) and may carry a now-dead `blob:` `previewUrl`; re-fetching from
+  // the id is what makes the document actually load.
+  //
+  // The auth surface is read from the ambient AiSessionContext (nullable — the
+  // widget stays context-agnostic per ADR-012: outside a provider, e.g. unit
+  // tests or a non-SpaarkeAi host, `session` is null and the widget falls back
+  // to its prior null-resolving behavior). Memoized on PRIMITIVE deps so the
+  // closure identity is STABLE across renders — otherwise the renderer's fetch
+  // effect (keyed on the closure) would re-fire every render and thrash the
+  // spinner (the infinite-spinner symptom).
+  const session = React.useContext(AiSessionContext);
+  const stableDocumentId = readStableDocumentId(data);
+  const bffBaseUrl = session?.bffBaseUrl;
+  const authenticatedFetch = session?.authenticatedFetch;
+  const reFetchFromDocumentId = React.useMemo<(() => Promise<string | null>) | null>(() => {
+    if (!stableDocumentId || !bffBaseUrl || !authenticatedFetch) return null;
+    return async (): Promise<string | null> => {
+      try {
+        const response = await authenticatedFetch(
+          `${bffBaseUrl}/api/documents/${encodeURIComponent(stableDocumentId)}/preview-url`,
+          { method: 'GET' }
+        );
+        if (!response.ok) return null;
+        const body = (await response.json()) as { previewUrl?: string | null };
+        const fresh = body.previewUrl ?? null;
+        // Defensive: never re-introduce the bug even if a server ever returned
+        // an ephemeral URL.
+        return fresh && !isEphemeralPreviewUrl(fresh) ? fresh : null;
+      } catch {
+        // Non-fatal — the renderer shows its "preview not available" fallback
+        // (RESOLVES; never an infinite spinner).
+        return null;
+      }
+    };
+  }, [stableDocumentId, bffBaseUrl, authenticatedFetch]);
 
   const rendererProps = React.useMemo<IRichFilePreviewProps>(() => {
     if (isValid) {
-      return mapPayloadToRendererProps(data);
+      return mapPayloadToRendererProps(data, reFetchFromDocumentId);
     }
+    // Narrowing failed — still re-derive from a stable documentId when one rode
+    // along on an off-contract payload (e.g. a restored persisted shape).
     return {
       documentName: 'Unknown file',
       documentId: 'document-viewer:unknown',
-      fetchPreviewUrl: async () => null,
+      fetchPreviewUrl: reFetchFromDocumentId ?? (async () => null),
       onOpenFile: () => undefined,
       onOpenRecord: () => undefined,
       onEmailDocument: () => undefined,
       onCopyLink: () => undefined,
     };
-  }, [isValid, data]);
+  }, [isValid, data, reFetchFromDocumentId]);
 
   return (
     <div

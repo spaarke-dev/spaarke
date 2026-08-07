@@ -9,13 +9,13 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.Foundry;
-using Sprk.Bff.Api.Services.Ai.PublicContracts;
-using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai.Memory;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Services.Workspace;
 
@@ -1471,11 +1471,20 @@ public class SprkChatAgentFactory
         string sessionId,
         string? activeContextTabId = null)
     {
-        // FR-58 + FR-59 BINDING: filter is `visibleToAssistant === true` AND widget has
-        // derivable visible state. Both required. Privacy default — when EITHER condition
-        // is unmet, the tab does NOT appear in the agent prompt.
+        // FR-58 + FR-59 + ADR-015 Path A (spaarkeai-assistant-enhancements-r2, owner-approved
+        // 2026-08-05) BINDING: a tab appears when it has derivable visible state AND either
+        //   (a) the user opted it in (`visibleToAssistant === true`), OR
+        //   (b) it is the ACTIVE tab — the client focus-stamp (`activeContextTabId`) matches.
+        // (b) is "active-tab-as-consent": focusing a tab IS the consent to make it content-visible
+        // (only the active tab; see the `contentVisible: isActive` gate below — background tabs stay
+        // metadata-only and still require the opt-in flag). This completes the Path A exception whose
+        // focus-stamp *hoist* landed in task 012 but whose *visibility bypass* did not — so a user-
+        // opened email/document tab was permanently invisible (every user tab defaults
+        // `visibleToAssistant=false` and no UI ever flips it). Fix: R2 UAT 2026-08-07.
         var visible = tabs
-            .Where(t => t.VisibleToAssistant)
+            .Where(t => t.VisibleToAssistant
+                || (!string.IsNullOrWhiteSpace(activeContextTabId)
+                    && string.Equals(t.Id, activeContextTabId, StringComparison.Ordinal)))
             .Select(t => (Tab: t, State: TryDeriveVisibleState(t)))
             .Where(p => p.State is not null)
             .ToList();
@@ -1506,7 +1515,7 @@ public class SprkChatAgentFactory
 
         var sb = new System.Text.StringBuilder();
         sb.Append("\n\n## Workspace State\n");
-        sb.Append("Tabs the user has marked visible to the assistant. Per-tab fields are deterministic visible state only (ADR-015 — no raw user text, no widget bodies). The active tab contributes its compact content shape; background tabs are metadata-only.\n");
+        sb.Append("The tab the user is currently focused on, plus any tabs they have marked visible to the assistant. Per-tab fields are deterministic visible state only (ADR-015 — no raw user text, no widget bodies). The active tab contributes its compact content shape; background tabs are metadata-only.\n");
 
         var truncatedAt = -1;
         for (var i = 0; i < ordered.Count; i++)

@@ -3,7 +3,10 @@
 // The core authorization gate: accessible(principal) is composed per identity plane. These tests
 // protect the composition contract that task 030 (broker authz-before-stream) depends on, covering
 // POSITIVE and NEGATIVE paths for all THREE principal planes:
-//   (1) systemuser            → ADR-034 membership ONLY (automatic); grants/standing NEVER consulted
+//   (1) systemuser            → ADR-034 membership ∪ the caller's OWN contact grants (project-scoped;
+//                               §6.5 Path-B amendment, external-access-r2 UAT 2026-08-07 — "parallel
+//                               workforce/contact access"). Standing-grant is NEVER consulted for a
+//                               systemuser; membership-only still holds for non-project entities.
 //   (2) contact + grant       → sprk_externalrecordaccess grants ONLY; standing membership NEVER unioned
 //   (3) contact + standing    → grants ∪ contact-anchored membership (task 021), gated on the flag
 // Plus the load-bearing negative: a contact WITHOUT a standing grant gets ONLY explicit grants,
@@ -83,6 +86,90 @@ public class AccessibleRecordSetServiceTests
             .Should().BeTrue("the record is in the systemuser's ADR-034 membership");
         (await sut.IsRecordAccessibleAsync(SystemUserPrincipal(), MatterEntity, UnrelatedRecord, CancellationToken.None))
             .Should().BeFalse("a record outside membership must be denied, not omitted");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // (1b) systemuser + linked contact grant — membership ∪ contact grants (project-scoped)
+    //      §6.5 Path-B amendment (external-access-r2 UAT 2026-08-07 — parallel workforce/contact access)
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserWithLinkedContactGrant_OnProject_UnionsMembershipAndGrants()
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
+
+        // The systemuser's DERIVED contact (SystemUserPrincipal().ContactId) holds a grant.
+        var sut = CreateSut(membership.Object, ParticipationsFor(GrantedProject), NeverStanding());
+
+        var set = await sut.ComposeAsync(SystemUserPrincipal(), ProjectEntity, CancellationToken.None);
+
+        set.PrincipalKind.Should().Be(WorkforcePrincipalKind.SystemUser);
+        set.RecordIds.Should().BeEquivalentTo(new[] { MemberRecordA, GrantedProject },
+            "an internal systemuser who is also a granted contact sees membership ∪ their own contact grants");
+        set.Sources.SystemUserMembership.Should().BeTrue();
+        set.Sources.ContactGrants.Should().BeTrue();
+        set.Sources.StandingGrantMembership.Should().BeFalse("standing-grant is never consulted for a systemuser");
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserNoLinkedContact_EmailFallbackResolvesContactGrants()
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity)); // no ADR-034 membership
+
+        // No derived contact (sprk_primarycontact null) but a verified email that resolves to a contact.
+        var principal = new WorkforcePrincipal
+        {
+            Kind = WorkforcePrincipalKind.SystemUser,
+            SystemUserId = SystemUserId,
+            ContactId = null,
+            Oid = Oid.ToString("D"),
+            TenantId = Tenant,
+            Email = "ralph.schroeder@hotmail.com",
+        };
+        var participations = new FakeParticipationService(
+            new[] { new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly } },
+            resolveContactId: ContactId);
+
+        var sut = CreateSut(membership.Object, participations, NeverStanding());
+
+        var set = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
+
+        set.RecordIds.Should().BeEquivalentTo(new[] { GrantedProject },
+            "with no linked contact, the verified-email fallback finds the caller's contact grants");
+        set.Sources.ContactGrants.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ComposeAsync_SystemUserNoLinkedContactNoEmail_AppliesMembershipOnly()
+    {
+        var membership = new Mock<IMembershipResolverService>();
+        membership
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
+
+        // No derived contact AND no email → the contact-grants term cannot resolve; membership only.
+        var principal = new WorkforcePrincipal
+        {
+            Kind = WorkforcePrincipalKind.SystemUser,
+            SystemUserId = SystemUserId,
+            ContactId = null,
+            Oid = Oid.ToString("D"),
+            TenantId = Tenant,
+            Email = string.Empty,
+        };
+        // Strict-ish: resolveContactId null so even if called, nothing resolves.
+        var sut = CreateSut(membership.Object, new FakeParticipationService(Array.Empty<ExternalParticipation>()), NeverStanding());
+
+        var set = await sut.ComposeAsync(principal, ProjectEntity, CancellationToken.None);
+
+        set.RecordIds.Should().BeEquivalentTo(new[] { MemberRecordA });
+        set.Sources.ContactGrants.Should().BeFalse("no derived contact and no email → no contact-grants term");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -258,14 +345,25 @@ public class AccessibleRecordSetServiceTests
     private sealed class FakeParticipationService : ExternalParticipationService
     {
         private readonly IReadOnlyList<ExternalParticipation> _participations;
+        private readonly Guid? _resolveContactId;
 
-        public FakeParticipationService(IReadOnlyList<ExternalParticipation> participations)
+        public FakeParticipationService(
+            IReadOnlyList<ExternalParticipation> participations, Guid? resolveContactId = null)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
                    httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
-            => _participations = participations;
+        {
+            _participations = participations;
+            _resolveContactId = resolveContactId;
+        }
 
         public override Task<IReadOnlyList<ExternalParticipation>> GetParticipationsAsync(
             Guid contactId, CancellationToken ct = default)
             => Task.FromResult(_participations);
+
+        // Email-fallback resolution (systemuser with no derived contact). Returns the configured
+        // contact id regardless of the (oid, email) passed — the test controls whether a match exists.
+        public override Task<Guid?> ResolveExternalContactAsync(
+            string? oid, string? email, CancellationToken ct = default)
+            => Task.FromResult(_resolveContactId);
     }
 }

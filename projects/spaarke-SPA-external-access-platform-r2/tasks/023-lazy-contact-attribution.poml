@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Lazy Contact attribution (resolve-or-create by workforce oid on first attributed action)</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag `bff-api`; modifies `.cs` on the shared external-access surface; broadens an oid-binding field with cross-plane implications — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuse-heavy: the resolve-or-create + oid-bind machinery already exists (`ResolveOrCreateContactAsync`, bind-oid); the task is broadening semantics + wiring the first-attributed-action call site. Well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>021</deps>
+    <tags>bff-api</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Implement lazy Contact attribution: on an internal (workforce) user's FIRST attributed action (e.g. submitting a request), resolve-or-create their Contact by workforce oid (reuse R1 `ResolveOrCreateContactAsync` + bind oid to `sprk_externalobjectid`) and record it as requester. No Contact is created merely by having access.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF engineer fluent in the R1 Contact-provisioning machinery and idempotent resolve-or-create semantics.</role>
+  <goal>The BFF resolves-or-creates a Contact by workforce oid on the first attributed action of a workforce user, binding oid to `sprk_externalobjectid` (semantics broadened to CIAM-or-workforce oid) and setting the Contact as requester. Second and subsequent actions reuse the same Contact. Having module access alone creates no Contact. Unit + KEEP-path integration tests cover create-once, reuse, and the no-Contact-on-access-only negative.</goal>
+  <context>
+    <background>FR-11: on an internal user's first attributed action, the BFF resolves-or-creates a Contact by workforce oid (reuse R1 `ResolveOrCreateContact` + bind-oid to `sprk_externalobjectid`) and records it as requester. Acceptance: an employee's first submission creates/links exactly one Contact; subsequent actions reuse it; no Contact is created merely by having access. Spec Assumption: `sprk_externalobjectid` semantics broaden from "CIAM oid" to "external identity object id (CIAM OR workforce oid)" — one field, both planes (oids globally unique). MUST NOT create a Contact merely to grant internal access (entitlement = App Role; Contact = attribution, lazy).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs — `ResolveOrCreateContactAsync` :172 (reuse this; do NOT re-implement); oid → `sprk_externalobjectid` :139.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs — resolve-by-oid :231 / bind-oid :323 (the canonical oid resolution/bind machinery).</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs — `CallerPrincipal` (:66) exposes `Oid` for the workforce plane; the attribution reads that oid.</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/module-entitlement-schema-decision.md — task 020 schema (attribution links requester Contact to the request record it will be set on, e.g. sprk_servicerequest requester in P3).</file>
+    </relevant-files>
+    <dependencies>Task 021 (resolver) establishes the entitlement plane/principal. This attribution is invoked at the first attributed action (the P3 intake submit is a caller); the mechanism itself is delivered here so P3 wires it.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="spec-FR11">Resolve-or-create MUST be idempotent by oid: exactly one Contact per oid; a second attributed action reuses it (no duplicate). Reuse `ResolveOrCreateContactAsync` (:172) — do NOT re-implement Contact lookup/create. Scope: attribution path only.</constraint>
+    <constraint source="spec-assumption">Broaden `sprk_externalobjectid` semantics to CIAM-OR-workforce oid (one field, both planes). Bind the workforce oid using the existing bind-oid machinery (:323 / :139). Scope: the field's usage in the workforce attribution path.</constraint>
+    <constraint source="spec-MUST-NOT">MUST NOT create a Contact merely to grant internal access. Contact creation fires ONLY on a first attributed ACTION, never on entitlement/access alone. Scope: gating of the resolve-or-create call.</constraint>
+    <constraint source="project">Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); `dotnet publish -c Release` compressed size + delta vs 46.90 MB baseline (≤60 MB); no new HIGH CVE; `/conflict-check` before the PR (teams-app-r1 shares this surface).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="resolve-or-create-contact" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs">Reuse `ResolveOrCreateContactAsync` (:172) + oid bind (:139) — idempotent Contact provisioning by oid.</pattern>
+      <pattern name="oid-bind" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">resolve-by-oid (:231) / bind-oid (:323) — the canonical oid ↔ Contact machinery to reuse for the workforce plane.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec FR-11 + the `sprk_externalobjectid`-broadening assumption + the MUST-NOT. Read `ResolveOrCreateContactAsync` (:172) and the oid bind machinery (:231/:323) to confirm reuse points.</step>
+    <step order="2">Introduce an attribution service/method (e.g. `IContactAttributionService.EnsureRequesterContactAsync(CallerPrincipal)`) that: reads the workforce `Oid` from `CallerPrincipal`; calls the existing resolve-or-create-by-oid; binds oid to `sprk_externalobjectid`; returns the Contact id to set as requester. Reuse existing machinery — thin wrapper only.</step>
+    <step order="3">Ensure the resolve-or-create is idempotent (one Contact per oid) and that the workforce oid path uses the same `sprk_externalobjectid` field (broadened semantics), not a new field.</step>
+    <step order="4">Wire the attribution to be invoked from the first attributed action ONLY (the P3 intake-submit call site consumes this; do not call it from `/me` or entitlement resolution). Guard so access/entitlement alone never triggers it.</step>
+    <step order="5">Register the service in DI (`ExternalAccessModule.cs`). ADR-010: only add an interface if a second impl or genuine test-seam is warranted; otherwise register the concrete.</step>
+    <step order="6">Add unit + KEEP-path integration tests (ADR-038): first attributed action creates exactly one Contact bound to the oid; a second action reuses it (no duplicate); a caller who only has access but performs no attributed action → no Contact created (negative); an existing Contact already bound to that oid is reused not duplicated.</step>
+    <step order="7">Build + test: `dotnet build` + `dotnet test`. Run `dotnet publish -c Release` and record compressed size + delta.</step>
+    <step order="8">Run `/conflict-check`; write Placement Justification + publish-size delta into the PR/task notes.</step>
+    <step order="9">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/</step>
+  </steps>
+  <escalation>
+    <trigger>If a workforce oid collides with an existing CIAM-bound Contact on `sprk_externalobjectid` (same field, both planes), STOP — cross-plane identity collision is a security-sensitive case (email-hijack adjacency, FR-19) needing owner sign-off (§6) before choosing merge-vs-reject.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactAttributionService.cs (thin reuse wrapper) + DI registration in ExternalAccessModule.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + KEEP-path integration test for create-once / reuse / no-Contact-on-access-only</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a workforce user performing their first attributed action, when attribution runs, then exactly one Contact is created and bound to their oid via `sprk_externalobjectid`, and set as requester.</criterion>
+    <criterion testable="true">Given the same user performing a second attributed action, when attribution runs, then the existing Contact is reused (no duplicate created).</criterion>
+    <criterion testable="true">Given a user who has module access but performs no attributed action, when they browse, then NO Contact is created (negative — no Contact merely by access).</criterion>
+    <criterion testable="true">Given an oid already bound to a Contact, when attribution runs, then resolve-by-oid returns that Contact (idempotent by oid, not by email).</criterion>
+    <criterion testable="true">Given `dotnet publish -c Release`, when measured, then compressed size + delta vs 46.90 MB baseline is reported and ≤60 MB; BFF suite passes; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>This task delivers the MECHANISM; the P3 intake-submit endpoint is the first real caller. The field-broadening (CIAM-or-workforce oid on `sprk_externalobjectid`) is per spec Assumption — oids are globally unique so one field serves both planes. Reuse `ResolveOrCreateContactAsync`/bind-oid verbatim; this is not a re-implementation.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; §10 gate at Step 9.5.</protocol>
+  </execution>
+</task>

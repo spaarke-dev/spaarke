@@ -134,6 +134,57 @@ public class CommunicationsEndpointsContractTests : IClassFixture<OfficeCommunic
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // GET /api/office/communications/by-message-id/{internetMessageId}/suggestions
+    // (task 042 / FR-B2 — engine-predicted pre-selection for the add-in picker)
+    //
+    // NOTE: the 200 happy path is intentionally NOT covered here. It runs the real
+    // engine evaluate path (CommunicationService.ReconstructEnvelopeAsync +
+    // IncomingAssociationResolver.EvaluateAsync — non-virtual singletons); mocking
+    // them to force a 200 would be a B7/B15 scaffolding antipattern (tests/CLAUDE.md).
+    // That evaluate path is already covered by the engine's own tests + the
+    // POST /api/communications/{id}/suggest-associations contract this endpoint reuses.
+    // The net-new behavior worth protecting here is auth + the message-id→404 fallback
+    // (the FR-B2 "email not captured → picker with no pre-selection" contract).
+    // ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task GetSuggestions_WithoutAuth_Returns401()
+    {
+        // Arrange
+        using var anonFactory = OfficeCommunicationsTestWebAppFactory.CreateAnonymous();
+        var anonClient = anonFactory.CreateClient();
+
+        // Act
+        var response = await anonClient.GetAsync(
+            "/api/office/communications/by-message-id/abc123%40contoso.com/suggestions");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task GetSuggestions_WhenEmailNotCaptured_Returns404()
+    {
+        // Arrange — no sprk_communication for this message id (email not yet captured).
+        // FR-B2 fallback: the client opens the picker with NO pre-selection.
+        var messageId = "<not-captured@contoso.com>";
+
+        _factory.EntityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection());
+
+        // Act
+        var response = await _client.GetAsync(
+            $"/api/office/communications/by-message-id/{Uri.EscapeDataString(messageId)}/suggestions");
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
+        payload.GetProperty("errorCode").GetString().Should().Be("OFFICE_COMM_NOT_FOUND");
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
     // GET /api/office/communications/{commId}/linked-todos
     // ────────────────────────────────────────────────────────────────────────
 

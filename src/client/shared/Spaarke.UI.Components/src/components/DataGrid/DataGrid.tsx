@@ -76,7 +76,6 @@ import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
 import {
   discoverChips,
   augmentFetchXmlWithChips,
-  FilterChipBar,
   type ChipDescriptor,
   type ChipState,
 } from './filterChips';

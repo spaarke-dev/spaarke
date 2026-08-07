@@ -1233,4 +1233,44 @@ public class DriveItemOperations
         string itemId,
         CancellationToken ct = default)
         => DownloadFileAsUserAsync(ctx, driveId, itemId, ct);
+
+    /// <summary>
+    /// Reads the SharePoint Embedded <c>quickXorHash</c> content identity for a persisted drive item
+    /// (app-only), via <c>GET /drives/{driveId}/items/{itemId}?$select=file</c> → <c>file.hashes.quickXorHash</c>.
+    /// This keeps the <c>Microsoft.Graph</c> hash facet inside the ADR-007 Infrastructure boundary — callers
+    /// (the content-dedup detector) receive only the hash string. FR-C3 content-dedup identity.
+    /// </summary>
+    /// <remarks>
+    /// <para><c>quickXorHash</c> is the SPE content identity; <c>sha256Hash</c> is DEPRECATED on SPE and MUST NOT
+    /// be used. <c>crc32</c>/<c>sha1</c> are consumer-OneDrive only.</para>
+    /// <para>Best-effort / non-fatal (NFR-04): returns null when the item is missing, the hash facet is not yet
+    /// populated (large/chunked uploads may lag), or any Graph call fails — the caller treats a null hash as
+    /// "no dedup, proceed". Never throws.</para>
+    /// </remarks>
+    public async Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
+    {
+        try
+        {
+            var graphClient = _factory.ForApp();
+            var item = await graphClient.Drives[driveId].Items[itemId]
+                .GetAsync(req => req.QueryParameters.Select = new[] { "id", "file" }, cancellationToken: ct);
+
+            var hash = item?.File?.Hashes?.QuickXorHash;
+            if (string.IsNullOrWhiteSpace(hash))
+            {
+                _logger.LogDebug(
+                    "quickXorHash not available for item {ItemId} in drive {DriveId} (absent or not yet populated).",
+                    itemId, driveId);
+                return null;
+            }
+            return hash;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Failed to read quickXorHash for item {ItemId} in drive {DriveId} (non-fatal — dedup skipped).",
+                itemId, driveId);
+            return null;
+        }
+    }
 }

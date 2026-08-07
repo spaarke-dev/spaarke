@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>My-requests list + feedback (email + in-app decision/response render) + thread-on-request (ConversationView on request)</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:031,036</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client (Fluent v9) + BFF feedback/email + thread surface consuming the requester==caller reads (036) + 030 feedback/thread fields; touches shared external-access + Communication surfaces; tags frontend/bff-api — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Composition over established seams — my-requests render + reuse the /api/communications/send email path + mount ConversationView on the shared thread-on-request; no new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Consumes 036 (requester==caller reads) + 030 (feedback + thread fields); touches the shared external-access + Services/Communication BFF surfaces (conflict-check with teams-app-r1 + messaging/comm cluster); sequential.</parallel-reason>
+    <deps>031,036</deps>
+    <tags>frontend, bff-api</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+  <prompt>Build the FR-24 feedback loop UI + delivery: (1) a my-requests list + detail rendering the caller's own requests (036 requester==caller reads) with legal's decision/response + downloadable response docs (030 feedback fields); (2) email-with-documents on legal review by reusing POST /api/communications/send with AttachmentDocumentIds resolved app-only from SPE (arbitrary recipient email + request association); (3) a thread-on-request — mount ConversationView on the request, reading the shared sprk_communicationthread lookup (030). FR-24 (feedback) + FR-27 (messaging) SHARE this one thread-on-request spine (§12 D). Reuse existing components; do NOT build a new list, email path, or thread model.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 on @spaarke/ui-components (ConversationView, presets); app-only broker reads + the existing communications/send path (no OBO on the external plane, ADR-028/A3); ProblemDetails (ADR-019).</role>
+  <goal>A workforce Front Door user sees a my-requests list (their own requests only, via 036) + a detail rendering legal's decision + response text + downloadable response docs (030 fields). On legal's MDA review, the requester is emailed via the existing POST /api/communications/send with AttachmentDocumentIds resolved app-only from SPE. A thread-on-request (ConversationView bound to the request's sprk_communicationthread, 030) renders on the request — the shared FR-24/FR-27 thread spine. User A never sees user B's feedback or thread (Tier-2 negative). Reuses ConversationView + communications/send + the shared thread; no new list/email/thread built.</goal>
+  <context>
+    <background>FR-24 (spec.md line 255): a submitted request's decision + response documents flow back to the requester — (a) email-with-documents via the existing POST /api/communications/send (arbitrary recipient email + AttachmentDocumentIds resolved from SPE app-only + request association) triggered on legal's MDA review; (b) in-app — the my-requests detail renders legal's decision/response + downloadable response docs via the requester==caller endpoints (036). Additive schema (030): decision/outcome + response text + a response-document linkage distinct from the submitted-doc linkage. Live push/badge deferred (notification spine is systemuser-keyed; CIAM uses read-on-request). §12(D): FR-24 (feedback) + FR-27 (messaging) share ONE thread-on-request model — a request carries a conversation thread with the law department; the cross-boundary messaging spine (ConversationView + external thread endpoint) serves both. This task delivers the my-requests UI + feedback render + email trigger + the ConversationView on the shared thread (030 lookup); the external thread WRITE endpoint + ACS mint for cross-boundary posting is 052 (FR-27) — this task mounts the read/render on the shared spine.</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-24 line 255; §12 D shared thread-on-request; FR-27 line 261 for the shared spine)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/036-submitter-authz-app-only-upload.poml (the requester==caller reads this UI renders)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/030-servicerequest-intake-schema.poml (decision/response feedback fields + the sprk_communicationthread lookup this task reads)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs:2240 (POST /api/communications/send + AttachmentDocumentIds resolved app-only from SPE — the email-with-docs path to reuse)</file>
+      <file>src/client/shared/Spaarke.UI.Components/** ConversationView / ConversationWorkspace (mixed-principal chat, context-agnostic; mount on the request thread)</file>
+      <file>src/client/external-spa/** (the module-host shell + the 031 driver — mount my-requests + detail + the thread)</file>
+      <file>.claude/constraints/bff-extensions.md (binding BFF governance — Placement Justification + publish size); .claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </relevant-files>
+    <dependencies>031 (Front Door group + module shell) + 036 (requester==caller reads + attribution) must be complete — the my-requests list/detail renders 036's scoped reads. 030 supplies the decision/response fields + the sprk_communicationthread lookup. 052 (FR-27) adds the external thread WRITE endpoint + ACS mint on the SAME shared thread spine (this task mounts the ConversationView read/render).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">The my-requests list/detail MUST render the 036 requester==caller reads — the client never widens scope; user A sees only A's requests, decisions, response docs, and thread. Verify two-user isolation (Tier-2 negative).</constraint>
+    <constraint source="project">Email-with-documents MUST reuse the existing POST /api/communications/send with AttachmentDocumentIds resolved app-only from SPE (CommunicationService.cs:2240) — do NOT build a new email path or a new attachment resolver. Trigger is on legal's MDA review.</constraint>
+    <constraint source="project">The thread-on-request MUST mount ConversationView on the request's shared sprk_communicationthread lookup (030) — do NOT create a new thread entity or a second thread model. FR-24 + FR-27 share this one spine (§12 D); the external WRITE endpoint is 052.</constraint>
+    <constraint source="ADR-028">All external reads are app-only broker (no OBO); the caller token authenticates only to the BFF. No live SignalR push to the client (read-on-request per the amendment scope delta).</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; zero hardcoded hex; verified light/dark/Teams theme + narrow Teams personal-tab width; all dialogs via @spaarke/ui-components presets (no hand-rolled Dialog, §11/ADR-050).</constraint>
+    <constraint source="project">BFF addition (email trigger / feedback read): state the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); report dotnet publish size delta vs baseline 46.90 MB (ceiling ≤60 MB); run /conflict-check before the BFF PR — Services/Communication/** is a HEAVILY shared surface (email-r5, messaging-r1/r2/r3, notification-spine).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Email-with-docs" location="src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs:2240">Reuse POST /api/communications/send + AttachmentDocumentIds resolved app-only from SPE; trigger on legal review.</pattern>
+      <pattern name="Thread-on-request" location="src/client/shared/Spaarke.UI.Components/** ConversationView">Mount ConversationView on the request's shared sprk_communicationthread (030) — the FR-24/FR-27 one-spine.</pattern>
+      <pattern name="Scoped reads" location="projects/spaarke-SPA-external-access-platform-r2/tasks/036-submitter-authz-app-only-upload.poml">Render only the 036 requester==caller reads; never widen scope client-side.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-24 (line 255) + §12 D + FR-27 (line 261, for the shared spine) + ux-brief + 036/030 task files + CommunicationService.cs:2240 + ConversationView. Run /conflict-check for the external-access + Services/Communication BFF surfaces.</step>
+    <step order="2">Client: build the my-requests list + detail in the Front Door module rendering the 036 requester==caller reads — status, legal's decision (030), response text, and downloadable response docs (distinct from the submitted doc). App-only reads; no scope widening.</step>
+    <step order="3">Email trigger: on legal's MDA review, send the decision + response docs to the requester by reusing POST /api/communications/send with AttachmentDocumentIds resolved app-only from SPE + the request association. Do NOT build a new email path. (Wire the trigger BFF-side; keep the shared-surface footprint minimal.)</step>
+    <step order="4">Thread-on-request: mount ConversationView on the request's shared sprk_communicationthread lookup (030) — render the read/history. The external WRITE (post) endpoint + ACS mint is 052; here render on the shared spine so FR-24 + FR-27 use one thread.</step>
+    <step order="5">Implement the required states (loading, empty, error, unentitled/denied, dark, Teams theme, keyboard, narrow width) per ux-brief §4 for the list, detail, and thread.</step>
+    <step order="6">Tests: client component tests for the my-requests list/detail (feedback render) + the ConversationView mount; two-user isolation (A never sees B's feedback/thread — Tier-2 negative). If a BFF email-trigger/read change exists, add KEEP-path integration tests (no Mock&lt;HttpMessageHandler&gt;/DI/ctor tests, ADR-038).</step>
+    <step order="7">Build: npm run build:prod (client); if BFF changed, dotnet publish -c Release + report size delta vs 46.90 MB + Placement Justification.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test the external-spa client (build:prod)</tool>
+    <tool name="dotnet">Build/test/publish the BFF (email trigger / feedback read)</tool>
+    <tool name="terminal">Shell, /conflict-check</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/external-spa/** — my-requests list + detail (feedback render) + ConversationView thread-on-request mounted on the shared sprk_communicationthread</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/** — email-with-docs trigger on legal review reusing POST /api/communications/send (AttachmentDocumentIds app-only) + the feedback read (if not already in 036)</output>
+    <output type="test">tests/** — client component tests (feedback render + thread mount + two-user isolation negative); BFF KEEP-path tests if a BFF change exists</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a reviewed request, when the requester opens my-requests, then the detail renders legal's decision + response text + downloadable response docs (030 fields, distinct from the submitted doc).</criterion>
+    <criterion testable="true">Given legal's MDA review, when it completes, then the requester is emailed via the existing POST /api/communications/send with the response docs attached (AttachmentDocumentIds resolved app-only from SPE) — no new email path in the diff.</criterion>
+    <criterion testable="true">Given a request, when its detail loads, then a ConversationView renders on the request's shared sprk_communicationthread (030) — the one FR-24/FR-27 thread spine (no second thread model).</criterion>
+    <criterion testable="true">Negative (Tier-2 / two-user isolation): given user B's request + feedback + thread, when user A is signed in, then A never sees B's feedback or thread (client renders only 036's requester==caller reads).</criterion>
+    <criterion testable="true">Given the surfaces, when rendered in light/dark/Teams theme at narrow width, then semantic tokens adapt with zero hardcoded hex and no console errors.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Feedback render + thread">
+      <steps><step>Open my-requests for a reviewed request</step><step>Verify decision/response + response docs; open the thread</step></steps>
+      <expected>Decision/response + downloadable docs render; ConversationView shows the request thread; no console errors</expected>
+    </test>
+    <test name="Two-user isolation">
+      <steps><step>Sign in as user A</step><step>Attempt to view user B's request/feedback/thread</step></steps>
+      <expected>A sees only A's requests; B's feedback + thread never appear (Tier-2)</expected>
+    </test>
+    <test name="Dark + Teams theme (ADR-021)">
+      <steps><step>Toggle dark mode; load inside a Teams-theme host at narrow width</step></steps>
+      <expected>Zero hardcoded hex; tokens adapt across light/dark/Teams; readable at Teams personal-tab width</expected>
+    </test>
+  </ui-tests>
+  <notes>Spec FR-24 (line 255) + §12(D) shared thread-on-request. Reuse POST /api/communications/send (email) + ConversationView (thread) + 036's requester==caller reads — no new list, email path, or thread model. Live push/badge deferred (read-on-request). The external thread WRITE endpoint + ACS mint (cross-boundary posting) is 052 (FR-27) — this task mounts the read/render on the shared spine. Services/Communication is heavily shared → /conflict-check mandatory before the BFF PR. Use build:prod per CLAUDE.md §12 / AP-1.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; run /conflict-check + code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>

@@ -755,6 +755,70 @@ public class SprkChatAgentFactoryWorkspaceStateTests
         result.Should().NotContain("BG_SELECTION_PROBE");
     }
 
+    // spaarkeai-assistant-enhancements-r2 UAT fix 2026-08-07 — ADR-015 Path A active-tab-as-consent.
+    // Regression: user-opened tabs default visibleToAssistant=false and no UI ever flips it, so the
+    // focus-stamped ACTIVE tab was filtered out BEFORE the FR-A3 hoist → the Assistant could never
+    // see an open email/document tab (UAT items 1 + 2). The fix includes the active tab regardless of
+    // the opt-in flag; background non-opted-in tabs stay excluded (privacy preserved).
+    [Fact]
+    public void BuildWorkspaceStateBlock_ActiveTabNotOptedIn_IsContentVisibleAsActive_PathA()
+    {
+        var factory = CreateFactory();
+        // The user opened this document tab → visibleToAssistant defaults FALSE. It is the
+        // focus-stamped active tab. Before the fix it would be dropped entirely.
+        var tabs = new[]
+        {
+            MakeTab("active-doc", widgetType: "DocumentViewer", visibleToAssistant: false,
+                updatedAt: "2026-08-07T10:00:00Z",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-active",
+                    Filename = "corteva-nda.pdf",
+                    MimeType = "application/pdf",
+                    SizeBytes = 5000,
+                    HasSelection = true,
+                    SelectionText = "ACTIVE_PROBE indemnification",
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: "active-doc");
+
+        // Present + active + content-bearing, despite visibleToAssistant=false (active-tab-as-consent).
+        result.Should().Contain("Tab 1 (active): widgetType=DocumentViewer");
+        result.Should().Contain("filename: corteva-nda.pdf");
+        result.Should().Contain("ACTIVE_PROBE indemnification");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_BackgroundTabNotOptedIn_StaysExcluded_PathA()
+    {
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            // Opted-in active tab keeps the block non-empty.
+            MakeTab("active", widgetType: "Summary", visibleToAssistant: true,
+                updatedAt: "2026-08-07T11:00:00Z"),
+            // A DIFFERENT user-opened tab (visibleToAssistant=false) that is NOT the focus-stamp
+            // → must stay excluded. The consent bypass applies ONLY to the active tab.
+            MakeTab("bg-hidden", widgetType: "DocumentViewer", visibleToAssistant: false,
+                updatedAt: "2026-08-07T09:00:00Z",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-hidden",
+                    Filename = "HIDDEN_PROBE-secret.pdf",
+                    MimeType = "application/pdf",
+                    SizeBytes = 3000,
+                    HasSelection = false,
+                    SelectionText = null,
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: "active");
+
+        result.Should().Contain("(active): widgetType=Summary");
+        result.Should().NotContain("HIDDEN_PROBE-secret.pdf");
+    }
+
     [Fact]
     public void BuildWorkspaceStateBlock_FocusStampAlreadyMostRecent_RemainsActive()
     {

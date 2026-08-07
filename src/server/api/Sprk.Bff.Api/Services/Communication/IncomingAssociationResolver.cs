@@ -265,10 +265,18 @@ public sealed class IncomingAssociationResolver
         kind is RungKind.ExplicitReference or RungKind.ThreadContinuity
              or RungKind.ParticipantCorrelation or RungKind.StructuralDetector
              or RungKind.RecordNameMatch
+             // RecipientAlias (FR-A2) — a per-record intake address, parsed + resolved with zero AI cost,
+             // belongs in the always-run deterministic pass (and IS auto-file-eligible per the mapper).
+             or RungKind.RecipientAlias
              // ContactNameMatch (rung 3.6) is an exact, verified full-name→contact appearance (regex + exact
              // Dataverse lookup, no AI cost), so it belongs in the deterministic pass — even though the mapper
              // keeps it OUT of auto-file eligibility (owner: surface-for-review, never auto-file).
-             or RungKind.ContactNameMatch;
+             or RungKind.ContactNameMatch
+             // Affinity (FR-A4) is deterministic frequency counting over the sprk_affinity store (one query, no
+             // AI cost), so it runs in the deterministic pass to surface a learned suggestion — even though the
+             // mapper keeps it OUT of auto-file AND deterministic-write eligibility (SUGGEST-ONLY, never
+             // auto-file), exactly like RecordNameMatch / ContactNameMatch.
+             or RungKind.Affinity;
 
     // ═════════════════════════════════════════════════════════════════════════════
     // Apply the ladder decision to the communication record
@@ -514,23 +522,11 @@ public sealed class IncomingAssociationResolver
     }
 
     /// <summary>
-    /// Map entity logical name to its primary name attribute.
+    /// Map entity logical name to its primary name attribute. Delegates to the shared
+    /// <see cref="RegardingNameFields"/> (single source of truth — task 042 reuse).
     /// </summary>
-    private static string? GetPrimaryNameField(string entityLogicalName) => entityLogicalName switch
-    {
-        "sprk_matter" => "sprk_mattername",
-        "sprk_project" => "sprk_projectname",
-        "sprk_invoice" => "sprk_name",
-        "sprk_event" => "sprk_eventname",
-        "sprk_workassignment" => "sprk_name",
-        "sprk_servicerequest" => "sprk_name",
-        "sprk_budget" => "sprk_name",
-        "sprk_analysis" => "sprk_name",
-        "sprk_organization" => "sprk_name",
-        "contact" => "fullname",
-        "account" => "name",
-        _ => null,
-    };
+    private static string? GetPrimaryNameField(string entityLogicalName) =>
+        RegardingNameFields.PrimaryNameField(entityLogicalName);
 
     /// <summary>
     /// Map entity logical name to its reference-number attribute (the human-facing record number that

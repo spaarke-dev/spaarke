@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Deploy P3 (SWA + BFF + schema)</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:032,033,034,035,036,037</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment task — SWA + BFF + Dataverse schema promotion using existing deploy skills; no new code surface. STANDARD per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deployment sequencing over existing skills (dataverse-deploy, bff-deploy, SWA) — no architectural judgment; ordering + verification only.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploy gate that depends on all P3 build tasks (032-037); promotes shared schema + BFF; must run alone after the phase is green.</parallel-reason>
+    <deps>032,033,034,035,036,037</deps>
+    <tags>deploy</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+  <prompt>Deploy the P3 Legal Front Door: promote the Dataverse schema (030 sprk_servicerequest intake/feedback/thread fields + 034 sprk_documentcategory/governance/grid config), deploy the BFF (Sprk.Bff.Api — Front Door group, NDA-assess endpoint, index routing, feedback/email trigger), and deploy the external-spa SWA (intake framework, NDA 3-outcome UI, Policy Library, my-requests + feedback + thread). Run the standard deploy skills in the correct order (schema → BFF → SWA), verify each, and confirm the P3 acceptance criteria hold in the deployed environment.</prompt>
+  <role>SPAARKE platform developer / release engineer. Follow ADRs + deployment guides strictly. Dataverse solution promotion (dataverse-deploy), BFF App Service deploy (bff-deploy), Static Web App deploy (deploy-external-spa.yml). Verify publish-size ≤60 MB and no new HIGH CVE before the BFF deploy.</role>
+  <goal>P3 is live in the target environment: the 030 + 034 schema is promoted, the BFF is deployed (publish ≤60 MB, no new HIGH CVE), and the external-spa SWA is deployed. A workforce Front Door user can submit a typed request, run an NDA assessment (3 outcomes), browse the Policy Library, submit a Policy Question, and see their own requests + feedback + thread — verified post-deploy. The deploy sequence (schema → BFF → SWA) is followed exactly and each stage is verified before the next.</goal>
+  <context>
+    <background>P3 (Legal Front Door + amendment additions) build tasks 032-037 are complete. This is the phase deploy: Dataverse schema first (the BFF + client depend on the new fields/config), then the BFF (Front Door endpoints + NDA-assess + index routing + email trigger), then the SWA (client). Mirrors the P1/P2 deploy tasks (019/027). §10 BFF: verify publish size + CVE before deploy. teams-app-r1 shares the external-access surface + deploy-external-spa.yml — coordinate (it is COMPLETE/merged, a stable base, but run /conflict-check before the BFF PR/deploy). The 033 spike produces a decision doc (no deployable code) — its inclusion in deps is to gate the phase on the spike being resolved, not to deploy code.</background>
+    <relevant-files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md (promote the 030 + 034 schema — solution import)</file>
+      <file>.claude/skills/bff-deploy/SKILL.md (deploy Sprk.Bff.Api to Azure App Service)</file>
+      <file>.github/workflows/deploy-external-spa.yml (SWA deploy for external-spa)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/019-deploy-p1.poml + 027 (prior phase deploys — mirror the sequence + verification)</file>
+      <file>.claude/constraints/bff-extensions.md + .claude/constraints/azure-deployment.md (publish-size ≤60 MB + CVE gate)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (P3 acceptance criteria to verify post-deploy: FR-13/14/15/16/17/23/24/25)</file>
+    </relevant-files>
+    <dependencies>All P3 build tasks (032 NDA assessment, 033 redline spike, 034 P&amp;P architecture, 035 Policy Question + browse, 036 submitter authz + upload, 037 my-requests + feedback + thread) must be complete + green. Prior deploys (019 P1, 027 P2) established the environment.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Deploy order is PRESCRIPTIVE: (1) Dataverse schema (030 + 034), (2) BFF (Sprk.Bff.Api), (3) external-spa SWA — schema before BFF before client; verify each stage before the next. Do NOT deploy the BFF or SWA against un-promoted schema.</constraint>
+    <constraint source="project">Before the BFF deploy: run dotnet publish -c Release and confirm compressed size ≤60 MB (report delta vs baseline 46.90 MB incl PDBs) AND dotnet list package --vulnerable --include-transitive shows no NEW HIGH-severity CVE (§10). HARD STOP at ≥60 MB.</constraint>
+    <constraint source="project">Run /conflict-check before the BFF PR/deploy — teams-app-r1 shares Api/ExternalAccess/** + Infrastructure/ExternalAccess/** + deploy-external-spa.yml (stable/merged base; still verify no concurrent conflict). Services/Communication (037 email trigger) is heavily shared.</constraint>
+    <constraint source="project">Do NOT deploy code for the 033 spike — it is a decision doc only; its dep here gates the phase on the spike being resolved (the outcome-(b) redline is a mock in 032, not deployed).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Phase deploy sequence" location="projects/spaarke-SPA-external-access-platform-r2/tasks/019-deploy-p1.poml">Mirror the prior phase-deploy sequence + verification (schema → BFF → SWA).</pattern>
+      <pattern name="Publish-size gate" location=".claude/constraints/azure-deployment.md">dotnet publish -c Release; report compressed size + delta vs 46.90 MB; HARD STOP ≥60 MB.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Verify all P3 build tasks (032-037) are ✅ + the branch builds: dotnet build src/server/api/Sprk.Bff.Api/ + npm run build:prod for external-spa. Run /conflict-check for the external-access + Services/Communication BFF surfaces.</step>
+    <step order="2">Pre-deploy BFF gate: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; measure compressed size; report delta vs 46.90 MB; confirm ≤60 MB. Run dotnet list package --vulnerable --include-transitive; confirm no new HIGH CVE. HARD STOP if either fails.</step>
+    <step order="3">Deploy step 1 — Dataverse schema: promote the 030 (sprk_servicerequest intake/feedback/thread fields) + 034 (sprk_documentcategory/governance fields + Policy Library sprk_gridconfiguration) schema via dataverse-deploy. Verify via metadata query that the fields + optionsets + grid config exist in the target environment.</step>
+    <step order="4">Deploy step 2 — BFF: deploy Sprk.Bff.Api via bff-deploy (Front Door group, NDA-assess endpoint, index routing, feedback/email trigger). Verify health + a smoke call to the Front Door group (authz-gated).</step>
+    <step order="5">Deploy step 3 — external-spa SWA: deploy via deploy-external-spa.yml (intake framework, NDA 3-outcome UI, Policy Library, my-requests + feedback + thread). Verify the SWA loads + the Front Door module renders.</step>
+    <step order="6">Post-deploy verification: confirm the P3 acceptance criteria hold in the deployed environment — submit a typed request; run an NDA assessment (3 outcomes); browse the Policy Library (published-only); submit a Policy Question; view my-requests + feedback + thread; confirm two-user isolation (A cannot see B). Record results.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document the deploy (versions, publish size + delta, verification results, any deviations) in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="dotnet">Build + publish (size gate) + CVE scan the BFF</tool>
+    <tool name="npm">Build the external-spa client (build:prod)</tool>
+    <tool name="terminal">dataverse-deploy, bff-deploy, SWA deploy, /conflict-check, verification</tool>
+  </tools>
+  <outputs>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ — P3 deploy record (versions, publish size + delta, CVE result, post-deploy verification, deviations)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the deploy order, when P3 is deployed, then the Dataverse schema (030 + 034) is promoted and verified BEFORE the BFF, and the BFF is deployed BEFORE the SWA (prescriptive order held).</criterion>
+    <criterion testable="true">Given the BFF pre-deploy gate, when dotnet publish -c Release runs, then compressed size is reported with delta vs 46.90 MB, is ≤60 MB, and dotnet list package --vulnerable shows no new HIGH CVE.</criterion>
+    <criterion testable="true">Given the deployed environment, when a workforce Front Door user submits a typed request, runs an NDA assessment, browses the Policy Library, submits a Policy Question, and views my-requests + feedback + thread, then each works per the P3 acceptance criteria.</criterion>
+    <criterion testable="true">Negative: given the deployed my-requests surface, when user A is signed in, then A cannot see user B's requests/feedback/thread (Tier-2 isolation holds post-deploy).</criterion>
+    <criterion testable="true">Negative: no code is deployed for the 033 spike (decision doc only); the outcome-(b) redline remains the 032 mock in production.</criterion>
+  </acceptance-criteria>
+  <notes>Phase deploy for P3 (Legal Front Door + FR-23/24/25 additions). Prescriptive order: schema (030+034) → BFF → SWA. §10 gate: publish ≤60 MB + no new HIGH CVE before the BFF deploy; /conflict-check (external-access + Services/Communication). 033 is a spike (no code deployed). Mirror the 019/027 phase deploys. Use build:prod per CLAUDE.md §12 / AP-1.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; follow the prescriptive deploy order + the §10 pre-deploy gate.</protocol>
+  </execution>
+</task>

@@ -13,6 +13,8 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -238,6 +240,19 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
+        // POST /api/communications/{id}/confirm-affinity — FR-A4 affinity confirmation-write (R-1). The confirm
+        // surface calls this FIRE-AND-FORGET after a human confirms this communication is regarding {target},
+        // recording the (signal → target) frequency so AffinityRung can SUGGEST that target for future untagged
+        // messages with matching signals. Learns from HUMAN confirmations only (not the engine's auto-files).
+        // Best-effort / non-fatal (NFR-04): a disabled tenant, unmapped target, or store failure is a no-op that
+        // still returns 200 — it MUST NOT fail the user's confirmation (the regarding write already succeeded
+        // client-side via Xrm.WebApi, ADR-024). Auth-scoped via the endpoint filter (NFR-07).
+        group.MapPost("/{id:guid}/confirm-affinity", RecordAffinityConfirmationAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("RecordCommunicationAffinityConfirmation")
+            .WithDescription("FR-A4 affinity learning: record that a human confirmed this communication is regarding {targetEntityType}:{targetRecordId}, incrementing the per-(signal, target) confirmation frequency the deterministic AffinityRung reads. Signals are computed with the SAME AffinityRung.ExtractSignals the read path uses (read/write canonicalization parity). Best-effort — never fails the confirmation; disabled-tenant / unmapped-target / store-failure are no-ops.")
+            .Produces<RecordAffinityConfirmationResult>(StatusCodes.Status200OK);
+
         // GET /api/communications/queue-feed?regarding=&top= — the FR-17 ranked-exceptions queue-feed (task 032).
         // Surface-agnostic: r1 supplies the feed ONLY, r5 builds the Exceptions Queue surface on top of it (C-3).
         // Composes unresolved/Suggested/Ambiguous association exceptions + OPEN pending Job B proposals (task 030)
@@ -267,6 +282,25 @@ public static class CommunicationEndpoints
             .WithName("ApplyCommunicationProposal")
             .WithDescription("Job B apply (FR-10): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
             .Produces<ApplyProposalResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/proposals/{reviewLogId}/create-task/apply — Job C APPLY (task 034 / FR-D5, backs
+        // FR-E5). Sibling of the Job B apply above. r5's Tasks reconcile tab (task 056) POSTs a confirmed create-task
+        // proposal's ReviewLogId here on Approve, with the human-supplied FR-E5 fields in the body. The service
+        // CREATES the sprk_event (type=task) via the blessed IActionSeam.CreateTaskAsync write core, PATCHes the
+        // remaining FR-E5 fields (status/completed-date/base-date/final-due-date) under the confirming user's
+        // MSCRMCallerID impersonation, and writes ONE append-only Applied audit row (Path B — the facade is unchanged
+        // per ADR-013; see CommunicationCreateTaskApplyService remarks). Caller resolved server-side (403 fail-closed);
+        // a non-create-task/unverifiable-citation proposal (422), an already-resolved proposal (409), or a failed
+        // create/patch (422) are refused. Registered unconditionally (ADR-010/ADR-032). r1 builds no UI.
+        group.MapPost("/proposals/{reviewLogId:guid}/create-task/apply", ApplyCreateTaskProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ApplyCommunicationCreateTaskProposal")
+            .WithDescription("Job C apply (FR-D5): create the sprk_event (type=task) a confirmed create-task proposal describes via IActionSeam.CreateTaskAsync, PATCH the human-supplied FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-create-task/unverifiable-citation (422), already-resolved (409), or failed create/patch (422) are refused.")
+            .Produces<ApplyCreateTaskResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
@@ -866,6 +900,30 @@ public static class CommunicationEndpoints
     }
 
     /// <summary>
+    /// FR-A4 affinity confirmation-write (email-communication-intelligence-r2, R-1). Records that a HUMAN
+    /// confirmed communication <paramref name="id"/> is regarding the requested target, incrementing the
+    /// per-(signal, target) affinity frequency so <see cref="AffinityRung"/> can SUGGEST that target for future
+    /// untagged messages with matching signals. Computes the SAME signals the read rung uses
+    /// (<see cref="AffinityRung.ExtractSignals"/> over the reconstructed envelope) — keeping read/write
+    /// canonicalization identical. Learns from HUMAN confirmations only (the client calls it after the user's
+    /// regarding write), never the engine's deterministic auto-files, so affinity does not self-reinforce.
+    /// <para>
+    /// Best-effort / non-fatal (NFR-04): an invalid/unmapped target, a disabled tenant, or any store failure is a
+    /// no-op that STILL returns 200 — this MUST NOT fail the user's confirmation (the regarding write already
+    /// committed client-side via Xrm.WebApi per ADR-024; this is a fire-and-forget learning signal on top).
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> RecordAffinityConfirmationAsync(
+        Guid id,
+        RecordAffinityConfirmationRequest request,
+        AffinityConfirmationRecorder recorder,
+        CancellationToken ct)
+    {
+        var recorded = await recorder.RecordAsync(id, request?.TargetEntityType, request?.TargetRecordId, ct);
+        return TypedResults.Ok(new RecordAffinityConfirmationResult(recorded));
+    }
+
+    /// <summary>
     /// FR-17 ranked-exceptions queue-feed (task 032) — delegates entirely to
     /// <see cref="CommunicationQueueFeedService.GetQueueFeedAsync"/> (caller resolved server-side inside the
     /// service, same access posture as every other communication read). READ-ONLY; r1 supplies the feed only,
@@ -892,6 +950,21 @@ public static class CommunicationEndpoints
         CancellationToken ct)
     {
         var result = await applyService.ApplyAsync(reviewLogId, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job C apply (task 034 / FR-D5). The caller is resolved server-side inside the service (fail-closed 403); the
+    // sprk_event is created via IActionSeam.CreateTaskAsync and its FR-E5 fields PATCHed under that caller's
+    // MSCRMCallerID impersonation; failures surface as RFC 7807 ProblemDetails via SdapProblemException
+    // (403/404/409/422/500). The request body (optional) carries the human-supplied FR-E5 fields from the reconcile tab.
+    private static async Task<IResult> ApplyCreateTaskProposalAsync(
+        Guid reviewLogId,
+        [FromBody] ApplyCreateTaskRequest? request,
+        ICommunicationCreateTaskApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
         return TypedResults.Ok(result);
     }
 

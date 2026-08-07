@@ -59,8 +59,20 @@ jest.mock('@spaarke/ui-components', () => ({
   DEFAULT_RICH_FILE_PREVIEW_DISABLED_ACTIONS: Object.freeze(['preview', 'aiSummary', 'toggleWorkspace', 'rename']),
 }));
 
+// Mock the AiSessionProvider module to expose a real (lightweight) React
+// context under the SAME import specifier the widget consumes, so tests can
+// supply an ambient `{ bffBaseUrl, authenticatedFetch }` auth surface (or omit
+// it) without evaluating the full provider tree. `require('react')` inside the
+// factory keeps it hoist-safe.
+jest.mock('../../../providers/AiSessionProvider', () => {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const R = require('react');
+  return { AiSessionContext: R.createContext(null) };
+});
+
 // Import widget AFTER mock so the mock is wired before module evaluation.
 import DocumentViewerWidget, { type DocumentViewerWidgetData } from '../DocumentViewerWidget';
+import { AiSessionContext } from '../../../providers/AiSessionProvider';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -296,6 +308,140 @@ describe('DocumentViewerWidget — defensive narrowing', () => {
     const props = lastRendererProps();
     expect(props.documentName).toBe('Unknown file');
     expect(props.documentId).toBe('document-viewer:unknown');
+    await expect(props.fetchPreviewUrl()).resolves.toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-D restore defect (owner UAT 2026-08-07) — a restored document tab must
+// re-derive its preview from the STABLE documentId via the BFF, NEVER reuse a
+// persisted/stale `blob:` object-URL (dead after reload → ERR_FILE_NOT_FOUND),
+// and the load path must RESOLVE (never spin forever).
+// ---------------------------------------------------------------------------
+
+interface SessionStub {
+  bffBaseUrl?: string;
+  authenticatedFetch?: (url: string, init?: RequestInit) => Promise<Response>;
+}
+
+function renderWithSession(data: WorkspaceWidgetProps<DocumentViewerWidgetData>['data'], session: SessionStub | null) {
+  const tree = (
+    <AiSessionContext.Provider value={session as unknown as never}>
+      <DocumentViewerWidget data={data} widgetType="document-viewer" />
+    </AiSessionContext.Provider>
+  );
+  return render(tree);
+}
+
+describe('DocumentViewerWidget — FR-D restore: re-derive from documentId, never reuse a blob', () => {
+  it('re-fetches a FRESH preview URL from documentId when the persisted previewUrl is a dead blob URL', async () => {
+    const deadBlob = 'blob:https://spaarkedev1.crm.dynamics.com/1111-dead-uuid';
+    const calledUrls: string[] = [];
+    const authenticatedFetch = jest.fn(async (url: string) => {
+      calledUrls.push(url);
+      return {
+        ok: true,
+        json: async () => ({ previewUrl: 'https://bff.example/preview/fresh-doc-xyz' }),
+      } as unknown as Response;
+    });
+
+    // Restored shape: live fetchPreviewUrl closure stripped by JSON; only the
+    // stable id + a now-dead blob previewUrl survive.
+    renderWithSession(
+      {
+        filename: 'nda.docx',
+        contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        textContent: '',
+        documentId: 'doc-xyz',
+        previewUrl: deadBlob,
+      },
+      { bffBaseUrl: 'https://bff.example', authenticatedFetch }
+    );
+
+    const props = lastRendererProps();
+    const resolved = await props.fetchPreviewUrl();
+
+    // Re-derived a fresh server URL — NOT the dead blob.
+    expect(resolved).toBe('https://bff.example/preview/fresh-doc-xyz');
+    expect(resolved).not.toBe(deadBlob);
+    // Fetched via the stable documentId against the existing BFF surface.
+    expect(authenticatedFetch).toHaveBeenCalledTimes(1);
+    expect(calledUrls[0]).toContain('/api/documents/doc-xyz/preview-url');
+    // The dead blob URL is never fetched.
+    expect(calledUrls.some(u => u.startsWith('blob:'))).toBe(false);
+  });
+
+  it('re-fetches from documentId when the live fetchPreviewUrl closure is absent (restore)', async () => {
+    const authenticatedFetch = jest.fn(
+      async () =>
+        ({
+          ok: true,
+          json: async () => ({ previewUrl: 'https://bff.example/preview/restored' }),
+        }) as unknown as Response
+    );
+
+    renderWithSession(
+      {
+        filename: 'restored.pdf',
+        contentType: 'application/pdf',
+        textContent: '',
+        documentId: 'doc-restored',
+      },
+      { bffBaseUrl: 'https://bff.example', authenticatedFetch }
+    );
+
+    const props = lastRendererProps();
+    await expect(props.fetchPreviewUrl()).resolves.toBe('https://bff.example/preview/restored');
+  });
+
+  it('RESOLVES to null (renderer error state, no infinite spinner) when the re-fetch fails', async () => {
+    const authenticatedFetch = jest.fn(async () => ({ ok: false, status: 404 }) as unknown as Response);
+
+    renderWithSession(
+      {
+        filename: 'gone.pdf',
+        contentType: 'application/pdf',
+        textContent: '',
+        documentId: 'doc-gone',
+      },
+      { bffBaseUrl: 'https://bff.example', authenticatedFetch }
+    );
+
+    const props = lastRendererProps();
+    // Resolves (does not hang) → RichFilePreview surfaces "preview not available".
+    await expect(props.fetchPreviewUrl()).resolves.toBeNull();
+  });
+
+  it('never returns a blob even if the server response itself is ephemeral (defensive)', async () => {
+    const authenticatedFetch = jest.fn(
+      async () =>
+        ({
+          ok: true,
+          json: async () => ({ previewUrl: 'blob:https://spaarkedev1.crm.dynamics.com/2222' }),
+        }) as unknown as Response
+    );
+
+    renderWithSession(
+      { filename: 'x.pdf', contentType: 'application/pdf', textContent: '', documentId: 'doc-x' },
+      { bffBaseUrl: 'https://bff.example', authenticatedFetch }
+    );
+
+    const props = lastRendererProps();
+    await expect(props.fetchPreviewUrl()).resolves.toBeNull();
+  });
+
+  it('treats a blob previewUrl as absent even with NO session (resolves null, never reuses the blob)', async () => {
+    // No AiSessionContext provider → no re-fetch possible → must fall back to
+    // null (NOT the dead blob).
+    renderWidget({
+      filename: 'no-session.pdf',
+      contentType: 'application/pdf',
+      textContent: '',
+      documentId: 'doc-no-session',
+      previewUrl: 'blob:https://spaarkedev1.crm.dynamics.com/3333',
+    });
+
+    const props = lastRendererProps();
     await expect(props.fetchPreviewUrl()).resolves.toBeNull();
   });
 });

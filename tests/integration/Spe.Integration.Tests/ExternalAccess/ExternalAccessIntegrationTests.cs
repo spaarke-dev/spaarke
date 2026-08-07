@@ -22,7 +22,7 @@ namespace Spe.Integration.Tests.ExternalAccess;
 ///   - The cache layer (MemoryDistributedCache in tests; Redis in production) is correctly
 ///     invalidated after grant/revoke operations reach the handler.
 ///   - The GET /api/v1/external/me endpoint correctly returns 401 when called without
-///     a portal token (ExternalCallerAuthorizationFilter rejects the request).
+///     a portal token (CallerPrincipalAuthorizationFilter rejects the request).
 ///   - POST endpoints respond with the correct Content-Type for both success and error paths.
 ///
 /// Test Strategy
@@ -145,7 +145,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     [Fact]
     public async Task ExternalMeEndpoint_IsRegistered_NotReturning404()
     {
-        // Act — the ExternalCallerAuthorizationFilter will reject this (no portal JWT),
+        // Act — the CallerPrincipalAuthorizationFilter will reject this (no portal JWT),
         // but the route must be registered (i.e., not a 404 from the router).
         var response = await _authenticatedClient.GetAsync(ExternalMeEndpoint);
 
@@ -189,7 +189,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     [Fact]
     public async Task ExternalMeEndpoint_WithoutPortalToken_ReturnsUnauthorizedOrForbidden()
     {
-        // Arrange — the ExternalCallerAuthorizationFilter requires a Power Pages portal JWT.
+        // Arrange — the CallerPrincipalAuthorizationFilter requires a Power Pages portal JWT.
         // In tests, there is no portal JWT — the filter should reject with 401 or 403.
         // We use the standard Bearer test token which is NOT a portal JWT.
         // The filter checks the token issuer/audience; it should fail auth checks.
@@ -200,7 +200,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         // Assert — filter rejects non-portal tokens (401 or 403 or 500 due to missing context)
         ((int)response.StatusCode).Should().BeOneOf(
             new[] { StatusCodes.Status401Unauthorized, StatusCodes.Status403Forbidden, StatusCodes.Status500InternalServerError },
-            "GET /api/v1/external/me must reject non-portal tokens via ExternalCallerAuthorizationFilter");
+            "GET /api/v1/external/me must reject non-portal tokens via CallerPrincipalAuthorizationFilter");
     }
 
     #endregion
@@ -770,7 +770,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
     [Fact]
     public async Task ExternalGroup_GetMe_RequiresPortalToken_NotAzureAdToken()
     {
-        // The /api/v1/external group uses ExternalCallerAuthorizationFilter (portal JWT),
+        // The /api/v1/external group uses CallerPrincipalAuthorizationFilter (portal JWT),
         // while /api/v1/external-access group uses RequireAuthorization() (Azure AD JWT).
         // This test verifies that an Azure AD bearer token is rejected by the external group's filter.
 
@@ -778,10 +778,10 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
         var response = await _authenticatedClient.GetAsync(ExternalMeEndpoint);
 
         // Assert — should NOT return 401 from RequireAuthorization (that's the admin group behavior).
-        // Should return 401/403/500 from ExternalCallerAuthorizationFilter (portal token check).
+        // Should return 401/403/500 from CallerPrincipalAuthorizationFilter (portal token check).
         ((int)response.StatusCode).Should().BeOneOf(
             new[] { StatusCodes.Status401Unauthorized, StatusCodes.Status403Forbidden, StatusCodes.Status500InternalServerError },
-            "the external user group uses ExternalCallerAuthorizationFilter, not RequireAuthorization");
+            "the external user group uses CallerPrincipalAuthorizationFilter, not RequireAuthorization");
     }
 
     [Fact]

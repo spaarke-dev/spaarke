@@ -1,4 +1,5 @@
 import { authService } from './AuthService';
+import { authenticatedJsonFetch } from './authenticatedJsonFetch';
 
 /**
  * API client for communicating with the Spaarke BFF API.
@@ -8,10 +9,17 @@ import { authService } from './AuthService';
  * Auth v2 (email-communication-solution-r4 task 072 / FR-25): `AuthService` now
  * delegates to `@spaarke/auth`'s `OfficeNaaStrategy`, which acquires a token for
  * the single `bffApiScope` configured at `initialize()` time
- * (`api://{BFF_API_CLIENT_ID}/user_impersonation`, per ADR-028). The `.default`-
- * scope array built below is passed through for interface back-compat only —
- * `AuthService.getAccessToken()` ignores it and always returns the token for the
- * configured scope.
+ * (`api://{BFF_API_CLIENT_ID}/user_impersonation`, per ADR-028).
+ * `AuthService.getAccessToken()` ignores any scope argument and always returns
+ * the token for the configured scope (task 040 / FR-B0: the dead `.default`
+ * scope array previously built here — and passed but silently ignored — has
+ * been removed).
+ *
+ * Single-retry-on-401 (task 040 / FR-B0): `request()` and `uploadFile()` route
+ * through `authenticatedJsonFetch`, which mirrors `@spaarke/auth`'s
+ * `authenticatedFetch` 401-retry shape (clear cache, re-acquire, retry exactly
+ * once) — see that helper's header comment for why the office-addins package
+ * can't call `@spaarke/auth`'s own `authenticatedFetch` directly.
  */
 
 export interface IApiClient {
@@ -76,13 +84,15 @@ class ApiClient implements IApiClient {
     const formData = new FormData();
     formData.append('file', file, fileName);
 
-    const response = await fetch(`${this.baseUrl}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
+    const response = await authenticatedJsonFetch(
+      `${this.baseUrl}${endpoint}`,
+      {
+        method: 'POST',
+        body: formData,
       },
-      body: formData,
-    });
+      accessToken,
+      this.retryConfig()
+    );
 
     if (!response.ok) {
       await this.handleErrorResponse(response);
@@ -97,21 +107,23 @@ class ApiClient implements IApiClient {
       throw new Error('Not authenticated');
     }
 
-    const headers: HeadersInit = {
-      Authorization: `Bearer ${accessToken}`,
-      'Content-Type': 'application/json',
-    };
-
     const config: RequestInit = {
       method,
-      headers,
+      headers: {
+        'Content-Type': 'application/json',
+      },
     };
 
     if (body && (method === 'POST' || method === 'PUT')) {
       config.body = JSON.stringify(body);
     }
 
-    const response = await fetch(`${this.baseUrl}${endpoint}`, config);
+    const response = await authenticatedJsonFetch(
+      `${this.baseUrl}${endpoint}`,
+      config,
+      accessToken,
+      this.retryConfig()
+    );
 
     if (!response.ok) {
       await this.handleErrorResponse(response);
@@ -126,10 +138,16 @@ class ApiClient implements IApiClient {
     return JSON.parse(text) as T;
   }
 
+  /** Single-retry-on-401 config shared by `request()` and `uploadFile()` (task 040 / FR-B0). */
+  private retryConfig() {
+    return {
+      getRetryToken: async () => (await this.getAccessToken()) ?? '',
+      onBeforeRetry: () => authService.clearCache(),
+    };
+  }
+
   private async getAccessToken(): Promise<string | null> {
-    // Use `.default` scope per auth.md constraint
-    const scopes = [`api://${this.bffApiClientId}/.default`];
-    return authService.getAccessToken(scopes);
+    return authService.getAccessToken();
   }
 
   private async handleErrorResponse(response: Response): Promise<never> {

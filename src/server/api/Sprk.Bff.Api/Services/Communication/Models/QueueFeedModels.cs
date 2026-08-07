@@ -1,7 +1,8 @@
 namespace Sprk.Bff.Api.Services.Communication.Models;
 
 /// <summary>
-/// The two <see cref="QueueFeedItem.Kind"/> discriminator values for the FR-17 queue-feed (task 032).
+/// The <see cref="QueueFeedItem.Kind"/> discriminator values for the FR-17 queue-feed (task 032; create-task
+/// added task 034 / FR-D5).
 /// </summary>
 public static class QueueFeedItemKinds
 {
@@ -12,6 +13,14 @@ public static class QueueFeedItemKinds
     /// <summary>An OPEN pending Job B field-update proposal (task 030's <c>sprk_emailreviewlog</c> <c>Proposed</c>
     /// row with no later terminal row for the same (communication, target entity, target field)).</summary>
     public const string PendingProposal = "pending-proposal";
+
+    /// <summary>An OPEN pending Job C create-task proposal (task 040's deadline-bearing <c>sprk_emailreviewlog</c>
+    /// <c>Proposed</c> row, keyed by the <c>__create_task__:</c> sentinel <c>sprk_targetfield</c>, with no later
+    /// terminal row). The task the reconcile tab (task 056 / FR-E5) will create on Approve — POSTed to the create-task
+    /// apply endpoint (task 034). The <see cref="QueueFeedItem"/> Task* group carries the extracted
+    /// name/description/due-date; base-date/final-due-date/assigned-to/status/completed-date are null in the feed and
+    /// supplied by the human at apply time.</summary>
+    public const string CreateTask = "create-task";
 }
 
 /// <summary>
@@ -73,6 +82,23 @@ public static class QueueFeedItemKinds
 /// an association-exception item.</param>
 /// <param name="PrivilegeFlagged">ADR-015 — carried as a flag only, never decided/suppressed by this feed; null
 /// otherwise.</param>
+/// <param name="TaskName">Populated for <see cref="QueueFeedItemKinds.CreateTask"/> — the extracted follow-up task
+/// subject (Job C candidate <c>subject</c>); null for other kinds. For a create-task item the regarding record is
+/// carried in <see cref="TargetEntity"/> + <see cref="TargetRecordId"/> (the confirmed association the task attaches
+/// to, NFR-10) and the citation in the Citation* fields.</param>
+/// <param name="TaskDescription">Populated for <see cref="QueueFeedItemKinds.CreateTask"/> — the extracted task
+/// description; null for other kinds.</param>
+/// <param name="TaskBaseDate">Create-task FR-E5 field. NOT extracted by Job C — null in the feed; the human supplies
+/// it at apply time (task 056). Exposed here so the reconcile tab binds the full FR-E5 field set on one shape.</param>
+/// <param name="TaskDueDate">Populated for <see cref="QueueFeedItemKinds.CreateTask"/> — the extracted deadline
+/// (Job C candidate <c>dueDate</c>, the field that made this candidate deadline-bearing and thus human-confirm); null
+/// for other kinds.</param>
+/// <param name="TaskFinalDueDate">Create-task FR-E5 field. NOT extracted — null in the feed; human-supplied at apply.</param>
+/// <param name="TaskAssignedTo">Create-task FR-E5 field (the task Owner / <c>ownerid</c> systemuser). NOT extracted —
+/// null in the feed; human-supplied at apply.</param>
+/// <param name="TaskStatus">Create-task FR-E5 field (<c>sprk_eventstatus</c> Choice value, e.g. Completed=2 for the
+/// create-and-complete case). NOT extracted — null in the feed; human-supplied at apply.</param>
+/// <param name="TaskCompletedDate">Create-task FR-E5 field. NOT extracted — null in the feed; human-supplied at apply.</param>
 public sealed record QueueFeedItem(
     Guid CommunicationId,
     string Kind,
@@ -95,7 +121,16 @@ public sealed record QueueFeedItem(
     string? CitationQuotedText,
     string? Reason,
     bool? RequireConfirm,
-    bool? PrivilegeFlagged);
+    bool? PrivilegeFlagged,
+    // ── Create-task (task 034 / FR-D5) group — populated only for QueueFeedItemKinds.CreateTask ──
+    string? TaskName = null,
+    string? TaskDescription = null,
+    DateOnly? TaskBaseDate = null,
+    DateOnly? TaskDueDate = null,
+    DateOnly? TaskFinalDueDate = null,
+    Guid? TaskAssignedTo = null,
+    int? TaskStatus = null,
+    DateOnly? TaskCompletedDate = null);
 
 /// <summary>
 /// FR-17 queue-feed result (task 032): the caller's ranked exceptions for the requested scope, already ranked by

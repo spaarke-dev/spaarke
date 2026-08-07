@@ -126,6 +126,10 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
           return;
         }
         await advanceAssociationStatus(writeContext);
+        // FR-A4 (R-1): fire-and-forget affinity learning — a HUMAN confirmed this email is regarding
+        // c.entity:c.targetId. Host-injected (ADR-012); a no-op when unwired. Best-effort: the impl swallows
+        // its own errors, so this never blocks or fails the confirmation the user just made.
+        writeContext.recordAffinity?.(c.entity, c.targetId);
         setSelectedKey(undefined);
         onAssociationsChanged?.();
       } catch (err) {

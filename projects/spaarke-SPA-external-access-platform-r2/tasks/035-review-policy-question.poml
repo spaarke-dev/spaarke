@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Review Policy Question (submit question → official human answer via feedback loop) + Policy Library browse/read</title>
+    <phase>P3 Legal Front Door intake MVP</phase>
+    <gate>blocked-until:031,034</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Client (Fluent v9) + BFF read/submit surface spanning the Front Door group; consumes 034's grid config + 030's feedback fields; tags frontend/bff-api — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified composition — a PolicyQuestion request type on the 031 framework + the FR-24 feedback loop + the 034 Policy Library grid; no new architecture, reuses established seams.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Consumes 031 (intake framework) + 034 (grid config + governance schema) + 030 (feedback fields); touches the shared external-access BFF surface; sequential after its deps.</parallel-reason>
+    <deps>031,034</deps>
+    <tags>frontend, bff-api</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+  <prompt>Build the FR-25 read side: (1) "Review Policy Question" — a PolicyQuestion Front Door request type on the 031 intake framework where a user submits a policy question and receives an OFFICIAL HUMAN answer from the law department (NOT AI — that's FR-26) via the FR-24 feedback loop (legal answers in the MDA; the answer returns to the requester in-app + email); (2) the Policy Library browse/read surface — a widget rendering the 034 Policy Library sprk_gridconfiguration (entity=sprk_document, filter category=Policy + published) read-only via BffDataverseClient, with document read/open. Reuse the 031 framework + 030 feedback fields + 034 grid; do NOT build a new grid or a new feedback path.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 on @spaarke/ui-components + the DataGrid framework; ASP.NET Minimal API endpoint groups (ADR-008/019) for any read/submit route on the Front Door group; app-only broker reads (ADR-028/A3, no OBO).</role>
+  <goal>A workforce Front Door user can: (1) submit a PolicyQuestion request through the 031 intake framework and later see the law department's official human answer (decision/response text + response docs) rendered on their my-requests detail + emailed — via the FR-24 loop (030 fields; 037 renders the shared feedback); (2) browse/read the Policy Library — a widget backed by the 034 sprk_gridconfiguration (category=Policy + published) reading read-only via BffDataverseClient, and open/read a policy document (app-only, no Power-Apps license). Expired/unpublished policies never surface (034 governance trim). No new grid, no new feedback path.</goal>
+  <context>
+    <background>FR-25 (spec.md line 257): R2 builds both (i) a browse/read policy library and (ii) "Review Policy Question" — a user submits a policy question and receives an official HUMAN response from the law department (NOT an AI answer — that's FR-26). "Review Policy Question" is a Front Door request type (PolicyQuestion) that reuses the intake (031) + the FR-24 official-human-response feedback loop (legal answers in the MDA; the answer returns to the requester in-app + email — 037 renders it). The library home reuses sprk_document category=Policy (034) + governance fields + the existing indexing lifecycle. Two read roles kept separate: (a) grounding — Ask Legal policy_search (FR-26/051) hits the AI-Search policy index (NOT this task); (b) browse — the Policy Library grid reads sprk_document via sprk_gridconfiguration + BffDataverseClient (THIS task). Both filter published/effective. Authoring is by law-dept core users in the MDA — the external portal is READ-ONLY on P&amp;P. This task delivers the PolicyQuestion request-type registration + the browse/read widget; the feedback RENDER is shared with 037 (FR-24).</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md (FR-25 line 257 — Review Policy Question + browse/read; FR-24 feedback loop)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/031-typed-intake-framework.poml (the intake framework + request-type registry to register PolicyQuestion into)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/034-pnp-document-architecture.poml (the Policy Library sprk_gridconfiguration + governance schema this browse surface consumes)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/030-servicerequest-intake-schema.poml (sprk_requesttype=PolicyQuestion + the decision/response feedback fields)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/** + docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (&lt;DataGrid configId=…&gt; + BffDataverseClient read-only broker — the browse surface)</file>
+      <file>src/client/external-spa/** (the module-host shell + the 031 driver to register PolicyQuestion + mount the Policy Library widget)</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md + MODAL-DESIGN-SYSTEM.md (open/read a policy document via the right modal preset)</file>
+      <file>.claude/constraints/bff-extensions.md (binding BFF governance — Placement Justification + publish size)</file>
+    </relevant-files>
+    <dependencies>031 (intake framework + request-type registry) — PolicyQuestion registers as a request type. 034 (sprk_documentcategory + governance fields + Policy Library sprk_gridconfiguration + governance trim) — the browse surface reads this grid. 030 (feedback fields decision/response) — the official-human answer writes here; 037 renders the shared feedback (this task registers PolicyQuestion + browse; the feedback render is 037).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">"Review Policy Question" MUST be a PolicyQuestion request type on the 031 intake framework (config/schema + a form) — do NOT build a bespoke question flow or a new endpoint group. The answer is an OFFICIAL HUMAN response via the FR-24 loop (legal answers in the MDA) — NOT an AI answer (that is FR-26/051; do not add AI here).</constraint>
+    <constraint source="project">The Policy Library browse surface MUST render the 034 sprk_gridconfiguration (entity=sprk_document, filter category=Policy + published) via &lt;DataGrid configId=…&gt; + BffDataverseClient read-only — do NOT hand-roll a grid or add a new read endpoint. External is read-only on P&amp;P (authoring is MDA-side).</constraint>
+    <constraint source="project">Expired/unpublished policies MUST NOT surface in the browse grid — rely on the 034 governance trim (published/effective filter). Verify with a negative case.</constraint>
+    <constraint source="ADR-028">All reads are app-only broker (no OBO) — the external caller token authenticates only to the BFF; Dataverse/SPE reads are app-only, entitlement-scoped.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; zero hardcoded hex; verified light/dark/Teams theme + narrow Teams personal-tab width; document open/read via @spaarke/ui-components modal presets (no hand-rolled Dialog, §11/ADR-050).</constraint>
+    <constraint source="project">Any BFF read/submit addition: state the Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); report dotnet publish size delta vs baseline 46.90 MB (ceiling ≤60 MB); run /conflict-check before the BFF PR. (Most of this task is client + config; flag if no BFF change is needed.)</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Request-type registration" location="projects/spaarke-SPA-external-access-platform-r2/tasks/031-typed-intake-framework.poml">Register PolicyQuestion as a request type (config + a form) — no framework change.</pattern>
+      <pattern name="Typed grid browse" location="docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md">Render the 034 sprk_gridconfiguration via &lt;DataGrid configId=…&gt; + BffDataverseClient read-only.</pattern>
+      <pattern name="FR-24 feedback loop" location="projects/spaarke-SPA-external-access-platform-r2/tasks/030-servicerequest-intake-schema.poml">The official human answer writes decision/response fields; 037 renders + emails it.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-25 (line 257) + FR-24 + ux-brief + the DataGrid framework docs + 031/034/030 task files. Run /conflict-check if a BFF change is needed.</step>
+    <step order="2">Register PolicyQuestion as a request type in the 031 intake framework (config + a question form via WizardModal/FormModal). Submit writes a sprk_servicerequest (requesttype=PolicyQuestion) via the existing Front Door group — no new endpoint group.</step>
+    <step order="3">Confirm the FR-24 loop covers PolicyQuestion: legal's official human answer (decision/response text + response docs) is written MDA-side into the 030 feedback fields; the requester sees it in-app (my-requests, rendered by 037) + email (037). This task ensures PolicyQuestion flows through that shared loop — do NOT build a separate answer path or any AI answer.</step>
+    <step order="4">Build the Policy Library browse/read widget: render the 034 sprk_gridconfiguration (entity=sprk_document, filter category=Policy + published) via &lt;DataGrid configId=…&gt; + BffDataverseClient read-only; wire document open/read via a modal preset. Mount as a role-defaulted widget in the shell.</step>
+    <step order="5">Implement the required states (loading, empty, error, unentitled/denied, dark, Teams theme, keyboard, narrow width) per ux-brief §4 for both the PolicyQuestion form and the Policy Library grid.</step>
+    <step order="6">Tests: client component tests for the PolicyQuestion form (renders through the 031 driver) + the Policy Library grid (renders the config; expired/unpublished excluded — negative). If a BFF change exists, add KEEP-path integration tests (no Mock&lt;HttpMessageHandler&gt;/DI/ctor tests, ADR-038).</step>
+    <step order="7">Build: npm run build:prod (client); if BFF changed, dotnet publish -c Release + report size delta vs 46.90 MB + Placement Justification.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <tools>
+    <tool name="npm">Build/test the external-spa client (build:prod)</tool>
+    <tool name="dotnet">Build/test/publish the BFF if a read/submit change is needed</tool>
+    <tool name="terminal">Shell, /conflict-check</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/external-spa/** — PolicyQuestion request type registered in the 031 framework + a Policy Library browse/read widget (&lt;DataGrid configId=…&gt; + BffDataverseClient)</output>
+    <output type="test">tests/** — client component tests for the PolicyQuestion form + Policy Library grid (published-only negative); BFF KEEP-path tests only if a BFF change exists</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the Front Door, when a user opens "Review Policy Question", then a PolicyQuestion form renders through the 031 intake framework (config + a form, no framework change) and submit creates a sprk_servicerequest with requesttype=PolicyQuestion.</criterion>
+    <criterion testable="true">Given a submitted PolicyQuestion, when legal writes an official human answer (decision/response) MDA-side, then it returns to the requester via the FR-24 loop (in-app my-requests + email, rendered by 037) — NOT an AI answer.</criterion>
+    <criterion testable="true">Given the Policy Library widget, when it loads, then it renders the 034 sprk_gridconfiguration (entity=sprk_document, filter category=Policy) via &lt;DataGrid configId=…&gt; + BffDataverseClient read-only — no hand-rolled grid in the diff.</criterion>
+    <criterion testable="true">Negative: given an unpublished or expired policy, when the Policy Library grid loads, then it never appears (034 governance trim / published filter).</criterion>
+    <criterion testable="true">Given a policy row, when the user opens it, then the document reads via a modal preset app-only (no OBO, no Power-Apps license, no Graph pointer exposure).</criterion>
+    <criterion testable="true">Given both surfaces, when rendered in light/dark/Teams theme at narrow width, then semantic tokens adapt with zero hardcoded hex and no console errors.</criterion>
+  </acceptance-criteria>
+  <ui-tests>
+    <test name="Policy Library browse + read">
+      <steps><step>Open the Policy Library widget in the shell</step><step>Verify published policies list; open one to read</step></steps>
+      <expected>Grid renders the 034 config via BffDataverseClient; document opens in a modal preset; expired/unpublished absent; no console errors</expected>
+    </test>
+    <test name="Review Policy Question submit">
+      <steps><step>Open "Review Policy Question"</step><step>Fill + submit the question form</step></steps>
+      <expected>Form renders through the 031 driver; a PolicyQuestion sprk_servicerequest is created; confirmation shown</expected>
+    </test>
+    <test name="Dark + Teams theme (ADR-021)">
+      <steps><step>Toggle dark mode; load inside a Teams-theme host at narrow width</step></steps>
+      <expected>Zero hardcoded hex; tokens adapt across light/dark/Teams; readable at Teams personal-tab width</expected>
+    </test>
+  </ui-tests>
+  <notes>Spec FR-25 (line 257) read side + FR-24. Review Policy Question = a PolicyQuestion request type on the 031 framework → OFFICIAL HUMAN answer via the FR-24 loop (NOT AI — AI Q&amp;A is FR-26/051). Policy Library browse reuses the 034 grid config + BffDataverseClient (read-only; external is read-only on P&amp;P). Feedback RENDER (in-app + email) is shared with 037. No new grid, no new feedback path, no AI. Use build:prod per CLAUDE.md §12 / AP-1.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; declare rigor; run /conflict-check (if BFF) + code-review + adr-check at Step 9.5.</protocol>
+  </execution>
+</task>
