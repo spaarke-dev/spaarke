@@ -326,4 +326,284 @@ public sealed class ComposeTemplatePartMergeEngineTests
             "the document's own page setup is adopted so the output stays a valid single-section docx");
         BodyText(doc).Should().Contain("Confidentiality Obligations");
     }
+
+    [Fact]
+    public void Merge_HappyPath_EmitsNoWarnings()
+    {
+        var warnings = new List<ComposeProjectionWarning>();
+        Engine().Merge(BuildRenderedBody(), BuildTemplateDotx(), warnings);
+        warnings.Should().BeEmpty("a clean merge must not cry wolf — warnings are reserved for real degradation");
+    }
+
+    // ── carrier-class source (030-review F1/F2/F3): sectPr header refs, footnote-with-hyperlink,
+    //    comment — the imported-document input class ───────────────────────────────────────────────
+
+    private const string SourceHeaderText = "SOURCE HEADER — carried page chrome";
+    private const string SourceFootnoteText = "See the governing statute";
+    private const string FootnoteLinkUri = "https://law.example.com/statute-42";
+    private const string SourceCommentText = "Please verify this clause";
+
+    /// <summary>An imported-carrier-shaped source: body paragraph anchoring a comment (id 7) and a
+    /// footnote (id 2 — whose content carries a HYPERLINK, i.e. a footnotes-part-local relationship),
+    /// a numbered paragraph (numId 5), and a trailing sectPr referencing the source's OWN header part.</summary>
+    private static byte[] BuildCarrierLikeSource()
+    {
+        using var stream = new MemoryStream();
+        using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document, autoSave: true))
+        {
+            var main = doc.AddMainDocumentPart();
+            main.Document = new Document();
+            var body = main.Document.AppendChild(new Body());
+
+            body.AppendChild(new Paragraph(
+                new CommentRangeStart { Id = "7" },
+                new Run(new Text("Carrier body text with a footnote")),
+                new Run(new FootnoteReference { Id = 2 }),
+                new CommentRangeEnd { Id = "7" },
+                new Run(new CommentReference { Id = "7" })));
+            body.AppendChild(new Paragraph(
+                new ParagraphProperties(new NumberingProperties(
+                    new NumberingLevelReference { Val = 0 }, new NumberingId { Val = 5 })),
+                new Run(new Text("Numbered carrier item"))));
+
+            var footnotesPart = main.AddNewPart<FootnotesPart>();
+            var footnoteLink = footnotesPart.AddHyperlinkRelationship(new Uri(FootnoteLinkUri), isExternal: true);
+            footnotesPart.Footnotes = new Footnotes(
+                new Footnote(new Paragraph(
+                    new Run(new Text(SourceFootnoteText + " ")),
+                    new Hyperlink(new Run(new Text("statute link"))) { Id = footnoteLink.Id }))
+                { Id = 2 });
+
+            var commentsPart = main.AddNewPart<WordprocessingCommentsPart>();
+            commentsPart.Comments = new Comments(
+                new Comment(new Paragraph(new Run(new Text(SourceCommentText))))
+                { Id = "7", Author = "Reviewer", Date = System.Xml.XmlConvert.ToDateTime("2026-08-01T12:00:00Z", System.Xml.XmlDateTimeSerializationMode.Utc) });
+
+            var numberingPart = main.AddNewPart<NumberingDefinitionsPart>();
+            numberingPart.Numbering = new Numbering(
+                new AbstractNum(
+                    new Level(
+                        new NumberingFormat { Val = NumberFormatValues.Decimal },
+                        new LevelText { Val = "%1." })
+                    { LevelIndex = 0 })
+                { AbstractNumberId = 4 },
+                new NumberingInstance(new AbstractNumId { Val = 4 }) { NumberID = 5 });
+
+            var headerPart = main.AddNewPart<HeaderPart>();
+            headerPart.Header = new Header(new Paragraph(new Run(new Text(SourceHeaderText))));
+
+            body.AppendChild(new SectionProperties(
+                new HeaderReference { Type = HeaderFooterValues.Default, Id = main.GetIdOfPart(headerPart) },
+                new PageSize { Width = 12240, Height = 15840 }));
+
+            main.Document.Save();
+        }
+        return stream.ToArray();
+    }
+
+    [Fact]
+    public void Merge_ChromelessTemplateWithCarrierSource_ReconcilesAdoptedSectPrHeaderReference()
+    {
+        byte[] chromelessTemplate;
+        using (var stream = new MemoryStream())
+        {
+            using (var bare = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Template, autoSave: true))
+            {
+                var bareMain = bare.AddMainDocumentPart();
+                bareMain.Document = new Document(new Body());
+                bareMain.Document.Save();
+            }
+            chromelessTemplate = stream.ToArray();
+        }
+
+        var merged = Engine().Merge(BuildCarrierLikeSource(), chromelessTemplate);
+
+        using var doc = Open(merged);
+        var main = doc.MainDocumentPart!;
+        var sectPr = main.Document!.Body!.Elements<SectionProperties>().Last();
+        var headerRef = sectPr.GetFirstChild<HeaderReference>();
+        headerRef.Should().NotBeNull("the adopted sectPr keeps its header reference");
+        var headerPart = (HeaderPart)main.GetPartById(headerRef!.Id!.Value!);
+        headerPart.Header!.InnerText.Should().Contain(SourceHeaderText,
+            "the ADOPTED sectPr's header r:id must be reconciled onto the merged main part (030-review F1), not left dangling");
+    }
+
+    [Fact]
+    public void Merge_FootnoteWithHyperlink_CarriesContentAndItsPartLocalRelationship()
+    {
+        var merged = Engine().Merge(BuildCarrierLikeSource(), BuildTemplateDotx());
+
+        using var doc = Open(merged);
+        var main = doc.MainDocumentPart!;
+
+        var bodyRefIds = main.Document!.Body!.Descendants<FootnoteReference>()
+            .Select(r => r.Id!.Value).ToList();
+        bodyRefIds.Should().HaveCount(1);
+
+        var footnotesPart = main.FootnotesPart;
+        footnotesPart.Should().NotBeNull("the referenced footnote content must be carried");
+        var carried = footnotesPart!.Footnotes!.Elements<Footnote>()
+            .Single(f => f.Id?.Value == bodyRefIds[0]);
+        carried.InnerText.Should().Contain(SourceFootnoteText);
+
+        // 030-review F2: the footnote's OWN hyperlink relationship must live on the MERGED footnotes part.
+        var link = carried.Descendants<Hyperlink>().Single();
+        var rel = footnotesPart.HyperlinkRelationships.SingleOrDefault(h => h.Id == link.Id?.Value);
+        rel.Should().NotBeNull("part-local relationships inside carried story content must be re-created");
+        rel!.Uri.OriginalString.Should().Be(FootnoteLinkUri);
+
+        var errors = new OpenXmlValidator(FileFormatVersions.Office2019).Validate(doc).ToList();
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Merge_AnchoredComment_CarriesCommentAndKeepsAnchorsResolvable()
+    {
+        var merged = Engine().Merge(BuildCarrierLikeSource(), BuildTemplateDotx());
+
+        using var doc = Open(merged);
+        var main = doc.MainDocumentPart!;
+        var commentId = main.Document!.Body!.Descendants<CommentReference>().Single().Id!.Value!;
+        main.Document.Body.Descendants<CommentRangeStart>().Single().Id!.Value.Should().Be(commentId);
+        main.WordprocessingCommentsPart!.Comments!.Elements<Comment>()
+            .Single(c => c.Id?.Value == commentId).InnerText.Should().Contain(SourceCommentText);
+    }
+
+    [Fact]
+    public void Merge_FootnoteIdCollidesWithTemplate_RemapsWithoutDuplicateIds()
+    {
+        byte[] templateWithFootnotes;
+        using (var stream = new MemoryStream())
+        {
+            var seed = BuildTemplateDotx();
+            stream.Write(seed, 0, seed.Length);
+            stream.Position = 0;
+            using (var t = WordprocessingDocument.Open(stream, isEditable: true))
+            {
+                var fp = t.MainDocumentPart!.AddNewPart<FootnotesPart>();
+                fp.Footnotes = new Footnotes(
+                    new Footnote(new Paragraph(new Run(new Text("TEMPLATE NOTE")))) { Id = 2 });
+            }
+            templateWithFootnotes = stream.ToArray();
+        }
+
+        var merged = Engine().Merge(BuildCarrierLikeSource(), templateWithFootnotes);
+
+        using var doc = Open(merged);
+        var main = doc.MainDocumentPart!;
+        var footnotes = main.FootnotesPart!.Footnotes!.Elements<Footnote>().ToList();
+        footnotes.Select(f => f.Id!.Value).Should().OnlyHaveUniqueItems(
+            "id collision must remap, never duplicate (030-review F4)");
+
+        var bodyRefId = main.Document!.Body!.Descendants<FootnoteReference>().Single().Id!.Value;
+        footnotes.Single(f => f.Id!.Value == bodyRefId).InnerText.Should().Contain(SourceFootnoteText,
+            "the body's marker must follow the SOURCE footnote through the remap, not cross-wire to the template's");
+    }
+
+    [Fact]
+    public void Merge_DanglingFootnoteReference_StripsMarkerLoudly()
+    {
+        byte[] sourceWithDanglingRef;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document, autoSave: true))
+            {
+                var main = doc.AddMainDocumentPart();
+                main.Document = new Document(new Body(
+                    new Paragraph(new Run(new Text("Text")), new Run(new FootnoteReference { Id = 9 })),
+                    new SectionProperties(new PageSize { Width = 12240, Height = 15840 })));
+                main.Document.Save();
+            }
+            sourceWithDanglingRef = stream.ToArray();
+        }
+
+        var warnings = new List<ComposeProjectionWarning>();
+        var merged = Engine().Merge(sourceWithDanglingRef, BuildTemplateDotx(), warnings);
+
+        warnings.Should().Contain(w => w.Code == "template-merge-story-reference-dropped");
+        using var doc2 = Open(merged);
+        doc2.MainDocumentPart!.Document!.Body!.Descendants<FootnoteReference>().Should().BeEmpty(
+            "a dangling marker must be stripped (030-review F9) — left alone it cross-wires to a same-id template footnote");
+        BodyText(doc2).Should().Contain("Text");
+    }
+
+    // ── numbering schema order (030-review F5) + loud unresolved references (F7/F10) ─────────────
+
+    [Fact]
+    public void Merge_TemplateWithPictureBulletsAndMacCleanup_InsertsGraftsAtSchemaCorrectSlots()
+    {
+        byte[] template;
+        using (var stream = new MemoryStream())
+        {
+            var seed = BuildTemplateDotx();
+            stream.Write(seed, 0, seed.Length);
+            stream.Position = 0;
+            using (var t = WordprocessingDocument.Open(stream, isEditable: true))
+            {
+                var tNumbering = t.MainDocumentPart!.NumberingDefinitionsPart!.Numbering!;
+                tNumbering.InsertBefore(
+                    new NumberingPictureBullet(
+                        new PictureBulletBase()) { NumberingPictureBulletId = 0 },
+                    tNumbering.FirstChild!);
+                tNumbering.AppendChild(new NumberingIdMacAtCleanup { Val = 1 });
+            }
+            template = stream.ToArray();
+        }
+
+        var merged = Engine().Merge(BuildRenderedBody(), template);
+
+        using var doc = Open(merged);
+        var numbering = doc.MainDocumentPart!.NumberingDefinitionsPart!.Numbering!;
+        var kinds = numbering.ChildElements.Select(c => c switch
+        {
+            NumberingPictureBullet => 0,
+            AbstractNum => 1,
+            NumberingInstance => 2,
+            NumberingIdMacAtCleanup => 3,
+            _ => 4,
+        }).Where(k => k < 4).ToList();
+        kinds.Should().BeInAscendingOrder(
+            "grafts must land at schema-correct slots: numPicBullet* → abstractNum* → num* → numIdMacAtCleanup (030-review F5)");
+
+        var errors = new OpenXmlValidator(FileFormatVersions.Office2019).Validate(doc).ToList();
+        errors.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Merge_DanglingRelationshipReferences_DropsDrawingAndUnwrapsHyperlinkLoudly()
+    {
+        byte[] source;
+        using (var stream = new MemoryStream())
+        {
+            using (var doc = WordprocessingDocument.Create(stream, WordprocessingDocumentType.Document, autoSave: true))
+            {
+                var main = doc.AddMainDocumentPart();
+                var blip = new DocumentFormat.OpenXml.Drawing.Blip { Embed = "rIdDanglingImage" };
+                main.Document = new Document(new Body(
+                    new Paragraph(
+                        new Run(new Text("Before ")),
+                        new Run(new Drawing(new DocumentFormat.OpenXml.Drawing.Wordprocessing.Inline(
+                            new DocumentFormat.OpenXml.Drawing.Graphic(
+                                new DocumentFormat.OpenXml.Drawing.GraphicData(
+                                    new DocumentFormat.OpenXml.Drawing.Pictures.Picture(
+                                        new DocumentFormat.OpenXml.Drawing.Pictures.BlipFill(blip))))))),
+                        new Hyperlink(new Run(new Text("kept link text"))) { Id = "rIdDanglingLink" },
+                        new Run(new Text(" after"))),
+                    new SectionProperties(new PageSize { Width = 12240, Height = 15840 })));
+                main.Document.Save();
+            }
+            source = stream.ToArray();
+        }
+
+        var warnings = new List<ComposeProjectionWarning>();
+        var merged = Engine().Merge(source, BuildTemplateDotx(), warnings);
+
+        warnings.Should().Contain(w => w.Code == "template-merge-unresolved-reference");
+        using var doc2 = Open(merged);
+        var body = doc2.MainDocumentPart!.Document!.Body!;
+        body.Descendants<Drawing>().Should().BeEmpty("an unresolvable image drops its hosting drawing");
+        body.Descendants<Hyperlink>().Should().BeEmpty("an unresolvable hyperlink unwraps");
+        BodyText(doc2).Should().Contain("kept link text", "unwrapping preserves the link TEXT (030-review F10)");
+        BodyText(doc2).Should().Contain("Before").And.Contain("after");
+    }
 }
