@@ -39,7 +39,7 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | 032 | Endpoint + client wiring for template selection/merge | 3 | 031 | P3 | false | FULL | sonnet/high | ✅ |
 | 033 | Part-merge tests + Placement/Component Justification | 3 | 032 | P3 | false | STANDARD | sonnet/high | ✅ |
 | 040 | PDF → canonical model via DocumentIntelligenceService/DocumentParserRouter | 4 | 020 | P4 | false | FULL | opus/high | ✅ |
-| 041 | Open PDF in Compose → edit → save as docx version (client wiring) | 4 | 040 | P4 | false | FULL | sonnet/high | 🔄 |
+| 041 | Open PDF in Compose → edit → save as docx version (client wiring) | 4 | 040 | P4 | false | FULL | sonnet/high | ✅ |
 | 042 | PDF intake tests + lossiness-expectation UX | 4 | 041 | P4 | false | STANDARD | sonnet/high | 🔲 |
 | 050 | New OBO list-versions + open-prior-version (read-only) endpoint | 5 | 002 | P5 | false | FULL | opus/high | ✅ |
 | 051 | Documents surface version-history entry point (AllDocuments) | 5 | 050 | P5 | false | FULL | sonnet/high | ✅ |

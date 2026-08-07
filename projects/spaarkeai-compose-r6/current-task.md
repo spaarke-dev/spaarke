@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040 ✅ COMPLETE** (`5ae5a4246` impl + `2d72046aa` wire fix + `f0f9a34ec` triage — review PASS-WITH-FINDINGS, ALL HIGH/MEDIUM fixed same-session; full record `notes/040-pdf-intake.md`). **041 🔄 IMPLEMENTED** (`c73055d33` — client PDF open/save-as-new-docx + honest-lossiness banner; tsc clean, reducer+banner 37/37, renderOnSave 11/11; 5 jest fails proven pre-existing via stash bisect). |
-| **Step** | 041 Step 9.5 IN FLIGHT — review agent on `c73055d33` (041) + `f0f9a34ec` (040-triage verification) |
-| **Status** | in-progress; all work committed + pushed through `c73055d33` (+ docs commit pending) |
-| **Next Action** | When review-041 returns: triage findings → fix commit(s) → TASK-INDEX 041 → ✅ → then **042** (PDF intake tests + lossiness UX tests — MUST add sourceFormat reducer-lifecycle tests per review scope) → 052 → 090 wrap-up. Publish baseline 47.00 MB. |
+| **Task** | **040 ✅ + 041 ✅ COMPLETE** — PDF intake end-to-end. Commits: `5ae5a4246` (040 impl) + `2d72046aa` (wire fix) + `f0f9a34ec` (040 triage: all HIGH/MED) + `c73055d33` (041 client) + `48d17ac31` (041 triage: A-HIGH-1 replace-target guard, apply-template both legs, Word-actions gate, grid clamp). Both Step 9.5 reviews PASS-WITH-FINDINGS, every HIGH/MEDIUM fixed same-session except B-MED-3 (container placement — recorded DECISION POINT). Full record: `notes/040-pdf-intake.md`. Server 390/390 + 18/18; client tsc clean + 48/48. |
+| **Step** | Phase 4 remainder: task **042** next |
+| **Status** | ALL work committed; push pending this checkpoint; no agents in flight |
+| **Next Action** | On "continue": task-execute **042** (PDF intake tests + lossiness UX) — its BINDING scope = the "042 test plan" section in `notes/040-pdf-intake.md` (reducer lifecycle, flow negatives, banner, server endpoint mapping, B-LOW-3 invariant, A-LOW-2 display fix) + surface the B-MED-3 container-placement decision to the operator. Then 052 → 090 wrap-up. Publish baseline 47.00 MB. |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are

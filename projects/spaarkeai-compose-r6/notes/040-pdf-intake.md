@@ -115,6 +115,33 @@ bisect (`bornInEditorSave` fails identically without these changes — mock/env 
 known `stepOperationInterceptor` baseline). Step 9.5 review for `c73055d33` + triage-verification of
 `f0f9a34ec` dispatched; result recorded in the 041 section of the close-out.
 
+## 041 Step 9.5 — verdicts PASS-WITH-FINDINGS (both commits); triage in `48d17ac31`
+
+The review verified all seven 040-triage fixes correct as-scoped, the full client state machine
+(both save shapes create a NEW docx; the replace URL unreachable while PDF-sourced; saveFailed
+retains the dedup key; the second-save posture matches the existing imported-transient flow — NOT a
+staleness bug), ADR-021/ADR-040 compliance, and the eight-site non-PDF no-op audit. Findings → triage:
+
+| # | Finding | Resolution (`48d17ac31`) |
+|---|---|---|
+| A-HIGH-1 | Version skew (pre-041 client + new BFF) could replace-save the synthesized docx over the `.pdf` item — baseline guard passes (bytes are valid docx), TARGET unchecked | **FIXED** — replace path refuses a `.pdf`-named target at the existing metadata choke point (typed 422, zero extra Graph calls) |
+| A-MED-1 / B-MED-2 | Apply-template fully exposed to PDF mounts (server: %PDF- bytes → deep OOXML 500; client: button enabled) | **FIXED both legs** — server sniffs the downloaded bytes → typed 422 + endpoint catch; client disables with the same honest reason |
+| B-MED-1 | Open-in-Word on a PDF doc opens the WRONG document (the C3 "id stable across flush" invariant breaks — the flush IS a create-on-save) | **FIXED** — Word actions disabled while PDF-sourced; re-enable after the first save (new docx identity) |
+| A-MED-2 | Span-coverage collision over-widened rows (invalid Word grid) | **FIXED** — anchors clamp to the contiguous free run; S1 invariant test (sum(GridSpan)==columnCount) |
+| A-LOW-1 | Out-of-grid anchor text counted as "consolidated" but actually dropped | **FIXED** — own `pdf-intake-table-cell-dropped` code + client copy |
+| B-LOW-1/2/4 | triggerSave deps; missing banner copy for the table codes; fileName-undefined asymmetry | **FIXED** all three |
+| B-MED-3 | New docx lands in the BU container (not the source PDF's container/matter) with no parent association | **DEFERRED — DECISION POINT for 042/operator UAT**: current behavior = the established create-on-save flow (BU container). Options: create in the source item's drive; or accept + document. Needs owner call |
+| A-LOW-2 | Intake warnings reach the wire but never DISPLAY in the op-log-fallback case | **DEFERRED → 042** |
+| B-LOW-3 | Redundant-but-defensive versionId re-baseline branch | **KEPT**; 042 pins the invariant with a test |
+
+### 042 test plan (from the review — binding scope for task 042)
+Reducer lifecycle (set/mint/clear/re-target/fileName-swap incl. `.PDF`/no-extension/undefined;
+saveFailed retention; older-BFF omission), flow tests (dirty→Shape-2 create; clean→Shape-3
+passthrough; second save→replace on the NEW item; forkNew fresh key; retry same key; NEGATIVE: never
+`/documents/{pdfId}/save`), banner tests (render/dismiss/re-warn/retire; no "identical to source"),
+server endpoint tests (replace-refusal on `.pdf` target; apply-template 422; 503-vs-422 mapping),
+B-LOW-3 versionId invariant, A-LOW-2 display fix.
+
 ### Follow-ups ledger additions (→ notes §23 ledger)
 - LOW-9 buffer-copy trim on the intake leg; LOW-10 discriminated facade result (cause preservation).
 - Pre-existing client jest failures (4 × ComposeWorkspace suites "Element type is invalid" + timeouts
