@@ -4,39 +4,42 @@
 > **Revised 2026-08-05**: spikes 001/002 retired (gate-after-write + Tier-2-deferred decisions); see Resolved decisions below.
 > **Status legend**: 🔲 not-started · 🔄 in-progress · ✅ completed · ⛔ blocked · ⏸️ deferred
 > **Execution**: via `task-execute` per task (Sonnet 5 @ high default; `<model-tier>`/`<effort>` per POML).
-> **⚠️ Execution intentionally NOT started** — operator review gate (per pipeline run choice).
+> **Execution status (2026-08-06)**: Pillars C + D largely complete; Pillar B code done (041/042/043 ✅; 040 blocked on gated 004). Pillar-C dedup schema in place (027/028 operator-created + verified live; 029 resolved by reuse of `sprk_relatedcommunication`). Remaining: operator-gated backend (004/010 + downstream), Pillar E (contended shared-lib), deploys (paused).
 
 ## Registry
 
 | # | Task | Phase | Status | deps | model·effort | parallel-safe |
 |---|---|---|---|---|---|---|
 | 003 | R1 close-out — reconcile 013 + pin golden misfile emails | 0 | ✅ | — | sonnet·high | ✅ true |
-| 004 | Entra NAA app-registration verify/provision | 0 | 🔲 | — | sonnet·med | ✅ true |
-| 010 | HMAC footer/token signing helper (Key Vault) | 1·A | 🔲 | — | **opus·xhigh** | ❌ false |
+| 004 | Entra NAA app-registration verify/provision | 0 | ✅ | — | sonnet·med | ✅ true |
+| 010 | HMAC footer/token signing helper (Key Vault) | 1·A | ✅ | — | **opus·xhigh** | ❌ false |
 | 011 | Footer config (operator app setting, per-tenant) | 1·A | ✅ | — | sonnet·high | ❌ false |
-| 012 | Inject signed footer on outbound send path | 1·A | 🔲 | 010,011 | sonnet·high | ❌ false |
+| 012 | Inject signed footer on outbound send path | 1·A | ✅ | 010,011 | sonnet·high | ❌ false |
 | 013 | `TrackingTokenRung` (reuse RungKind.ExplicitReference) | 1·A | 🔲 | 010,011 | **opus·high** | ✅ true (A-rungs) |
-| 014 | `RecipientAliasRung` + Bcc plumbing | 1·A | 🔲 | 011 | sonnet·high | ✅ true (A-rungs) |
+| 014 | `RecipientAliasRung` + Bcc plumbing | 1·A | ✅ | 011 | sonnet·high | ✅ true (A-rungs) |
 | 015 | Formalize external-reply self-association + test | 1·A | ✅ | — | sonnet·high | ❌ false |
-| 016 | `AffinityRung` + `sprk_affinity` store | 1·A | 🔲 | 011 | **opus·high** | ✅ true (A-rungs) |
+| 016 | `AffinityRung` + `sprk_affinity` store | 1·A | ✅ | 011 | **opus·high** | ✅ true (A-rungs) |
 | 017 | Pillar A BFF deploy (size/CVE) | 1·A | 🔲 | 010–016 | sonnet·med | ❌ false |
-| 020 | Alternate key on `sprk_communication.sprk_internetmessageid` | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
-| 021 | Canonical message-id dedup — race-proof create + SB idempotency | 2·C | 🔲 | 020 | **opus·xhigh** | ❌ false |
-| 022 | Context-merge on duplicate | 2·C | 🔲 | 021 | sonnet·high | ❌ false |
-| 023 | Indexed `sprk_document.sprk_canonicalhash` column (forward-only) | 2·C | 🔲 | — | sonnet·high | ✅ true (schema-c) |
-| 024 | SPE content dedup Tier-1 — **gate-after-write** (quickXorHash detector) | 2·C | 🔲 | 023 | **opus·high** | ❌ false |
-| 025 | Cross-path reconciliation (comm ↔ document via message-id) | 2·C | 🔲 | 021 | sonnet·high | ❌ false |
-| 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025 | sonnet·med | ❌ false |
+| 020 | Alternate key on `sprk_communication.sprk_internetmessageid` | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
+| 021 | Canonical message-id dedup — race-proof create + SB idempotency | 2·C | ✅ | 020 | **opus·xhigh** | ❌ false |
+| 022 | Context-merge on duplicate | 2·C | ✅ | 021 | sonnet·high | ❌ false |
+| 023 | Indexed `sprk_document.sprk_canonicalhash` column (forward-only) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
+| 024 | SPE content dedup Tier-1 — **gate-after-write** (quickXorHash detector) | 2·C | ✅ | 023 | **opus·high** | ❌ false |
+| 025 | Cross-path reconciliation (comm ↔ document via message-id) | 2·C | ✅ | 021 | sonnet·high | ❌ false |
+| 027 | `sprk_document.sprk_canonicaldocument` self-lookup (FR-C3 graduate-on-divergence) — schema (operator-created, verified live) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
+| 028 | `sprk_communication.sprk_deliveredmailboxes` + `sprk_savedbyusers` memo (FR-C2 context-merge) — schema (operator-created, verified live) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
+| 029 | FR-C4 cross-path reconciliation — **RESOLVED BY REUSE** of existing `sprk_document.sprk_relatedcommunication` (no new column; code rewired) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
+| 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025,027,028,029 | sonnet·med | ❌ false |
 | 030 | Fix FR-06 RAG grounding — ParentEntity tagging (both sites) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |
 | 031 | Batched identifier query (≈175→≤7) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |
 | 032 | Golden regression suite (+ absorbs A3 test) | 3·D | ✅ | 015 | sonnet·high | ✅ true (D-indep) |
 | 033 | Job B allow-list seed (`sprk_emailupdatefield`) | 3·D | 🔲 | — | sonnet·med | ✅ true (D-indep) |
-| 034 | Job C apply endpoint + create-task queue-feed discriminator | 3·D | 🔲 | — | **opus·high** | ❌ false |
+| 034 | Job C apply endpoint + create-task queue-feed discriminator | 3·D | ✅ | — | **opus·high** | ❌ false |
 | 035 | Pillar D BFF deploy (size/CVE) | 3·D | 🔲 | 030,031,034 | sonnet·med | ❌ false |
 | 040 | Add-in realignment (FR-B0 a–d) | 4·B | 🔲 | 004 | sonnet·high | ✅ true (PB-a) |
-| 041 | Real Spaarke intake folder (both mechanisms) | 4·B | 🔲 | — | sonnet·high | ✅ true (PB-a) |
-| 042 | Drag-to-matter + engine pre-select + ribbon quick-save | 4·B | 🔲 | 041 | sonnet·high | ✅ true (PB-b) |
-| 043 | Unify user-upload with capture (engine + dedup) | 4·B | 🔲 | 021,024 | sonnet·high | ❌ false |
+| 041 | Real Spaarke intake folder — re-scoped (mech-1 = config, documented; mech-2 → 043) | 4·B | ✅ | — | sonnet·high | ✅ true (PB-a) |
+| 042 | Drag-to-matter + engine pre-select + ribbon quick-save | 4·B | ✅ | 041 | **opus·high (Option B)** | ✅ true (PB-b) |
+| 043 | Unify user-upload with capture (engine + dedup) — absorbs FR-B1 add-in drag-target (from 041) | 4·B | ✅ | 021,024 | sonnet·high | ❌ false |
 | 044 | Deploy Pillar B add-in (Azure SWA) | 4·B | 🔲 | 040,042 | sonnet·med | ❌ false |
 | 045 | Pillar B BFF deploy (size/CVE) | 4·B | 🔲 | 041,043 | sonnet·med | ❌ false |
 | 050 | Reconciliation grid — enhance DataGrid + Needs-review config | 5·E | 🔲 | — | sonnet·high | ❌ false (shared lib) |
@@ -47,7 +50,7 @@
 | 055 | Field-update reconcile tab (Job B, editable, apply-under-audit) | 5·E | 🔲 | 052,053 | sonnet·high | ❌ false |
 | 056 | Task/deadline reconcile tab (Job C, create-and-complete + ad-hoc) | 5·E | 🔲 | 034,052,053 | sonnet·high | ❌ false |
 | 057 | Reconciliation routing (category→team + per-team views) | 5·E | 🔲 | 050 | sonnet·high | ❌ false |
-| 058 | r5 coordination contract (record R2 ownership D/E/F) | 5·E | 🔲 | — | sonnet·med | ❌ false |
+| 058 | r5 coordination contract (record R2 ownership D/E/F) | 5·E | ✅ | — | sonnet·med | ❌ false |
 | 059 | Deploy Pillar E — code page + SpaarkeAi widget | 5·E | 🔲 | 050–057 | sonnet·med | ❌ false |
 | 090 | Project wrap-up (test-diet, lessons, doc-drift, size) | 6 | 🔲 | all | sonnet·high | ❌ false |
 

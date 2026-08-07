@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-05
+> **Last Updated**: 2026-08-06 (context-handoff — clean break after 012 + KV tracking-footer ACTIVATED in dev; next = 013)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Safe-autonomous code-only lane COMPLETE (003, 030, 031, 015 ✅ + CVE fix). Awaiting operator direction. |
-| **Step** | — |
-| **Status** | 003 ✅, 030 ✅, 031 ✅, 015 ✅, CVE fix ✅ — all committed. |
-| **Next Action** | GATE. Remaining startable tasks are cloud/security (004 Entra, 020/023 Dataverse schema, 033 Dataverse seed, 010 Key Vault — need operator go-ahead), sequential shared-lib (Pillar E), or dep-gated (032 golden suite absorbs 015; 034 opus-contract). No more pure code-only-autonomous work remains. |
+| **Task** | **CLEAN BREAK POINT (2026-08-06). No task in progress — safe to start a fresh session.** Last completed: **012 ✅** (send-path footer injection), committed+pushed `78ba44753`. All work this session is committed+pushed; build green; no half-done edits. |
+| **Session done (this session, all committed+pushed)** | **043 ✅** (unify user-upload w/ capture — `EmailUploadCaptureService`; commit `bbf989c03`). **004 ✅** (Entra NAA registration verified live — already provisioned+consented; runbook `notes/runbooks/004-entra-naa-registration.md`; commit `75e1fb237`). **027/028 ✅** (dedup schema columns — operator-created, verified live) **+ 029 ✅ RESOLVED BY REUSE** of existing `sprk_document.sprk_relatedcommunication` (no new column; `CrossPathLink` rewired; commit `eac5f9c10`; note `027-028-029-schema-closeout.md`). **010 ✅** (HMAC `ITrackingTokenSigner` — KV key via central credential, FixedTimeEquals, 18 tests; commit `20b758746`; note `010-tracking-token-signer-complete.md`). **012 ✅** (send-path footer injection — `ApplyTrackingFooterAsync`, both branches, 7 tests; commit `78ba44753`; note `012-footer-injection-send-path-complete.md`). |
+| **Next task** | **013 — `TrackingTokenRung` (Pillar A, opus·high, deps 010✅/011✅ satisfied, `parallel-safe:true` A-rungs).** Verify the inbound footer token via `ITrackingTokenSigner.VerifyAsync`; on valid → deterministic regarding (reuse `RungKind.ExplicitReference` per project CLAUDE.md Implementation Notes → zero `AssociationStatusMapper` change). Self-contained new rung file under `Services/Communication/Engine/Rungs/`. POML: `tasks/013-trackingtokenrung.poml` (verify exact filename). Read the token from the inbound `NormalizedMessage` body (the footer survives quoted reply). Fresh session recommended (user asked). |
+| **Status** | Pillar A: 010✅ 011✅ 012✅ 014✅ 015✅ 016✅ · **013🔲 (next, unblocked)** · 017 deploy (gated/paused). Pillar C: 020–025✅ + **027/028/029✅ (schema in place)** · 026 deploy (gated). Pillar D: 030–032✅ 034✅ · 033🔲(seed, gated) · 035 deploy. Pillar B: 041/042/043✅ · 040🔲(dep 004 now ✅ — UNBLOCKED for dev) · 044/045 deploy. Pillar E: 050–057🔲 (contended shared-lib, operator-gated). |
+| **Next Action** | New session → `continue` runs **013**. **KV tracking-footer ACTIVATED in dev (2026-08-06)**: secret `communication-trackingfooter-signingkey` created in KV `spaarke-spekvcert`; BFF UAMI `mi-bff-api-dev` already had `Key Vault Secrets User`; `spaarke-bff-dev` app settings set `Communication__TrackingFooter__SigningKeySecretName` + `Enabled=true` (KeyVaultUri already pointed at that vault). Footer now stamps outbound sends that regard a record. NOTE: inbound consumption needs **013** (rung not built) — footer is stamped-but-not-yet-read on reply (harmless). Off-switch: `az webapp config appsettings set -n spaarke-bff-dev -g rg-spaarke-dev --settings "Communication__TrackingFooter__Enabled=false"`. **Still operator-gated:** 033 seed, all deploys (paused), Pillar E. **040 unblocked** (004 ✅) for dev add-in realignment. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
@@ -31,9 +32,12 @@
 ### Standing reminders
 - **/conflict-check MUST re-run before the PR** (030/031/015/DEFER-030-01 touched shared Communication + the AI-owned `ParentEntityContext.cs`; cleared only at execution time). Publish baseline 46.88 MB. **CVE fixed** (Xml 8.0.4).
 
-### Files Modified This Session
-- **Task 003 ✅** (2026-08-05): created `notes/fixtures/r1-golden-emails.md` (R1 013 reconciled=applied; 4 golden items pinned w/ expected outcomes; KEEP path named; raw-.eml gap flagged). Updated task 003 POML status + TASK-INDEX.
-- Worktree synced to master (Update-Only) @ b2167eb21 — 0 behind.
+### Files Modified This Session (2026-08-06 — remediation R-1/R-2/R-3 + 021-drift; all committed)
+- **R-2** (`83f2496d9`): `Services/Compose/ComposeService.cs` (link-on-create + graduate; widened alt-key lookup), `Services/Documents/ContentDedupDetector.cs` (ResolveContentIdentityAsync + linked-copy exclusion + NotifyLinkedCopyAsync), `Spaarke.Dataverse/DataverseServiceClientImpl.cs` + `IGenericEntityService.cs` (DBNull clear-sentinel), tests `ContentDedupDetectorTests` + `ComposeContentDedupTests` (new), `tasks/027-canonicaldocument-selflookup-schema.poml` (new, GATED), TASK-INDEX row.
+- **R-3** (`ed62571d8`): `Services/Office/OfficeDocumentPersistence.cs` (tuple return), `OfficeService.cs` (skip finalization + delete blob on dup), `OfficeStorageUploader.cs` (DeleteFromSpeAsync), `Infrastructure/Graph/SpeFileStore.cs` (DeleteFileAsync virtual), tests `OfficeDocumentPersistenceDedupTests` + `OfficeStorageUploaderDeleteTests` (new).
+- **R-1** (`9d69d2ca2`): `Api/CommunicationEndpoints.cs` (POST /confirm-affinity), `Services/Communication/Engine/AffinityConfirmationRecorder.cs` + `Models/RecordAffinityConfirmation.cs` (new), `CommunicationModule.cs` (DI), client `ConnectionsWriteHandler.ts` (recordAffinity field) + `EmailConnectionsReview.tsx` (fire) + `EmailWorkspace.tsx` (BFF wire), tests `AffinityConfirmationRecorderTests` (new) + `EmailAssociationsAndTracking.test.tsx` (+2).
+- **021-drift** (`0e1ba86d3`): `tests/…/Integration/CommunicationIntegrationTests.cs` (4 inbound stubs → `CreateCommunicationRaceProofAsync`).
+- Memory saved: `closed-r5-projects-editable.md` (compose-r5 + email-communication-solution-r5 are CLOSED; edit directly).
 
 ### Critical Context
 **Open questions resolved 2026-08-05 — project runs spike-free** (tasks 001/002 removed): gate-after-write dedup · Tier-2 deferred out of R2 · FR-E5 = Path B (create via `IActionSeam` + PATCH; add base/final-due-date fields, task 034) · backfill forward-only · browse shell = `BrowseModal` preset. See CLAUDE.md → **Decisions Made** + TASK-INDEX → **Resolved decisions**. Pillar-E UI is prototype-validated (`spaarke-prototype/projects/email-communication-intelligence-r2-uat`). Heavily-contended shared surfaces — `/conflict-check` before every shared PR; `parallel-safe:false` on shared writers. Execution intentionally **not started** — operator review gate.

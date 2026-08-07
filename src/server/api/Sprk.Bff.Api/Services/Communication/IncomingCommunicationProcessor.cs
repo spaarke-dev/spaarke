@@ -228,7 +228,7 @@ public sealed class IncomingCommunicationProcessor
                     config.QueryParameters.Select = new[]
                     {
                         "id", "internetMessageId", "internetMessageHeaders", "conversationId",
-                        "from", "toRecipients", "ccRecipients",
+                        "from", "toRecipients", "ccRecipients", "bccRecipients",
                         "subject", "body", "uniqueBody",
                         "receivedDateTime", "hasAttachments"
                     };
@@ -256,12 +256,73 @@ public sealed class IncomingCommunicationProcessor
             message.ReceivedDateTime,
             message.HasAttachments);
 
+        // ── Step 3.5: Canonical internet-message-id dedup (FR-C1 / task 021) ─────
+        // The Step-1 graph-id check only catches SAME-mailbox redelivery. The SAME email delivered to N
+        // monitored mailboxes carries N distinct Graph ids but ONE internet-message-id — so check the
+        // canonical id here (post-fetch, the earliest point it's known) to short-circuit cross-mailbox
+        // duplicates before a doomed create. The race-proof create (Step 4) is the backstop for the narrow
+        // window where two deliveries pass this check concurrently.
+        if (!string.IsNullOrWhiteSpace(message.InternetMessageId))
+        {
+            // Fail-open lookup (Dataverse error → null → falls through to the race-proof create, task 021).
+            var canonicalDuplicate = await TryGetCanonicalByInternetMessageIdAsync(message.InternetMessageId, ct);
+            if (canonicalDuplicate is not null)
+            {
+                // FR-C2 (task 022): the SAME email delivered to ANOTHER monitored mailbox. Before short-circuiting,
+                // MERGE this delivering mailbox onto the canonical row so the delivery fact is not lost — the
+                // canonical reflects every mailbox that received it. Idempotent set-union + non-fatal (NFR-04).
+                await DeliveryContextMerge.MergeAsync(
+                    _genericEntityService, canonicalDuplicate.Id,
+                    DeliveryContextMerge.DeliveredMailboxesAttribute, mailboxEmail, _logger, ct);
+                _logger.LogInformation(
+                    "Duplicate detected for InternetMessageId {InternetMessageId} (cross-mailbox) — merged delivering " +
+                    "mailbox {Mailbox} onto canonical {CommunicationId}. Skipping.",
+                    message.InternetMessageId, mailboxEmail, canonicalDuplicate.Id);
+                return;
+            }
+        }
+
         // ── Step 4: Create sprk_communication record ─────────────────────────────
         // Direction = Incoming (100000000)
         // CommunicationType = Email (100000000)
         // StatusCode = Delivered (659490003)
         // Note: Regarding fields are set in step 4.5 by IncomingAssociationResolver
-        var communicationId = await CreateCommunicationRecordAsync(message, mailboxEmail, graphMessageId, ct);
+        var (communicationId, wasDuplicate) = await CreateCommunicationRecordAsync(message, mailboxEmail, graphMessageId, ct);
+
+        if (wasDuplicate)
+        {
+            // Lost the create race to a concurrent delivery of the same email (identical internet-message-id,
+            // different mailbox/graph id). The canonical row already exists WITH its associations, attachments,
+            // thread, participants, and enrichment — re-running those side effects would duplicate them. Short-
+            // circuit exactly like the Step-1 dedup early-return (FR-C1 / NFR-02 / task 021).
+            // FR-C2 (task 022): first MERGE this delivering mailbox onto the canonical the race reconciled to,
+            // so the delivery fact is preserved even for the loser of the race. Idempotent + non-fatal (NFR-04).
+            await DeliveryContextMerge.MergeAsync(
+                _genericEntityService, communicationId,
+                DeliveryContextMerge.DeliveredMailboxesAttribute, mailboxEmail, _logger, ct);
+            _logger.LogInformation(
+                "Duplicate detected for InternetMessageId {InternetMessageId} (create race → reconciled to " +
+                "canonical CommunicationId {CommunicationId}) — merged delivering mailbox {Mailbox}. Skipping duplicate processing.",
+                message.InternetMessageId, communicationId, mailboxEmail);
+            return;
+        }
+
+        // FR-C2 (task 022): seed the canonical row's delivering-mailbox set with ITS OWN originating mailbox, so
+        // the set is COMPLETE (first mailbox + every later duplicate's mailbox), not just the duplicates. Done via
+        // the non-fatal post-create merge (NOT the atomic entity build) so capture never fails on the new column
+        // being absent before its gated schema deploy — contract-first-safe (NFR-04).
+        await DeliveryContextMerge.MergeAsync(
+            _genericEntityService, communicationId,
+            DeliveryContextMerge.DeliveredMailboxesAttribute, mailboxEmail, _logger, ct);
+
+        // FR-C4 (task 025): cross-path reconciliation, upload-then-capture order. If the user already "Save to
+        // Spaarke"-d this email's .eml archive (a sprk_document with the same internet-message-id) BEFORE it was
+        // captured here, link that archive document to this new canonical communication — so the reconciliation
+        // surface shows ONE email, not the archive document + this communication as two rows. The reverse order
+        // (capture-then-upload) is linked from OfficeDocumentPersistence when the document is created. Idempotent
+        // (single-valued lookup) + non-fatal (NFR-04, contract-first onto the existing sprk_relatedcommunication lookup).
+        await CrossPathLink.FindAndLinkArchiveDocumentsAsync(
+            _genericEntityService, message.InternetMessageId, communicationId, _logger, ct);
 
         _logger.LogInformation(
             "Created sprk_communication record | CommunicationId: {CommunicationId}, " +
@@ -503,6 +564,31 @@ public sealed class IncomingCommunicationProcessor
     }
 
     /// <summary>
+    /// Checks if a sprk_communication already exists with the given canonical internet-message-id
+    /// (FR-C1 / task 021). Complements <see cref="ExistsByGraphMessageIdAsync"/>: the graph id is
+    /// per-mailbox, the internet-message-id is cross-mailbox — so this catches the SAME email delivered
+    /// to multiple monitored mailboxes (a distinct graph id per delivery, one shared internet-message-id).
+    /// Non-fatal: on a Dataverse query failure, returns false and lets the race-proof create (the task-020
+    /// UNIQUE alternate key) be the backstop — same fail-open contract as the graph-id helper.
+    /// </summary>
+    private async Task<DataverseEntity?> TryGetCanonicalByInternetMessageIdAsync(string internetMessageId, CancellationToken ct)
+    {
+        try
+        {
+            return await _communicationService.GetCommunicationByInternetMessageIdAsync(internetMessageId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Dataverse dedup check failed for InternetMessageId {InternetMessageId}; " +
+                "falling back to the race-proof alternate-key create",
+                internetMessageId);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Gets the receive-enabled communication account for a mailbox email.
     /// </summary>
     private async Task<CommunicationAccount?> GetReceiveAccountAsync(
@@ -528,7 +614,7 @@ public sealed class IncomingCommunicationProcessor
     /// Creates a sprk_communication record for the incoming email.
     /// Sets all required fields per schema; does NOT set any regarding fields.
     /// </summary>
-    private async Task<Guid> CreateCommunicationRecordAsync(
+    private async Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRecordAsync(
         Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
     {
         // Determine body content: prefer the FULL body (the complete conversation thread) over
@@ -595,7 +681,15 @@ public sealed class IncomingCommunicationProcessor
             }
         }
 
-        return await _genericEntityService.CreateAsync(communication, ct);
+        // Route the create through the race-proof seam (FR-C1 / NFR-02 / task 021): the task-020 UNIQUE
+        // alternate key on sprk_internetmessageid makes the insert atomic — if a concurrent delivery of the
+        // SAME email (different mailbox → different graph id, identical internet-message-id) wins the race,
+        // this reconciles to the canonical row (WasDuplicate=true) instead of throwing a duplicate fault. A
+        // null/blank internet-message-id (headerless capture) creates unguarded — the key excludes nulls, so
+        // multiple such rows are permitted. Replaces the prior _genericEntityService.CreateAsync; both live in
+        // DataverseServiceClientImpl over the same ServiceClient, so no create behavior is lost.
+        return await _communicationService.CreateCommunicationRaceProofAsync(
+            communication, message.InternetMessageId, ct);
     }
 
     /// <summary>

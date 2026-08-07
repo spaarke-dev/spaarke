@@ -93,6 +93,15 @@ module.exports = async (env, options) => {
         '@shared': path.resolve(__dirname, 'shared'),
         '@outlook': path.resolve(__dirname, 'outlook'),
         '@word': path.resolve(__dirname, 'word'),
+        // Task 042 (FR-B2 / ADR-045): reuse the code page's EXACT candidate model
+        // (`derivePrimaryReview`) — do NOT fork it. `provenance.ts` is a pure module
+        // (zero imports), so we alias straight to its source (outside node_modules →
+        // ts-loader transpiles it) rather than pulling the whole components lib +
+        // React. Exact ($) match so only this pure subpath resolves here.
+        '@spaarke/communication-components/logic/connections/provenance$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts'
+        ),
       },
     },
     module: {

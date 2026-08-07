@@ -232,6 +232,22 @@ This ensures no incoming email is lost even if the webhook subscription temporar
 - `"Drafts"` to monitor draft folder (uncommon)
 - Any custom folder name created in Outlook
 
+### Shared "Spaarke" intake folder (FR-B1) — configuration, not code
+
+A shared **"drop anything here and Spaarke files it"** intake folder is delivered entirely by the existing
+receive-enabled-account mechanism above — **no additional feature or config surface is required** (email-communication-intelligence-r2, task 041, 2026-08-05). To stand one up:
+
+1. Provision a shared mailbox (e.g. `intake@yourfirm.com`) and, in Outlook/Exchange, create the intake folder (e.g. **`Spaarke`**).
+2. Create a `sprk_communicationaccount` record for that mailbox (see "How to Add a New Communication Account") with:
+   - `sprk_receiveenabled = Yes`
+   - `sprk_monitorfolder = "Spaarke"` (the intake folder name)
+   - `sprk_autocreaterecords = Yes`
+3. Add the mailbox to the Exchange Application Access Policy security group (Step 2) so the BFF managed identity may read it.
+
+Any email placed in that folder is picked up by `GraphSubscriptionManager` → the webhook → `IncomingCommunicationProcessor`, and receives the **full** Association Engine output (association + triage + provenance) — identical to a mailbox-captured email, and deduped on the same keys. This is the same monitored-folder path documented above; the "intake folder" is just a chosen folder name, not a distinct code path.
+
+> **Add-in drag target (the second FR-B1 mechanism)**: routing an add-in-dropped email through the *same* Association Engine pipeline (so a dragged email yields identical engine output) is tracked separately as **task 043 — "Unify user-upload with capture (engine + dedup)"**, which depends on the Pillar C dedup foundation (tasks 021/024). Today the add-in save (`/api/office/save`) creates a `sprk_document` on the document-centric path and does not yet run the Association Engine.
+
 ---
 
 ## Document Archival Configuration

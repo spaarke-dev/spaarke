@@ -4,7 +4,7 @@
     <title>r5 coordination contract — record R2 ownership of states D/E/F + Exceptions Queue (FR-E6)</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
     <gate>startable (documentation; run alongside/after the Pillar E build)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation update to a coordination note; no code, no new surface; MINIMAL per §8.</rigor-reason>
     <model-tier>sonnet</model-tier>

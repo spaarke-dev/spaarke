@@ -84,6 +84,14 @@ public sealed class CommunicationQueueFeedService
     private const int ReviewActionDismissed = 100000004;
     private const int ReviewActionApplied = 100000005;
 
+    /// <summary>The <c>sprk_targetfield</c> sentinel PREFIX Job C (task 040) writes for a create-task proposal —
+    /// mirrored from <c>CommunicationEnrichmentService.CreateTaskSentinelFieldPrefix</c> (the SAME open/closed
+    /// tuple-walk this feed generalizes; the constant is duplicated here the same way the option-set integers above
+    /// are, with a "mirrored from" note, rather than coupling this read to the enrichment writer). An open Proposed
+    /// row whose <c>sprk_targetfield</c> starts with this prefix is a Job C create-task proposal (rendered as
+    /// <see cref="QueueFeedItemKinds.CreateTask"/>), not a Job B field-update.</summary>
+    private const string CreateTaskSentinelFieldPrefix = "__create_task__:";
+
     /// <summary>Bounds the candidate communication scan per feed request (NFR-07 — no per-row fan-out).</summary>
     private const int MaxCandidateScan = 200;
 
@@ -267,6 +275,48 @@ public sealed class CommunicationQueueFeedService
 
             var suggestion = TryParseSuggestion(row.GetAttributeValue<string>(ReviewSuggestionField));
             var proposalConfidence = row.GetAttributeValue<decimal?>(ReviewConfidenceField);
+            var targetField = row.GetAttributeValue<string>(ReviewTargetFieldField);
+            var targetEntity = row.GetAttributeValue<string>(ReviewTargetEntityField);
+            var targetRecordId = row.GetAttributeValue<string>(ReviewTargetRecordIdField);
+
+            // Discriminate Job C (create-task) from Job B (field-update): a create-task proposal is keyed by the
+            // __create_task__ sentinel targetfield (task 040). Both kinds share the same open/closed walk above; only
+            // the DTO projection differs (D-10 — one shape, no surface fork). Ranking is identical (D-08 — the parent
+            // communication's triage priority + RI-confidence, never recomputed).
+            if (!string.IsNullOrEmpty(targetField)
+                && targetField.StartsWith(CreateTaskSentinelFieldPrefix, StringComparison.Ordinal))
+            {
+                items.Add(new QueueFeedItem(
+                    CommunicationId: candidate.CommunicationId,
+                    Kind: QueueFeedItemKinds.CreateTask,
+                    Subject: candidate.Subject,
+                    From: candidate.From,
+                    SentAt: candidate.SentAt,
+                    TriagePriority: candidate.TriagePriority,
+                    RiConfidence: candidate.RiConfidence,
+                    AssociationStatus: null,
+                    ReviewLogId: row.Id,
+                    // Regarding record the task attaches to (the confirmed association, NFR-10).
+                    TargetEntity: targetEntity,
+                    TargetRecordId: targetRecordId,
+                    TargetField: null, // the sentinel is an internal key, never surfaced as a real field
+                    FieldType: null,
+                    OldValue: null,
+                    NewValue: null,
+                    ProposalConfidence: proposalConfidence.HasValue ? (double)proposalConfidence.Value : null,
+                    CitationSource: suggestion?.Citation?.Source,
+                    CitationLocator: suggestion?.Citation?.Locator,
+                    CitationQuotedText: suggestion?.Citation?.QuotedText,
+                    Reason: suggestion?.Reason,
+                    RequireConfirm: suggestion?.RequireConfirm,
+                    PrivilegeFlagged: suggestion?.PrivilegeFlagged,
+                    // Create-task group: only name/description/due are extracted; the remaining FR-E5 fields are
+                    // supplied by the human at apply time (task 056), null in the feed.
+                    TaskName: suggestion?.Subject,
+                    TaskDescription: suggestion?.Description,
+                    TaskDueDate: TryParseDateOnly(suggestion?.DueDate)));
+                continue;
+            }
 
             items.Add(new QueueFeedItem(
                 CommunicationId: candidate.CommunicationId,
@@ -278,9 +328,9 @@ public sealed class CommunicationQueueFeedService
                 RiConfidence: candidate.RiConfidence,
                 AssociationStatus: null,
                 ReviewLogId: row.Id,
-                TargetEntity: row.GetAttributeValue<string>(ReviewTargetEntityField),
-                TargetRecordId: row.GetAttributeValue<string>(ReviewTargetRecordIdField),
-                TargetField: row.GetAttributeValue<string>(ReviewTargetFieldField),
+                TargetEntity: targetEntity,
+                TargetRecordId: targetRecordId,
+                TargetField: targetField,
                 FieldType: suggestion?.FieldType,
                 OldValue: suggestion?.OldValue,
                 NewValue: suggestion?.NewValue,
@@ -295,6 +345,13 @@ public sealed class CommunicationQueueFeedService
 
         return items;
     }
+
+    /// <summary>Parses a Job C stored <c>dueDate</c> ("yyyy-MM-dd", the format
+    /// <c>CommunicationEnrichmentService.StoreCreateTaskProposedRowAsync</c> writes) to a <see cref="DateOnly"/>;
+    /// null/malformed → null (the item still surfaces without a due date).</summary>
+    private static DateOnly? TryParseDateOnly(string? value) =>
+        DateOnly.TryParse(value, System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.None, out var d) ? d : null;
 
     /// <summary>Best-effort parse of task 030's <c>sprk_aisuggestion</c> JSON — a malformed/missing payload degrades
     /// to null fields (the item still surfaces with its typed columns) rather than failing the whole feed.</summary>
@@ -325,7 +382,12 @@ public sealed class CommunicationQueueFeedService
         string? Reason,
         double? Confidence,
         bool? RequireConfirm,
-        bool? PrivilegeFlagged);
+        bool? PrivilegeFlagged,
+        // Job C create-task suggestion members (task 040 StoreCreateTaskProposedRowAsync) — null on a Job B row.
+        string? Kind = null,
+        string? Subject = null,
+        string? Description = null,
+        string? DueDate = null);
 
     private sealed record ProposalCitation(string? Source, string? Locator, string? QuotedText);
 

@@ -189,6 +189,31 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
     expect(nulledBinds).toHaveLength(0);
   });
 
+  it('FR-A4 (R-1): fires recordAffinity with the confirmed target after a successful confirm (fire-and-forget learning)', async () => {
+    const recordAffinity = jest.fn();
+    const props = baseProps({ writeContext: { ...makeWriteContext(), recordAffinity } });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(recordAffinity).toHaveBeenCalledWith('sprk_matter', 'mtr-1'));
+  });
+
+  it('FR-A4 (R-1): does NOT record affinity when the confirmation write fails (learning only follows a real confirm)', async () => {
+    const recordAffinity = jest.fn();
+    const ctx = makeWriteContext();
+    (ctx.webApi.updateRecord as jest.Mock).mockRejectedValue(new Error('write failed'));
+    const props = baseProps({ writeContext: { ...ctx, recordAffinity } });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(ctx.webApi.updateRecord).toHaveBeenCalled());
+    expect(recordAffinity).not.toHaveBeenCalled();
+  });
+
   it('NEEDS CONFIRMATION: an auto-matched (autoFiled) top candidate is pre-selected with a Confirm', () => {
     renderWithProvider(
       <EmailConnectionsReview
