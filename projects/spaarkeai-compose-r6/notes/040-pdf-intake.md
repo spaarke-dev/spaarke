@@ -75,6 +75,50 @@ Success Criterion 2 (PDF opens in Compose) is unreachable without a facade, and 
 - `/conflict-check`: soft-pass — no open PR overlaps the touched files (#690 is CI/seam-test surfaces;
   rest docs/deps); cross-worktree Compose contention governed by the project serialize rule.
 
-## Step 9.5
+## Step 9.5 — verdict PASS-WITH-FINDINGS; ALL HIGH/MEDIUM fixed same-session
 
-Combined code-review + adr-check agent dispatched on `5ae5a4246`; findings + triage appended below.
+Review agent (combined code-review + adr-check) ran on `5ae5a4246` + `2d72046aa`. Compliance
+verifications all clean (ADR-013/039/007, §F.1 incl. no-double-registration, thread-safety,
+additivity). The "SourceFormat never crosses the wire" gap was found independently by BOTH the main
+session (fixed pre-emptively in `2d72046aa` during the 041 survey) and the reviewer — the trailing-
+optional placement was verified safe (single named-argument construction site).
+
+### Findings → triage (fix commit `f0f9a34ec`)
+
+| # | Finding | Resolution |
+|---|---|---|
+| HIGH-1 | Compound-OFF / failed PDF load surfaced as generic 500 (the endpoint catch-all swallowed the clear `InvalidOperationException` messages) | **FIXED** — `ComposePdfIntakeException` (Unavailable discriminator) + typed catches in the Load handler and `ExecuteSaveAsync` → 503 (intake unavailable) / 422 (document not projectable) ProblemDetails carrying the real message; catches placed BEFORE the InvalidOperationException catches (derivation order) |
+| HIGH-2 | SaveAsync could write docx bytes over the `.pdf` SPE item (040 made a PDF session reachable; no server-side guard) | **FIXED** (server leg) — `GuardBaselineIsNotPdf` sniffs every resolved baseline at the `ResolveSaveBaselineAsync` choke point → typed 422. **041 (client leg, `c73055d33`) eliminates the mainline**: PDF-sourced docs route create-on-save exclusively. Residual: a rogue client posting docx bytes to a `.pdf` item's replace route with a valid docx baseline — accepted (indistinguishable from a legitimate save; the item's bytes were never PDF at that point) |
+| MED-3 | Load returned the PDF item's VersionId (post-refresh save booby trap: re-fetch hands `%PDF-` to the OOXML engine) | **FIXED** — PDF loads skip the version-id lookup entirely (null → retained-bytes fast-path / create-on-save routing); the HIGH-2 guard also backstops it |
+| MED-4 | Overlapping/duplicate table anchors dropped cell text silently; out-of-order anchors could leave a Restart without Continue | **FIXED** — reading-order anchor processing + overlap text CONSOLIDATED into the covering cell (new `pdf-intake-table-cell-consolidated` counter); Slot-based grid rebuild with owner tracking |
+| MED-5 | Extension won over magic bytes: a docx misnamed `.pdf` took the lossy reflow path | **FIXED** — bytes first (`%PDF-` → PDF; `PK\x03\x04` → docx), extension is tiebreak only |
+| MED-6 | The trickiest logic (`MapAnalyzeResultToLayout`) untested; projector missing adversarial cases | **FIXED** — +2 mapper tests via `DocumentIntelligenceModelFactory` (cell-paragraph dedup; role/offset interleave) + 4 projector adversarial tests (overlap consolidation, out-of-order anchors, oversized-span clamp, bare glyph). Suite 390/390 |
+| LOW-7 | Intake warnings dropped when the synthesized-docx re-projection failed | **FIXED** — unconditional merge |
+| LOW-8 | Failed-empty projection discarded its diagnostic counters | **FIXED** — counters ride on the Failed result; test locked in |
+| LOW-9 | ~4 concurrent in-memory PDF copies on the intake leg (bounded by MaxFileSizeBytes) | **DEFERRED** → follow-ups ledger (MemoryMarshal.TryGetArray / BinaryData.FromStream would trim two) |
+| LOW-10 | Cause-collapsing at the facade's null boundary (circuit-open vs timeout vs corrupt all → one message) | **DEFERRED** → follow-ups ledger (discriminated facade result; ties into the exception-type seam HIGH-1 introduced) |
+
+## Task 041 (client wiring) — delivered same-session as `c73055d33`
+
+`sourceFormat` lifecycle through the reducer (set at load + transientKey minted; cleared by every
+fresh mount and by saveSucceeded, which also re-targets documentRef to the new docx identity,
+re-baselines versionId from the save response, and swaps fileName `.pdf`→`.docx`); triggerSave routes
+EVERY pdf-sourced save through the EXISTING create-on-save (never the replace URL; display name
+`.docx`-swapped; the G7 transientKey dedups repeated saves onto ONE new record); "Opened from PDF"
+info banner (Fluent v9 semantic tokens; per-mount dismissal — every fresh PDF open re-warns; no
+"identical to source" claim; version-history safety net + new-Word-document expectation stated) +
+friendly copy for the six `pdf-intake-*` codes. Deviation from the POML's file list: `ComposeEditor.tsx`
+needed NO change — the synthesize-at-intake design mounts the PDF-derived model through the standard
+docx pipeline (`docxBridge.ts` untouched by construction). Client evidence: tsc clean; reducer+banner
+37/37; renderOnSave save-contract 11/11; 5 failing jest suites proven PRE-EXISTING at HEAD via stash
+bisect (`bornInEditorSave` fails identically without these changes — mock/env failure class, plus the
+known `stepOperationInterceptor` baseline). Step 9.5 review for `c73055d33` + triage-verification of
+`f0f9a34ec` dispatched; result recorded in the 041 section of the close-out.
+
+### Follow-ups ledger additions (→ notes §23 ledger)
+- LOW-9 buffer-copy trim on the intake leg; LOW-10 discriminated facade result (cause preservation).
+- Pre-existing client jest failures (4 × ComposeWorkspace suites "Element type is invalid" + timeouts
+  under full-suite load) — owning-project fix candidate; NOT introduced by 040/041 (stash-bisect proof).
+- 042 must add reducer-lifecycle tests for `sourceFormat` (set/clear/save-retarget) per the review scope.
+- Operator UAT items for 041 (dark-mode ui-tests are manual): PDF opens with the notice in light+dark;
+  edit → save creates a NEW .docx document (original PDF untouched); second save updates that docx.

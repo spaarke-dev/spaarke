@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040 — PDF → canonical model** (FULL rigor, opus tier) — IMPLEMENTED + COMMITTED `5ae5a4246` (pushed). All Step-4 gates passed (build ✅ · projector tests 10/10 ✅ · Compose suite 384/384 ✅ · ADR-013 arch guards ✅ (4 arch fails pre-existing, unrelated) · publish 47.00 MB Δ≈0 ✅ · CVE clean ✅ · conflict-check soft-pass ✅). Design + Placement Justification recorded in `notes/040-pdf-intake.md`. |
-| **Step** | Step 9.5 IN FLIGHT — combined code-review + adr-check agent running on `5ae5a4246` |
-| **Status** | in-progress (awaiting review agent; TASK-INDEX still 🔲 for 040 pending triage) |
-| **Next Action** | When the review agent returns: triage findings → fix commit(s) if needed → append triage to `notes/040-pdf-intake.md` → TASK-INDEX 040 → ✅ → then 041 (client wiring, sonnet) → 042 → 052 → 090 wrap-up. |
+| **Task** | **040 ✅ COMPLETE** (`5ae5a4246` impl + `2d72046aa` wire fix + `f0f9a34ec` triage — review PASS-WITH-FINDINGS, ALL HIGH/MEDIUM fixed same-session; full record `notes/040-pdf-intake.md`). **041 🔄 IMPLEMENTED** (`c73055d33` — client PDF open/save-as-new-docx + honest-lossiness banner; tsc clean, reducer+banner 37/37, renderOnSave 11/11; 5 jest fails proven pre-existing via stash bisect). |
+| **Step** | 041 Step 9.5 IN FLIGHT — review agent on `c73055d33` (041) + `f0f9a34ec` (040-triage verification) |
+| **Status** | in-progress; all work committed + pushed through `c73055d33` (+ docs commit pending) |
+| **Next Action** | When review-041 returns: triage findings → fix commit(s) → TASK-INDEX 041 → ✅ → then **042** (PDF intake tests + lossiness UX tests — MUST add sourceFormat reducer-lifecycle tests per review scope) → 052 → 090 wrap-up. Publish baseline 47.00 MB. |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are
