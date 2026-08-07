@@ -248,6 +248,83 @@ export function toWorkspaceRecordState(raw: RawCommunicationRecord): EmailWorksp
   };
 }
 
+// ---------------------------------------------------------------------------
+// FR-C1 (spaarkeai-assistant-enhancements-r2 task 042b) — compact agent-visible
+// snapshot of the selected email ("Path 1: persisted Email carrier").
+// ---------------------------------------------------------------------------
+
+/**
+ * Char cap for the derived body snippet. Mirrors the agent-visible
+ * `EMAIL_SNIPPET_CAP_CHARS` (200, `pillar9-visibility.ts`) so a pre-capped
+ * snippet never surprises the downstream `emailWidgetVisibility` derivation
+ * (which re-caps at 200 anyway — being consistent keeps the persisted carrier
+ * and the derived agent-visible state the same length).
+ */
+export const EMAIL_VISIBLE_SNIPPET_CAP_CHARS = 200;
+
+/**
+ * Compact snapshot of the currently-selected email, derived from the SINGLE
+ * per-selection record read (`useEmailWorkspaceRecord`). This is the shape the
+ * SpaarkeAi `email` workspace tab persists into its `WorkspaceTab.widgetData`
+ * as an `EmailTabWidgetData` (task 042b, FR-C1). The server's
+ * `TryDeriveVisibleState` and the client registry `getVisibleState('email')`
+ * both read the compact shape from `widgetData`.
+ *
+ * `emlDocumentId` is a FETCH HANDLE ONLY (on-demand `eml-render`, FR-C4) — it
+ * is never projected into the agent-visible `SerializedEmailState`; only
+ * `subject`/`from`/`date`/`threadId`/`snippet` are agent-visible (ADR-015 data
+ * minimization). `threadId` is intentionally absent: `sprk_communication`
+ * surfaces no conversation/thread column today (verified against
+ * `EmailWorkspaceRecordState`); the field stays optional for when one exists.
+ */
+export interface EmailWorkspaceVisibleState {
+  emlDocumentId: string | null;
+  subject: string;
+  from: string;
+  date: string;
+  threadId?: string;
+  snippet?: string;
+}
+
+/** Derive a short plain-text body snippet (sanitize → strip → cap) or `undefined` when the body is empty. */
+function deriveBodySnippet(rawBody: string): string | undefined {
+  if (!rawBody) return undefined;
+  const text = htmlToPlainTextPreview(sanitizeEmailHtml(rawBody), EMAIL_VISIBLE_SNIPPET_CAP_CHARS);
+  return text.length > 0 ? text : undefined;
+}
+
+/**
+ * Derive the compact {@link EmailWorkspaceVisibleState} from the resolved
+ * record state + `.eml` handle. Returns `null` when nothing is selected, the
+ * read is loading/failed (`recordState === null`), or the identity minimum
+ * (`subject`/`from`/`date`) is not fully present — mirroring the required-field
+ * gate in the agent-visible `emailWidgetVisibility` derivation so we never
+ * persist a carrier the derivation would reject anyway. `date` prefers the
+ * received timestamp, falling back to the sent timestamp (matching
+ * `mapRowToEmailCardItem`'s date precedence). Pure — no React, no I/O.
+ */
+export function deriveEmailWorkspaceVisibleState(
+  recordState: EmailWorkspaceRecordState | null,
+  emlDocumentId: string | null
+): EmailWorkspaceVisibleState | null {
+  if (!recordState) return null;
+
+  const subject = recordState.subject ?? '';
+  const from = recordState.from ?? '';
+  const date = recordState.receivedDate ?? recordState.sentAt ?? '';
+  if (subject.length === 0 || from.length === 0 || date.length === 0) return null;
+
+  const snippet = deriveBodySnippet(recordState.sprk_body);
+
+  return {
+    emlDocumentId,
+    subject,
+    from,
+    date,
+    ...(snippet ? { snippet } : {}),
+  };
+}
+
 /**
  * Resolve the `.eml` archive document id for a communication — the related
  * `sprk_document` flagged `sprk_isemailarchive = true` (verified against

@@ -201,14 +201,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid documentId, string? name = null, Guid? playbookId = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, CancellationToken ct = default)
     {
+        // FR-D9: at least one anchor is required — a source document OR a regarding (matter/project)
+        // target. A document-less analysis is valid ONLY when a regarding target makes it discoverable.
+        if ((documentId is null || documentId.Value == Guid.Empty) && regarding is null)
+        {
+            throw new ArgumentException(
+                "CreateAnalysisAsync requires either a documentId or a regarding target (FR-D9).", nameof(documentId));
+        }
+
         var analysis = new Entity("sprk_analysis")
         {
             ["sprk_name"] = name ?? $"Analysis {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
-            ["sprk_documentid"] = new EntityReference("sprk_document", documentId),
             ["statuscode"] = new OptionSetValue(1) // Active
         };
+
+        // Document anchor is now optional (FR-D9). Only bind when supplied.
+        if (documentId is { } docId && docId != Guid.Empty)
+        {
+            analysis["sprk_documentid"] = new EntityReference("sprk_document", docId);
+        }
 
         // Set playbook lookup if provided
         if (playbookId.HasValue)
@@ -216,10 +229,144 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             analysis["sprk_playbook"] = new EntityReference("sprk_analysisplaybook", playbookId.Value);
         }
 
+        // FR-D9 (ADR-024): write the polymorphic regarding field-set when a target was supplied. Uses the
+        // SDK EntityReference path (the SDK resolves nav-props by attribute name — no @odata.bind casing
+        // risk) and mirrors IncomingAssociationResolver's denormalized-field write exactly.
+        if (regarding is not null)
+        {
+            await PopulateAnalysisRegardingAsync(analysis, regarding, ct);
+        }
+
         var analysisId = await _serviceClient.CreateAsync(analysis, ct);
-        _logger.LogInformation("[DATAVERSE] Created analysis {AnalysisId} for document {DocumentId} with playbook {PlaybookId}",
-            analysisId, documentId, playbookId);
+        _logger.LogInformation(
+            "[DATAVERSE] Created analysis {AnalysisId} (document={DocumentId}, playbook={PlaybookId}, regarding={Regarding})",
+            analysisId, documentId, playbookId,
+            regarding is null ? "(none)" : $"{regarding.EntityLogicalName}:{regarding.RecordId}");
         return analysisId;
+    }
+
+    /// <summary>
+    /// Resolves the denormalized regarding values (true name + reference number from the target record,
+    /// and the <c>sprk_recordtype_ref</c> id) via Dataverse I/O, then stages the ADR-024 regarding
+    /// field-set on a not-yet-created <c>sprk_analysis</c> payload (FR-D9) by delegating to the pure
+    /// <see cref="StageAnalysisRegardingFields"/>. Reading the true name/number is deliberate — for a
+    /// matter the picker's primary-name column is the NUMBER (SRFR-052), so the denormalized name must
+    /// come from the target record. Resolver-lookup failures are non-fatal (they are for display); the
+    /// entity-specific lookup that drives the Analyses subgrid is always staged.
+    /// </summary>
+    private async Task PopulateAnalysisRegardingAsync(Entity analysis, AnalysisRegardingTarget target, CancellationToken ct)
+    {
+        var entityLogicalName = target.EntityLogicalName;
+
+        // Fail fast on an unsupported target BEFORE any I/O (the stager validates again as defense-in-depth).
+        if (RegardingRecordType.GetRegardingLookupFieldByEntity(entityLogicalName) is null)
+        {
+            throw new ArgumentException(
+                $"Unsupported regarding entity type '{entityLogicalName}' for sprk_analysis (expected sprk_matter or sprk_project).",
+                nameof(target));
+        }
+
+        string? resolvedName = null;
+        string? resolvedNumber = null;
+        Guid? recordTypeRefId = null;
+        string? recordTypeRefName = null;
+
+        try
+        {
+            var nameField = RegardingRecordType.GetPrimaryNameField(entityLogicalName);
+            var numberField = RegardingRecordType.GetReferenceNumberField(entityLogicalName);
+            if (nameField is not null || numberField is not null)
+            {
+                try
+                {
+                    var columns = new List<string>(2);
+                    if (nameField is not null) columns.Add(nameField);
+                    if (numberField is not null) columns.Add(numberField);
+                    var record = await _serviceClient.RetrieveAsync(
+                        entityLogicalName, target.RecordId, new ColumnSet(columns.ToArray()), ct);
+                    if (nameField is not null) resolvedName = record.GetAttributeValue<string>(nameField);
+                    if (numberField is not null) resolvedNumber = record.GetAttributeValue<string>(numberField);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Regarding name/number retrieve failed for {Entity} {Id}", entityLogicalName, target.RecordId);
+                }
+            }
+
+            var recordTypeRef = await QueryRecordTypeRefAsync(entityLogicalName, ct);
+            if (recordTypeRef is not null)
+            {
+                recordTypeRefId = recordTypeRef.Id;
+                recordTypeRefName = recordTypeRef.GetAttributeValue<string>("sprk_recorddisplayname");
+            }
+            else
+            {
+                _logger.LogWarning("No sprk_recordtype_ref found for {Entity}; sprk_regardingrecordtype left unset.", entityLogicalName);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Denormalized-value resolution is for display; a failure here must not fail the whole
+            // promotion. The stager below still writes the load-bearing entity-specific lookup.
+            _logger.LogWarning(ex, "Failed to resolve denormalized regarding values for analysis→{Entity} {Id}",
+                entityLogicalName, target.RecordId);
+        }
+
+        StageAnalysisRegardingFields(analysis, target, resolvedName, resolvedNumber, recordTypeRefId, recordTypeRefName);
+    }
+
+    /// <summary>
+    /// Pure (no-I/O) stager for the ADR-024 polymorphic <c>regarding</c> field-set on an
+    /// <c>sprk_analysis</c> payload (FR-D9). Given a matter/project target plus the already-resolved
+    /// display name / reference number / <c>sprk_recordtype_ref</c> id, writes the entity-specific
+    /// lookup (the load-bearing field for the Analyses-tab subgrid) plus the denormalized resolver
+    /// fields.
+    ///
+    /// <para><b>Reduced field-set — no <c>sprk_regardingrecordurl</c>.</b> Unlike <c>sprk_event</c> /
+    /// <c>sprk_todo</c> / <c>sprk_communication</c>, the <c>sprk_analysis</c> entity does NOT carry a
+    /// <c>sprk_regardingrecordurl</c> attribute (confirmed against the MCP-verified projection in
+    /// <c>sprkAnalysis.ts</c> <c>ISprkAnalysisRecord</c> / <c>SPRK_ANALYSIS_SELECT</c>, which include the
+    /// other 4 resolver fields but omit url). Staging url would make <c>ServiceClient.CreateAsync</c>
+    /// throw and 500 every regarding promotion — so it is intentionally NOT written. <c>sprk_analysis</c>
+    /// carries a REDUCED ADR-024 resolver set: recordtype + id + name + number + the entity-specific
+    /// lookup.</para>
+    ///
+    /// <para>Exposed <c>public static</c> for direct testability (no ServiceClient needed) per the
+    /// <c>TodoRegardingBuilder.ApplyResolverFieldsAsync</c> precedent — avoids the tests/CLAUDE.md B8
+    /// ban on internal/reflection tests.</para>
+    /// </summary>
+    public static void StageAnalysisRegardingFields(
+        Entity analysis,
+        AnalysisRegardingTarget target,
+        string? resolvedName,
+        string? resolvedNumber,
+        Guid? recordTypeRefId,
+        string? recordTypeRefName)
+    {
+        var lookupField = RegardingRecordType.GetRegardingLookupFieldByEntity(target.EntityLogicalName)
+            ?? throw new ArgumentException(
+                $"Unsupported regarding entity type '{target.EntityLogicalName}' for sprk_analysis (expected sprk_matter or sprk_project).",
+                nameof(target));
+
+        // Entity-specific lookup — the load-bearing field for the Analyses-tab subgrid relationship.
+        analysis[lookupField] = new EntityReference(target.EntityLogicalName, target.RecordId);
+
+        var cleanId = target.RecordId.ToString("D").ToLowerInvariant();
+        analysis["sprk_regardingrecordid"] = cleanId;
+
+        // True name from the target record wins; fall back to the picker-provided name (SRFR-052).
+        analysis["sprk_regardingrecordname"] =
+            !string.IsNullOrWhiteSpace(resolvedName) ? resolvedName! : (target.RecordName ?? string.Empty);
+
+        // Reference number only when the entity has one and it is populated (graceful-blank otherwise).
+        if (!string.IsNullOrWhiteSpace(resolvedNumber))
+            analysis["sprk_regardingrecordnumber"] = resolvedNumber!;
+
+        // sprk_regardingrecordtype (Lookup → sprk_recordtype_ref).
+        if (recordTypeRefId is { } rtId)
+            analysis["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", rtId) { Name = recordTypeRefName };
+
+        // sprk_regardingrecordurl intentionally NOT written — see remarks (not a deployed attribute on sprk_analysis).
     }
 
     public async Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default)

@@ -84,11 +84,15 @@
  *                        (deliberately NOT chart data — payload minimization per NFR-10).
  *   - `Table`          — tabular data with sort/filter (e.g. matter list, document grid).
  *                        Pillar 9 visible state: `{ widgetType, rowCount, sortColumn, filteredColumns, selectedRows[] }`.
+ *   - `Email`          — email message / thread view (R2 Workstream C, FR-C2).
+ *                        Pillar 9 visible state: `{ widgetType, subject, from, date, threadId, snippet }`
+ *                        (compact shape per ADR-015; `snippet` is the sole content-bearing
+ *                        field, capped at 200 chars — mirrors `DocumentViewer.selectionText`).
  *
  * @see FR-31 — interface contract (widgetType + widgetData typed)
  * @see CLAUDE.md project file §9 "Pillar 9 (Widget Visibility Contract)" for per-variant prompt shapes
  */
-export type WorkspaceTabWidgetType = 'Summary' | 'DocumentViewer' | 'Dashboard' | 'Table';
+export type WorkspaceTabWidgetType = 'Summary' | 'DocumentViewer' | 'Dashboard' | 'Table' | 'Email';
 
 // ---------------------------------------------------------------------------
 // Per-variant widgetData shapes (discriminated union narrowed by widgetType)
@@ -200,6 +204,58 @@ export interface TableTabWidgetData {
 }
 
 /**
+ * Widget data for an `Email` tab (R2 Workstream C, FR-C1/C2/C4 — Path 1,
+ * "persisted Email carrier"; see `notes/c-architecture-gap.md`).
+ *
+ * Mirrors `DocumentViewerTabWidgetData`'s "compact snapshot + id" pattern: a
+ * lean identity/metadata snapshot is PERSISTED (so both the server's
+ * `TryDeriveVisibleState` and the client's registry `getVisibleState`
+ * derivation have something to read from `widgetData` — the ADR-015
+ * server-authoritative invariant that blocked the original 042 CompactState
+ * shortcut), while the heavy full body/thread is fetched ON-DEMAND via the
+ * existing `eml-render` endpoint (FR-C4) using `emlDocumentId` as the fetch
+ * handle. `emlDocumentId` is a fetch handle only — it is NEVER part of the
+ * derived `SerializedEmailState` (task 040); only `subject`/`from`/`date`/
+ * `threadId`/`snippet` are agent-visible.
+ *
+ * Population (writing these fields onto the tab's `widgetData` from
+ * `useEmailWorkspaceRecord` at tab open/update) is a SEPARATE task (042b) —
+ * this type only defines the persisted carrier shape.
+ *
+ * @see FR-31 — discriminated union per widgetType
+ * @see FR-C1/C2/C4 — Email visibility (compact ambient + on-demand full body)
+ * @see ADR-015 — data minimization: identifiers + derived metadata OK;
+ *      content capped to a bounded snippet only
+ * @see ADR-007 — SpeFileStore (eml-render is the SPE-backed on-demand body path)
+ * @see Pillar 9 — `getAgentVisibleState()` returns `{ widgetType, subject, from, date, threadId, snippet }`
+ */
+export interface EmailTabWidgetData {
+  /** Discriminator — must equal the parent tab's `widgetType`. */
+  readonly kind: 'Email';
+  /**
+   * `.eml` archive document id for on-demand full-body fetch via `eml-render`
+   * (FR-C4, `GET /api/documents/{documentId}/eml-render`). `null` when no
+   * `.eml` archive exists for this email yet. NOT part of the agent-visible
+   * state — a fetch handle only.
+   */
+  emlDocumentId: string | null;
+  /** Email subject line. */
+  subject: string;
+  /** Sender display string (name and/or address, as surfaced by the host). */
+  from: string;
+  /** ISO-8601 send/receive timestamp. */
+  date: string;
+  /** Conversation/thread id, when the host exposes one. */
+  threadId?: string;
+  /**
+   * Short body snippet or the user's current selection. Agent-visible
+   * derivation caps this at {@link EMAIL_SNIPPET_CAP_CHARS} (200 chars,
+   * `pillar9-visibility.ts`) — the sole content-bearing field.
+   */
+  snippet?: string;
+}
+
+/**
  * Discriminated union of all per-variant widget-data shapes.
  *
  * Narrowed by the parent tab's `widgetType` (which MUST equal the `kind` field
@@ -213,7 +269,8 @@ export type WorkspaceTabWidgetData =
   | SummaryTabWidgetData
   | DocumentViewerTabWidgetData
   | DashboardTabWidgetData
-  | TableTabWidgetData;
+  | TableTabWidgetData
+  | EmailTabWidgetData;
 
 // ---------------------------------------------------------------------------
 // Provenance + matter-context supporting types
@@ -280,9 +337,9 @@ export interface WorkspaceTabMatterContext {
  *   - Restoration on mount    — via `GET /api/workspace/state`
  *
  * Discriminated union semantics:
- *   - `widgetType` (4-variant literal) is the discriminator
+ *   - `widgetType` (5-variant literal) is the discriminator
  *   - `widgetData.kind` MUST equal `widgetType`
- *   - Exhaustive `switch (tab.widgetType)` MUST cover all 4 variants
+ *   - Exhaustive `switch (tab.widgetType)` MUST cover all 5 variants
  *
  * @see FR-31 — interface specification
  * @see CLAUDE.md project §"Per-Pillar Binding Rules" Pillar 6a
@@ -294,6 +351,7 @@ export interface WorkspaceTabMatterContext {
  *     case 'DocumentViewer': return <DocumentView data={tab.widgetData} />;       // narrows to DocumentViewerTabWidgetData
  *     case 'Dashboard':      return <DashboardView data={tab.widgetData} />;      // narrows to DashboardTabWidgetData
  *     case 'Table':          return <TableView data={tab.widgetData} />;          // narrows to TableTabWidgetData
+ *     case 'Email':          return <EmailView data={tab.widgetData} />;          // narrows to EmailTabWidgetData
  *     // Omit a case → TS error (exhaustiveness check) → gate-protection for Pillars 6b/6c/7/9
  *   }
  * }
@@ -310,7 +368,7 @@ export interface WorkspaceTab {
 
   /**
    * Pillar 9 visibility category — discriminator for the `widgetData` union.
-   * Closed union of 4 variants (Summary | DocumentViewer | Dashboard | Table).
+   * Closed union of 5 variants (Summary | DocumentViewer | Dashboard | Table | Email).
    * Drives both per-variant data typing AND `getAgentVisibleState()` shape.
    * @see FR-31, FR-58 (Pillar 9 prompt builder)
    * @see WorkspaceTabWidgetType

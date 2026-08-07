@@ -636,7 +636,7 @@ public sealed class TestableChatSessionManagerForUpload : ChatSessionManager
         => Task.FromResult(Session);
 
     internal override Task UpdateSessionCacheAsync(
-        ChatSession session, CancellationToken ct = default)
+        ChatSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
     {
         PersistedSession = session;
         return Task.CompletedTask;

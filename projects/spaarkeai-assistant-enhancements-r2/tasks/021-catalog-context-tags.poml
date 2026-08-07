@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Add a first-class context-type tag column to the Binding catalog + BFF contract, seed tags + a Reanalyze Binding (FR-B2, FR-D11 data) — Option C</title>
+    <phase>3 B — Proactive follow-ons</phase>
+    <gate>blocked until 020</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Re-scoped to Option C (owner-approved §6.5 Path A): touches BFF (Binding.cs + ConsumerRoutingService.cs) AND a live Dataverse schema change — bff-api + dataverse tags force FULL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical: mirrors the existing sprk_surfaces column pattern exactly (schema + contract read + seed). Fully specified, low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Live Dataverse schema deploy + BFF redeploy — sequence-sensitive; edits ConsumerRoutingService.cs (BFF). Run alone.</parallel-reason>
+    <deps>020</deps>
+    <tags>dataverse, schema, bff-api, ai, config</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a dedicated first-class context-type tag carrier to the Binding catalog: a new CSV-text Dataverse column `sprk_contexttypetags` on `sprk_playbookconsumer` (mirroring `sprk_surfaces`), projected onto the `Binding` contract as `ContextTypeTags`, then seed tag values on the relevant Bindings and author a "Reanalyze" Binding tagged `document`. This is the CARRIER + DATA half; the active-tab filter that CONSUMES this field is task 022 — do NOT build the filter here.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. ADR-039 grounded-catalog + Dataverse Web-API schema expertise; comfortable mirroring an existing CSV column pattern (`sprk_surfaces`) end-to-end (schema → BFF contract read → seed) without introducing a classifier.</role>
+  <goal>The Binding contract carries a per-Binding closed-set context-type tag list, sourced from a new `sprk_contexttypetags` column; relevant Bindings are seeded (e.g. an email-summarize Binding tagged `email`, a document Binding tagged `document`) and a Reanalyze Binding tagged `document` exists — giving task 022 a field to filter candidate Bindings by the active tab's contextType.</goal>
+  <context>
+    <background>
+      FR-B2 + FR-D11 (data half). §6.5 Path A (owner-approved 2026-08-05, logged in notes/deviations.md): FR-B2's "no deploy" premise is void because NO context-type field exists on `sprk_playbookconsumer` today — a carrier must be created regardless. Closest existing fields are semantically wrong (`sprk_surfaces` = placement vocabulary) or too general (`sprk_matchconditions` = JSON predicate). Option C = a dedicated first-class column, aligned to task 020's closed WidgetContextType set.
+      The closed set (task 020, src/client/shared/Spaarke.AI.Widgets/src/types/shared.ts): email | document | compose-doc | matter-grid | dashboard | calendar.
+      The proven column pattern to mirror is `sprk_surfaces`: a comma-separated string column read via entity.GetAttributeValue&lt;string&gt; and split by ParseSurfaces into IReadOnlyList&lt;string&gt;, projected onto Binding.Surfaces, and listed in the Columns array (ConsumerRoutingService.cs).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs (add ContextTypeTags after Surfaces, ~line 89)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs (Columns array :80-103; MapBinding Surfaces read :877; ParseSurfaces :953)</file>
+      <file>scripts/Create-PlaybookTriggerFields.ps1 (reference: add-attribute-to-existing-entity pattern)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039">The tag is DATA on the already-closed catalog that SCOPES grounded selection. MUST NOT introduce a classifier, reranker, keyword map, or second intent mechanism. This task adds no selection logic at all — only the carrier + seed.</constraint>
+    <constraint source="ADR-022">Schema change MUST be an unmanaged customization (Web API creation is unmanaged automatically). Never deploy a managed solution to dev.</constraint>
+    <constraint source="project-§6.5-PathA">Option C overrides FR-B2 "no deploy" — owner-approved, documented in notes/deviations.md. State the placement decision in notes per BFF §10.</constraint>
+    <constraint source="BFF-§10">Verify publish size on this BFF-touching task. Ceiling ≤60 MB compressed; baseline ~48.25 MB. Report absolute size + delta in notes. Escalate at ≥+5 MB single-task delta or ≥55 MB cumulative. No new NuGet packages.</constraint>
+    <constraint source="scope">Column TYPE is String/CSV (mirror `sprk_surfaces`) — NOT a multi-select choice. Rationale: avoids an option-value→token mapping layer, matches the proven pattern, keeps the closed set enforced at the widget/task-020 layer. MaxLength 200.</constraint>
+    <constraint source="scope">The active-tab candidate FILTER (chips scoped to the focused tab's contextType) is task 022. MUST NOT be built here. 021 is carrier + data only.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/notes/deviations.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Pre-validate via MCP: mcp__dataverse__describe (or read_query on the metadata) for `sprk_playbookconsumer`; CONFIRM `sprk_contexttypetags` does NOT already exist. If it exists with a conflicting type, STOP and escalate (do not mutate an existing column).</step>
+    <step order="2">Author an idempotent PowerShell schema script (scripts/Add-BindingContextTypeTagsColumn.ps1) that adds a String attribute `sprk_contexttypetags` (DisplayName "Context Type Tags", MaxLength 200, RequiredLevel None, Description explaining CSV of the closed WidgetContextType set) to entity `sprk_playbookconsumer`, then Publish-Customizations. Mirror the New-StringAttribute + Add-EntityAttribute + Publish-Customizations pattern from the dataverse-create-schema skill; include a Test-AttributeExists guard so re-runs are safe. Target https://spaarkedev1.crm.dynamics.com.</step>
+    <step order="3">Run the script against spaarkedev1 (az token). Verify via MCP describe that `sprk_contexttypetags` exists as a String column.</step>
+    <step order="4">BFF contract read: (a) add "sprk_contexttypetags" to the Columns array in ConsumerRoutingService.cs (:80-103, next to sprk_surfaces); (b) add `public IReadOnlyList&lt;string&gt; ContextTypeTags { get; init; } = Array.Empty&lt;string&gt;();` to Binding.cs (after Surfaces, ~:89) with an XML-doc comment noting the closed set + FR-B2 provenance; (c) in MapBinding (:845-891) set `ContextTypeTags = ParseSurfaces(entity.GetAttributeValue&lt;string&gt;("sprk_contexttypetags"))` — ParseSurfaces is a generic CSV token splitter and is the correct reuse (do NOT add a duplicate parser). Empty/null → empty list (legacy-row tolerance).</step>
+    <step order="5">Build BFF: dotnet build src/server/api/Sprk.Bff.Api/ — must be clean.</step>
+    <step order="6">Seed data (via MCP mcp__dataverse__update_record / create_record against spaarkedev1): set `sprk_contexttypetags` on the relevant existing Bindings — at minimum a document-context Binding tagged "document" and, if an email-summarize Binding exists, tag it "email". Author the "Reanalyze" Binding row (sprk_playbookconsumer) tagged "document" per FR-D11 (reuses the existing analysis/reanalyze Action + playbook — do NOT create a new Action if one fits). Record exactly which BindingIds were seeded/created in notes/catalog-context-tags.md.</step>
+    <step order="7">Deploy BFF: pwsh -File (abs path)\scripts\Deploy-BffApi.ps1. Confirm SHA-256 hash-verify passes + /healthz 200. Measure compressed publish size; report absolute + delta vs ~48.25 MB baseline in notes. If ≥+5 MB delta or ≥55 MB cumulative → escalate per BFF §10.</step>
+    <step order="8">Write notes/catalog-context-tags.md (column definition, seeded BindingIds, Reanalyze BindingId, publish-size line, §6.5 Path A citation). Update TASK-INDEX 021 → ✅ and current-task.md.</step>
+  </steps>
+  <escalation>
+    <trigger>If `sprk_contexttypetags` already exists with a non-String/conflicting type, STOP and escalate (root §6) — do not alter an existing column.</trigger>
+    <trigger>If BFF publish delta ≥+5 MB or cumulative ≥55 MB, STOP and escalate per BFF §10 before deploying.</trigger>
+    <trigger>If no existing document/analysis Action fits the "Reanalyze" Binding (would require authoring a new Action/playbook), STOP and escalate — that is scope beyond FR-D11's data half and belongs in a separate task.</trigger>
+  </escalation>
+  <justification>
+    <existing>`sprk_surfaces` (placement CSV) + `sprk_matchconditions` (JSON predicate) exist on `sprk_playbookconsumer`; neither is a context-type tag (Grep-confirmed in Binding.cs / ConsumerRoutingService.cs).</existing>
+    <extension>Yes — extend the existing Binding contract with one CSV column that MIRRORS `sprk_surfaces` end-to-end (schema + read). No new registry, no new parser (reuses ParseSurfaces), no new selection surface.</extension>
+    <cost-of-doing-nothing>Task 022's proactive chips have no per-Binding context-type carrier to filter against — chips cannot be scoped to the active tab's contextType, so they either fire for every tab or not at all (FR-B3/B5 fails).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</output>
+    <output type="script">scripts/Add-BindingContextTypeTagsColumn.ps1</output>
+    <output type="config">projects/spaarkeai-assistant-enhancements-r2/notes/catalog-context-tags.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Column `sprk_contexttypetags` (String, MaxLength 200) exists on `sprk_playbookconsumer` in spaarkedev1, MCP-verified.</criterion>
+    <criterion testable="true">Binding.cs has `ContextTypeTags` (IReadOnlyList&lt;string&gt;, default empty); ConsumerRoutingService Columns array includes "sprk_contexttypetags"; MapBinding populates ContextTypeTags via ParseSurfaces; legacy/null rows → empty list.</criterion>
+    <criterion testable="true">BFF builds clean (dotnet build) and deploys (hash-verify pass + /healthz 200).</criterion>
+    <criterion testable="true">At least one document-context Binding is seeded tagged "document"; a "Reanalyze" Binding tagged "document" exists; seeded/created BindingIds recorded in notes.</criterion>
+    <criterion testable="true">BFF publish size ≤60 MB; absolute + delta reported in notes.</criterion>
+    <criterion testable="true">No classifier/reranker/keyword-map introduced (ADR-039); no candidate-filter logic added (that is task 022).</criterion>
+  </acceptance-criteria>
+  <notes>Re-scoped from STANDARD/data-only to FULL Option C per owner-approved §6.5 Path A (notes/deviations.md). Carrier + data only — task 022 (opus/xhigh) owns the active-tab filter that consumes ContextTypeTags.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill. This is a BFF + live-schema task — honor prescriptive step order.</protocol>
+  </execution>
+</task>

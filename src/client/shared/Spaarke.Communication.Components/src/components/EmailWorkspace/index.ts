@@ -17,7 +17,13 @@ export {
   readFiledAssociations,
   toWorkspaceRecordState,
   resolveEmlArchiveDocumentId,
+  deriveEmailWorkspaceVisibleState,
+  EMAIL_VISIBLE_SNIPPET_CAP_CHARS,
 } from './EmailWorkspace.mapping';
-export type { RawCommunicationRecord, EmailWorkspaceRecordState } from './EmailWorkspace.mapping';
+export type {
+  RawCommunicationRecord,
+  EmailWorkspaceRecordState,
+  EmailWorkspaceVisibleState,
+} from './EmailWorkspace.mapping';
 export { useEmailWorkspaceRecord } from './useEmailWorkspaceRecord';
 export type { UseEmailWorkspaceRecordResult } from './useEmailWorkspaceRecord';

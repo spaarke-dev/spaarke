@@ -611,6 +611,331 @@ public class SprkChatAgentFactoryWorkspaceStateTests
     }
 
     // ---------------------------------------------------------------------
+    // spaarkeai-assistant-enhancements-r2 FR-A3/A4 — focus-stamp preference
+    // (prefer the explicit active-tab id over the UpdatedAt-most-recent heuristic)
+    // + active=compact-content / background=metadata-only (ADR-015 Path A)
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_FocusStamp_LabelsStampedTabActive_NotMostRecent()
+    {
+        var factory = CreateFactory();
+        // "newer" is UpdatedAt-max; "older" carries the focus-stamp. FR-A3: the stamp wins.
+        var tabs = new[]
+        {
+            MakeTab("older", widgetType: "DocumentViewer", updatedAt: "2026-06-09T10:00:00Z",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-1",
+                    Filename = "focused-doc.pdf",
+                    MimeType = "application/pdf",
+                    SizeBytes = 12345,
+                }),
+            MakeTab("newer", widgetType: "Summary", updatedAt: "2026-06-10T15:00:00Z",
+                widgetData: new SummaryTabWidgetData { Body = "agent summary body", Tldr = "tldr line" }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: "older");
+
+        // The focus-stamped tab ("older" = DocumentViewer) is now "Tab 1 (active)".
+        result.Should().Contain("Tab 1 (active): widgetType=DocumentViewer");
+        result.Should().Contain("filename: focused-doc.pdf");
+        // The UpdatedAt-max tab ("newer" = Summary) is NO LONGER active.
+        result.Should().Contain("Tab 2: widgetType=Summary");
+        result.Should().NotContain("Tab 2 (active)");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_NoFocusStamp_FallsBackToUpdatedAtMostRecent()
+    {
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            MakeTab("older", widgetType: "DocumentViewer", updatedAt: "2026-06-09T10:00:00Z",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-1",
+                    Filename = "engagement-letter.docx",
+                    MimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    SizeBytes = 12345,
+                }),
+            MakeTab("newer", widgetType: "Summary", updatedAt: "2026-06-10T15:00:00Z",
+                widgetData: new SummaryTabWidgetData { Body = "agent summary body", Tldr = "tldr line" }),
+        };
+
+        // No focus-stamp (null) → legacy UpdatedAt-max behavior is unchanged.
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: null);
+
+        result.Should().Contain("Tab 1 (active): widgetType=Summary");
+        result.Should().Contain("Tab 2: widgetType=DocumentViewer");
+        result.Should().NotContain("Tab 2 (active)");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_FocusStampMatchesNoVisibleTab_FallsBackToUpdatedAt()
+    {
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            MakeTab("older", widgetType: "DocumentViewer", updatedAt: "2026-06-09T10:00:00Z",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-1",
+                    Filename = "engagement-letter.docx",
+                    MimeType = "application/pdf",
+                    SizeBytes = 12345,
+                }),
+            MakeTab("newer", widgetType: "Summary", updatedAt: "2026-06-10T15:00:00Z",
+                widgetData: new SummaryTabWidgetData { Body = "agent summary body", Tldr = "tldr line" }),
+        };
+
+        // A stamp pointing at a closed/stale tab id → graceful UpdatedAt fallback.
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: "ghost-tab");
+
+        result.Should().Contain("Tab 1 (active): widgetType=Summary");
+        result.Should().NotContain("Tab 2 (active)");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_BackgroundTabs_EmitMetadataOnly_ActiveEmitsContent_FR_A4()
+    {
+        var factory = CreateFactory();
+        // Active tab (focus-stamped) is a DocumentViewer WITH a selection (content-bearing).
+        // Background tab is a Summary with tldr + body (content-bearing) AND a background
+        // DocumentViewer with a selection — both content-bearing fields must be suppressed on
+        // the background tabs, but their identity/metadata must remain.
+        var tabs = new[]
+        {
+            MakeTab("active-doc", widgetType: "DocumentViewer", updatedAt: "2026-06-08T10:00:00Z",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-active",
+                    Filename = "active-contract.pdf",
+                    MimeType = "application/pdf",
+                    SizeBytes = 5000,
+                    HasSelection = true,
+                    SelectionText = "ACTIVE_SELECTION_PROBE indemnification clause",
+                }),
+            MakeTab("bg-summary", widgetType: "Summary", updatedAt: "2026-06-10T15:00:00Z",
+                widgetData: new SummaryTabWidgetData
+                {
+                    Body = "BG_SUMMARY_BODY_PROBE the contract is silent on scope",
+                    Tldr = "BG_TLDR_PROBE",
+                    HasUserEdits = true,
+                }),
+            MakeTab("bg-doc", widgetType: "DocumentViewer", updatedAt: "2026-06-09T15:00:00Z",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-bg",
+                    Filename = "background-doc.pdf",
+                    MimeType = "application/pdf",
+                    SizeBytes = 8000,
+                    HasSelection = true,
+                    SelectionText = "BG_SELECTION_PROBE liability limitation",
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: "active-doc");
+
+        // Active tab (Tab 1) → compact content shape INCLUDING selectionText.
+        result.Should().Contain("Tab 1 (active): widgetType=DocumentViewer");
+        result.Should().Contain("filename: active-contract.pdf");
+        result.Should().Contain("ACTIVE_SELECTION_PROBE indemnification clause");
+
+        // Background Summary → metadata only. tldr + summary body (CONTENT) MUST be suppressed;
+        // the hasUserEdits flag (metadata) remains.
+        result.Should().NotContain("BG_TLDR_PROBE");
+        result.Should().NotContain("BG_SUMMARY_BODY_PROBE");
+        result.Should().Contain("hasUserEdits: true");
+
+        // Background DocumentViewer → identity/metadata remain; selectionText (CONTENT) suppressed.
+        result.Should().Contain("filename: background-doc.pdf");
+        result.Should().Contain("sizeBytes: 8000");
+        result.Should().Contain("hasSelection: true");
+        result.Should().NotContain("BG_SELECTION_PROBE");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_FocusStampAlreadyMostRecent_RemainsActive()
+    {
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            MakeTab("older", widgetType: "DocumentViewer", updatedAt: "2026-06-09T10:00:00Z",
+                widgetData: new DocumentViewerTabWidgetData
+                {
+                    DocumentId = "doc-1",
+                    Filename = "older.pdf",
+                    MimeType = "application/pdf",
+                    SizeBytes = 12345,
+                }),
+            MakeTab("newer", widgetType: "Summary", updatedAt: "2026-06-10T15:00:00Z",
+                widgetData: new SummaryTabWidgetData { Body = "summary body", Tldr = "newer tldr" }),
+        };
+
+        // Stamp points at the already-most-recent tab → it stays active; content emitted.
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: "newer");
+
+        result.Should().Contain("Tab 1 (active): widgetType=Summary");
+        result.Should().Contain("newer tldr");
+        result.Should().Contain("Tab 2: widgetType=DocumentViewer");
+    }
+
+    // ---------------------------------------------------------------------
+    // spaarkeai-assistant-enhancements-r2 task 041 (FR-C2 server) — Email variant
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void WorkspaceTabVisibleState_Email_IsStructurallyDistinctVariant_NoDashboardFallback()
+    {
+        // The Email variant is a first-class closed-union member. Constructing one must
+        // yield a WorkspaceTabVisibleState.Email instance (WidgetType == "Email") — never
+        // the pre-task-041 Dashboard(name-only) fallback shape.
+        WorkspaceTabVisibleState state = new WorkspaceTabVisibleState.Email(
+            Subject: "Re: NDA review",
+            From: "alice@acme.com",
+            Date: "2026-08-01T10:00:00Z",
+            ThreadId: "thread-123",
+            Snippet: "Please review the attached draft.");
+
+        state.Should().BeOfType<WorkspaceTabVisibleState.Email>();
+        state.WidgetType.Should().Be("Email");
+        state.Should().NotBeOfType<WorkspaceTabVisibleState.Dashboard>();
+    }
+
+    [Fact]
+    public void FormatVisibleStateFields_EmailActiveTab_EmitsSubjectFromDateThreadAndSnippet()
+    {
+        var state = new WorkspaceTabVisibleState.Email(
+            Subject: "Re: NDA review",
+            From: "alice@acme.com",
+            Date: "2026-08-01T10:00:00Z",
+            ThreadId: "thread-123",
+            Snippet: "Please review the attached draft.");
+
+        var result = SprkChatAgentFactory.FormatVisibleStateFields(state, contentVisible: true);
+
+        result.Should().Contain("subject: Re: NDA review");
+        result.Should().Contain("from: alice@acme.com");
+        result.Should().Contain("date: 2026-08-01T10:00:00Z");
+        result.Should().Contain("threadId: thread-123");
+        result.Should().Contain("snippet: Please review the attached draft.");
+    }
+
+    [Fact]
+    public void FormatVisibleStateFields_EmailBackgroundTab_SuppressesSnippet_KeepsIdentityFields()
+    {
+        // FR-A4 / ADR-015 Path A: background tabs stay metadata-only. subject/from/date/
+        // threadId are identity fields (always emitted); snippet is the sole content-bearing
+        // field and MUST be suppressed when contentVisible is false.
+        var state = new WorkspaceTabVisibleState.Email(
+            Subject: "Re: NDA review",
+            From: "alice@acme.com",
+            Date: "2026-08-01T10:00:00Z",
+            ThreadId: "thread-123",
+            Snippet: "BG_SNIPPET_PROBE should not leak on a background tab");
+
+        var result = SprkChatAgentFactory.FormatVisibleStateFields(state, contentVisible: false);
+
+        result.Should().Contain("subject: Re: NDA review");
+        result.Should().Contain("from: alice@acme.com");
+        result.Should().Contain("date: 2026-08-01T10:00:00Z");
+        result.Should().Contain("threadId: thread-123");
+        result.Should().NotContain("BG_SNIPPET_PROBE");
+        result.Should().NotContain("snippet:");
+    }
+
+    [Fact]
+    public void FormatVisibleStateFields_EmailNoThreadIdOrSnippet_OmitsOptionalFields()
+    {
+        var state = new WorkspaceTabVisibleState.Email(
+            Subject: "Re: NDA review",
+            From: "alice@acme.com",
+            Date: "2026-08-01T10:00:00Z",
+            ThreadId: null,
+            Snippet: null);
+
+        var result = SprkChatAgentFactory.FormatVisibleStateFields(state, contentVisible: true);
+
+        result.Should().Contain("subject: Re: NDA review");
+        result.Should().NotContain("threadId:");
+        result.Should().NotContain("snippet:");
+    }
+
+    [Fact]
+    public void TryDeriveVisibleState_EmailWidgetData_DerivesEmailVisibleState_WithCappedSnippet()
+    {
+        // task 041b ("Path 1: persisted Email carrier") resolves the task 041 escalation.
+        // A tab whose persisted WidgetData is EmailTabWidgetData must derive a real
+        // WorkspaceTabVisibleState.Email — never the pre-041b Dashboard-shaped fallback.
+        // Snippet must be capped at SprkChatAgentFactory.SelectionTextMaxChars (200), the
+        // same bound DocumentViewer.SelectionText respects.
+        var longSnippet = new string('a', 250);
+        var tab = MakeTab("email-1", widgetType: "Email",
+            widgetData: new EmailTabWidgetData
+            {
+                EmlDocumentId = "eml-doc-999",
+                Subject = "Re: NDA review",
+                From = "alice@acme.com",
+                Date = "2026-08-01T10:00:00Z",
+                ThreadId = "thread-123",
+                Snippet = longSnippet,
+            });
+
+        var state = SprkChatAgentFactory.TryDeriveVisibleState(tab);
+
+        state.Should().BeOfType<WorkspaceTabVisibleState.Email>();
+        state.Should().NotBeOfType<WorkspaceTabVisibleState.Dashboard>();
+        var email = (WorkspaceTabVisibleState.Email)state!;
+        email.Subject.Should().Be("Re: NDA review");
+        email.From.Should().Be("alice@acme.com");
+        email.Date.Should().Be("2026-08-01T10:00:00Z");
+        email.ThreadId.Should().Be("thread-123");
+        email.Snippet.Should().HaveLength(201); // 200 chars + ellipsis
+        email.Snippet.Should().StartWith(new string('a', 200));
+
+        // FormatVisibleStateFields emits the derived state's fields end-to-end.
+        var formatted = SprkChatAgentFactory.FormatVisibleStateFields(state!, contentVisible: true);
+        formatted.Should().Contain("subject: Re: NDA review");
+        formatted.Should().Contain("from: alice@acme.com");
+        formatted.Should().Contain("date: 2026-08-01T10:00:00Z");
+        formatted.Should().Contain("threadId: thread-123");
+        formatted.Should().Contain($"snippet: {email.Snippet}");
+    }
+
+    [Fact]
+    public void EmailTabWidgetData_JsonRoundTrip_KindDiscriminatorDeserializesToEmailTabWidgetData()
+    {
+        // ADR-015 / closed-union contract: the persisted "kind":"Email" discriminator must
+        // round-trip through the polymorphic WorkspaceTabWidgetData base type — no fallback,
+        // no throw, no silent loss of the concrete subtype.
+        WorkspaceTabWidgetData original = new EmailTabWidgetData
+        {
+            EmlDocumentId = "eml-doc-999",
+            Subject = "Re: NDA review",
+            From = "alice@acme.com",
+            Date = "2026-08-01T10:00:00Z",
+            ThreadId = "thread-123",
+            Snippet = "Please review the attached draft.",
+        };
+
+        var json = System.Text.Json.JsonSerializer.Serialize(original);
+        json.Should().Contain("\"kind\":\"Email\"");
+
+        var roundTripped = System.Text.Json.JsonSerializer.Deserialize<WorkspaceTabWidgetData>(json);
+
+        roundTripped.Should().BeOfType<EmailTabWidgetData>();
+        var email = (EmailTabWidgetData)roundTripped!;
+        email.Kind.Should().Be("Email");
+        email.EmlDocumentId.Should().Be("eml-doc-999");
+        email.Subject.Should().Be("Re: NDA review");
+        email.From.Should().Be("alice@acme.com");
+        email.Date.Should().Be("2026-08-01T10:00:00Z");
+        email.ThreadId.Should().Be("thread-123");
+        email.Snippet.Should().Be("Please review the attached draft.");
+    }
+
+    // ---------------------------------------------------------------------
     // Test stubs
     // ---------------------------------------------------------------------
 

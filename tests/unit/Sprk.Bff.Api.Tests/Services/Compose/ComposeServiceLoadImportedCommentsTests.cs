@@ -77,8 +77,8 @@ public sealed class ComposeServiceLoadImportedCommentsTests
                 _store.TryGetValue(sessionId, out var session) && session.TenantId == tenantId ? session : null);
 
         _sessions
-            .Setup(s => s.UpdateSessionCacheAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>()))
-            .Returns((ChatSession session, CancellationToken _) =>
+            .Setup(s => s.UpdateSessionCacheAsync(It.IsAny<ChatSession>(), It.IsAny<CancellationToken>(), It.IsAny<bool>()))
+            .Returns((ChatSession session, CancellationToken _, bool __) =>
             {
                 _store[session.SessionId] = session;
                 return Task.CompletedTask;

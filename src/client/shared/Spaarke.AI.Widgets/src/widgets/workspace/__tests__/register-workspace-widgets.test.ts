@@ -412,3 +412,93 @@ describe('communications-list — upgrade in place (task 031, FR-14a / NFR-06)',
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: `contextType` closed set (FR-B1 + FR-C3, task 020)
+// ---------------------------------------------------------------------------
+//
+// Covers the task-020 acceptance criteria:
+//   - The union has exactly the six values (compile-time exhaustiveness guard
+//     below — widening the union without updating the switch fails `tsc`).
+//   - The email widget resolves to 'email' (FR-C3, BINDING).
+//   - A widget with no honest fit (e.g. BudgetDashboard) resolves to none
+//     (`undefined`), proving the field is additive/backward-compatible.
+
+describe('contextType — closed set (task 020, FR-B1 + FR-C3)', () => {
+  beforeEach(() => {
+    loadRegistrations();
+  });
+
+  it('the WidgetContextType union has exactly these six values (compile-time exhaustiveness)', () => {
+    // If a 7th value is ever added to WidgetContextType without updating this
+    // switch, TypeScript fails to compile (the `default: assertNever(value)`
+    // branch requires `value` to be typed `never`) — the closed-set
+    // invariant is enforced at build time, not just documented here.
+    function assertNever(x: never): never {
+      throw new Error(`Unexpected WidgetContextType value: ${String(x)}`);
+    }
+    function exhaustiveCheck(value: import('../../../types/shared').WidgetContextType): string {
+      switch (value) {
+        case 'email':
+          return 'email';
+        case 'document':
+          return 'document';
+        case 'compose-doc':
+          return 'compose-doc';
+        case 'matter-grid':
+          return 'matter-grid';
+        case 'dashboard':
+          return 'dashboard';
+        case 'calendar':
+          return 'calendar';
+        default:
+          return assertNever(value);
+      }
+    }
+    const allSix: import('../../../types/shared').WidgetContextType[] = [
+      'email',
+      'document',
+      'compose-doc',
+      'matter-grid',
+      'dashboard',
+      'calendar',
+    ];
+    expect(allSix.map(exhaustiveCheck)).toEqual(allSix);
+    expect(new Set(allSix).size).toBe(6);
+  });
+
+  it("the email widget's registered contextType is 'email' (FR-C3, BINDING)", () => {
+    const meta = registry.getWorkspaceWidgetMetadata('email');
+    expect(meta).toBeDefined();
+    expect(meta!.contextType).toBe('email');
+  });
+
+  it('a widget with no honest fit (BudgetDashboard) resolves to none (undefined)', () => {
+    const meta = registry.getWorkspaceWidgetMetadata('BudgetDashboard');
+    expect(meta).toBeDefined();
+    expect(meta!.contextType).toBeUndefined();
+  });
+
+  it("matters-list (a Dataverse entity-view grid) resolves to 'matter-grid'", () => {
+    const meta = registry.getWorkspaceWidgetMetadata('matters-list');
+    expect(meta).toBeDefined();
+    expect(meta!.contextType).toBe('matter-grid');
+  });
+
+  it("workspace (the workspace-layout dispatcher) resolves to 'dashboard'", () => {
+    const meta = registry.getWorkspaceWidgetMetadata('workspace');
+    expect(meta).toBeDefined();
+    expect(meta!.contextType).toBe('dashboard');
+  });
+
+  it('every registered widget carries either a valid contextType or none (undefined) — never an invalid string', () => {
+    const validValues = new Set(['email', 'document', 'compose-doc', 'matter-grid', 'dashboard', 'calendar']);
+    for (const type of registry.getAllWorkspaceWidgetTypes()) {
+      const meta = registry.getWorkspaceWidgetMetadata(type);
+      const contextType = meta?.contextType;
+      if (contextType !== undefined) {
+        expect(validValues.has(contextType)).toBe(true);
+      }
+    }
+  });
+});

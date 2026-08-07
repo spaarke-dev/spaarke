@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Fidelity seam tests across the corpus — per-feature round-trip; hard-tier warns-not-fails</title>
+    <phase>2 Canonical model + fidelity widening</phase>
+    <gate>dep:021,022,023,024,025,026,012 — RE-SEQUENCED 2026-08-05: also gated on 012 (surgical retired) so the fidelity seam suite tests the SHIPPED render-on-save path, not the transitional state.</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying task (tags include testing/seam) → FULL rigor UNCONDITIONALLY per root §8 TEST-MODIFYING override. Adds the through-the-wire seam coverage that is the Phase-2 fidelity DoD (ADR-038); asserts the graceful-degradation guarantee (hard-tier warns-not-fails) and golden-label numbering parity across the corpus. code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per plan.md §5 Phase 2 — well-specified seam-test authoring against a known corpus with clear per-feature oracles; not architectural.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds fidelity seam slices under the shared tests/integration/seam/Compose/ tree and exercises the shared Services/Compose canonical model — the MOST-CONTESTED repo surface. Overlaps spaarkeai-compose-r5/r4.5/r3/r2/r1 + spaarke-ai-architecture-redesign-r2 + agreements-r1/analysis-hub-r1 seam suites. Depends on all Phase-2 feature adapters (021-026) landing first; serializes behind them. Run /conflict-check before the BFF PR.</parallel-reason>
+    <deps>021,022,023,024,025,026,012</deps>
+    <tags>testing, seam</tags>
+    <estimated-effort>3-6 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Author the Phase-2 fidelity seam-test suite across the compose corpus: a per-feature load → edit → save → reopen
+    round-trip for each near-term construct (numbering/lists, tables, headers/footers + page breaks, hyperlinks,
+    comments, tracked-changes) proving it survives through the canonical model without hard-fail; and a hard-tier
+    slice proving text boxes / drawings / fields / content controls WARN-not-FAIL (accept-flatten + warning, no
+    422). Numbering labels must match Word golden labels from the corpus. Use ADR-038 seam paths only — NO
+    Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null tests.
+  </prompt>
+
+  <role>SPAARKE platform test engineer. Expert in through-the-wire WebApplicationFactory seam testing (ADR-038), the Compose canonical model + render-on-save save path, the compose corpus fixtures, and OOXML assertion (numbering labels, revision markup, degradation warnings). Follow ADRs strictly.</role>
+
+  <goal>tests/integration/seam/Compose/ carries a fidelity suite that, for each near-term feature (numbering/lists, tables, headers/footers + page breaks, hyperlinks, comments, tracked-changes), asserts a load→edit→save→reopen round-trip through the canonical model without hard-fail; asserts numbering labels equal the Word golden labels for the corpus numbering exemplars; and asserts each hard-tier construct (text box/drawing/field/content control) accept-flattens with a warning and NO 422 (the graceful-degradation guarantee). All slices are through-the-wire seam tests per ADR-038 with no banned mock/DI/ctor shapes.</goal>
+
+  <context>
+    <background>Spec FR-04 acceptance ("each near-term feature survives a load→edit→save→reopen round-trip; each hard-tier construct flattens without hard-failing, with a user-visible warning") and FR-03 ("numbering labels match Word for the corpus numbering exemplars"). This task consolidates the Phase-2 fidelity DoD into one seam suite. It is distinct from the Phase-6 CI fidelity HARNESS (tasks 060/061) — this is the per-feature seam coverage; the harness is the corpus-wide release gate. Corpus fixtures live in tests/fixtures/compose-corpus/ (NDA fixture from task 004; numbering exemplars; placeholder worst-offender rows).</background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/Compose/</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="021" status="pending">Numbering/lists through the model (golden-label parity oracle).</dependency>
+      <dependency task="022" status="pending">Tables through the model.</dependency>
+      <dependency task="023" status="pending">Headers/footers + page breaks through the model.</dependency>
+      <dependency task="024" status="pending">Hyperlinks + comments through the model.</dependency>
+      <dependency task="025" status="pending">Tracked-changes through the model.</dependency>
+      <dependency task="026" status="pending">Hard-tier accept-flatten + warning (the warns-not-fails oracle).</dependency>
+      <dependency task="012" status="pending">Surgical save path retired — the fidelity seam suite tests the shipped render-on-save path (RE-SEQUENCED 2026-08-05).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">All slices are through-the-wire WebApplicationFactory seam tests under tests/integration/seam/Compose/. NO Mock&lt;HttpMessageHandler&gt;, NO DI-registration tests, NO ctor-null tests. Coverage is observation, not a gate.</constraint>
+    <constraint source="ADR-049">Assertions target the render-on-save behavior (save renders from the canonical model; no surgical byte-patch, no text-search, new SPE version). Do NOT assert byte-identity of untouched subtrees on the save path (superseded for the save path by the Path-B amendment) — assert per-feature round-trip fidelity + warnings instead.</constraint>
+    <constraint source="project">Numbering assertions compare computed labels to the Word GOLDEN LABELS from the corpus numbering exemplars (R4.5). Hard-tier assertions require warns-not-fails: accept-flatten + warning + NO 422. Run /conflict-check before the BFF/test PR (shared seam tree).</constraint>
+    <constraint source="ADR-029/010">If the test project build affects publish measurement, report BFF publish size + delta vs ~49.63 MB incl. PDBs (test assemblies are not shipped; note this). ≤60 MB ceiling.</constraint>
+    <constraint source="project">NEVER delete docxBridge.ts. This is a test-modifying task → FULL rigor with Step 9.5 gates (root §8 override).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose fidelity seam testing (ADR-038)</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>tests/fixtures/compose-corpus/corpus-manifest.md</file>
+    </files>
+    <patterns>
+      <pattern name="Seam-test suite" location="tests/integration/seam/Compose/">Model the per-feature round-trip slices on the existing Compose seam slices (through the WebApplicationFactory; POST edits → save → reopen → assert).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load all knowledge files. Declare RIGOR LEVEL FULL + reason (test-modifying override, root §8). Confirm 021-026 have landed and the corpus fixtures + golden labels are present.</step>
+    <step order="1">Author a per-feature round-trip seam slice for each near-term construct: numbering/lists, tables, headers/footers + page breaks, hyperlinks, comments, tracked-changes — each load → edit → save → reopen through the canonical model, asserting no hard-fail and feature-level fidelity.</step>
+    <step order="2">Author the numbering golden-label assertions: computed labels equal the Word golden labels for the corpus numbering exemplars (R4.5).</step>
+    <step order="3">Author the hard-tier warns-not-fails slice on the NDA fixture + hard-tier exemplars: each construct accept-flattens, a warning is emitted, the save succeeds (NO 422), a new SPE version is produced, and visible content is preserved.</step>
+    <step order="4">Run the suite; confirm all slices pass and use no banned mock/DI/ctor shapes.</step>
+    <step order="5">Report BFF publish size + delta vs ~49.63 MB (note test assemblies are not shipped). Run /conflict-check before the PR; state Placement Justification.</step>
+    <step order="6">Run/verify: full seam suite + BFF build green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a near-term feature CANNOT be made to round-trip without hard-fail (i.e. a Phase-2 adapter 021-025 has a gap), STOP and route the gap back to that adapter task rather than weakening the test. If a hard-tier construct 422s instead of warning (task 026 gap), STOP — the graceful-degradation guarantee is violated.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test the BFF + run the seam suite.</tool>
+    <tool name="terminal">Run /conflict-check before the PR.</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/Compose/ (per-feature round-trip slices: numbering, tables, headers/footers+page-breaks, hyperlinks, comments, tracked-changes)</output>
+    <output type="test">tests/integration/seam/Compose/ (hard-tier warns-not-fails slice on the NDA fixture)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each near-term feature (numbering/lists, tables, headers/footers + page breaks, hyperlinks, comments, tracked-changes), when its seam slice runs, then the construct survives a load→edit→save→reopen round-trip through the canonical model without hard-fail.</criterion>
+    <criterion testable="true">Given the corpus numbering exemplars, when the numbering slice runs, then computed labels equal the Word golden labels (R4.5).</criterion>
+    <criterion testable="true">Given each hard-tier construct on the NDA fixture, when the hard-tier slice runs, then it accept-flattens with a warning, the save succeeds (NO 422), and a new SPE version is produced.</criterion>
+    <criterion testable="true">Negative / no-regression: all slices are ADR-038 through-the-wire seam tests under tests/integration/seam/Compose/; no Mock&lt;HttpMessageHandler&gt;, DI-registration, or ctor-null tests; the suite is green; docxBridge.ts not deleted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-03/FR-04 acceptance; plan.md §5 Phase 2 + §6 critical path (020 → 027 → 060/061). Distinct from the Phase-6 CI harness (060/061) — this is per-feature seam coverage. Depends on 021-026. Test-modifying → FULL rigor (root §8 override). parallel-safe=false. Run /conflict-check before the PR.
+
+COMPLETED 2026-08-06 — commits f7bd052f0 (suite + fixture) + 6b00765e9 (Step-9.5 strengthenings F1-F6). ComposeFidelityRoundTripSeamTests: 11 through-the-wire slices with ONE shared load→edit→save→reopen driver (self-proving reopen leg) — numbering golden-label continuity (interrupted "1."-"6." · multilevel incl. level reset · style-linked incl. the FR-12 "4.2" example, asserted from paraIdMap[].computedNumber vs manifest §1.5 goldens; ZERO 020-R7 gap — style identity survives), tables, headers/footers (all 6 CIPO carrier parts + footer SDT semantic assert), page breaks, hyperlinks, comments (part + reference + range markers), tracked-changes on the NEW corpus fixture (authors+dates, delText, mark-del, rPrChange/pPrChange, hyperlink⊃ins never inverted, new-edit save-author attribution, unique w:id), hard-tier warns-not-fails (text-box-flattened wire-visible + no-422 + signature text), duplicate-paraId load probe (first-wins pinned). NEW FIXTURE multi-author-redline-synthetic.docx (manifest §1.7 row 15, raw-OOXML synthetic, OpenXmlValidator 0 errors, LFS; fills 025-F6 — the corpus had zero revision markup; row-4 owner placeholder stays OPEN). AppendSection w:ins oracle re-baselined (count-unchanged + appended-subset-empty). T-2 narrative refreshed; ops notes (transitional-telemetry decay chart + post-save re-projection perf watch) in notes §20 for 014.
+
+ACCEPTANCE: all 4 criteria verified (per-feature round-trips no hard-fail; goldens equal; hard-tier accept-flatten + warning + no 422 + new version; seam paths only, no banned shapes, suite green, docxBridge untouched). Publish 46.91 MB clean-worktree (flat — tests not shipped); CVE set unchanged (tests-only diff); zero production-code changes (empty src/ diff — verified).
+
+STEP 9.5: code-review APPROVE-WITH-MINORS (3 minors + 3 nits — ALL applied in 6b00765e9; oracle-strength probes confirmed the goldens non-vacuous and the fixture sound). The independent adr-check agent was terminated by the session usage limit; its axes were verified INLINE with evidence (banned shapes/KEEP-path/no-byte-identity-asserts empirically confirmed by the code reviewer's probes; LFS registration + row-4-open + zero-production-diff + publish/CVE verified in the main session) — recorded transparently, not silently skipped. Suites: fidelity 11/11 · full Compose 1020/1020, zero reds.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; first. Follow task-execute pre-execution checklist incl. Step 9.5 gates (code-review + adr-check; test-modifying FULL override). Run /conflict-check on the shared seam tree.</protocol>
+  </execution>
+</task>

@@ -712,7 +712,7 @@ public class EventRulesServiceTests
             return Task.FromResult(SessionQueue.Count > 0 ? SessionQueue.Dequeue() : SessionToReturn);
         }
 
-        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
         {
             PersistedSessions.Add(session);
             return Task.CompletedTask;

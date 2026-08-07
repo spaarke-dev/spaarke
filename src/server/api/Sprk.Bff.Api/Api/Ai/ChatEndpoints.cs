@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
@@ -143,6 +144,18 @@ public static class ChatEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // PATCH /api/ai/chat/sessions/{sessionId} — rename a session (FR-D4, task 032)
+        group.MapMethods("/sessions/{sessionId}", ["PATCH"], RenameSessionAsync)
+            .AddAiAuthorizationFilter()
+            .WithName("RenameChatSession")
+            .WithSummary("Rename a chat session (FR-D4)")
+            .WithDescription("Updates the session's stored, human-readable title. Persists across reloads (StoredSession.Title, ADR-040 — no new store). Returns 404 for a genuinely-missing session (same existence-check pattern as GetHistoryAsync/SwitchContextAsync).")
+            .Produces(204)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404);
+
         // DELETE /api/ai/chat/sessions/{sessionId} — delete a session
         group.MapDelete("/sessions/{sessionId}", DeleteSessionAsync)
             .AddAiAuthorizationFilter()
@@ -202,6 +215,26 @@ public static class ChatEndpoints
             .WithSummary("Retrieve persisted workspace tabs and active tab id for a session")
             .WithDescription("Returns the most recently persisted non-Home tabs and active tab id. Empty list for sessions that have never persisted tabs.")
             .Produces<SessionTabsResponse>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(404)
+            .ProducesProblem(429);
+
+        // POST /api/ai/chat/sessions/{sessionId}/suggest — proactive follow-on suggestions
+        // (spaarkeai-assistant-enhancements-r2 FR-B3/B5, task 022). ONE grounded, contextType-
+        // pre-filtered suggestion turn (AssistantSuggestionService) returning ≤3 content-specific
+        // chips for the focused tab. PROPOSER only — the chips ride the existing Click path when
+        // clicked; this endpoint never dispatches, injects a transcript message, or writes a ledger
+        // entry (ADR-039/040). Best-effort: returns an empty chip list (never 5xx) on any
+        // upstream failure or when the AI feature is disabled. Same auth as the sibling session
+        // endpoints.
+        group.MapPost("/sessions/{sessionId}/suggest", SuggestFollowupsAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-stream")
+            .WithName("SuggestFollowups")
+            .WithSummary("Proactive follow-on suggestions for the focused workspace tab (FR-B3/B5)")
+            .WithDescription("Runs one grounded, context-type-pre-filtered suggestion turn over the focused tab's compact server-derived visible state and returns up to 3 content-specific follow-on chips (targetBindingId + label). A proposer only — chips dispatch via the existing Click path on user click. Returns an empty list when nothing is relevant or the feature is disabled; never injects a transcript message.")
+            .Produces<ChatSuggestResponse>()
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(404)
@@ -650,6 +683,12 @@ public static class ChatEndpoints
                 // text-path dispatch composes it with the Binding's own tier override (ADR-039 — the
                 // ONE resolver). Null (the default) is a no-op.
                 modelTierOverride: request.ModelTierOverride,
+                // spaarkeai-assistant-enhancements-r2 FR-A3: the client focus-stamp's tab id. When
+                // present, BuildWorkspaceStateBlock labels the matching tab "(active)" in preference
+                // to the UpdatedAt-most-recent heuristic. Null = no focus-stamp → UpdatedAt fallback
+                // (backward compatible). Only the tab id is forwarded — the compact state is NOT
+                // trusted as prompt content (ADR-015: server-derived visible state is authoritative).
+                activeContextTabId: request.ActiveContext?.TabId,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -1141,10 +1180,22 @@ public static class ChatEndpoints
     /// <summary>
     /// Get chat history for a session.
     /// GET /api/ai/chat/sessions/{sessionId}/history
+    ///
+    /// FR-D3: returns 404 for a genuinely-missing session so the client's stale-session
+    /// recovery fires, instead of a silent blank 200. <see cref="ChatHistoryManager.GetHistoryAsync"/>
+    /// itself collapses "missing" and "exists-but-empty" to the same empty array (it exists to serve
+    /// the hot message-read path, not existence checks), so the existence check is done here via
+    /// <see cref="ChatSessionManager.GetSessionAsync"/> — the same session-load path (Redis hot →
+    /// Cosmos warm → Dataverse cold, ADR-040) that <c>DeleteSessionAsync</c>/<c>SwitchContextAsync</c>/
+    /// <c>GetComposeOutputsAsync</c> already use for their 404 checks. It returns <c>null</c> ONLY when
+    /// the session is absent from all three tiers — an existing session with zero messages still
+    /// returns a non-null <see cref="ChatSession"/> (empty <c>Messages</c> list), so it is not
+    /// ambiguous with "missing" and correctly stays 200.
     /// </summary>
     private static async Task<IResult> GetHistoryAsync(
         string sessionId,
         ChatHistoryManager historyManager,
+        ChatSessionManager sessionManager,
         HttpContext httpContext,
         ILogger<ChatHistoryManager> logger,
         CancellationToken cancellationToken)
@@ -1160,6 +1211,17 @@ public static class ChatEndpoints
 
         logger.LogDebug(
             "GetHistory: session={SessionId}, tenant={TenantId}", sessionId, tenantId);
+
+        // Existence check (FR-D3) — mirrors the 404-on-missing pattern used by
+        // DeleteSessionAsync/SwitchContextAsync/GetComposeOutputsAsync.
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Session '{sessionId}' not found.");
+        }
 
         var messages = await historyManager.GetHistoryAsync(tenantId, sessionId, ct: cancellationToken);
 
@@ -1221,6 +1283,71 @@ public static class ChatEndpoints
         await sessionManager.UpdateSessionCacheAsync(updatedSession, cancellationToken);
 
         logger.LogInformation("Context switched for session {SessionId}", sessionId);
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Rename a chat session's stored title (FR-D4, task 032).
+    /// PATCH /api/ai/chat/sessions/{sessionId}
+    ///
+    /// Mirrors the 404-on-missing pattern used by GetHistoryAsync/SwitchContextAsync/
+    /// DeleteSessionAsync (<see cref="ChatSessionManager.GetSessionAsync"/> — Redis hot ->
+    /// Cosmos warm -> Dataverse cold). The new title persists via the same
+    /// <see cref="ChatSessionManager.UpdateSessionCacheAsync"/> write-through
+    /// <see cref="SwitchContextAsync"/> uses (StoredSession.Title, ADR-040 — no new store).
+    /// </summary>
+    private static async Task<IResult> RenameSessionAsync(
+        string sessionId,
+        ChatRenameSessionRequest request,
+        ChatSessionManager sessionManager,
+        HttpContext httpContext,
+        ILogger<ChatSessionManager> logger,
+        CancellationToken cancellationToken)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Validation Error",
+                detail: "Title must not be empty.");
+        }
+
+        var trimmedTitle = request.Title.Trim();
+        if (trimmedTitle.Length > ChatRenameSessionRequest.MaxTitleLength)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Validation Error",
+                detail: $"Title cannot exceed {ChatRenameSessionRequest.MaxTitleLength} characters. Received {trimmedTitle.Length}.");
+        }
+
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+        if (session is null)
+        {
+            return Results.Problem(
+                statusCode: 404,
+                title: "Not Found",
+                detail: $"Session '{sessionId}' not found.");
+        }
+
+        var updatedSession = session with
+        {
+            Title = trimmedTitle,
+            LastActivity = DateTimeOffset.UtcNow
+        };
+
+        await sessionManager.UpdateSessionCacheAsync(updatedSession, cancellationToken);
+
+        logger.LogInformation("Session {SessionId} renamed (tenant={TenantId})", sessionId, tenantId);
         return Results.NoContent();
     }
 
@@ -1798,6 +1925,13 @@ public static class ChatEndpoints
 
     /// <summary>
     /// DTO for recent session list items.
+    ///
+    /// FR-D7 (spaarkeai-assistant-enhancements-r2, DI-01) adds <see cref="Preview"/>,
+    /// <see cref="MessageCount"/>, and <see cref="TabSummary"/> — property names chosen to match
+    /// the client's `HistoryOverlay.tsx` `mapSession` reads EXACTLY under the default camelCase
+    /// wire policy (`Preview` → `preview`, `MessageCount` → `messageCount`,
+    /// `TabSummary` → `tabSummary`). All three are optional; the client already renders their
+    /// absence gracefully (task 037 forward-compatible mapping).
     /// </summary>
     internal record RecentSessionDto(
         string Id,
@@ -1805,7 +1939,10 @@ public static class ChatEndpoints
         string? EntityType,
         string? EntityName,
         string? PlaybookName,
-        DateTimeOffset UpdatedAt);
+        DateTimeOffset UpdatedAt,
+        string? Preview,
+        int? MessageCount,
+        string? TabSummary);
 
     /// <summary>
     /// GET /api/ai/chat/sessions — lists recent sessions for the current tenant.
@@ -1835,7 +1972,10 @@ public static class ChatEndpoints
                 EntityType: s.EntityType,
                 EntityName: s.EntityName,
                 PlaybookName: s.PlaybookName,
-                UpdatedAt: s.UpdatedAt))
+                UpdatedAt: s.UpdatedAt,
+                Preview: s.Preview,
+                MessageCount: s.MessageCount,
+                TabSummary: s.TabSummary))
             .ToList();
 
         return Results.Ok(sessions);
@@ -1853,7 +1993,10 @@ public static class ChatEndpoints
         string? ConversationSummary,
         IReadOnlyList<SessionRestoreMessageDto> RecentMessages,
         bool HasStaleEntities,
-        long RestoreLatencyMs);
+        long RestoreLatencyMs,
+        // spaarkeai-assistant-enhancements-r2 FR-D5: minimal uploaded-files manifest so the client
+        // rehydrates the attachment chip on restore. Identifier/display fields only (ADR-015 Tier-2).
+        IReadOnlyList<SessionRestoreUploadedFileDto> UploadedFiles);
 
     /// <summary>
     /// A single message in the restore response — minimal projection of SessionMessage.
@@ -1862,6 +2005,17 @@ public static class ChatEndpoints
         string Role,
         string Content,
         DateTimeOffset Timestamp);
+
+    /// <summary>
+    /// A single uploaded file in the restore response — minimal projection of the session manifest
+    /// (FR-D5). Camel-cased on the wire by System.Text.Json (fileId/fileName/contentType/sizeBytes),
+    /// matching the client <c>SessionRestoreUploadedFile</c> shape in <c>useSessionRestore.ts</c>.
+    /// </summary>
+    internal record SessionRestoreUploadedFileDto(
+        string FileId,
+        string FileName,
+        string ContentType,
+        long SizeBytes);
 
     /// <summary>
     /// GET /api/ai/chat/sessions/{sessionId}/restore
@@ -1898,6 +2052,12 @@ public static class ChatEndpoints
 
         var stage = restored.WidgetStates.Count > 0 ? "active-chat" : "loading";
 
+        // FR-D5: project the restored uploaded-files manifest to the wire DTO (already minimal — the
+        // restore service dropped enriched fields). Empty list when the session had no attachments.
+        var uploadedFiles = restored.UploadedFiles
+            .Select(f => new SessionRestoreUploadedFileDto(f.FileId, f.FileName, f.ContentType, f.SizeBytes))
+            .ToList();
+
         var response = new SessionRestoreResponse(
             SessionId: restored.SessionId,
             PlaybookId: restored.PlaybookId,
@@ -1906,7 +2066,8 @@ public static class ChatEndpoints
             ConversationSummary: restored.WasSummarized ? restored.ReconstructedContext : null,
             RecentMessages: recentMessages,
             HasStaleEntities: restored.StaleEntityRefs.Count > 0,
-            RestoreLatencyMs: restored.RestoreLatencyMs);
+            RestoreLatencyMs: restored.RestoreLatencyMs,
+            UploadedFiles: uploadedFiles);
 
         return Results.Ok(response);
     }
@@ -2168,6 +2329,56 @@ public static class ChatEndpoints
             .ToList();
 
         return Results.Ok(new SessionTabsResponse(wireTabs, session.ActiveTabId));
+    }
+
+    /// <summary>
+    /// POST /api/ai/chat/sessions/{sessionId}/suggest
+    /// spaarkeai-assistant-enhancements-r2 FR-B3/B5 (task 022) — run the ONE grounded proactive-
+    /// suggestion turn for the focused workspace tab and return ≤3 content-specific follow-on chips.
+    /// Proposer only: the returned chips ride the existing Click path when clicked; this endpoint never
+    /// dispatches, injects a transcript message, or writes a ledger entry. Best-effort — returns an
+    /// empty chip list (200) rather than an error when the context type is absent, no candidates match,
+    /// the model proposes nothing, or the AI feature is disabled.
+    /// </summary>
+    private static async Task<IResult> SuggestFollowupsAsync(
+        string sessionId,
+        ChatSuggestRequest request,
+        AssistantSuggestionService suggestions,
+        HttpContext httpContext,
+        ILoggerFactory loggerFactory,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatEndpoints.Suggest");
+
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+        }
+
+        // A proactive surface degrades silently: a request with no context type yields no chips
+        // (200 empty), not a 400 — the client fires this fire-and-forget on tab open.
+        if (request is null || string.IsNullOrWhiteSpace(request.ContextType))
+        {
+            return Results.Ok(new ChatSuggestResponse(Array.Empty<ChatSuggestChip>()));
+        }
+
+        var chips = await suggestions.SuggestAsync(
+            sessionId,
+            tenantId,
+            request.ContextType,
+            request.ActiveContext?.TabId,
+            cancellationToken);
+
+        logger.LogDebug(
+            "Suggest endpoint: session={SessionId}, contextType={ContextType}, chipCount={ChipCount}",
+            sessionId, request.ContextType, chips.Count);
+
+        return Results.Ok(new ChatSuggestResponse(
+            chips.Select(c => new ChatSuggestChip(c.TargetBindingId, c.Label, c.Reason)).ToList()));
     }
 
     // =========================================================================
@@ -3198,6 +3409,23 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// through the ONE tier→deployment resolver (ADR-039). Default <c>null</c> = no override; the Action's
 /// own tier governs unchanged (pre-task-011 behavior).
 /// </param>
+/// <param name="ActiveContext">
+/// spaarkeai-assistant-enhancements-r2 FR-A2/A3 (Active-tab awareness / focus-stamp): the
+/// identity + compact state of the workspace tab the user has explicitly focused, captured
+/// client-side from the <c>workspace.active_widget_changed</c> signal and attached to the
+/// outbound body via the existing <c>onDecorateOutboundBody</c> seam (FR-A1/A2 — no
+/// <c>SprkChat</c> change). Server-side, <see cref="ChatActiveContext.TabId"/> is the ONLY
+/// load-bearing field: it is forwarded to
+/// <see cref="Sprk.Bff.Api.Services.Ai.Chat.SprkChatAgentFactory.CreateAgentAsync"/> so
+/// <c>BuildWorkspaceStateBlock</c> labels the matching tab "(active)" in preference to the
+/// legacy <c>UpdatedAt</c>-most-recent heuristic (FR-A3). The active tab then contributes its
+/// COMPACT content shape while background tabs stay metadata-only (FR-A4, ADR-015 Path A
+/// exception). Default <c>null</c> = no focus-stamp → the <c>UpdatedAt</c> fallback is used
+/// unchanged (backward compatible). ADR-015 note: the server does NOT trust the client-supplied
+/// <see cref="ChatActiveContext.CompactState"/> as prompt content — the agent-visible content is
+/// derived server-side from persisted tab state, so this field cannot widen visibility beyond the
+/// bounded compact shape.
+/// </param>
 /// <remarks>
 /// FR-P2-05 hard cutover (task 034): the former soft-slash bias field was RETIRED
 /// end-to-end (NFR-08). There is no longer any client-to-server intent-bias hint —
@@ -3208,7 +3436,63 @@ public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
     IReadOnlyList<ChatMessageAttachment>? Attachments = null,
-    AiModelTier? ModelTierOverride = null);
+    AiModelTier? ModelTierOverride = null,
+    ChatActiveContext? ActiveContext = null);
+
+/// <summary>
+/// spaarkeai-assistant-enhancements-r2 FR-A2 — the client "focus-stamp": the identity and
+/// compact state of the currently focused workspace tab, mirrored from the client
+/// <c>{ widgetType, contextType, tabId, displayName, compactState }</c> shape (FR-A1/A2).
+///
+/// <para>
+/// Server-side contract: <see cref="TabId"/> matches <c>WorkspaceTab.id</c> and is used ONLY to
+/// prefer the explicit focus-stamp over the <c>UpdatedAt</c>-most-recent heuristic when labeling
+/// the "(active)" tab (FR-A3). The remaining fields are carried for wire-fidelity with the client
+/// stamp; <see cref="CompactState"/> is deliberately NOT injected into the agent prompt — the
+/// agent-visible content is derived server-side from persisted tab state (ADR-015: the server is
+/// the authority on what content is visible, never client-supplied bytes). This keeps the field
+/// a labeling preference, not a new content channel or intent-classifier (ADR-039).
+/// </para>
+/// </summary>
+/// <param name="WidgetType">The focused tab's widget-type discriminator (e.g. "DocumentViewer", "Summary", "email"). Carried for fidelity; not load-bearing server-side.</param>
+/// <param name="ContextType">The focused widget's context type from the closed FR-B1 set (email | document | compose-doc | matter-grid | dashboard | calendar). Carried for fidelity.</param>
+/// <param name="TabId">Stable tab identity matching <c>WorkspaceTab.id</c>. The ONLY load-bearing field — drives the FR-A3 active-tab labeling preference.</param>
+/// <param name="DisplayName">Human-readable tab label. Carried for fidelity; not load-bearing server-side.</param>
+/// <param name="CompactState">Client-computed compact visible-state payload. Accepted for wire-fidelity but NOT emitted into the agent prompt (ADR-015 — server-derived visible state is authoritative).</param>
+public record ChatActiveContext(
+    string? WidgetType = null,
+    string? ContextType = null,
+    string? TabId = null,
+    string? DisplayName = null,
+    JsonElement? CompactState = null);
+
+/// <summary>
+/// Request body for <c>POST /sessions/{id}/suggest</c> (spaarkeai-assistant-enhancements-r2 FR-B3/B5, task 022).
+/// </summary>
+/// <param name="ContextType">The focused tab's context type (closed FR-B1 set: email | document | compose-doc | matter-grid | dashboard | calendar). Required — a blank value yields an empty chip list. Deterministically pre-filters the candidate capabilities (task 021 <c>Binding.ContextTypeTags</c>).</param>
+/// <param name="ActiveContext">The focused tab's identity/compact stamp (reuses <see cref="ChatActiveContext"/>). Only <see cref="ChatActiveContext.TabId"/> is load-bearing server-side — the active tab's compact content is derived SERVER-SIDE from persisted state (ADR-015), never from the client-supplied <see cref="ChatActiveContext.CompactState"/>.</param>
+public record ChatSuggestRequest(
+    string ContextType,
+    ChatActiveContext? ActiveContext = null);
+
+/// <summary>Response body for <c>POST /sessions/{id}/suggest</c> — up to 3 proactive follow-on chips (empty when nothing fits).</summary>
+/// <param name="Chips">The proposed chips (≤3), ranked most-useful first.</param>
+public record ChatSuggestResponse(
+    [property: JsonPropertyName("chips")] IReadOnlyList<ChatSuggestChip> Chips);
+
+/// <summary>
+/// One proactive follow-on chip. Field names match the client <c>parseConsumerChips</c> contract
+/// (<c>targetBindingId</c> + <c>label</c>) so the client feeds the array straight to
+/// <c>useConsumerChips.acceptChips</c>. The chip dispatches via the existing deterministic Click path
+/// (<c>invoke(targetBindingId, args)</c>) on user click — this record is a proposal, never a dispatch.
+/// </summary>
+/// <param name="TargetBindingId">The proposed capability's <c>sprk_playbookconsumer</c> id (always one of the pre-filtered candidates).</param>
+/// <param name="Label">Short, content-specific chip label.</param>
+/// <param name="Reason">Developer-facing selection-trace rationale (FR-B6/task 024); not shown to the end user.</param>
+public record ChatSuggestChip(
+    [property: JsonPropertyName("targetBindingId")] string TargetBindingId,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("reason")] string? Reason);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).
@@ -3253,6 +3537,20 @@ public record ChatSwitchContextRequest(
     Guid? PlaybookId,
     ChatHostContext? HostContext = null,
     IReadOnlyList<string>? AdditionalDocumentIds = null);
+
+/// <summary>Request body for PATCH /sessions/{id} (FR-D4, task 032 — rename).</summary>
+/// <param name="Title">The new session title. Required, non-empty after trim, capped at <see cref="MaxTitleLength"/> characters.</param>
+public record ChatRenameSessionRequest(string Title)
+{
+    /// <summary>
+    /// Safety ceiling for a user-supplied rename. Deliberately more generous than
+    /// <c>ChatHistoryManager.TitleMaxLength</c> (60) — that constant caps the CHEAP
+    /// auto-generated/fallback title (3-6 words), whereas a user manually renaming a session
+    /// may reasonably want a longer descriptive label. This cap exists only to bound storage/
+    /// display, not to enforce the auto-gen word-count target.
+    /// </summary>
+    public const int MaxTitleLength = 200;
+}
 
 // The R2-052 per-action confirm request/response records were DELETED by D12 / FR-P2-02
 // (task 031) together with their endpoint — the second confirmation store.

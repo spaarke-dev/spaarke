@@ -1270,6 +1270,54 @@ export interface ISprkChatProps {
   onLocalMessageInjected?: () => void;
 
   /**
+   * One-shot host→send request — spaarkeai-assistant-enhancements-r2 task
+   * 042c-fr-c4 (FR-C4). Mirrors the `injectLocalMessage`/`onLocalMessageInjected`
+   * opt-in pattern above, but for an OUTBOUND message instead of a local
+   * interjection.
+   *
+   * When this prop transitions from `null` (or absent) to a non-null string
+   * AND SprkChat is not already streaming/sending, SprkChat invokes its OWN
+   * `handleSend(pendingOutboundMessage)` exactly once — the SAME send path a
+   * user's composer click takes, so `onBeforeSendMessage` and
+   * `onDecorateOutboundBody` still run and the turn is a real
+   * `SendMessage` turn. The host then clears the slot via
+   * `onOutboundConsumed` (below). This is a host-driven programmatic send: it
+   * lets a deterministic host affordance (e.g. a "Summarize this email" chip)
+   * produce a real chat turn without the host re-implementing SprkChat's
+   * streaming transcript.
+   *
+   * One-shot semantics (identical to `injectLocalMessage`): SprkChat records
+   * the last value it consumed and skips re-render re-fires; it also resets
+   * that record when the slot returns to `null`, so re-arming with the SAME
+   * string (after a `null`) sends again. If the component is streaming or has
+   * no active session when the slot arms, SprkChat waits and sends when the
+   * stream clears (the slot is NOT consumed until the send actually happens,
+   * so a busy component never drops the request).
+   *
+   * Undefined/null ⇒ ZERO behavior change — existing consumers that never
+   * pass this prop are byte-identical.
+   *
+   * @example
+   * const [pendingSend, setPendingSend] = useState<string | null>(null);
+   * // deterministic affordance click:
+   * setPendingSend("Summarize this email");
+   * // Pass to SprkChat:
+   * <SprkChat pendingOutboundMessage={pendingSend} onOutboundConsumed={() => setPendingSend(null)} />
+   */
+  pendingOutboundMessage?: string | null;
+
+  /**
+   * Ack fired after SprkChat consumes a `pendingOutboundMessage` (i.e. after it
+   * has actually invoked `handleSend` for that armed value) —
+   * spaarkeai-assistant-enhancements-r2 task 042c-fr-c4 (FR-C4).
+   *
+   * The host uses this to clear the `pendingOutboundMessage` prop back to
+   * `null` so subsequent renders do not re-send the same message. Pairs with
+   * `pendingOutboundMessage` above.
+   */
+  onOutboundConsumed?: () => void;
+
+  /**
    * Hook fired BEFORE SprkChat starts an outbound message stream — R5 task
    * 020 / D2-11.
    *

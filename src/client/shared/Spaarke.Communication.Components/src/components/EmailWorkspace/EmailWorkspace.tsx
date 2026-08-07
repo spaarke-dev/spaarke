@@ -52,7 +52,11 @@ import { useEmailComposeActions } from '../EmailComposeActions';
 import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding } from '../../logic/connections';
 import { launchCreate, type CreateKind } from '../../logic/actions';
 import { CollapsibleSection } from './CollapsibleSection';
-import { COMMUNICATION_ENTITY, mapRowToEmailCardItem } from './EmailWorkspace.mapping';
+import {
+  COMMUNICATION_ENTITY,
+  mapRowToEmailCardItem,
+  deriveEmailWorkspaceVisibleState,
+} from './EmailWorkspace.mapping';
 import { useEmailWorkspaceRecord } from './useEmailWorkspaceRecord';
 import type { EmailWorkspaceProps } from './EmailWorkspace.types';
 
@@ -139,6 +143,7 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   linkAnotherCatalog,
   initialSelectedId,
   hideList,
+  onVisibleEmailChange,
 }) => {
   const s = useStyles();
 
@@ -180,6 +185,20 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   const effectiveInitialSelectedId = initialSelectedId ?? autoFirstId;
 
   const record = useEmailWorkspaceRecord(dataService, selectedId);
+
+  // FR-C1 (task 042b, "Path 1: persisted Email carrier") — surface the compact
+  // agent-visible snapshot of the selected email to the (optional) host callback
+  // whenever the selection or its resolved record changes. Recomputed from the
+  // SAME single per-selection read above (no second Dataverse call). The SpaarkeAi
+  // `email` widget mount forwards this to its tab's persisted `widgetData`; the
+  // standalone code page omits the callback (NFR-06 — no per-mount branch here).
+  const visibleEmail = React.useMemo(
+    () => deriveEmailWorkspaceVisibleState(record.recordState, record.emlDocumentId),
+    [record.recordState, record.emlDocumentId]
+  );
+  React.useEffect(() => {
+    onVisibleEmailChange?.(visibleEmail);
+  }, [onVisibleEmailChange, visibleEmail]);
 
   // Attachment count for the collapsed "Attachments (N)" header — reported by the
   // (kept-mounted) attachments view after its per-selection load; reset on change.

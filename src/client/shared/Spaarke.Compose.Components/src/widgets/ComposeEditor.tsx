@@ -173,7 +173,21 @@ import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widget
 // mammoth reader) and `stampParaIds` (only ever called from the now-deleted mammoth branch) are no
 // longer imported here — every mount now hydrates via the `projection` branch below, whose HTML
 // already carries server paraIds (`data-paraid`), so no client-side stamping pass is needed.
-import { captureParaIdSnapshot, buildContentModel, buildBaselineParaIdMap } from '../utils/docxBridge';
+import {
+  captureParaIdSnapshot,
+  buildContentModel,
+  buildBaselineParaIdMap,
+  // R6 (spaarkeai-compose-r6 task 012, render-on-save cutover): the imported-doc model mapper + the
+  // born-in-editor comment-folding wrapper (scope amendment — the server removed the engine-based
+  // comment bake for ALL ContentModel saves, so both build paths fold session/advisory threads).
+  buildImportedContentModel,
+  buildContentModelWithComments,
+  type ImportedModelResult,
+  type ImportedModelThreadInput,
+} from '../utils/docxBridge';
+// R6 (task 012): the ONE shared composition for an advisory thread's exported root-comment text —
+// the same helper getAnchoredComments' mapping already routes through (see advisoryNoteFormatting).
+import { composeAdvisoryCommentExportText } from './advisoryNoteFormatting';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
 // R4 FR-03/FR-06 (task 020/022/032) — the step→operation interceptor + its rebased
 // operation log. A headless, read-only ProseMirror plugin captures transaction steps
@@ -852,6 +866,52 @@ export interface ComposeEditorHandle {
    * high-fidelity `.docx` (styles + style-linked multi-level numbering + tables). Resets the dirty flag.
    */
   buildContentModel(): ComposeContentModel;
+
+  /**
+   * R6 (spaarkeai-compose-r6 task 012, render-on-save cutover): the merged {@link ComposeContentModel}
+   * an IMPORTED document's dirty save posts — the server renders it into the retained carrier
+   * (RenderIntoCarrier), replacing the op-log/patch-engine path. Pairs editor blocks to `loadedModel`
+   * by paraId: untouched blocks pass through VERBATIM (every server-set fact preserved), edited blocks
+   * rebuild with diff-derived `w:ins`/`w:del` revision facts against the load-time baseline snapshot
+   * (redlined when `opts.trackChanges`; plain for reopened AUTHORED docs), pending AI / imported Word
+   * revision marks translate to revision facts, and session + advisory comment threads fold in as
+   * Start/End anchor runs + appended `model.comments` (imported threads excluded — they ride
+   * `loadedModel.comments`). Returns `null` when the editor is unmounted. Warnings are aggregated
+   * `{ code, count }` fidelity notices (e.g. dropped line/page breaks on an edited paragraph) —
+   * surfaced by the host, never blocking.
+   *
+   * F5 (step-9.5 review): does NOT reset the dirty flag at build time (a failed save must leave the
+   * document dirty for retry). It records the op-log high-water mark exactly like
+   * {@link serializeOperationLog} does, so the host's existing {@link commitSaved} on a confirmed 200
+   * drops the batch this model captured and recomputes dirty — edits typed mid-flight survive as
+   * still-dirty. F4: the result carries the build-time `snapshot` to hand back via
+   * {@link adoptBaselineSnapshot} after the 200 (never re-capture from the live doc — a mid-flight
+   * edit would silently vanish into a live re-capture).
+   */
+  buildImportedContentModel(
+    loadedModel: ComposeContentModel,
+    opts: { trackChanges: boolean }
+  ): ImportedModelResult | null;
+
+  /**
+   * F4 (step-9.5 review): ADOPT a build-time baseline snapshot — the one
+   * {@link buildImportedContentModel} returned — as the diff baseline for the next save and the live
+   * Track Changes overlay. Called by the workspace on a CONFIRMED 200 for the save that posted that
+   * model. Replaces {@link recaptureBaselineSnapshot} for the model-save path: adopting the
+   * build-time map (instead of re-capturing the live doc) keeps any edit typed while the save was in
+   * flight DIFFERENT from the baseline, so it still redlines/saves next time. No dirty-flag side
+   * effect.
+   */
+  adoptBaselineSnapshot(snapshot: ReadonlyMap<string, string>): void;
+
+  /**
+   * R6 (task 012): re-capture the `{ paraId → reject-state text }` baseline snapshot from the CURRENT
+   * document (same capture as the load-time {@link captureParaIdSnapshot} pass). No dirty-flag side
+   * effect. Prefer {@link adoptBaselineSnapshot} after a model-path save (F4: a live re-capture at
+   * 200-time silently absorbs mid-flight edits); kept for compatibility and for callers that
+   * deliberately want a live re-baseline.
+   */
+  recaptureBaselineSnapshot(): void;
 
   /**
    * R3 FR-04 (task 027): the current PENDING AI redlines mapped to {@link DocxAnnotationInput}[] (native
@@ -2704,6 +2764,24 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     }, [editor, referenceOnly, projectionUnavailable, isImporting]);
 
     // ----- Imperative handle ----------------------------------------------
+    // R6 (task 012): the session + advisory comment threads folded into a ContentModel save —
+    // assembled EXACTLY like getAnchoredComments (session panel threads from commentThreadsRef
+    // excluding the load-time imported ids, plus the advisory instance's threads), flattened to the
+    // pure mapper's thread-input shape. Root text routes through composeAdvisoryCommentExportText —
+    // the SAME structured "Flagged clause / Assessment / Standard" composition the anchored-comments
+    // save path exports (a plain session comment's text passes through unchanged).
+    const collectSessionThreadInputs = (): ImportedModelThreadInput[] => {
+      const importedIds = new Set(initialCommentThreads.map(t => t.id));
+      const threads = [...commentThreadsRef.current.filter(t => !importedIds.has(t.id)), ...advisoryComments.threads];
+      return threads.map(t => ({
+        id: t.id,
+        author: t.author,
+        timestamp: t.timestamp,
+        text: composeAdvisoryCommentExportText(t),
+        replies: t.replies.map(r => ({ text: r.text, author: r.author, timestamp: r.timestamp })),
+      }));
+    };
+
     React.useImperativeHandle(
       ref,
       (): ComposeEditorHandle => ({
@@ -2736,14 +2814,43 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
         getBaselineParaIdMap: () => buildBaselineParaIdMap(paraIdSnapshotRef.current),
         // R3 FR-01a (task 027): the full content model for a born-in-editor save — the server renders it.
+        // R6 (task 012 scope amendment): the server removed the engine-based comment bake for ALL
+        // ContentModel saves, so the born-in-editor build now folds session + advisory comment threads
+        // into the model itself (Start/End anchor runs + comments list, ids allocated from 1). Text
+        // output is unchanged (reject-state parity — buildContentModelWithComments delegates to the
+        // legacy buildContentModel when no session threads exist).
         buildContentModel: () => {
           if (!editor) {
             throw new Error('ComposeEditor: cannot build content model — editor not mounted');
           }
-          const model = buildContentModel(editor);
+          const { model } = buildContentModelWithComments(editor, collectSessionThreadInputs());
           dirtyRef.current = false;
           onDirtyChange?.(false);
           return model;
+        },
+        // R6 (task 012, render-on-save cutover): the imported-doc merged model — see the handle JSDoc.
+        // F5 (step-9.5 review): NO dirty reset at build time — a rejected save must leave the Save
+        // button live for retry. Instead record the op-log high-water mark (the SAME mechanism
+        // serializeOperationLog uses) so commitSaved() on a confirmed 200 drops exactly the batch
+        // this model captured and recomputes dirty from whatever the user typed mid-flight.
+        buildImportedContentModel: (loadedModel, opts) => {
+          if (!editor) return null;
+          if (opLogRef.current) committedBoundaryRef.current = opLogRef.current.nextSeq;
+          return buildImportedContentModel(editor, loadedModel, paraIdSnapshotRef.current, {
+            trackChanges: opts.trackChanges,
+            sessionThreads: collectSessionThreadInputs(),
+          });
+        },
+        // F4 (step-9.5 review): adopt the BUILD-TIME snapshot handed back by the mapper after a
+        // confirmed 200 — mid-flight edits stay different from the baseline and save next time.
+        adoptBaselineSnapshot: snapshot => {
+          paraIdSnapshotRef.current = new Map(snapshot);
+        },
+        // R6 (task 012): LIVE re-capture of the baseline. Prefer adoptBaselineSnapshot after a
+        // model-path save (F4); kept for compatibility / deliberate live re-baselines.
+        recaptureBaselineSnapshot: () => {
+          if (!editor) return;
+          paraIdSnapshotRef.current = captureParaIdSnapshot(editor);
         },
         // R3 FR-04 (task 027): pending AI redlines → native-markup annotations the server composes onto
         // the authored baseline (task 023). Does NOT reset dirty (separate from settled-text edits).

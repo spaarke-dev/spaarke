@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Add the Email variant to the client SerializedWidgetState union + discriminator guard (FR-C2 client)</title>
+    <phase>5 C — Email visibility</phase>
+    <gate>blocked until 001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Shared-lib TypeScript union + compile-guard change</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive union variant following the existing 4-variant pattern + pillar9-visibility derivations</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits Spaarke.AI.Widgets types — disjoint from the server variant (041) and ConversationPane</parallel-reason>
+    <deps>001</deps>
+    <tags>react, frontend, typescript</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a lean `Email` variant to the closed `SerializedWidgetState` union (subject, from, date, thread id, short snippet or current selection) and update the `_DiscriminatorAlignment` guard; add its derivation alongside the pillar9-visibility functions.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript shared-lib expertise; comfortable extending closed discriminated unions and compile-time alignment guards without breaking structural deserialization.</role>
+  <goal>The union has an Email variant that deserializes structurally (no fallback to Dashboard/Summary); the discriminator guard stays 1:1.</goal>
+  <context>
+    <background>FR-C2 client half. The client `SerializedWidgetState` union has 4 variants (Summary/DocumentViewer/Dashboard/Table) at :321-325, `GetAgentVisibleState` at :375, and the `_DiscriminatorAlignment` compile guard at :425-429 (locked 1:1 to WorkspaceTabWidgetType). Email has no honest fit among the 4, so it deserializes as Dashboard (name-only). The four existing derivations live in pillar9-visibility.ts (copy that pattern for emailWidgetVisibility).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/SerializedWidgetState.ts (:321-325 union, :375 GetAgentVisibleState, :425-429 guard)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/pillar9-visibility.ts (add emailWidgetVisibility alongside the 4 existing derivations)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/types/WorkspaceTab.ts (WorkspaceTabWidgetType — keep the guard aligned)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-015">The Email shape is a COMPACT/lean shape (subject/from/date/thread + short snippet/selection) — not full body.</constraint>
+    <constraint source="project">Keep the `_DiscriminatorAlignment` compile guard 1:1 with the server union.</constraint>
+    <constraint source="project">Caps mirror pillar9 (e.g., selection/snippet char caps).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add the Email variant to the SerializedWidgetState union.</step>
+    <step order="2">Add emailWidgetVisibility to pillar9-visibility.ts (compact shape, char caps).</step>
+    <step order="3">Update the _DiscriminatorAlignment guard so it stays 1:1.</step>
+    <step order="4">Build the shared lib + typecheck.</step>
+    <step order="5">Update TASK-INDEX ✅.</step>
+  </steps>
+  <justification>
+    <existing>SerializedWidgetState has 4 variants (:321); no Email.</existing>
+    <extension>No — email has no honest fit among the 4; must add a variant.</extension>
+    <cost-of-doing-nothing>Email deserializes as Dashboard (name-only); the Assistant can't see subject/from/thread.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/types/SerializedWidgetState.ts</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/pillar9-visibility.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The union has an Email variant with subject/from/date/thread + short snippet/selection.</criterion>
+    <criterion testable="true">It deserializes structurally (no fallback to Dashboard/Summary).</criterion>
+    <criterion testable="true">The discriminator guard is 1:1 with the server union.</criterion>
+    <criterion testable="true">Caps applied.</criterion>
+    <criterion testable="true">Shared lib builds.</criterion>
+  </acceptance-criteria>
+  <notes>FR-C2 client half; coordinate the exact field set with the server variant (041).
+
+DONE (2026-08-06, subagent, FULL rigor). Added `SerializedEmailState { widgetType: 'Email'; subject: string; from: string; date: string; threadId: string | null; snippet: string | null }` to the closed `SerializedWidgetState` union (SerializedWidgetState.ts); added `'Email'` to `WorkspaceTabWidgetType` (WorkspaceTab.ts); added `emailWidgetVisibility` derivation + `EMAIL_SNIPPET_CAP_CHARS=200` constant to pillar9-visibility.ts (returns null unless subject+from+date all non-empty; snippet sourced from `snippet` or falls back to `selectionText`, truncated to 200 chars, null when absent); barrel-exported `SerializedEmailState` from index.ts. `_DiscriminatorAlignment` verified resolving to `true` via a scratch `const _check: _DiscriminatorAlignment = true` compile check (both directions — union↔type). Build (`tsc`) + typecheck both exit 0. Added 8 new unit tests for `emailWidgetVisibility` (mirrors documentViewerWidgetVisibility conventions; includes explicit ADR-015 negative assertion that full body/attachments never leak) — pillar9-visibility.test.ts now 37/37 green (was 29). Step 9.5 gates: code-review found one Warning (missing test coverage for the new derivation) — resolved by adding the 8 tests; no Critical issues. adr-check: ADR-015 compliant (identifiers/derived metadata only + single capped content field, verified by negative test); no other ADR triggers (client-only shared-lib change, no BFF/DI/auth surface). Files: SerializedWidgetState.ts, WorkspaceTab.ts, pillar9-visibility.ts, index.ts, pillar9-visibility.test.ts (new test coverage, not in original &lt;outputs&gt; but added to close the code-review gap). No deployment performed (implementation + build/typecheck only per orchestrator scope). TASK-INDEX.md and current-task.md intentionally NOT updated here (parallel-group C1 race avoidance with task 041; main session updates both after both C1 tasks finish).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

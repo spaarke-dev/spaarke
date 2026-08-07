@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Deploy + verify Workstream C (email visibility: shared lib + code page + BFF)</title>
+    <phase>5 C — Email visibility</phase>
+    <gate>blocked until 040,041,042</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment + verification</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deploy via bff-deploy + code-page-deploy</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment step after C code lands</parallel-reason>
+    <deps>040,041,042</deps>
+    <tags>deploy, frontend, bff-api</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Deploy the shared lib + SpaarkeAi code page + BFF and verify the Assistant can state an open email's subject/sender/thread (Success Criterion 3).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deployment expertise with the bff-deploy + code-page-deploy skills; comfortable verifying the Email visible-state variant end-to-end for a visible email tab.</role>
+  <goal>C deployed; the Email visible-state variant is emitted for a visible email tab.</goal>
+  <context>
+    <background>Workstream C code (040 client Email variant + 041 server Email variant + 042 widget getAgentVisibleState) has landed; deploy the shared lib (bundled into the code page), the SpaarkeAi code page, and the BFF, then verify the Assistant can state an open email's subject/sender/thread per Success Criterion 3.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Use bff-deploy + code-page-deploy; the shared-lib change is bundled into the code page; verify publish ≤60 MB.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Build the shared lib; deploy BFF (record publish size).</step>
+    <step order="2">Deploy SpaarkeAi (bundles the shared lib).</step>
+    <step order="3">Verify: open an email tab, confirm the Assistant states subject/sender/thread (Email visible-state emitted).</step>
+    <step order="4">Update TASK-INDEX ✅.</step>
+    <step order="5">Record in notes/.</step>
+  </steps>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r2/notes/c-deploy-verify.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Shared lib + BFF + code page deploy.</criterion>
+    <criterion testable="true">Publish ≤60 MB.</criterion>
+    <criterion testable="true">The Assistant states an open email's subject/sender/thread.</criterion>
+  </acceptance-criteria>
+  <notes>Success Criterion 3.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

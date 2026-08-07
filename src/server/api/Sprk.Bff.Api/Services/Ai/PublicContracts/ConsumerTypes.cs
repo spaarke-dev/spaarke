@@ -347,6 +347,22 @@ public static class ConsumerTypes
     public const string ComposeReviseDocument = "compose-revise-document";
 
     /// <summary>
+    /// <c>AssistantSuggestionService</c> (spaarkeai-assistant-enhancements-r2 task 022, FR-B3/B5) —
+    /// the proactive-suggestion capability. A Linear AI Consumer resolving the catalog-authored
+    /// <c>SUGGEST-FOLLOWUPS</c> Action (<c>sprk_actioncode = "suggest-followups"</c>): given the
+    /// focused workspace tab's compact server-derived visible state + a deterministically
+    /// contextType-pre-filtered candidate capability set (<see cref="Binding.ContextTypeTags"/>,
+    /// task 021), it SELECTS + phrases up to 3 content-specific follow-on chips. A PROPOSER, not a
+    /// dispatcher — the chips ride the existing deterministic Click path when clicked; this Action
+    /// never dispatches, executes, or stores anything (no second dispatch protocol / no second intent
+    /// mechanism, ADR-039). Invoked from the <c>POST /api/ai/chat/sessions/{id}/suggest</c> endpoint via
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.IAssistantSuggestionService"/>, never chat/loop-projected.
+    /// Live Binding row seeded on spaarkedev1 (task 022); mirror at
+    /// <c>infra/dataverse/actions/suggest-followups.action.json</c>.
+    /// </summary>
+    public const string AssistantSuggest = "assistant-suggest";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -379,5 +395,6 @@ public static class ConsumerTypes
         ComposeDraftDocument,
         CreateMatter,
         ComposeReviseDocument,
+        AssistantSuggest,
     };
 }

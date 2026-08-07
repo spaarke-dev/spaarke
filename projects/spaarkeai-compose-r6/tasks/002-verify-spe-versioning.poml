@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Verify SPE versioning append-only + inventory Documents version APIs</title>
+    <phase>0 Foundations &amp; gates</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Verification + inventory producing a notes artifact; no production code change — STANDARD per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified read-only verification; sonnet default per §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase0-foundations</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only: inventories SPE/Documents version APIs and writes only a notes file; touches no Services/Compose/ shared source.</parallel-reason>
+    <deps>none</deps>
+    <tags>verify, spe</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Confirm SPE versioning is non-destructive / append-only against the live Documents surface, and inventory the existing Documents version APIs (the admin/app-only version-list endpoint and the unexposed OBO download-version primitive). This is the Q1 gate that underwrites the render-on-save "version history is the safety net" claim and de-risks FR-07 before any endpoint is built.</prompt>
+  <role>SPAARKE platform developer. Expertise in SharePoint Embedded (SpeFileStore / ISpeFileOperations / DriveItemOperations), Graph version semantics, and OBO vs app-only auth paths. Follow ADRs strictly.</role>
+  <goal>A notes/spe-versioning-verify.md file that (a) confirms with evidence that SPE versioning is append-only (a new save produces a new version; prior versions remain byte-retrievable), and (b) inventories every existing Documents version API with file:line, auth path (OBO vs app-only), and scope — establishing what FR-07 must add vs reuse.</goal>
+
+  <context>
+    <background>The pivot's safety-net claim (prior versions retrievable) and FR-07 (open prior version, exact bytes) both assume SPE versioning is non-destructive. The only version-list endpoint today is admin-only/app-only/config-scoped (ContainerItemEndpoints.cs:48); the OBO DownloadFileVersionAsUserAsync primitive exists but is Compose-internal and unexposed. spec Assumptions require this be confirmed against the live Documents surface before FR-07 is built.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ContainerItemEndpoints.cs:48 — admin/app-only version-list endpoint (the existing surface to contrast against the needed OBO one).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs — DownloadFileVersionAsUserAsync:842 (OBO version-download primitive, unexposed).</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:642 — SaveAsync; ReplaceFileContentAsUserAsync auto-version behavior.</file>
+      <file role="new">projects/spaarkeai-compose-r6/notes/spe-versioning-verify.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Scope: reason about versioning strictly through the SpeFileStore facade / ISpeFileOperations; do not introduce Microsoft.Graph types into any inventory recommendation for Services/Compose.</constraint>
+    <constraint source="project">Scope: this is verification only — do NOT modify any production code, endpoint, or DI registration; the sole write is the notes file.</constraint>
+    <constraint source="project">Scope: record the auth path (OBO vs app-only) and scope (user-document vs admin/config) for each inventoried API, since FR-07 hinges on the OBO-vs-app-only distinction.</constraint>
+    <constraint source="ADR-038">Scope: if a probe is needed, prefer an existing seam/integration slice over any new Mock&lt;HttpMessageHandler&gt; — do not add banned mock-shaped tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SharePoint Embedded versioning; OBO vs app-only; Documents surface</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="OBO version primitive" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs">DownloadFileVersionAsUserAsync:842 is the existing OBO primitive FR-07 will expose; document its signature + auth path.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: STANDARD, model-tier sonnet. Load the SPE/Documents endpoint + primitive files.</step>
+    <step order="1">Trace how a Compose save persists (ReplaceFileContentAsUserAsync) and confirm from code + SPE behavior that a new version is appended, not overwritten.</step>
+    <step order="2">Verify against the live Documents surface (or the closest available seam) that a prior version remains retrievable byte-for-byte after a newer version exists.</step>
+    <step order="3">Inventory every Documents version API: ContainerItemEndpoints.cs:48 (admin/app-only), DownloadFileVersionAsUserAsync:842 (OBO, unexposed), and any list-versions OBO gap; record file:line, auth path, scope.</step>
+    <step order="4">Write projects/spaarkeai-compose-r6/notes/spe-versioning-verify.md with the append-only confirmation + the API inventory + an explicit "what FR-07 must ADD vs REUSE" table.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If evidence shows SPE versioning is NOT append-only (a save destroys or mutates a prior version), STOP and escalate per root §6 — this invalidates the pivot's safety-net premise and FR-07, and must be resolved before Phase 1 proceeds.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-compose-r6/notes/spe-versioning-verify.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the notes artifact, when reviewed, then it confirms with cited evidence that a Compose save appends a new SPE version and leaves prior versions byte-retrievable.</criterion>
+    <criterion testable="true">Given the notes artifact, when reviewed, then it inventories ContainerItemEndpoints.cs:48 and DownloadFileVersionAsUserAsync:842 with file:line, auth path (OBO vs app-only), and scope.</criterion>
+    <criterion testable="true">Given the notes artifact, when reviewed, then it states explicitly what FR-07 must ADD (OBO list-versions + open-prior endpoint) vs REUSE (the OBO download primitive).</criterion>
+    <criterion testable="true">Negative: no production code, endpoint, or DI registration is modified; the only committed change is the notes file.</criterion>
+  </acceptance-criteria>
+
+  <notes>Q1 gate (spec Assumptions + Dependencies/Prerequisites). Its output feeds Phase 5 (050/051/052). Contrast the admin/app-only list endpoint against the OBO primitive to scope FR-07's new endpoint.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

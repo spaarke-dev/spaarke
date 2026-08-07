@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>ConversationPane subscribes to active_widget_changed and holds a focus ref (FR-A1)</title>
+    <phase>2 A — Active-tab awareness</phase>
+    <gate>blocked until 001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend .tsx implementation with a seam test</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive subscriber following the existing usePaneEvent pattern</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (shared client spine)</parallel-reason>
+    <deps>001</deps>
+    <tags>react, frontend, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a `workspace.active_widget_changed` subscriber to ConversationPane that stores `{ widgetType, contextType, tabId, displayName, compactState }` in a ref, plus a seam test.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 frontend expertise; comfortable extending PaneEventBus subscriptions and writing seam tests without re-render churn.</role>
+  <goal>Switching the active Workspace tab updates the focus ref; a seam test verifies the subscriber.</goal>
+  <context>
+    <background>FR-A1 — the Assistant has no active-tab tracking today. `active_widget_changed` is broadcast by WorkspacePane.tsx:586 and consumed only by ReviewCompleteToast; ConversationPane's usePaneEvent('workspace') subscription (:2362) handles only widget_load, with no active-tab branch.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventTypes.ts (read the active_widget_changed payload)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-030">Use the existing PaneEventBus `usePaneEvent('workspace', …)` subscription pattern.</constraint>
+    <constraint source="project">Store in a ref (not state) to avoid re-render churn.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read PaneEventTypes active_widget_changed payload (widgetType, widgetData, tabId, displayName).</step>
+    <step order="2">Add a usePaneEvent('workspace') handler branch for active_widget_changed that writes the focus ref.</step>
+    <step order="3">Add a seam test asserting the ref updates on an active_widget_changed event.</step>
+    <step order="4">Build + test.</step>
+    <step order="5">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If active_widget_changed is not actually broadcast for the email widget path, STOP and escalate rather than inventing a new event.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Focus ref updates">
+      <steps>Switch the active tab; verify (via the dev trace or a temporary log) the focus ref reflects the new tab. Include an ADR-021 dark-mode no-regression check.</steps>
+      <expected>Focus ref reflects the newly-active tab; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <justification>
+    <existing>ConversationPane usePaneEvent('workspace') at :2362 handles only widget_load — no active-tab branch.</existing>
+    <extension>Yes — extend the existing workspace subscription with an active_widget_changed branch.</extension>
+    <cost-of-doing-nothing>'summarize this' keeps resolving against the server UpdatedAt heuristic, not the focused tab.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="test">the seam test file</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Switching the active tab updates the focus ref.</criterion>
+    <criterion testable="true">The seam test passes.</criterion>
+    <criterion testable="true">No SprkChat fork.</criterion>
+    <criterion testable="true">Build clean.</criterion>
+  </acceptance-criteria>
+  <notes>Ref shape must match FR-A1 exactly: { widgetType, contextType, tabId, displayName, compactState }.
+
+Completed 2026-08-05. Extended the existing `usePaneEvent('workspace', …)` handler (:2320, single subscription preserved) with an `active_widget_changed` branch that writes `activeTabFocusRef` (React.useRef, no state). Factored the event→stamp mapping into a pure, exported `deriveActiveTabFocusStamp` helper in a new sibling file `activeTabFocusStamp.ts` (mirrors the file's existing `routeSummarizeIntent`/`normalizeReviewDepth` pattern) so the seam test unit-tests the derivation logic directly rather than rendering the full pane to poke a private ref. `contextType` intentionally left `undefined` (FR-B1 closed set lands in task 020). New seam test `__tests__/activeTabFocusStamp.test.ts` — 5/5 passing (exact-shape mapping, displayName fallback to widgetType, empty-string defaults for missing tabId/widgetType, compactState undefined when widgetData absent, ignores every other workspace event type). Regression-checked 3 existing workspace-subscription tests (restore-session-readopt, wizard-auto-run e2e, hooks-order) — all still pass. `npm run typecheck`: Surface-owned 0 (307 pre-existing shared-lib errors unrelated). code-review: 1 low-severity/PLAUSIBLE note (compactState passes widgetData verbatim, unbounded at this layer — bounding is task 011/012's ADR-015 responsibility, not this task's). adr-check (ADR-030): clean — single subscription, no `any`, additive-only, typed via PaneChannelEventMap. No SprkChat fork.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

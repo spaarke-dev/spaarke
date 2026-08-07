@@ -61,7 +61,8 @@ export type {
 
 // WidgetMetadata — canonical definition from shared.ts (task AIPU2-071).
 // Required by WorkspaceWidgetRegistry.registerWorkspaceWidget().
-export type { WidgetMetadata } from './types/shared';
+// WidgetContextType — closed contextType union (FR-B1 + FR-C3, task 020).
+export type { WidgetMetadata, WidgetContextType } from './types/shared';
 
 // ---------------------------------------------------------------------------
 // Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)
@@ -79,6 +80,7 @@ export type {
   DocumentViewerTabWidgetData,
   DashboardTabWidgetData,
   TableTabWidgetData,
+  EmailTabWidgetData,
   WorkspaceTabSourceProvenance,
   WorkspaceTabMatterContext,
 } from './types/WorkspaceTab';
@@ -86,8 +88,8 @@ export type {
 // ---------------------------------------------------------------------------
 // Types — Pillar 9 Widget Visibility Contract (R6 task 071; FR-55)
 //
-// Discriminated union (4 variants — Summary, DocumentViewer, Dashboard, Table)
-// describing the agent-visible state each widget MAY opt into exposing to
+// Discriminated union (5 variants — Summary, DocumentViewer, Dashboard, Table,
+// Email) describing the agent-visible state each widget MAY opt into exposing to
 // Pillar 9's prompt builder. Consumed by:
 //   - task 072 (WorkspaceWidgetRegistry getVisibleState extension)
 //   - task 073 (per-widget implementations)
@@ -105,6 +107,7 @@ export type {
   SerializedDocumentViewerState,
   SerializedDashboardState,
   SerializedTableState,
+  SerializedEmailState,
   GetAgentVisibleState,
   _DiscriminatorAlignment,
 } from './types/SerializedWidgetState';

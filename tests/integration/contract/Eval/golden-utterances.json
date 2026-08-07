@@ -298,7 +298,10 @@
         "catalogStatus": "existing"
       },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
-      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 023 (FR-05)" }
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "email-communication-intelligence-r1 task 023 (FR-05)"
+      }
     },
     {
       "caseId": "GU-139",
@@ -315,7 +318,10 @@
         "catalogStatus": "existing"
       },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
-      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 030 (FR-09)" }
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "email-communication-intelligence-r1 task 030 (FR-09)"
+      }
     },
     {
       "caseId": "GU-140",
@@ -332,7 +338,10 @@
         "catalogStatus": "existing"
       },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
-      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "email-communication-intelligence-r1 task 040 (FR-14)" }
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "email-communication-intelligence-r1 task 040 (FR-14)"
+      }
     },
     {
       "caseId": "GU-018",
@@ -2363,6 +2372,26 @@
       },
       "assertions": { "schemaConformance": "compose-revise-document", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "spaarkeai-compose-r2 DEF-11 (catalog deploy)" }
+    },
+    {
+      "caseId": "GU-141",
+      "family": "assistant-suggest",
+      "ucId": "UC-B-3",
+      "channel": "event",
+      "utterance": "proactive follow-on suggestion turn fires on a workspace tab first-open (spaarkeai-assistant-enhancements-r2 task 022, FR-B3/B5)",
+      "notes": "FR-P2-08 full-catalog coverage for the ConsumerTypes.AssistantSuggest constant (added task 022). A proactive PROPOSER, NOT a dispatch consumer: invoked server-side via POST /api/ai/chat/sessions/{id}/suggest (the SUGGEST-FOLLOWUPS Action run through IActionRunner), never chat/loop-projected; the <=3 chips it selects ride the EXISTING deterministic Click path on user click, so it never enters the three-entry-path dispatch protocol (ADR-039). Dedicated coverage (deterministic contextType pre-filter, closed-catalog guard dropping off-catalog ids, <=3 cap, best-effort) lives in tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/AssistantSuggestionServiceTests.cs; this entry exists ONLY to satisfy P2LoopInjectionEvalSuiteTests.FullCatalog_EveryClosedCatalogConsumerType_HasAnEvalFamily's ConsumerTypes.All scan of this shared file (same coverage-only pattern as GU-138 email-triage).",
+      "context": { "surface": "assistant-proactive-suggestion" },
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "assistant-suggest",
+        "consumerCode": "default",
+        "catalogStatus": "existing"
+      },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": {
+        "dispatchAssertPhase": "P3",
+        "activatedBy": "spaarkeai-assistant-enhancements-r2 task 022 (FR-B3/B5)"
+      }
     }
   ]
 }
