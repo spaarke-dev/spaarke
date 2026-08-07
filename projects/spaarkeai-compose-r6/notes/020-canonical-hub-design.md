@@ -896,3 +896,41 @@ corpus fixture (025-F6).
 ---
 
 *Steps 1–3 artifact + gates + tasks 020/011/021/022/023/024/025/026/010/012/013/027 records. Checkpoint in `current-task.md`.*
+
+## §21 — Task 030: ComposeTemplatePartMergeEngine (2026-08-07)
+
+**Design**: TEMPLATE-AS-BASE. The merged package IS the .dotx re-typed to Document — template chrome
+(styles/numbering/theme/headers/footers/sectPr + their rIds) is structurally free; only grafted content
+reconciles. NOT altChunk (FR-05). Commits: 976cb1057 (initial) + c9c1b24f2 (review round).
+
+**The merge pipeline** (Merge(bodyDocx, templateDotx, warnings) -> byte[]):
+1. VBA stripped loudly if template was macro-enabled (`template-merge-macros-stripped`).
+2. Template body reset; trailing sectPr kept (or adopted from source + WARNED + joins rel reconcile — F1).
+3. Story clones (comments/footnotes/endnotes the body anchors) prepared EARLY so they participate in
+   style/numbering collection + remap (F3); dangling story refs stripped loudly (F9).
+4. FIXED-POINT dependency closure over source catalogs: styles pull basedOn/link/next + style-attached
+   numIds; numbering pulls numStyleLink/styleLink + per-level pStyle (F8).
+5. Style graft: template WINS collisions (that is house style); missing defs grafted.
+6. Numbering graft: num+abstractNum(+numPicBullet, F6) cloned VERBATIM under offset ids at schema-correct
+   slots (numPicBullet* -> abstractNum* -> num* -> numIdMacAtCleanup — F5); identity preserved, never
+   recomputed. Unresolvable numbering refs STRIPPED (renders visibly unnumbered) + warned — never left to
+   silently capture the template's same-id scheme (F7).
+7. Story attach with collision-proof id minting (taken-set checked per mint — F4); body refs remapped.
+8. Rel reconciliation PER HOSTING PART (F2): main-part roots vs source main; carried story/numbering
+   content vs its own source->target part pair. Hyperlink/external re-added by URI; parts deep-copied via
+   cross-package AddPart. Unresolvable: hyperlinks UNWRAP (text survives — F10), others drop smallest
+   run-child host; one aggregated `template-merge-unresolved-reference` warning.
+
+**Warning codes**: template-merge-{missing-sectpr, template-has-no-styles, macros-stripped,
+numbering-unresolved, story-reference-dropped, comment-threading-dropped, unresolved-reference}.
+
+**Step 9.5**: adr-check PASS (7 axes, zero violations). Code-review surfaced 2 Critical + 6 Major + 3
+Minor — ALL fixed same-task in c9c1b24f2; test gaps closed with 8 carrier-class tests (footnote-with-
+hyperlink part-local rels, adopted-sectPr header refs, comment carry, footnote id collision, dangling
+story ref, numPicBullet/numIdMacAtCleanup schema order, dangling drawing/hyperlink loud drops, happy-path
+zero-warnings). 15/15 engine; 1039/1039 Compose+arch; publish 46.98 MB; CVE clean.
+
+**Known deferred**: commentsExtended threading/resolution not carried (warned loudly); orphan-rel package
+bloat when ONE element carries both a resolvable and an unresolvable r-ref (cosmetic). For 032/033: the
+endpoint (032) feeds rendered bodies; 033's seam suite should include an IMPORTED carrier slice through
+the wire (the review's core lesson: the carrier class is where the bodies are buried).

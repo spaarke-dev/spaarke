@@ -1,16 +1,16 @@
 # Current Task — Spaarke Compose R6
 
-> **Last Updated**: 2026-08-07 (task 030 implemented; Step 9.5 reviewers in flight)
+> **Last Updated**: 2026-08-07 (030 closed — clean boundary; next 031)
 > **Recovery**: Read "Quick Recovery" first; full state below.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **030 — Part-merge engine** (FULL rigor, Fable@high). IMPLEMENTED + committed `976cb1057`: `ComposeTemplatePartMergeEngine` (template-as-base direct part-merge; style-collision template-wins + transitive graft; numId remap onto verbatim clones; r:-ns rel reconciliation; comments/footnotes/endnotes id-remapped merge; loud `template-merge-*` warnings) + unconditional singleton in ComposeModule + 7 engine tests. Suite 1031/1031. Step 9.5 IN FLIGHT: code-review + adr-check background agents + clean-worktree publish/CVE on the SHA. |
-| **Next task** | Operator choice — all now unblocked: **030** (part-merge engine, opus/FULL), **040** (PDF intake, opus/FULL), **050** (OBO version-history endpoint, opus/FULL), **060** (CI fidelity harness, sonnet/FULL). ALSO on the table: UAT defect fix tasks D1-D7 (see notes/phase1-deploy-uat.md defect register) — operator may want D1 (duplicate sprk_document records) + D2 (quote→`2` mangling) prioritized before new phases. |
-| **Status** | 014 closed; deploy + UAT record at notes/phase1-deploy-uat.md |
-| **Next Action** | On "continue": ask/confirm which of 030/040/050/060 (or a D-fix task) to start, then task-execute it. Task creation for D1-D7 fixes = scope addition → operator approval first. |
+| **Task** | NONE ACTIVE — clean boundary. **030 COMPLETE** (`976cb1057` + `c9c1b24f2`): `ComposeTemplatePartMergeEngine` — template-as-base direct part-merge, all 12 review findings fixed same-task, 15 engine tests, suite 1039/1039, publish 46.98 MB, adr-check clean. Record: notes §21. |
+| **Next task** | **031 — template storage/variable rendering reuse** (`tasks/031-*.poml`, deps 030 ✅, STANDARD/sonnet) → then 032 (endpoint+client wiring) → 033 (provenance seam tests — MUST include an imported-carrier wire slice per §21). Parallel-eligible alternatives: 040 (PDF intake), 050 (version-history endpoint), 060 (CI harness) — but Compose tasks serialize. D1-D7 fix tasks still awaiting operator scope approval (D1 scope defined: split-button UX + fork filename uniquify + upsert guard). |
+| **Status** | 030 closed; pushing |
+| **Next Action** | On "continue": task-execute 031. |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are

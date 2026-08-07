@@ -34,7 +34,7 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | 025 | Tracked-changes (redlines) through the model | 2 | 020 | none | false | FULL | sonnet/high | ✅ |
 | 026 | Hard-tier graceful degradation (text boxes/drawings/fields/content controls → accept-flatten + warning) | 2 | 020 | none | false | FULL | sonnet/high | ✅ |
 | 027 | Fidelity seam tests across the corpus | 2 | 021,022,023,024,025,026,012 | none | false | FULL | sonnet/high | ✅ |
-| 030 | Part-merge engine in Services/Compose (body → firm/matter .dotx) | 3 | 020 | P3 | false | FULL | opus/high | 🔲 |
+| 030 | Part-merge engine in Services/Compose (body → firm/matter .dotx) | 3 | 020 | P3 | false | FULL | opus/high | ✅ |
 | 031 | Template storage/variable rendering reuse (template entity + ITemplateEngine) | 3 | 030 | P3 | false | STANDARD | sonnet/high | 🔲 |
 | 032 | Endpoint + client wiring for template selection/merge | 3 | 031 | P3 | false | FULL | sonnet/high | 🔲 |
 | 033 | Part-merge tests + Placement/Component Justification | 3 | 032 | P3 | false | STANDARD | sonnet/high | 🔲 |
