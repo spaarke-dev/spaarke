@@ -7,10 +7,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | NONE ACTIVE — wave-2 (032+051+061) CLOSED at a1f005033 (suite 1104/1104; the only reds all day = the known flaky ComposeServiceCreateOnSaveTests class). Step 9.5 review agent for 032+051 IN FLIGHT — triage on return (fix-commit if needed), record in notes §23. |
-| **Next task** | **033 — part-merge provenance seam tests** (deps 030-032 ✅; MUST include an imported-carrier wire slice per §21) → then 052 (remaining Phase-5 client polish/picker if scoped), 040-042 (PDF intake), 090 wrap-up (needs 033/042/052/061✅). Also outstanding: D1-D7 fix-task scope approval; branch ~45 behind master (reconcile at next PR + /conflict-check; PR #690 fidelity-gate double-run dedup note). Phase 3 (030-033) is one task from done; Phases 5+6 DONE product-side. |
-| **Status** | Pushing close-out; review triage pending |
-| **Next Action** | On review return: triage + fix-commit + push. Then on "continue": task-execute 033 (Compose-serialized, main session or agent). |
+| **Task** | **033 IN FLIGHT** (exec-033 agent, isolated worktree): chrome-provenance seam suite + the §21 imported-carrier wire slice (assess-then-fill-gaps vs 030/032 coverage; test-only). Wave-2 review CLOSED at db1cc3406 (two HIGHs fixed: §F.1 NullComposeTemplateSource + carryDegradationWarnings through requestLoad; + isDirty apply-time re-check hoisted, ispersonal org-shared guard). Publish post-fixes 47.00 MB (ceiling 60); CVE clean. |
+| **Next task** | On 033 return: cherry-pick, verify, Step 9.5 (TEST-MODIFYING → FULL), close Phase 3 COMPLETE. Then Phase 4: 040 (PDF intake, opus/FULL) → 041/042. Then 090 wrap-up (test-diet gate; needs 042 + 052? — check TASK-INDEX deps: 090 needs 014✅,027✅,033,042,052,061✅). 052 = check what remains in Phase 5 (051 done). Follow-ups ledger: If-Match apply replace; ApiError 404 branch; 051 popup fallback; #690 double-run dedup; D1-D7 operator approval; flaky CreateOnSaveTests FakeTimeProvider. Branch ~45+ behind master — reconcile at next PR. |
+| **Status** | 033 agent running; all pushed through db1cc3406 |
+| **Next Action** | Triage 033 return → close-out → 040. |
 
 ### Critical Context (3 sentences)
 Dev environment now runs render-on-save end-to-end; the assistant-enhancements-r2 session's deploys are
