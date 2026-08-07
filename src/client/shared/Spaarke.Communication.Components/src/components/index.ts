@@ -21,3 +21,7 @@ export * from './EmailWorkspace';
 // (email-communication-intelligence-r2 task 050, FR-E2). Thin wrapper over the
 // shared `<DataGrid configId={...} />` framework — see ReconciliationGrid.tsx.
 export * from './ReconciliationGrid';
+
+// ReconcileTabs - Pillar E reconcile tabs (Fields = task 055 / FR-E4; Tasks =
+// task 056 / FR-E5) mounted in the browse-shell right pane + email record form.
+export * from './ReconcileTabs';
