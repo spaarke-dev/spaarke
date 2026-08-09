@@ -95,10 +95,40 @@ Parity tools are the Assistant's **interface** to a widget's domain. Behind them
 
 ---
 
+## 5.5 Orchestration model — how the Assistant works with a widget (THE template)
+
+**Refined principle (supersedes the strict "identity-only" line):** the Assistant gets a **handle to the active/selected item** (an id), **never its content**. The widget publishes *which* item is active; a tool fetches that item's data itself, by id. **Awareness = identity + active-item handle.**
+
+**The pattern — generalized from the SHIPPED Compose active-document flow:**
+1. **Widget publishes the active item on selection.** When the user selects/opens an item in a widget, the widget registers it as the active item — a handle `{ id, type, label }` — through the active-item conduit. (Compose precedent: `composeActionBridge` → `registerActiveDocument` → `POST /api/compose/active-document` → client `activeSourceDocRef` in ConversationPane.tsx:389/424.) No user "invoke" step; **selection is the trigger.**
+2. **Assistant auto-presents follow-on cards** for the active item, from the widget's declared action set (the proactive-card surface). No typing required. (Compose already does this for documents — ConversationPane.tsx:164-167.)
+3. **Click a card → parity tool** loads the item **by id** from the source of record (never from the tab) and acts.
+4. **Output lands on the native surface** — the widget's own editor/composer, a new Compose tab, or a chat answer.
+
+**Worked example — EMAIL (the canonical template instance):**
+- User selects an email → the Email widget publishes `{ communicationId, emlDocumentId, subject }` as the active item.
+- The Assistant shows follow-on cards: **Reply · Reply All · Forward · Summarize the thread**.
+- Click **Reply/Reply All/Forward** → `draft_reply(communicationId, mode)` loads the email by id (`sprk_communication` for addressing; the `.eml` for full thread), generates the body, then calls the EXISTING `useEmailComposeActions.openComposer(mode, communicationId)` with a new `bodyOverride` → the native composer (`SendEmailDialog`) opens **pre-filled** (recipients + `Re:`/`Fwd:` subject already handled by `fetchCommunicationPrefill`).
+- Click **Summarize the thread** → loads the `.eml` like a file (`eml-render`/document-context) and answers in chat.
+
+**Two representations of an email:** the **`sprk_communication` record** is the working surface (From/To/Subject/Body/Related-to/Attachments/Confirmed — Spaarke's tracking fields; this is what the reading pane + reply-quote render). The **`.eml`** (`emlDocumentId`) is the archived original message, loaded like any file via `eml-render`/document-context when full-thread fidelity is needed.
+
+**Two tool kinds per widget (what "capability parity" means concretely):**
+| Kind | Trigger | Target comes from | Output |
+|---|---|---|---|
+| **Overview / query** | a chat question | the tool's own query (no target needed) | chat answer / direct-to-tab |
+| **Per-item action** | a follow-on card (on the active item) | the **widget** (active-item handle) | native surface (composer / Compose / chat answer) |
+
+**Registration contract:** each widget declares at registration its context-type + its overview tools + its per-item action cards + where each lands. The registry enforces it — no widget ships without its Assistant contract — regardless of which of the four registration sites declares it.
+
+**Reuse vs. new:** *Reuse* — the active-document conduit (generalize to "active item"), the proactive-card surface, the email composer + recipient/subject prefill, `eml-render`. *New (small)* — the email widget publishing its selection as active context; the 4 email cards keyed to an active email; the email parity tools (`draft_reply`/`draft_forward`, `summarize_thread`); one `bodyOverride` parameter on `openComposer`.
+
+---
+
 ## 6. Key decisions (owner-confirmed 2026-08-07)
 
 1. **Keep standalone email + document tabs** (not Compose-only). Each gets a parity tool set with read + actions.
-2. **Strip ambient content to identity-only.** The prompt carries `{ type, label, active }` per tab; the one exception is the live text-selection hint. All factual data comes via tools. This lightly walks back FR-C1's ambient email data (email tab stays aware; content via tool). Rationale: single source of truth, no stale-snapshot hallucination, leaner prompt, scales.
+2. **Awareness = identity + active-item HANDLE (not content).** The prompt carries `{ type, label, active }` per tab PLUS a handle to the active/selected item (an id — e.g. `communicationId`/`documentId`), so the Assistant can offer per-item cards. It carries **no item content**; every fact/action is a tool that fetches by id. This supersedes the earlier strict "identity-only" phrasing (owner discussion 2026-08-07, the Compose-precedent alignment) and lightly walks back FR-C1's ambient email *content* (email tab stays aware via its handle; content via tool). Rationale: single source of truth, no stale-snapshot hallucination, leaner prompt, scales. See §5.5.
 3. **Phasing**: Phase 0 (quick wins) ships on the R2 branch now; Phases 1–4 (the contract) are R3.
 4. **Registration contract**: Assistant-contract fields become required registration metadata.
 
