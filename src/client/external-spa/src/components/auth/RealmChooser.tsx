@@ -48,7 +48,7 @@ export const RealmChooser: React.FC<RealmChooserProps> = ({ onChoose }) => {
           icon: <PeopleTeam24Regular />,
         },
       ]}
-      onSelect={(choiceId) => onChoose(choiceId as Realm)}
+      onSelect={choiceId => onChoose(choiceId as Realm)}
       cancelLabel="Cancel"
     />
   );
