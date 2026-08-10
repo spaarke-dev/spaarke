@@ -272,7 +272,13 @@ export type ComposeWorkspaceAction =
   // G8 (FR-07, task 030): `externalChange` (default false) carries the external-change flag THROUGH a
   // remount — a clean-editor auto-remount dispatches requestLoad with externalChange:true so the
   // banner still renders after loadSucceeded. Every other requestLoad (initial open / Search) omits it.
-  | { kind: 'requestLoad'; documentRef: ComposeDocumentRef; sessionId: string; externalChange?: boolean; carryDegradationWarnings?: Array<{ code: string; count: number }> | null }
+  | {
+      kind: 'requestLoad';
+      documentRef: ComposeDocumentRef;
+      sessionId: string;
+      externalChange?: boolean;
+      carryDegradationWarnings?: Array<{ code: string; count: number }> | null;
+    }
   | {
       kind: 'loadSucceeded';
       docxBytes: ArrayBuffer;
@@ -662,8 +668,10 @@ export function composeWorkspaceReducer(
         //   instead of keeping the PDF's.
         versionId:
           state.sourceFormat === 'pdf'
-            ? (action.versionId && action.versionId.length > 0 ? action.versionId : null)
-            : state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null),
+            ? action.versionId && action.versionId.length > 0
+              ? action.versionId
+              : null
+            : (state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null)),
         // G1 (FR-01, task 020): refresh from this save's resolved origin when the response carries
         // one; otherwise keep whatever state already had (never regress a known origin to null just
         // because an older BFF response omitted the field).

@@ -122,9 +122,7 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
   if (teamsHost) {
     return (
       <div className={styles.teamsHint} role="banner">
-        <Text size={200}>
-          Teams-embedded: the host provides the header and theme. Your workspace is below.
-        </Text>
+        <Text size={200}>Teams-embedded: the host provides the header and theme. Your workspace is below.</Text>
       </div>
     );
   }
@@ -193,12 +191,8 @@ export const AppHeader: React.FC<AppHeaderProps> = ({
 
       {showWelcomeBand && (
         <div className={styles.welcomeBand}>
-          <LargeTitle className={styles.welcomeTitle}>
-            Welcome to the Legal Department Service Portal
-          </LargeTitle>
-          {portalUser?.displayName && (
-            <Text className={styles.welcomeSub}>{portalUser.displayName}</Text>
-          )}
+          <LargeTitle className={styles.welcomeTitle}>Welcome to the Legal Department Service Portal</LargeTitle>
+          {portalUser?.displayName && <Text className={styles.welcomeSub}>{portalUser.displayName}</Text>}
         </div>
       )}
     </header>

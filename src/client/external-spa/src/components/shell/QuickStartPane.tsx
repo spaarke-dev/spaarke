@@ -129,7 +129,7 @@ export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget
   const s = useStyles();
   const [moreOpen, setMoreOpen] = React.useState(false);
 
-  const entitledActions = React.useMemo(() => QUICK_START_ACTIONS.filter((a) => isEntitled(me, a)), [me]);
+  const entitledActions = React.useMemo(() => QUICK_START_ACTIONS.filter(a => isEntitled(me, a)), [me]);
 
   const launch = React.useCallback(
     (action: QuickStartActionDef) => {
@@ -143,13 +143,18 @@ export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget
   );
 
   const rowCards: ActionCardConfig[] = React.useMemo(() => {
-    const live: ActionCardConfig[] = entitledActions.map((a) => ({
+    const live: ActionCardConfig[] = entitledActions.map(a => ({
       id: a.id,
       label: a.label,
       icon: a.icon,
       ariaLabel: a.ariaLabel,
     }));
-    live.push({ id: MORE_SERVICES_ID, label: 'More Services', icon: AppsListRegular, ariaLabel: 'Browse all legal services' });
+    live.push({
+      id: MORE_SERVICES_ID,
+      label: 'More Services',
+      icon: AppsListRegular,
+      ariaLabel: 'Browse all legal services',
+    });
     return live;
   }, [entitledActions]);
 
@@ -168,12 +173,19 @@ export const QuickStartPane: React.FC<QuickStartPaneProps> = ({ me, onOpenWidget
         <ActionCardRow cards={rowCards} onCardClick={onCardClick} />
       </SectionPanel>
 
-      <FormModal open={moreOpen} onClose={() => setMoreOpen(false)} onSubmit={() => setMoreOpen(false)} title="Legal services" submitLabel="Done" cancelLabel="Close">
+      <FormModal
+        open={moreOpen}
+        onClose={() => setMoreOpen(false)}
+        onSubmit={() => setMoreOpen(false)}
+        title="Legal services"
+        submitLabel="Done"
+        cancelLabel="Close"
+      >
         <Text className={s.intro}>
           Everything you can start from here. You only see services you&apos;re entitled to.
         </Text>
         <div className={s.grid}>
-          {entitledActions.map((a) => (
+          {entitledActions.map(a => (
             <div key={a.id} className={s.cell}>
               <ActionCard
                 icon={a.icon}

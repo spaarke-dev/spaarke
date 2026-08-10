@@ -122,7 +122,9 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
         status: 500,
         json: async () => ({ detail: 'transient create failure' }),
         text: async () => 'transient create failure',
-        clone() { return this; },
+        clone() {
+          return this;
+        },
       } as unknown as Response;
     }
     return saveResponse('spe-created-1');

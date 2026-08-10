@@ -1,8 +1,4 @@
-import {
-  buildEmailSaveRequest,
-  computeQuickSaveIdempotencyKey,
-  type QuickSaveEmailContext,
-} from '../quickSaveHelpers';
+import { buildEmailSaveRequest, computeQuickSaveIdempotencyKey, type QuickSaveEmailContext } from '../quickSaveHelpers';
 import type { EntitySearchResult } from '../../hooks/useEntitySearch';
 
 const target: EntitySearchResult = {

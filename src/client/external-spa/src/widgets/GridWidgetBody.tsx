@@ -43,10 +43,7 @@ const useStyles = makeStyles({
 /** Resolves + live-tracks the ambient light/dark/Teams theme (same source as the app shell). */
 function useAmbientTheme(): Theme {
   const [theme, setTheme] = React.useState<Theme>(() => resolveCodePageTheme() ?? webLightTheme);
-  React.useEffect(
-    () => setupCodePageThemeListener((next) => setTheme(next ?? webLightTheme)),
-    []
-  );
+  React.useEffect(() => setupCodePageThemeListener(next => setTheme(next ?? webLightTheme)), []);
   return theme;
 }
 
