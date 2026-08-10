@@ -1,7 +1,7 @@
 # Project Plan: SpaarkeAI Assistant Enhancements R2
 
 > **Last Updated**: 2026-08-05
-> **Status**: Ready for Tasks
+> **Status**: ✅ Complete (2026-08-10)
 > **Spec**: [spec.md](spec.md)
 
 ---
@@ -253,8 +253,8 @@ Per README graduation criteria + spec §Success Criteria (1–9). Each BFF-touch
 
 ---
 
-**Status**: Ready for Tasks
-**Next Action**: Generate task files (task-create) → execute Phase 1
+**Status**: ✅ Complete (2026-08-10) — all milestones shipped + deployed
+**Next Action**: None — project closed. Follow-on work is `spaarkeai-assistant-enhancements-r3`.
 
 ---
 
