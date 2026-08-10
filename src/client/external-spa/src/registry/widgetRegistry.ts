@@ -37,6 +37,7 @@ import {
   MoneyRegular,
   ShieldKeyholeRegular,
   DocumentAddRegular,
+  DocumentBulletListRegular,
 } from '@fluentui/react-icons';
 import type { Plane, MeEntitlementsResponse } from '../api/me-client';
 import type { WidgetBodyComponent } from './PlaceholderWidgetBody';
@@ -71,20 +72,23 @@ export interface WidgetDefinition {
 // ---------------------------------------------------------------------------
 
 const placeholderLoader = (): Promise<{ default: WidgetBodyComponent }> =>
-  import('./PlaceholderWidgetBody').then((m) => ({ default: m.PlaceholderWidgetBody }));
+  import('./PlaceholderWidgetBody').then(m => ({ default: m.PlaceholderWidgetBody }));
 
 // Outside-counsel (ciam) data widgets (task 016) — each a thin `<DataGrid configId=… />` binding
 // (see `widgets/GridWidgetBody.tsx`), swapped in for the task-012 placeholder.
 const projectsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
-  import('../widgets/ProjectsWidget').then((m) => ({ default: m.ProjectsWidgetBody }));
+  import('../widgets/ProjectsWidget').then(m => ({ default: m.ProjectsWidgetBody }));
 const mattersLoader = (): Promise<{ default: WidgetBodyComponent }> =>
-  import('../widgets/MattersWidget').then((m) => ({ default: m.MattersWidgetBody }));
+  import('../widgets/MattersWidget').then(m => ({ default: m.MattersWidgetBody }));
 const workAssignmentsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
-  import('../widgets/WorkAssignmentsWidget').then((m) => ({ default: m.WorkAssignmentsWidgetBody }));
+  import('../widgets/WorkAssignmentsWidget').then(m => ({ default: m.WorkAssignmentsWidgetBody }));
 const documentsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
-  import('../widgets/DocumentsWidget').then((m) => ({ default: m.DocumentsWidgetBody }));
+  import('../widgets/DocumentsWidget').then(m => ({ default: m.DocumentsWidgetBody }));
 const invoicesLoader = (): Promise<{ default: WidgetBodyComponent }> =>
-  import('../widgets/InvoicesWidget').then((m) => ({ default: m.InvoicesWidgetBody }));
+  import('../widgets/InvoicesWidget').then(m => ({ default: m.InvoicesWidgetBody }));
+// Internal-only Service Requests read tab (task 028) — a thin `<DataGrid configId=… />` binding.
+const serviceRequestsLoader = (): Promise<{ default: WidgetBodyComponent }> =>
+  import('../widgets/ServiceRequestsWidget').then(m => ({ default: m.ServiceRequestsWidgetBody }));
 
 /**
  * All registered widgets. Role-default coverage (workspace-shell-foundation.md):
@@ -128,6 +132,22 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     requiredEntitlement: 'policy-library',
     defaultForRoles: ['workforce'],
     lazyLoader: placeholderLoader,
+  },
+  {
+    // Internal-only (task 028): the concrete data-backed read of the caller's OWN submitted service
+    // requests (sprk_requestedby == caller contact). planes:['workforce'] keeps it OFF the outside-
+    // counsel partner SPA; the BFF module additionally fail-closes to 0 rows for any non-workforce
+    // caller. (Distinct from the P3 'my-requests' placeholder, which will become the broader Legal
+    // Front Door request tracker; they may reconcile in P3.)
+    id: 'service-requests',
+    title: 'Service Requests',
+    icon: DocumentBulletListRegular,
+    ariaLabel: 'Open Service Requests — requests you have submitted',
+    description: 'Service requests you have submitted and their status.',
+    planes: ['workforce'],
+    requiredEntitlement: 'legal-front-door',
+    defaultForRoles: ['workforce'],
+    lazyLoader: serviceRequestsLoader,
   },
   {
     id: 'nda',
@@ -228,7 +248,7 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
 
 /** Look up a widget definition by id. Returns undefined for an unknown/unregistered id. */
 export function getWidgetDefinition(id: string): WidgetDefinition | undefined {
-  return WIDGET_DEFINITIONS.find((d) => d.id === id);
+  return WIDGET_DEFINITIONS.find(d => d.id === id);
 }
 
 /**
@@ -270,14 +290,12 @@ export function isEntitledToWidgetId(me: MeEntitlementsResponse, widgetId: strin
 
 /** The role-defaulted widget ids to open as tabs on workspace load, for this caller. */
 export function defaultWidgetIdsFor(me: MeEntitlementsResponse): string[] {
-  return WIDGET_DEFINITIONS.filter((d) => isWidgetEntitled(me, d) && d.defaultForRoles.includes(me.plane)).map(
-    (d) => d.id
-  );
+  return WIDGET_DEFINITIONS.filter(d => isWidgetEntitled(me, d) && d.defaultForRoles.includes(me.plane)).map(d => d.id);
 }
 
 /** Widgets shown in the "Add widget" library for this caller — entitled ONLY (FR-02). */
 export function libraryWidgetsFor(me: MeEntitlementsResponse): WidgetDefinition[] {
-  return WIDGET_DEFINITIONS.filter((d) => isWidgetEntitled(me, d));
+  return WIDGET_DEFINITIONS.filter(d => isWidgetEntitled(me, d));
 }
 
 // ---------------------------------------------------------------------------
