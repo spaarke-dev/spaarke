@@ -19,7 +19,10 @@ public class ExternalParticipationService
     // Resource identifier for ITenantCache (FR-05). Cached value is per-Contact participation
     // data (project list), not an authorization decision per ADR-009.
     private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 1;
+    // CacheVersion 2 (task 028): the cached shape widened from project-only participations to the full
+    // polymorphic grant set (projects + matters + work assignments). The version bump orphans any v1
+    // entry (it simply expires on its 60s TTL) so no stale narrow-shape read can occur.
+    private const int CacheVersion = 2;
 
     private readonly HttpClient _httpClient;
     private readonly ITenantCache _cache;
@@ -52,9 +55,26 @@ public class ExternalParticipationService
     }
 
     /// <summary>
-    /// Gets active participations for a Contact. Checks Redis cache first, falls back to Dataverse.
+    /// Gets active PROJECT participations for a Contact (id + access level). Retained for the CIAM
+    /// <c>/me</c> per-project level mapping and every legacy project-scoped caller; it now projects the
+    /// project slice of the full <see cref="GetGrantSetAsync"/> grant set so there is a single query +
+    /// cache entry per Contact.
     /// </summary>
     public virtual async Task<IReadOnlyList<ExternalParticipation>> GetParticipationsAsync(
+        Guid contactId,
+        CancellationToken ct = default)
+    {
+        var grantSet = await GetGrantSetAsync(contactId, ct).ConfigureAwait(false);
+        return grantSet.Projects;
+    }
+
+    /// <summary>
+    /// Gets the FULL polymorphic grant set for a Contact — projects (with level) + matters + work
+    /// assignments — from active <c>sprk_externalrecordaccess</c> rows (task 028). Checks Redis cache
+    /// first (60s TTL, ADR-009), falls back to Dataverse. Outside-counsel access is grant-only: this set
+    /// is exactly what a CIAM partner may see, and one of the union terms for an internal caller.
+    /// </summary>
+    public virtual async Task<ExternalGrantSet> GetGrantSetAsync(
         Guid contactId,
         CancellationToken ct = default)
     {
@@ -66,13 +86,14 @@ public class ExternalParticipationService
         {
             try
             {
-                var cached = await _cache.GetAsync<List<CachedParticipation>>(
+                var cached = await _cache.GetAsync<CachedGrantSet>(
                     tenantId, ExternalAccessResource, idComponent, CacheVersion, ct: ct);
                 if (cached != null)
                 {
-                    _logger.LogDebug("[EXT-ACCESS] Cache HIT for Contact {ContactId}: {Count} participations",
-                        contactId, cached.Count);
-                    return cached.Select(c => c.ToParticipation()).ToList();
+                    _logger.LogDebug(
+                        "[EXT-ACCESS] Cache HIT for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment grants",
+                        contactId, cached.Projects.Count, cached.Matters.Count, cached.WorkAssignments.Count);
+                    return cached.ToGrantSet();
                 }
             }
             catch (Exception ex)
@@ -82,15 +103,15 @@ public class ExternalParticipationService
         }
 
         // Cache miss — query Dataverse
-        var participations = await QueryDataverseAsync(contactId, ct);
+        var grantSet = await QueryGrantSetAsync(contactId, ct);
 
         // Cache result (fire-and-forget — don't block response). Skip when no tenant claim.
         if (!string.IsNullOrEmpty(tenantId))
         {
-            _ = CacheParticipationsAsync(tenantId, idComponent, participations);
+            _ = CacheGrantSetAsync(tenantId, idComponent, grantSet);
         }
 
-        return participations;
+        return grantSet;
     }
 
     /// <summary>
@@ -359,19 +380,22 @@ public class ExternalParticipationService
         }
     }
 
-    private async Task<IReadOnlyList<ExternalParticipation>> QueryDataverseAsync(Guid contactId, CancellationToken ct)
+    private async Task<ExternalGrantSet> QueryGrantSetAsync(Guid contactId, CancellationToken ct)
     {
         try
         {
             var token = await GetAppOnlyTokenAsync(ct);
             var apiUrl = GetDataverseApiUrl();
 
-            // Query active participations for this Contact.
-            // Dataverse lookup field names: _sprk_contact_value (contact FK), _sprk_project_value (project FK).
-            // These differ from the schema name suffix convention — verified against live Dataverse response.
+            // Query ALL active grants for this Contact across every root type (task 028 — polymorphic).
+            // A grant row targets exactly ONE root via its typed lookup (verified live):
+            //   _sprk_project_value / _sprk_matter_value / _sprk_workassignment_value.
+            // (Dataverse projects lookups as _sprk_{name}_value; the contact FK is _sprk_contact_value —
+            // verified against live Dataverse.) sprk_invoice grants are intentionally NOT read (design §6
+            // — child access derives from an accessible root, not a direct child grant).
             var query = $"{apiUrl}/sprk_externalrecordaccesses" +
                         $"?$filter=_sprk_contact_value eq {contactId} and statecode eq 0" +
-                        $"&$select=_sprk_project_value,sprk_accesslevel";
+                        $"&$select=_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,sprk_accesslevel";
 
             using var request = new HttpRequestMessage(HttpMethod.Get, query);
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -384,54 +408,76 @@ public class ExternalParticipationService
             {
                 _logger.LogWarning("[EXT-ACCESS] Dataverse query failed for Contact {ContactId}: {Status}",
                     contactId, response.StatusCode);
-                return Array.Empty<ExternalParticipation>();
+                return ExternalGrantSet.Empty;
             }
 
             var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ExternalAccessRow>>(ct);
-            var participations = result?.Value?
+            var rows = result?.Value ?? new List<ExternalAccessRow>();
+
+            // Partition each grant into its root bucket by which typed lookup is populated. A project
+            // grant keeps its access level; matter/WA grants contribute an id only.
+            var projects = rows
                 .Where(r => r._sprk_project_value.HasValue && r.sprk_accesslevel.HasValue)
                 .Select(r => new ExternalParticipation
                 {
                     ProjectId = r._sprk_project_value!.Value,
                     AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
                 })
-                .ToList() ?? new List<ExternalParticipation>();
+                .ToList();
+            var matters = rows
+                .Where(r => r._sprk_matter_value.HasValue)
+                .Select(r => r._sprk_matter_value!.Value)
+                .ToHashSet();
+            var workAssignments = rows
+                .Where(r => r._sprk_workassignment_value.HasValue)
+                .Select(r => r._sprk_workassignment_value!.Value)
+                .ToHashSet();
 
-            _logger.LogInformation("[EXT-ACCESS] Loaded {Count} active participations for Contact {ContactId}",
-                participations.Count, contactId);
+            _logger.LogInformation(
+                "[EXT-ACCESS] Loaded grants for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment",
+                contactId, projects.Count, matters.Count, workAssignments.Count);
 
-            return participations;
+            return new ExternalGrantSet
+            {
+                Projects = projects,
+                Matters = matters,
+                WorkAssignments = workAssignments,
+            };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[EXT-ACCESS] Error querying Dataverse for Contact {ContactId}", contactId);
-            return Array.Empty<ExternalParticipation>();
+            return ExternalGrantSet.Empty;
         }
     }
 
-    private async Task CacheParticipationsAsync(
+    private async Task CacheGrantSetAsync(
         string tenantId,
         string idComponent,
-        IReadOnlyList<ExternalParticipation> participations)
+        ExternalGrantSet grantSet)
     {
         try
         {
-            var cached = participations.Select(p => new CachedParticipation
+            var cached = new CachedGrantSet
             {
-                ProjectId = p.ProjectId,
-                AccessLevel = (int)p.AccessLevel
-            }).ToList();
+                Projects = grantSet.Projects
+                    .Select(p => new CachedParticipation { ProjectId = p.ProjectId, AccessLevel = (int)p.AccessLevel })
+                    .ToList(),
+                Matters = grantSet.Matters.ToList(),
+                WorkAssignments = grantSet.WorkAssignments.ToList(),
+            };
 
             await _cache.SetAsync(
                 tenantId, ExternalAccessResource, idComponent, CacheVersion,
                 cached, CacheTtl);
 
-            _logger.LogDebug("[EXT-ACCESS] Cached {Count} participations for Contact {ContactId} (TTL: {Ttl}s)",
-                participations.Count, idComponent, CacheTtl.TotalSeconds);
+            _logger.LogDebug(
+                "[EXT-ACCESS] Cached grants for Contact {ContactId} (TTL: {Ttl}s): {Projects}p/{Matters}m/{Was}w",
+                idComponent, CacheTtl.TotalSeconds, cached.Projects.Count, cached.Matters.Count, cached.WorkAssignments.Count);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "[EXT-ACCESS] Error caching participations for Contact {ContactId}. Non-critical.", idComponent);
+            _logger.LogWarning(ex, "[EXT-ACCESS] Error caching grants for Contact {ContactId}. Non-critical.", idComponent);
         }
     }
 
@@ -481,6 +527,12 @@ public class ExternalParticipationService
         [JsonPropertyName("_sprk_project_value")]
         public Guid? _sprk_project_value { get; set; }
 
+        [JsonPropertyName("_sprk_matter_value")]
+        public Guid? _sprk_matter_value { get; set; }
+
+        [JsonPropertyName("_sprk_workassignment_value")]
+        public Guid? _sprk_workassignment_value { get; set; }
+
         [JsonPropertyName("sprk_accesslevel")]
         public int? sprk_accesslevel { get; set; }
     }
@@ -503,6 +555,20 @@ public class ExternalParticipationService
         {
             ProjectId = ProjectId,
             AccessLevel = (ExternalAccessLevel)AccessLevel
+        };
+    }
+
+    private sealed class CachedGrantSet
+    {
+        public List<CachedParticipation> Projects { get; set; } = new();
+        public List<Guid> Matters { get; set; } = new();
+        public List<Guid> WorkAssignments { get; set; } = new();
+
+        public ExternalGrantSet ToGrantSet() => new()
+        {
+            Projects = Projects.Select(p => p.ToParticipation()).ToList(),
+            Matters = Matters.ToHashSet(),
+            WorkAssignments = WorkAssignments.ToHashSet(),
         };
     }
 }
