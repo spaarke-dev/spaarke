@@ -21,15 +21,7 @@
  * (its own §11 justification). Semantic tokens only — zero hardcoded hex (ADR-021).
  */
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  mergeClasses,
-  Text,
-  Title3,
-  Button,
-  Tooltip,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, mergeClasses, Text, Title3, Button, Tooltip } from '@fluentui/react-components';
 import {
   AddRegular,
   AppsAddInRegular,
@@ -196,15 +188,13 @@ export const PortalWorkspaceShell: React.FC<PortalWorkspaceShellProps> = ({
 
   // Quick Start home is always available; fall back to it when no valid widget tab is active.
   const active =
-    activeTabId === QUICK_START_TAB || widgetTabs.some((t) => t.id === activeTabId)
-      ? activeTabId
-      : QUICK_START_TAB;
+    activeTabId === QUICK_START_TAB || widgetTabs.some(t => t.id === activeTabId) ? activeTabId : QUICK_START_TAB;
   const isQuickStart = active === QUICK_START_TAB;
 
   // Pinned Quick Start (home) tab first + the open widget tabs (closable).
   const tabs: TabItem[] = [
     { id: QUICK_START_TAB, title: 'Quick Start', icon: HomeRegular, closable: false },
-    ...widgetTabs.map((w) => ({ id: w.id, title: w.title, icon: w.icon, closable: true })),
+    ...widgetTabs.map(w => ({ id: w.id, title: w.title, icon: w.icon, closable: true })),
   ];
 
   // Assistant dock (expanded) node — side-aware border.

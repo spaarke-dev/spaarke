@@ -2791,9 +2791,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             list's viewport height so a short assistant response still leaves
             enough scroll room for the pinned user message to reach the top of
             the viewport. Zero height until the first send; purely presentational. */}
-        {messages.length > 0 && (
-          <div ref={trailingSpacerRef} aria-hidden="true" data-testid="chat-trailing-spacer" />
-        )}
+        {messages.length > 0 && <div ref={trailingSpacerRef} aria-hidden="true" data-testid="chat-trailing-spacer" />}
 
         {/* Highlight-and-refine floating toolbar (local DOM selection + cross-pane bridge selection) */}
         <SprkChatHighlightRefine
