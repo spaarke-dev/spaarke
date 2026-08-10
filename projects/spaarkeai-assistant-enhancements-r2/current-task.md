@@ -1,10 +1,18 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-09 (context-handoff — R2 E/A/B/D/C SHIPPED; UAT rounds 1-3 fixes + Phase 0 quick-wins DEPLOYED; auth cold-start hang FIXED (flag revert) — needs deploy; R3 design + orchestration model AGREED)
+> **Last Updated**: 2026-08-10 (project-close — R2 COMPLETE)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
+
+## ✅ PROJECT COMPLETE (2026-08-10)
+
+**Active task**: none — project closed. All 27 tasks + 090 wrap-up ✅.
+
+R2 shipped E/A/B/D/C end-to-end (deployed to `spaarkedev1`). Final close-out (2026-08-10): auth cold-start fix (`requireSilentOnly` revert) **deployed** to `sprk_spaarkeai` from synced master; test-diet clean (0 scaffolding / 0 orphans — `notes/test-diet-report.md`); README/plan/INDEX/TASK-INDEX marked Complete; `notes/lessons-learned.md` written. **Owner re-UAT of the cold-start** is the one remaining owner verification (fix restores known-good pre-Aug-4 popup fallback). Follow-on: `spaarkeai-assistant-enhancements-r3` (see that worktree's `notes/R3-SESSION-CONTEXT.md`).
+
+<details><summary>Historical CURRENT STATE (pre-close, 2026-08-09)</summary>
 
 ## ⭐ CURRENT STATE (2026-08-09 — R2 shipped; post-UAT hardening + R3 design)
 
@@ -160,3 +168,5 @@ Then 022 (FR-B3/B5, **opus/xhigh**, ConversationPane spine): proactive suggestio
 4. Dispatch pattern: subagents per task at `<model-tier>`/`<effort>`; build-verify between waves; commit per task; update TASK-INDEX + this file.
 
 **Commands**: `/project-continue` · "where was I?" · `work on task 021`
+
+</details>
