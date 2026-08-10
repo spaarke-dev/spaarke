@@ -73,12 +73,7 @@ import {
 } from './fetchXmlOverlay';
 import type { MembershipResolver } from '../../services/membership';
 import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
-import {
-  discoverChips,
-  augmentFetchXmlWithChips,
-  type ChipDescriptor,
-  type ChipState,
-} from './filterChips';
+import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type ChipState } from './filterChips';
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
 import type { SavedQuerySummary } from '../../services/IDataverseClient';

@@ -197,11 +197,7 @@ export async function fetchEnginePreSelection(
 
   // SAME candidate model as the code page (no fork; ADR-045). Server-resolved display
   // names are folded into the model's `targetName` (the field it is designed to receive).
-  const model = derivePrimaryReview(
-    JSON.stringify(toProvenanceDoc(response.suggestions, response.names)),
-    null,
-    []
-  );
+  const model = derivePrimaryReview(JSON.stringify(toProvenanceDoc(response.suggestions, response.names)), null, []);
   const predictedCandidate = model.primary ?? model.candidates[0];
   if (!predictedCandidate) return null;
 

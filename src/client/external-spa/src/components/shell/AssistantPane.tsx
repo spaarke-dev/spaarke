@@ -98,12 +98,7 @@ export const AssistantPane: React.FC<AssistantPaneProps> = ({ unavailableReason 
             disabled
             aria-label="Message the Ask Legal assistant (not yet available)"
           />
-          <Button
-            appearance="primary"
-            icon={<SendRegular />}
-            disabled
-            aria-label="Send message (not yet available)"
-          />
+          <Button appearance="primary" icon={<SendRegular />} disabled aria-label="Send message (not yet available)" />
         </div>
         <Text size={200} className={s.muted}>
           Assistant responses are not yet enabled.

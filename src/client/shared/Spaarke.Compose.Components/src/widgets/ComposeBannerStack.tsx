@@ -366,9 +366,9 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         <MessageBar intent="info" data-testid="compose-workspace-pdf-source-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Opened from PDF</MessageBarTitle>
-            This document was converted from a fixed-layout PDF, so some formatting was simplified and
-            content may reflow. Saving creates a new Word document — the original PDF is unchanged and
-            remains available with its version history.
+            This document was converted from a fixed-layout PDF, so some formatting was simplified and content may
+            reflow. Saving creates a new Word document — the original PDF is unchanged and remains available with its
+            version history.
           </MessageBarBody>
           <MessageBarActions
             containerAction={
