@@ -198,6 +198,127 @@ export interface WidgetState<TData = unknown> {
 export type WidgetContextType = 'email' | 'document' | 'compose-doc' | 'matter-grid' | 'dashboard' | 'calendar';
 
 // ---------------------------------------------------------------------------
+// WidgetAssistantContract (R3 spaarkeai-assistant-enhancements task 022,
+// FR-08 + FR-15 SHAPE)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical catalog tool name for the FR-06/task-020 parameterized
+ * `configId`-driven overview tool — ONE tool reused across every grid plus
+ * the Daily Briefing/Calendar dashboard tabs (NFR-06: no per-grid handlers).
+ * Every overview-only widget's `assistantContract.overviewTools` references
+ * this ONE literal so there is a single place to update if the BFF catalog
+ * row (task 020) lands under a different name.
+ */
+export const OVERVIEW_QUERY_TOOL_NAME = 'overview_query' as const;
+
+/**
+ * Where a per-item card's tool output lands once invoked (FR-09/FR-10/FR-11).
+ *  - `'chat'`     — the tool answers inline in the conversation transcript
+ *                   (e.g. "Summarize the thread" / "Summarize" a document).
+ *  - `'composer'` — opens the existing email composer (`SendEmailDialog` via
+ *                   `useEmailComposeActions.openComposer`) pre-filled.
+ *  - `'compose'`  — opens the Compose (ADR-049) drafting surface.
+ */
+export type AssistantCardLanding = 'chat' | 'composer' | 'compose';
+
+/**
+ * respond | direct | hybrid (FR-13). A DATA field the deterministic
+ * follow-on derivation (FR-14, task 041) reads — never a classifier and
+ * never model-interpreted prompt prose (ADR-039 invariant: no second
+ * intent-detection mechanism).
+ *
+ *  - `'respond'` — the widget only ever answers IN CHAT (an overview/query
+ *    surface with no per-item action cards of its own, e.g. a grid).
+ *  - `'direct'`  — the widget's tools always open ANOTHER surface (composer
+ *    or Compose) with no standalone chat answer.
+ *  - `'hybrid'`  — the widget mixes both: some per-item tools answer in chat
+ *    (e.g. Summarize) while others open a surface (e.g. Reply, Draft memo).
+ *
+ * task 022 defines this field on the SHAPE and best-effort populates it for
+ * the in-scope widgets from the already-specified spec surfaces
+ * (FR-09/FR-10/FR-11). task 040 is the single-sourcing checkpoint once
+ * tasks 025/026 land the concrete per-item card implementations — coordinate
+ * there before diverging from the values set here.
+ */
+export type AssistantInteractionPattern = 'respond' | 'direct' | 'hybrid';
+
+/**
+ * One per-item action card declared on a widget's Assistant contract.
+ *
+ * Per ASSISTANT-UI-ELEMENT-CRITERIA.md, per-item actions on an active item
+ * are CARDS (never chips) — this array enumerates card actions only.
+ *
+ * NEVER carries item content (ADR-015 — identity + capability metadata
+ * only): a human-facing label, a catalog tool NAME, and a landing tag.
+ */
+export interface AssistantContractCard {
+  /**
+   * Human-facing card label shown in the workspace pane, e.g. `"Reply"`,
+   * `"Summarize the thread"`. MUST NOT contain item content (a subject line,
+   * a body excerpt, etc.) — labels are static per-widget-type strings.
+   */
+  readonly label: string;
+  /**
+   * The ADR-039 closed-catalog tool name this card invokes (e.g.
+   * `'draft_reply'`, `'summarize_thread'`). The LLM never invokes an
+   * unlisted tool — this string MUST match a registered catalog Tool.
+   */
+  readonly tool: string;
+  /** Where the tool's output lands once invoked. */
+  readonly landing: AssistantCardLanding;
+}
+
+/**
+ * The Assistant-contract metadata SHAPE (FR-08 + FR-15). Declared per widget
+ * as the OPTIONAL `WidgetMetadata.assistantContract` field, additive
+ * alongside the existing `WidgetMetadata.contextType` (task 020):
+ *
+ *   1. context-type             — `WidgetMetadata.contextType` (existing;
+ *                                  NOT duplicated inside this object — read
+ *                                  the two fields together).
+ *   2. overview tool(s)         — `overviewTools`.
+ *   3. per-item cards + landing — `perItemCards`.
+ *   4. interaction pattern      — `interactionPattern`.
+ *
+ * OPTIONAL at this stage: task 022 DEFINES the shape and POPULATES it for
+ * the in-scope widgets named in spec FR-08/FR-09/FR-11 (grids, Daily
+ * Briefing, Calendar, Email, Documents). task 050 makes this field
+ * structurally REQUIRED and adds the registry enforcement guard (FR-15) so
+ * no widget can ship without a contract. This task does NOT implement that
+ * enforcement — see FR-15 / task 050.
+ *
+ * Every field here is identity/capability metadata (a label, a tool NAME, a
+ * landing tag) — NEVER item content (ADR-015).
+ *
+ * @see WidgetMetadata.contextType — the existing closed context-type union
+ *      (task 020) this contract is read alongside.
+ * @see WidgetMetadata.assistantContract — where this is attached per widget.
+ */
+export interface WidgetAssistantContract {
+  /**
+   * Overview/query tool name(s) that answer chat questions for this surface
+   * from its own data lane (FR-06/FR-07). Empty array = this widget has no
+   * overview tool of its own (e.g. a per-item-only surface whose overview
+   * lives on a sibling grid widget — see `email`/`document-viewer` below).
+   *
+   * `readonly` — this is static catalog-shaped declarative data (ADR-039),
+   * often a SHARED object reused by reference across multiple registrations
+   * (e.g. every overview-only grid); it is never mutated after registration.
+   */
+  readonly overviewTools: readonly string[];
+  /**
+   * Per-item action cards for the widget's active item (FR-09/FR-10/FR-11).
+   * Empty array = an overview-only surface with no per-item cards.
+   *
+   * `readonly` — see `overviewTools` above.
+   */
+  readonly perItemCards: readonly AssistantContractCard[];
+  /** respond | direct | hybrid (FR-13) — see `AssistantInteractionPattern`. */
+  readonly interactionPattern: AssistantInteractionPattern;
+}
+
+// ---------------------------------------------------------------------------
 // WidgetMetadata
 // ---------------------------------------------------------------------------
 
@@ -250,6 +371,19 @@ export interface WidgetMetadata {
    * @see WidgetContextType for the closed set + rationale.
    */
   contextType?: WidgetContextType;
+
+  /**
+   * OPTIONAL (R3 task 022, FR-08 + FR-15 SHAPE) Assistant-contract metadata:
+   * the overview tool(s), per-item cards + landing target, and interaction
+   * pattern this widget declares to the Assistant. Additive sibling to
+   * `contextType` above (context-type stays that existing field — not
+   * duplicated inside this object). Optional here; task 050 (FR-15
+   * enforcement) makes it REQUIRED and adds a registry guard so no widget
+   * can ship without a contract.
+   *
+   * @see WidgetAssistantContract for the full shape + field-by-field rationale.
+   */
+  assistantContract?: WidgetAssistantContract;
 }
 
 // ---------------------------------------------------------------------------

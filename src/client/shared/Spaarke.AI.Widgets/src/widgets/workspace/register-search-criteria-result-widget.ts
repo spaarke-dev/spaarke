@@ -42,6 +42,12 @@ registerWorkspaceWidget(
      * (150, R4 task 042) so it sorts last among current widgets.
      */
     defaultOrder: 160,
+    // FR-08 enumeration (task 022): deliberately OMITTED. A search-results
+    // snapshot has no honest fit among the six WidgetContextType values
+    // (email/document/compose-doc/matter-grid/dashboard/calendar) — per
+    // `WidgetMetadata.contextType`'s own contract, omission here means
+    // "none", not an authoring gap. Not in R3's overview (FR-06/07) or
+    // per-item (FR-09/11) scope, so `assistantContract` is also omitted.
   },
   () =>
     import('./SearchCriteriaResultWidget') as Promise<{

@@ -38,6 +38,12 @@ import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
 import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
 import type { EmailTabWidgetData } from '../../types/WorkspaceTab';
+// Assistant-contract metadata SHAPE (FR-08 + FR-15 SHAPE, R3 task 022):
+// context-type (existing `contextType` field, task 020) · overview tool(s) ·
+// per-item cards + landing target · interaction pattern. See
+// WidgetAssistantContract's JSDoc in types/shared.ts for the full rationale.
+import type { WidgetAssistantContract, AssistantContractCard } from '../../types/shared';
+import { OVERVIEW_QUERY_TOOL_NAME } from '../../types/shared';
 // Pillar 9 visibility derivations (task 073, D-C-28). The Dashboard category
 // is attached to the 'workspace' registration (WorkspaceLayoutWidget); the
 // Table category is attached to all 5 DataverseEntityViewWidget-backed
@@ -99,6 +105,64 @@ const WIDGET_TYPE = {
   Recommendation: 'Recommendation',
   ActionPlan: 'ActionPlan',
 } as const;
+
+// ---------------------------------------------------------------------------
+// Assistant-contract constants (FR-08 + FR-15 SHAPE, R3 task 022)
+//
+// Two shared, reused-by-reference contracts cover every in-scope widget in
+// THIS file:
+//   - OVERVIEW_ONLY_CONTRACT — every grid + the 'workspace' dashboard
+//     dispatcher (which hosts the Daily Briefing/Calendar layouts, task 010:
+//     both collapse to the same generic Dashboard identity server-side —
+//     there is no separate per-layout widget TYPE to tag). FR-06/FR-07: ONE
+//     parameterized overview tool, no per-item cards, always answers in chat.
+//   - EMAIL_CONTRACT — the 'email' direct widget. FR-09/FR-10: per-item
+//     cards Reply/Reply All/Forward/Summarize the thread; no overview tool
+//     of its own (overview parity for messages lives on the sibling
+//     'communications-list' grid — FR-07's explicit scope is "all grids +
+//     Briefing + Calendar", which does not name Email separately).
+//
+// Declaring these ONCE and reusing by reference (rather than repeating an
+// identical object literal at every call site) keeps every overview-only
+// registration provably identical — §11 reuse-first.
+// ---------------------------------------------------------------------------
+
+// Object.freeze: these two contracts are shared BY REFERENCE across every
+// overview-only registration below (and EMAIL_CONTRACT is a single object
+// too) — freezing prevents an accidental `contract.foo = ...` or
+// `contract.perItemCards.push(...)` in a future consumer (e.g. task 030's
+// pre-filter or task 050's guard) from silently corrupting every OTHER
+// widget that shares the same reference.
+const OVERVIEW_ONLY_CONTRACT: WidgetAssistantContract = Object.freeze({
+  overviewTools: Object.freeze([OVERVIEW_QUERY_TOOL_NAME]),
+  perItemCards: Object.freeze([]),
+  interactionPattern: 'respond',
+});
+
+// Explicit type annotation (rather than inline in EMAIL_CONTRACT below) so
+// each card's `landing` narrows to the AssistantCardLanding literal union
+// instead of widening to `string`.
+const EMAIL_PER_ITEM_CARDS: readonly AssistantContractCard[] = [
+  // FR-10: draft_reply auto-drafts a thread-preserving bodyOverride, then
+  // opens the existing SendEmailDialog composer pre-filled.
+  { label: 'Reply', tool: 'draft_reply', landing: 'composer' },
+  // Same backing tool as Reply — FR-09 declares draft_reply(communicationId,
+  // mode); Reply vs Reply All is a call-time `mode` argument, not a
+  // separate catalog tool.
+  { label: 'Reply All', tool: 'draft_reply', landing: 'composer' },
+  { label: 'Forward', tool: 'draft_forward', landing: 'composer' },
+  // FR-09: summarize_thread answers IN CHAT (plain narrative, identical to
+  // the file/document-summarize output) — no composer opens.
+  { label: 'Summarize the thread', tool: 'summarize_thread', landing: 'chat' },
+];
+
+const EMAIL_CONTRACT: WidgetAssistantContract = Object.freeze({
+  overviewTools: Object.freeze([]),
+  perItemCards: Object.freeze(EMAIL_PER_ITEM_CARDS),
+  // hybrid: Reply/Reply All/Forward open the composer (direct); Summarize
+  // answers in chat (respond) — the widget mixes both.
+  interactionPattern: 'hybrid',
+});
 
 // ---------------------------------------------------------------------------
 // Registration helper
@@ -614,6 +678,10 @@ registerWorkspaceWidget(
     // FR-B1/FR-C3 (task 020): the workspace-layout dispatcher mounts the
     // embedded LegalWorkspaceApp dashboard surface.
     contextType: 'dashboard',
+    // FR-08 (task 022): hosts the Daily Briefing + Calendar layouts (both
+    // collapse to the generic Dashboard identity server-side, task 010 —
+    // there is no separate per-layout widget type to tag). Overview-only.
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   () =>
     import('./WorkspaceLayoutWidget').then(m => ({
@@ -716,6 +784,10 @@ registerWorkspaceWidget(
     defaultOrder: 200,
     // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
     contextType: 'matter-grid',
+    // FR-06/FR-07 (task 022): overview-only grid — ONE parameterized tool,
+    // no per-item cards (per-item document actions live on the sibling
+    // 'document-viewer' tab, FR-11 — not on this list).
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents),
   tableWidgetVisibility
@@ -731,6 +803,9 @@ safeRegisterWidget(
     defaultOrder: 205,
     // FR-B1/FR-C3 (task 020): the canonical matter-grid entity-view widget.
     contextType: 'matter-grid',
+    // FR-06/FR-07 (task 022): overview-only grid — ONE parameterized tool,
+    // no per-item cards.
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters),
   tableWidgetVisibility
@@ -746,6 +821,9 @@ registerWorkspaceWidget(
     defaultOrder: 210,
     // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
     contextType: 'matter-grid',
+    // FR-06/FR-07 (task 022): overview-only grid — ONE parameterized tool,
+    // no per-item cards.
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects),
   tableWidgetVisibility
@@ -761,6 +839,9 @@ registerWorkspaceWidget(
     defaultOrder: 220,
     // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
     contextType: 'matter-grid',
+    // FR-06/FR-07 (task 022): overview-only grid — ONE parameterized tool,
+    // no per-item cards.
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices),
   tableWidgetVisibility
@@ -776,6 +857,9 @@ registerWorkspaceWidget(
     defaultOrder: 230,
     // FR-B1/FR-C3 (task 020): Dataverse entity-view grid.
     contextType: 'matter-grid',
+    // FR-06/FR-07 (task 022): overview-only grid — ONE parameterized tool,
+    // no per-item cards.
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
   tableWidgetVisibility
@@ -796,6 +880,9 @@ registerWorkspaceWidget(
     defaultOrder: 235,
     // FR-B1/FR-C3 (task 020): Dataverse entity-view grid (DataverseEntityViewWidget-backed).
     contextType: 'matter-grid',
+    // FR-06/FR-07 (task 022): overview-only grid — ONE parameterized tool,
+    // no per-item cards.
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.myTasks),
   tableWidgetVisibility
@@ -831,6 +918,10 @@ registerWorkspaceWidget(
     // communication records — the entity-grid bucket is the closest honest
     // fit among the six values.
     contextType: 'matter-grid',
+    // FR-06/FR-07 (task 022): overview-only grid — ONE parameterized tool,
+    // no per-item cards (per-item email actions live on the sibling 'email'
+    // direct widget, FR-09/FR-10 — not on this list).
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
   () =>
     import('@spaarke/communication-components').then(m => ({
@@ -867,6 +958,9 @@ safeRegisterWidget(
     // 'email' contextType — required so proactive-chip scoping (Workstream B)
     // can recognize an email tab as the active surface.
     contextType: 'email',
+    // FR-09/FR-10 (task 022): per-item cards Reply/Reply All/Forward/
+    // Summarize the thread — see EMAIL_CONTRACT above.
+    assistantContract: EMAIL_CONTRACT,
   },
   () =>
     import('./EmailWorkspaceWidget').then(m => ({

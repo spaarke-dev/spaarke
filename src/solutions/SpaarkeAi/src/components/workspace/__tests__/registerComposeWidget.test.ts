@@ -37,6 +37,18 @@ describe("Wave 5 — Compose Direct-widget registration", () => {
     expect(fn).toBe(composeWidgetVisibility);
   });
 
+  // FR-08 enumeration (task 022): Compose IS enumerated in the widget-type ↔
+  // context-type map (contextType: 'compose-doc', task 020) but is outside
+  // R3's overview/per-item scope (spec Out-of-Scope: Compose write/read
+  // fidelity is governed separately by ADR-049) — assistantContract is
+  // deliberately omitted, not a gap.
+  it("declares the 'compose-doc' contextType and no assistantContract (task 022, deliberate)", () => {
+    const meta = getWorkspaceWidgetMetadata("compose");
+    expect(meta).toBeDefined();
+    expect(meta?.contextType).toBe("compose-doc");
+    expect(meta?.assistantContract).toBeUndefined();
+  });
+
   describe("composeWidgetVisibility (getVisibleState)", () => {
     it("projects a stored-document seed onto the DocumentViewer variant", () => {
       const widgetData: ComposeWidgetData = {

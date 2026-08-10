@@ -47,4 +47,30 @@ describe('register-document-viewer-widget', () => {
     // the Assistant → Workspace `widget_load` demo wiring.
     expect(DOCUMENT_VIEWER_WIDGET_TYPE).toBe('document-viewer');
   });
+
+  // -------------------------------------------------------------------------
+  // assistantContract — FR-11 per-item cards (task 022, FR-08 + FR-15 SHAPE)
+  // -------------------------------------------------------------------------
+
+  it("declares the 'document' contextType (task 020)", () => {
+    const meta = getWorkspaceWidgetMetadata(DOCUMENT_VIEWER_WIDGET_TYPE);
+    expect(meta!.contextType).toBe('document');
+  });
+
+  it('declares per-item cards Summarize/Draft response/Draft memo and no overview tool (FR-11)', () => {
+    const meta = getWorkspaceWidgetMetadata(DOCUMENT_VIEWER_WIDGET_TYPE);
+    const contract = meta!.assistantContract;
+    expect(contract).toBeDefined();
+    expect(contract!.overviewTools).toEqual([]);
+    expect(contract!.perItemCards.map(c => c.label)).toEqual(['Summarize', 'Draft response', 'Draft memo']);
+    expect(contract!.interactionPattern).toBe('hybrid');
+  });
+
+  it('Summarize lands in chat; Draft response lands on the composer; Draft memo lands on Compose', () => {
+    const contract = getWorkspaceWidgetMetadata(DOCUMENT_VIEWER_WIDGET_TYPE)!.assistantContract!;
+    const byLabel = new Map(contract.perItemCards.map(c => [c.label, c.landing]));
+    expect(byLabel.get('Summarize')).toBe('chat');
+    expect(byLabel.get('Draft response')).toBe('composer');
+    expect(byLabel.get('Draft memo')).toBe('compose');
+  });
 });

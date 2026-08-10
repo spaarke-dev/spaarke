@@ -64,6 +64,18 @@ export type {
 // WidgetContextType — closed contextType union (FR-B1 + FR-C3, task 020).
 export type { WidgetMetadata, WidgetContextType } from './types/shared';
 
+// Assistant-contract metadata SHAPE (FR-08 + FR-15 SHAPE, R3 task 022) —
+// context-type (above) · overview tool(s) · per-item cards + landing target
+// · interaction pattern. Additive to WidgetMetadata via the optional
+// `assistantContract` field. Task 050 makes it required + enforced.
+export type {
+  WidgetAssistantContract,
+  AssistantContractCard,
+  AssistantInteractionPattern,
+  AssistantCardLanding,
+} from './types/shared';
+export { OVERVIEW_QUERY_TOOL_NAME } from './types/shared';
+
 // ---------------------------------------------------------------------------
 // Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)
 //
@@ -130,6 +142,11 @@ export {
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
+  // FR-08 + FR-15 SHAPE (R3 task 022) — derived widget-type ↔ context-type
+  // map + the Assistant-contract accessor. Consumed by the pre-filter (030)
+  // and the registry guard (050).
+  getWidgetContextTypeMap,
+  getWidgetAssistantContract,
 } from './registry/WorkspaceWidgetRegistry';
 
 // Task 072 (D-C-27) — Pillar 9 visibility extension.

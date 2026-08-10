@@ -170,6 +170,12 @@ const COMPOSE_WIDGET_METADATA: WidgetMetadata = {
   // dedicated 'compose-doc' bucket (distinct from the read-only 'document'
   // viewer bucket used by DocumentViewerWidget/redline-viewer/ContractComparison).
   contextType: "compose-doc",
+  // FR-08 enumeration (task 022): `assistantContract` deliberately OMITTED.
+  // Compose is enumerated in the widget-type ↔ context-type map above
+  // (contextType: 'compose-doc') but is outside R3's overview (FR-06/07 —
+  // "all grids + Briefing + Calendar") and per-item (FR-09/11 — Email +
+  // Documents only) scope; Compose write/read fidelity is governed
+  // separately by ADR-049 and untouched by this project (spec Out-of-Scope).
 };
 
 let _registered = false;

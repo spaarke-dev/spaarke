@@ -5,7 +5,11 @@
  * after all P3b tasks land).
  */
 export { useEmailComposeActions } from './useEmailComposeActions';
-export type { EmailComposeActionsDeps, UseEmailComposeActionsResult } from './EmailComposeActions.types';
+export type {
+  EmailComposeActionsDeps,
+  OpenComposerOptions,
+  UseEmailComposeActionsResult,
+} from './EmailComposeActions.types';
 export { fetchCommunicationPrefill } from './fetchCommunicationPrefill';
 export { OpenFullFormButton } from './OpenFullFormButton';
 export type { OpenFullFormButtonProps } from './OpenFullFormButton';

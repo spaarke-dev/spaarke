@@ -49,4 +49,15 @@ describe('register-search-criteria-result-widget', () => {
     // would break the Context → Workspace `widget_load` demo wiring (FR-03).
     expect(SEARCH_CRITERIA_RESULT_WIDGET_TYPE).toBe('search-criteria-result');
   });
+
+  // FR-08 enumeration (task 022): this widget has no honest fit among the
+  // six WidgetContextType values, and is outside R3's overview/per-item
+  // scope — both fields deliberately resolve to `undefined` ("none", not a
+  // gap; see the registration-site comment).
+  it('has no contextType and no assistantContract (deliberate — task 022 FR-08 enumeration)', () => {
+    const meta = getWorkspaceWidgetMetadata(SEARCH_CRITERIA_RESULT_WIDGET_TYPE);
+    expect(meta).toBeDefined();
+    expect(meta!.contextType).toBeUndefined();
+    expect(meta!.assistantContract).toBeUndefined();
+  });
 });

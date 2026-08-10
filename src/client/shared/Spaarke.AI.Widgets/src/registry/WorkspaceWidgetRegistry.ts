@@ -33,7 +33,7 @@ import type React from 'react';
 import type { WorkspaceWidgetComponent } from '../types/widget-types';
 // Use the canonical WidgetMetadata from shared.ts (task AIPU2-071) — it is the
 // richer definition with icon, required allowMultiple, and required defaultOrder.
-import type { WidgetMetadata, WidgetContextType } from '../types/shared';
+import type { WidgetMetadata, WidgetContextType, WidgetAssistantContract } from '../types/shared';
 // Pillar 9 widget-visibility serialization contract (task 071, FR-55). The
 // registry's optional `getVisibleState` field returns a variant of this
 // discriminated union; see RegistryGetAgentVisibleState below for the full
@@ -282,6 +282,43 @@ export function getWorkspaceWidgetMetadata(type: string): WidgetMetadata | undef
 }
 
 /**
+ * Derive the complete widget-type → context-type map from the LIVE registry
+ * (FR-08). This is NOT a second/parallel registry — every entry is read
+ * directly off that widget's own `metadata.contextType`, so the map can
+ * never drift from the per-widget declarations in the register-*.ts files
+ * (§11 reuse-first: extend the existing registration shape, don't invent a
+ * parallel one).
+ *
+ * A widget with no declared `contextType` maps to `undefined` — an honest
+ * "none of the six values fit" (see `WidgetMetadata.contextType`), not a
+ * gap in the map.
+ *
+ * @returns Record keyed by every currently-registered widget type string.
+ */
+export function getWidgetContextTypeMap(): Record<string, WidgetContextType | undefined> {
+  const map: Record<string, WidgetContextType | undefined> = {};
+  for (const [type, entry] of _registry.entries()) {
+    map[type] = entry.metadata.contextType;
+  }
+  return map;
+}
+
+/**
+ * Retrieve a registered widget's Assistant-contract metadata (FR-08 + FR-15
+ * SHAPE), if it declared one.
+ *
+ * Returns `undefined` for widgets that have not declared a contract — task
+ * 022 populates it for the in-scope widgets (grids, Daily Briefing/Calendar
+ * via `'workspace'`, Email, Documents via `'document-viewer'`); task 050
+ * makes the field required and adds the structural enforcement guard.
+ *
+ * @param type - Widget type string.
+ */
+export function getWidgetAssistantContract(type: string): WidgetAssistantContract | undefined {
+  return _registry.get(type)?.metadata.assistantContract;
+}
+
+/**
  * Retrieve the Pillar 9 agent-visibility derivation for a registered
  * workspace widget type (task 072 / D-C-27).
  *
@@ -338,7 +375,15 @@ export function clearWorkspaceRegistry(): void {
 
 export type { WorkspaceWidgetRegistration };
 
-// Re-export WidgetMetadata (+ the closed WidgetContextType union, task 020)
-// from its canonical source (shared.ts) for callers that import metadata
-// types via the registry module.
+// Re-export WidgetMetadata (+ the closed WidgetContextType union, task 020,
+// + the Assistant-contract SHAPE types, task 022) from their canonical
+// source (shared.ts) for callers that import metadata types via the
+// registry module.
 export type { WidgetMetadata, WidgetContextType };
+export type {
+  WidgetAssistantContract,
+  AssistantContractCard,
+  AssistantInteractionPattern,
+  AssistantCardLanding,
+} from '../types/shared';
+export { OVERVIEW_QUERY_TOOL_NAME } from '../types/shared';

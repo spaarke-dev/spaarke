@@ -4,7 +4,7 @@
     <title>Parameterized configId-driven overview tool — saved-query reuse, today injected, server-side predicates, record-id citations (FR-06)</title>
     <phase>2 — Capability parity</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF AI tool handler on the ADR-039 catalog + ADR-015 governance boundary; the overview DoD driver; server-side OBO query execution</rigor-reason>
     <model-tier>opus</model-tier>
