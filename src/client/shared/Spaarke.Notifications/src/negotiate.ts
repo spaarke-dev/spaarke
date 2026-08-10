@@ -124,7 +124,10 @@ export async function connectSignalR(onSignal: (signal: NotificationSignal) => v
           // abort the (re)connect attempt with a less diagnosable error). The
           // subsequent connect/reconnect attempt will surface its own failure/backoff
           // via the normal SignalR retry policy if this stale token is also rejected.
-          console.warn('[@spaarke/notifications] accessTokenFactory re-negotiate failed; reusing last-known token:', err);
+          console.warn(
+            '[@spaarke/notifications] accessTokenFactory re-negotiate failed; reusing last-known token:',
+            err
+          );
           return info.accessToken;
         }
       },
