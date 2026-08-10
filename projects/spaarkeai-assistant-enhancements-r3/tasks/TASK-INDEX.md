@@ -12,8 +12,8 @@
 |---|---|---|---|---|---|---|---|---|
 | 001 | Active-item conduit (widget-agnostic `{id,type,label}`) | 0 Foundation | FR-04 | opus / xhigh | FULL | ❌ | — | ✅ |
 | 010 | Layout-tab visibility + persist `visibleToAssistant` | 1 Awareness | FR-01,02 | sonnet / high | FULL | ❌ | 001 | ✅ |
-| 011 | Trim prompt block + thread active-item handle (server) | 1 Awareness | FR-03,04 | opus / xhigh | FULL | ❌ | 001,010 | 🔲 |
-| 012 | Email widget publishes selection as id handle | 1 Awareness | FR-05 | sonnet / high | FULL | ✅ | 001 | 🔲 |
+| 011 | Trim prompt block + thread active-item handle (server) | 1 Awareness | FR-03,04 | opus / xhigh | FULL | ❌ | 001,010 | ✅ |
+| 012 | Email widget publishes selection as id handle | 1 Awareness | FR-05 | sonnet / high | FULL | ✅ | 001 | ✅ |
 | 020 | Parameterized `configId` overview tool (DoD driver) | 2 Parity | FR-06 | opus / xhigh | FULL | ❌ | 011 | 🔲 |
 | 021 | Wire overview tool: all grids + Briefing + Calendar | 2 Parity | FR-07 | sonnet / high | FULL | ❌ | 020 | 🔲 |
 | 022 | widget↔context-type map + contract metadata shape | 2 Parity | FR-08,15 | sonnet / high | FULL | ✅ | 001 | 🔲 |

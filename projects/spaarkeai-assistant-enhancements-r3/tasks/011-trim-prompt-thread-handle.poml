@@ -4,7 +4,7 @@
     <title>Trim the workspace-state prompt block to {type,label,active} per tab and thread the active-item {id,type,label} handle into the prompt's active-item slot (FR-03, FR-04 server)</title>
     <phase>1 — Awareness (identity + active-item handle)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF agent-factory change on the ADR-015 prompt privacy boundary (id-not-content); the trim + handle threading is load-bearing governance — code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -74,7 +74,14 @@
     <criterion testable="true">Publish size ≤60 MB reported (absolute + delta).</criterion>
     <criterion testable="true">Tests pass.</criterion>
   </acceptance-criteria>
-  <notes>NFR-04 governance — this is the id-not-content boundary the project rests on. Serialize after 010 (same file). Run /conflict-check before the BFF PR; coordinate redesign-r2 seams.</notes>
+  <notes>NFR-04 governance — this is the id-not-content boundary the project rests on. Serialize after 010 (same file). Run /conflict-check before the BFF PR; coordinate redesign-r2 seams.
+
+COMPLETED 2026-08-10 (opus/xhigh, FULL). THREE changes (the first is the owner-approved re-point beyond the original POML):
+(A) RE-POINT: `BuildWorkspaceStateBlock` is now fed from the LIVE tabs (`session.Tabs` / `StoredSession.Tabs`, written by the client via PATCH /sessions/{id}/tabs → `SaveTabsAsync`) instead of the runtime-inert `IWorkspaceStateService.GetTabsAsync` (write path retired by AIR2-075). The ChatEndpoints SendMessage handler loads the stored session via `ISessionPersistenceService.LoadSessionAsync` and maps `StoredWorkspaceTab{id,widgetType,widgetData,displayName}` → `WorkspaceTab` (new private `MapStoredTabsToWorkspaceTabs`), passed to `CreateAgentAsync` as a new `liveTabs` param. `CreateAgentAsync` UNIONs `liveTabs` with pinned durable rows from `IWorkspaceStateService` (live rows win on same id). visibleToAssistant reconciliation: `StoredWorkspaceTab` has NO `visibleToAssistant` field → live tabs default visible=true (they appear — the point). Persisting the FR-01/FR-02 toggle through the live path needs a client PATCH-DTO field → FLAGGED as follow-up, NOT done (no client change).
+(B) TRIM (FR-03): per-tab emission is now EXACTLY `- Tab {n}{(active)}: widgetType={type} label="{label}"` — all ambient widget content removed (FormatVisibleStateFields no longer wired into the block; retained + noted). label = DisplayName ?? derived identity name (dashboardName/filename/subject) ?? widgetType.
+(C) HANDLE (FR-04): added `ChatActiveItem{id,type,label}` on `ChatSendMessageRequest` + `WorkspaceActiveItemHandle` (Models/Workspace, 3-field record) threaded into a single `### Active Item` slot (id/type/label only; empty when none).
+Task 010's layout-tab identity variant PRESERVED (composes — the derivation special-cases still run; only the emission format changed).
+Tests: `SprkChatAgentFactoryWorkspaceStateTests` rewritten to the trimmed contract + governance/handle tests (38 pass); `Pillar9PrivacyFilterTests` updated (3 pass). Full BFF unit suite 10252 passed / 0 failed / 101 skipped. Build 0 errors. Publish 48.44 MB compressed incl PDBs (baseline ~49.63 → −1.19 MB; ≤60 MB ceiling OK).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

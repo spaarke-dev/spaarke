@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
@@ -449,6 +450,7 @@ public static class ChatEndpoints
         [FromServices] IConversationHistorySanitizer conversationHistorySanitizer,
         [FromServices] CrossMatterSafetyTelemetry crossMatterTelemetry,
         [FromServices] AiTelemetry aiTelemetry,
+        [FromServices] ISessionPersistenceService? sessionPersistence,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
     {
@@ -654,6 +656,44 @@ public static class ChatEndpoints
             // — this emitter is purely additive and does not alter the R1 flow.
             var r2Emitter = CreateR2Emitter(sseWriter, logger);
 
+            // === R3 task 011 (FR-03 re-point) — feed the workspace-state block from the LIVE tabs ===
+            // The awareness block's tabs come from StoredSession.Tabs (written by the client via
+            // PATCH /sessions/{id}/tabs → ISessionPersistenceService.SaveTabsAsync) — the live
+            // source-of-record. This SUPERSEDES the runtime-inert IWorkspaceStateService read whose
+            // write path was retired by AIR2-075. We load the same store GetTabs reads, then map the
+            // StoredWorkspaceTab shape to the WorkspaceTab shape BuildWorkspaceStateBlock consumes.
+            // Best-effort: a load failure degrades to the legacy IWorkspaceStateService path (null).
+            IReadOnlyList<WorkspaceTab>? liveTabs = null;
+            if (sessionPersistence is not null)
+            {
+                try
+                {
+                    var storedForTabs = await sessionPersistence.LoadSessionAsync(tenantId, sessionId, cancellationToken);
+                    if (storedForTabs?.Tabs is { Count: > 0 })
+                    {
+                        liveTabs = MapStoredTabsToWorkspaceTabs(storedForTabs.Tabs, sessionId, tenantId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex,
+                        "R3 task 011: failed to load live workspace tabs for the awareness block — sessionId={SessionId}, continuing without",
+                        sessionId);
+                }
+            }
+
+            // FR-04 (server half): map the client active-item handle {id,type,label} → the model
+            // handle threaded into the single active-item slot. Only mapped when an id is present;
+            // ADR-015 id-not-content — no content field is ever carried.
+            WorkspaceActiveItemHandle? activeItem = null;
+            if (!string.IsNullOrWhiteSpace(request.ActiveItem?.Id))
+            {
+                activeItem = new WorkspaceActiveItemHandle(
+                    Id: request.ActiveItem!.Id!,
+                    Type: request.ActiveItem.Type ?? string.Empty,
+                    Label: request.ActiveItem.Label ?? string.Empty);
+            }
+
             // Create agent for this session — pass the user's message for conversation-aware
             // document chunk re-selection (FR-03, R2-054). When a document exceeds the 30K
             // token budget, this enables the DocumentContextService to select chunks most
@@ -689,6 +729,12 @@ public static class ChatEndpoints
                 // (backward compatible). Only the tab id is forwarded — the compact state is NOT
                 // trusted as prompt content (ADR-015: server-derived visible state is authoritative).
                 activeContextTabId: request.ActiveContext?.TabId,
+                // R3 task 011 (FR-03 re-point): the live open tabs from StoredSession.Tabs — the
+                // source-of-record that feeds the (now identity-only) workspace-state block.
+                liveTabs: liveTabs,
+                // R3 task 011 (FR-04): the {id,type,label} active-item handle → the ONE active-item
+                // slot in the block (ADR-015 id-not-content — no content ever).
+                activeItem: activeItem,
                 cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
@@ -2332,6 +2378,109 @@ public static class ChatEndpoints
     }
 
     /// <summary>
+    /// R3 task 011 (FR-03 re-point) — map the LIVE persisted tab shape
+    /// (<see cref="StoredWorkspaceTab"/>, written by <c>SaveTabsAsync</c>) onto the
+    /// <see cref="WorkspaceTab"/> shape <c>SprkChatAgentFactory.BuildWorkspaceStateBlock</c>
+    /// consumes for the (now identity-only) workspace-state prompt block.
+    ///
+    /// <para>
+    /// Field mapping: <c>id → Id</c>, <c>widgetType → WidgetType</c>,
+    /// <c>displayName → DisplayName</c> (the trimmed block's primary label source),
+    /// <c>widgetData (JsonElement) → WidgetData</c> (leniently deserialized against the
+    /// polymorphic <see cref="WorkspaceTabWidgetData"/> union — null when the opaque payload
+    /// carries no recognized <c>kind</c>, e.g. layout tabs; the derivation tolerates null and
+    /// the block still lists the tab by DisplayName). Synthetic ordering timestamps preserve the
+    /// client's left-to-right tab order under the block's <c>OrderByDescending(UpdatedAt)</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>visibleToAssistant reconciliation (owner-flagged follow-up)</b>:
+    /// <see cref="StoredWorkspaceTab"/> carries NO <c>visibleToAssistant</c> field, so live tabs
+    /// default to <c>VisibleToAssistant = true</c> — they DO appear (the whole point of the
+    /// re-point). Persisting the FR-01/FR-02 per-tab toggle THROUGH this live path would require a
+    /// client PATCH-DTO change to carry the flag; that cross-surface change is intentionally NOT
+    /// made here and is flagged as a follow-up. ADR-015: all mapped fields are identity/metadata —
+    /// no item content crosses this boundary (the block emits <c>{type,label,active}</c> only).
+    /// </para>
+    ///
+    /// <para>
+    /// <c>internal</c> (not <c>private</c>) specifically so this mapping — the re-point linchpin
+    /// between the write-through tab store and the workspace-state prompt block — is testable
+    /// directly via <c>InternalsVisibleTo</c> (see .csproj), matching the precedent set by
+    /// <see cref="SelectMostRecentSession"/> (tests CLAUDE.md B8 ban is on reflection into
+    /// private members, not on testing an internal member directly).
+    /// </para>
+    /// </summary>
+    internal static IReadOnlyList<WorkspaceTab> MapStoredTabsToWorkspaceTabs(
+        IReadOnlyList<StoredWorkspaceTab> storedTabs,
+        string sessionId,
+        string tenantId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var result = new List<WorkspaceTab>(storedTabs.Count);
+        for (var i = 0; i < storedTabs.Count; i++)
+        {
+            var t = storedTabs[i];
+
+            // Lenient polymorphic deserialization: the persisted widgetData carries a `kind`
+            // discriminator for the typed widgets (Summary/DocumentViewer/Dashboard/Table/Email),
+            // but layout/compose tabs persist a `kind`-less shape → deserialization fails → null.
+            // TryDeriveVisibleState + the special-cases handle null; the block labels by DisplayName.
+            // Hardening fix (r3 task 011 test pass): System.Text.Json's JsonPolymorphic converter
+            // throws NotSupportedException (NOT JsonException) when the discriminator property is
+            // ABSENT entirely — the exact shape a kind-less layout tab produces. A catch(JsonException)-
+            // only clause let this escape per-tab handling and propagate out of the whole batch, which
+            // the endpoint's outer catch(Exception) then swallowed by dropping ALL live tabs for the
+            // turn (not just the one kind-less tab) — silently defeating the FR-03 re-point for any
+            // session with a layout tab open. Both exception shapes are now caught per-tab, matching
+            // the documented behavior above.
+            WorkspaceTabWidgetData? widgetData = null;
+            if (t.WidgetData is { ValueKind: JsonValueKind.Object } we)
+            {
+                try
+                {
+                    widgetData = we.Deserialize<WorkspaceTabWidgetData>();
+                }
+                catch (Exception ex) when (ex is JsonException or NotSupportedException)
+                {
+                    widgetData = null;
+                }
+            }
+
+            // Ordering: earlier list index → later timestamp so OrderByDescending preserves the
+            // client's tab-strip order (the active tab is hoisted separately via the focus-stamp).
+            var syntheticUpdatedAt = now.AddSeconds(-i).ToString("O");
+
+            result.Add(new WorkspaceTab
+            {
+                Id = t.Id,
+                WidgetType = t.WidgetType,
+                WidgetData = widgetData!,
+                DisplayName = t.DisplayName,
+                SessionId = sessionId,
+                TenantId = tenantId,
+                // No visibleToAssistant on StoredWorkspaceTab → default visible (see remarks).
+                VisibleToAssistant = true,
+                SourceProvenance = new WorkspaceTabSourceProvenance
+                {
+                    // Deterministic marker id (ADR-015) — never user text.
+                    Source = "user",
+                    CreatedBy = "workspace-live-tab",
+                    CreatedAt = syntheticUpdatedAt,
+                },
+                MatterContext = new WorkspaceTabMatterContext { MatterId = string.Empty, MatterName = string.Empty },
+                IsPinned = false,
+                CanEdit = true,
+                LastUserEditAt = null,
+                CreatedAt = syntheticUpdatedAt,
+                UpdatedAt = syntheticUpdatedAt,
+            });
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// POST /api/ai/chat/sessions/{sessionId}/suggest
     /// spaarkeai-assistant-enhancements-r2 FR-B3/B5 (task 022) — run the ONE grounded proactive-
     /// suggestion turn for the focused workspace tab and return ≤3 content-specific follow-on chips.
@@ -3432,12 +3581,44 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// every chat NL utterance enters the agent-turn loop unbiased; the four retained soft
 /// slashes invoke deterministically through the Click path, not via a wire hint.
 /// </remarks>
+/// <param name="ActiveItem">
+/// spaarkeai-assistant-enhancements-r3 task 011 (FR-04): the client-supplied active-item handle —
+/// the <c>{id,type,label}</c> of the single item the user is currently acting on WITHIN a tab
+/// (e.g. a selected email in an email list, the document open in a viewer). Published client-side
+/// by the task-001 active-item conduit (a generalization of the Compose <c>composeActionBridge</c>)
+/// and forwarded to <see cref="Sprk.Bff.Api.Services.Ai.Chat.SprkChatAgentFactory.CreateAgentAsync"/>,
+/// where it becomes the ONE active-item slot in the workspace-state prompt block. Distinct from
+/// <see cref="ActiveContext"/> (the active TAB focus-stamp). ADR-015 id-not-content BINDING: only
+/// id/type/label are carried — NEVER item content; all content is tool-fetched by id. Default
+/// <c>null</c> = no active item published → the slot is empty.
+/// </param>
 public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
     IReadOnlyList<ChatMessageAttachment>? Attachments = null,
     AiModelTier? ModelTierOverride = null,
-    ChatActiveContext? ActiveContext = null);
+    ChatActiveContext? ActiveContext = null,
+    ChatActiveItem? ActiveItem = null);
+
+/// <summary>
+/// spaarkeai-assistant-enhancements-r3 task 011 (FR-04) — the client active-item handle carried on
+/// the chat request. Mirrors the widget-agnostic <c>{id,type,label}</c> shape published by the
+/// task-001 conduit. Mapped to <see cref="Sprk.Bff.Api.Models.Workspace.WorkspaceActiveItemHandle"/>
+/// at the send-message call site.
+///
+/// <para>
+/// <b>ADR-015 (id-not-content) BINDING</b>: this record has EXACTLY three fields — id, type, label —
+/// and MUST NOT be extended with any content field (body, snippet, selection text, row/chart data).
+/// A content field here is a governance defect. All real content is tool-fetched by <see cref="Id"/>.
+/// </para>
+/// </summary>
+/// <param name="Id">Opaque, deterministic fetch key for the active item (never user text). The Assistant keys per-item actions to this id.</param>
+/// <param name="Type">The item kind (e.g. <c>"email"</c>, <c>"document"</c>) — an identity discriminator, not content.</param>
+/// <param name="Label">Human-readable item title — a thin identity slice, never a body/snippet.</param>
+public record ChatActiveItem(
+    string? Id = null,
+    string? Type = null,
+    string? Label = null);
 
 /// <summary>
 /// spaarkeai-assistant-enhancements-r2 FR-A2 — the client "focus-stamp": the identity and
