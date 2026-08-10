@@ -59,6 +59,17 @@ None.
 
 `useAuthProbe.ts` is live in `App.tsx` and shipped in this deploy, but was previously characterized as structurally superseded by the `requireSilentOnly` flag revert. With the flag reverted the popup fallback succeeds, so the probe's retry can now resolve — it is not broken, but its continued necessity is a design question. Left in place because it is part of the deployed, about-to-be-re-UAT'd state; ripping it out during wrap-up would change App-mount auth gating unverified. Recommend a follow-up review (or R3 note) rather than a wrap-up change. Its test stays (MAINTAIN) as long as the hook stays.
 
+## Addendum — post-close auth hotfix tests (2026-08-10, re-run)
+
+The auth cold-start hotfix (PR #750) added **2 new test files** after the 090 close-out. Re-classified here:
+
+| File | Class | Why |
+|---|---|---|
+| `src/client/shared/Spaarke.Auth/tests/initAuth.idempotency.test.ts` | **MAINTAIN** | Behavioral — asserts a duplicate init for the same clientId coalesces (exactly one `PublicClientApplication` constructed) and a different clientId replaces. Guards the dual-MSAL-instance regression. Lives in the maintained `@spaarke/auth` suite. |
+| `src/client/shared/Spaarke.Auth/tests/SpaarkeAuthProvider.proactiveRefresh.test.ts` | **MAINTAIN** | Behavioral — asserts the background refresh timer never initiates a cold interactive acquire, and does refresh when a session exists. Guards the `interaction_in_progress` regression. |
+
+**Verdict: 2 new MAINTAIN, 0 scaffolding.** Both are regression guards for a real production defect (every bug = regression, ADR-038 KEEP category). Total project test-diet remains clean.
+
 ## Industry citation
 
 Build-vs-maintain per ADR-038 §7 (Beck "delete the scaffolding"; Feathers characterization-vs-behavior; Google test-sizes). 17-ban classifier B1–B17.

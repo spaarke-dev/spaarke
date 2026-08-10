@@ -24,8 +24,9 @@ const freshJwt = (): string => makeJwt(Math.floor(Date.now() / 1000) + 60 * 60);
 class StubStrategy implements AuthStrategy {
   readonly name = 'stub';
   public token = ''; // '' = cold (no session); a JWT = warm
-  acquire = jest.fn(async (): Promise<TokenResult> =>
-    this.token ? { accessToken: this.token, expiresOn: 0 } : { accessToken: '', expiresOn: 0 }
+  acquire = jest.fn(
+    async (): Promise<TokenResult> =>
+      this.token ? { accessToken: this.token, expiresOn: 0 } : { accessToken: '', expiresOn: 0 }
   );
   clearCache = jest.fn();
   logout = jest.fn(async () => {});
