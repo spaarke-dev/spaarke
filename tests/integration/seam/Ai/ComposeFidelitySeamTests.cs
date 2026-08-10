@@ -603,6 +603,16 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
     /// REAL ComposeService + ComposeTemplatePartMergeEngine stay in play.</summary>
     public Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource> TemplateSourceMock { get; } = new(MockBehavior.Loose);
 
+    /// <summary>Task 042 (spaarkeai-compose-r6, FR-06): the PDF-intake module boundary for the
+    /// PDF round-trip seam (`ComposePdfIntakeRoundTripSeamTests`). The REAL `ComposePdfIntakeSource`
+    /// calls Azure Document Intelligence (`prebuilt-layout`) — external by definition, so it is
+    /// doubled at the SAME PublicContracts seam as the template source above (ADR-038 "mock at
+    /// module boundaries"). Everything downstream of the DocumentLayout contract — the REAL
+    /// ComposePdfModelProjector, ComposeDocumentRenderer, projection builders, ComposeService PDF
+    /// branch, endpoints — stays in play. (The Azure-DI-shape → DocumentLayout mapping itself is
+    /// covered by TextExtractorLayoutMappingTests via DocumentIntelligenceModelFactory.)</summary>
+    public Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource> PdfIntakeSourceMock { get; } = new(MockBehavior.Loose);
+
     /// <summary>Resets the boundary mocks between tests (xUnit runs a class's [Fact]s sequentially
     /// against the same IClassFixture instance).</summary>
     public void ResetBoundaries()
@@ -611,6 +621,7 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
         DataverseMock.Reset();
         IndexingMock.Reset();
         TemplateSourceMock.Reset();
+        PdfIntakeSourceMock.Reset();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -740,6 +751,9 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
             // on their request paths).
             services.RemoveAll<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource>();
             services.AddSingleton(TemplateSourceMock.Object);
+            // Task 042: PDF-intake PublicContracts boundary double (see PdfIntakeSourceMock remarks).
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource>();
+            services.AddSingleton(PdfIntakeSourceMock.Object);
             services.RemoveAll<Azure.Core.TokenCredential>();
             services.AddSingleton<Azure.Core.TokenCredential>(new ComposeFidelitySeamFakeTokenCredential());
         });
