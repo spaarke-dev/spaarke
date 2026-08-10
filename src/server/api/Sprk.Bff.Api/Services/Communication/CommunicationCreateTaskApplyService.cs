@@ -73,6 +73,20 @@ public interface ICommunicationCreateTaskApplyService
     /// </summary>
     Task<ApplyCreateTaskResult> ApplyAsync(
         Guid reviewLogId, ApplyCreateTaskRequest? request, ClaimsPrincipal? caller, CancellationToken ct);
+
+    /// <summary>
+    /// Creates an AD-HOC task (FR-E5 "+ New task", task 056b) regarding the confirmed record — a task the reviewer
+    /// AUTHORED, not proposed by the engine — through the SAME create-task path as an applied proposal:
+    /// <see cref="IActionSeam.CreateTaskAsync"/> + the caller-impersonated FR-E5 PATCH + EXACTLY ONE append-only
+    /// <c>Applied</c> audit row (actor = the confirming human). There is NO proposal row, NO citation (nothing was
+    /// extracted, so no NFR-06 re-verify), and NO open-walk. Association gating is the UI's (NFR-10): the caller
+    /// supplies the confirmed record as the regarding, matching the applied-proposal sibling's documented posture (it
+    /// also does not add a second server-side association re-check — see the class remarks). Throws
+    /// <see cref="SdapProblemException"/> (RFC 7807) for an unresolved caller (403), a blank subject or missing/blank
+    /// regarding (422), a failed create (422), or a failed FR-E5 PATCH after create (422).
+    /// </summary>
+    Task<CreateAdHocTaskResult> CreateAdHocAsync(
+        Guid communicationId, CreateAdHocTaskRequest request, ClaimsPrincipal? caller, CancellationToken ct);
 }
 
 /// <summary>Human-supplied FR-E5 fields for a create-task apply (task 056 reconcile tab). All optional — an omitted
@@ -97,6 +111,41 @@ public sealed record ApplyCreateTaskRequest
 /// <summary>Result of a successful <see cref="ICommunicationCreateTaskApplyService.ApplyAsync"/>.</summary>
 public sealed record ApplyCreateTaskResult(
     Guid ReviewLogId,
+    Guid CreatedTaskId,
+    Guid AuditLogId,
+    string RegardingEntity,
+    Guid RegardingRecordId,
+    IReadOnlyList<string> FieldsPatched);
+
+/// <summary>Human-authored fields for an AD-HOC create-task (FR-E5 "+ New task", task 056b). Unlike
+/// <see cref="ApplyCreateTaskRequest"/> there is no backing proposal, so <see cref="Subject"/> + the regarding
+/// (<see cref="RegardingEntity"/> / <see cref="RegardingRecordId"/> — the confirmed record, NFR-10) are REQUIRED; the
+/// rest mirror the applied-proposal FR-E5 field set. Dates are <see cref="DateOnly"/> (the <c>sprk_event</c> date
+/// columns are Date-Only).</summary>
+public sealed record CreateAdHocTaskRequest
+{
+    /// <summary>The task name (<c>sprk_event</c> Subject) — REQUIRED for an ad-hoc task.</summary>
+    public string? Subject { get; init; }
+    public string? Description { get; init; }
+
+    /// <summary>The confirmed record's entity logical name (the task's regarding) — REQUIRED (NFR-10).</summary>
+    public string? RegardingEntity { get; init; }
+    /// <summary>The confirmed record's id (the task's regarding) — REQUIRED (NFR-10).</summary>
+    public Guid? RegardingRecordId { get; init; }
+
+    public DateOnly? DueDate { get; init; }
+    public DateOnly? BaseDate { get; init; }
+    public DateOnly? FinalDueDate { get; init; }
+    public DateOnly? CompletedDate { get; init; }
+
+    /// <summary><c>sprk_eventstatus</c> Choice value (e.g. Completed=2 for the create-and-complete case).</summary>
+    public int? Status { get; init; }
+    /// <summary>The task Owner (<c>ownerid</c> systemuser).</summary>
+    public Guid? AssignedTo { get; init; }
+}
+
+/// <summary>Result of a successful <see cref="ICommunicationCreateTaskApplyService.CreateAdHocAsync"/> (task 056b).</summary>
+public sealed record CreateAdHocTaskResult(
     Guid CreatedTaskId,
     Guid AuditLogId,
     string RegardingEntity,
@@ -346,20 +395,163 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
             reviewLogId, createdTaskId, auditLogId, targetEntity!, regardingRecordId, fieldsPatched);
     }
 
-    private static List<ActionFieldMapping> BuildPatchMappings(ApplyCreateTaskRequest? request)
+    /// <inheritdoc />
+    public async Task<CreateAdHocTaskResult> CreateAdHocAsync(
+        Guid communicationId, CreateAdHocTaskRequest request, ClaimsPrincipal? caller, CancellationToken ct)
+    {
+        // (1) Resolve the confirming caller server-side; fail closed (403) — NEVER app-only, never client-supplied.
+        var resolution = await _callerResolver.ResolveAsync(caller, ct).ConfigureAwait(false);
+        if (!resolution.IsResolved
+            || !Guid.TryParse(resolution.SystemUserId, out var callerSystemUserId)
+            || callerSystemUserId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "CALLER_NOT_RESOLVED",
+                title: "Caller Not Resolved",
+                detail: "The caller could not be resolved to a Dataverse systemuser; the ad-hoc create is refused (fail closed — the write must be attributed to the confirming user, never app-only).",
+                statusCode: 403);
+        }
+
+        // (2) Validate the request shape. There is no proposal to derive from, so subject + the regarding (the
+        //     confirmed record, NFR-10) are REQUIRED. Association gating is the UI's — matching the applied-proposal
+        //     sibling's posture (no second server-side association re-check; see class remarks).
+        var subject = request.Subject?.Trim();
+        var regardingEntity = request.RegardingEntity?.Trim();
+        if (string.IsNullOrWhiteSpace(subject))
+        {
+            throw new SdapProblemException(
+                code: "TASK_SUBJECT_REQUIRED",
+                title: "Task Subject Required",
+                detail: "An ad-hoc task requires a non-empty subject.",
+                statusCode: 422);
+        }
+        if (string.IsNullOrWhiteSpace(regardingEntity)
+            || request.RegardingRecordId is not { } regardingRecordId
+            || regardingRecordId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "REGARDING_REQUIRED",
+                title: "Regarding Record Required",
+                detail: "An ad-hoc task must attach to the confirmed record (NFR-10): a regarding entity + record id are required.",
+                statusCode: 422);
+        }
+        if (communicationId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "COMMUNICATION_REQUIRED",
+                title: "Communication Required",
+                detail: "A communication id is required to link the ad-hoc task's audit row.",
+                statusCode: 422);
+        }
+
+        // (3) CREATE the sprk_event via the blessed write core (app-only create, same as the applied-proposal path —
+        //     the confirming user is attributed via ownerid + the impersonated PATCH + the audit row).
+        var createResult = await _actionSeam.CreateTaskAsync(
+            new CreateTaskRequest
+            {
+                Subject = Truncate(subject, 200),
+                Description = request.Description,
+                DueDate = request.DueDate?.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc),
+                RegardingObjectId = regardingRecordId,
+                RegardingObjectType = regardingEntity,
+                OwnerId = request.AssignedTo,
+            },
+            ct).ConfigureAwait(false);
+
+        if (!createResult.Success || createResult.TaskId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "CREATE_TASK_FAILED",
+                title: "Create Task Failed",
+                detail: createResult.Error ?? "The ad-hoc task (sprk_event) could not be created.",
+                statusCode: 422);
+        }
+
+        var createdTaskId = createResult.TaskId;
+
+        // (4) PATCH the remaining FR-E5 fields under the confirming user's impersonation (same as the applied path).
+        var mappings = BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.Status);
+        UpdateRecordResult? patchResult = null;
+        if (mappings.Count > 0)
+        {
+            patchResult = await _actionSeam.UpdateRecordAsync(
+                new UpdateRecordRequest
+                {
+                    EntityLogicalName = EventEntity,
+                    RecordId = createdTaskId,
+                    FieldMappings = mappings,
+                    ImpersonateSystemUserId = callerSystemUserId,
+                },
+                ct).ConfigureAwait(false);
+        }
+
+        var patchFailed = patchResult is { Success: false };
+        var fieldsPatched = patchResult is { Success: true }
+            ? patchResult.FieldsUpdated
+            : (IReadOnlyList<string>)Array.Empty<string>();
+
+        // (5) Write EXACTLY ONE append-only Applied audit row (actor = the confirming human). The task WAS created, so
+        //     this always runs — a mutate-without-audit path does not exist.
+        Guid auditLogId;
+        try
+        {
+            auditLogId = await WriteAdHocAppliedAuditRowAsync(
+                communicationId, regardingEntity, regardingRecordId, subject, request.Description, createdTaskId,
+                fieldsPatched, patchResult?.Error, callerSystemUserId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogCritical(
+                ex,
+                "Job C ad-hoc create CREATED sprk_event {CreatedTaskId} (regarding {Entity}({RecordId})) for caller {Caller} on communication {CommunicationId} but the Applied audit row write FAILED. Manual audit reconciliation required.",
+                createdTaskId, regardingEntity, regardingRecordId, callerSystemUserId, communicationId);
+            throw new SdapProblemException(
+                code: "AUDIT_WRITE_FAILED",
+                title: "Audit Write Failed",
+                detail: "The ad-hoc task was created but the audit row could not be written; this has been logged for reconciliation.",
+                statusCode: 500);
+        }
+
+        // (6) If the FR-E5 PATCH failed, the task exists (and is audited) but its status/deadline fields did not
+        //     apply — surface loudly (422), NEVER silently drop a deadline-bearing field (ADR-015).
+        if (patchFailed)
+        {
+            _logger.LogWarning(
+                "Job C ad-hoc create CREATED sprk_event {CreatedTaskId} + audit row {AuditLogId}, but the FR-E5 field PATCH failed ({Error}) for caller {Caller}.",
+                createdTaskId, auditLogId, patchResult?.Error, callerSystemUserId);
+            throw new SdapProblemException(
+                code: "FIELD_PATCH_FAILED",
+                title: "Field Update Failed",
+                detail: $"The ad-hoc task was created and audited, but its status/deadline fields could not be applied: {patchResult?.Error}",
+                statusCode: 422);
+        }
+
+        _logger.LogInformation(
+            "Job C ad-hoc create: created sprk_event {CreatedTaskId} (regarding {Entity}({RecordId})) under caller {Caller} on communication {CommunicationId}; {PatchedCount} FR-E5 field(s) patched; audit row {AuditLogId} written.",
+            createdTaskId, regardingEntity, regardingRecordId, callerSystemUserId, communicationId, fieldsPatched.Count, auditLogId);
+
+        return new CreateAdHocTaskResult(createdTaskId, auditLogId, regardingEntity, regardingRecordId, fieldsPatched);
+    }
+
+    private static List<ActionFieldMapping> BuildPatchMappings(ApplyCreateTaskRequest? request) =>
+        request is null
+            ? new List<ActionFieldMapping>()
+            : BuildPatchMappings(request.BaseDate, request.FinalDueDate, request.CompletedDate, request.Status);
+
+    /// <summary>Builds the FR-E5 impersonated-PATCH field mappings (base/final-due/completed dates + status Choice).
+    /// Shared by the applied-proposal path and the ad-hoc path so both write the identical field set the same way.</summary>
+    private static List<ActionFieldMapping> BuildPatchMappings(
+        DateOnly? baseDate, DateOnly? finalDueDate, DateOnly? completedDate, int? status)
     {
         var mappings = new List<ActionFieldMapping>();
-        if (request is null)
-            return mappings;
-
-        if (request.BaseDate is { } baseDate)
-            mappings.Add(new ActionFieldMapping(EventBaseDateField, ActionFieldType.String, FormatDate(baseDate)));
-        if (request.FinalDueDate is { } finalDue)
-            mappings.Add(new ActionFieldMapping(EventFinalDueDateField, ActionFieldType.String, FormatDate(finalDue)));
-        if (request.CompletedDate is { } completed)
-            mappings.Add(new ActionFieldMapping(EventCompletedDateField, ActionFieldType.String, FormatDate(completed)));
-        if (request.Status is { } status)
-            mappings.Add(new ActionFieldMapping(EventStatusField, ActionFieldType.String, status.ToString(CultureInfo.InvariantCulture)));
+        if (baseDate is { } b)
+            mappings.Add(new ActionFieldMapping(EventBaseDateField, ActionFieldType.String, FormatDate(b)));
+        if (finalDueDate is { } f)
+            mappings.Add(new ActionFieldMapping(EventFinalDueDateField, ActionFieldType.String, FormatDate(f)));
+        if (completedDate is { } c)
+            mappings.Add(new ActionFieldMapping(EventCompletedDateField, ActionFieldType.String, FormatDate(c)));
+        if (status is { } s)
+            mappings.Add(new ActionFieldMapping(EventStatusField, ActionFieldType.String, s.ToString(CultureInfo.InvariantCulture)));
 
         return mappings;
     }
@@ -483,6 +675,48 @@ public sealed class CommunicationCreateTaskApplyService : ICommunicationCreateTa
 
         if (suggestion.Confidence.HasValue)
             entity["sprk_confidence"] = (decimal)suggestion.Confidence.Value;
+
+        return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Writes the single append-only <c>Applied</c> audit row for an AD-HOC create (task 056b). Mirrors
+    /// <see cref="WriteAppliedAuditRowAsync"/> but there is no AI proposal — no citation, no confidence — so the row
+    /// records the human-authored task and an <c>adhoc:true</c> marker in the self-contained JSON. The
+    /// <c>sprk_targetfield</c> carries the create-task sentinel + <c>adhoc</c> so the row is categorized with the
+    /// applied-proposal rows without colliding with any proposal's <c>(communication, entity, sentinel)</c> key.
+    /// </summary>
+    private async Task<Guid> WriteAdHocAppliedAuditRowAsync(
+        Guid communicationId, string regardingEntity, Guid regardingRecordId, string subject, string? description,
+        Guid createdTaskId, IReadOnlyList<string> fieldsPatched, string? patchError, Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        var applied = new
+        {
+            kind = "create-task-adhoc",
+            adhoc = true,
+            subject,
+            description,
+            createdTaskId,
+            regardingObjectType = regardingEntity,
+            regardingObjectId = regardingRecordId,
+            fieldsPatched,
+            patchError,
+        };
+        var appliedJson = JsonSerializer.Serialize(applied);
+
+        var entity = new Entity(ReviewLogEntity)
+        {
+            ["sprk_name"] = Truncate($"Created ad-hoc task: {subject}", 850),
+            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_actortype"] = new OptionSetValue(ReviewActorTypeHuman),
+            ["sprk_action"] = new OptionSetValue(ReviewActionApplied),
+            ["sprk_actor"] = Truncate(callerSystemUserId.ToString(), 200),
+            ["sprk_targetentity"] = Truncate(regardingEntity, 100),
+            ["sprk_targetrecordid"] = Truncate(regardingRecordId.ToString(), 100),
+            ["sprk_targetfield"] = Truncate(CreateTaskSentinelFieldPrefix + "adhoc", 100),
+            ["sprk_aisuggestion"] = appliedJson,
+        };
 
         return await _genericEntityService.CreateAsync(entity, ct).ConfigureAwait(false);
     }

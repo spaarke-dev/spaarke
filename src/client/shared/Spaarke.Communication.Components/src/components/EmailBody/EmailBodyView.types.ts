@@ -37,7 +37,45 @@
  * component imports the real free-function by default; this alias exists so the
  * dependency is named + documented and so tests can `jest.mock('@spaarke/auth')`.
  */
+import type { EmailCitation } from '../../logic/citations';
+
 export type AuthenticatedFetchFn = (url: string, init?: RequestInit) => Promise<Response>;
+
+/**
+ * One attachment's extracted content, folded into the reader as readable
+ * normalized text (email-communication-intelligence-r2 task 053, NFR-11). This
+ * is the SAME normalized text the AI-extraction pipeline ran over — so body +
+ * attachment text form ONE addressable surface that task 054 anchors proposal
+ * citations into. The host resolves + supplies this text (ADR-012 presentational
+ * boundary — the component renders it, it does not fetch it), mirroring how
+ * `emlDocumentId`/`body` are host-resolved.
+ */
+export interface ReconciliationAttachmentContent {
+  /** `sprk_communicationattachmentid` — stable key. */
+  attachmentId: string;
+  /** Display name (carries the extension), e.g. `Engagement Letter.pdf`. */
+  name: string;
+  /**
+   * The normalized extracted text. When absent AND `extractable === false`,
+   * the reader shows a "content not available as text" note instead of the text
+   * (the negative NFR-11 case) — it does NOT crash and open-original stays
+   * available. When absent but `extractable` is unset/true, the fold is treated
+   * as still-loading/empty and simply renders no text block.
+   */
+  text?: string | null;
+  /**
+   * `false` ⇒ this attachment type could not be extracted to readable text
+   * (e.g. an image or an unsupported binary). Drives the "not available as text"
+   * note. Unset/`true` ⇒ extractable (text is authoritative).
+   */
+  extractable?: boolean;
+  /**
+   * `sprk_document` id backing the "Open original" affordance. When present, an
+   * "Open original" link renders and fires `onOpenOriginal`. When absent, no
+   * open-original link renders for this fold.
+   */
+  documentId?: string | null;
+}
 
 export interface EmailBodyViewProps {
   /**
@@ -78,4 +116,30 @@ export interface EmailBodyViewProps {
    * seam; production callers normally omit it.
    */
   authenticatedFetch?: AuthenticatedFetchFn;
+
+  /**
+   * Attachment contents folded into the reader as readable normalized text
+   * BELOW the body (task 053, NFR-11) — attachments render as TEXT, not chips,
+   * so body + attachment text read as one continuous surface. Omitted/empty ⇒
+   * no fold (backward-compatible for every existing caller, e.g. `EmailWorkspace`).
+   */
+  attachments?: ReadonlyArray<ReconciliationAttachmentContent>;
+
+  /**
+   * Fired when an attachment fold's "Open original" link is clicked. The host
+   * (or the `ReconciliationBrowseShell`) opens the raw `.eml`/file in an overlay
+   * preview. Only rendered for folds that carry a `documentId`.
+   */
+  onOpenOriginal?: (attachment: ReconciliationAttachmentContent) => void;
+
+  /**
+   * The proposal citation to anchor into the reader (task 054, NFR-11). When set,
+   * the reader resolves it over its normalized text (body + folded attachment
+   * text) via `resolveQuotedCitation` and jumps to + highlights the exact passage
+   * — in a folded attachment (inline) or, for a body-sourced quote, an ephemeral
+   * "cited passage" callout (the `.eml` body renders in a sandboxed iframe the
+   * parent cannot reach into, NFR-03). An unlocatable/forged quote surfaces a
+   * "source not locatable" affordance and does NOT navigate. Omitted ⇒ no anchor.
+   */
+  activeCitation?: EmailCitation;
 }

@@ -31,6 +31,10 @@ public static class CommunicationModule
         // consumed via IOptionsMonitor so a flag/threshold flip takes effect WITHOUT redeploy.
         services.Configure<AutoFileOptions>(configuration.GetSection(AutoFileOptions.SectionName));
 
+        // Category→team reconciliation routing (ADR-018 / FR-E7, task 057). Bound from
+        // "Communication:CategoryRouting"; operator adds/removes a mapping or flips routing off with NO redeploy.
+        services.Configure<CategoryRoutingOptions>(configuration.GetSection(CategoryRoutingOptions.SectionName));
+
         // Tracking-footer config (ADR-018 / FR-A1). Bound from "Communication:TrackingFooter"; operator
         // flips enable / edits the disclosure template with NO redeploy. Carries only the Key Vault secret
         // NAME of the HMAC key, never the key (ADR-028 / NFR-07).
@@ -251,6 +255,10 @@ public static class CommunicationModule
         // Confidence→status ladder + auto-file gate (FR-11 / ADR-018). Both unconditional (ADR-010):
         // the gate is pure config resolution and the mapper is pure decision logic; no feature gate.
         services.AddSingleton<AutoFileGate>();
+
+        // Category→team routing gate (ADR-018 / FR-E7, task 057) — pure config resolution, registered
+        // unconditionally (ADR-010); consumed by CommunicationEnrichmentService at triage time.
+        services.AddSingleton<CategoryRoutingGate>();
         // Tracking-footer resolver (FR-A1 / ADR-018) — unconditional (ADR-010); pure config resolution.
         services.AddSingleton<TrackingFooterGate>();
         // Tracking-token HMAC signer (FR-A1 / NFR-07 / task 010). Registered UNCONDITIONALLY (ADR-010; the

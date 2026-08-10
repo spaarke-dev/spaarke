@@ -122,6 +122,7 @@ public sealed class EmailAttachmentActionSeamTests
             proposeAi.Object,
             createTaskAi,
             actionSeam,
+            TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

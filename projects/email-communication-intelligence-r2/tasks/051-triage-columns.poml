@@ -4,7 +4,7 @@
     <title>Triage as grid columns — category / priority / summary / RI-confidence / review-outcome renderers</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
     <gate>deps 050 complete (grid shell + columnRenderers seam)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Additive column renderers on an existing grid surface (no new architecture, no new entity); STANDARD per §8 (extends existing files + shared-lib constraint).</rigor-reason>
     <model-tier>sonnet</model-tier>
