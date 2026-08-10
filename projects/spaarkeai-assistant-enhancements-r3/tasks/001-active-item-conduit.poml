@@ -4,7 +4,7 @@
     <title>Generalize the Compose active-document flow into a widget-agnostic active-item conduit carrying a single {id,type,label} handle (FR-04 foundation)</title>
     <phase>0 — Foundation: the active-item conduit</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Shared client conduit with cross-worktree blast radius; touches the ADR-030 bus boundary and the shipped Compose precedent — post-compaction-recoverable, code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -79,7 +79,9 @@
     <criterion testable="true">The existing Compose active-document flow still works — activeSourceDocRef resolves and docxBridge.ts is untouched (negative case: any Compose regression fails).</criterion>
     <criterion testable="true">Shared package + SpaarkeAi build; unit tests pass.</criterion>
   </acceptance-criteria>
-  <notes>Critical path — blocks 010/011/012 and all per-item work. Coordinate with spaarkeai-compose-r5/r6 before touching composeActionBridge's shape. This task builds the conduit + invariants only; the email feed is task 012 and the document-viewer tab-focus feed is task 026.</notes>
+  <notes>Critical path — blocks 010/011/012 and all per-item work. Coordinate with spaarkeai-compose-r5/r6 before touching composeActionBridge's shape. This task builds the conduit + invariants only; the email feed is task 012 and the document-viewer tab-focus feed is task 026.
+
+COMPLETED 2026-08-10 (opus/xhigh). Implemented as a NEW widget-agnostic module `src/solutions/SpaarkeAi/src/components/workspace/activeItemConduit.tsx` (context+Provider+hooks: `ActiveItemHandle {id,type,label}`, `setActiveItem`/`getActiveItem`/`subscribe`, `useActiveItem`/`usePublishActiveItem`, `useSyncExternalStore`-backed, ref-stable setter, content-free normalization). `composeActionBridge.ts` + `docxBridge.ts` LEFT BYTE-UNTOUCHED (escalation-trigger reconciliation — see current-task.md decision). Provider mounted in ThreePaneShell above both panes; WorkspacePane tab-focus effect additively publishes the compose tab's handle via `deriveActiveItemHandle` (clears for multi-item/dashboard/no-tab); ConversationPane reads additively (activeSourceDocRef bytes flow unchanged). 5/5 unit tests, SpaarkeAi build green. Step 9.5 GATE: PASS (no criticals). DEFERRAL: handle id resolves to tab.id when a compose tab's composeSessionId is backfilled async after activation (widgetData mutation doesn't re-fire the activeTabId effect) — fidelity nuance for task 026 to address if consumers key off the session id.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

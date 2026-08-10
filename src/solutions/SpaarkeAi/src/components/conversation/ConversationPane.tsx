@@ -92,6 +92,12 @@ import {
   useComposeSave,
   useRegisterComposeSaveCompletedHandler,
 } from "@spaarke/compose-components/context/composeActionBridge";
+// spaarkeai-assistant-enhancements-r3 task 001 — READ the widget-agnostic active-item handle
+// (id/type/label; NEVER bytes — ADR-015) the WorkspacePane tab-focus feed publishes. This is the
+// generalized read seam future features (email → task 012, doc-viewer → task 026) will consume; it is
+// ADDITIVE and does NOT replace `activeSourceDocRef`'s Compose bytes → chat-context flow (a different
+// layer). Consuming it here proves the conduit carries the Compose handle end-to-end.
+import { useActiveItem, type ActiveItemHandle } from "../workspace/activeItemConduit";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
@@ -391,6 +397,15 @@ export function ConversationPane(): React.JSX.Element {
     documentSessionId?: string;
     fileName?: string;
   } | null>(null);
+
+  // spaarkeai-assistant-enhancements-r3 task 001 — the generalized active-item handle published by the
+  // WorkspacePane tab-focus feed (id/type/label ONLY; NEVER bytes — ADR-015). Read here ADDITIVELY: it
+  // does NOT alter `activeSourceDocRef` above (the Compose bytes → chat-context layer keeps working
+  // unchanged). Mirrored into a ref so it is observable to later features (email → 012, doc-viewer → 026)
+  // without churning render wiring; this consume proves the conduit carries the Compose handle end-to-end.
+  const generalizedActiveItem = useActiveItem();
+  const generalizedActiveItemRef = React.useRef<ActiveItemHandle | null>(null);
+  generalizedActiveItemRef.current = generalizedActiveItem;
 
   // task 031 (DEF-09 routing) — the pure waiter/timeout seam (documentSessionWaiter.ts) that resolves
   // a REVIEWED file's REAL document session, keyed by that file's session-file id (never a different

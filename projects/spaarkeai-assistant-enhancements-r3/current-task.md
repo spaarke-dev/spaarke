@@ -7,21 +7,22 @@
 
 ## Active Task
 
-- **Task**: none (execution not started — owner-gated)
-- **Status**: not-started
-- **Next action**: Re-sync `origin/master` into the branch (5 behind at init), then — **on owner go-ahead** — begin **task 001** (active-item conduit) via `task-execute`.
+- **Task**: 001 — Active-item conduit (widget-agnostic `{id,type,label}`)
+- **Status**: in-progress (owner go-ahead 2026-08-10: "autonomous where safe")
+- **Rigor**: FULL · **Tier**: opus @ xhigh · **Step mode**: directional
+- **Next action**: opus implementer subagent realizing the additive new-module conduit; then build-verify + Step 9.5 gates.
 
 ## Blocking / pre-execution notes
 
-- **Owner gate**: execution is NOT auto-started (R3 on BFF + SpaarkeAi hot paths with heavy active-worktree overlap).
-- **Master staleness**: branch is 5 commits behind `origin/master` (2026-08-10) — merge before Phase 1.
-- **Coordination**: `/conflict-check` before every BFF / `ConversationPane` PR. Consume `Services/Ai/PublicContracts/` seams (no fork). See `tasks/TASK-INDEX.md` Parallel Groups + `CLAUDE.md` contention rule.
-
-## Steps completed this task
-- (none)
-
-## Files modified this task
-- (none)
+- **Master re-sync DONE** (2026-08-10): branch merged `origin/master` (was 5 behind → 0), pushed. Precondition cleared.
+- **Coordination**: `/conflict-check` before every BFF / `ConversationPane` PR. Consume `Services/Ai/PublicContracts/` seams (no fork).
 
 ## Decisions this task
-- (none — see `CLAUDE.md` §Decisions Made for the spec-authoring decisions.)
+- **2026-08-10 — Conduit placement (§11 + escalation-trigger reconciliation)**: implement the generalized active-item conduit as a **NEW widget-agnostic module in the SpaarkeAi solution**, carrying ONLY `{id,type,label}`. **`composeActionBridge.ts` LEFT UNTOUCHED** (zero exported-shape change → POML escalation "coordinate with compose-r5/r6 before changing the exported shape" does NOT fire; merge-clean vs compose-r5/r6). Compose's bytes path (`activeSourceDocRef`/`docxBridge.ts`) unchanged → no regression. §11 satisfied: the new module is THE canonical selection spine every widget (incl. Compose tab-focus) publishes to — a generalization, not a parallel duplicate. Reason: safest reconciliation of §11 reuse-first with the cross-worktree contention on `composeActionBridge.ts` (compose-r5 + compose-r6 active).
+
+## Steps completed this task
+- [x] Step 0.5 hot-path check (SpaarkeAi=Y; INDEX reviewed; contention on composeActionBridge/ConversationPane confirmed)
+- [x] Step 1 task loaded; Step 4/5 knowledge+ADRs (015/030/049) loaded; §11 grep (no existing conduit)
+
+## Files modified this task
+- (pending subagent report)
