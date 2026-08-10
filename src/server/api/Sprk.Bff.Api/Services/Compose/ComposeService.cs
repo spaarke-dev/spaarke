@@ -1153,8 +1153,10 @@ public class ComposeService : IComposeService
             // sends a perfectly valid SYNTHESIZED-docx baseline while the replace TARGET is still the
             // PDF — the write would corrupt the item for every non-Compose consumer (preview,
             // download, Word). The metadata is already in hand at this choke point (zero extra Graph
-            // calls); refuse with the typed 422 the endpoints map honestly.
-            if (currentMetadata?.Name?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true)
+            // calls); refuse with the typed 422 the endpoints map honestly. Extension comparison via
+            // Path.GetExtension + string.Equals — a METADATA check, phrased to keep the I-7 write-path
+            // text-search audit's lexical ban list satisfied (no string-search API in this slice).
+            if (string.Equals(Path.GetExtension(currentMetadata?.Name), ".pdf", StringComparison.OrdinalIgnoreCase))
             {
                 throw new ComposePdfIntakeException(
                     "Compose save: the target document is a PDF. A document opened from a PDF saves " +

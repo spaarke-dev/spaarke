@@ -1,60 +1,47 @@
 # Current Task State — spaarke-SPA-external-access-platform-r2
 
-> **Last Updated**: 2026-08-07 (task-execute 018 — deletions + edits done; verifying build/test)
-> **Recovery**: read Quick Recovery below, then `design.md` §12 + this file's "Key integration seams". Resume with `/project-continue` or "work on task 018".
+> **Last Updated**: 2026-08-07 (context-handoff)
+> **Recovery**: read Quick Recovery, then "Deployed state" + "NEXT: R2 grid-widget bug". Branch = master (fully merged).
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Task** | **P1 COMPLETE (010–019 all ✅)** — 018 committed (`213f3ea8a`); 019 deployed from worktree 2026-08-07 |
-| **Status** | P1 shell foundation shipped to dev. BFF → spaarke-bff-dev (healthz ✅); client → swa-spaarke-external-spa-dev (https://green-dune-0c4f1221e.7.azurestaticapps.net). Smoke checks green (incl. /api/v1/collab now 404 — 018 removal live). |
-| **Next Action** | **Owner**: (a) live authenticated E2E — CIAM + workforce browser sign-in + Teams tab SSO/dark-theme/module-data (agent can't; needs creds); (b) `/merge-to-master` now that P1 is done (worktree workflow); (c) ISS-018-1 — 2 pre-existing `DataverseEntitySchemaTests` failures from master merge (Documents/schema, `/defer`). Then **P2 (020+)** entitlement — owner wave-gate + schema sign-off. |
-| **Pre-conditions** | Worktree current w/ master (0 behind); conflict-check clean (only `smart-todo-decoupling-r3` shares `WorkspaceHomePage.tsx` — merge-time coordination). |
+| **Status** | P1 complete (010–019 ✅) + merged to master; Teams SSO fix applied. **Grid-widget bug DIAGNOSED + FIXED (2026-08-07, commit `bff7e82e5`, BFF redeployed).** Awaiting user retest. |
+| **NEXT ACTION** | **User retest** the deployed grids (Projects should show 16; Documents should show project-linked docs; Matters clean "coming soon"; Work Assignments already worked). Then verify via App Insights `[EXT-MODULE] Fetch … server-side filtered`. **Invoices deferred** to matter-access work (invoices link to `sprk_matter`, not `sprk_project`). Full diagnosis: `notes/grid-widget-empty-diagnosis.md`. |
+| **Branch/master** | `work/spaarke-SPA-external-access-platform-r2` == `origin/master` == `e9da94467` (0 behind/ahead; main repo synced). Clean tree. |
+| **Pre-conditions** | Deploy from worktree (NOT CI) — see memory `deploy-from-worktree-not-ci.md`. Build client with `VITE_DEV_MOCK=false` + full CI VITE_* env (`.env.local` has mock=true; must override). |
 
-### Task 018 progress (this session)
-- **Conflict-check**: SOFT warn — `smart-todo-decoupling-r3` has unmerged changes in `Api/ExternalAccess/` on DISJOINT files (ExternalProjectDtos.cs, ExternalProjectDataEndpoints.cs, ExternalTodoDtoTests.cs). No overlap with deletion targets. teams-app-r1 FR-22 already merged to master.
-- **Zero callers proven**: no client surface (external-spa/PCF/solutions) or test calls `/api/v1/collab` — all `/collab` hits were server-side definitions.
-- **DELETED (git rm)**: `Api/Filters/ExternalCallerAuthorizationFilter.cs` (zero callers, inert), `Api/Filters/WorkforceCallerAuthorizationFilter.cs`, `Api/ExternalAccess/WorkforcePrincipalContextEndpoint.cs`, `Api/ExternalAccess/WorkforceCollaborationDownloadEndpoint.cs`, `Api/ExternalAccess/Dtos/WorkforcePrincipalContextResponse.cs`, `tests/unit/.../Api/ExternalAccess/WorkforceCollaborationDownloadEndpointTests.cs`.
-- **EDITED**: `ExternalAccessEndpoints.cs` (removed MapWorkforceCollaborationEndpoints call + method + updated class doc to two-group); `WorkforcePrincipalResolverTests.cs` (surgical — removed the deleted-filter tests + BuildFilterContext/NextSpy helpers + unused usings; resolver tests kept); `ExternalAccessIntegrationTests.cs` + e2e `access-level-enforcement.spec.ts` (comment/@see rename to CallerPrincipalAuthorizationFilter).
-- **KEPT (not in scope)**: `WorkforcePrincipalResolver`+`IWorkforcePrincipalResolver` (ACTIVELY used by CallerPrincipalResolver — the KEEP path), `WorkforcePrincipal`/`WorkforceDenyReason`/`WorkforcePrincipalResolution`, `AccessibleRecordSetAuthorizationFilter` (now unattached — parked for P2 task 022/030), `CallerPrincipalAuthorizationFilter`, `ExternalParticipationService`, `ExternalCallerContext`.
-- **KNOWN RESIDUE (documented)**: comment/doc-string refs to the deleted type names remain in kept files — (a) intentional lineage history ("reproduces the old X"); (b) pre-existing stale current-state comments in ExternalProjectDataEndpoints.cs (NOT edited — smart-todo conflict risk), ExternalUserContextEndpoint.cs, ExternalCallerContext.cs, ExternalDataService.cs (predate task 018 / drifted at 015). Zero CODE references remain (build proves it).
+## 🐞 NEXT: R2 grid-widget bug (the one open item)
+**Symptom**: In the deployed R2 shell, every `<DataGrid>` widget (Projects/Matters/Documents/Invoices/Work Assignments) shows empty on BOTH the CIAM (Partner) and workforce (My organization) logins. **Not** an auth/BFF problem — proven:
+- BFF `/api/v1/external/me` (workforce token) returns **16 projects**; the **old SPA** shows the CIAM contact's **2 projects** (Project 1 + PRJT.10007.02). So resolution + participations + Part-2 union all work server-side.
+- **All grids empty at once ⇒ a COMMON cause in the shared R2 grid path**, not a per-widget issue.
+**Investigate (client-first)**:
+1. Browser Network tab on a grid open: are the `GET {host}/api/v1/external/api/dataverse/*` calls firing? Status? Response body? (Look for the `sprk_gridconfiguration` config fetch FIRST — D-016-2: each grid fetches its config record before data; if that 403s/errors, NO grid renders.)
+2. Files: `src/client/external-spa/src/widgets/GridWidgetBody.tsx`, `ProjectsWidget.tsx` (+ siblings), `services/gridDataverseClient.ts` (check `bffBaseUrl` = `{host}/api/v1/external`), and the shared `<DataGrid configId>` from `@spaarke/ui-components`.
+3. BFF side: `Api/ExternalAccess/ExternalModuleDataEndpoints.cs` + `Infrastructure/ExternalAccess/ExternalModuleRegistry.cs` — the module-data read seam + the grid-configuration allow-list (`OutsideCounselGridConfigurationIds` in `ExternalAccessModule.cs`).
+4. Compare to how the **old SPA** fetched (it worked) — old path likely `ExternalDataService`/a different endpoint vs R2's module-data seam.
+Likely suspects (all-grids-empty): the `sprk_gridconfiguration` fetch failing, `gridDataverseClient` base URL/auth, or the DataGrid response→rows mapping.
 
-### Task 016 — COMPLETE (2026-08-06)
-Outside Counsel widgets (CIAM plane) on the shell. **Reused existing `<DataGrid configId>` + `BffDataverseClient`** (both unmodified — zero hand-rolled grids, §11). New: `services/gridDataverseClient.ts`, `widgets/{GridWidgetBody,Projects,Matters,WorkAssignments,Documents,Invoices}Widget.tsx`; registry lazyLoaders now real; BFF `AddExternalModule` ×5 + `TryGetRecordId` EntityReference case; 5 `sprk_gridconfiguration` records authored. Lookup labels via flat FetchXML formatted values (no `<link-entity>` — respects 015's guard). **D-016-1 (§6.5 Path A)**: Matters Tier-2 predicate intentionally always-empty/fail-closed (no `sprk_matter`→project lookup + no Contact→Org affiliation resolver) → R1 "coming soon" empty state (R1 parity, no over-exposure). Verify: tsc/npm build green, dotnet build 0-err, 9803 tests pass, publish 48.29 MB, no CVE. Notes: `notes/task-016-deviations.md`.
+## Deployed state (dev)
+- **SWA** `swa-spaarke-external-spa-dev` (https://green-dune-0c4f1221e.7.azurestaticapps.net) = **R2 client live** (shell markers verified; mock OFF; domain-qualified manifest). Old teams-r1 build replaced.
+- **BFF** `spaarke-bff-dev` = R2 (Part-2 access model + 018 cleanup + 015/016 framework). Config added this session: `ExternalAccess__PortalUrl=<SWA url>` (was missing → blocked invite), `AzureAd__ValidAudiences__2=api://green-dune-…/1e40baad-…` (Teams SSO fallback). `/api/v1/collab/me`→404 (018 live), `/healthz`→200.
+- **Entra `1e40baad` (SDAP-BFF-SPE-API)** — **R2 now owns it** (teams-r1 archived, handed off). Added domain-qualified identifierUri `api://green-dune-…/1e40baad-…` (additive; scopes+preAuth incl. broker preserved). Ratified teams-r1's broker pre-auth `29d9ed98` (Option A, NAA desktop).
+- **Provisioned test identities**: hotmail contact `2e419a4f` (CIAM account provisioned via invite; oid `06646385` bound), grants → Project 1 (`b12496d1`) + PRJT.10007.02 (`3e34a21a`). spaarke.com contact `8e9918a9` (= ralph systemuser `1d02f31c` `sprk_primarycontact`), grants → Project 1 + 3e34a21a + more.
 
-## P1 status (workspace-shell foundation)
-| Task | Status | Notes |
-|------|--------|-------|
-| 010 ADR-028 A3 | ✅ | dual-plane module-host platform + principal-agnostic endpoints ratified (concise-only) |
-| 011 shell scaffold | ✅ | PortalWorkspaceShell + TabStrip + QuickStartPane + AssistantPane(placeholder) + useWorkspaceTabs |
-| 012 widget registry | ✅ | me-client + widgetRegistry (11 defs) + WidgetLibraryModal(FormModal) + entitlement-honest choke point; entitlements mocked pending **022** |
-| 013 dual-plane auth bootstrap | ✅ | realm chooser (ChoiceModal) + StandaloneBootstrap in main.tsx; **§6.5 Path C** — did NOT touch @spaarke/auth (A3 forbids); CIAM sessionStorage + Teams NAA byte-for-byte preserved |
-| 014 Teams packaging | ✅ | inherited from teams-app-r1; branding-only manifest bump; **ISS-001/#744** high-contrast theme gap deferred |
-| 015 FR-22 framework generalization | ✅ | additive ExternalModuleRegistry + ExternalModuleDataEndpoints; shipped CallerPrincipalResolver seam unchanged; code-review caught+fixed a Critical link-entity over-read; build 0-err, **9803 tests pass**, publish **46.91 MB** (+0.01), no CVE |
-| 017 Power Pages cleanup | ✅ | dead vite proxy/plugin/config removed; escalation not fired (grep-verified dead); left `format:'iife'` (follow-up) |
-| 016 Outside Counsel widgets | 🔲 | **NEXT** (deps 012,015 ✅) |
-| 018 cleanup inert filter + /api/v1/collab | 🔲 | deps 015,016 |
-| 019 deploy P1 | 🔲 | deps 012,013,014,016,017 |
+## Done this session (all committed + pushed + merged to master)
+- **018** — deleted inert `ExternalCallerAuthorizationFilter` + `/api/v1/collab` group (net -963 LOC); build 0-err, 10155 tests pass (2 pre-existing `DataverseEntitySchemaTests` fails = ISS-018-1, inherited, unrelated).
+- **019** — deployed P1 (BFF + client) from the worktree; smoke green.
+- **Part-2 access model** (§6.5 Path-B, owner-directed) — workforce **systemuser sees membership ∪ own contact grants** (`AccessibleRecordSetService`, `WorkforcePrincipal.Email` + email fallback). Tests +3. Note: `notes/access-model-systemuser-contact-grant-union.md`.
+- **Dev-mock leak fix** — worktree builds must pass `VITE_DEV_MOCK=false` (`.env.local` gotcha; memory saved).
+- **Teams desktop SSO fix** — domain-qualified App ID URI + manifest + BFF ValidAudiences (Option B) + ratified Option A + R2 owns the Entra app. Note: `notes/teams-sso-fix-and-entra-app-ownership.md`.
+- **Merged to master twice** (P1 + Teams fix); worktree-synced.
 
-## Commits (ALL pushed to origin/work/spaarke-SPA-external-access-platform-r2)
-- `9646d10a2` P0 outcome + task re-decomposition
-- `037b1fba8` #010 ADR-028 A3
-- `c94068c05` #011 workspace-shell scaffold
-- `ca5aa53d3` #012/#014/#017 Group B
-- `8b7bda37c` #013/#015 dual-plane auth bootstrap + FR-22 framework generalization
-- `2bdc461da` #016 Outside Counsel widgets ← HEAD
-- Working tree clean. No open PR (worktree workflow — `/merge-to-master` when ready).
+## Remaining (beyond the widget bug)
+- **Admin (not worktree-doable)**: re-upload the Teams app **package** with the domain-qualified `webApplicationInfo.resource` (live Teams app is still teams-r1's GUID-form package) → then SSO-fallback fix is live; desktop NAA retest; admin consent via portal/az (not bare `/adminconsent`).
+- **ISS-018-1**: 2 pre-existing `DataverseEntitySchemaTests` failures (Documents `UpdateDocumentRequest` schema drift from the master merge) — `/defer` to Documents owner.
+- **P2 (020+)**: entitlement layer — real `/me` (task 022, replaces the mocked `me-client.ts`), Dataverse schema (owner sign-off), workforce-plane auth policy (024). Owner wave-gated.
+- Fold the Teams NAA/SSO Entra recipe into `docs/guides/auth-deployment-setup.md` §3 (+ `ExternalAccess__PortalUrl`).
 
-## Key integration seams for 016
-- Client widget: register a widget def in `src/registry/widgetRegistry.ts`; its body consumes the BFF via the **BffDataverseClient** read group `/api/v1/external/api/dataverse/*` (015) — Tier-2 scoped, app-only, un-forked (set `bffBaseUrl={host}/api/v1/external`). Do NOT re-host the Xrm-bound `pages/OutsideCounselDashboard.tsx` — build new widgets on BffDataverseClient (design.md §12 / §11).
-- BFF: add each Outside-Counsel module (matters/work-assignments/documents/invoices) via `AddExternalModule(descriptor)` in `ExternalAccessModule.cs` — one registration each, Tier-2 predicate over `CallerPrincipal`; no route/filter/handler changes (the A3 seam). External fetch forbids `<link-entity>` joins (015 D-015-1) — use formatted values for lookup labels, or add a per-module link allow-list (named future seam).
-
-## Deferrals / issues
-- **ISS-001 / GH #744** — Teams high-contrast theme → plain dark (shared cascade 2-state); ADR-021 gap; cross-cutting shared-lib fix.
-- 015 D-015-1 (no external `<link-entity>` joins), D-015-3 (fetch happy-path needs live ServiceClient — unit+contract covered).
-- 017 `format:'iife'` bundle-format change deferred; `tsconfig.node.json` 8 pre-existing @types/node errors (predate).
-- Tier-1 module-entitlement routability deny + real `/me` = **P2 (022)** (A3 defers it; Tier-2 is fail-closed today).
-
-## Notes
-Per-task detail: `notes/task-01{1,2,3,4,5,7}-deviations.md`, `notes/defer-issues.md`. Group B + 013/015 were run as parallel sub-agents (sonnet for 012/014/017, opus for 013/015); each ran its own Step 9.5 gates; main session ran authoritative wave builds + aggregated TASK-INDEX/status.
+## Notes index
+Per-task/finding detail in `notes/`: `task-018-deviations.md`, `task-019-deployment-record.md` (incl. UAT rounds 1-2), `access-model-systemuser-contact-grant-union.md`, `teams-sso-fix-and-entra-app-ownership.md`.
