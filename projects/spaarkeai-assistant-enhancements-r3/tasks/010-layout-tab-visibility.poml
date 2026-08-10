@@ -4,7 +4,7 @@
     <title>Make layout/dashboard tabs (Daily Briefing + Calendar) visible to the Assistant via a light identity variant + persist visibleToAssistant (FR-01, FR-02)</title>
     <phase>1 — Awareness (identity + active-item handle)</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF agent-factory change on the ADR-039/ADR-015 awareness boundary; touches BuildWorkspaceStateBlock — code-review + adr-check at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -72,7 +72,11 @@
     <criterion testable="true">Publish size ≤60 MB reported (absolute + delta).</criterion>
     <criterion testable="true">Tests pass.</criterion>
   </acceptance-criteria>
-  <notes>NFR-04 — identity only; content is tool-fetched by id (overview parity is Phase 2). Serialize with 011 on BuildWorkspaceStateBlock. Run /conflict-check before the BFF PR.</notes>
+  <notes>NFR-04 — identity only; content is tool-fetched by id (overview parity is Phase 2). Serialize with 011 on BuildWorkspaceStateBlock. Run /conflict-check before the BFF PR.
+
+COMPLETED 2026-08-10. Fix: `TryDeriveVisibleState` special-cases `tab.WidgetType == "workspace"` (the client's actual registry key for LegalWorkspaceApp embedded layout tabs — Daily Briefing, Calendar) BEFORE the closed-union switch, mirroring the existing Compose special-case idiom. Reuses the EXISTING `WorkspaceTabVisibleState.Dashboard` variant ({dashboardName, lastViewedSection} — §11 reuse, no new closed-union member) rather than inventing a parallel type. `visibleToAssistant` persistence: the field already exists on `WorkspaceTab` and is already read by `BuildWorkspaceStateBlock`'s Path-A filter — the bug was that layout tabs were EXCLUDED UNCONDITIONALLY (state=null) regardless of the flag's value, making the toggle a no-op; the FR-01 fix is the prerequisite that makes FR-02's toggle behavior real. Tests (9 new) prove: identity derives non-null, {type,label} block listing, ask-do-you-see-tab, toggle-off/-on, active-tab-as-consent, contract-gap graceful default (never null), and a negative no-content-leak case. 44/44 unit tests pass (35 pre-existing + 9 new), full BFF suite 10258 passed / 0 failed / 101 skipped. Publish size 48.43 MB compressed (baseline ~49.63 MB — no meaningful delta).
+
+DISCOVERED ARCHITECTURE GAP (flagged for orchestrator / task 011 attention, NOT fixed in this task — out of scope): `BuildWorkspaceStateBlock`'s only caller reads tabs via `IWorkspaceStateService.GetTabsAsync` (Redis `workspace-state` key + Cosmos `memory` container). That service's WRITE path was retired by AIR2-075 (confirmed via `SendWorkspaceArtifactHandler.cs` comment + repo-wide grep — no writer exists anywhere for this store). The REAL, live, currently-used tab persistence is `ISessionPersistenceService.SaveTabsAsync`/`StoredWorkspaceTab` (NFR-09, task 065, PATCH /api/ai/chat/sessions/{id}/tabs) — a separate, disconnected system with an opaque `JsonElement? WidgetData` and no `visibleToAssistant` field at all. In effect, `BuildWorkspaceStateBlock`'s tabs parameter is always empty against real production traffic today, independent of this task's fix. This task's identity-variant + visibility-filter fix is correct and fully unit-tested against the `WorkspaceTab` contract (the sanctioned extension point), but bridging the two persistence systems is a larger wiring task outside FR-01/FR-02's stated scope ("do NOT thread the active-item handle — task 011"). Recommend task 011 (or a new task) explicitly address whether to (a) resurrect a writer for `IWorkspaceStateService`, (b) migrate `BuildWorkspaceStateBlock` to read from `StoredWorkspaceTab`/`ISessionPersistenceService` instead, or (c) another reconciliation path — this is a CLAUDE.md §6.5-class discovery, not a task-010 fix.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

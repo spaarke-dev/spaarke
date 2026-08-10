@@ -1596,6 +1596,28 @@ public class SprkChatAgentFactory
     /// </summary>
     internal const string ComposeDefaultFilename = "Compose document";
 
+    /// <summary>
+    /// Registry widget-type discriminator for LegalWorkspaceApp embedded layout tabs
+    /// (Daily Briefing, Calendar, Corporate Workspace, and any other pinned/auto-installed
+    /// workspace layout). MUST match the client's <c>WorkspacePane.tsx</c> dispatch calls
+    /// (<c>widgetType: 'workspace'</c>, <c>widgetData: {{ layoutId, layoutName }}</c> — see
+    /// e.g. the auto-install and pinned-workspace-reopen effects). Layout tabs are
+    /// conceptually Dashboard-category (LegalWorkspaceApp embedded mode; mirrors the
+    /// client's <c>dashboardWidgetVisibility</c> derivation), so they project onto the
+    /// existing <see cref="WorkspaceTabVisibleState.Dashboard"/> variant — see the contract
+    /// note on <see cref="DeriveWorkspaceLayoutVisibleState"/>.
+    /// </summary>
+    internal const string WorkspaceLayoutWidgetType = "workspace";
+
+    /// <summary>
+    /// Graceful default label for a layout tab (<see cref="WorkspaceLayoutWidgetType"/>)
+    /// whose server-readable <see cref="WorkspaceTabWidgetData"/> carries no dashboard
+    /// name (the contract-gap fallback — see <see cref="DeriveWorkspaceLayoutVisibleState"/>).
+    /// Keeps the agent-visible identity as "a workspace layout is open" rather than
+    /// silently disappearing (the pre-fix null-derivation behavior).
+    /// </summary>
+    internal const string WorkspaceLayoutDefaultLabel = "Workspace layout";
+
     /// <remarks>
     /// <b>task 041b (2026-08-06, spaarkeai-assistant-enhancements-r2, "Path 1: persisted
     /// Email carrier")</b>: resolves the task 041 escalation. <see cref="EmailTabWidgetData"/>
@@ -1618,6 +1640,19 @@ public class SprkChatAgentFactory
         if (string.Equals(tab.WidgetType, ComposeWidgetType, StringComparison.OrdinalIgnoreCase))
         {
             return DeriveComposeVisibleState(tab.WidgetData);
+        }
+
+        // R3 task 010 (FR-01) — layout/dashboard tabs (Daily Briefing, Calendar, ...) HOLD NO
+        // per-item content; they are a named LegalWorkspaceApp embedded layout. Mirror the
+        // Compose special-case above: checked BEFORE the closed-union switch because the
+        // client's actual wire payload for these tabs (`{ layoutId, layoutName }`) carries NO
+        // `kind` discriminator (the exact "no kind" gap this task closes — see the contract
+        // note on DeriveWorkspaceLayoutVisibleState). Pre-fix, tabs of this widgetType fell
+        // through to the switch's `_ => null` default and were invisible to the agent
+        // regardless of VisibleToAssistant (the R2 UAT gap this task fixes).
+        if (string.Equals(tab.WidgetType, WorkspaceLayoutWidgetType, StringComparison.OrdinalIgnoreCase))
+        {
+            return DeriveWorkspaceLayoutVisibleState(tab.WidgetData);
         }
 
         // Closed-union switch over the polymorphic widget-data types. A new widget kind
@@ -1712,6 +1747,56 @@ public class SprkChatAgentFactory
             SizeBytes: 0,
             HasSelection: false,
             SelectionText: null);
+    }
+
+    /// <summary>
+    /// R3 task 010 (FR-01) — derive the agent-visible state for a LegalWorkspaceApp embedded
+    /// layout tab (widgetType "workspace" — Daily Briefing, Calendar, Corporate Workspace,
+    /// and any other pinned/auto-installed layout). Projects onto the EXISTING
+    /// <see cref="WorkspaceTabVisibleState.Dashboard"/> variant (§11 reuse — no new closed-
+    /// union member): a layout tab IS conceptually a Dashboard per FR-57 ("composable section
+    /// grid, LegalWorkspaceApp embedded mode"), so extending that category is the correct
+    /// home, not a parallel one. Identity ONLY — <c>{ widgetType, dashboardName,
+    /// lastViewedSection }</c>, never section payloads or chart data (ADR-015, mirrors
+    /// <see cref="DashboardTabWidgetData"/>'s existing privacy contract).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Preferred path</b>: the persisted widgetData is a <see cref="DashboardTabWidgetData"/>
+    /// (kind "Dashboard") carrying the real <c>dashboardName</c> — e.g. "Daily Briefing" or
+    /// "Calendar". The real name flows straight through, including <c>lastViewedSection</c>.
+    /// </para>
+    /// <para>
+    /// <b>CONTRACT GAP (reported to the client-owning agent, mirrors the Compose contract gap
+    /// on <see cref="DeriveComposeVisibleState"/>)</b>: the client's <c>WorkspacePane.tsx</c>
+    /// dispatches layout tabs with <c>widgetData: { layoutId, layoutName }</c> and NO <c>kind</c>
+    /// discriminator (e.g. the auto-install-default-workspace and pinned-workspace-reopen
+    /// effects) — this is the literal "no kind" gap FR-01 names. The strict
+    /// <see cref="WorkspaceTabWidgetData"/> polymorphic union cannot resolve that shape to a
+    /// typed payload, so <see cref="WorkspaceTab.WidgetData"/> degrades to <c>null</c> for these
+    /// tabs today. Pre-fix, <see cref="TryDeriveVisibleState"/> returned <c>null</c> for the
+    /// whole tab in that case (the R2 UAT gap: Daily Briefing / Calendar invisible to the
+    /// agent). This fallback instead emits a Dashboard identity with a graceful default label
+    /// — {type,label} is ALWAYS non-null now, never a silent drop. The durable fix is
+    /// client-owned: persist the layout tab's widgetData as
+    /// <c>{ kind: "Dashboard", layoutId, dashboardName: layoutName }</c> (the field the client
+    /// already computes as <c>layoutName</c>) so the real name reaches this derivation. Server
+    /// reuses the existing Dashboard type only — no new widget kind, no schema change.
+    /// </para>
+    /// </remarks>
+    private static WorkspaceTabVisibleState DeriveWorkspaceLayoutVisibleState(WorkspaceTabWidgetData? widgetData)
+    {
+        // Preferred: a Dashboard-shaped payload carries the real layout name.
+        if (widgetData is DashboardTabWidgetData db && !string.IsNullOrWhiteSpace(db.DashboardName))
+        {
+            return new WorkspaceTabVisibleState.Dashboard(db.DashboardName, db.LastViewedSection);
+        }
+
+        // Fallback (contract gap): no server-readable dashboard name — emit a Dashboard
+        // identity with a graceful default label so the layout tab is VISIBLE (identity-only,
+        // {type,label}) rather than silently dropped. Never masquerades unrelated content as
+        // the label.
+        return new WorkspaceTabVisibleState.Dashboard(WorkspaceLayoutDefaultLabel, null);
     }
 
     /// <summary>Summary has visible state when EITHER a non-empty TL;DR OR a non-empty body exists.</summary>

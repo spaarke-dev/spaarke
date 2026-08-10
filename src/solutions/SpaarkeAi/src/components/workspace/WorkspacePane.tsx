@@ -312,6 +312,47 @@ export function deriveActiveItemHandle(tab: WorkspaceTab | null): ActiveItemHand
   return null;
 }
 
+/**
+ * spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — the email widget's IN-WIDGET SELECTION
+ * feed into the active-item conduit. The `activeItemConduit.tsx` docblock reserves TWO feed
+ * patterns: tab-focus (above, `deriveActiveItemHandle` — fires only on tab SWITCH) and in-widget
+ * selection (this helper) — email needs the latter because choosing a different email while the
+ * SAME Email tab stays active does not change `activeTabId`, so the tab-focus effect never re-fires.
+ *
+ * `EmailWorkspaceWidget` (shared `Spaarke.AI.Widgets` package — CANNOT import this
+ * SpaarkeAi-solution conduit per ADR-012's shared-library dependency direction) rides the EXISTING
+ * `onDataChange` widget self-update seam with an extra transient `communicationId` field on the
+ * patch (§11 — redirects the existing emit rather than adding a new selection model). This PURE
+ * helper reads + strips that field so the persisted `widgetData` / BFF `EmailTabWidgetData`
+ * contract never sees it:
+ *   - `communicationId` a non-empty string → the widget selected an email; returns the id handle
+ *     to publish (`{ id, type: 'email', label: subject }` — id/label ONLY, ADR-015) + the patch
+ *     MINUS `communicationId` (safe to persist as-is).
+ *   - `communicationId === null`           → deselect; returns a `null` handle (clears the
+ *     conduit) + an EMPTY persistable patch (nothing to merge — leaves the last persisted Email
+ *     carrier intact, mirroring `EmailWorkspaceWidget`'s own "don't clobber on deselect" contract).
+ *   - `communicationId` absent / not an 'email' widget → not an email active-item signal; returns
+ *     `null` so the caller persists the patch unchanged.
+ */
+export function deriveEmailActiveItemFromPatch(
+  widgetType: string,
+  patch: unknown
+): { handle: ActiveItemHandle | null; persistablePatch: Record<string, unknown> } | null {
+  if (widgetType !== 'email') return null;
+  if (patch === null || typeof patch !== 'object') return null;
+  const raw = patch as Record<string, unknown>;
+  if (!('communicationId' in raw)) return null;
+
+  const communicationId = raw.communicationId;
+  const persistablePatch = Object.fromEntries(Object.entries(raw).filter(([key]) => key !== 'communicationId'));
+
+  if (typeof communicationId === 'string' && communicationId.length > 0) {
+    const subject = typeof raw.subject === 'string' ? raw.subject : '';
+    return { handle: { id: communicationId, type: 'email', label: subject }, persistablePatch };
+  }
+  return { handle: null, persistablePatch };
+}
+
 // ---------------------------------------------------------------------------
 // WorkspacePane
 // ---------------------------------------------------------------------------
@@ -2400,6 +2441,21 @@ export function WorkspacePane(): React.JSX.Element {
       const current = manager.getSnapshot().tabs.find(t => t.id === tabId);
       if (!current) return;
 
+      // spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — the email widget's in-widget
+      // selection feed into the active-item conduit. See `deriveEmailActiveItemFromPatch` docblock.
+      const emailActiveItem = deriveEmailActiveItemFromPatch(current.widgetType, patch);
+      if (emailActiveItem) {
+        publishActiveItem(emailActiveItem.handle);
+        if (Object.keys(emailActiveItem.persistablePatch).length === 0) return; // pure clear-signal — nothing to persist
+        const currentData =
+          current.widgetData !== null && typeof current.widgetData === 'object'
+            ? (current.widgetData as Record<string, unknown>)
+            : {};
+        manager.updateTab(tabId, { ...currentData, ...emailActiveItem.persistablePatch });
+        syncState();
+        return;
+      }
+
       const currentData =
         current.widgetData !== null && typeof current.widgetData === 'object'
           ? (current.widgetData as Record<string, unknown>)
@@ -2409,7 +2465,7 @@ export function WorkspacePane(): React.JSX.Element {
       manager.updateTab(tabId, { ...currentData, ...patchData });
       syncState();
     },
-    [syncState]
+    [publishActiveItem, syncState]
   );
 
   // ---------------------------------------------------------------------------

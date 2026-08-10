@@ -7,22 +7,22 @@
 
 ## Active Task
 
-- **Task**: 001 — Active-item conduit (widget-agnostic `{id,type,label}`)
-- **Status**: in-progress (owner go-ahead 2026-08-10: "autonomous where safe")
+- **Task**: 011 — Trim prompt block + thread active-item handle (server)
+- **Status**: not-started
 - **Rigor**: FULL · **Tier**: opus @ xhigh · **Step mode**: directional
-- **Next action**: opus implementer subagent realizing the additive new-module conduit; then build-verify + Step 9.5 gates.
+- **Next action**: Begin Step 1 of task 011 (`tasks/011-trim-prompt-thread-handle.poml`).
 
 ## Blocking / pre-execution notes
 
 - **Master re-sync DONE** (2026-08-10): branch merged `origin/master` (was 5 behind → 0), pushed. Precondition cleared.
 - **Coordination**: `/conflict-check` before every BFF / `ConversationPane` PR. Consume `Services/Ai/PublicContracts/` seams (no fork).
+- **Task 010 discovered architecture gap** (see task 010 POML `<notes>` + TASK-INDEX): `BuildWorkspaceStateBlock`'s only caller reads via `IWorkspaceStateService.GetTabsAsync`, whose WRITE path was retired by AIR2-075 (no writer anywhere in the repo). The REAL, live tab persistence is `ISessionPersistenceService.SaveTabsAsync`/`StoredWorkspaceTab` (NFR-09, task 065) — a separate, disconnected system. Task 011 (FR-03/FR-04, wiring the active-item handle) should explicitly decide whether/how to reconcile these two systems as part of its threading work.
 
 ## Decisions this task
-- **2026-08-10 — Conduit placement (§11 + escalation-trigger reconciliation)**: implement the generalized active-item conduit as a **NEW widget-agnostic module in the SpaarkeAi solution**, carrying ONLY `{id,type,label}`. **`composeActionBridge.ts` LEFT UNTOUCHED** (zero exported-shape change → POML escalation "coordinate with compose-r5/r6 before changing the exported shape" does NOT fire; merge-clean vs compose-r5/r6). Compose's bytes path (`activeSourceDocRef`/`docxBridge.ts`) unchanged → no regression. §11 satisfied: the new module is THE canonical selection spine every widget (incl. Compose tab-focus) publishes to — a generalization, not a parallel duplicate. Reason: safest reconciliation of §11 reuse-first with the cross-worktree contention on `composeActionBridge.ts` (compose-r5 + compose-r6 active).
+- (none yet)
 
 ## Steps completed this task
-- [x] Step 0.5 hot-path check (SpaarkeAi=Y; INDEX reviewed; contention on composeActionBridge/ConversationPane confirmed)
-- [x] Step 1 task loaded; Step 4/5 knowledge+ADRs (015/030/049) loaded; §11 grep (no existing conduit)
+- (none yet — task 010 completed; see tasks/010-layout-tab-visibility.poml for its full completion notes)
 
 ## Files modified this task
-- (pending subagent report)
+- (none yet)

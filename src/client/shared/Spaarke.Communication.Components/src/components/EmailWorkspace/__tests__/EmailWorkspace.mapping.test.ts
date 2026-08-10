@@ -77,8 +77,8 @@ function buildRecordState(overrides: Partial<EmailWorkspaceRecordState> = {}): E
 }
 
 describe('deriveEmailWorkspaceVisibleState — compact persisted-carrier shape (FR-C1)', () => {
-  it('derives subject/from/date + a plain-text snippet + the eml handle from the resolved record', () => {
-    const state = deriveEmailWorkspaceVisibleState(buildRecordState(), 'eml-doc-1');
+  it('derives subject/from/date + a plain-text snippet + the eml handle + the communicationId from the resolved record', () => {
+    const state = deriveEmailWorkspaceVisibleState(buildRecordState(), 'eml-doc-1', 'c1');
     expect(state).not.toBeNull();
     expect(state!.subject).toBe('Quarterly filing update');
     expect(state!.from).toBe('jane.doe@example.com');
@@ -86,6 +86,8 @@ describe('deriveEmailWorkspaceVisibleState — compact persisted-carrier shape (
     expect(state!.date).toBe('2026-08-02T10:30:00Z');
     // eml handle carried through (fetch handle for on-demand eml-render, FR-C4)
     expect(state!.emlDocumentId).toBe('eml-doc-1');
+    // communicationId — the active-item conduit id-handle anchor (task 012, FR-05)
+    expect(state!.communicationId).toBe('c1');
     // snippet is plain text (tags stripped), non-empty
     expect(state!.snippet).toContain('Please review the attached');
     expect(state!.snippet).not.toContain('<');
@@ -94,29 +96,37 @@ describe('deriveEmailWorkspaceVisibleState — compact persisted-carrier shape (
   });
 
   it('falls back to sentAt when receivedDate is absent', () => {
-    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ receivedDate: null }), null);
+    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ receivedDate: null }), null, 'c1');
     expect(state!.date).toBe('2026-08-01T09:00:00Z');
     expect(state!.emlDocumentId).toBeNull();
   });
 
   it('caps the snippet at EMAIL_VISIBLE_SNIPPET_CAP_CHARS', () => {
     const long = 'x'.repeat(1000);
-    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ sprk_body: `<p>${long}</p>` }), null);
+    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ sprk_body: `<p>${long}</p>` }), null, 'c1');
     expect(state!.snippet!.length).toBeLessThanOrEqual(EMAIL_VISIBLE_SNIPPET_CAP_CHARS + 1); // +1 tolerates an ellipsis suffix
   });
 
   it('omits snippet when the body is empty (privacy default)', () => {
-    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ sprk_body: '' }), null);
+    const state = deriveEmailWorkspaceVisibleState(buildRecordState({ sprk_body: '' }), null, 'c1');
     expect(state!.snippet).toBeUndefined();
   });
 
   it('returns null when nothing is selected / the read is loading or failed (recordState null)', () => {
-    expect(deriveEmailWorkspaceVisibleState(null, 'eml-doc-1')).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(null, 'eml-doc-1', 'c1')).toBeNull();
   });
 
   it('returns null when the identity minimum (subject/from/date) is incomplete — never persists a carrier the agent-visible derivation would reject', () => {
-    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ subject: null }), null)).toBeNull();
-    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ from: null }), null)).toBeNull();
-    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ sentAt: null, receivedDate: null }), null)).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ subject: null }), null, 'c1')).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ from: null }), null, 'c1')).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState({ sentAt: null, receivedDate: null }), null, 'c1')).toBeNull();
+  });
+
+  // spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — negative case: no id → no handle.
+  // A conduit id-handle cannot be constructed without an id; mirrors the identity-minimum gate above.
+  it('returns null when communicationId is absent/empty — cannot construct an id handle without an id', () => {
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState(), 'eml-doc-1', null)).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState(), 'eml-doc-1', undefined)).toBeNull();
+    expect(deriveEmailWorkspaceVisibleState(buildRecordState(), 'eml-doc-1', '')).toBeNull();
   });
 });

@@ -437,6 +437,217 @@ public class SprkChatAgentFactoryWorkspaceStateTests
     }
 
     // ---------------------------------------------------------------------
+    // R3 task 010 (FR-01/FR-02) — layout/dashboard tabs (Daily Briefing, Calendar)
+    // become visible via a light identity variant; visibleToAssistant persists.
+    // ---------------------------------------------------------------------
+
+    [Fact]
+    public void TryDeriveVisibleState_WorkspaceLayoutTab_NoLongerNull_DerivesDashboardIdentity()
+    {
+        // Pre-fix: a "workspace" widgetType tab (Daily Briefing / Calendar) fell through the
+        // closed-union switch's `_ => null` default. FR-01 requires a non-null {type,label}
+        // identity instead.
+        var tab = MakeTab("briefing-1", widgetType: "workspace",
+            widgetData: new DashboardTabWidgetData
+            {
+                LayoutId = "layout-briefing",
+                DashboardName = "Daily Briefing",
+            });
+
+        var state = SprkChatAgentFactory.TryDeriveVisibleState(tab);
+
+        state.Should().NotBeNull(because: "FR-01 — layout tabs must no longer derive null");
+        state.Should().BeOfType<WorkspaceTabVisibleState.Dashboard>();
+        var dashboard = (WorkspaceTabVisibleState.Dashboard)state!;
+        dashboard.DashboardName.Should().Be("Daily Briefing");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_DailyBriefingAndCalendarTabsOpen_ListsEachByTypeAndLabel()
+    {
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            MakeTab("briefing-1", widgetType: "workspace", updatedAt: "2026-08-10T09:00:00Z",
+                widgetData: new DashboardTabWidgetData
+                {
+                    LayoutId = "layout-briefing",
+                    DashboardName = "Daily Briefing",
+                }),
+            MakeTab("calendar-1", widgetType: "workspace", updatedAt: "2026-08-10T10:00:00Z",
+                widgetData: new DashboardTabWidgetData
+                {
+                    LayoutId = "layout-calendar",
+                    DashboardName = "Calendar",
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId);
+
+        // Each layout tab is listed by {type, label}: type = raw widgetType ("workspace",
+        // mirrors the Compose precedent where the header always shows tab.WidgetType), label =
+        // the derived dashboardName.
+        result.Should().Contain("widgetType=workspace");
+        result.Should().Contain("dashboardName: Daily Briefing");
+        result.Should().Contain("dashboardName: Calendar");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_WorkspaceLayoutTab_AskDoYouSeeDailyBriefing_AnswerableFromBlock()
+    {
+        // Acceptance criterion: "asking 'do you see the daily briefing tab?' answers yes
+        // without opening a second tab" — the block must name the tab so the LLM can answer
+        // from the prompt alone (no tool call, no duplicate tab).
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            MakeTab("briefing-1", widgetType: "workspace", visibleToAssistant: true,
+                widgetData: new DashboardTabWidgetData
+                {
+                    LayoutId = "layout-briefing",
+                    DashboardName = "Daily Briefing",
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId);
+
+        result.Should().Contain("Daily Briefing");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_WorkspaceLayoutTab_ToggleOff_StaysHiddenUnlessActive_FR02()
+    {
+        // FR-02: a toggled-off (visibleToAssistant=false), non-active layout tab stays hidden —
+        // same Path-A privacy default every other widget type already respects. Before the
+        // FR-01 fix this tab was ALREADY always hidden (state was unconditionally null), so
+        // this proves the flag now genuinely GATES visibility rather than being a no-op.
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            // Keeps the block non-empty via a different, opted-in tab.
+            MakeTab("other", widgetType: "Summary", visibleToAssistant: true,
+                updatedAt: "2026-08-10T11:00:00Z"),
+            MakeTab("briefing-hidden", widgetType: "workspace", visibleToAssistant: false,
+                updatedAt: "2026-08-10T08:00:00Z",
+                widgetData: new DashboardTabWidgetData
+                {
+                    LayoutId = "layout-briefing",
+                    DashboardName = "TOGGLED_OFF_PROBE Daily Briefing",
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: "other");
+
+        result.Should().NotContain("TOGGLED_OFF_PROBE");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_WorkspaceLayoutTab_ToggleOn_StaysVisible_FR02()
+    {
+        // FR-02: a toggled-on (visibleToAssistant=true) layout tab is visible — the flag now
+        // has real effect for this widget type (previously a no-op given the null-state gap).
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            MakeTab("calendar-visible", widgetType: "workspace", visibleToAssistant: true,
+                widgetData: new DashboardTabWidgetData
+                {
+                    LayoutId = "layout-calendar",
+                    DashboardName = "Calendar",
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId);
+
+        result.Should().Contain("dashboardName: Calendar");
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_WorkspaceLayoutTab_ActiveButNotOptedIn_VisibleViaConsent_PathA()
+    {
+        // Active-tab-as-consent (spaarkeai-assistant-enhancements-r2 Path A) applies to layout
+        // tabs identically to every other widget type: focusing IS the consent for the active
+        // tab even when visibleToAssistant defaults false.
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            MakeTab("briefing-active", widgetType: "workspace", visibleToAssistant: false,
+                widgetData: new DashboardTabWidgetData
+                {
+                    LayoutId = "layout-briefing",
+                    DashboardName = "Daily Briefing",
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId, activeContextTabId: "briefing-active");
+
+        result.Should().Contain("Tab 1 (active): widgetType=workspace");
+        result.Should().Contain("dashboardName: Daily Briefing");
+    }
+
+    [Fact]
+    public void TryDeriveVisibleState_WorkspaceLayoutTab_ContractGapNoServerReadableName_DerivesGracefulDefault_NeverNull()
+    {
+        // Contract-gap case (mirrors the Compose contract gap): the client's real wire payload
+        // for a layout tab is `{ layoutId, layoutName }` with NO `kind` discriminator, so
+        // WidgetData degrades to null rather than a typed Dashboard payload. The derivation
+        // must still emit a non-null identity — never silently drop the tab.
+        var tab = new WorkspaceTab
+        {
+            Id = "workspace-no-kind",
+            WidgetType = "workspace",
+            WidgetData = null!,
+            SessionId = TestSessionId,
+            TenantId = "tenant-test",
+            VisibleToAssistant = true,
+            SourceProvenance = new WorkspaceTabSourceProvenance
+            {
+                Source = "user",
+                CreatedBy = "user-001",
+                CreatedAt = "2026-08-10T09:00:00Z",
+            },
+            MatterContext = new WorkspaceTabMatterContext { MatterId = "matter-001", MatterName = "Acme v. Beta" },
+            IsPinned = false,
+            CanEdit = true,
+            LastUserEditAt = null,
+            CreatedAt = "2026-08-10T09:00:00Z",
+            UpdatedAt = "2026-08-10T09:00:00Z",
+        };
+
+        var state = SprkChatAgentFactory.TryDeriveVisibleState(tab);
+
+        state.Should().NotBeNull(because: "the contract-gap fallback must never silently drop the tab");
+        state.Should().BeOfType<WorkspaceTabVisibleState.Dashboard>();
+        var dashboard = (WorkspaceTabVisibleState.Dashboard)state!;
+        dashboard.DashboardName.Should().Be(SprkChatAgentFactory.WorkspaceLayoutDefaultLabel);
+    }
+
+    [Fact]
+    public void BuildWorkspaceStateBlock_WorkspaceLayoutTab_NoContentLeak_OnlyTypeAndLabelFields_ADR015()
+    {
+        // Negative case: the layout-tab emission carries no item content — only type/label
+        // (dashboardName) — never layoutId, section payloads, or chart data.
+        var factory = CreateFactory();
+        var tabs = new[]
+        {
+            MakeTab("briefing-1", widgetType: "workspace",
+                widgetData: new DashboardTabWidgetData
+                {
+                    LayoutId = "SHOULD_NOT_LEAK_layout-id-999",
+                    DashboardName = "Daily Briefing",
+                }),
+        };
+
+        var result = factory.BuildWorkspaceStateBlock(tabs, TestSessionId);
+
+        result.Should().Contain("dashboardName: Daily Briefing");
+        result.Should().NotContain("SHOULD_NOT_LEAK_layout-id-999");
+        result.Should().NotContain("layoutId");
+        result.Should().NotContain("chart");
+        result.Should().NotContain("widgetData");
+    }
+
+    // ---------------------------------------------------------------------
     // Task 074 — FR-58 + FR-59 privacy filter (BOTH conditions required)
     // ---------------------------------------------------------------------
 
