@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Polymorphic Tier-2 scoping across roots (Project · Matter · Work Assignment) + internal-only Service Requests tab — supersedes the partial documents-by-project fix (bff7e82e5)</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:none (015/016 shipped; this amends them)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Rewrites the Tier-2 record-visibility authorization boundary across the external module-data seam (bff-api, auth); modifies .cs in Infrastructure/ExternalAccess + Api/ExternalAccess; participation/grant-scoped read correctness is load-bearing; ends in a live redeploy on both identity planes.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-boundary generalization (multi-dimension scope framework + dual-plane accessible-set composition) — high blast radius; same tier as task 015 (O/x).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the shared external-access BFF surface (Infrastructure/ExternalAccess + Api/ExternalAccess) — /conflict-check required; auth-sensitive; single-owner serial.</parallel-reason>
+    <deps>015,016</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+    <escalation>
+      <trigger>If a required access source cannot be read from existing schema (e.g. Work-Assignment assignee → contact resolution for the INTERNAL plane, or the Service-Request `sprk_requestedby` field is absent/differently-named) — STOP and surface per §6 before inventing a mechanism.</trigger>
+    </escalation>
+  </metadata>
+
+  <prompt>
+    Generalize the external module-data Tier-2 scoping from single-parent to POLYMORPHIC multi-root, per
+    notes/external-access-polymorphic-scoping-design.md. Outside-counsel access is GRANT-ONLY and explicit
+    (sprk_externalrecordaccess, by sprk_recordtype: Project / Matter / Work Assignment). Internal workforce
+    access is membership/assignment/ownership ∪ own-contact grants, plus Service-Requests-they-submitted.
+    Compose accessible-root sets per type onto CallerPrincipal; make each grid scope by an OR across ALL its
+    parent lookups; add an internal-only Service Requests tab. This SUPERSEDES the partial documents-by-project
+    fix (commit bff7e82e5), which silently hides matter/work-assignment-linked documents.
+  </prompt>
+
+  <role>SPAARKE platform BFF engineer with external-access authorization fluency. Follows ADR-008/010/028 strictly. Precise about fail-closed Tier-2 record scoping and dual identity-plane composition.</role>
+
+  <goal>
+    One Documents tab that shows every document a caller can access across ALL accessible roots (project OR
+    matter OR work-assignment); Matters, Invoices, and Work Assignments correctly populated; a Service Requests
+    tab that is INTERNAL-ONLY and shows the caller's own submitted requests (sprk_requestedby == caller contact);
+    outside-counsel access remains strictly grant-only (incl. Work Assignments); no over-exposure (fail-closed,
+    all-empty → 0 rows); redeployed and UAT-verified on both planes.
+  </goal>
+
+  <context>
+    <background>
+      Grew from R2 grid-widget UAT (2026-08-07..10). The task-015 ExternalModuleDescriptor + Tier2ScopeFilterInjector
+      are single-attribute; task 016 wired documents/invoices to a single project lookup and matters to an empty set.
+      UAT proved this incomplete: documents/invoices are polymorphic (matter OR project), work-assignment is a
+      first-class ROOT (a WA with its own documents can be granted to outside counsel with no project/matter), and
+      Service Requests are internal records. The grant table + child schema already support this (verified live) —
+      NO Dataverse schema change. Full model + verified schema facts: notes/external-access-polymorphic-scoping-design.md.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalModuleRegistry.cs (ExternalModuleDescriptor — generalize to N scope dimensions)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Tier2ScopeFilterInjector.cs (generalize single-attr → OR filter)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalModuleDataEndpoints.cs (compute per-dimension sets; all-empty short-circuit)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs (module registrations — rewire per §4 of the design)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs (read grants of ALL record types, not just project)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (grant term beyond sprk_project; compose matter/WA)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs (CallerPrincipal — carry accessible-root sets per type; both plane strategies populate)</file>
+      <file>src/client/external-spa/src/widgets/ (add Service Requests widget) + src/registry/widgetRegistry.ts (internal-only entitlement gate)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/Tier2ScopeFilterInjectorTests.cs + ExternalModuleRegistryTests.cs (extend for OR/multi-dimension)</file>
+    </relevant-files>
+    <dependencies>015 (module framework this generalizes). 016 (module registrations + grid configs this rewires). teams-app-r1 IAccessibleRecordSetService (extend, do not fork).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design">Follow notes/external-access-polymorphic-scoping-design.md §2 access sources, §3 root sets, §4 module→dimensions — it is the binding spec for this task.</constraint>
+    <constraint source="owner">Outside-counsel access is GRANT-ONLY and explicit: every root a partner sees comes from an active sprk_externalrecordaccess row of that record type. No assignment- or rollup-derived access for partners. (Internal users: membership/assignment ∪ own-contact grants.)</constraint>
+    <constraint source="owner">Service Requests are INTERNAL records — the SR tab MUST NOT appear on the outside-counsel partner SPA; internal SR tab shows only sprk_requestedby == caller contact.</constraint>
+    <constraint source="NFR-08">Each module Tier-2 scoped; being entitled to a tab reveals NO record whose parents are outside the caller's accessible sets. All-empty accessible set → 0 rows (fail-closed), never unscoped. Negative test per module + per plane.</constraint>
+    <constraint source="project">§10 BFF Hygiene: Placement Justification (cite .claude/constraints/bff-extensions.md); /conflict-check before the PR (shared external-access surface); publish ≤60 MB compressed + report delta; no new HIGH CVE; tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+    <constraint source="ADR-010">Generalize the concrete ExternalModuleDescriptor (no new interface) — scope dimensions are data on the descriptor.</constraint>
+    <constraint source="project">Reuse sprk_recordtype_ref (record-type → regarding-field/logical-name map). Do NOT reuse the write-side PolymorphicResolverService/IncomingAssociationResolver for read scoping (documents lack the denormalized regarding fields — typed-lookup OR is required).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/external-access-polymorphic-scoping-design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/grid-widget-empty-diagnosis.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/task-016-deviations.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/data-model/entity-relationship-model.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Multi-dimension Tier-2 scope" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalModuleRegistry.cs">A module declares a LIST of {attribute, accessibleIds(principal)} dimensions; a row is accessible if ANY dimension matches; the injector emits &lt;filter type="or"&gt; across non-empty dimensions.</pattern>
+      <pattern name="Dual-plane accessible-set composition" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs">Compose accessible roots per type (P/M/W [+S internal]): partner = grants by recordtype; internal = membership ∪ own-contact grants.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for the external-access BFF surface; record result.</step>
+    <step order="2">Extend ExternalParticipationService to read grants of ALL record types (project/matter/work-assignment) from sprk_externalrecordaccess (currently _sprk_project_value only) — return typed grant sets.</step>
+    <step order="3">Extend AccessibleRecordSetService so the grant term composes matter + work-assignment (not just sprk_project); compose accessible-root sets per type. Add the internal Service-Request "own submitted" set (sprk_requestedby == contact).</step>
+    <step order="4">Carry the accessible-root sets per type on CallerPrincipal (GetAccessibleProjectIds/…MatterIds/…WorkAssignmentIds); populate from BOTH plane strategies (CIAM grants-only; workforce membership ∪ grants).</step>
+    <step order="5">Generalize ExternalModuleDescriptor to a list of scope dimensions {attribute, accessibleIds}; ScopeRows keeps a row if ANY dimension matches; all-empty → empty.</step>
+    <step order="6">Generalize Tier2ScopeFilterInjector to emit &lt;filter type="or"&gt; across the non-empty dimensions; update its unit tests for the OR case.</step>
+    <step order="7">Rewire module registrations (ExternalAccessModule.cs) per design §4: Documents [project,matter,workassignment], Invoices [matter,project], Matters [matterid], Work Assignments [workassignmentid], Projects [projectid], Service Requests [sprk_requestedby] (internal-only).</step>
+    <step order="8">Update grid config records (sprk_gridconfiguration) so each child grid projects the parent lookups its scoping reads (Documents +sprk_matter +sprk_workassignment; Invoices +sprk_matter); author the Service Requests config.</step>
+    <step order="9">Client: add the Service Requests widget INTERNAL-ONLY (entitlement-gated to workforce; absent on the outside-counsel partner tab set); keep Work Assignments on partner.</step>
+    <step order="10">dotnet build + dotnet test; npm run build:prod (external-spa); dotnet publish -c Release + report size delta + no new HIGH CVE. Deploy the BFF from the worktree (scripts/Deploy-BffApi.ps1 → spaarke-bff-dev) per the deploy-from-worktree rule (NOT CI). Verify via App Insights [EXT-MODULE] Fetch server-side-filtered row counts on both planes.</step>
+    <step order="11">Quality gates (code-review + adr-check) per task-execute Step 9.5. Update TASK-INDEX.md (028 ✅; note 015/016 amended). Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="npm">Build the external-spa (npm run build:prod)</tool>
+    <tool name="mcp__dataverse">Update sprk_gridconfiguration records; verify schema/data</tool>
+    <tool name="az">App Insights verification + App Service restart if needed</tool>
+    <tool name="terminal">Shell / deploy script</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Generalized ExternalModuleDescriptor + Tier2ScopeFilterInjector + rewired ExternalAccessModule registrations + extended ExternalParticipationService/AccessibleRecordSetService/CallerPrincipal</output>
+    <output type="code">Service Requests widget (internal-only) + widgetRegistry entitlement gate</output>
+    <output type="docs">Updated sprk_gridconfiguration records (Documents/Invoices project parent lookups; new Service Requests config)</output>
+    <output type="test">Extended injector + descriptor unit tests (OR / multi-dimension); per-plane contract scoping tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A partner (CIAM) granted a Project sees, in the Documents tab, every document whose sprk_project is that project; a partner granted a Matter sees matter-linked documents; a partner granted a standalone Work Assignment (no project/matter) sees that WA and its sprk_workassignment-linked documents — all in the single Documents tab.</criterion>
+    <criterion testable="true">Invoices show for accessible matters OR projects; Matters and Work Assignments tabs are populated from the caller's accessible sets.</criterion>
+    <criterion testable="true">The Service Requests tab is ABSENT on the outside-counsel partner SPA; on the internal SPA it shows only requests where sprk_requestedby == the caller's contact.</criterion>
+    <criterion testable="true">Negative (partner grant-only): a partner with NO grant of a given type sees NO roots of that type and NO children rolling up from them (fail-closed); an all-empty accessible set returns 0 rows without querying.</criterion>
+    <criterion testable="true">Negative (over-read): a document/invoice whose parents are all outside the caller's accessible sets never appears in any tab, on either plane.</criterion>
+    <criterion testable="true">The partial documents-by-project behavior (bff7e82e5) is superseded: a matter-linked document that was previously hidden now appears for a caller with access to its matter.</criterion>
+    <criterion testable="true">BFF publish ≤60 MB compressed (report delta); dotnet test green; no new HIGH CVE; /conflict-check clean or coordinated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Supersedes the partial fix in commit bff7e82e5 (documents scoped by project only). The single-attribute
+    Tier2ScopeFilterInjector + ExternalModuleDescriptor from task 015 and the module registrations from task 016 are
+    GENERALIZED here, not reverted. NO Dataverse schema change (grant table already targets Project/Matter/Work
+    Assignment; sprk_document.sprk_workassignment + sprk_servicerequest.sprk_requestedby verified live). Binding design:
+    notes/external-access-polymorphic-scoping-design.md.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; (esp. the polymorphic-scoping design note) before starting. /conflict-check before the BFF PR. Deploy from the worktree (scripts/Deploy-BffApi.ps1), NOT CI. Verify both planes via App Insights.</protocol>
+  </execution>
+</task>

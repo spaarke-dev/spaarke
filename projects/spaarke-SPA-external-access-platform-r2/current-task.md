@@ -1,47 +1,47 @@
 # Current Task State — spaarke-SPA-external-access-platform-r2
 
-> **Last Updated**: 2026-08-07 (context-handoff)
-> **Recovery**: read Quick Recovery, then "Deployed state" + "NEXT: R2 grid-widget bug". Branch = master (fully merged).
+> **Last Updated**: 2026-08-10 (context-handoff)
+> **Recovery**: read Quick Recovery, then "NEXT: execute task 028". Branch = master (fully merged).
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Status** | P1 complete (010–019 ✅) + merged to master; Teams SSO fix applied. **Grid-widget bug DIAGNOSED + FIXED (2026-08-07, commit `bff7e82e5`, BFF redeployed).** Awaiting user retest. |
-| **NEXT ACTION** | **User retest** the deployed grids (Projects should show 16; Documents should show project-linked docs; Matters clean "coming soon"; Work Assignments already worked). Then verify via App Insights `[EXT-MODULE] Fetch … server-side filtered`. **Invoices deferred** to matter-access work (invoices link to `sprk_matter`, not `sprk_project`). Full diagnosis: `notes/grid-widget-empty-diagnosis.md`. |
-| **Branch/master** | `work/spaarke-SPA-external-access-platform-r2` == `origin/master` == `e9da94467` (0 behind/ahead; main repo synced). Clean tree. |
-| **Pre-conditions** | Deploy from worktree (NOT CI) — see memory `deploy-from-worktree-not-ci.md`. Build client with `VITE_DEV_MOCK=false` + full CI VITE_* env (`.env.local` has mock=true; must override). |
+| **Status** | P1 complete (010–019 ✅) + merged to master. Grid-widget bug **fixed + deployed + UAT-verified both planes**. Polymorphic Tier-2 access model **designed + spec'd + tasked as 028** (not started). |
+| **NEXT ACTION** | **Execute task 028 via `task-execute`** — `tasks/028-polymorphic-tier2-scoping.poml`. It generalizes Tier-2 scoping to polymorphic multi-root (Project/Matter/Work Assignment) + adds an internal-only Service Requests tab, and **supersedes** the partial documents-by-project fix. Binding spec: `notes/external-access-polymorphic-scoping-design.md`. |
+| **Branch/master** | `work/spaarke-SPA-external-access-platform-r2` == `origin/master` == `d211b6705` (grid fix + merge). Planning artifacts for 028 committed on top (see below). |
+| **Pre-conditions** | Deploy from worktree (NOT CI) — memory `deploy-from-worktree-not-ci.md`. Build client with `VITE_DEV_MOCK=false`. `/conflict-check` before the BFF PR. |
 
-## 🐞 NEXT: R2 grid-widget bug (the one open item)
-**Symptom**: In the deployed R2 shell, every `<DataGrid>` widget (Projects/Matters/Documents/Invoices/Work Assignments) shows empty on BOTH the CIAM (Partner) and workforce (My organization) logins. **Not** an auth/BFF problem — proven:
-- BFF `/api/v1/external/me` (workforce token) returns **16 projects**; the **old SPA** shows the CIAM contact's **2 projects** (Project 1 + PRJT.10007.02). So resolution + participations + Part-2 union all work server-side.
-- **All grids empty at once ⇒ a COMMON cause in the shared R2 grid path**, not a per-widget issue.
-**Investigate (client-first)**:
-1. Browser Network tab on a grid open: are the `GET {host}/api/v1/external/api/dataverse/*` calls firing? Status? Response body? (Look for the `sprk_gridconfiguration` config fetch FIRST — D-016-2: each grid fetches its config record before data; if that 403s/errors, NO grid renders.)
-2. Files: `src/client/external-spa/src/widgets/GridWidgetBody.tsx`, `ProjectsWidget.tsx` (+ siblings), `services/gridDataverseClient.ts` (check `bffBaseUrl` = `{host}/api/v1/external`), and the shared `<DataGrid configId>` from `@spaarke/ui-components`.
-3. BFF side: `Api/ExternalAccess/ExternalModuleDataEndpoints.cs` + `Infrastructure/ExternalAccess/ExternalModuleRegistry.cs` — the module-data read seam + the grid-configuration allow-list (`OutsideCounselGridConfigurationIds` in `ExternalAccessModule.cs`).
-4. Compare to how the **old SPA** fetched (it worked) — old path likely `ExternalDataService`/a different endpoint vs R2's module-data seam.
-Likely suspects (all-grids-empty): the `sprk_gridconfiguration` fetch failing, `gridDataverseClient` base URL/auth, or the DataGrid response→rows mapping.
+## ✅ Done since last handoff (2026-08-07 → 08-10)
+- **Grid-widget "empty grids" bug** — diagnosed empirically (App Insights + live Dataverse), root-caused as THREE bugs, fixed:
+  - Projects/Matters 500s → wrong FetchXML attribute names in `sprk_gridconfiguration` (fixed live: `sprk_name`→`sprk_projectname`, `sprk_referencenumber`→`sprk_projectnumber`, `sprk_status`→`statuscode`; `sprk_mattertitle`→`sprk_mattername`).
+  - Documents/Invoices 0 rows → BFF fetched one unfiltered page then filtered in-memory. Fixed via **server-side FetchXML scope injection** (`Tier2ScopeFilterInjector`, commit `bff7e82e5`, deployed) + Documents pageSize→250.
+  - Diagnosis: `notes/grid-widget-empty-diagnosis.md`.
+- **UAT verified both planes** (2026-08-07): workforce = 16 projects / 49 docs / 5 WA / 0 matters; partner = 2 projects / 14 docs / 4 WA. Invoices deferred (matter-parented).
+- **Merged to master** (safe: conflict-checked, FF, main repo synced) — `d211b6705`.
 
-## Deployed state (dev)
-- **SWA** `swa-spaarke-external-spa-dev` (https://green-dune-0c4f1221e.7.azurestaticapps.net) = **R2 client live** (shell markers verified; mock OFF; domain-qualified manifest). Old teams-r1 build replaced.
-- **BFF** `spaarke-bff-dev` = R2 (Part-2 access model + 018 cleanup + 015/016 framework). Config added this session: `ExternalAccess__PortalUrl=<SWA url>` (was missing → blocked invite), `AzureAd__ValidAudiences__2=api://green-dune-…/1e40baad-…` (Teams SSO fallback). `/api/v1/collab/me`→404 (018 live), `/healthz`→200.
-- **Entra `1e40baad` (SDAP-BFF-SPE-API)** — **R2 now owns it** (teams-r1 archived, handed off). Added domain-qualified identifierUri `api://green-dune-…/1e40baad-…` (additive; scopes+preAuth incl. broker preserved). Ratified teams-r1's broker pre-auth `29d9ed98` (Option A, NAA desktop).
-- **Provisioned test identities**: hotmail contact `2e419a4f` (CIAM account provisioned via invite; oid `06646385` bound), grants → Project 1 (`b12496d1`) + PRJT.10007.02 (`3e34a21a`). spaarke.com contact `8e9918a9` (= ralph systemuser `1d02f31c` `sprk_primarycontact`), grants → Project 1 + 3e34a21a + more.
+## 🔜 NEXT: Task 028 — polymorphic Tier-2 scoping (spec'd, not started)
+**Why**: UAT + owner clarification proved the shipped single-parent scoping (015/016 + `bff7e82e5`) is incomplete — documents/invoices are polymorphic (matter OR project), Work Assignment is a first-class ROOT (grantable standalone with its own docs), Service Requests are internal-only.
 
-## Done this session (all committed + pushed + merged to master)
-- **018** — deleted inert `ExternalCallerAuthorizationFilter` + `/api/v1/collab` group (net -963 LOC); build 0-err, 10155 tests pass (2 pre-existing `DataverseEntitySchemaTests` fails = ISS-018-1, inherited, unrelated).
-- **019** — deployed P1 (BFF + client) from the worktree; smoke green.
-- **Part-2 access model** (§6.5 Path-B, owner-directed) — workforce **systemuser sees membership ∪ own contact grants** (`AccessibleRecordSetService`, `WorkforcePrincipal.Email` + email fallback). Tests +3. Note: `notes/access-model-systemuser-contact-grant-union.md`.
-- **Dev-mock leak fix** — worktree builds must pass `VITE_DEV_MOCK=false` (`.env.local` gotcha; memory saved).
-- **Teams desktop SSO fix** — domain-qualified App ID URI + manifest + BFF ValidAudiences (Option B) + ratified Option A + R2 owns the Entra app. Note: `notes/teams-sso-fix-and-entra-app-ownership.md`.
-- **Merged to master twice** (P1 + Teams fix); worktree-synced.
+**The model** (frozen, verified live — `notes/external-access-polymorphic-scoping-design.md`):
+- Roots per caller: **P** projects, **M** matters, **W** work assignments (+ **S** = SRs I submitted, internal only).
+- Partner = **grant-only** (`sprk_externalrecordaccess` by `sprk_recordtype`: Project/Matter/WorkAssignment). Internal = membership/assignment ∪ own-contact grants.
+- Children scope by OR across parents: Documents [`sprk_project`|`sprk_matter`|`sprk_workassignment`], Invoices [`sprk_matter`|`sprk_project`].
+- Service Requests tab: **internal-only**, `sprk_requestedby == caller contact`.
+- **No Dataverse schema change** (grant table targets all 3 roots; `sprk_document.sprk_workassignment` + `sprk_servicerequest.sprk_requestedby` verified).
 
-## Remaining (beyond the widget bug)
-- **Admin (not worktree-doable)**: re-upload the Teams app **package** with the domain-qualified `webApplicationInfo.resource` (live Teams app is still teams-r1's GUID-form package) → then SSO-fallback fix is live; desktop NAA retest; admin consent via portal/az (not bare `/adminconsent`).
-- **ISS-018-1**: 2 pre-existing `DataverseEntitySchemaTests` failures (Documents `UpdateDocumentRequest` schema drift from the master merge) — `/defer` to Documents owner.
-- **P2 (020+)**: entitlement layer — real `/me` (task 022, replaces the mocked `me-client.ts`), Dataverse schema (owner sign-off), workforce-plane auth policy (024). Owner wave-gated.
-- Fold the Teams NAA/SSO Entra recipe into `docs/guides/auth-deployment-setup.md` §3 (+ `ExternalAccess__PortalUrl`).
+**Build (11 steps in the POML)**: extend `ExternalParticipationService` (all grant types) → extend `AccessibleRecordSetService` (matter/WA grant term) → carry root sets on `CallerPrincipal` → generalize `ExternalModuleDescriptor` to N scope dimensions → generalize `Tier2ScopeFilterInjector` to OR filter → rewire `ExternalAccessModule` registrations → update grid configs (+ new SR config) → add internal-only SR widget → tests → redeploy from worktree → verify both planes via App Insights.
+
+**Files**: `Infrastructure/ExternalAccess/{ExternalParticipationService,AccessibleRecordSetService,ExternalModuleRegistry,CallerPrincipalResolver}.cs`, `Api/ExternalAccess/{ExternalModuleDataEndpoints,Tier2ScopeFilterInjector}.cs`, `Infrastructure/DI/ExternalAccessModule.cs`, `src/client/external-spa/src/widgets/` + `registry/widgetRegistry.ts`, tests in `tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/`.
+
+## Deployed state (dev) — unchanged from 08-07 + the 028-precursor injector
+- **SWA** `swa-spaarke-external-spa-dev` = R2 client live. **BFF** `spaarke-bff-dev` = R2 + `bff7e82e5` (single-attr server-side scope injection). **Entra `1e40baad`** R2-owned + Teams SSO fix. Grant/test identities per `notes/grid-widget-empty-diagnosis.md`.
+
+## Remaining (beyond 028)
+- Admin: re-upload Teams package (domain-qualified `webApplicationInfo.resource`) for the desktop SSO fix to go live.
+- ISS-018-1: 2 pre-existing `DataverseEntitySchemaTests` fails — `/defer` to Documents owner.
+- P2 021/024 (entitlement resolver / workforce auth policy) — 028 builds the Tier-2 substrate they assume.
+- P3 030–037: Service Request **creation** wizard + law-dept management (028 adds only the SR read tab).
 
 ## Notes index
-Per-task/finding detail in `notes/`: `task-018-deviations.md`, `task-019-deployment-record.md` (incl. UAT rounds 1-2), `access-model-systemuser-contact-grant-union.md`, `teams-sso-fix-and-entra-app-ownership.md`.
+`notes/`: `external-access-polymorphic-scoping-design.md` (028 binding spec), `grid-widget-empty-diagnosis.md` (+UAT verification), `task-018-deviations.md`, `task-019-deployment-record.md`, `access-model-systemuser-contact-grant-union.md`, `teams-sso-fix-and-entra-app-ownership.md`.
