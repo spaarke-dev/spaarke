@@ -4,7 +4,7 @@
     <title>Project wrap-up — final quality gates, test-diet, cleanup, docs, lessons-learned</title>
     <phase>9 Wrap-up</phase>
     <gate>blocked until 002,013,025,039,043</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Runs code-review + adr-check + test-diet gates across all project code; touches many files</rigor-reason>
     <model-tier>sonnet</model-tier>
