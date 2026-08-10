@@ -70,13 +70,18 @@ function getInitializer(): CodePageAuthInitializer {
       bffBaseUrl: getBffBaseUrl(),
       bffApiScope: getBffOAuthScope(),
       proactiveRefresh: true,
-      // owner UAT 2026-08-03 R5 item 6 — never surface an involuntary sign-in popup
-      // when a widget/tab mounts (the Email tab's first BFF fetch was tripping
-      // acquireTokenPopup on a cold MSAL cache). ADR-028 INV-5: a popup only from an
-      // explicit user auth action. The user is already signed in to the MDA session,
-      // so ssoSilent resolves normally; the cold-cache edge degrades to a retryable
-      // error instead of a second SpaarkeAi window opening on load.
-      requireSilentOnly: true,
+      // REVERTED to false 2026-08-07 (owner-approved). Set true 2026-08-04 (R5 item 6) to
+      // suppress the cold-cache acquireTokenPopup — but that removed the ONLY path that
+      // seeds the MSAL cache on a hard-reset cold start: acquireTokenSilent needs a cached
+      // account (none when cold) and ssoSilent fails on the first cold attempt, so with the
+      // popup suppressed getAccessToken() returned '' and the app hung forever on
+      // "Connecting to Dataverse…" (UAT 2026-08-07). The prior comment's assumption that
+      // "ssoSilent resolves normally" on cold start is false on the FIRST mount. Restoring
+      // the shared library's built-in popup fallback = the known-good pre-Aug-4 behavior
+      // (one sign-in on a truly cold cache, then silent forever). NO @spaarke/auth change —
+      // this is a SpaarkeAi-local config revert only. If the occasional cold-start prompt
+      // becomes a problem, the fully-silent path is a separate, deliberate shared-lib effort.
+      requireSilentOnly: false,
       logLabel: "SpaarkeAi:authInit",
     });
   }
