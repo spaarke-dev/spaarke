@@ -1,8 +1,8 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-10 (Pillar E **PR #751 OPENED** — https://github.com/spaarke-dev/spaarke/pull/751; branch merged current with master (0 behind), pushed HEAD `df7c586f8`; conflict-check CLEAN 0/72 overlap. Only GATED deploys remain.)
-> **Recovery**: Read "Quick Recovery" first. Tree clean, all pushed; **PR #751 open (base master, tasks 050–058)**; nothing in-flight.
+> **Last Updated**: 2026-08-10 (Pillar E **PR #751 MERGED to master** — tasks 050–058 now in `origin/master` @ `1c37781f4`; worktree fully synced 0/0/0/0; main repo master synced. Only GATED deploys (017/026/035/044/045/059) remain.)
+> **Recovery**: Read "Quick Recovery" first. **All Pillar A–E code + R-1/R-2/R-3 remediation is MERGED to master.** Worktree = master (0 ahead/behind before this doc commit); nothing in-flight; only operator-gated deploys left.
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
