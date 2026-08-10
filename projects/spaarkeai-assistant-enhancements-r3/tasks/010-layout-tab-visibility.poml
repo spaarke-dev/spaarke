@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Make layout/dashboard tabs (Daily Briefing + Calendar) visible to the Assistant via a light identity variant + persist visibleToAssistant (FR-01, FR-02)</title>
+    <phase>1 — Awareness (identity + active-item handle)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF agent-factory change on the ADR-039/ADR-015 awareness boundary; touches BuildWorkspaceStateBlock — code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive identity variant in an existing derive method; bounded, well-specified reuse — Sonnet 5 @ high suffices.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches SprkChatAgentFactory.BuildWorkspaceStateBlock — same file as 011 → must serialize with 011; coordinate spaarke-ai-architecture-redesign-r2 (consume PublicContracts, no fork).</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, ai, spaarkeai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>In SprkChatAgentFactory, make Daily Briefing and Calendar layout tabs (which have no `kind` and currently derive `null` → invisible) visible to the agent via a light identity variant in TryDeriveVisibleState/BuildWorkspaceStateBlock, and persist the per-tab visibleToAssistant flag across reload/resume.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI agent-factory expertise; comfortable adding a bounded identity variant to an existing visible-state derivation without introducing content into the prompt.</role>
+  <goal>With a Daily Briefing tab and a Calendar tab open, the agent prompt lists each by {type,label}; toggling a tab's visibility persists across reload/resume.</goal>
+  <context>
+    <background>FR-01/FR-02. Layout/dashboard tabs (Daily Briefing, Calendar) carry no `kind`, so `TryDeriveVisibleState` currently derives `null` and they are invisible to the agent — the R2 UAT gap where the Assistant couldn't "see" these tabs. Add a light identity variant so these tabs surface as {type,label} in the workspace-state block. `BuildWorkspaceStateBlock` (~:1469) is the emit; `TryDeriveVisibleState`/`FormatVisibleStateFields` (~:1547/1679) is the derivation. Persist a per-tab `visibleToAssistant` flag so a toggled-off tab stays hidden across reload/resume (and toggled-on stays visible). This is identity only — NO ambient widget content (that trim is FR-03/task 011). Consume `Services/Ai/PublicContracts/` seams; do NOT fork `Services/Ai/` internals (redesign-r2 sole owner).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (BuildWorkspaceStateBlock ~:1469, TryDeriveVisibleState ~:1547, FormatVisibleStateFields ~:1679)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039">No classifier, no second dispatch surface — layout-tab visibility is deterministic identity derivation only.</constraint>
+    <constraint source="ADR-015">Identity only: {type,label} per layout tab — NO item content in the prompt.</constraint>
+    <constraint source="ADR-013">Consume Services/Ai/PublicContracts/ — do NOT inject AI-internal types into CRUD code and do NOT fork Services/Ai/ internals (redesign-r2 sole owner).</constraint>
+    <constraint source="project">BFF §10: publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report the delta.</constraint>
+    <constraint source="project">Scope clause: add the identity variant + persist visibleToAssistant only. Do NOT trim the existing block (FR-03/011) or thread the active-item handle (011).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read TryDeriveVisibleState/FormatVisibleStateFields/BuildWorkspaceStateBlock and confirm layout tabs derive null today.</step>
+    <step order="2">Add a light identity variant so no-`kind` layout tabs (Daily Briefing, Calendar) derive {type,label} instead of null.</step>
+    <step order="3">Persist a per-tab visibleToAssistant flag so visibility survives reload/resume.</step>
+    <step order="4">Emit the layout tabs in BuildWorkspaceStateBlock as {type,label} — identity only, no content.</step>
+    <step order="5">Add/extend unit tests (layout tab visible; toggle-off persists hidden; toggle-on persists visible).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute + delta.</step>
+    <step order="7">Update TASK-INDEX.</step>
+  </steps>
+  <escalation>
+    <trigger>If making layout tabs visible requires emitting more than {type,label} (i.e. any widget content) to be useful, STOP and escalate (ADR-015) rather than widening the prompt. If PublicContracts/ lacks a seam for the variant, coordinate with spaarke-ai-architecture-redesign-r2 rather than forking Services/Ai/.</trigger>
+  </escalation>
+  <justification>
+    <existing>TryDeriveVisibleState returns null for no-`kind` layout tabs; no visibleToAssistant persistence exists.</existing>
+    <extension>Yes — additive identity variant in the existing derive method + a persisted per-tab flag.</extension>
+    <cost-of-doing-nothing>The Assistant stays blind to Daily Briefing and Calendar tabs (the R2 UAT gap) — it narrates or opens duplicate tabs instead of answering "do you see the daily briefing tab?".</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</output>
+    <output type="test">the agent-factory visible-state test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">With a Daily Briefing tab and a Calendar tab open, the agent prompt lists each by {type,label}.</criterion>
+    <criterion testable="true">Asking "do you see the daily briefing tab?" answers yes without opening a second tab.</criterion>
+    <criterion testable="true">Toggling a tab's visibility off then reloading keeps it hidden from the prompt; toggling on keeps it visible.</criterion>
+    <criterion testable="true">The layout-tab emission carries no item content — only type/label (negative case: any content field fails review/test).</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta).</criterion>
+    <criterion testable="true">Tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>NFR-04 — identity only; content is tool-fetched by id (overview parity is Phase 2). Serialize with 011 on BuildWorkspaceStateBlock. Run /conflict-check before the BFF PR.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

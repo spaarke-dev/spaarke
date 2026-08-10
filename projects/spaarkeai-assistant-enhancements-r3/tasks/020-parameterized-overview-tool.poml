@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Parameterized configId-driven overview tool — saved-query reuse, today injected, server-side predicates, record-id citations (FR-06)</title>
+    <phase>2 — Capability parity</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF AI tool handler on the ADR-039 catalog + ADR-015 governance boundary; the overview DoD driver; server-side OBO query execution</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The R2 UAT-defect fix — judgment-sensitive: reuse the query definition (not model-authored SQL), inject today, compute predicates server-side; sits on the Services/Ai boundary owned by redesign-r2 (PublicContracts, no fork)</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>Wave2-BFF</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Ai/** (tool handler + catalog row) — coordinate with spaarke-ai-architecture-redesign-r2 (sole owner of Services/Ai internals); consume PublicContracts/, NO fork. /conflict-check before the PR.</parallel-reason>
+    <deps>011</deps>
+    <tags>bff-api, ai, api</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Implement ONE parameterized `configId`-driven overview tool in Services/Ai/** that executes a surface's EXISTING saved-query/FetchXML server-side over OBO, injects `today`, computes derived predicates server-side (e.g. overdue = dueDate &lt; today), and returns grid-shaped rows with record-id citations. Reuse the query DEFINITION — never model-authored SQL. Register it as an ADR-039 catalog row; consume the Services/Ai/PublicContracts/ facade — do NOT fork Services/Ai internals or inject AI-internal types into CRUD code.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI tool-catalog expertise; comfortable with OBO Dataverse query execution (saved-query/FetchXML), server-side derived predicates, and the ADR-013 AI facade boundary.</role>
+  <goal>"How many overdue tasks do I have?" answers with the correct count — overdue computed server-side with today injected, reusing the My Tasks saved-query — opens/directs to the Tasks tab, with no query error, no asking for the date, and no duplicate tab.</goal>
+  <context>
+    <background>FR-06 — the overview DoD driver. The generic `read_query` rejects GETDATE()/COUNT/aggregates, so the model hand-authored unsupported SQL (the R2 UAT defect: query error, duplicate tab, narrated tab names not data). This ONE parameterized tool wraps a surface's existing `sprk_gridconfiguration` saved-query/FetchXML, executes it server-side over OBO, injects `today` deterministically (no date prompt), and computes derived predicates (overdue = dueDate &lt; today) server-side, returning grid-shaped rows carrying record ids for citation. It reuses the query DEFINITION per surface — it does NOT accept model-authored SQL. Lives in Services/Ai/** and must consume the Services/Ai/PublicContracts/ facade; redesign-r2 is the sole owner of Services/Ai internals (no fork). Existing query execution to reuse: DataverseSqlQueryTranslator / DataverseUserClient behind `read_query`; saved-query/configId reuse per DataGrid + sprk_gridconfiguration.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/** (new parameterized overview tool handler + ADR-039 catalog row)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (facade seam to consume — NO fork of internals)</file>
+      <file>src/server/api/Sprk.Bff.Api/.../AgentToolProjection.cs (catalog row / tool projection reference)</file>
+      <file>read_query / DataverseSqlQueryTranslator / DataverseUserClient (existing query-execution path to reuse the definition, NOT model SQL)</file>
+      <file>sprk_gridconfiguration saved-query/FetchXML per grid (the reusable query asset)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (add/update unit tests — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the new overview tool handler and its catalog registration">Register as a catalog row consumed by the deterministic PreFilter; NO classifier, NO second dispatch surface.</constraint>
+    <constraint source="ADR-015" scope="the tool's returned rows and prompt exposure">Return record-id citations; content is tool-fetched by id over OBO — no item content leaks into the prompt; the tool executes under the caller's OBO identity.</constraint>
+    <constraint source="ADR-013" scope="Services/Ai placement and CRUD interaction">Consume the Services/Ai/PublicContracts/ facade; do NOT fork Services/Ai internals (redesign-r2 sole owner); do NOT inject IOpenAiClient/IPlaybookService or other AI-internal types into CRUD code.</constraint>
+    <constraint source="project" scope="the overview surface">ONE parameterized configId tool reusing existing saved-queries — MUST NOT author per-grid handlers or accept model-authored SQL (§11 reuse-first / NFR-06).</constraint>
+    <constraint source="project" scope="today handling">Inject `today` server-side deterministically; MUST NOT prompt the user for the date; compute derived predicates (overdue = dueDate &lt; today) server-side.</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report absolute + delta; no new HIGH CVE.</constraint>
+    <constraint source="NFR-08" scope="the tool handler">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Design the tool contract: input = { configId, optional filter params }; it resolves the surface's existing saved-query/FetchXML by configId (reuse the DEFINITION, not model SQL).</step>
+    <step order="2">Execute the resolved query server-side over OBO via the existing query-execution path (DataverseUserClient / read_query internals) — inject `today` deterministically.</step>
+    <step order="3">Compute derived predicates server-side (overdue = dueDate &lt; today; counts) and return grid-shaped rows carrying record ids for citation.</step>
+    <step order="4">Register the tool as an ADR-039 catalog row consuming the Services/Ai/PublicContracts/ facade — no fork of internals.</step>
+    <step order="5">Add/extend unit tests in tests/unit/Sprk.Bff.Api.Tests/ (correct count, today injected, no model-SQL path, record-id citations present).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute size + delta; run the vulnerable-package scan.</step>
+    <step order="7">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If reusing an existing saved-query/FetchXML by configId cannot express a needed overview predicate without either model-authored SQL or a new per-grid handler, STOP and escalate (§11 reuse-first + ADR-039 catalog bound) rather than adding N handlers or accepting model SQL.</trigger>
+  </escalation>
+  <justification>
+    <existing>`read_query` (generic) rejects GETDATE()/COUNT/aggregates — the exact R2 UAT defect. No parameterized configId overview tool exists.</existing>
+    <extension>Extends existing query execution (wraps a saved-query + injects today) — ONE parameterized tool, not N per-grid handlers.</extension>
+    <cost-of-doing-nothing>"How many overdue tasks do I have?" fails (model authors unsupported SQL → query error, duplicate tab); the overview DoD cannot be met.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/** (parameterized overview tool handler)</output>
+    <output type="code">the ADR-039 catalog row registering the tool</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ overview-tool unit tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">"How many overdue tasks do I have?" answers the correct count (overdue computed server-side with today injected, reusing the My Tasks saved-query).</criterion>
+    <criterion testable="true">The answer opens/directs to the Tasks tab with NO duplicate tab.</criterion>
+    <criterion testable="true">NO query error is produced (no model-authored GETDATE()/aggregate SQL).</criterion>
+    <criterion testable="true">The tool does NOT ask the user for the date (today injected server-side).</criterion>
+    <criterion testable="true">Returned rows carry record-id citations; no item content enters the prompt (ADR-015).</criterion>
+    <criterion testable="true">The tool reuses the surface's existing saved-query definition by configId — no per-grid handler, no model-authored SQL (negative case).</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+    <criterion testable="true">Unit tests added/updated in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
+  </acceptance-criteria>
+  <notes>Contrast with the generic `read_query`, which rejects GETDATE()/COUNT/aggregates (the R2 UAT defect this task closes). Task 021 wires this same tool across all grids + Briefing + Calendar via configId — keep the contract surface-agnostic. Coordinate with redesign-r2 on the PublicContracts seam; /conflict-check before the PR.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

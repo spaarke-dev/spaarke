@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Document per-item: generalize active-doc-follows-tab to document-viewer + per-item CARDS (Summarize · Draft response · Draft memo) backed by RAG (FR-11)</title>
+    <phase>2 — Capability parity</phase>
+    <gate>blocked (deps 022, 024)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>SpaarkeAi .tsx on the ConversationPane spine + WorkspacePane tab-focus effect; per-item card correctness + reactive-not-proactive boundary (NFR-07). Auto-FULL on .tsx.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified: generalize ONE existing effect condition + render cards over existing RAG/document-context tools; no new selection model, the hard invariants are in 001/024.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (sequential spine, shared with 025/041) AND WorkspacePane.tsx (shared active-doc-follows-tab effect); sequence with 025, commit between.</parallel-reason>
+    <deps>022, 024</deps>
+    <tags>spaarkeai, frontend, react, fluent-ui</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Generalize the `WorkspacePane` `active-doc-follows-tab` effect (`WorkspacePane.tsx:2283`, today gated `widgetType === 'compose'`) to ALSO fire for `document-viewer` tabs, publishing `{documentId, filename}` (the stable id already on `DocumentViewerWidget.tsx:99-112` widgetData) as the active-item handle. NO new in-widget selection model. Then render per-item CARDS (Summarize · Draft response · Draft memo) keyed to that handle, backed by RAG (lane 2 — `IRagService`/`DocumentSearchHandler`/`DocumentContextService`) + on-demand body: Summarize → chat answer (record-id cited); Draft response/Draft memo → composer/Compose per the widget's interaction pattern. Switching away clears the handle → cards suppress.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React 18 + TypeScript + Fluent UI v9 expertise on the SpaarkeAi WorkspacePane + ConversationPane; comfortable generalizing ONE existing tab-focus effect condition and rendering a reactive per-item card surface without inventing a new selection model.</role>
+  <goal>Focusing a document-viewer tab publishes the document as the active-item handle and surfaces three cards with no typing; Summarize answers in chat from RAG/body; switching away clears the handle and suppresses the cards.</goal>
+  <context>
+    <background>FR-11. The document active item is the FOCUSED `document-viewer` tab's document — published via the tab-focus pattern (FR-04b). Generalize the existing `WorkspacePane` `active-doc-follows-tab` effect (`WorkspacePane.tsx:2283`, today gated `widgetType === 'compose'`) so it ALSO fires for `document-viewer` tabs, publishing `{documentId, filename}` as the active-item handle onto the task-001 conduit. The stable `documentId` already rides on `DocumentViewerWidget`'s `widgetData` (`DocumentViewerWidget.tsx:99-112`) — NO new in-widget selection model is built (that was the RESOLVED unresolved-question). Per-item CARDS Summarize · Draft response · Draft memo render on the ConversationPane proactive-card surface keyed to the handle (reactive, no typing; per ASSISTANT-UI-ELEMENT-CRITERIA.md per-item→cards). Backing: RAG lane 2 (`IRagService`/`DocumentSearchHandler`/`DocumentContextService`) + on-demand body — content is tool-fetched by id, never a tab snapshot (ADR-015). Landing per interaction pattern (task 022/040 metadata): Summarize → a chat answer with a record-id citation; Draft response / Draft memo → composer/Compose. Switching away from the document-viewer tab clears the handle (single-active-item invariant, task 001) → cards suppress. NFR-07: reactive surface stays distinct from the ADR-047 spine. ConversationPane + WorkspacePane are sequential spines — sequence with 025.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (active-doc-follows-tab effect :2283, generalize from widgetType === 'compose' to also document-viewer)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/DocumentViewerWidget.tsx (stable documentId on widgetData :99-112)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (proactive-card surface ~:164-167; active-item handle consumer)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Reuse-first / §11: generalize the ONE existing `active-doc-follows-tab` effect condition — build NO new in-widget selection model. Scope: the tab-focus effect.</constraint>
+    <constraint source="ADR-015">Cards key to the `{documentId, filename}` handle; all content (summary / draft basis) is tool-fetched by id via RAG lane 2 + on-demand body — never a tab/prompt snapshot. Scope: card data.</constraint>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA">Per-item actions render as CARDS (not chips); no code/tool syntax in labels; collapse the card stack under one disclosure header; hover only on clickable regions. Scope: the card UI.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens — cards render correctly in light AND dark mode. Scope: new card UI states.</constraint>
+    <constraint source="ADR-030">Publish the handle via the content-free conduit (task 001), not new content on the PaneEventBus. Scope: the tab-focus publish.</constraint>
+    <constraint source="NFR-07">The card surface is reactive/local — distinct from the ADR-047 server-initiated spine; no new push channel. Scope: the card surface.</constraint>
+    <constraint source="project">Scope clause: generalize the effect + render the three cards + wire the RAG-backed actions. Do NOT alter the email cards (task 025); reuse existing RAG/document-context services — no new data path.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-047-notification-spine.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0">Declare rigor; trace the `active-doc-follows-tab` effect (:2283), the `document-viewer` widgetData `documentId` (:99-112), and the ConversationPane active-item handle consumer.</step>
+    <step order="1">Generalize the :2283 effect so it also fires for `document-viewer` tabs, publishing `{documentId, filename}` onto the task-001 conduit (retain the Compose branch; no new selection model).</step>
+    <step order="2">Render three cards (Summarize · Draft response · Draft memo) keyed to the handle; appear on focus with NO typing; suppress on tab-switch-away.</step>
+    <step order="3">Wire Summarize → RAG lane 2 + on-demand body → a chat answer with a record-id citation.</step>
+    <step order="4">Wire Draft response / Draft memo → composer/Compose per the widget's interaction-pattern metadata (022/040).</step>
+    <step order="5">Keep the surface distinct from the ADR-047 spine (NFR-07); collapse the card stack under one disclosure header.</step>
+    <step order="6">Add unit/interaction tests + ui-tests; verify dark-mode rendering.</step>
+    <step order="7">npm run build the Spaarke.AI.Widgets package (if touched) + SpaarkeAi; update TASK-INDEX.</step>
+  </steps>
+  <ui-tests>
+    <test name="Document cards on tab focus"><steps><step>Open a document-viewer tab (focus it); do not type</step></steps><expected>Three cards appear — Summarize · Draft response · Draft memo — keyed to the focused document.</expected></test>
+    <test name="Summarize answers in chat from RAG"><steps><step>Focus a document-viewer tab</step><step>Click the Summarize card</step></steps><expected>A summary appears as a chat answer sourced from RAG/on-demand body with a record-id citation — NOT from a tab snapshot.</expected></test>
+    <test name="Switch away clears handle"><steps><step>Focus a document-viewer tab (cards appear)</step><step>Switch focus to another tab</step></steps><expected>The active-item handle clears and the three cards suppress.</expected></test>
+    <test name="Dark mode"><steps><step>Toggle dark mode; focus a document-viewer tab</step></steps><expected>The three cards use Fluent v9 semantic tokens and are readable in both themes; hover affordances only on clickable regions.</expected></test>
+  </ui-tests>
+  <escalation>
+    <trigger>If generalizing the effect requires building a new in-widget selection model or putting document content on the bus/conduit, STOP and escalate (§11 reuse-first / ADR-015) rather than inventing a parallel mechanism. If the card surface would require touching the ADR-047 spine, STOP (NFR-07). Coordinate ConversationPane/WorkspacePane edits with 025 and the analysis-hub/agreements forks (sequential spine).</trigger>
+  </escalation>
+  <justification>
+    <existing>The `active-doc-follows-tab` effect (:2283) exists but is gated to Compose; the `document-viewer` widget already exposes a stable `documentId` on widgetData (:99-112); RAG lane 2 services exist.</existing>
+    <extension>Yes — generalize ONE effect condition + render cards over existing RAG services; no new selection model, no new data path.</extension>
+    <cost-of-doing-nothing>Documents have overview parity but no act-on surface — the second per-item instance is missing; focus a document → no cards → the document per-item DoD fails.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="test">tab-focus publish + card render/suppress + Summarize-from-RAG interaction tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Focusing a document-viewer tab publishes `{documentId, filename}` as the active-item handle (via the generalized :2283 effect; no new selection model).</criterion>
+    <criterion testable="true">Three cards (Summarize · Draft response · Draft memo) appear on focus with NO typing.</criterion>
+    <criterion testable="true">Summarize answers in chat from RAG/body with a record-id citation — not from a tab snapshot.</criterion>
+    <criterion testable="true">Draft response / Draft memo land on composer/Compose per the widget's interaction-pattern metadata.</criterion>
+    <criterion testable="true">Switching away from the document-viewer tab clears the handle and suppresses the cards.</criterion>
+    <criterion testable="true">Cards render as CARDS (not chips), collapse under one disclosure header, readable in dark mode.</criterion>
+    <criterion testable="true">Negative: no new in-widget selection model is built; the Compose branch of the effect still works (no regression).</criterion>
+    <criterion testable="true">Negative: the card surface does NOT touch the ADR-047 spine (NFR-07 preserved).</criterion>
+    <criterion testable="true">SpaarkeAi builds; unit/interaction tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-11; document selection = tab-focus (resolved unresolved-question — no in-widget selection). Depends on 022 (context-type/contract + interaction pattern) and 024 (composer bodyOverride for the draft-response landing). ConversationPane + WorkspacePane are sequential spines — sequence with 025, commit between.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

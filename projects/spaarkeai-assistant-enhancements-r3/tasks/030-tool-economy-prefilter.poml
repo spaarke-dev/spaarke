@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Wire Binding.ContextTypeTags into the ADR-039 PreFilter — OpenTabContextTypes predicate; mount a widget's parity tools only when its tab is open (FR-12)</title>
+    <phase>3 — Tool economy</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Server change on the ADR-039 deterministic PreFilter (the tool-mounting mechanism); touches the Services/Ai projection boundary owned by redesign-r2</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Sits on the ADR-039 closed-catalog / one-decider boundary — judgment-sensitive: must add exactly one predicate to the sanctioned PreFilter with NO classifier and NO second dispatch surface, coordinating the PublicContracts seam with redesign-r2</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>Wave4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Ai/** (AgentToolProjection PreFilter + SprkChatAgentFactory projection seam) — coordinate with spaarke-ai-architecture-redesign-r2 (sole owner of Services/Ai internals); consume PublicContracts/, NO fork. /conflict-check before the PR.</parallel-reason>
+    <deps>022</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Wire `Binding.ContextTypeTags` (client-only today) into the server ADR-039 `PreFilter`: add `OpenTabContextTypes` to the filter context and ONE predicate that mounts a widget's parity tools ONLY when its tab is open, keyed by the FR-08 context-type. Hoist `tabs` into the pre-filter scope. Add NO classifier and NO second dispatch surface — this is a deterministic catalog pre-filter only. Consume the Services/Ai/PublicContracts/ facade; do NOT fork Services/Ai internals.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI tool-catalog/projection expertise; comfortable reasoning about the ADR-039 deterministic PreFilter and the ADR-013 AI facade boundary.</role>
+  <goal>With only the Tasks tab open, the tool projection includes the tasks overview tool and excludes email/document per-item tools; opening the Email tab adds its tools; closing it removes them — all via one deterministic predicate, no classifier.</goal>
+  <context>
+    <background>FR-12 — tool economy. `Binding.ContextTypeTags` exists client-side today but is not consumed by the server ADR-039 PreFilter, so all tools mount always (token bloat, ADR-039 drift). This task wires the open-tab context-types into the PreFilter: add `OpenTabContextTypes` to the filter context, hoist `tabs` into the pre-filter scope, and add ONE predicate keyed by the FR-08 widget-type ↔ context-type mapping (task 022) so a widget's parity tools mount only while its tab is open. PreFilter lives at AgentToolProjection.cs (~:101); the projection seam is SprkChatAgentFactory.cs (:826-869). No classifier, no reranker, no second dispatch protocol — parity capabilities remain catalog rows filtered deterministically (NFR-03). Services/Ai internals are owned by redesign-r2 — consume the Services/Ai/PublicContracts/ facade, do NOT fork.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/.../AgentToolProjection.cs (PreFilter ~:101; add OpenTabContextTypes to the filter context + ONE predicate)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (tool-projection seam :826-869; hoist `tabs` into the pre-filter scope)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (facade seam to consume — NO fork of internals)</file>
+      <file>Binding.ContextTypeTags (existing client-only signal to consume server-side; keyed by the FR-08 context-type map from task 022)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (projection unit test with varying open-tab sets — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the PreFilter predicate and tool mounting">Use ONLY the sanctioned deterministic PreFilter — add exactly ONE predicate. NO classifier, NO reranker, NO keyword map, NO second dispatch surface. Parity capabilities stay catalog rows.</constraint>
+    <constraint source="ADR-013" scope="Services/Ai placement and CRUD interaction">Consume the Services/Ai/PublicContracts/ facade; do NOT fork Services/Ai internals (redesign-r2 sole owner); do NOT inject AI-internal types into CRUD code.</constraint>
+    <constraint source="ADR-015" scope="what the pre-filter reads">The pre-filter keys on open-tab context-types + the {id,type,label} handle only — no item content enters the projection decision.</constraint>
+    <constraint source="project" scope="the predicate">ONE predicate against the existing filter context (§11 reuse-first / NFR-06) — MUST NOT add a second dispatch mechanism or per-tool bespoke gating.</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report absolute + delta; no new HIGH CVE via `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="NFR-08" scope="the PreFilter change">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/ (projection with varying open-tab sets).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the current PreFilter (AgentToolProjection.cs ~:101) and the projection seam (SprkChatAgentFactory.cs :826-869); confirm the FR-08 context-type map (task 022) is available.</step>
+    <step order="2">Hoist `tabs` (open-tab set) into the pre-filter scope and add `OpenTabContextTypes` to the filter context.</step>
+    <step order="3">Add ONE predicate: a parity tool mounts only when its widget's context-type is in `OpenTabContextTypes`.</step>
+    <step order="4">Confirm the Binding.ContextTypeTags signal flows server-side via the PublicContracts facade — no fork of internals.</step>
+    <step order="5">Add/extend projection unit tests over varying open-tab sets (only Tasks open → tasks overview tool present, email/document per-item absent; open Email → its tools appear; close → removed).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute size + delta; run the vulnerable-package scan.</step>
+    <step order="7">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If scoping tools by open tab cannot be expressed as ONE deterministic predicate on the existing PreFilter without introducing a classifier or a second dispatch surface, STOP and escalate (ADR-039 closed-catalog bound) rather than adding a ranking/dispatch mechanism.</trigger>
+  </escalation>
+  <justification>
+    <existing>`Binding.ContextTypeTags` exists client-side but is not consumed by the server PreFilter (AgentToolProjection.PreFilter ~:101); all tools mount always.</existing>
+    <extension>Yes — one predicate in the existing filter context; hoist `tabs` into scope. No new mechanism.</extension>
+    <cost-of-doing-nothing>Tool economy cannot scope by open tabs; every parity tool mounts on every turn (token bloat + ADR-039 drift toward an unbounded catalog).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/.../AgentToolProjection.cs (OpenTabContextTypes filter context + predicate)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (hoist tabs into the pre-filter scope)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ projection unit tests (varying open-tab sets)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">With only the Tasks tab open, the projection includes the tasks overview tool and excludes email/document per-item tools.</criterion>
+    <criterion testable="true">Opening the Email tab adds its parity tools to the projection.</criterion>
+    <criterion testable="true">Closing the Email tab removes its parity tools from the projection.</criterion>
+    <criterion testable="true">Mounting is driven by ONE deterministic PreFilter predicate — no classifier, no second dispatch surface (negative case).</criterion>
+    <criterion testable="true">No item content enters the projection decision (ADR-015).</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+    <criterion testable="true">Projection unit tests added/updated and pass.</criterion>
+  </acceptance-criteria>
+  <notes>Depends on task 022 (the FR-08 widget-type ↔ context-type map) for the keying. Coordinate with redesign-r2 on the PublicContracts seam; /conflict-check before the PR (Services/Ai is heavily contended).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

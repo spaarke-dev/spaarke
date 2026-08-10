@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Email per-item CARDS (Reply · Reply All · Forward · Summarize the thread) keyed to the active email (FR-09/FR-10 client)</title>
+    <phase>2 — Capability parity</phase>
+    <gate>blocked (deps 023, 024, 022)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>SpaarkeAi .tsx on the ConversationPane spine; per-item card correctness + reactive-not-proactive surface boundary (NFR-07). Auto-FULL on .tsx.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified card surface wiring existing tools (023) + composer path (024) to an existing proactive-card surface; the hard invariants live in 023/024, this is the reactive UI wiring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (the sequential spine — shared with 026 and the follow-on task 041); coordinate notification-spine-r1 (ADR-047 renderer) + analysis-hub/agreements ConversationPane forks.</parallel-reason>
+    <deps>023, 024, 022</deps>
+    <tags>spaarkeai, frontend, react, fluent-ui</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Render email per-item CARDS (Reply · Reply All · Forward · Summarize the thread) keyed to the active email; they appear on selection with NO typing (a reactive/local card surface, distinct from the ADR-047 proactive spine). Reply/Reply All/Forward call the task-023 `draft_reply`/`draft_forward` tool then open the composer via task-024's `bodyOverride` (thread preserved). Summarize the thread calls the task-023 `summarize_thread` tool and answers in chat (no composer). Cards suppress when there is no single active email (multi-select / deselect).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React 18 + TypeScript + Fluent UI v9 expertise on the SpaarkeAi ConversationPane; comfortable adding a reactive per-item card surface that stays distinct from the server-initiated notification spine and renders correctly in light + dark themes.</role>
+  <goal>Selecting an email surfaces four cards with no typing; Reply/Reply All/Forward auto-draft and open the composer with a preserved thread; Summarize answers in chat; the cards clear when no single email is active.</goal>
+  <context>
+    <background>FR-09/FR-10 client. The active-item conduit (task 001) carries the active email `{id,type,label}` handle (fed by task 012's email selection emit). This task renders the per-item cards on the existing proactive-card surface in `ConversationPane.tsx` (~:164-167) keyed to that handle — a REACTIVE/local card surface that appears on selection with NO typing (NFR-07: distinct from the ADR-047 server-initiated spine; no new push channel). Per `ASSISTANT-UI-ELEMENT-CRITERIA.md`, per-item actions on an active item render as CARDS (persistent act-on items), not chips. Card actions: Reply / Reply All / Forward → call task-023's `draft_reply(communicationId, mode)` / `draft_forward(communicationId)` (auto-draft), then open the composer via task-024's `bodyOverride` so the composer opens pre-filled with recipients + Re:/Fwd: subject + auto-draft AND the preserved quoted thread. Summarize the thread → task-023's `summarize_thread(communicationId)` → a plain-narrative chat answer (like a file summary), no composer. When there is no single active email (grid multi-select / deselect / tab-switch away), the cards suppress. Coordinate with notification-spine-r1 (owns the ADR-047 suggestion renderer on the same surface) and the analysis-hub/agreements ConversationPane forks — ConversationPane is a sequential spine.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (proactive-card surface ~:164-167; active-item handle consumer)</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/EmailComposeActions/useEmailComposeActions.tsx (openComposer + bodyOverride from task 024)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="NFR-07">The per-item card surface is REACTIVE/local-selection-triggered — it MUST stay distinct from the ADR-047 server-initiated notification spine. No merge, no new push channel. Scope: the card surface.</constraint>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA">Per-item actions on an active item render as CARDS (not chips); no code/tool syntax in card labels; hover affordances only on clickable regions; collapse proactive-card stacks behind one disclosure header. Scope: the card UI.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens — cards render correctly in light AND dark mode; pointer affordances only on clickable regions. Scope: new card UI states.</constraint>
+    <constraint source="ADR-015">Cards key to the `{id,type,label}` handle; content (draft body / thread summary) is tool-fetched by id via 023 — never read from a prompt/tab snapshot. Scope: card data.</constraint>
+    <constraint source="FR-10">Reply/Reply All/Forward MUST open the composer via `bodyOverride` (draft above the reducer-derived quoted thread) — never a whole-body replace. Scope: the reply/forward card actions.</constraint>
+    <constraint source="project">Scope clause: render + wire the cards only. Do NOT re-implement the tools (023) or the composer param (024); do NOT alter the document cards (task 026).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-047-notification-spine.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0">Declare rigor; trace the proactive-card surface (~:164-167), the active-item handle consumer, and how task-023 tools + task-024 `bodyOverride` are invoked.</step>
+    <step order="1">Render four cards (Reply · Reply All · Forward · Summarize the thread) keyed to the active email handle; appear on selection with NO typing; suppress on multi-select/deselect/tab-switch.</step>
+    <step order="2">Wire Reply/Reply All/Forward → `draft_reply`/`draft_forward` (023) → open composer via `bodyOverride` (024), thread preserved.</step>
+    <step order="3">Wire Summarize the thread → `summarize_thread` (023) → plain-narrative chat answer; no composer opened.</step>
+    <step order="4">Keep the surface distinct from the ADR-047 spine (NFR-07); collapse the card stack under one disclosure header per criteria doc.</step>
+    <step order="5">Add unit/interaction tests + ui-tests; verify dark-mode rendering.</step>
+    <step order="6">npm run build SpaarkeAi; update TASK-INDEX.</step>
+  </steps>
+  <ui-tests>
+    <test name="Reply card auto-draft + preserved thread"><steps><step>Open the Email tab; select an email (do not type)</step><step>Click the Reply card</step></steps><expected>The composer (SendEmailDialog) opens pre-filled with recipients + a Re: subject + an auto-drafted body AND the quoted previous thread preserved below the draft — no manual typing required.</expected></test>
+    <test name="Summarize answers in chat"><steps><step>Select an email</step><step>Click the Summarize the thread card</step></steps><expected>A plain-narrative summary of the thread appears as a chat answer (like a file summary); NO composer opens.</expected></test>
+    <test name="Cards suppress on multi-select"><steps><step>Multi-select two emails in the grid, then clear the selection</step></steps><expected>No single active email → the per-item cards are absent (suppressed).</expected></test>
+    <test name="Dark mode"><steps><step>Toggle dark mode; select an email</step></steps><expected>The four cards use Fluent v9 semantic tokens and are readable in both light and dark themes; hover affordances only on clickable card regions.</expected></test>
+  </ui-tests>
+  <escalation>
+    <trigger>If rendering the cards requires touching the ADR-047 notification-spine renderer or introducing a push channel to make them appear, STOP and escalate (NFR-07 — reactive must stay distinct from proactive) rather than merging the surfaces. Coordinate ConversationPane edits with notification-spine-r1 and the analysis-hub/agreements forks (sequential spine).</trigger>
+  </escalation>
+  <justification>
+    <existing>The proactive-card surface exists in ConversationPane (~:164-167); the tools (023) and composer param (024) exist as deps; the active-item handle (001/012) exists.</existing>
+    <extension>Yes — render new cards on the existing surface keyed to the existing handle, invoking existing tools; no new surface or channel.</extension>
+    <cost-of-doing-nothing>Email has overview parity but no per-item act-on surface — the per-item Email DoD (select → Reply card → pre-filled composer with preserved thread) cannot be met.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="test">card render/suppress + Reply/Forward/Summarize interaction tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Selecting an email surfaces the four cards (Reply · Reply All · Forward · Summarize the thread) with NO typing.</criterion>
+    <criterion testable="true">Per-item Email DoD: select email → Reply card → composer pre-filled with recipients + Re: subject + auto-draft AND the preserved quoted thread (via 024's bodyOverride).</criterion>
+    <criterion testable="true">Summarize the thread → a plain-narrative chat answer; no composer opens.</criterion>
+    <criterion testable="true">Cards suppress when there is no single active email (multi-select / deselect / tab-switch away).</criterion>
+    <criterion testable="true">Cards render as CARDS (not chips), collapse under one disclosure header, and are readable in dark mode (semantic tokens).</criterion>
+    <criterion testable="true">Negative: the card surface does NOT touch the ADR-047 spine or add a push channel (NFR-07 preserved).</criterion>
+    <criterion testable="true">Negative: no email content is read from a prompt/tab snapshot — all content is tool-fetched by id (023).</criterion>
+    <criterion testable="true">SpaarkeAi builds; unit/interaction tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-09/FR-10 client; per-item→cards per ASSISTANT-UI-ELEMENT-CRITERIA.md. Depends on 023 (tools), 024 (bodyOverride), 022 (contract metadata). ConversationPane is a sequential spine — sequence with 026/041, commit between. NFR-07 reactive≠proactive is a hard boundary.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

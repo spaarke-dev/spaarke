@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Enumerate the widget-type ↔ context-type map AND define the Assistant-contract metadata SHAPE on registration (FR-08, FR-15 shape)</title>
+    <phase>2 — Capability parity</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Shared-lib .ts registration metadata consumed by the pre-filter (FR-12) and the registry enforcement (FR-15); auto-FULL on .ts and cross-cutting shape.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified metadata enumeration + a typed shape over four existing registration sites; no judgment boundary beyond faithfully mirroring the spec's contract fields.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave2-client</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Registration metadata shape + per-site declarations across disjoint register-*.ts files; does not touch ConversationPane/WorkspacePane or email components. Disjoint from 024.</parallel-reason>
+    <deps>001</deps>
+    <tags>spaarkeai, frontend, react</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Enumerate the widget-type ↔ context-type mapping as registration metadata across all four registration sites, AND define the Assistant-contract metadata SHAPE (context-type · overview tool(s) · per-item cards + landing target · interaction pattern) on the registration so the pre-filter (FR-12) and the registry enforcement (FR-15) can consume it. This task defines the shape and populates it for each in-scope widget; the compile-time/runtime ENFORCEMENT is task 050.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React 18 + TypeScript expertise on the shared Spaarke.AI.Widgets registration model and the SpaarkeAi Compose widget registration; comfortable defining a typed metadata contract consumed by both a server pre-filter and a client registry without forking the registration mechanism.</role>
+  <goal>Every in-scope widget declares its context-type plus the four Assistant-contract fields as registration metadata; the mapping table is complete and referenced by the registry + pre-filter.</goal>
+  <context>
+    <background>FR-08 (+ the FR-15 shape). Today the four workspace registration sites register widgets without an Assistant-contract. R3 needs (a) a complete widget-type ↔ context-type mapping consumed by the pre-filter (FR-12, `Binding.ContextTypeTags` / `OpenTabContextTypes`) and (b) the Assistant-contract metadata SHAPE declared on each registration: context-type, the overview tool(s) that answer chat questions for the surface, the per-item cards + their landing target (chat answer / composer / Compose), and the interaction pattern (respond/direct/hybrid, made a first-class field by FR-13). This task DEFINES the typed shape and POPULATES it per widget; task 050 makes the fields REQUIRED and adds the registry guard. Registration sites: `register-workspace-widgets.ts`, `register-document-viewer-widget.ts`, `register-search-criteria-result-widget.ts`, `register-structured-output-stream-widget.ts` (all in `Spaarke.AI.Widgets/src/widgets/workspace/`), plus `registerComposeWidget.ts` in the SpaarkeAi code page. Metadata only — no item content, no runtime behavior change here. Per ADR-015 the context-type/contract is identity+capability metadata, never item content.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-search-criteria-result-widget.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/registerComposeWidget.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039">The context-type mapping is the deterministic key the `PreFilter` uses (via `Binding.ContextTypeTags`) — no classifier, no second dispatch surface. Scope: the metadata shape must be consumable by the sanctioned pre-filter only. Scope: registration metadata.</constraint>
+    <constraint source="ADR-015">The Assistant-contract carries identity + capability metadata (context-type, tool names, card labels, pattern) — never item content. Scope: the metadata fields.</constraint>
+    <constraint source="ADR-012">Widgets in the shared lib stay host-agnostic; the contract shape is declarative metadata, not host-coupled behavior. Scope: shared-lib registration.</constraint>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA">Per-item actions on an active item are declared as CARDS; overview/query turn-follow-ons are chips. The `per-item cards` field enumerates card actions, not chips. Scope: the per-item-cards field semantics.</constraint>
+    <constraint source="project">§11 reuse-first: extend the EXISTING registration shape with required metadata — do NOT invent a parallel registry. Scope: the registration model.</constraint>
+    <constraint source="project">Scope clause: DEFINE the shape + POPULATE per widget only. Do NOT implement the compile-time/runtime enforcement guard (task 050) or the pre-filter predicate (task 030) here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the four register-*.ts sites + registerComposeWidget.ts and the existing registration shape they share.</step>
+    <step order="2">Define the Assistant-contract metadata SHAPE (context-type · overview tool(s) · per-item cards + landing target · interaction pattern) as an additive typed field on the existing registration shape.</step>
+    <step order="3">Enumerate the widget-type ↔ context-type mapping for every in-scope widget (grids, Daily Briefing, Calendar, Email, Documents, Compose, search-criteria-result, structured-output-stream).</step>
+    <step order="4">Populate the contract fields per widget at each registration site (email → per-item cards Reply/Reply All/Forward/Summarize; documents → Summarize/Draft response/Draft memo; overview-only surfaces declare overview tool + no per-item cards).</step>
+    <step order="5">Ensure the mapping/shape is exported so the pre-filter (030) and the registry guard (050) can consume it; leave enforcement to 050.</step>
+    <step order="6">Add/extend unit tests asserting each in-scope widget declares a context-type + the four contract fields, and the mapping table is complete.</step>
+    <step order="7">npm run build the Spaarke.AI.Widgets package + SpaarkeAi; update TASK-INDEX.</step>
+  </steps>
+  <escalation>
+    <trigger>If a widget's correct context-type or interaction pattern is genuinely ambiguous (no clear per-item vs overview-only classification), STOP and escalate rather than guessing — the mapping is consumed by tool-economy scoping (030) and a wrong tag mis-mounts tools. Coordinate with 040 (interaction-pattern field) and 050 (enforcement) so the shape stays single-sourced.</trigger>
+  </escalation>
+  <justification>
+    <existing>The four registration sites exist and register widgets, but carry no Assistant-contract metadata and no context-type mapping.</existing>
+    <extension>Yes — add required metadata to the existing registration shape; no new registry.</extension>
+    <cost-of-doing-nothing>The pre-filter (FR-12) has no context-type key to scope tools by open tab, and follow-ons (FR-14) cannot be derived deterministically — parity silently regresses per FR-15.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-search-criteria-result-widget.ts</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/registerComposeWidget.ts</output>
+    <output type="test">context-type + contract-field completeness tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Every in-scope widget declares a context-type; the widget-type ↔ context-type mapping table is complete.</criterion>
+    <criterion testable="true">The Assistant-contract shape (context-type · overview tool(s) · per-item cards + landing · interaction pattern) is defined and populated on each registration site.</criterion>
+    <criterion testable="true">Email declares per-item cards Reply/Reply All/Forward/Summarize; Documents declare Summarize/Draft response/Draft memo; overview-only surfaces declare an overview tool with no per-item cards.</criterion>
+    <criterion testable="true">The mapping/shape is exported and consumable by the pre-filter (030) and the registry guard (050).</criterion>
+    <criterion testable="true">Negative: no item content appears in any contract field (id/label/tool-name/pattern only) — a content field fails review/test.</criterion>
+    <criterion testable="true">Negative: this task does NOT add the compile-time/runtime enforcement guard (that is 050) — scope respected.</criterion>
+    <criterion testable="true">Spaarke.AI.Widgets + SpaarkeAi build; unit tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-08 mapping + FR-15 SHAPE only; enforcement is task 050 and the pre-filter predicate is task 030. Coordinate the interaction-pattern field with 040 so it stays single-sourced. NFR-04 — the contract is id/capability metadata, never content.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

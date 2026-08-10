@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Wire the parameterized overview tool across all grids + Daily Briefing (BriefingService) + Calendar (events query) (FR-07)</title>
+    <phase>2 — Capability parity</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF wiring across Services/Ai catalog rows + composed-service wrappers (BriefingService lane 3, Calendar events lane 1) on the ADR-039 / ADR-015 boundary</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring/reuse of the 020 tool across surfaces via configId + two thin lane wrappers — well-specified once 020 lands; no new query semantics</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave2-BFF</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Ai/** catalog wiring + BriefingService wrapper — same surface as 020; coordinate with spaarke-ai-architecture-redesign-r2 (PublicContracts, no fork). /conflict-check before the PR.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Wire the FR-06 parameterized overview tool across ALL grids via configId; wrap `BriefingService` (lane 3) for Daily Briefing; wrap the Calendar events query (lane 1) for Calendar. Each in-scope surface answers an overview question from its OWN data lane with record-id / service-output citations — never from a prompt snapshot. Reuse the 020 tool and existing services; consume Services/Ai/PublicContracts/ — do NOT fork Services/Ai internals.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI catalog wiring; comfortable reusing a parameterized tool across grids by configId and wrapping composed services (BriefingService, Calendar events) as parity-tool backings.</role>
+  <goal>Each in-scope surface — every grid, Daily Briefing, and Calendar — answers an overview question from its own data lane, citing record ids / service output.</goal>
+  <context>
+    <background>FR-07 — overview parity breadth. The 020 parameterized configId tool covers all grids by pointing at each grid's existing saved-query. Daily Briefing has no grid saved-query; wrap the existing composed BriefingService (lane 3) as a parity-tool backing so "summarize my daily briefing counts" answers from the service output. Calendar answers "what's on my calendar this week" from the Calendar events query (lane 1). All three reuse existing data services over OBO; no new aggregate endpoints (spec Assumptions). Composed-service wrapper precedent: BriefingService as a parity-tool backing. Consume Services/Ai/PublicContracts/ — redesign-r2 owns Services/Ai internals (no fork).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/** (020 overview tool + catalog rows wiring per surface)</file>
+      <file>src/server/api/Sprk.Bff.Api/.../BriefingService (lane 3 — wrap as parity-tool backing for Daily Briefing)</file>
+      <file>Calendar events query (lane 1 — wrap for Calendar overview)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (facade seam — NO fork)</file>
+      <file>sprk_gridconfiguration saved-queries per grid (configId targets)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (add/update unit tests — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="each wired surface tool">Each surface's overview capability is a deterministic catalog row consumed by the PreFilter; NO classifier, NO second dispatch surface.</constraint>
+    <constraint source="ADR-015" scope="all overview answers">Answers cite record ids / service output — never a prompt snapshot; content is tool-fetched over OBO.</constraint>
+    <constraint source="ADR-013" scope="Services/Ai placement">Consume the Services/Ai/PublicContracts/ facade; do NOT fork Services/Ai internals; no AI-internal types into CRUD code.</constraint>
+    <constraint source="project" scope="the overview surface">Reuse the 020 tool via configId for grids and wrap existing services (BriefingService, Calendar events) — MUST NOT author per-grid handlers or a new aggregate endpoint (§11 / NFR-06).</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed — measure and report absolute + delta; no new HIGH CVE.</constraint>
+    <constraint source="NFR-08" scope="the wiring + wrappers">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Wire the 020 overview tool across all grids via configId (one catalog row per grid pointing at its saved-query; no new handler).</step>
+    <step order="2">Wrap BriefingService (lane 3) as a parity-tool backing for Daily Briefing overview questions.</step>
+    <step order="3">Wrap the Calendar events query (lane 1) for Calendar overview questions.</step>
+    <step order="4">Confirm each surface's answer cites record ids / service output, not a prompt snapshot.</step>
+    <step order="5">Add/extend unit tests per surface in tests/unit/Sprk.Bff.Api.Tests/.</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute + delta; run the vulnerable-package scan.</step>
+    <step order="7">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If Daily Briefing or Calendar cannot answer an overview question from BriefingService/the events query without a new aggregate endpoint, STOP and escalate (spec Assumptions say no new aggregate endpoints) rather than adding one silently.</trigger>
+  </escalation>
+  <justification>
+    <existing>020 provides the parameterized configId tool; BriefingService (lane 3) and the Calendar events query (lane 1) already exist as data lanes.</existing>
+    <extension>Wires the existing 020 tool across grids by configId and wraps existing services — no new query semantics, no new endpoints.</extension>
+    <cost-of-doing-nothing>Only the seed grid answers overview questions; Daily Briefing and Calendar (and other grids) still narrate tab names, not data — overview breadth fails.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/** (per-surface catalog wiring)</output>
+    <output type="code">the BriefingService + Calendar events parity-tool wrappers</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ per-surface overview tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Each in-scope grid answers an overview question from its own saved-query via configId with record-id citations.</criterion>
+    <criterion testable="true">Daily Briefing answers an overview question (e.g. "summarize my daily briefing counts") from BriefingService output.</criterion>
+    <criterion testable="true">Calendar answers an overview question (e.g. "what's on my calendar this week") from the events query.</criterion>
+    <criterion testable="true">No surface answers from a prompt snapshot; all cite record ids / service output (negative case).</criterion>
+    <criterion testable="true">No new aggregate endpoint and no per-grid handler are introduced (negative case).</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+    <criterion testable="true">Unit tests added/updated in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
+  </acceptance-criteria>
+  <notes>Grids reuse 020 by configId; Briefing = lane 3 wrapper; Calendar = lane 1 events query. Coordinate with redesign-r2 on the PublicContracts seam; /conflict-check before the PR. Depends on 020 landing first.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

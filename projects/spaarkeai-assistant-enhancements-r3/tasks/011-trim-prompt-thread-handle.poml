@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Trim the workspace-state prompt block to {type,label,active} per tab and thread the active-item {id,type,label} handle into the prompt's active-item slot (FR-03, FR-04 server)</title>
+    <phase>1 — Awareness (identity + active-item handle)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF agent-factory change on the ADR-015 prompt privacy boundary (id-not-content); the trim + handle threading is load-bearing governance — code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Sits on the ADR-015 id-not-content prompt boundary and coordinates redesign-r2 PublicContracts seams — judgment-sensitive; the handle must not carry content.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>Wave1-serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SprkChatAgentFactory.BuildWorkspaceStateBlock — same file as 010 → runs sequentially after 010; coordinate spaarke-ai-architecture-redesign-r2 seams (consume PublicContracts, no fork).</parallel-reason>
+    <deps>001, 010</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+  <prompt>In SprkChatAgentFactory.BuildWorkspaceStateBlock, trim the workspace-state block so it carries ONLY {type,label,active} per tab (no ambient widget content), and thread the client-supplied active-item handle {id,type,label} into the prompt's single active-item slot.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI agent-factory expertise; comfortable reasoning about the ADR-015 id-not-content boundary and threading a bounded handle through existing seams without forking Services/Ai internals.</role>
+  <goal>The workspace-state block emits {type,label,active} per tab plus exactly one {id,type,label} active-item handle — and no item content anywhere in the block.</goal>
+  <context>
+    <background>FR-03 + FR-04 (server). The workspace-state block is built in `BuildWorkspaceStateBlock` (~:1469). FR-03 trims it to ONLY {type,label,active} per tab — no ambient widget content of any kind. FR-04 (server half) threads the active-item handle {id,type,label} — published client-side by the task-001 conduit and carried on the chat request — into a single active-item slot in the prompt. This is the id-not-content boundary (ADR-015 Path A, honest): the label is a thin identity slice; all real content is tool-fetched by id downstream (Phase 2 parity tools). The handle shape is exactly {id,type,label} — if honoring it would need more than that, STOP (see escalation). Runs after 010 (same file). Consume `Services/Ai/PublicContracts/` seams; do NOT fork `Services/Ai/` internals (redesign-r2 sole owner). A characterization/snapshot test must prove the block has no item-content fields.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (BuildWorkspaceStateBlock ~:1469)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (chat request DTO carrying the active-item handle — reuse the R2 activeContext threading pattern)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-015">The prompt carries {type,label,active} per tab + one {id,type,label} handle — NO item content ever enters the prompt. All content is tool-fetched by id.</constraint>
+    <constraint source="ADR-039">No classifier, no second dispatch surface — deterministic prompt assembly only.</constraint>
+    <constraint source="ADR-013">Consume Services/Ai/PublicContracts/ seams; do NOT fork Services/Ai/ internals (redesign-r2 sole owner); no AI-internal types into CRUD code.</constraint>
+    <constraint source="project">BFF §10: publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report the delta.</constraint>
+    <constraint source="project">Scope clause: trim the block + thread the {id,type,label} handle only. Do NOT add layout-tab visibility (010) or build any parity tool (Phase 2).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read BuildWorkspaceStateBlock and inventory every field it currently emits per tab.</step>
+    <step order="2">Trim the per-tab emission to exactly {type,label,active} — remove all ambient widget content.</step>
+    <step order="3">Thread the client-supplied active-item handle {id,type,label} (reuse the R2 activeContext request threading) into a single active-item slot in the block.</step>
+    <step order="4">Add a characterization/snapshot test asserting the block has no item-content fields (only type/label/active per tab + one handle).</step>
+    <step order="5">Add a test for the single active-item slot (exactly one handle; empty when none published).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute + delta.</step>
+    <step order="7">Update TASK-INDEX.</step>
+  </steps>
+  <escalation>
+    <trigger>If honoring the active-item handle requires more than {id,type,label} (e.g. any content field to make it usable), STOP and escalate (ADR-015) rather than widening the handle. If PublicContracts/ lacks a seam for the handle threading, coordinate with spaarke-ai-architecture-redesign-r2 rather than forking Services/Ai/.</trigger>
+  </escalation>
+  <justification>
+    <existing>BuildWorkspaceStateBlock emits richer per-tab state today (R2 ambient content); no single active-item handle slot exists.</existing>
+    <extension>Yes — trim the existing emission + add one handle slot fed by the request; no new method or store.</extension>
+    <cost-of-doing-nothing>The prompt keeps ambient content (ADR-015 drift + token bloat) and the Assistant has no id to key per-item actions to — the §5.5 handle-driven flow can't run.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (if the handle needs request threading)</output>
+    <output type="test">BuildWorkspaceStateBlock characterization/snapshot test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A snapshot/characterization test of BuildWorkspaceStateBlock output shows no item-content fields — only {type,label,active} per tab.</criterion>
+    <criterion testable="true">The block carries exactly one {id,type,label} active-item handle when the client publishes one.</criterion>
+    <criterion testable="true">When no active item is published, the active-item slot is empty (no stale/duplicate handle).</criterion>
+    <criterion testable="true">The handle carries only id/type/label — no content field (negative case: any content field fails the governance test).</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta).</criterion>
+    <criterion testable="true">Tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>NFR-04 governance — this is the id-not-content boundary the project rests on. Serialize after 010 (same file). Run /conflict-check before the BFF PR; coordinate redesign-r2 seams.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

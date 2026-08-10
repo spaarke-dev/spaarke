@@ -23,8 +23,8 @@
 
 ## 2. Immediate next actions (in order)
 
-1. **Apply the review edits** `§A1–A6` from `notes/design-review-2026-08-10.md` to `design.md`. Do A1 first (reconcile the "identity-only" drift in §4/§7/§11 against the §5.5 handle model — near-blocking internal inconsistency). Then A2–A6. Fold B1–B3 into §12 so they survive into the spec.
-2. **Flesh out the §12 open items** the owner and R2 session flagged as the design-to-spec inputs:
+1. ~~**Apply the review edits** `§A1–A6` from `notes/design-review-2026-08-10.md` to `design.md`.~~ ✅ **DONE 2026-08-10.** A1 (drift reconciled in §4/§7/§11), A2 (interaction → registration-contract field in §4/§7), A3 (active-item lifecycle paragraph in §5.5), A4 (card-economy standard cited), A5 (reactive-vs-ADR-047 disambiguation), A6 (second/per-item DoD in §8) all applied. B1–B3 folded into §12. Review file banner-marked executed.
+2. **Flesh out the §12 open items** the owner and R2 session flagged as the design-to-spec inputs (partially seeded in §12 now — resolve fully at spec time):
    - the widget-type (4) ↔ context-type (6) mapping table;
    - Bindings vs `sprk_analysistool`+handler split (default to **ONE parameterized `configId`-driven overview tool**, per review B1 — do NOT author 8 per-grid handlers; CLAUDE.md §11 reuse discipline);
    - the tasks-count parity tool (the acceptance-test driver — "how many overdue tasks" must ANSWER, computing overdue server-side with *today* injected, reusing the My Tasks saved-query);

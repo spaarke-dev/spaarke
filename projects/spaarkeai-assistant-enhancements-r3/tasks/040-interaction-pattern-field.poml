@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Declare respond/direct/hybrid interaction pattern as a registration-contract field, not prompt prose (FR-13)</title>
+    <phase>4 — Interaction patterns + accurate follow-ons</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared registration-metadata shape (.ts) consumed across all four registration sites and by the follow-on derivation</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive metadata field on an established registration shape; well-specified, low ambiguity — literal execution</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes the registration-contract shape — sequential with 041 (consumes the field) and 050 (enforces it); registration shape is a single spine.</parallel-reason>
+    <deps>022,025,026</deps>
+    <tags>spaarkeai, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Add the respond/direct/hybrid interaction pattern as a typed FIELD on the widget registration-contract metadata (built on the FR-08 shape from task 022) — read at runtime from registration metadata, NOT authored as per-widget prose in the system prompt. Each in-scope widget declares its pattern. Remove/avoid any per-widget interaction matrix living in the system prompt.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript expertise on the SpaarkeAi widget registration contract; comfortable extending a shared metadata shape consumed at multiple sites.</role>
+  <goal>Each in-scope widget declares respond/direct/hybrid as registration metadata; the interaction pattern is read from that metadata and no per-widget matrix exists in the system prompt.</goal>
+  <context>
+    <background>FR-13 — interaction pattern as a registration field. Today the notion of how a widget responds (respond in chat / direct to a surface / hybrid) is not a first-class field; if encoded at all it would be prompt prose. This task declares respond/direct/hybrid as a typed field on the registration-contract metadata shape introduced by task 022 (widget-type ↔ context-type + Assistant-contract fields). Task 041 consumes this field to derive follow-ons deterministically; task 050 makes the contract fields required + registry-enforced. Keep it a data field, not model prose — the pattern drives deterministic follow-on element selection (FR-14), not a prompt instruction.</background>
+    <relevant-files>
+      <file>the shared registration-contract metadata shape (extended by task 022 with the Assistant-contract fields)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-search-criteria-result-widget.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/registerComposeWidget.ts</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="how the pattern is used">The pattern is a deterministic data field driving deterministic follow-on selection — MUST NOT become a classifier or prompt instruction that the model interprets.</constraint>
+    <constraint source="ADR-047" scope="pattern semantics">The reactive interaction pattern stays distinct from the server-initiated notification spine — declaring a pattern MUST NOT introduce a push channel.</constraint>
+    <constraint source="project" scope="the field">Add ONE typed field to the existing registration shape (§11 reuse-first) — MUST NOT add a parallel per-widget matrix in the system prompt.</constraint>
+    <constraint source="ADR-012" scope="shared widgets">Shared-lib widgets stay host-agnostic; the field is declared at registration, not host-injected.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-047-notification-action-spine.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add a typed `interactionPattern: 'respond' | 'direct' | 'hybrid'` field to the registration-contract metadata shape (from task 022).</step>
+    <step order="2">Declare each in-scope widget's pattern at its registration site.</step>
+    <step order="3">Ensure the pattern is read from registration metadata at runtime (available to the follow-on derivation in task 041).</step>
+    <step order="4">Confirm no per-widget interaction matrix is (re)introduced into the system prompt.</step>
+    <step order="5">Build the shared/SpaarkeAi packages; add/extend a unit test asserting the field is read from metadata.</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If a widget's interaction cannot be expressed as respond/direct/hybrid without adding prompt prose or a classifier, STOP and escalate (ADR-039 bound / §5.5) rather than encoding it as model-interpreted text.</trigger>
+  </escalation>
+  <justification>
+    <existing>No first-class interaction-pattern field exists; the registration shape (task 022) carries context-type + overview/per-item fields but not respond/direct/hybrid.</existing>
+    <extension>Yes — one typed field added to the existing registration shape; declared per widget at existing sites.</extension>
+    <cost-of-doing-nothing>Follow-on derivation (FR-14) has no deterministic signal for how a widget responds; pattern falls back to model-invented prose (the exact anti-pattern FR-13/FR-14 close).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">the extended registration-contract metadata shape (interactionPattern field)</output>
+    <output type="code">the five registration sites declaring each widget's pattern</output>
+    <output type="test">a unit test asserting the pattern is read from registration metadata</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The interaction pattern is read from registration metadata (typed field).</criterion>
+    <criterion testable="true">Each in-scope widget declares its respond/direct/hybrid pattern.</criterion>
+    <criterion testable="true">No per-widget interaction matrix exists in the system prompt (negative case).</criterion>
+    <criterion testable="true">The field is a deterministic data value, not a model-interpreted prompt instruction (negative case).</criterion>
+    <criterion testable="true">Shared/SpaarkeAi packages build; the metadata-read unit test passes.</criterion>
+  </acceptance-criteria>
+  <notes>Task 041 consumes this field to derive follow-ons; task 050 makes it a required, registry-enforced field. Sequential on the registration-shape spine — coordinate with 041/050.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

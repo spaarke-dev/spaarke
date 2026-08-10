@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Generalize the Compose active-document flow into a widget-agnostic active-item conduit carrying a single {id,type,label} handle (FR-04 foundation)</title>
+    <phase>0 — Foundation: the active-item conduit</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Shared client conduit with cross-worktree blast radius; touches the ADR-030 bus boundary and the shipped Compose precedent — post-compaction-recoverable, code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Shared conduit generalized from a shipped Compose flow; cross-worktree blast radius (compose-r5/r6, notification-spine, analysis-hub all touch these files) — judgment-sensitive; must not regress Compose or the content-free bus.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>Foundation</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared active-item conduit generalized from composeActionBridge; coordinate spaarkeai-compose-r5/r6; NEVER delete docxBridge.ts. Blocks all per-item work — critical path, runs alone.</parallel-reason>
+    <deps></deps>
+    <tags>spaarkeai, frontend, react</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Generalize the shipped Compose active-document flow (composeActionBridge registerActiveDocument/activeSourceDocRef; WorkspacePane active-doc-follows-tab effect) into a widget-agnostic active-item conduit that carries a single {id,type,label} handle, fed by two publish patterns (in-widget selection + tab-focus), enforcing the single-active-item invariant and clear-on-deselect/tab-switch, with grid multi-select yielding no handle.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React 18 + TypeScript expertise on the SpaarkeAi code page and shared widget libraries; comfortable generalizing a shipped sibling-pane conduit without regressing its original Compose consumer or the content-free PaneEventBus (ADR-030).</role>
+  <goal>A single widget-agnostic conduit exposes exactly one active-item handle {id,type,label} at a time; both in-widget selection and tab-focus can publish it; deselect / tab-switch / multi-select clears it — and the existing Compose active-document flow still works unchanged.</goal>
+  <context>
+    <background>FR-04 foundation and the project's critical path — it blocks all per-item work (email/document cards). The shipped precedent is Compose-only: `composeActionBridge.ts` exposes `registerActiveDocument`/`activeSourceDocRef` (a non-bus sibling-pane conduit — ADR-030 keeps the bus itself content-free), and `WorkspacePane.tsx:2283` runs an `active-doc-follows-tab` effect gated on `widgetType === 'compose'` that publishes the focused Compose tab's document. R3 generalizes this into a conduit that carries a single `{id,type,label}` handle for ANY widget. Two feed patterns, both with shipped precedent (reuse, don't invent): (a) in-widget selection for list-bearing widgets (later wired by task 012 for email), and (b) tab-focus for single-item-per-tab surfaces (Compose + document-viewer, generalizing the `:2283` effect — the document-viewer wiring itself is task 026). This task builds the conduit + the invariants; downstream tasks (012, 026) feed it. Enforce the single-active-item invariant (exactly one handle) and clear-on-deselect/tab-switch; on a grid multi-select set no handle (per-item cards suppress). Do NOT put content on the conduit — id/type/label only (ADR-015). Do NOT delete `docxBridge.ts` or regress the Compose consumer (`ConversationPane.tsx` `activeSourceDocRef` ~:389/424).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Compose.Components/src/context/composeActionBridge.ts (registerActiveDocument, activeSourceDocRef — the precedent to generalize)</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx (active-doc-follows-tab effect ~:2283, gated widgetType === 'compose')</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (activeSourceDocRef consumer ~:389/424 — must keep working)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-015">The conduit carries ONLY the {id,type,label} handle — never item content. The label is a thin identity slice (e.g. a subject); content is always tool-fetched by id downstream.</constraint>
+    <constraint source="ADR-030">Keep the PaneEventBus content-free — the conduit is a sibling-pane channel like the existing composeActionBridge, not new content on the bus.</constraint>
+    <constraint source="ADR-049">Do NOT regress the shipped Compose active-document flow; NEVER delete docxBridge.ts. The Compose consumer must keep working unchanged.</constraint>
+    <constraint source="project">§11 reuse-first: generalize the existing composeActionBridge/active-doc-follows-tab — do NOT invent a parallel selection mechanism.</constraint>
+    <constraint source="project">Scope clause: modify only the conduit + WorkspacePane focus effect generalization + the Compose consumer's reference to the generalized shape. Do NOT wire email (task 012) or document-viewer (task 026) feeds here.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the shipped precedent: composeActionBridge.ts (registerActiveDocument/activeSourceDocRef) and the WorkspacePane active-doc-follows-tab effect (:2283).</step>
+    <step order="2">Introduce a widget-agnostic active-item conduit carrying a single {id,type,label} handle, generalizing the composeActionBridge shape (keep the Compose consumer working via the generalized handle).</step>
+    <step order="3">Enforce the single-active-item invariant (setting a new handle replaces any prior one) and a clear operation for deselect / tab-switch.</step>
+    <step order="4">Generalize the WorkspacePane :2283 tab-focus effect so it publishes the focused single-item tab's handle (retain Compose; leave the document-viewer branch for task 026 but make the generalization support it).</step>
+    <step order="5">Ensure a grid multi-select sets no handle (clear), so per-item cards suppress.</step>
+    <step order="6">Update the Compose consumer (ConversationPane activeSourceDocRef ~:389/424) to read the generalized handle; verify no Compose regression.</step>
+    <step order="7">Add/extend unit tests for the invariant, clear-on-deselect/tab-switch, and multi-select-clears.</step>
+    <step order="8">npm run build the affected shared package + SpaarkeAi; update TASK-INDEX.</step>
+  </steps>
+  <escalation>
+    <trigger>If generalizing the conduit cannot be done without either (a) putting item content on the channel or (b) breaking the Compose consumer, STOP and escalate (ADR-015 / ADR-049) rather than widening the handle or forking a second conduit. Also coordinate with spaarkeai-compose-r5/r6 before changing composeActionBridge's exported shape.</trigger>
+  </escalation>
+  <justification>
+    <existing>composeActionBridge (registerActiveDocument/activeSourceDocRef) and the WorkspacePane active-doc-follows-tab effect exist but are Compose-only.</existing>
+    <extension>Yes — generalize the existing Compose conduit to a widget-agnostic {id,type,label} handle; no new store or bus.</extension>
+    <cost-of-doing-nothing>Per-item cards cannot key to a selection; the entire §5.5 per-item flow (email + document) is impossible — no downstream task can proceed.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/context/composeActionBridge.ts (or a generalized conduit module)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="test">conduit invariant + clear-on-deselect/tab-switch + multi-select unit tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Selecting an item in a list-bearing widget OR focusing a single-item tab places exactly one {id,type,label} handle on the conduit.</criterion>
+    <criterion testable="true">Setting a new handle replaces the prior one (single-active-item invariant — never two at once).</criterion>
+    <criterion testable="true">Deselecting or switching the tab's focus clears the handle.</criterion>
+    <criterion testable="true">A grid multi-select yields no active-item handle (handle cleared, cards suppress).</criterion>
+    <criterion testable="true">The conduit carries no item content — only id/type/label (negative case: a content field on the handle fails review/test).</criterion>
+    <criterion testable="true">The existing Compose active-document flow still works — activeSourceDocRef resolves and docxBridge.ts is untouched (negative case: any Compose regression fails).</criterion>
+    <criterion testable="true">Shared package + SpaarkeAi build; unit tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>Critical path — blocks 010/011/012 and all per-item work. Coordinate with spaarkeai-compose-r5/r6 before touching composeActionBridge's shape. This task builds the conduit + invariants only; the email feed is task 012 and the document-viewer tab-focus feed is task 026.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

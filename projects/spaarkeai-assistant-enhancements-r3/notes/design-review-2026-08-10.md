@@ -1,5 +1,8 @@
 # Design Review — design.md (rev with §5.5) — 2026-08-10
 
+> **STATUS (2026-08-10): §A1–A6 APPLIED to `design.md`; §B1–B3 folded into `design.md` §12.** The action list below is executed — kept as the record of what changed. Next step is `/design-to-spec` on the updated `design.md`.
+
+
 > **Reviewer**: external architecture review (owner-requested), grounded against `ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`, ADR-039, ADR-015, ADR-047, `ASSISTANT-UI-ELEMENT-CRITERIA.md`.
 > **Verdict**: Design is strong and strategy-consistent. §5.5 (active-item handle, generalized from the SHIPPED Compose flow) is the right spine. **Approve into `/design-to-spec` after the edits below.** The one near-blocking item is internal consistency drift (§7.1); the rest is sharpening.
 > **Action for this project**: apply the edits in §A below to `design.md`, holding the context in this project. Items in §B are spec-time obligations (carry into spec.md, not necessarily editable now).
