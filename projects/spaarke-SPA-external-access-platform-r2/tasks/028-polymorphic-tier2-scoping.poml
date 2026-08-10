@@ -4,7 +4,7 @@
     <title>Polymorphic Tier-2 scoping across roots (Project · Matter · Work Assignment) + internal-only Service Requests tab — supersedes the partial documents-by-project fix (bff7e82e5)</title>
     <phase>P2 Access-control + entitlement</phase>
     <gate>blocked-until:none (015/016 shipped; this amends them)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Rewrites the Tier-2 record-visibility authorization boundary across the external module-data seam (bff-api, auth); modifies .cs in Infrastructure/ExternalAccess + Api/ExternalAccess; participation/grant-scoped read correctness is load-bearing; ends in a live redeploy on both identity planes.</rigor-reason>
     <model-tier>opus</model-tier>

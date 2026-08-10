@@ -36,7 +36,7 @@ Legend: 🔲 not-started · ✅ completed · Tier S=sonnet O=opus · Eff h=high 
 | 025 | D1 workforce role→level grading | P2 | 🔲 | 024 | S/x | FULL | — |
 | 026 | Core-user admin UI (grant/revoke; reuse AccessGrantModal) | P2 | 🔲 | 021 | S/h | FULL | Group C |
 | 027 | Deploy P2 (BFF + entitlement schema) | P2 | 🔲 | 022,023,024,025,026 | S/h | STANDARD | — (deploy) |
-| 028 | Polymorphic Tier-2 scoping across roots (Project/Matter/WorkAssignment) + internal-only Service Requests tab (supersedes bff7e82e5; amends 015/016) | P2 | 🔲 | 015,016 | O/x | FULL | — (auth boundary; own redeploy) |
+| 028 | Polymorphic Tier-2 scoping across roots (Project/Matter/WorkAssignment) + internal-only Service Requests tab (supersedes bff7e82e5; amends 015/016) | P2 | ✅ | 015,016 | O/x | FULL | — (auth boundary; own redeploy; deployed dev, live both-plane UAT owner-pending) |
 | 030 | Intake schema (servicerequest + FR-24 feedback + thread-on-request) | P3 | 🔲 | 020 | S/h | FULL | — (schema) |
 | 031 | Generic typed-intake framework | P3 | 🔲 | 022,030 | O/h | FULL | — (framework base) |
 | 032 | NDA AI 3-outcome assessment (FR-23) | P3 | 🔲 | 031 | O/x | FULL | — (auth+AI) |

@@ -25,8 +25,14 @@
 // (sprk_document.sprk_project, sprk_invoice.sprk_project, sprk_workassignment.sprk_regardingproject)
 // instead of the child's own primary id. A FetchXML lookup attribute is projected by the Dataverse
 // SDK as an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> (not a raw Guid/string), so
-// TryGetRecordId gained an EntityReference case below — purely additive, the existing Guid/string
-// cases (used by the collaboration/sprk_project module's own-primary-id scoping) are unchanged.
+// TryGetAttributeId (task 028; formerly TryGetRecordId) handles an EntityReference case below,
+// alongside the Guid/string cases used by a root module's own-primary-id scoping.
+//
+// spaarke-SPA-external-access-platform-r2 Task 028 (2026-08-10) — polymorphic multi-root scoping.
+// A module now declares a LIST of OR'd ScopeDimensions (one per typed parent lookup) instead of a
+// single RecordIdAttribute, so a child (document/invoice) rolls up to ANY accessible root
+// (project OR matter OR work assignment). The single-attribute RecordIdAttribute + AccessibleRecordIds
+// pair is retained as a one-dimension shorthand for root/config modules.
 
 using Microsoft.Xrm.Sdk;
 
