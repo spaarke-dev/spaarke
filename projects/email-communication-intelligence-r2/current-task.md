@@ -1,8 +1,19 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-10 (**Pillar E MOUNT BUILD complete** — 060/061/062 ✅. BFF deployed (endpoints live). Branch 3 ahead of master with the mount build: `0e5d0fafd`. Next = push + Pillar-E-mount PR (061/062), then **059 GATED deploy**.)
-> **Recovery**: Read "Quick Recovery" first. **Pillar E reconciliation UI now BUILT + mounted** — `ReconciliationWorkspace` (061) composed + A4/A5/A6 shell; dual host (062) code page `sprk_communicationreconciliation` + SpaarkeAi widget `communications-reconciliation`. Both build green, jest 229/229, Step 9.5 + conflict-check clean. Nothing in-flight. Remaining: PR review + 059 gated deploy (seed gridconfig, set NEEDS_REVIEW_CONFIG_ID, deploy both surfaces).
+> **Last Updated**: 2026-08-11 (context-handoff — pre-compaction). **Pillar E mount BUILT + in review (PR #755); UAT round-2 captured + prototyped.** BFF deployed (endpoints live). Branch `fb5180f22`, **7 ahead / 25 behind** master (others merged — worktree-sync before merging #755), 0 uncommitted/unpushed.
+> **Recovery**: Read "Quick Recovery" first. Nothing in-flight. Prototype live at **localhost:5177** (dev server bg). Everything committed + pushed (main branch + spaarke-prototype `feature/uat-harness-framework`).
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Done this session** | (1) **BFF deployed** via /bff-deploy — Pillar E endpoints verified live (404→401). (2) **Pillar E mount BUILT**: 061 `ReconciliationWorkspace` (composes grid→browse shell renderTabs→tabs + shell A4/A5/A6: SprkModal xl, PanelSplitter 50/50, thin scroll) + 062 dual host (code page `sprk_communicationreconciliation` + SpaarkeAi widget `communications-reconciliation`) + "+ New task"→standard `FormModal`. jest 229/229; Step 9.5 + conflict-check clean. (3) **PR #755 OPEN** (base master, tasks 060/061/062 + FormModal + docs). (4) **UAT round-2**: captured in UX doc §E + plan §7.5 BINDING reuse table; **prototype updated** (labels `+ New record`/`+ Update other fields`; Quick Start→FormModal + WizardModal presets w/ "PRODUCTION uses X" comments; Fields typed controls + Update-other-fields modal). |
+| **PR** | **#755 OPEN** — https://github.com/spaarke-dev/spaarke/pull/755 . Branch 25 behind master → run `/worktree-sync` before merge. |
+| **Next Action** | Pick: (1) **Prototype sign-off** at localhost:5177 (Related-to `+ New record`→Quick Start→wizard→confirmable candidate; Fields `Accept`+`+ Update other fields`; Tasks `Create`). (2) After sign-off: **production label changes** (New record/Accept/Create) into 052/055/056 + **follow-on tasks 063+** for the real behaviors — **all MUST reuse existing components per plan §7.5** (QuickStartModal, Create*Wizard via surface-launch, navigateTo/RecordNavigationModalShell, SprkModal presets, OOB advanced-lookup side pane). (3) **059 GATED deploy** (operator go-ahead only). |
+| **Key files** | UX reqs: `notes/pillar-e-reconciliation-ux-requirements.md` (§A owner layout, §B v4, §E UAT round-2). Plan: `notes/pillar-e-mount-build-plan.md` (§7.5 BINDING reuse table). Completes: `notes/061-*.md`, `notes/062-*.md`. Prototype: `spaarke-prototype/projects/email-communication-intelligence-r2-uat/src/App.tsx` (branch `feature/uat-harness-framework`, HEAD `c5d9a31`). |
+| **Gates ahead** | 059 (deploy) + all other deploys — operator go-ahead only (deploys paused). |
+| **Known refinement (062 note)** | In-shell Related-to confirm remounts the workspace (host-refresh seam) → browse shell closes before Fields enables; clean fix = non-remounting grid-refresh seam (059/UAT). |
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
