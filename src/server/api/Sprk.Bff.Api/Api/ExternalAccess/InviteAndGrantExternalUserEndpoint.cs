@@ -69,7 +69,7 @@ public static class InviteAndGrantExternalUserEndpoint
             ProjectId: request.ProjectId,
             AccessLevel: (ExternalAccessLevel)request.AccessLevel,
             ExpiryDate: request.ExpiryDate,
-            AccountId: request.AccountId,
+            OrganizationId: request.OrganizationId,
             RecordType: request.RecordType,
             RecordId: request.RecordId));
         if (!grantRoot.Ok)
@@ -101,15 +101,15 @@ public static class InviteAndGrantExternalUserEndpoint
         }
 
         // ── Step 2: Grant (audited; grantee = the Contact, NOT the firm) — reuse the grant core (task 026) ──
-        // The grantee is the resolved Contact (person). request.AccountId (optional) is record-keeping
-        // only (sprk_accountid) — it is never the grantee. The grant is bound to the polymorphic root
-        // resolved above (project|matter|workassignment).
+        // The grantee is the resolved Contact (person). request.OrganizationId (optional) is the grantee's
+        // firm/org (sprk_organization) for firm-level scoping — it is never the grantee. The grant is bound
+        // to the polymorphic root resolved above (project|matter|workassignment).
         var grantRequest = new GrantAccessRequest(
             contactId,
             request.ProjectId,
             (ExternalAccessLevel)request.AccessLevel,
             request.ExpiryDate,
-            request.AccountId,
+            request.OrganizationId,
             request.RecordType,
             request.RecordId);
         var callerSystemUserId = GrantExternalAccessEndpoint.ResolveCallerSystemUserId(httpContext);

@@ -9,7 +9,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// <param name="FirstName">Optional first name for Contact creation if the Contact does not yet exist.</param>
 /// <param name="LastName">Optional last name for Contact creation if the Contact does not yet exist.</param>
 /// <param name="ExpiryDate">Optional expiry date for the access record. No expiry if not specified.</param>
-/// <param name="AccountId">Optional Account ID associated with the Contact (for firm-level scoping).</param>
+/// <param name="OrganizationId">
+/// Optional grantee firm/organization — a <c>sprk_organization</c> id (NOT the OOB <c>account</c>) —
+/// written to the grant's <c>sprk_Organization</c> lookup for firm-level scoping by <c>/invite-and-grant</c>.
+/// </param>
 /// <param name="RecordType">
 /// Optional polymorphic grant root type for <c>/invite-and-grant</c>: <c>project</c> | <c>matter</c> |
 /// <c>workassignment</c> (case-insensitive). When supplied, <paramref name="RecordId"/> is required and
@@ -23,6 +26,6 @@ public record InviteExternalUserRequest(
     string? FirstName,
     string? LastName,
     DateOnly? ExpiryDate,
-    Guid? AccountId,
+    Guid? OrganizationId,
     string? RecordType = null,
     Guid? RecordId = null);

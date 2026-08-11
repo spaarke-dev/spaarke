@@ -97,7 +97,7 @@ public class ExternalAccessEndpointTests
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         (request.ContactId == Guid.Empty).Should().BeTrue(
             "handler returns 400 when ContactId is empty GUID");
@@ -113,7 +113,7 @@ public class ExternalAccessEndpointTests
             ProjectId: Guid.Empty,
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         GrantExternalAccessEndpoint.ResolveGrantRoot(request).Ok.Should().BeFalse(
             "a grant with no project/matter/work-assignment root must be rejected (no unscoped row)");
@@ -147,7 +147,7 @@ public class ExternalAccessEndpointTests
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.Collaborate,
             ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)),
-            AccountId: Guid.NewGuid());
+            OrganizationId: Guid.NewGuid());
 
         (request.ContactId == Guid.Empty).Should().BeFalse();
         (request.ProjectId == Guid.Empty).Should().BeFalse();
@@ -157,16 +157,16 @@ public class ExternalAccessEndpointTests
     [Fact]
     public void GrantAccess_OptionalFieldsAreNullable()
     {
-        // ExpiryDate and AccountId are optional — should accept null without error.
+        // ExpiryDate and OrganizationId are optional — should accept null without error.
         var request = new GrantAccessRequest(
             ContactId: Guid.NewGuid(),
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         request.ExpiryDate.Should().BeNull();
-        request.AccountId.Should().BeNull();
+        request.OrganizationId.Should().BeNull();
     }
 
     #endregion
@@ -390,7 +390,7 @@ public class ExternalAccessEndpointTests
             FirstName: null,
             LastName: "Doe",
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         string.IsNullOrWhiteSpace(request.Email).Should().BeTrue(
             "handler returns 400 when Email is empty");
@@ -408,7 +408,7 @@ public class ExternalAccessEndpointTests
             FirstName: null,
             LastName: "Doe",
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         string.IsNullOrWhiteSpace(request.Email).Should().BeFalse(
             "invite requires only Email; ProjectId is no longer gated (task 070)");
@@ -424,7 +424,7 @@ public class ExternalAccessEndpointTests
             FirstName: "Jane",
             LastName: "Doe",
             ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)),
-            AccountId: null);
+            OrganizationId: null);
 
         string.IsNullOrWhiteSpace(request.Email).Should().BeFalse();
         (request.ProjectId == Guid.Empty).Should().BeFalse();

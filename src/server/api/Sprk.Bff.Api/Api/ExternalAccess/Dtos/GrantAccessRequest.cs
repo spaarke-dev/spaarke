@@ -20,7 +20,10 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// </param>
 /// <param name="AccessLevel">The access level to grant (ViewOnly, Collaborate, or FullAccess).</param>
 /// <param name="ExpiryDate">Optional expiry date for the access grant.</param>
-/// <param name="AccountId">Optional Account ID associated with the Contact (for record-keeping).</param>
+/// <param name="OrganizationId">
+/// Optional grantee firm/organization — a <c>sprk_organization</c> id (NOT the OOB <c>account</c>).
+/// When supplied it is written to the grant's <c>sprk_Organization</c> lookup for firm-level scoping.
+/// </param>
 /// <param name="RecordType">
 /// The polymorphic root type: <c>project</c> | <c>matter</c> | <c>workassignment</c> (case-insensitive).
 /// When supplied, <paramref name="RecordId"/> is required and <paramref name="ProjectId"/> is ignored.
@@ -31,6 +34,6 @@ public record GrantAccessRequest(
     Guid ProjectId,
     ExternalAccessLevel AccessLevel,
     DateOnly? ExpiryDate,
-    Guid? AccountId,
+    Guid? OrganizationId,
     string? RecordType = null,
     Guid? RecordId = null);

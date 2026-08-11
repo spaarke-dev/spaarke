@@ -293,7 +293,7 @@ public class PolymorphicGrantWriteTests
         var matterId = Guid.NewGuid();
         var request = new GrantAccessRequest(
             ContactId: Guid.NewGuid(), ProjectId: Guid.Empty, AccessLevel: ExternalAccessLevel.ViewOnly,
-            ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)), AccountId: null,
+            ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)), OrganizationId: null,
             RecordType: "matter", RecordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
@@ -301,6 +301,35 @@ public class PolymorphicGrantWriteTests
 
         payload.Should().ContainKey("sprk_expiresdate");
         payload.Should().NotContainKey("sprk_expirydate");
+    }
+
+    [Fact]
+    public void BuildGrantPayload_WithOrganization_BindsSprkOrganization_NotAccount()
+    {
+        // Firm/org association is sprk_organization (nav property sprk_Organization), NOT the OOB account.
+        var matterId = Guid.NewGuid();
+        var orgId = Guid.NewGuid();
+        var request = new GrantAccessRequest(
+            ContactId: Guid.NewGuid(), ProjectId: Guid.Empty, AccessLevel: ExternalAccessLevel.ViewOnly,
+            ExpiryDate: null, OrganizationId: orgId, RecordType: "matter", RecordId: matterId);
+
+        var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
+            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+
+        payload["sprk_Organization@odata.bind"].Should().Be($"/sprk_organizations({orgId})");
+        payload.Should().NotContainKey("sprk_accountid@odata.bind");
+    }
+
+    [Fact]
+    public void BuildGrantPayload_NoOrganization_OmitsOrganizationBind()
+    {
+        var matterId = Guid.NewGuid();
+        var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
+
+        var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
+            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+
+        payload.Should().NotContainKey("sprk_Organization@odata.bind");
     }
 
     // =========================================================================
@@ -336,7 +365,7 @@ public class PolymorphicGrantWriteTests
             ProjectId: projectId,
             AccessLevel: accessLevel,
             ExpiryDate: null,
-            AccountId: null,
+            OrganizationId: null,
             RecordType: recordType,
             RecordId: recordId);
 
