@@ -3,7 +3,7 @@
   <metadata>
     <title>Deploy Pillar E — reconciliation-grid code page + SpaarkeAi widget (code-page-deploy + Deploy-AllDataGridConsumers)</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
-    <gate>deps 050-057 complete (grid + tabs + routing built)</gate>
+    <gate>deps 061 (ReconciliationWorkspace composition) + 062 (dual host built) complete</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Deployment task using an established deploy skill; no new architecture; STANDARD per §8 (deploy tag; sequence prescriptive).</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>P5</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Deploys the shared reconciliation surfaces + touches DataGrid consumers (co-owned with r5 / dataset-grid-framework-r2); serialize; /conflict-check before deploy.</parallel-reason>
-    <deps>050,051,052,053,054,055,056,057</deps>
+    <deps>050,051,052,053,054,055,056,057,061,062</deps>
     <tags>deploy, code-page, spaarkeai, datagrid, pillar-e</tags>
     <estimated-effort>2-4 hours</estimated-effort>
   </metadata>
