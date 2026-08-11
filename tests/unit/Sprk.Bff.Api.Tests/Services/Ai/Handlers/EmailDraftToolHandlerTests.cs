@@ -30,9 +30,10 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
 {
     private readonly Mock<IDataverseUserClient> _dataverse = new();
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi> _emailDraftAi = new();
 
     private EmailDraftToolHandler CreateHandler() =>
-        new(_dataverse.Object, CreateLogger<EmailDraftToolHandler>());
+        new(_dataverse.Object, _emailDraftAi.Object, CreateLogger<EmailDraftToolHandler>());
 
     private static AnalysisTool BuildDraftTool() =>
         BuildAnalysisTool(handlerClass: nameof(EmailDraftToolHandler), name: "SYS-Email Draft");

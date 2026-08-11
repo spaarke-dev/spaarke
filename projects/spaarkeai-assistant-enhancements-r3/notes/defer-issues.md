@@ -35,3 +35,10 @@
 - **Concrete failure**: task 025's AI-draft reply card seeds the composer via `openComposer({bodyOverride})` on the Layer-1 `initialBody` path (reducer `quotedThread` stays empty). If the user then clicks the in-dialog sparkle again, `runAiDraft` re-appends `stateRef.current.quotedThread` (empty) → the quoted thread inside `initialBody` is dropped. Pre-existing seam property, NOT a task-024 regression.
 - **Fix**: task 025 MUST account for the empty reducer `quotedThread` when a body is seeded (e.g. seed the reducer source/quotedThread too, or guard re-draft to preserve an existing seeded thread).
 - **Severity**: Medium — addressed within task 025 (its prompt carries this constraint).
+
+## D-6 — Email tools summarize/draft from sprk_communication body, not the full .eml render (from task 023 §6.5 Path A)
+
+- **Context**: task 023's POML said "load the .eml via eml-render", but that conflicts with the binding "OBO, not app-only" rule — the archived .eml is MI-written in SPE and a chat-tool handler has no HttpContext/OBO gate, so an OBO SPE download 403s and app-only would violate ADR-028. Subagent surfaced this as §6.5 Path A and resolved by fetching thread content fully over OBO from the `sprk_communication` record (subject+body) via IDataverseUserClient, echoing the .eml doc id for grounding only.
+- **Concrete gap**: `summarize_thread`/`draft_reply` summarize/draft from the communication record body (usually contains the inline quoted thread for received email) rather than the fully-rendered .eml thread. Fidelity is good for typical received email; a multi-part thread whose full history isn't in sprk_body would be under-summarized.
+- **Fix (future)**: an OBO-safe .eml-text path (server renders .eml to text under a filter-gated OBO endpoint the tool can call), then enrich thread content from it.
+- **Severity**: Low–Medium. OBO purity preserved (zero app-only); feature works with the communication body. Owner aware.
