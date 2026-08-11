@@ -9,12 +9,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | Pipeline COMPLETE (init-only) + deploy reframed for dev-only reality. **Execution NOT started.** |
-| **Active task** | `001` — Bump global.json → 10.0.1xx SDK + re-scrape .NET 10 breaking changes (H5) |
+| **Project phase** | EXECUTION STARTED. P0 chain underway. **001 ✅ complete** (2026-08-11). |
+| **Active task** | `002` — Retarget **Spaarke.Scheduling FIRST** (TreatWarningsAsErrors=true) + clear NU1510/SYSLIB |
 | **Status** | not-started |
-| **Next Action** | Begin execution: `task-execute` on `tasks/001-bump-globaljson-sdk.poml` (do NOT read/implement POMLs manually — root §4). |
+| **Next Action** | Begin execution: `task-execute` on `tasks/002-retarget-scheduling.poml` (do NOT read/implement POMLs manually — root §4). Depends on 001 ✅. |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
-| **Git** | Clean — all committed + pushed (tip `16639a24d`). **Synced with `origin/master` 2026-08-11** (Update Only: merged master in, 0 behind; NOT merged to master — deferred per sequencing). Merge did NOT touch BFF csproj / `Directory.Build.props` / `global.json`, so task baselines hold. |
+| **Git** | 001 changes UNCOMMITTED in worktree (`global.json` + `notes/breaking-changes-rescrape.md` + researcher memory files). Prior tip `16639a24d`, synced with `origin/master` 2026-08-11 (0 behind; NOT merged to master — deferred). Commit 001 before/with 002 per owner cadence. |
 
 ### Critical Context (do NOT re-derive)
 - Target is **.NET 10 (LTS), NOT .NET 11** (STS/not-GA) — LTS-hopping; see memory `dotnet10-not-11`.

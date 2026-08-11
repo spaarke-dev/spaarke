@@ -4,7 +4,7 @@
     <title>Bump global.json to the 10.0.1xx SDK + re-scrape .NET 10 breaking changes (H5)</title>
     <phase>P0 Retarget + build-green</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies build config (global.json) that gates every downstream build; tags include bff-api/ci.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -83,7 +83,9 @@
     <criterion testable="true">Negative: no csproj TFM and no package version is changed by this task (git diff touches only `global.json` + the note).</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-02 acceptance: `dotnet --version` in CI resolves a 10.0.x SDK; no NETSDK1045. CI setup-dotnet alignment happens in task 040 — keep global.json and setup-dotnet in lockstep there.</notes>
+  <notes>spec FR-02 acceptance: `dotnet --version` in CI resolves a 10.0.x SDK; no NETSDK1045. CI setup-dotnet alignment happens in task 040 — keep global.json and setup-dotnet in lockstep there.
+
+  COMPLETION (2026-08-11): `global.json` sdk.version 8.0.0 → 10.0.100 (rollForward=latestFeature kept). `dotnet --version` in worktree → 10.0.101, no NETSDK1045 (10.0.101 SDK installed locally). Re-scrape (researcher) verdict = NO scope change: Learn pages not re-serviced since 2026-08-10 (core page updated_at 2026-07-30); 4 minor already-on-page items §5 didn't transcribe (ActivitySource sampling, W3C propagator, C#14 span overload resolution, XmlSerializer [Obsolete]) — all absorbable into P1 sweep + P5 smoke, none meets §6 escalation bar. Escalation NOT fired. Findings + 2 carried follow-ups in `notes/breaking-changes-rescrape.md`. Quality gates (Step 9.5) SKIPPED — config-only (JSON version bump, no logic) + doc note; not test-modifying, so binding override N/A. ADR-029 satisfied by inspection (no SelfContained/RID/publish change). Side effect: researcher wrote its own project-memory files under `.claude/agent-memory/researcher/` (CLAUDE.md §15 mechanism) — not part of the retarget; zero csproj/package changes.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

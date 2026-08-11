@@ -12,7 +12,7 @@
 
 | # | Task | Phase | FR | MT / E | Deps | Parallel-safe | Status |
 |---|------|-------|----|--------|------|---------------|--------|
-| 001 | Bump global.json → 10.0.1xx + re-scrape breaking changes (H5) | P0 | FR-02 | sonnet/high | — | false | 🔲 |
+| 001 | Bump global.json → 10.0.1xx + re-scrape breaking changes (H5) | P0 | FR-02 | sonnet/high | — | false | ✅ |
 | 002 | Retarget **Spaarke.Scheduling FIRST** (warnings-as-errors) + NU1510/SYSLIB | P0 | FR-01,04 | sonnet/xhigh | 001 | false | 🔲 |
 | 003 | Retarget Core + Dataverse; required package moves + pin removals | P0 | FR-01,03,04 | sonnet/xhigh | 002 | false | 🔲 |
 | 004 | Retarget Sprk.Bff.Api; package alignment + §6.3 catch-ups | P0 | FR-01,03,05 | sonnet/xhigh | 003 | false | 🔲 |
