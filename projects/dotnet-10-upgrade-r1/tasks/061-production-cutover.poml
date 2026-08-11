@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="061" project="dotnet-10-upgrade-r1">
   <metadata>
-    <title>FR-16 — production cutover via P1v3 slot swap (runtime+binary atomic)</title>
-    <phase>P6 Production cutover (OPERATOR-DRIVEN)</phase>
-    <gate>060 complete</gate>
-    <status>not-started</status>
+    <title>FR-16 — production cutover via slot swap — DEFERRED to future demo/prod stand-up on net10</title>
+    <phase>P6 Production cutover (DEFERRED — OPERATOR-DRIVEN)</phase>
+    <gate>deferred: demo/prod environment (re)provisioned on net10 + task 060</gate>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Production runtime cutover; the highest-consequence step; deployment-critical.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -18,7 +18,7 @@
     <estimated-effort>1-2 hours</estimated-effort>
   </metadata>
 
-  <prompt>OPERATOR-DRIVEN. Execute the production cutover: with the staging slot validated on net10 (051 "go") and rollback rehearsed (060), swap staging→production so the runtime string and the code move atomically to `DOTNETCORE|10.0`. Warm-up pings before routing switches → no dropped requests. Monitor post-swap; keep rollback-by-swap ready (staging holds the prior app). Record the swap logs + monitoring evidence.</prompt>
+  <prompt>⏸ DEFERRED (owner 2026-08-11): there is NO production environment today — demo/trial + production were decommissioned for budget until a first release ships, and will be re-provisioned on .NET 10. FR-16 (production cutover), NFR-04 (runtime/binary agree in production), and NFR-06 (rollback rehearsed) are therefore NOT active acceptance criteria for this project's dev-only completion (task 051 is the completion gate). This task fires ONLY when demo/prod are (re)stood-up on net10. When it does: OPERATOR-DRIVEN — with the slot validated (a future 051-equivalent) and rollback rehearsed (060), swap staging→production atomically to `DOTNETCORE|10.0`, warm-up before routing, monitor, rollback-by-swap ready. Procedure is in the task-042 slot-swap runbook (future-prod section).</prompt>
   <role>SPAARKE release engineer. Expert in App Service P1v3 slot swaps, warm-up, atomic runtime+binary cutover, and production monitoring. Follow ADRs strictly.</role>
   <goal>Production serves on `DOTNETCORE|10.0` with no dropped requests during the swap; `notes/production-cutover.md` records the swap logs, warm-up behavior, post-swap monitoring, and rollback-readiness.</goal>
 
@@ -82,7 +82,7 @@
     <criterion testable="true">Negative: on any regression the operator rolled back via swap-back rather than forward-fixing live prod.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-16. Final cutover step. After this, production is on net10; wrap-up is task 090.</notes>
+  <notes>spec FR-16. DEFERRED (owner 2026-08-11) — no production environment today; fires when demo/prod are re-provisioned on net10. The project's active completion gate is the dev deploy (task 051); wrap-up (090) proceeds after 051. Procedure preserved in the task-042 runbook. See memory `active-environments`.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

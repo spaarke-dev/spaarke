@@ -94,19 +94,21 @@ Lands as **one coherent change** — the P0 tasks are a strict dependency chain,
 | 041 | App Service Bicep runtime `DOTNETCORE|10.0` (5 locations) + recompile `platform.json`; Functions `dotnet-isolated` version bump | FR-14 | sonnet/xhigh |
 | 042 | Adapt `/bff-deploy` skill for net10 runtime string + slot-swap runbook (exact `az` commands; pipe vs colon) (**main-session-only** write) | FR-14 | sonnet/high |
 
-### Phase P5 — Non-prod cutover + validation (Med — **OPERATOR-DRIVEN**, needs Azure)
-This is the **go/no-go gate** for production. Tasks require Azure credentials, a staging slot, and a recorded human go/no-go; they are executed with the operator, not autonomously.
+### Phase P5 — Dev cutover + validation (Med — **OPERATOR-DRIVEN**, needs Azure) — **PROJECT COMPLETION GATE**
+> **⏸ Environment-reality amendment (owner 2026-08-11)**: the only live environment is `spaarke-dev` (`spaarke-bff-dev`); demo/prod are decommissioned for budget until a first release ships, to be re-provisioned on net10 later. So the near-term cutover is a **direct deploy to `spaarke-bff-dev`** (from the worktree, NOT CI — the `push:master` auto-deploy was removed), and this dev "go" is the project's completion gate. See project memory `active-environments`.
 
 | # | Task | FR | MT / E |
 |---|------|----|--------|
-| 050 | Gather region/slot evidence: `az webapp list-runtimes --os-type linux`; confirm/create staging slot — resolves the 2 execution-time Unresolved Questions | FR-15 | sonnet/high |
-| 051 | Non-prod slot deploy on `DOTNETCORE|10.0` + full smoke (4 auth paths OBO/MI/named-API-key, SSE chat streaming, real Service Bus job, real background-worker tick, FR-06 telemetry); **recorded go/no-go** | FR-15 | sonnet/high |
+| 050 | Confirm `spaarke-dev` runs net10: `az webapp list-runtimes --os-type linux`; record whether `spaarke-bff-dev` has a slot | FR-15 | sonnet/high |
+| 051 | **Deploy net10 to `spaarke-bff-dev`** + full smoke (4 auth paths OBO/MI/named-API-key, SSE chat streaming, real Service Bus job, real background-worker tick, FR-06 telemetry); **recorded go/no-go** — completion gate | FR-15 | sonnet/high |
 
-### Phase P6 — Production cutover (Med, mitigated by slot swap — **OPERATOR-DRIVEN**)
+### Phase P6 — Production cutover (⏸ **DEFERRED** — no production environment today; **OPERATOR-DRIVEN**)
+> Deferred until demo/prod are re-provisioned on net10. The slot-swap/rollback procedure is preserved as a **future playbook** in the task-042 runbook (§B). Tasks below carry `status=deferred`; the wrap-up (090) files this deferred prod/demo cutover as a tracked follow-on. FR-16/NFR-04/NFR-06 are not active acceptance criteria for the dev-only completion.
+
 | # | Task | FR | MT / E |
 |---|------|----|--------|
-| 060 | Rehearse rollback (swap-back to 8.0 proven) on the slot BEFORE the forward swap | NFR-06 | sonnet/high |
-| 061 | Production slot swap to net10 (runtime+binary atomic); monitor; rollback-ready | FR-16 | sonnet/high |
+| 060 ⏸ | *(deferred)* Rehearse rollback (swap-back proven) on the slot BEFORE the forward swap | NFR-06 | sonnet/high |
+| 061 ⏸ | *(deferred)* Production slot swap to net10 (runtime+binary atomic); monitor; rollback-ready | FR-16 | sonnet/high |
 
 ### Phase P7 — Wrap-up (Low)
 | # | Task | FR | MT / E |
@@ -115,7 +117,7 @@ This is the **go/no-go gate** for production. Tasks require Azure credentials, a
 
 ## 5. Critical path & concurrency
 
-**Critical path** (serial): `001 → 002 → 003 → 004 → 005 → 010 → 012 → 013 → 014 → 020 → 030 → 031 → 032 → 040 → 041 → 042 → 050 → 051 → 060 → 061 → 090`.
+**Critical path** (serial): `001 → 002 → 003 → 004 → 005 → 010 → 012 → 013 → 014 → 020 → 030 → 031 → 032 → 040 → 041 → 042 → 050 → 051 → 090`. Tasks **060/061 are deferred** (no production environment today) and sit off the active path until demo/prod are re-provisioned on net10.
 
 **The only concurrency** is each adversarial-verify task pairing with its author (`011` after `010`; `021` after `020`) — and these can overlap the next author task. There are **no P0 parallel groups**: per design §4 principle 2, the retarget is intentionally atomic. See `tasks/TASK-INDEX.md`.
 
@@ -129,7 +131,7 @@ This is the **go/no-go gate** for production. Tasks require Azure credentials, a
 
 ## 7. ADR Tensions (CLAUDE.md §6.5)
 
-One documented exception only: **FR-06 telemetry consolidation** vs the NFR-01 "zero behavior change" principle — owner-approved 2026-08-10, validated on the non-prod slot (FR-15) before prod, logged in the PR. Not an ADR MUST/MUST-NOT. No ADR MUST/MUST-NOT tensions surfaced at design time.
+One documented exception only: **FR-06 telemetry consolidation** vs the NFR-01 "zero behavior change" principle — owner-approved 2026-08-10, validated on `spaarke-bff-dev` (FR-15), logged in the PR. Not an ADR MUST/MUST-NOT. No ADR MUST/MUST-NOT tensions surfaced at design time.
 
 ## 8. Success criteria (spec) → owning task
 
@@ -143,8 +145,8 @@ One documented exception only: **FR-06 telemetry consolidation** vs the NFR-01 "
 | 6 | Full test suite green on net10 | 030 |
 | 7 | Publish ≤60 MB; new baseline documented | 031 |
 | 8 | CI green on net10 across all workflows | 040 |
-| 9 | Non-prod slot smoke passes; go/no-go recorded | 050, 051 |
-| 10 | Production on `DOTNETCORE|10.0`; rollback rehearsed | 060, 061 |
+| 9 | Dev smoke on `spaarke-bff-dev` passes; go/no-go recorded (**completion gate**) | 050, 051 |
+| 10 | ⏸ Production on `DOTNETCORE|10.0`; rollback rehearsed — **DEFERRED** (no prod env today; active when demo/prod re-provisioned on net10) | 060, 061 (deferred) |
 | 11 | r3 handoff note written; deferred majors filed | 090 |
 
 ## 9. Guardrails (spec MUST / MUST NOT)

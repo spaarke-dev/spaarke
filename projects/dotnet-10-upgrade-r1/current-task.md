@@ -30,7 +30,7 @@ _(none yet)_
 
 - This is a support-lifecycle retarget (net8 EOL 2026-11-10) with **zero product-behavior change** except the FR-06 telemetry carve-out.
 - The retarget is intentionally a **serial atomic chain** (design §4 principle 2) — no P0 parallel groups.
-- Deploy tasks (050/051/060/061) are **OPERATOR-DRIVEN** (Azure + go/no-go) — not autonomous.
+- Deploy: **051 (dev deploy to `spaarke-bff-dev`) is the completion gate** — OPERATOR-DRIVEN (Azure + go/no-go), not autonomous. **060/061 (production cutover) are DEFERRED** — only `spaarke-dev` is live; demo/prod decommissioned for budget until re-provisioned on net10 (see memory `active-environments`).
 - `net462` Dataverse plugin is **out of scope** (NFR-05).
 
 ## Next action

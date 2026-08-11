@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="060" project="dotnet-10-upgrade-r1">
   <metadata>
-    <title>NFR-06 — rehearse rollback (prove swap-back to 8.0) before the forward swap</title>
-    <phase>P6 Production cutover (OPERATOR-DRIVEN)</phase>
-    <gate>051 go</gate>
-    <status>not-started</status>
+    <title>NFR-06 — rehearse rollback (swap-back) — DEFERRED to future demo/prod stand-up on net10</title>
+    <phase>P6 Production cutover (DEFERRED — OPERATOR-DRIVEN)</phase>
+    <gate>deferred: demo/prod environment (re)provisioned on net10</gate>
+    <status>deferred</status>
     <rigor>FULL</rigor>
     <rigor-reason>Production-safety rehearsal; the rollback guarantee for the cutover; deployment-critical.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -18,7 +18,7 @@
     <estimated-effort>1-2 hours</estimated-effort>
   </metadata>
 
-  <prompt>OPERATOR-DRIVEN. Rehearse the rollback: prove that a swap-back to the 8.0 app + 8.0 runtime works BEFORE the production forward swap. The staging slot still holds the 8.0 app + runtime, so demonstrate the swap-back path returns cleanly to 8.0 and record the evidence. This is the rollback guarantee (NFR-06) that de-risks task 061.</prompt>
+  <prompt>⏸ DEFERRED (owner 2026-08-11): demo/trial + production are decommissioned for budget until a first release ships, and will be re-provisioned on .NET 10 later. This task and its NFR-06 rollback-rehearsal obligation do NOT apply to the current dev-only cutover (task 051) — there is no production slot to rehearse against today. It fires ONLY when demo/prod are (re)stood-up on net10. When it does: OPERATOR-DRIVEN — rehearse the rollback (prove a swap-back returns cleanly) on the provisioned slot BEFORE the production forward swap (task 061). The procedure is documented in the task-042 slot-swap runbook (future-prod section).</prompt>
   <role>SPAARKE release engineer. Expert in App Service slot swaps, swap-back rollback, and zero-downtime cutover safety. Follow ADRs strictly.</role>
   <goal>The swap-back (net10 → 8.0) is demonstrated on the slot and returns cleanly; `notes/rollback-rehearsal.md` records the evidence, confirming the rollback path works before the production forward swap.</goal>
 
@@ -78,7 +78,7 @@
     <criterion testable="true">Negative: if swap-back fails, task 061 is blocked and the failure is escalated.</criterion>
   </acceptance-criteria>
 
-  <notes>spec NFR-06. Hard precondition for task 061.</notes>
+  <notes>spec NFR-06. DEFERRED (owner 2026-08-11) — production/demo decommissioned; fires when they are re-provisioned on net10. Hard precondition for task 061 (also deferred). Procedure preserved in the task-042 runbook. See memory `active-environments`.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

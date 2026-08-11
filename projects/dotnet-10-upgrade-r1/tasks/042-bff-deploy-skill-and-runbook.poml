@@ -18,9 +18,9 @@
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
 
-  <prompt>Adapt the `/bff-deploy` skill so it no longer encodes the 8.0 runtime, and author a slot-swap cutover runbook with the EXACT `az` commands: create/refresh a staging slot, set `linuxFxVersion` to `DOTNETCORE|10.0` on the slot only (pipe form), deploy the net10 framework-dependent build, validate on the slot hostname, swap staging→production (atomic runtime+binary), and rollback-by-swap. Note the colon form `DOTNETCORE:10.0` for `az webapp create --runtime`/`list-runtimes`, the port-8080/no-hardcoded-ASPNETCORE_URLS rule, and that auto-swap is unsupported on Linux (manual/CLI/pipeline). This is a MAIN-SESSION-ONLY write task (`.claude/skills/`).</prompt>
+  <prompt>Adapt the `/bff-deploy` skill so it no longer encodes the 8.0 runtime, and author a runbook with TWO sections. (A) NEAR-TERM — the active path: **direct worktree deploy to `spaarke-bff-dev`** (the only live environment) via `/bff-deploy` + `az` on `DOTNETCORE|10.0`, NOT via CI (the `push:master` auto-deploy was removed) — exact commands, health check, and a note that brief dev downtime is acceptable (or use a slot if `spaarke-bff-dev` has one, per task 050). (B) FUTURE — the deferred prod/demo playbook: the zero-downtime staging-slot swap (create/refresh slot, set `linuxFxVersion` `DOTNETCORE|10.0` pipe on the slot only, deploy, validate, swap atomic, rollback-by-swap) for when demo/prod are re-provisioned on net10. Note the colon form `DOTNETCORE:10.0` for `create`/`list-runtimes`, port-8080/no-hardcoded-ASPNETCORE_URLS, and Linux-no-auto-swap. MAIN-SESSION-ONLY write (`.claude/skills/`).</prompt>
   <role>SPAARKE platform developer + release engineer. Expert in Azure App Service staging slots, zero-downtime swaps, and Spaarke's /bff-deploy skill. Follow ADRs strictly.</role>
-  <goal>`.claude/skills/bff-deploy/**` no longer encodes 8.0; a runbook at `projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md` (and/or in the skill) gives the exact `az` command sequence for staging-slot deploy → validate → swap → rollback-by-swap, with the pipe/colon forms, port-8080, and Linux-no-auto-swap facts baked in.</goal>
+  <goal>`.claude/skills/bff-deploy/**` no longer encodes 8.0; a runbook at `projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md` has (A) a NEAR-TERM `spaarke-bff-dev` direct-deploy section (the active path, worktree/`az`, not CI) and (B) a FUTURE prod/demo staging-slot-swap section (deploy → validate → swap → rollback-by-swap) with the pipe/colon forms, port-8080, and Linux-no-auto-swap facts baked in.</goal>
 
   <context>
     <background>spec FR-14 + design §7. `/bff-deploy` currently encodes 8.0 assumptions. Design §7 gives the 6-step zero-downtime path + the hard facts (pipe vs colon; mismatch = 503; don't hardcode ASPNETCORE_URLS/UseUrls; don't pin RuntimeFrameworkVersion; auto-swap unsupported on Linux). The runbook is the operator's script for tasks 050/051/060/061. Writing `.claude/skills/` requires the main session (root §3).</background>
@@ -78,7 +78,8 @@
 
   <acceptance-criteria>
     <criterion testable="true">`/bff-deploy` no longer encodes the 8.0 runtime string.</criterion>
-    <criterion testable="true">The runbook contains the exact `az` command sequence with the pipe form for `linux-fx-version` and the colon form for `create`/`list-runtimes`, plus rollback-by-swap.</criterion>
+    <criterion testable="true">Section A (near-term) gives the exact worktree/`az` direct-deploy sequence to `spaarke-bff-dev` on `DOTNETCORE|10.0`, explicitly NOT via CI.</criterion>
+    <criterion testable="true">Section B (future prod/demo) contains the exact `az` slot-swap sequence with the pipe form for `linux-fx-version` and the colon form for `create`/`list-runtimes`, plus rollback-by-swap.</criterion>
     <criterion testable="true">The runbook documents port-8080/no-hardcoded-ASPNETCORE_URLS, no-RuntimeFrameworkVersion-pin, and Linux-no-auto-swap.</criterion>
     <criterion testable="true">Negative: authored in the main session (not a sub-agent) — the `.claude/skills/` write succeeded.</criterion>
   </acceptance-criteria>

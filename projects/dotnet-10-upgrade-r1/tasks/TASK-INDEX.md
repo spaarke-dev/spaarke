@@ -2,8 +2,9 @@
 
 > **Generated**: 2026-08-11 by `/project-pipeline`
 > **Branch**: `work/dotnet-10-upgrade-r1` · **Spec**: [`../spec.md`](../spec.md) · **Plan**: [`../plan.md`](../plan.md)
-> **Status legend**: 🔲 not-started · 🔄 in-progress/needs-retry · ✅ complete · ⏸ blocked
-> **Execution**: per-task via `task-execute` (root CLAUDE.md §4). Deploy tasks (050/051/060/061) are **OPERATOR-DRIVEN** (Azure + go/no-go).
+> **Status legend**: 🔲 not-started · 🔄 in-progress/needs-retry · ✅ complete · ⏸ deferred/blocked
+> **Execution**: per-task via `task-execute` (root CLAUDE.md §4). Deploy tasks (050/051) are **OPERATOR-DRIVEN** (Azure + go/no-go).
+> **⏸ Environment reality (owner 2026-08-11)**: only `spaarke-dev` is live; demo/prod decommissioned for budget (to be re-provisioned on net10 later). **051 (dev deploy) is the completion gate; 060/061 (production cutover) are DEFERRED.** See project memory `active-environments`.
 
 ---
 
@@ -29,16 +30,17 @@
 | 040 | CI setup-dotnet → 10.x / @v6 across 7 workflows | P4 | FR-13 | sonnet/xhigh | 032 | false | 🔲 |
 | 041 | App Service Bicep DOTNETCORE\|10.0 (+ platform.json) + Functions | P4 | FR-14 | sonnet/xhigh | 032 | false | 🔲 |
 | 042 | Adapt /bff-deploy + slot-swap runbook 🔒 | P4 | FR-14 | sonnet/high | 041 | false | 🔲 |
-| 050 | Region/slot evidence (resolves 2 unknowns) 🛠️ | P5 | FR-15 | sonnet/high | 042 | false | 🔲 |
-| 051 | Non-prod slot deploy + full smoke + **go/no-go** 🛠️ | P5 | FR-15 | sonnet/high | 050 | false | 🔲 |
-| 060 | Rehearse rollback (swap-back to 8.0) 🛠️ | P6 | NFR-06 | sonnet/high | 051 | false | 🔲 |
-| 061 | Production slot swap to net10 🛠️ | P6 | FR-16 | sonnet/high | 060 | false | 🔲 |
-| 090 | Wrap-up: test-diet, doc-drift, INDEX, r3 handoff, defer majors 🔒 | P7 | FR-17 | sonnet/high | 061 | false | 🔲 |
+| 050 | Confirm `spaarke-dev` runs net10 (runtime + slot evidence) 🛠️ | P5 | FR-15 | sonnet/high | 042 | false | 🔲 |
+| 051 | **Deploy net10 to `spaarke-bff-dev`** + full smoke + **go/no-go** (completion gate) 🛠️ | P5 | FR-15 | sonnet/high | 050 | false | 🔲 |
+| 060 | ⏸ *(deferred)* Rehearse rollback (swap-back) 🛠️ | P6 | NFR-06 | sonnet/high | future demo/prod | false | ⏸ |
+| 061 | ⏸ *(deferred)* Production slot swap to net10 🛠️ | P6 | FR-16 | sonnet/high | 060 | false | ⏸ |
+| 090 | Wrap-up: test-diet, doc-drift, INDEX, r3 handoff, defer majors 🔒 | P7 | FR-17 | sonnet/high | 051 | false | 🔲 |
 
 🔒 = writes root `CLAUDE.md` / `.claude/` / `projects/INDEX.md` → **main-session-only** (root §3).
 🛠️ = **OPERATOR-DRIVEN** — needs Azure credentials + a recorded human go/no-go; not run autonomously.
+⏸ = **DEFERRED** — fires only when demo/prod are re-provisioned on net10 (no production environment today).
 
-**Count**: 23 tasks across P0–P7 (P0=5, P1=5, P2=2, P3=3, P4=3, P5=2, P6=2, P7=1).
+**Count**: 23 tasks across P0–P7 (P0=5, P1=5, P2=2, P3=3, P4=3, P5=2, P6=2, P7=1) — **21 active + 2 deferred** (060/061).
 
 ---
 
@@ -46,10 +48,10 @@
 
 ```
 001 → 002 → 003 → 004 → 005 → 010 → 012 → 013 → 014 → 020 → 030 → 031 → 032
-    → 040 → 041 → 042 → 050 → 051 → 060 → 061 → 090
+    → 040 → 041 → 042 → 050 → 051 → 090          (060/061 DEFERRED — off the active path)
 ```
 
-The adversarial-verify tasks (011 after 010; 021 after 020) hang off the path but are not on the longest chain — each can overlap the next author task.
+The adversarial-verify tasks (011 after 010; 021 after 020) hang off the path but are not on the longest chain — each can overlap the next author task. **060/061 (production cutover) are deferred** — the active path ends at 051 (dev deploy) → 090 (wrap-up).
 
 ## Parallel execution groups
 
@@ -68,8 +70,8 @@ There are no concurrent code-writing waves — every code task is `parallel-safe
 - **002 before 003/004**: `Spaarke.Scheduling` has `TreatWarningsAsErrors=true` — do it first so NU1510/SYSLIB surface early on the smallest project.
 - **005 is the P0 exit gate**: whole-solution build + publish green before any P1 hit-site work.
 - **021 gates P3**: H2 fixes must be adversarially verified before the test suite is declared green.
-- **051 "go" gates P6**: production cutover (060/061) does NOT proceed without a recorded non-prod go/no-go.
-- **060 before 061**: rollback (swap-back to 8.0) must be rehearsed before the production forward swap (NFR-06).
+- **051 "go" is the project completion gate**: on a recorded dev go/no-go "go", the active work is done and 090 (wrap-up) proceeds. There is no production cutover in scope today.
+- **060/061 DEFERRED**: production cutover (rollback rehearsal + slot swap) fires only when demo/prod are re-provisioned on net10. Procedure preserved in the task-042 runbook §B; 090 files it as a tracked follow-on.
 
 ## Governance reminders (per task)
 
@@ -90,6 +92,6 @@ There are no concurrent code-writing waves — every code task is `parallel-safe
 | 6 | full test suite green | 030 |
 | 7 | publish ≤60 MB; baseline documented | 031 |
 | 8 | CI green on net10 | 040 |
-| 9 | non-prod smoke + go/no-go | 050, 051 |
-| 10 | prod on DOTNETCORE\|10.0; rollback rehearsed | 060, 061 |
+| 9 | dev smoke on `spaarke-bff-dev` + go/no-go (completion gate) | 050, 051 |
+| 10 | ⏸ prod on DOTNETCORE\|10.0; rollback rehearsed — **DEFERRED** (no prod env) | 060, 061 (deferred) |
 | 11 | r3 handoff note; deferred majors filed | 090 |

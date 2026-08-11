@@ -6,6 +6,8 @@
 > **Driver**: .NET 8 (LTS) end-of-support **2026-11-10** (~3 months). Skip .NET 9 (EOL same day) → **.NET 10 (LTS, supported to 2028-11-14)**.
 > **Execution model note**: this is a brownfield/root-cause-heavy migration → most tasks warrant `<effort>xhigh</effort>`; behavioral tasks (FR-07/FR-08) warrant `<model-tier>opus</model-tier>` per root CLAUDE.md §8.5.
 
+> **⏸ Environment-reality amendment (owner 2026-08-11, added post-pipeline)**: The **only live environment is `spaarke-dev`** (App Service `spaarke-bff-dev`). The **demo/trial and production environments are decommissioned for budget** until a first release ships from dev, and will be **re-provisioned on .NET 10** later. Consequences for this spec: **FR-15 is reframed** to a direct net10 deploy + smoke on `spaarke-dev` (the project's completion gate; no prod slot swap available today), and **FR-16 (production cutover), NFR-04 (runtime/binary agree in production), and NFR-06 (rehearsed rollback) are DEFERRED** — they become active when demo/prod are re-stood-up on net10. The production slot-swap procedure is preserved as a future playbook (task 042 runbook §B; tasks 060/061 parked with `status=deferred`). The wrap-up (FR-17) files this deferred prod/demo cutover as a tracked follow-on. This is a documented scope carve-out, not a silent cut. See project memory `active-environments`.
+
 ## Executive Summary
 
 Retarget the Spaarke server backend (BFF + 3 shared libraries + ~7 test projects) from `net8.0` to `net10.0` before .NET 8 loses support on 2026-11-10, with **zero product-behavior change** (one documented carve-out: telemetry-pipeline consolidation, FR-06). Research (2026-08-10, 3 sub-agents) confirmed **no hard package blockers**, identified **6 concrete codebase hit-sites**, and verified a **zero-downtime Azure App Service cutover path** (slot swap; the plan is P1v3 → slots available). The `net462` Dataverse plugin is out of scope (sandbox-fixed). This ships and merges to master FIRST; `code-quality-and-assurance-r3` is then re-planned on the net10 baseline (owner decision, design §11).
@@ -58,8 +60,8 @@ Retarget the Spaarke server backend (BFF + 3 shared libraries + ~7 test projects
 12. **FR-12** — Publish-size re-baseline + governance updates. Acceptance: measured compressed `dotnet publish -c Release` output reported (absolute + diff vs ~49.63 MB incl-PDB baseline); ≤ **60 MB**; new baseline written to root `CLAUDE.md` §10 + `.claude/constraints/azure-deployment.md`.
 13. **FR-13** — CI `setup-dotnet` → `10.x`/`10.0.x` across all listed workflows (use `actions/setup-dotnet@v6`); remove any `dotnet-quality: preview`; keep `global.json` aligned. Acceptance: all CI workflows build/test net10 green; no preview-channel SDK pulled.
 14. **FR-14** — `/bff-deploy` skill adapted for the net10 runtime string + a documented slot-swap runbook (staging slot → validate → swap → rollback-by-swap). Acceptance: runbook exists with exact `az` commands (`DOTNETCORE|10.0` pipe for `linux-fx-version`; `DOTNETCORE:10.0` colon for create/list); `/bff-deploy` no longer encodes 8.0.
-15. **FR-15** — **Non-prod cutover + validation (go/no-go gate)**: deploy the net10 build to a dev/staging slot on `DOTNETCORE|10.0`; smoke all four auth paths (OBO, MI app-only, named API-key), SSE chat streaming, a real Service Bus job, a real background-worker tick, and FR-06 telemetry. Acceptance: all smoke checks pass on the actual net10 stack; documented evidence; explicit go/no-go recorded before FR-16.
-16. **FR-16** — **Production cutover** via P1v3 slot swap (design §7): staging slot on net10, validate, swap (runtime+code atomic), monitor, rollback-ready (swap back). Acceptance: production serving on `DOTNETCORE|10.0` with no dropped requests during swap; rollback rehearsed on the slot before the forward swap.
+15. **FR-15** *(reframed 2026-08-11 → dev-only; PROJECT COMPLETION GATE)* — **Dev cutover + validation (go/no-go gate)**: deploy the net10 build to `spaarke-bff-dev` on `DOTNETCORE|10.0` (direct worktree deploy, or a slot if it has one — NOT via CI); smoke all four auth paths (OBO, MI app-only, named API-key), SSE chat streaming, a real Service Bus job, a real background-worker tick, and FR-06 telemetry. Acceptance: all smoke checks pass on the actual net10 stack; documented evidence; explicit go/no-go recorded.
+16. **FR-16** *(⏸ DEFERRED 2026-08-11 — no production environment today)* — **Production cutover** via slot swap (design §7): staging slot on net10, validate, swap (runtime+code atomic), monitor, rollback-ready (swap back). **Deferred until demo/prod are re-provisioned on net10**; procedure preserved in the task-042 runbook (§B), tasks 060/061 parked. Acceptance (when active): production serving on `DOTNETCORE|10.0` with no dropped requests during swap; rollback rehearsed on the slot before the forward swap.
 17. **FR-17** — Wrap-up: `/test-diet`, doc-drift audit, update `projects/INDEX.md` row, and write the **r3 handoff note** (net10 baseline assumptions: don't re-pin superseded CVE packages; H1/H2 already fixed; publish baseline moved). Acceptance: INDEX updated; handoff note exists at `projects/dotnet-10-upgrade-r1/notes/`; deferred optional majors (§6.4) filed as follow-on issues via `/project-defer-issue-tracking`.
 
 ### Non-Functional Requirements
@@ -67,9 +69,9 @@ Retarget the Spaarke server backend (BFF + 3 shared libraries + ~7 test projects
 - **NFR-01** — **Zero product-behavior change**, with ONE documented carve-out: FR-06 telemetry-pipeline consolidation. Same endpoints, contracts, auth behavior, job behavior. Any other observed behavior delta is a defect.
 - **NFR-02** — Publish-size ≤ **60 MB** compressed (CLAUDE.md §10); framework-dependent only (no self-contained — would blow the ceiling).
 - **NFR-03** — No new HIGH-severity CVE vs the net8 baseline (`dotnet list package --vulnerable --include-transitive`; net10 restore audits transitively by default).
-- **NFR-04** — Runtime and binary must never disagree in production: the App Service runtime string and the deployed TFM change together (slot swap is atomic). Framework mismatch = hard startup 503.
+- **NFR-04** *(⏸ DEFERRED 2026-08-11 with FR-16 — production-scoped)* — Runtime and binary must never disagree in production: the App Service runtime string and the deployed TFM change together (slot swap is atomic). Framework mismatch = hard startup 503. (For the dev deploy the same principle applies trivially — a direct deploy sets runtime + binary together.)
 - **NFR-05** — The `net462` Dataverse plugin is untouched and continues to build/deploy unchanged.
-- **NFR-06** — Rollback rehearsed (swap-back to 8.0 proven) before the production forward swap.
+- **NFR-06** *(⏸ DEFERRED 2026-08-11 with FR-16 — no production slot today)* — Rollback rehearsed (swap-back to 8.0 proven) before the production forward swap. Active when demo/prod are re-provisioned on net10.
 - **NFR-07** — Behavioral changes (FR-07 workers, FR-08 DI) are **adversarially verified by a non-author** (fan-out → adversarial-verify per the "no issues" mandate).
 - **NFR-08** — `/conflict-check` before every BFF PR (13+ active BFF worktrees); no parallel BFF-wide project merges.
 
@@ -131,8 +133,8 @@ Retarget the Spaarke server backend (BFF + 3 shared libraries + ~7 test projects
 6. [ ] Full test suite green on net10 — Verify: `dotnet test` + arch tests.
 7. [ ] Publish ≤60 MB; new baseline documented — Verify: FR-12 measurement + governance doc diff.
 8. [ ] CI green on net10 across all workflows — Verify: workflow runs.
-9. [ ] Non-prod slot smoke passes (all auth paths, SSE, job, worker, telemetry) — Verify: FR-15 evidence + recorded go/no-go.
-10. [ ] Production on `DOTNETCORE|10.0` with no dropped requests; rollback rehearsed — Verify: FR-16 swap logs + monitoring.
+9. [ ] **Dev** smoke passes on `spaarke-bff-dev` (all auth paths, SSE, job, worker, telemetry) — Verify: FR-15 evidence + recorded go/no-go. *(reframed 2026-08-11 — this is the completion gate)*
+10. [ ] ⏸ *DEFERRED* — Production on `DOTNETCORE|10.0` with no dropped requests; rollback rehearsed — Verify: FR-16 swap logs + monitoring. *(Active when demo/prod are re-provisioned on net10; not required for this project's dev-only completion.)*
 11. [ ] r3 handoff note written; deferred majors filed — Verify: FR-17 artifacts.
 
 ## Dependencies

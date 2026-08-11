@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-17 — wrap-up: test-diet, doc-drift, INDEX update, r3 handoff note, defer majors</title>
     <phase>P7 Wrap-up</phase>
-    <gate>061 complete</gate>
+    <gate>051 complete (dev deploy "go"); 060/061 deferred</gate>
     <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Project-close wrap-up; touches .claude/ + projects/INDEX.md (main-session-only) + governance docs.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Writes projects/INDEX.md + reads/updates .claude/ — MAIN-SESSION-ONLY (root §3).</parallel-reason>
-    <deps>061</deps>
+    <deps>051</deps>
     <tags>wrap-up, testing, docs, skill-directives, migration</tags>
     <estimated-effort>2-3 hours</estimated-effort>
   </metadata>
@@ -86,7 +86,7 @@
     <criterion testable="true">Negative: no MAINTAIN-class test was deleted and no SCAFFOLDING-class test was kept without the reviewer's call.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-17. Main-session-only. Closes the project; r3 is re-planned on the net10 baseline afterward (design §11).</notes>
+  <notes>spec FR-17. Main-session-only. Closes the project on the DEV deploy "go" (task 051) — production/demo cutover (tasks 060/061, FR-16/NFR-04/NFR-06) is DEFERRED to when those environments are re-provisioned on net10 (owner 2026-08-11). ALSO file that deferred prod/demo net10 cutover as a tracked follow-on via `/project-defer-issue-tracking` (alongside the 6 deferred optional majors), so it isn't lost. r3 is re-planned on the net10 baseline afterward (design §11).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
