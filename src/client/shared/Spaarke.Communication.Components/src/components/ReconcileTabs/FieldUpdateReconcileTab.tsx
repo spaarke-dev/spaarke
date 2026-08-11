@@ -47,17 +47,123 @@ import {
   Caption1,
   Input,
   Link,
+  Select,
   Spinner,
   Text,
   makeStyles,
   shorthands,
   tokens,
 } from '@fluentui/react-components';
-import { CheckmarkRegular, DismissRegular, ClockRegular, Link16Regular } from '@fluentui/react-icons';
-import { FormModal } from '@spaarke/ui-components';
+import {
+  AddRegular,
+  CheckmarkRegular,
+  DismissRegular,
+  ClockRegular,
+  Link16Regular,
+  SearchRegular,
+} from '@fluentui/react-icons';
+import { FormModal, getXrmForPicker } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
 import type { AuthenticatedFetchFn } from '../EmailBody/EmailBodyView.types';
 import type { EmailCitation } from '../../logic/citations';
+
+/**
+ * The OOB Xrm surface this tab self-resolves via `getXrmForPicker` (E2b/E2c, task 065).
+ * `getXrmForPicker` is typed only for `Utility.lookupObjects`; the real host Xrm also exposes
+ * `Utility.getEntityMetadata` + `Navigation.navigateTo`. We declare the extra surface LOCALLY and
+ * cast (rather than widening ui-components' bridge type). Every call is behind a presence guard +
+ * try/catch, so a non-MDA/dev host (bridge absent) degrades gracefully to the text-input path.
+ */
+interface XrmOptionSetOption {
+  Value?: number | string;
+  value?: number | string;
+  Label?: { UserLocalizedLabel?: { Label?: string }; LocalizedLabels?: Array<{ Label?: string }> };
+  label?: string;
+}
+interface XrmAttributeMetadata {
+  LogicalName?: string;
+  logicalName?: string;
+  AttributeType?: string;
+  attributeType?: string;
+  OptionSet?: { Options?: XrmOptionSetOption[] };
+  optionSet?: { options?: XrmOptionSetOption[] };
+  Targets?: string[];
+  targets?: string[];
+}
+interface XrmEntityMetadata {
+  Attributes?:
+    | XrmAttributeMetadata[]
+    | {
+        get?: (key: string | number) => XrmAttributeMetadata | undefined;
+        getByName?: (name: string) => XrmAttributeMetadata | undefined;
+      };
+}
+interface ReconcileXrm {
+  Utility?: {
+    lookupObjects?: (opts: {
+      entityTypes: string[];
+      defaultEntityType?: string;
+      allowMultiSelect: boolean;
+    }) => Promise<Array<{ id: string; name: string; entityType?: string }>>;
+    getEntityMetadata?: (entityName: string, attributes?: string[]) => Promise<XrmEntityMetadata>;
+  };
+  Navigation?: {
+    navigateTo?: (pageInput: Record<string, unknown>, navOptions?: Record<string, unknown>) => Promise<unknown>;
+  };
+}
+/** Cast the shared picker bridge to the broader (metadata + navigation) surface. Undefined on non-MDA. */
+function getReconcileXrm(): ReconcileXrm | undefined {
+  return getXrmForPicker() as ReconcileXrm | undefined;
+}
+
+/** Resolved attribute metadata for a proposal's target field (best-effort; all fields optional). */
+interface FieldMeta {
+  type?: string;
+  options?: Array<{ value: string; label: string }>;
+  targets?: string[];
+}
+
+/** Defensively parse `Xrm.Utility.getEntityMetadata(...)` (PascalCase/camelCase, array/collection). */
+function parseFieldMeta(md: XrmEntityMetadata | undefined, field: string): FieldMeta {
+  const attrs = md?.Attributes;
+  let attr: XrmAttributeMetadata | undefined;
+  if (Array.isArray(attrs)) {
+    attr = attrs.find(a => (a.LogicalName ?? a.logicalName) === field) ?? attrs[0];
+  } else if (attrs) {
+    attr = attrs.getByName?.(field) ?? attrs.get?.(field) ?? attrs.get?.(0);
+  }
+  const type = attr?.AttributeType ?? attr?.attributeType;
+  const rawOptions = attr?.OptionSet?.Options ?? attr?.optionSet?.options;
+  const options = Array.isArray(rawOptions)
+    ? rawOptions.map(o => {
+        const value = String(o.Value ?? o.value ?? '');
+        const label = o.Label?.UserLocalizedLabel?.Label ?? o.Label?.LocalizedLabels?.[0]?.Label ?? o.label ?? value;
+        return { value, label };
+      })
+    : undefined;
+  const targets = attr?.Targets ?? attr?.targets;
+  return { type, options, targets };
+}
+
+/** Normalize a Dataverse lookup id (strip braces, lowercase) — mirrors EmailConnectionsReview. */
+function normalizeLookupId(id: string): string {
+  return id.replace(/[{}]/g, '').toLowerCase();
+}
+
+/** Map a resolved metadata AttributeType (or the queue-feed fieldType hint) to a control kind. */
+function controlKind(
+  meta: FieldMeta | undefined,
+  fieldType?: string | null
+): 'date' | 'number' | 'optionset' | 'lookup' | 'text' {
+  const t = (meta?.type ?? fieldType ?? '').toLowerCase();
+  if (t.includes('datetime') || t === 'date') return 'date';
+  if (t === 'lookup' || t === 'customer' || t === 'owner') return meta?.targets?.length ? 'lookup' : 'text';
+  if (t === 'picklist' || t === 'state' || t === 'status' || t.includes('optionset') || t === 'multiselectpicklist')
+    return meta?.options?.length ? 'optionset' : 'text';
+  if (t === 'integer' || t === 'decimal' || t === 'double' || t === 'money' || t === 'bigint' || t === 'number')
+    return 'number';
+  return 'text';
+}
 
 /** The confirmed association a proposal is scoped to (NFR-10). */
 export interface ReconcileRegarding {
@@ -187,6 +293,8 @@ const useStyles = makeStyles({
   oldValue: { color: tokens.colorNeutralForeground3, textDecorationLine: 'line-through' },
   arrow: { color: tokens.colorNeutralForeground3 },
   editInput: { minWidth: '160px', flex: '1 1 160px' },
+  controlRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flex: '1 1 160px', minWidth: 0 },
+  updateOther: { width: '100%', marginTop: tokens.spacingVerticalS },
   meta: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
   actions: { display: 'flex', gap: tokens.spacingHorizontalS, marginTop: tokens.spacingVerticalXS },
   rowError: { color: tokens.colorPaletteRedForeground1 },
@@ -235,6 +343,9 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
   const [edited, setEdited] = React.useState<Record<string, string>>({});
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [rowError, setRowError] = React.useState<Record<string, string>>({});
+  // E2b (065): resolved attribute metadata per proposal (best-effort) + picked lookup display names.
+  const [fieldMeta, setFieldMeta] = React.useState<Record<string, FieldMeta>>({});
+  const [pickedNames, setPickedNames] = React.useState<Record<string, string>>({});
 
   // Fetch (and RE-SCOPE on `scope`/`communicationId` change). Keyed strictly on the
   // CONFIRMED scope — when the association is overridden, `scope` changes and the
@@ -264,6 +375,77 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  // E2b: resolve attribute metadata for the loaded proposals (best-effort, guarded). A non-MDA host
+  // (no bridge) or a metadata error leaves the row's meta empty → the text-input path (date/number
+  // still honored from the fieldType hint).
+  React.useEffect(() => {
+    let cancelled = false;
+    const xrmUtil = getReconcileXrm()?.Utility;
+    if (!xrmUtil?.getEntityMetadata || proposals.length === 0) {
+      setFieldMeta({});
+      return;
+    }
+    void (async () => {
+      const next: Record<string, FieldMeta> = {};
+      for (const p of proposals) {
+        if (!p.targetEntity || !p.targetField) continue;
+        try {
+          const md = await xrmUtil.getEntityMetadata!(p.targetEntity, [p.targetField]);
+          next[p.reviewLogId] = parseFieldMeta(md, p.targetField);
+        } catch {
+          /* best-effort — leave this row on the text fallback */
+        }
+      }
+      if (!cancelled) setFieldMeta(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [proposals]);
+
+  // E2b: open the OOB advanced-lookup for a Lookup field (targets from metadata). Guarded no-op non-MDA.
+  const openFieldLookup = React.useCallback(
+    async (p: FieldUpdateProposal): Promise<void> => {
+      const targets = fieldMeta[p.reviewLogId]?.targets;
+      try {
+        const xrm = getReconcileXrm();
+        if (!xrm?.Utility?.lookupObjects || !targets?.length) return; // non-MDA or unknown target — no-op
+        const results = await xrm.Utility.lookupObjects({
+          entityTypes: targets,
+          defaultEntityType: targets[0],
+          allowMultiSelect: false,
+        });
+        if (!results || results.length === 0) return; // cancelled
+        const picked = results[0];
+        setEdited(prev => ({ ...prev, [p.reviewLogId]: normalizeLookupId(picked.id) }));
+        setPickedNames(prev => ({ ...prev, [p.reviewLogId]: picked.name }));
+      } catch (err) {
+        setRowError(prev => ({
+          ...prev,
+          [p.reviewLogId]: err instanceof Error ? err.message : 'Could not open the record picker.',
+        }));
+      }
+    },
+    [fieldMeta]
+  );
+
+  // E2c: open the confirmed regarding record's OOB form (modal-on-modal); re-load on close (the record
+  // may have changed). Guarded no-op on non-MDA/dev.
+  const openRecordForm = React.useCallback(async (): Promise<void> => {
+    if (!regarding?.entityType || !regarding?.recordId) return;
+    const nav = getReconcileXrm()?.Navigation;
+    if (!nav?.navigateTo) return; // non-MDA/dev — no-op
+    try {
+      await nav.navigateTo(
+        { pageType: 'entityrecord', entityName: regarding.entityType, entityId: regarding.recordId },
+        { target: 2, position: 1, width: { value: 60, unit: '%' } }
+      );
+      await load(); // the record may have changed — re-scope the proposals
+    } catch {
+      /* user closed / nav error — non-fatal */
+    }
+  }, [regarding, load]);
 
   const removeRow = React.useCallback((reviewLogId: string) => {
     setProposals(prev => prev.filter(p => p.reviewLogId !== reviewLogId));
@@ -319,6 +501,73 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
     },
     [removeRow, onProposalResolved]
   );
+
+  // E2b: the type-correct value editor. Kind resolves from live metadata (preferred) or the
+  // fieldType hint; option-set → dropdown, lookup → OOB advanced-lookup, date/number → typed input,
+  // else → text. All write the control's string value into `edited` (the Accept {overrideValue}).
+  const renderValueControl = (p: FieldUpdateProposal, value: string, busy: boolean): React.ReactNode => {
+    const kind = controlKind(fieldMeta[p.reviewLogId], p.fieldType);
+    const label = `New value for ${p.targetField ?? 'field'}`;
+    const onText = (v: string) => setEdited(prev => ({ ...prev, [p.reviewLogId]: v }));
+
+    if (kind === 'optionset') {
+      return (
+        <Select
+          className={s.editInput}
+          value={value}
+          disabled={busy}
+          aria-label={label}
+          data-testid="field-reconcile-edit-optionset"
+          onChange={(_, d) => onText(d.value)}
+        >
+          <option value="">(unset)</option>
+          {(fieldMeta[p.reviewLogId]?.options ?? []).map(o => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </Select>
+      );
+    }
+
+    if (kind === 'lookup') {
+      const name = pickedNames[p.reviewLogId];
+      return (
+        <div className={s.controlRow}>
+          <Input
+            className={s.editInput}
+            value={name ?? value}
+            readOnly
+            disabled={busy}
+            aria-label={label}
+            data-testid="field-reconcile-edit-lookup"
+          />
+          <Button
+            size="small"
+            appearance="secondary"
+            icon={<SearchRegular />}
+            disabled={busy}
+            data-testid="field-reconcile-edit-lookup-btn"
+            onClick={() => void openFieldLookup(p)}
+          >
+            Lookup
+          </Button>
+        </div>
+      );
+    }
+
+    return (
+      <Input
+        className={s.editInput}
+        type={kind === 'date' ? 'date' : kind === 'number' ? 'number' : 'text'}
+        value={value}
+        disabled={busy}
+        aria-label={label}
+        data-testid="field-reconcile-edit"
+        onChange={(_, d) => onText(d.value)}
+      />
+    );
+  };
 
   const rootClass = className ? `${s.root} ${className}` : s.root;
 
@@ -398,14 +647,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
               <Text className={s.arrow} aria-hidden>
                 →
               </Text>
-              <Input
-                className={s.editInput}
-                value={value}
-                disabled={busy}
-                aria-label={`New value for ${p.targetField ?? 'field'}`}
-                data-testid="field-reconcile-edit"
-                onChange={(_, d) => setEdited(prev => ({ ...prev, [p.reviewLogId]: d.value }))}
-              />
+              {renderValueControl(p, value, busy)}
             </div>
 
             {hasCitation ? (
@@ -463,6 +705,20 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
           </div>
         );
       })}
+
+      {/* E2c — open the confirmed record's OOB form to edit fields beyond the proposals
+          (modal-on-modal; the tab reloads on close). Shown only for a confirmed record. */}
+      {regarding ? (
+        <Button
+          appearance="secondary"
+          icon={<AddRegular />}
+          className={s.updateOther}
+          data-testid="field-reconcile-update-other"
+          onClick={() => void openRecordForm()}
+        >
+          Update other fields
+        </Button>
+      ) : null}
     </div>
   );
 };
