@@ -248,7 +248,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       this.apiBaseUrl,
       getClientUrl()
     ).catch(err => {
-       
       console.error(
         "[TrackingFieldTrio] Auth initialization failed — the access-grant modal's BFF calls will fail until the page is reloaded.",
         err
@@ -586,7 +585,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
-      versionText: 'v1.0.12 • Built 2026-08-11',
+      versionText: 'v1.0.13 • Built 2026-08-11',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -695,7 +694,6 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                   this.renderControl();
                 },
                 onError: (err: Error) => {
-                   
                   console.error('[TrackingFieldTrio] Email-members send failed.', err);
                 },
               })

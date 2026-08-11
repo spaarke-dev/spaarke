@@ -230,6 +230,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [pickingContact, setPickingContact] = React.useState(false);
   const [pickedOrg, setPickedOrg] = React.useState<IOrganizationPick | null>(null);
   const [pickingOrg, setPickingOrg] = React.useState(false);
+  // task 073 UAT fix (#2): the Xrm side-pane Advanced Lookup (Xrm.Utility.lookupObjects) renders in the
+  // host shell BELOW this Fluent `Dialog`'s portal, so the pane opened behind the modal and was
+  // unusable. While a pick is in flight we HIDE this modal (SprkModal `open={open && !pickerActive}`) so
+  // the pane is fully visible + interactable, then restore it. State (selectedNamed/pickedOrg) is held
+  // in THIS component (not the unmounted Dialog surface) and the reset effect keys on the `open` PROP —
+  // which never changes here — so nothing is lost across the hide/show.
+  const [pickerActive, setPickerActive] = React.useState(false);
 
   const [revokeTargetId, setRevokeTargetId] = React.useState<string | null>(null);
   const [revoking, setRevoking] = React.useState(false);
@@ -491,6 +498,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const handlePickContact = React.useCallback(async () => {
     if (!pickContact) return;
     setPickingContact(true);
+    setPickerActive(true); // hide the modal so the Xrm lookup pane is usable (task 073 UAT #2)
     try {
       const picked = await pickContact();
       if (picked) {
@@ -501,6 +509,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       /* lookup cancelled/failed — leave the current selection unchanged */
     } finally {
       setPickingContact(false);
+      setPickerActive(false);
     }
   }, [pickContact]);
 
@@ -509,6 +518,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const handlePickOrganization = React.useCallback(async () => {
     if (!pickOrganization) return;
     setPickingOrg(true);
+    setPickerActive(true); // hide the modal so the Xrm lookup pane is usable (task 073 UAT #2)
     try {
       const picked = await pickOrganization();
       if (picked) setPickedOrg(picked);
@@ -516,6 +526,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       /* lookup cancelled/failed — leave the current selection unchanged */
     } finally {
       setPickingOrg(false);
+      setPickerActive(false);
     }
   }, [pickOrganization]);
 
@@ -542,7 +553,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   return (
     <>
       <SprkModal
-        open={open}
+        // Hidden while a side-pane Advanced Lookup is in flight (task 073 UAT #2) so the Xrm lookup
+        // pane — which renders below this Fluent Dialog's portal — is fully usable. `open` is the prop;
+        // the reset effect keys on it, so hiding via `pickerActive` does not reset the modal's state.
+        open={open && !pickerActive}
         onClose={onClose}
         title={title}
         size="lg"
