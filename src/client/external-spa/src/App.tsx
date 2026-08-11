@@ -137,7 +137,7 @@ const AppShell: React.FC<{
       />
 
       <main className={styles.content}>
-        <AuthGuard>
+        <AuthGuard teamsHost={teamsHost}>
           <ErrorBoundary>
             <Routes>
               <Route path="/" element={<WorkspaceHomePage teamsHost={teamsHost} />} />
