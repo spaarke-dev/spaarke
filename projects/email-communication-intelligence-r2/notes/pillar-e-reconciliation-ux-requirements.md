@@ -101,6 +101,12 @@ E1b + E2c both stack a record/wizard modal ON the open review modal. This is an 
 ### Production follow-up
 E1b (Quick Start integration), E2b/E3b (OOB advanced-lookup side pane), and E2c (record-form modal) are **new build work** beyond the 061/062 mount — track as follow-on tasks (063+) after prototype sign-off. Label changes (E1a/E2a/E3a) are trivial and can ship into the 055/056/052 components directly.
 
+### REUSE existing components (BINDING §11 — owner 2026-08-11)
+These behaviors MUST reuse the shipped components, not rebuild them — full table in [`pillar-e-mount-build-plan.md` §7.5](pillar-e-mount-build-plan.md). Key targets: **Quick Start** = `QuickStartModal` (`src/solutions/SpaarkeAi/src/components/conversation/QuickStartModal.tsx`); **wizards** = the `Create*Wizard` code pages launched via the Assistant surface-launch mechanism; **"Update other fields"** = OOB `navigateTo` record form / `RecordNavigationModalShell`; **modal chrome** = `SprkModal` presets (`FormModal`/`WizardModal`/`BrowseModal`/`PreviewModal`); **lookups/Assigned-to** = OOB advanced-lookup side pane. The prototype's stand-ins are for review only; carried into the 063+ POMLs as explicit reuse `<constraint>`s.
+
+### Button-label consistency (E-cross, owner 2026-08-11)
+The action buttons that open a create/add surface use the **`+ {verb}`** pattern (Add icon + text), consistent with **`+ New task`**: **`+ New record`** (Related-to) and **`+ Update other fields`** (Fields).
+
 ---
 
 *Update this doc when UX requirements change. The production build (`pillar-e-mount-build-plan.md`) and any prototype refinement both trace to the items above.*

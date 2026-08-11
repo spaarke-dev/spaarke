@@ -96,7 +96,25 @@ Sequence: **060 (review gate) → 061 → 062 → 059**. 061 can start in parall
 
 ---
 
-## 7. Definition of done
+## 7.5 Reuse existing components — BINDING §11 (UAT round-2 directive, owner 2026-08-11)
+
+**The UAT round-2 behaviors (§E of the UX requirements doc) MUST be built on the EXISTING modals + UI components — NOT re-implemented.** The prototype uses lightweight stand-ins for review only; production wires the real components below. Any new-component proposal for these surfaces fails the §11 gate.
+
+| Behavior (UX §E) | Reuse THIS existing component/surface (do not rebuild) | Path / reference |
+|---|---|---|
+| **Quick Start chooser** (E1b — "+ New record" opens it) | **`QuickStartModal`** (the shipped SpaarkeAi Quick Start) | `src/solutions/SpaarkeAi/src/components/conversation/QuickStartModal.tsx` |
+| **Record-creation wizards** launched from Quick Start (E1b) | The shipped **`Create*Wizard` code pages** — `CreateMatterWizard`, `CreateProjectWizard`, `CreateWorkAssignmentWizard`, `CreateEventWizard`, `CreateTodoWizard`, `CreateInvoiceWizard`, etc. — launched via the **Assistant surface-launch mechanism** (`consumerType` → `surfaceLaunchRegistry` → `handleSurfaceLaunch`), NOT a bespoke wizard | `src/solutions/Create*Wizard/`; `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md`; `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` |
+| **Wizard shell** (if a reconciliation-local wizard surface is ever needed) | **`WizardModal`** preset | `src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/WizardModal.tsx` |
+| **"Update other fields" record modal** (E2c) | Open the confirmed record's **real form** via OOB **`Xrm.Navigation.navigateTo`** (record form) OR **`RecordNavigationModalShell`** — per `MODAL-DECISION-CRITERIA.md`. NOT a hand-built form. | `docs/standards/MODAL-DECISION-CRITERIA.md`; `src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/` |
+| **"+ New task" modal** (already shipped) | **`FormModal`** preset (done in 056) — OR, if a full task surface is wanted, the shipped **`CreateTodoWizard`/`CreateEventWizard`** via surface-launch. Decide at build; do NOT hand-roll. | `SprkModal/presets/FormModal.tsx`; `src/solutions/CreateTodoWizard/` |
+| **Lookup fields + Assigned-to** (E2b/E3b) | The OOB **advanced-lookup side pane** (`Xrm.WebApi`/`lookupObjects` OOB control), not a bespoke picker; option-sets → Fluent `Dropdown`; dates → date control | `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`; OOB `Xrm.Utility.lookupObjects` |
+| **All modal chrome** | **`SprkModal` presets** (`FormModal`/`WizardModal`/`BrowseModal`/`PreviewModal`) — ADR-050 | `docs/standards/MODAL-DESIGN-SYSTEM.md` |
+
+**Modal-on-modal** (E1b + E2c stack a wizard/record surface on the open review modal): use the established stacked-`SprkModal` pattern (the browse shell already stacks a `PreviewModal`); each surface owns its `open` state so the underlying review modal stays open on close.
+
+These reuse targets are carried into the follow-on task POMLs (063+) as explicit `<constraint>` + `<justification>` entries so a literal executor cannot rebuild them.
+
+## 8. Definition of done
 
 - `ReconciliationWorkspace` composes the production components honoring UX A1–A6 + B1–B13 + NFR-10/11; tests green.
 - Code page `sprk_communicationreconciliation` **and** SpaarkeAi widget both render the grid and open the browse shell against live data.
