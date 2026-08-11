@@ -122,14 +122,19 @@ public static class GrantExternalAccessEndpoint
         GrantAccessRequest request,
         ExternalGrantRootType rootType,
         Guid rootId,
-        string? callerSystemUserId,
+        string? callerOid,
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger logger,
         CancellationToken ct)
     {
-        var payload = BuildGrantPayload(request, rootType, rootId, callerSystemUserId);
+        // sprk_grantedby is a systemuser lookup — its target is a Dataverse systemuserid, which is
+        // DISTINCT from the caller's Azure AD object id (oid). Resolve the systemuserid from the oid;
+        // if the caller has no matching systemuser, omit grantedby (an audit field must never 400 the grant).
+        var grantedBySystemUserId = await ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct);
+
+        var payload = BuildGrantPayload(request, rootType, rootId, grantedBySystemUserId);
         var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
 
         logger.LogInformation(
@@ -163,10 +168,53 @@ public static class GrantExternalAccessEndpoint
         return accessRecordId;
     }
 
-    /// <summary>Resolves the caller's systemuser id (oid) for the audited <c>sprk_grantedby</c>.</summary>
+    /// <summary>
+    /// Resolves the caller's Azure AD object id (<c>oid</c>) — the input to
+    /// <see cref="ResolveGrantedBySystemUserIdAsync"/>, which maps it to the Dataverse systemuserid the
+    /// audited <c>sprk_grantedby</c> lookup requires. NOTE: the oid is NOT itself a systemuserid.
+    /// </summary>
     internal static string? ResolveCallerSystemUserId(HttpContext httpContext)
         => httpContext.User.FindFirst("oid")?.Value
             ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>
+    /// Maps the caller's Azure AD object id (<paramref name="callerOid"/>) to their Dataverse
+    /// <c>systemuserid</c> for the audited <c>sprk_grantedby</c> lookup. The systemuserid is DISTINCT
+    /// from the AAD oid — binding the raw oid as a systemuserid fails Dataverse validation (400).
+    /// Returns <c>null</c> when the oid is absent/unparseable or has no matching active systemuser, in
+    /// which case <c>sprk_grantedby</c> is omitted (an audit field must never block the grant).
+    /// </summary>
+    internal static async Task<string?> ResolveGrantedBySystemUserIdAsync(
+        DataverseWebApiClient dataverseClient, string? callerOid, ILogger logger, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(callerOid) || !Guid.TryParse(callerOid, out _))
+            return null;
+
+        try
+        {
+            var rows = await dataverseClient.QueryAsync<SystemUserRow>(
+                "systemusers",
+                filter: $"azureactivedirectoryobjectid eq {callerOid}",
+                select: "systemuserid",
+                top: 1,
+                cancellationToken: ct);
+
+            return rows.Count > 0 ? rows[0].systemuserid?.ToString() : null;
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: grantedby is audit metadata. Log and omit rather than fail the grant.
+            logger.LogWarning(ex,
+                "[EXT-GRANT] Failed to resolve grantedby systemuser for oid {Oid} — omitting the audit field.",
+                callerOid);
+            return null;
+        }
+    }
+
+    private sealed class SystemUserRow
+    {
+        public Guid? systemuserid { get; set; }
+    }
 
     // =========================================================================
     // Helpers
@@ -217,7 +265,7 @@ public static class GrantExternalAccessEndpoint
     /// contract directly — a wrong <c>@odata.bind</c> key silently breaks the grant.
     /// </summary>
     internal static object BuildGrantPayload(
-        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? callerSystemUserId)
+        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId)
     {
         // Bind exactly ONE typed root lookup per record type (never two). A project root binds
         // sprk_projectid@odata.bind — byte-identical to the pre-070 project grant (back-compat).
@@ -231,15 +279,19 @@ public static class GrantExternalAccessEndpoint
             ["sprk_granteddate"] = DateTime.UtcNow.ToString("o")
         };
 
-        if (!string.IsNullOrEmpty(callerSystemUserId) &&
-            Guid.TryParse(callerSystemUserId, out var systemUserId))
+        // grantedBySystemUserId is already a resolved Dataverse systemuserid (see
+        // ResolveGrantedBySystemUserIdAsync) — NOT the caller's raw AAD oid. Omitted when unresolved.
+        if (!string.IsNullOrEmpty(grantedBySystemUserId) &&
+            Guid.TryParse(grantedBySystemUserId, out var systemUserId))
         {
             payload["sprk_grantedby@odata.bind"] = $"/systemusers({systemUserId})";
         }
 
         if (request.ExpiryDate.HasValue)
         {
-            payload["sprk_expirydate"] = request.ExpiryDate.Value.ToString("o");
+            // Bug fix (task 070): the grant table's expiry field is sprk_expiresdate (verified live via
+            // describe), NOT sprk_expirydate — the prior name would 400 any grant that carries an expiry.
+            payload["sprk_expiresdate"] = request.ExpiryDate.Value.ToString("o");
         }
 
         if (request.AccountId.HasValue)

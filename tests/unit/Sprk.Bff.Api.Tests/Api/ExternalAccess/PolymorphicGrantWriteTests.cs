@@ -188,7 +188,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: projectId, recordType: null, recordId: null);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Project, projectId, callerSystemUserId: null));
+            request, ExternalGrantRootType.Project, projectId, grantedBySystemUserId: null));
 
         payload.Should().ContainKey("sprk_projectid@odata.bind");
         payload["sprk_projectid@odata.bind"].Should().Be($"/sprk_projects({projectId})");
@@ -205,7 +205,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, callerSystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
 
         payload["sprk_matterid@odata.bind"].Should().Be($"/sprk_matters({matterId})");
         payload.Should().NotContainKey("sprk_projectid@odata.bind");
@@ -219,7 +219,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: Guid.Empty, recordType: "workassignment", recordId: waId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.WorkAssignment, waId, callerSystemUserId: null));
+            request, ExternalGrantRootType.WorkAssignment, waId, grantedBySystemUserId: null));
 
         payload["sprk_workassignmentid@odata.bind"].Should().Be($"/sprk_workassignments({waId})");
         payload.Should().NotContainKey("sprk_projectid@odata.bind");
@@ -236,7 +236,7 @@ public class PolymorphicGrantWriteTests
         var request = MakeGrant(projectId: rootId, recordType: null, recordId: null);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, type, rootId, callerSystemUserId: null));
+            request, type, rootId, grantedBySystemUserId: null));
 
         var rootKeys = new[] { "sprk_projectid@odata.bind", "sprk_matterid@odata.bind", "sprk_workassignmentid@odata.bind" };
         payload.Keys.Count(k => rootKeys.Contains(k)).Should().Be(1,
@@ -251,7 +251,7 @@ public class PolymorphicGrantWriteTests
             accessLevel: ExternalAccessLevel.Collaborate);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, callerSystemUserId: null));
+            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
 
         payload.Should().ContainKey("sprk_contactid@odata.bind");
         payload["sprk_accesslevel"].Should().Be((int)ExternalAccessLevel.Collaborate);
@@ -259,16 +259,48 @@ public class PolymorphicGrantWriteTests
     }
 
     [Fact]
-    public void BuildGrantPayload_WithCaller_BindsGrantedBy()
+    public void BuildGrantPayload_WithResolvedSystemUser_BindsGrantedBy()
     {
         var matterId = Guid.NewGuid();
-        var systemUserId = Guid.NewGuid();
+        var systemUserId = Guid.NewGuid(); // a resolved Dataverse systemuserid (NOT an AAD oid)
         var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
 
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
-            request, ExternalGrantRootType.Matter, matterId, callerSystemUserId: systemUserId.ToString()));
+            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: systemUserId.ToString()));
 
         payload["sprk_grantedby@odata.bind"].Should().Be($"/systemusers({systemUserId})");
+    }
+
+    [Fact]
+    public void BuildGrantPayload_NoResolvedSystemUser_OmitsGrantedBy()
+    {
+        // Regression (task 070): grantedby is audit metadata resolved from the caller's oid → systemuserid.
+        // When it can't be resolved (null), it MUST be omitted — an audit field must never 400 the grant.
+        var matterId = Guid.NewGuid();
+        var request = MakeGrant(projectId: Guid.Empty, recordType: "matter", recordId: matterId);
+
+        var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
+            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+
+        payload.Should().NotContainKey("sprk_grantedby@odata.bind");
+    }
+
+    [Fact]
+    public void BuildGrantPayload_WithExpiry_BindsExpiresDateField_NotExpiryDate()
+    {
+        // Regression (task 070): the grant table's expiry field is sprk_expiresdate, NOT sprk_expirydate
+        // (verified live) — the prior name would 400 any grant carrying an expiry.
+        var matterId = Guid.NewGuid();
+        var request = new GrantAccessRequest(
+            ContactId: Guid.NewGuid(), ProjectId: Guid.Empty, AccessLevel: ExternalAccessLevel.ViewOnly,
+            ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)), AccountId: null,
+            RecordType: "matter", RecordId: matterId);
+
+        var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
+            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+
+        payload.Should().ContainKey("sprk_expiresdate");
+        payload.Should().NotContainKey("sprk_expirydate");
     }
 
     // =========================================================================
