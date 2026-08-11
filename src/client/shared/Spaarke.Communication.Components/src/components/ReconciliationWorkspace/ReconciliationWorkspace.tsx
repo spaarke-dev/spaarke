@@ -42,7 +42,11 @@ import type {
 } from '../ReconciliationBrowseShell/ReconciliationBrowseShell.types';
 import { FieldUpdateReconcileTab, TaskReconcileTab } from '../ReconcileTabs';
 import type { ReconcileRegarding, ProposalOutcome } from '../ReconcileTabs/FieldUpdateReconcileTab';
-import type { EmailConnectionsReviewProps } from '../EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
+import type {
+  EmailConnectionsReviewProps,
+  CreatedRecordRef,
+  EmlSource,
+} from '../EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
 import type { AuthenticatedFetchFn } from '../EmailBody/EmailBodyView.types';
 import type { EmailCitation } from '../../logic/citations';
 
@@ -112,6 +116,27 @@ export interface ReconciliationWorkspaceProps {
   onOpenOriginalActivate?: ReconciliationBrowseShellProps['onOpenOriginalActivate'];
   /** Forwarded to the browse shell reader toolbar (Reply / Save to SharePoint / …). */
   readerActions?: ReconciliationBrowseShellProps['readerActions'];
+
+  /**
+   * Task 064 (E1b): "New record" launcher. When supplied, the Related-to review's
+   * "New record" tile (grid cell AND browse tab) opens the host's Quick Start /
+   * Create*Wizard and, on a created {@link CreatedRecordRef}, files it as the
+   * confirmed regarding via the shared additive confirm path (no second write
+   * path; NFR-10) — which re-scopes Fields/Tasks. `null` ⇒ cancelled. The
+   * workspace binds the current row's `.eml` source (see `resolveEmlSource`) so
+   * the launched wizard can pre-seed its AI-prepopulate step (E1c). Omitted ⇒ the
+   * review keeps its existing fire-and-forget "New record" behavior (if the host
+   * wires that via `resolveReview`) or hides the tile.
+   */
+  onLaunchCreateRecord?: (ctx: { emlSource?: EmlSource }) => Promise<CreatedRecordRef | null>;
+
+  /**
+   * Task 064 (E1c): resolve a grid row → the reconciled email's archived `.eml`
+   * source (`sprk_document` id), passed to `onLaunchCreateRecord` so the launched
+   * wizard opens pre-seeded with the email content. Omitted / `undefined` ⇒ the
+   * wizard opens without a pre-loaded file (E1b still works).
+   */
+  resolveEmlSource?: (record: Record<string, unknown>) => EmlSource | undefined;
 }
 
 /** Read a string field off an untyped grid row. */
@@ -170,6 +195,8 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   onProposalResolved,
   onOpenOriginalActivate,
   readerActions,
+  onLaunchCreateRecord,
+  resolveEmlSource,
 }) => {
   const s = useStyles();
 
@@ -220,13 +247,29 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     [onAssociationsChanged]
   );
 
+  // Task 064 (E1b): wrap the host's per-row review props to inject a zero-arg
+  // "New record" launcher bound to THIS row's `.eml` source (E1c). The shared
+  // review component stays context-agnostic (ADR-012); the workspace owns the
+  // emlSource binding. No-op passthrough when the host wires no launcher.
+  const wrapReview = React.useCallback(
+    (liveRow: Record<string, unknown>): EmailConnectionsReviewProps => {
+      const base = resolveReview!(liveRow);
+      if (!onLaunchCreateRecord) return base;
+      return {
+        ...base,
+        onLaunchCreateRecord: () => onLaunchCreateRecord({ emlSource: resolveEmlSource?.(liveRow) }),
+      };
+    },
+    [resolveReview, onLaunchCreateRecord, resolveEmlSource]
+  );
+
   // The grid's interactive Related-to cell (052) — only when the host resolves it.
   const relatedTo = React.useMemo(
     () =>
       resolveReview
-        ? { resolveReview, onConfirmed: (record: Record<string, unknown>) => handleConfirmed(record) }
+        ? { resolveReview: wrapReview, onConfirmed: (record: Record<string, unknown>) => handleConfirmed(record) }
         : undefined,
-    [resolveReview, handleConfirmed]
+    [resolveReview, wrapReview, handleConfirmed]
   );
 
   // The shell's right-pane TabList (Related to · Fields · Tasks) for one record.
@@ -259,7 +302,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
           <div className={s.tabBody} data-testid="reconcile-tab-body">
             {effectiveTab === 'related' &&
               (resolveReview && liveRow ? (
-                <RelatedToCell review={resolveReview(liveRow)} onConfirmed={() => handleConfirmed(liveRow)} />
+                <RelatedToCell review={wrapReview(liveRow)} onConfirmed={() => handleConfirmed(liveRow)} />
               ) : (
                 <div className={s.relatedNote} role="note" data-testid="reconcile-related-note">
                   <Text>Related-to review is not configured for this host.</Text>
@@ -293,6 +336,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       rows,
       resolveRegarding,
       resolveReview,
+      wrapReview,
       selectedTab,
       authenticatedFetch,
       handleCitationClick,
