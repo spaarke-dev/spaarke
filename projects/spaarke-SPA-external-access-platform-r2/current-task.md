@@ -1,32 +1,34 @@
 # Current Task State — spaarke-SPA-external-access-platform-r2
 
-> **Last Updated**: 2026-08-11 (task 070 COMPLETE — deployed + live-verified)
-> **Recovery**: read Quick Recovery. Task 070 done; P2b continues with 071.
+> **Last Updated**: 2026-08-11 (task 070 COMPLETE + org-scoping done; task 071 STARTING)
+> **Recovery**: read Quick Recovery. 070 is done/deployed/verified. 071 is set up (conflict-check clean) but
+> its heavy implementation should run in a fresh context — resume with "work on task 071".
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Status** | Task **070 COMPLETE** — polymorphic external grant-WRITE (Project/Matter/WorkAssignment) deployed to spaarke-bff-dev + **live-verified** (matter/WA/project grants each bind the correct single typed lookup; no-root → 400). While verifying, found + fixed that the ENTIRE grant path was broken (never live in teams-app-r1): PascalCase `@odata.bind` nav names, grantedby oid→systemuserid, `sprk_expiresdate`, removed broken account bind. External-access suite 225 pass; publish 48.45 MB; gates PASS. |
-| **NEXT ACTION** | **P2b continues** — task **071** (PCF/modal polymorphism + side-pane Advanced Lookup) → 072 (Tier-1 Option-B entitlement + widgetRegistry tab sets) → 073 (wave deploy + both-plane UAT). Say "work on task 071". |
-| **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — **0 behind / 16 ahead** of master. Worktree updated from master; **teams-app-r1 SSO-fallback SPA fix (`d636b6872`, App.tsx + AuthGuard.tsx) is now merged-in** and ready for the eventual external-spa deploy. Not yet merged branch→master. |
-| **Deploy state** | BFF live on spaarke-bff-dev with all grant fixes. SPA (external-spa) NOT yet deployed — task 073 (needs 071/072); now includes the teams auth fix. |
+| **Status** | Task **070 COMPLETE** (deployed + live-verified: polymorphic grant-write + repaired the fully-broken grant path + `sprk_organization` scoping). **Task 071 NOT STARTED** — rigor declared (FULL, sonnet@high, directional), `/conflict-check` CLEAN (no PR touches TrackingFieldTrio / AccessGrantModal / Spaarke.UI.Components). |
+| **NEXT ACTION** | **Resume task 071 in a fresh context** — say "work on task 071". It's a 1–2 day PCF+shared-lib task: (1) parameterize `TrackingFieldTrio/index.ts` by host entity (drop `GRANT_RECORD_ENTITY='sprk_project'`; per-entity role-fields; grant-read filter `_sprk_{root}_value`; `retrieveRecord` host entity) — fixes the Matter/WA "Failed to load access data"; (2) `AccessGrantModal`: 3 `projectId` body keys → `{recordType,recordId}` (task-070 DTO), section-2 Combobox → side-pane Advanced Lookup via injected `INavigationService.openLookup` (reuse `createXrmNavigationService`, NO new abstraction); **also add an `sprk_organization` picker → send `organizationId`** (070 wired the backend); (3) Access-Permission gate reads `sprk_accesspermission` on host entity; (4) side-pane-over-modal spike (step 6); (5) tests + PCF version bump (4 places) + `npm run build:prod` + solution import; (6) Step 9.5 gates. |
+| **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — pushed, 0 unpushed. ~18 behind / 19 ahead of master (master moving; teams-app-r1 SSO SPA fix already merged-in earlier). Update-from-master again at 071 start is fine (071 touches PCF/shared-lib; check for overlap). |
+| **BFF deploy** | Live on spaarke-bff-dev with ALL grant fixes + org bind. SPA (external-spa) NOT deployed yet (task 073). |
 
-## ✅ Task 070 — what shipped + verified
-- **Polymorphic grant-write** + fail-closed root resolution + close-project `_sprk_project_value` fix.
-- **Grant path fully repaired** (4 latent bugs, all live-verified fixed): nav names PascalCase, grantedby
-  systemuserid resolution, expiry field, account-bind removed.
-- Live UAT green (matter/WA/project 200 + correct binding; no-root 400). Test rows cleaned up.
-- Docs: `notes/task-070-deviations.md` (full root-cause + UAT + /defer items).
+## ✅ Task 070 — done (reference)
+Grant path was fully broken (never live in teams-app-r1); fixed + live-verified: PascalCase `@odata.bind`
+nav names (`sprk_Contact/sprk_Project/sprk_Matter/sprk_WorkAssignment/sprk_GrantedBy`), grantedby
+oid→systemuserid (omit-if-unresolved), `sprk_expiresdate`, and grantee firm/org → **`sprk_Organization`**
+lookup (created on the grant table + DTO `AccountId→OrganizationId` + bound + live-verified). Polymorphic
+root {recordType,recordId} + fail-closed + close-project `_sprk_project_value` fix. External-access suite
+227 pass. Full detail: `notes/task-070-deviations.md`.
+
+## 071 context already loaded (reuse, don't re-derive)
+- Inventory of the 3 change-places + side-pane helper: `notes/polymorphic-grant-authoring-enhancement.md`.
+- Side-pane Advanced Lookup = `INavigationService.openLookup` (`Spaarke.UI.Components/src/types/serviceInterfaces.ts:363`) → `createXrmNavigationService` (`utils/adapters/xrmNavigationServiceAdapter.ts:92`, cleanGuid). Adopt as-is (§11).
+- Grant DTO now: `{contactId, recordType, recordId, accessLevel, organizationId?, expiryDate?}`; legacy `projectId` still works.
 
 ## Follow-ups
-1. **Org-scoping** — ✅ DONE (owner: build now). `sprk_Organization` lookup created on the grant table + DTO `AccountId→OrganizationId` + bound + **live-verified** (matter grant with `organizationId` populated `sprk_organization`). Task 071 adds the modal org picker.
-2. **grantedby under SSO**: owner will confirm `sprk_grantedby` populates under a real workforce token (073 UAT). Non-blocking.
-
-## Remaining (project)
-- **P2b**: 071 → 072 → 073 (073 also live-tests revoke + close-project + deploys the SPA incl. teams fix).
-- **028 both-plane read UAT** (deployed, owner-pending).
-- **Master integration** (branch→master) deferred; 16 ahead / 0 behind.
+1. **Org picker in modal** — surface it in 071 (backend ready: send `organizationId` = a `sprk_organization` id).
+2. **grantedby under SSO** — owner confirms during 073 UAT (non-blocking).
 
 ## Notes index
-`notes/`: `task-070-deviations.md` (this task, full UAT), `polymorphic-grant-authoring-enhancement.md` (P2b design), `task-028-deviations.md`, `external-access-polymorphic-scoping-design.md`, `module-entitlement-schema-decision.md`, `grid-widget-empty-diagnosis.md`.
+`notes/`: `task-070-deviations.md`, `polymorphic-grant-authoring-enhancement.md`, `task-028-deviations.md`, `external-access-polymorphic-scoping-design.md`, `module-entitlement-schema-decision.md`, `grid-widget-empty-diagnosis.md`.
