@@ -4,15 +4,19 @@
     <title>Polymorphic external grant-WRITE (BFF) — grant/revoke across Project · Matter · Work Assignment + close-project lookup-name bug fix</title>
     <phase>P2b Polymorphic access-write (grant authoring)</phase>
     <gate>blocked-until:none (028 shipped; 020 schema owner-created)</gate>
-    <status>code-complete-deploy-gated</status>
-    <status-note>2026-08-10: BFF code + tests + quality gates DONE. Polymorphic grant-write
-    (Project/Matter/WorkAssignment) via {recordType,recordId}; legacy ProjectId shorthand kept;
-    fail-closed reject; close-project _sprk_project_value bug fixed. Build clean; full BFF suite
-    10293 pass/0 fail (+34 new PolymorphicGrantWriteTests); publish 48.44 MB (Δ0, ≤60); no CVE;
-    code-review + adr-check PASS. REMAINING: owner-gated Azure deploy (Deploy-BffApi.ps1 → spaarke-bff-dev,
-    from worktree) + live matter/WA grant smoke test = the escalation gate (nav-property final check).
-    2 pre-existing latent bugs discovered + documented for /defer (sprk_expiresdate, sprk_accountid) —
-    out of scope (byte-identical back-compat). See notes/task-070-deviations.md.</status-note>
+    <status>completed</status>
+    <status-note>2026-08-11: DEPLOYED to spaarke-bff-dev (from worktree) + LIVE-VERIFIED end-to-end.
+    Polymorphic grant-write (Project/Matter/WorkAssignment) via {recordType,recordId} + legacy ProjectId;
+    fail-closed reject; close-project _sprk_project_value fix. Live UAT: matter/WA/project grants all 200
+    with the correct single typed lookup bound (verified via read_query); no-root → 400. Escalation trigger
+    FIRED (owner-provided nav names were wrong) and was RESOLVED: live $metadata is authoritative. In doing
+    so, found + fixed that the ENTIRE grant path was broken (never executed live in teams-app-r1): @odata.bind
+    nav names must be PascalCase (sprk_Contact/sprk_Project/sprk_Matter/sprk_WorkAssignment/sprk_GrantedBy);
+    grantedby must resolve AAD oid→systemuserid (omit if unresolved); expiry field is sprk_expiresdate;
+    removed the broken sprk_accountid bind (org=sprk_organization per owner, no lookup on table yet).
+    External-access suite 225 pass/0 fail; publish 48.45 MB (≤60); no CVE; gates PASS. Follow-ups → /defer:
+    org-scoping lookup + AccountId→OrganizationId; confirm grantedby under real SSO token (073 UAT).
+    See notes/task-070-deviations.md.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Rewrites the external grant-WRITE authorization boundary (creates sprk_externalrecordaccess rows that confer external access); bff-api + auth; modifies .cs; ends in a live redeploy. Security-sensitive per root CLAUDE.md §6.</rigor-reason>
     <model-tier>opus</model-tier>

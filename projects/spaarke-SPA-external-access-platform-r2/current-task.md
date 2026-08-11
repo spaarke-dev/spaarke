@@ -1,32 +1,32 @@
 # Current Task State — spaarke-SPA-external-access-platform-r2
 
-> **Last Updated**: 2026-08-10 (task 070 — code complete, deploy-gated)
-> **Recovery**: read Quick Recovery. Task 070 BFF code+tests+quality-gates DONE; the Azure deploy +
-> live matter/WA grant smoke test (escalation gate) is the one remaining, owner-gated step.
+> **Last Updated**: 2026-08-11 (task 070 COMPLETE — deployed + live-verified)
+> **Recovery**: read Quick Recovery. Task 070 done; P2b continues with 071.
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Status** | Task **070 CODE-COMPLETE** — polymorphic external grant-WRITE (Project/Matter/WorkAssignment) + close-project cascade-revoke bug fix. Build clean; full BFF suite **10293 pass / 0 fail** (+34 new); publish **48.44 MB** (Δ0, ≤60); no CVE; code-review + adr-check **PASS**. NOT yet deployed. |
-| **NEXT ACTION** | **Owner: gate the BFF deploy** — `scripts/Deploy-BffApi.ps1` → spaarke-bff-dev (from worktree, NOT CI), then the **escalation-gate live smoke test**: grant a Matter AND a Work Assignment to an external contact via `/api/v1/external-access/grant` `{recordType,recordId}` and confirm `_sprk_matter_value`/`_sprk_workassignment_value` populate (read_query). If a matter/WA grant write fails live → STOP + escalate (nav-property mismatch). Then mark 070 ✅ and proceed to 071. Say "deploy task 070" to proceed. |
-| **Task** | 070 (code done; deploy + live-write verification pending) |
-| **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — 070 code committed locally (see git log). 40 behind / (10+) ahead of master; master integration still deferred. |
-| **Escalation** | ARMED for Step 8 live-write: matter/WA nav-property names (`sprk_matterid`/`sprk_workassignmentid`) verified by convention (2 on-table data points) + owner + schema describe, but the definitive faithful check is the live grant write. |
+| **Status** | Task **070 COMPLETE** — polymorphic external grant-WRITE (Project/Matter/WorkAssignment) deployed to spaarke-bff-dev + **live-verified** (matter/WA/project grants each bind the correct single typed lookup; no-root → 400). While verifying, found + fixed that the ENTIRE grant path was broken (never live in teams-app-r1): PascalCase `@odata.bind` nav names, grantedby oid→systemuserid, `sprk_expiresdate`, removed broken account bind. External-access suite 225 pass; publish 48.45 MB; gates PASS. |
+| **NEXT ACTION** | **P2b continues** — task **071** (PCF/modal polymorphism + side-pane Advanced Lookup) → 072 (Tier-1 Option-B entitlement + widgetRegistry tab sets) → 073 (wave deploy + both-plane UAT). Say "work on task 071". |
+| **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — **0 behind / 16 ahead** of master. Worktree updated from master; **teams-app-r1 SSO-fallback SPA fix (`d636b6872`, App.tsx + AuthGuard.tsx) is now merged-in** and ready for the eventual external-spa deploy. Not yet merged branch→master. |
+| **Deploy state** | BFF live on spaarke-bff-dev with all grant fixes. SPA (external-spa) NOT yet deployed — task 073 (needs 071/072); now includes the teams auth fix. |
 
-## ✅ Task 070 — what shipped (code)
-- **New** `ExternalGrantRoot.cs` (enum + `BindFor`/`TryParse`; no interface, ADR-010).
-- `GrantAccessRequest`/`InviteExternalUserRequest` gained optional `{RecordType, RecordId}`; legacy `ProjectId` = back-compat shorthand.
-- `GrantExternalAccessEndpoint`: `ResolveGrantRoot` (fail-closed) + polymorphic `BuildGrantPayload` (binds exactly one typed lookup; project grant byte-identical).
-- `/invite-and-grant` threads the root (400 before onboarding side effects); `/revoke` + `/invite` no longer require `ProjectId`.
-- `ProjectClosureEndpoint`: bug fix `_sprk_projectid_value` → `_sprk_project_value` (+ extracted `BuildActiveProjectGrantsFilter` for regression test).
-- Tests: `PolymorphicGrantWriteTests.cs` (34) — per-root payload contract, fail-closed rejects, legacy ProjectId, root parse/bind, close-project filter regression. 3 existing tests updated for relaxed contracts.
-- Docs: `notes/task-070-deviations.md` (incl. 2 discovered pre-existing latent bugs → recommend /defer: `sprk_expiresdate`, `sprk_accountid`).
+## ✅ Task 070 — what shipped + verified
+- **Polymorphic grant-write** + fail-closed root resolution + close-project `_sprk_project_value` fix.
+- **Grant path fully repaired** (4 latent bugs, all live-verified fixed): nav names PascalCase, grantedby
+  systemuserid resolution, expiry field, account-bind removed.
+- Live UAT green (matter/WA/project 200 + correct binding; no-root 400). Test rows cleaned up.
+- Docs: `notes/task-070-deviations.md` (full root-cause + UAT + /defer items).
 
-## Remaining after 070 deploy
-- **P2b wave**: 071 (PCF/modal polymorphism + side-pane Advanced Lookup), 072 (Tier-1 Option-B entitlement + widgetRegistry tab sets), 073 (wave deploy + both-plane UAT).
-- **028 live both-plane UAT** (deployed dev, owner-pending).
-- **Master integration** deferred (40 behind).
+## /defer items (owner intent needed — pending filing)
+1. **Org-scoping**: add `sprk_organization` lookup to `sprk_externalrecordaccess`; DTO `AccountId → OrganizationId`; bind it (currently accepted-but-not-persisted; OOB `account` was wrong per owner).
+2. **grantedby under SSO**: confirm systemuser resolution populates `sprk_grantedby` with a real workforce token (073 UAT).
+
+## Remaining (project)
+- **P2b**: 071 → 072 → 073 (073 also live-tests revoke + close-project + deploys the SPA incl. teams fix).
+- **028 both-plane read UAT** (deployed, owner-pending).
+- **Master integration** (branch→master) deferred; 16 ahead / 0 behind.
 
 ## Notes index
-`notes/`: `task-070-deviations.md` (this task), `polymorphic-grant-authoring-enhancement.md` (P2b binding design), `task-028-deviations.md`, `external-access-polymorphic-scoping-design.md`, `module-entitlement-schema-decision.md`, `grid-widget-empty-diagnosis.md`.
+`notes/`: `task-070-deviations.md` (this task, full UAT), `polymorphic-grant-authoring-enhancement.md` (P2b design), `task-028-deviations.md`, `external-access-polymorphic-scoping-design.md`, `module-entitlement-schema-decision.md`, `grid-widget-empty-diagnosis.md`.

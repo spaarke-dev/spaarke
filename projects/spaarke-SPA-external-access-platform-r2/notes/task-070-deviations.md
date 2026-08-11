@@ -1,81 +1,109 @@
-# Task 070 — Polymorphic external grant-WRITE (BFF) — deviations & decisions
+# Task 070 — Polymorphic external grant-WRITE (BFF) — deviations & live-UAT findings
 
-> 2026-08-10 · FULL rigor · opus @ xhigh · Companion (write-side) to task 028's polymorphic reads.
-> Branch `work/spaarke-SPA-external-access-platform-r2`. `/conflict-check` clean (no open PR touches
-> `Api/ExternalAccess/**` or `Infrastructure/ExternalAccess/**`; teams-app-r1 merged/stable).
+> 2026-08-11 · FULL rigor · opus @ xhigh · Companion (write-side) to task 028's polymorphic reads.
+> Branch `work/spaarke-SPA-external-access-platform-r2`. Deployed to spaarke-bff-dev from worktree +
+> **live-verified end-to-end** against the real endpoint.
 
-## What shipped (code)
+## Headline: the external grant-WRITE path was completely broken and had never worked
 
-- **New**: `Infrastructure/ExternalAccess/ExternalGrantRoot.cs` — `ExternalGrantRootType` enum
-  (Project/Matter/WorkAssignment) + static `ExternalGrantRoot` helper: `BindFor(type)` → the
-  `@odata.bind` nav-property + entity set, and `TryParse(raw)` for the wire `recordType` token
-  (case/hyphen/underscore tolerant, fail-closed on unknown). No new interface (ADR-010).
-- **`Dtos/GrantAccessRequest.cs`** — added optional `RecordType` (string) + `RecordId` (Guid?).
-  Legacy `ProjectId` retained as back-compat shorthand for a project root.
-- **`Dtos/InviteExternalUserRequest.cs`** — added optional `RecordType` + `RecordId` (threaded to
-  the grant core by `/invite-and-grant`; unused by `/invite`).
-- **`GrantExternalAccessEndpoint.cs`** — `ResolveGrantRoot(request)` (precedence: explicit
-  recordType+recordId > legacy projectId; fail-closed otherwise) + `BuildGrantPayload` generalized to
-  bind exactly ONE typed root lookup per record type. `CreateGrantAsync` now takes the resolved
-  `(rootType, rootId)`. `BuildGrantPayload`/`ResolveGrantRoot` made `internal` (InternalsVisibleTo) for
-  direct payload-contract tests.
-- **`InviteAndGrantExternalUserEndpoint.cs`** — resolves the root up-front (400 before any onboarding
-  side effect), threads it through `CreateGrantAsync`.
-- **`RevokeExternalAccessEndpoint.cs` / `InviteExternalUserEndpoint.cs`** — dropped the
-  `ProjectId`-required 400 (revoke deactivates by AccessRecordId; invite only onboards). DTO field kept
-  for back-compat.
-- **`ProjectClosureEndpoint.cs`** — **bug fix**: cascade-revoke filter `_sprk_projectid_value` →
-  `_sprk_project_value` (the prior field name is invalid → matched zero rows, so close-project silently
-  revoked nothing). Extracted `BuildActiveProjectGrantsFilter(projectId)` (internal) for regression test.
+Live smoke-testing the deployed `/api/v1/external-access/grant` surfaced that **every** grant — matter,
+work-assignment, AND the byte-identical legacy project path — returned Dataverse 400. Root-cause
+investigation (via live `$metadata` + MCP reproduction, per §6.5 Empirical-Reproduction-FIRST) found
+the grant path shipped by teams-app-r1 was never actually executed live (its E2E was owner-pending), so
+multiple payload bugs were latent. Task 070 fixes all of them; grants now work.
 
-## Escalation trigger — did NOT fire (verification record)
+### Bug 1 (PRIMARY) — `@odata.bind` navigation-property names were wrong
 
-Trigger: "if the live @odata.bind nav-property name for matter/WA differs from the owner-provided
-`sprk_matterid`/`sprk_workassignmentid`, or a matter/WA grant write fails live — STOP."
+The single-valued navigation property for a lookup on `sprk_externalrecordaccess` is **PascalCase**
+`sprk_X`, NOT the lowercase `sprk_xid` form the code used. Verified live via
+`EntityDefinitions('sprk_externalrecordaccess')/ManyToOneRelationships`:
 
-- **Schema existence** verified live via `mcp__dataverse describe tables/sprk_externalrecordaccess`:
-  lookups `sprk_project` / `sprk_matter` / `sprk_workassignment` all present, correct target tables.
-- **Nav-property convention** proven TWICE on this exact table by the shipped grant code:
-  `sprk_contact` → `sprk_contactid@odata.bind` and `sprk_project` → `sprk_projectid@odata.bind`
-  (attribute `sprk_X` → nav property `sprk_Xid`). Owner independently confirmed `sprk_matterid` /
-  `sprk_workassignmentid` in `polymorphic-grant-authoring-enhancement.md` (locked decision #5).
-- **Definitive faithful check** = a live matter + WA grant write through the deployed 070 endpoint
-  (MCP `create_record` normalizes lookups and would NOT faithfully test the raw `@odata.bind` string,
-  so it was not used). This is the Step-8 deploy smoke test; the trigger stays ARMED for it — a live
-  matter/WA grant failure STOPS and escalates before marking 070 complete.
+| Attribute | Code used (WRONG) | Actual nav property (verified) |
+|---|---|---|
+| `sprk_contact` | `sprk_contactid` | **`sprk_Contact`** |
+| `sprk_project` | `sprk_projectid` | **`sprk_Project`** |
+| `sprk_matter` | `sprk_matterid` | **`sprk_Matter`** |
+| `sprk_workassignment` | `sprk_workassignmentid` | **`sprk_WorkAssignment`** |
+| `sprk_grantedby` | `sprk_grantedby` | **`sprk_GrantedBy`** |
 
-## Discovered pre-existing latent bugs (OUT OF SCOPE — not fixed here)
+The bind VALUE (plural entity set — `/sprk_matters({id})`, `/contacts({id})`) was already correct.
+Fix in `ExternalGrantRoot.BindFor` + `BuildGrantPayload`.
 
-The back-compat constraint requires the **project grant payload to stay byte-identical**, so these
-pre-existing field-name issues in `BuildGrantPayload` were left untouched and are recorded for `/defer`:
+### Bug 2 — `sprk_grantedby` bound the caller's AAD oid as a systemuserid
 
-1. **`sprk_expirydate`** written, but the live field is **`sprk_expiresdate`** (DATE ONLY). A grant
-   with `ExpiryDate` set would 400. (Only fires when expiry is supplied — teams-app-r1 evidently never
-   exercised it.)
-2. **`sprk_accountid@odata.bind`** written, but `sprk_externalrecordaccess` has **no account lookup**
-   at all (describe confirms). A grant with `AccountId` set would 400. Needs owner intent — is
-   `AccountId` meant to persist somewhere, or vestigial? Cannot be a mechanical rename.
+`ResolveCallerSystemUserId` returns the Azure AD object id (oid), which was bound directly as
+`/systemusers({oid})`. A Dataverse `systemuserid` is a DISTINCT GUID from the AAD oid (proven: caller
+oid `c74ac1af…` ↔ systemuserid `1d02f31c…`) → invalid reference → 400. Fix: new
+`ResolveGrantedBySystemUserIdAsync` maps oid → systemuserid via `systemuser.azureactivedirectoryobjectid`;
+**omit `grantedby` if unresolved** (an audit field must never 400 the grant).
 
-Recommend filing both via `/defer` (concrete failing behavior each). Not fixed in 070 to honor scope +
-byte-identical back-compat.
+### Bug 3 — expiry field name
 
-## Verification
+`sprk_expirydate` → **`sprk_expiresdate`** (verified live). Would 400 any grant carrying an expiry
+(e.g. task 071's modal).
 
-- `dotnet build` clean (0 errors). Full BFF test project: **10293 passed / 0 failed / 101 skipped**
-  (+34 new in `PolymorphicGrantWriteTests.cs`, 3 existing updated for the relaxed contracts).
-- Publish (Release, linux-x64): **48.44 MB compressed incl. PDBs** — Δ0.00 vs task-028 baseline; ≤60 MB.
-- `dotnet list package --vulnerable --include-transitive`: **no vulnerable packages**.
-- Quality gates (Step 9.5): code-review PASS (0 Critical), adr-check PASS (0 violations).
+### Bug 4 — firm/org association (owner steer)
 
-## §10 Placement Justification
+The prior `sprk_accountid@odata.bind → /accounts` is wrong twice: (a) `sprk_externalrecordaccess` has NO
+account lookup, and (b) Spaarke models the firm/org as **`sprk_organization`**, not the OOB `account`
+(owner, 2026-08-11). There is currently **no org/account lookup on the grant table** at all, so the bind
+was removed (it 400'd every grant that sent `AccountId`, incl. `/invite-and-grant`). `AccountId` is now
+accepted-but-not-persisted. **Follow-up (owner + 071/072)**: add a `sprk_organization` lookup to
+`sprk_externalrecordaccess`, rename DTO `AccountId → OrganizationId`, and bind it. → /defer.
 
-No new endpoint/service/package/DI registration. The change GENERALIZES the existing external-access
-grant-write endpoints (project-only → Project/Matter/WorkAssignment) and fixes a filter bug — the
-write-side mirror of task 028. It belongs in the BFF alongside the reads it complements. Publish-size
-Δ0, no CVE, tests added → all §10 pre-merge checks satisfied.
+## Polymorphic generalization (the task's nominal scope)
 
-## Deploy status
+- `ExternalGrantRoot` (enum + `BindFor` + `TryParse`) — no new interface (ADR-010).
+- `GrantAccessRequest`/`InviteExternalUserRequest`: optional `{RecordType, RecordId}`; legacy `ProjectId`
+  = back-compat shorthand.
+- `ResolveGrantRoot` (fail-closed, NFR-08) + polymorphic `BuildGrantPayload` (binds exactly ONE typed
+  root lookup per record type).
+- `/invite-and-grant` threads the root (400 before onboarding side effects); `/revoke` + `/invite` no
+  longer require `ProjectId`.
+- `ProjectClosureEndpoint`: bug fix `_sprk_projectid_value` → `_sprk_project_value` (the invalid field
+  matched zero rows → close-project silently revoked nothing). `BuildActiveProjectGrantsFilter` extracted
+  for regression test.
 
-BFF deploy from worktree (`scripts/Deploy-BffApi.ps1` → spaarke-bff-dev) + live matter/WA grant
-smoke test (escalation gate) is the remaining Step-8 action — owner-gated (outward-facing Azure deploy
-+ live Dataverse writes to shared dev). See current-task.md NEXT ACTION.
+## Live UAT — verified against deployed spaarke-bff-dev
+
+| Case | Result |
+|---|---|
+| POST /grant `{recordType:matter}` | **200** → row with `sprk_matter` set, project/WA null |
+| POST /grant `{recordType:workassignment}` | **200** → `sprk_workassignment` set, matter/project null |
+| POST /grant `{projectId}` (legacy) | **200** → `sprk_project` set, matter/WA null |
+| POST /grant `{}` (no root) | **400** fail-closed (exact message) |
+
+Each grant bound exactly ONE typed root lookup — no cross-binding. Test rows cleaned up.
+
+## Escalation trigger — fired, resolved (not silently bypassed)
+
+The armed trigger ("live @odata.bind nav name differs from owner-provided `sprk_matterid`/
+`sprk_workassignmentid`") **fired**: the owner-provided names (enhancement-note locked-decision #5) were
+INCORRECT. Resolution: determined the authoritative names from live `$metadata` (Path C — pivot to the
+correct implementation), applied + live-verified. Surfaced to the owner in the session + this note.
+
+## Minor / non-blocking observations
+
+- `sprk_grantedby` resolved to null under the CLI (`az account get-access-token`) smoke-test token — the
+  grant correctly proceeded without it (proving the non-blocking design). Confirm it populates under a
+  real workforce SSO token in the task-073 UAT. Non-blocking either way.
+- `/revoke` (ProjectId no longer required) and `close-project` cascade-revoke (`_sprk_project_value` fix)
+  are unit-verified (incl. a regression test) but not live-smoke-tested here — covered by the task-073
+  wave UAT.
+
+## Verification summary
+
+- External-access unit suite **225 pass / 0 fail** (+ polymorphic-write + regression tests). Full BFF
+  suite green pre-merge (10316).
+- Publish **48.45 MB** compressed (≤60); no vulnerable packages.
+- Quality gates (code-review + adr-check): PASS (no ADR violations; §10 Placement Justification =
+  generalizes existing external-access endpoints, no new endpoint/service/package/DI).
+- Deployed to spaarke-bff-dev from worktree (health + SHA verified); worktree updated from master
+  (0 behind), `/conflict-check` clean.
+
+## /defer items (need owner intent — file to notes/defer-issues.md + GitHub)
+
+1. **Org-scoping**: add `sprk_organization` lookup to `sprk_externalrecordaccess`; DTO `AccountId →
+   OrganizationId`; bind it. (Currently accepted-but-not-persisted.)
+2. **grantedby under SSO**: confirm systemuser resolution populates `sprk_grantedby` with a real
+   workforce token (073 UAT).
