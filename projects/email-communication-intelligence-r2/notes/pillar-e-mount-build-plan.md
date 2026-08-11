@@ -115,6 +115,41 @@ Sequence: **060 (review gate) → 061 → 062 → 059**. 061 can start in parall
 
 These reuse targets are carried into the follow-on task POMLs (063+) as explicit `<constraint>` + `<justification>` entries so a literal executor cannot rebuild them.
 
+## 9. Explicit build plan for 064 / 065 / 066 (UAT round-2 behaviors — NO defer)
+
+> Owner directive 2026-08-11: every gapped item gets a concrete mechanism — no deferrals. Grounded in the 2026-08-11 integration-surface investigation (see `notes/063-*` sibling + this section). Prototype **approved** (use existing components).
+
+### Architecture spine (applies to all three)
+The shared lib `@spaarke/communication-components` is context-agnostic (ADR-012). **Reuse the existing `getXrmForPicker()` self-resolve bridge** (already imported in `EmailConnectionsReview.tsx:42`) for ALL OOB Xrm capabilities — entity metadata, advanced-lookup, `navigateTo` — each **guarded no-op on non-MDA/dev hosts** (mirrors `EmailConnectionsReview.tsx:162`). A **host-injected callback is used ONLY for the Quick Start create-new flow (E1b/E1c)**, because `QuickStartModal` is a SpaarkeAi component that must not be imported into the shared lib. This minimizes host-injection and stays consistent with the package's shipped pattern.
+
+### Task 066 — E3b: New-task **Assigned to** → OOB advanced-lookup (smallest; build FIRST)
+- **Mechanism (reuse):** In `TaskReconcileTab.tsx` the `Assigned to` field is a text `<Input>` today (`:498-503`). Replace with an OOB advanced-lookup: `getXrmForPicker().Utility.lookupObjects({ entityTypes: ['systemuser','team'], allowMultiSelect:false })` → set `form.assignedTo` to the picked id + show the display name. **Exact reuse of `EmailConnectionsReview.tsx:157-176`.** Guarded no-op on non-MDA → keep the text `<Input>` as the dev fallback.
+- **Surface:** shared lib only. No host prop, no BFF. **Rigor STANDARD→FULL (TEST-MODIFYING), sonnet.**
+- **Tests:** mock `getXrmForPicker` per `RelatedToCell.test.tsx:52-61`; assert lookup opens + selection writes `assignedTo`.
+
+### Task 065 — E2b typed controls + E2c "Update other fields" (OOB self-resolve; NO BFF)
+- **E2b type-correct controls (reuse OOB metadata):** self-resolve `getXrmForPicker().Utility.getEntityMetadata(targetEntity, [targetField])` (proposal already carries `targetEntity`/`targetField`, `FieldUpdateReconcileTab.tsx:76-78`) → render by `AttributeType`: **DateTime → Fluent `DatePicker`; Picklist/State/Status → Fluent `Dropdown`** seeded from the metadata option-set; **Lookup → OOB advanced-lookup** (`lookupObjects`, `entityTypes` = the attribute's metadata `Targets`); else → today's text `<Input>`. The existing `fieldType` string hint (`:81`) is the fast-path; metadata refines it. Guarded no-op non-MDA → falls back to text + hint. **No BFF, no new host prop.**
+- **E2c "Update other fields" (reuse navigateTo):** full-width **"+ Update other fields"** button (Add icon, "+ {verb}" consistency) at the Fields-tab bottom → open the confirmed regarding record's form via `navigateToEntityRecordSurfaceAsync` (ui-components `WorkspaceShell/wizardLaunchers.ts:397`, self-resolved Xrm via `resolveXrmNavigation()`). Modal-on-modal; review shell stays open; on close, refresh that record's Field proposals. Guarded no-op non-MDA.
+- **Surface:** shared lib only (`FieldUpdateReconcileTab.tsx`). **Rigor FULL, opus** (typed-control matrix + metadata).
+- **Tests:** mock `getEntityMetadata` (return DateTime / Picklist+options / Lookup+Targets) + `lookupObjects` + `navigateTo`; assert control-per-type + modal-on-modal open/refresh.
+
+### Task 064 — E1b create-new-via-Quick-Start + E1c .eml pre-load (largest; BFF + SpaarkeAi hot-path; build LAST)
+- **E1b created record → confirmable candidate:**
+  - *Shared lib:* add injected callback `onLaunchCreateRecord?: (ctx: { emlSource?: EmlSource }) => Promise<CreatedRecordRef | null>` on `ReconciliationWorkspaceProps`, threaded to `EmailConnectionsReview` (replaces the fire-and-forget `onCreateNewRecord` tile action, `:260-275`). On resolve with a ref → re-enter `confirmCandidate`/`applyRegardingSelection` (`:115-143`) so the created record becomes the confirmed regarding (NFR-10). Review shell stays open (controlled) — modal-on-modal over the browse shell.
+  - *QuickStartModal (SpaarkeAi hot-path):* add **additive** `onRecordCreated?(ref)` prop; `await` the currently-`void`ed `launchSurface(...)` outcome (`QuickStartModal.tsx:253-279`) and on `result.committed` fire `onRecordCreated({ id: result.recordId, entityType })` (`launchSurface` already returns `{committed, recordId}`, `launchSurface.ts:74-90` / `types.ts:132-141`). Backward-compatible; **/conflict-check SpaarkeAi + update `projects/INDEX.md`.**
+  - *Hosts implement `onLaunchCreateRecord`:* mount `QuickStartModal`, resolve on `onRecordCreated`. SpaarkeAi-widget host = natural. Code-page host imports `QuickStartModal` directly (the prototype import failure was the **mock harness** constraint, not a real code-page-bundle constraint — confirm at build; if the AI-widgets dep weight is unacceptable, fall back to a thin shared launcher).
+- **E1c .eml pre-load (BFF resolver — decided; the wizard fetch is HARD session-scoped):**
+  - *BFF (§10):* endpoint that **materializes the reconciled email's archived `.eml`** (`sprk_document`, `sprk_isemailarchive`) **as a chat-session document** and returns **`{ sessionId, fileId, fileName }`** (NOT a bare fileId — the wizard requires `sessionId`, `CreateMatterWizard/main.tsx:74`; fetch = `GET /api/ai/chat/sessions/{sessionId}/documents/{fileId}/content`, `readHandoff.ts:69-70`). **Step 0: locate + REUSE the existing "attach/ingest document into a chat session" capability** (the Assistant's file-attach path) — do NOT build a new SPE ingest if one exists. Placement justification in PR (Documents/Chat domain, facade per §10); publish-size ≤60 MB + delta; no new HIGH CVE; seam tests (ADR-038 KEEP path).
+  - *Host:* before opening the wizard, call the endpoint for the reconciled email → pass `{ sessionId, fileIds:[fileId], fileNames }` as `QuickStartModal.getFileContext` (`QuickStartFileContext`, `QuickStartModal.tsx:111-115`). The wizard's EXISTING session-scoped fetch pre-populates AI. End-to-end reuse of the Assistant path.
+- **Surface:** shared lib + `QuickStartModal` (SpaarkeAi) + BFF + BOTH hosts. **Rigor FULL, opus.** **/conflict-check BFF + SpaarkeAi before PR.**
+- **Tests:** shared lib — mock `onLaunchCreateRecord` (created-ref → candidate → confirm, per `RelatedToCell.test.tsx:160-168`); QuickStartModal — await-outcome → `onRecordCreated`; BFF — seam test for the `.eml`→session-document resolver.
+
+### Sequencing & governance
+- **Order: 066 → 065 → 064.** Bank the low-risk OOB self-resolve wins first; tackle the BFF + SpaarkeAi-hot-path 064 last with a dedicated `/conflict-check` (BFF + SpaarkeAi) + §10 governance pass. Each task is its own PR-able unit.
+- All three are `parallel-safe:false` (shared `Spaarke.Communication.Components`) → **sequential, main-session**; `/conflict-check` before each shared-lib PR.
+- **Deploys remain paused** — 059 (gated) still deploys the surface; 064's BFF endpoint deploys with the next BFF release on operator go-ahead.
+- Reuse targets unchanged from §7.5 (QuickStartModal, `Create*Wizard` via surface-launch, `navigateTo`/`RecordNavigationModalShell`, `SprkModal` presets, OOB `lookupObjects`/`getEntityMetadata`).
+
 ## 8. Definition of done
 
 - `ReconciliationWorkspace` composes the production components honoring UX A1–A6 + B1–B13 + NFR-10/11; tests green.
