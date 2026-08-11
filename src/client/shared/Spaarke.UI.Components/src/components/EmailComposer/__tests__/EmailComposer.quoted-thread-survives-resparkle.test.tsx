@@ -29,7 +29,10 @@ const QUOTED_THREAD =
   '<p>On Jul 24, 2026 9:00 AM, sender@contoso.com wrote:</p><hr/><p>Original thread body — keep me.</p>';
 const CARD_SEEDED_DRAFT = '<p>Thanks — I will review and revert by Friday.</p>';
 const SEEDED_BODY = `${CARD_SEEDED_DRAFT}<p></p>${QUOTED_THREAD}`;
-const RESPARKLE_RESULT: IEmailAiDraftResult = { text: '<p>Actually, let me get back to you tomorrow.</p>', isHtml: true };
+const RESPARKLE_RESULT: IEmailAiDraftResult = {
+  text: '<p>Actually, let me get back to you tomorrow.</p>',
+  isHtml: true,
+};
 
 function renderComposer(overrides: Partial<IEmailComposerProps>) {
   const ref = React.createRef<IEmailComposerHandle>();
