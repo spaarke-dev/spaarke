@@ -36,12 +36,10 @@ on:
         type: boolean
         default: false
 
-  workflow_run:
-    workflows: ["SDAP CI"]
-    types:
-      - completed
-    branches:
-      - master
+  # NOTE (dotnet-10-upgrade-r1, 2026-08-11): the `workflow_run` auto-promote
+  # (dev→staging after "SDAP CI" on master) was REMOVED. All promotions are
+  # operator-driven via workflow_dispatch — no CI-forced deploys. CI improvements
+  # are being addressed separately.
 
 permissions:
   contents: read
