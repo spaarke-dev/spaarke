@@ -80,9 +80,15 @@ import {
   tokens,
   shorthands,
 } from '@fluentui/react-components';
-import { PersonRegular, DismissCircleRegular } from '@fluentui/react-icons';
+import { PersonRegular, DismissCircleRegular, BuildingRegular, DismissRegular } from '@fluentui/react-icons';
 import { SprkModal } from '../SprkModal';
-import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IContactSearchResult } from './types';
+import type {
+  IAccessGrantModalProps,
+  IAccessGrantCandidate,
+  IAccessGrantRecord,
+  IContactSearchResult,
+  IOrganizationPick,
+} from './types';
 import { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
 
 const useStyles = makeStyles({
@@ -179,11 +185,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   open,
   onClose,
   recordId,
+  recordType = 'project',
   canGrantAccess = true,
   authenticatedFetch,
   fetchCandidates,
   fetchExistingGrants,
   searchContacts,
+  pickContact,
+  pickOrganization,
   isInternalContact,
   onSetStandingGrant,
   title = 'Manage Access',
@@ -215,6 +224,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [selectedNamed, setSelectedNamed] = React.useState<IContactSearchResult | null>(null);
   const [standingForNamed, setStandingForNamed] = React.useState(false);
   const [addingNamed, setAddingNamed] = React.useState(false);
+  // Side-pane Advanced Lookup state (task 071). `pickingContact`/`pickingOrg`
+  // guard against re-entrant openLookup calls while a lookup pane is open;
+  // `pickedOrg` is the optional grantee firm/org sent as `organizationId`.
+  const [pickingContact, setPickingContact] = React.useState(false);
+  const [pickedOrg, setPickedOrg] = React.useState<IOrganizationPick | null>(null);
+  const [pickingOrg, setPickingOrg] = React.useState(false);
 
   const [revokeTargetId, setRevokeTargetId] = React.useState<string | null>(null);
   const [revoking, setRevoking] = React.useState(false);
@@ -244,6 +259,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSearchResults([]);
       setSelectedNamed(null);
       setStandingForNamed(false);
+      setPickedOrg(null);
       void loadData();
     }
     // Only re-run when the modal transitions open (and once per open), not on every render.
@@ -287,10 +303,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const grantContact = React.useCallback(
     async (
       contact: { contactId: string; fullName: string; email?: string },
-      opts: { standingGrant: boolean }
+      opts: { standingGrant: boolean; organizationId?: string }
     ): Promise<IGrantOutcome> => {
       const [firstName, ...rest] = contact.fullName.trim().split(/\s+/);
       const lastName = rest.join(' ') || firstName;
+      // Optional grantee firm/org (task 070/071). Spread into the body only when
+      // set, so a grant without an org selection omits the key entirely.
+      const orgFields = opts.organizationId ? { organizationId: opts.organizationId } : {};
 
       // Fail SAFE toward "internal" on a classification error: the
       // consequence of wrongly treating an external contact as internal is
@@ -305,20 +324,26 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
       if (!internal && contact.email) {
         // External, known email → the built, atomic onboard+grant+CIAM-email endpoint.
+        // Polymorphic root (task 070/071): send {recordType, recordId} — the BFF
+        // binds the correct typed root lookup (project|matter|workassignment).
         await postJson('/api/v1/external-access/invite-and-grant', {
           email: contact.email,
-          projectId: recordId,
+          recordType,
+          recordId,
           accessLevel: effectiveAccessLevel,
           firstName,
           lastName,
+          ...orgFields,
         });
       } else {
         // Internal workforce contact, or an external contact with no email on
         // file → the built grant-only core (no CIAM onboarding attempted).
         await postJson('/api/v1/external-access/grant', {
           contactId: contact.contactId,
-          projectId: recordId,
+          recordType,
+          recordId,
           accessLevel: effectiveAccessLevel,
+          ...orgFields,
         });
         if (internal) {
           // Escalated gap — see the module doc comment. The grant itself
@@ -338,7 +363,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
       return { notifyPending, standingGrantFailed };
     },
-    [effectiveAccessLevel, isInternalContact, onSetStandingGrant, postJson, recordId]
+    [effectiveAccessLevel, isInternalContact, onSetStandingGrant, postJson, recordId, recordType]
   );
 
   const handleApproveSelected = React.useCallback(async () => {
@@ -350,7 +375,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     let anyStandingGrantFailed = false;
     for (const candidate of toApprove) {
       try {
-        const outcome = await grantContact(candidate, { standingGrant: standingForCandidate.has(candidate.contactId) });
+        const outcome = await grantContact(candidate, {
+          standingGrant: standingForCandidate.has(candidate.contactId),
+          organizationId: pickedOrg?.id,
+        });
         anyNotifyPending = anyNotifyPending || outcome.notifyPending;
         anyStandingGrantFailed = anyStandingGrantFailed || outcome.standingGrantFailed;
       } catch {
@@ -378,13 +406,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     } else {
       setNotice({ intent: 'success', text: `Granted access to ${toApprove.length} contact(s).` });
     }
-  }, [candidates, grantContact, loadData, selectedCandidateIds, standingForCandidate]);
+  }, [candidates, grantContact, loadData, selectedCandidateIds, standingForCandidate, pickedOrg]);
 
   const handleAddNamed = React.useCallback(async () => {
     if (!selectedNamed) return;
     setAddingNamed(true);
     try {
-      const outcome = await grantContact(selectedNamed, { standingGrant: standingForNamed });
+      const outcome = await grantContact(selectedNamed, {
+        standingGrant: standingForNamed,
+        organizationId: pickedOrg?.id,
+      });
       const grantedName = selectedNamed.fullName;
       setSelectedNamed(null);
       setSearchQuery('');
@@ -409,7 +440,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     } finally {
       setAddingNamed(false);
     }
-  }, [grantContact, loadData, selectedNamed, standingForNamed]);
+  }, [grantContact, loadData, selectedNamed, standingForNamed, pickedOrg]);
 
   const handleSearchChange = React.useCallback(
     (query: string) => {
@@ -436,10 +467,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     }
     setRevoking(true);
     try {
+      // Revoke is root-agnostic (task 070): it deactivates by accessRecordId +
+      // contactId and no longer requires a root id, so no recordType/recordId is sent.
       await postJson('/api/v1/external-access/revoke', {
         accessRecordId: target.accessRecordId,
         contactId: target.contactId,
-        projectId: recordId,
       });
       setRevokeTargetId(null);
       await loadData();
@@ -449,7 +481,43 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     } finally {
       setRevoking(false);
     }
-  }, [existingGrants, loadData, postJson, recordId, revokeTargetId]);
+  }, [existingGrants, loadData, postJson, revokeTargetId]);
+
+  /** Opens the shared side-pane Advanced Lookup for a Contact (task 071) and,
+   * on a selection, sets it as the named contact to grant. The host's
+   * `pickContact` wires `INavigationService.openLookup` and enriches the result
+   * with the contact's email; a cancel resolves to `null` and leaves state
+   * unchanged. */
+  const handlePickContact = React.useCallback(async () => {
+    if (!pickContact) return;
+    setPickingContact(true);
+    try {
+      const picked = await pickContact();
+      if (picked) {
+        setSelectedNamed(picked);
+        setSearchQuery(picked.fullName);
+      }
+    } catch {
+      /* lookup cancelled/failed — leave the current selection unchanged */
+    } finally {
+      setPickingContact(false);
+    }
+  }, [pickContact]);
+
+  /** Opens the side-pane Advanced Lookup for a `sprk_organization` (task 071);
+   * a selection becomes the optional grantee firm/org sent as `organizationId`. */
+  const handlePickOrganization = React.useCallback(async () => {
+    if (!pickOrganization) return;
+    setPickingOrg(true);
+    try {
+      const picked = await pickOrganization();
+      if (picked) setPickedOrg(picked);
+    } catch {
+      /* lookup cancelled/failed — leave the current selection unchanged */
+    } finally {
+      setPickingOrg(false);
+    }
+  }, [pickOrganization]);
 
   const toggleCandidateSelected = (contactId: string) => {
     setSelectedCandidateIds(prev => {
@@ -575,33 +643,57 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   )}
                 </div>
 
-                {/* Section 2 — named-contact person-picker */}
+                {/* Section 2 — named-contact person-picker. When the host injects
+                    `pickContact` (task 071), the picker is the SHARED side-pane
+                    Advanced Lookup (INavigationService.openLookup); otherwise it
+                    falls back to the inline Combobox search (SPA/no-lookup hosts). */}
                 <div className={styles.section}>
                   <Text className={styles.sectionTitle}>Add a named contact</Text>
                   <Text className={styles.sectionSubtitle}>
-                    Search for any Contact to grant explicit access, regardless of role assignment.
+                    {pickContact
+                      ? 'Use Advanced Lookup to pick any Contact to grant explicit access, regardless of role assignment.'
+                      : 'Search for any Contact to grant explicit access, regardless of role assignment.'}
                   </Text>
                   <div className={styles.pickerRow}>
-                    <Combobox
-                      freeform
-                      placeholder="Search contacts by name or email…"
-                      value={searchQuery}
-                      onInput={e => handleSearchChange((e.target as HTMLInputElement).value)}
-                      onOptionSelect={(_, data) => {
-                        const found = searchResults.find(r => r.contactId === data.optionValue);
-                        setSelectedNamed(found ?? null);
-                        if (found) setSearchQuery(found.fullName);
-                      }}
-                      expandIcon={searching ? <Spinner size="tiny" /> : undefined}
-                      disabled={grantsBlocked}
-                    >
-                      {searchResults.map(result => (
-                        <Option key={result.contactId} value={result.contactId} text={result.fullName}>
-                          {result.fullName}
-                          {result.email ? ` (${result.email})` : ''}
-                        </Option>
-                      ))}
-                    </Combobox>
+                    {pickContact ? (
+                      <>
+                        <Button
+                          appearance="secondary"
+                          icon={pickingContact ? <Spinner size="tiny" /> : <PersonRegular />}
+                          disabled={grantsBlocked || pickingContact}
+                          onClick={handlePickContact}
+                        >
+                          {selectedNamed ? 'Change contact' : 'Select contact'}
+                        </Button>
+                        {selectedNamed && (
+                          <div className={styles.rowMain}>
+                            <Text className={styles.rowName}>{selectedNamed.fullName}</Text>
+                            {selectedNamed.email && <Text className={styles.rowMeta}>{selectedNamed.email}</Text>}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <Combobox
+                        freeform
+                        placeholder="Search contacts by name or email…"
+                        value={searchQuery}
+                        onInput={e => handleSearchChange((e.target as HTMLInputElement).value)}
+                        onOptionSelect={(_, data) => {
+                          const found = searchResults.find(r => r.contactId === data.optionValue);
+                          setSelectedNamed(found ?? null);
+                          if (found) setSearchQuery(found.fullName);
+                        }}
+                        expandIcon={searching ? <Spinner size="tiny" /> : undefined}
+                        disabled={grantsBlocked}
+                      >
+                        {searchResults.map(result => (
+                          <Option key={result.contactId} value={result.contactId} text={result.fullName}>
+                            {result.fullName}
+                            {result.email ? ` (${result.email})` : ''}
+                          </Option>
+                        ))}
+                      </Combobox>
+                    )}
                     {onSetStandingGrant && standingGrantAllowed && (
                       <Checkbox
                         label="Standing grant"
@@ -619,6 +711,37 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       Add
                     </Button>
                   </div>
+
+                  {/* Optional grantee firm/org (task 071) — the same side-pane
+                      Advanced Lookup, scoped to sprk_organization. A chosen org is
+                      sent as `organizationId` (the grant's sprk_Organization
+                      firm-scoping lookup, task 070). Only shown when the host wires
+                      `pickOrganization`. */}
+                  {pickOrganization && (
+                    <div className={styles.pickerRow}>
+                      <Button
+                        appearance="secondary"
+                        icon={pickingOrg ? <Spinner size="tiny" /> : <BuildingRegular />}
+                        disabled={grantsBlocked || pickingOrg}
+                        onClick={handlePickOrganization}
+                      >
+                        {pickedOrg ? 'Change organization' : 'Select organization (optional)'}
+                      </Button>
+                      {pickedOrg && (
+                        <>
+                          <Text className={styles.rowName}>{pickedOrg.name}</Text>
+                          <Button
+                            appearance="subtle"
+                            size="small"
+                            icon={<DismissRegular />}
+                            aria-label="Clear organization"
+                            onClick={() => setPickedOrg(null)}
+                            disabled={grantsBlocked}
+                          />
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Section 3 — existing grants + revoke */}

@@ -4,7 +4,7 @@
     <title>Polymorphic grant UI — TrackingFieldTrio host + AccessGrantModal across Project/Matter/WorkAssignment; adopt the shared side-pane Advanced-Lookup (INavigationService.openLookup) for the contact picker</title>
     <phase>P2b Polymorphic access-write (grant authoring)</phase>
     <gate>blocked-until:070</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared @spaarke/ui-components AccessGrantModal (consumed by other surfaces) + the TrackingFieldTrio PCF; touches the access-grant UX; pcf/frontend; ends in a PCF solution deploy.</rigor-reason>
     <model-tier>sonnet</model-tier>

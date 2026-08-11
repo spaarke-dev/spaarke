@@ -60,6 +60,25 @@ export interface IContactSearchResult {
   email?: string;
 }
 
+/** A grantee firm/organization picked via the side-pane Advanced Lookup
+ * (task 071) — a `sprk_organization` record. `id` is the `sprk_organizationid`
+ * GUID (already `cleanGuid`-normalized by the navigation adapter). Sent to the
+ * BFF as `organizationId` (the grant's `sprk_Organization` firm-scoping lookup,
+ * task 070). The shared modal never reads `sprk_organization` itself — the host
+ * supplies this via the injected {@link IAccessGrantModalProps.pickOrganization}
+ * callback, keeping the modal Xrm-free (ADR-012). */
+export interface IOrganizationPick {
+  id: string;
+  name: string;
+}
+
+/** The polymorphic root type a grant is held at (task 070/071). Mirrors the
+ * BFF's `ExternalGrantRoot` types; the caller (the PCF host) derives it from the
+ * bound record's entity and passes it as {@link IAccessGrantModalProps.recordType}
+ * so the modal sends `{recordType, recordId}` grant bodies without knowing any
+ * Dataverse entity name itself (ADR-012). */
+export type ExternalGrantRootType = 'project' | 'matter' | 'workassignment';
+
 /**
  * The record-level Access-Permission sharing-gate state (spec FR-14, Option
  * A — teams-app-r1 task 043). This is a project-wide SEMANTIC vocabulary
@@ -105,8 +124,17 @@ export interface IAccessGrantModalProps {
   open: boolean;
   /** Close callback — wired to the × and the footer Close button. */
   onClose: () => void;
-  /** The current record's id (`sprk_projectid` — R1 scope per design.md §5). */
+  /** The current record's id — the GUID of the polymorphic root identified by
+   * {@link recordType} (a `sprk_project`, `sprk_matter`, or `sprk_workassignment`
+   * id). Sent to the BFF as `recordId`. */
   recordId: string;
+  /** The polymorphic root type this grant is held at (task 070/071). The modal
+   * sends `{recordType, recordId}` in every grant/invite-and-grant body so the
+   * BFF binds the correct typed root lookup. Defaults to `'project'` — the
+   * pre-071 baseline — so a caller that has not yet wired the host entity keeps
+   * writing project grants unchanged (the BFF also accepts the legacy `projectId`
+   * shorthand, but this modal always sends the explicit `recordType`). */
+  recordType?: ExternalGrantRootType;
   /** Gates the modal's functional UI. Mirrors `TrackingFieldTrio`'s
    * `canGrantAccess` gate on the person icon (task 040) — this is a SECOND,
    * defense-in-depth check inside the modal itself, so a direct component
@@ -128,8 +156,29 @@ export interface IAccessGrantModalProps {
   fetchExistingGrants: () => Promise<IAccessGrantRecord[]>;
   /** Searches Dataverse Contacts by free-text query (named-contact picker).
    * Debounced by the modal; the host implements the actual Contact query
-   * (Xrm.WebApi, host-context). */
+   * (Xrm.WebApi, host-context). Used ONLY as the fallback inline picker when
+   * {@link pickContact} is not supplied (e.g. an SPA host with no side-pane
+   * lookup); when `pickContact` is provided the modal uses the side-pane
+   * Advanced Lookup instead and this is not called. */
   searchContacts: (query: string) => Promise<IContactSearchResult[]>;
+  /** Opens the shared side-pane Advanced Lookup for a single Contact and
+   * resolves to the picked contact (or `null` if the user cancelled). Injected
+   * by the host, which wires `INavigationService.openLookup` via
+   * `createXrmNavigationService` (Dataverse) — the modal stays Xrm-free (§11,
+   * ADR-012). When supplied, section 2's inline Combobox is replaced by a
+   * "Select contact" button that invokes this. The host SHOULD enrich the
+   * result with the contact's email (a second host-context read) so the
+   * external-vs-internal grant routing stays correct. Omit to fall back to the
+   * {@link searchContacts} inline picker. */
+  pickContact?: () => Promise<IContactSearchResult | null>;
+  /** Opens the shared side-pane Advanced Lookup for a single
+   * `sprk_organization` and resolves to the picked firm/org (or `null` if
+   * cancelled). Injected by the host (same `openLookup` mechanism as
+   * {@link pickContact}). When supplied, section 2 shows an optional
+   * "Organization" picker; a chosen org is sent to the BFF as `organizationId`
+   * (the grant's `sprk_Organization` firm-scoping lookup, task 070). Omit to
+   * hide the org picker entirely. */
+  pickOrganization?: () => Promise<IOrganizationPick | null>;
   /** Classifies a contact as internal-workforce (has a linked `systemuser`)
    * vs external. Drives the notify branch: an external contact with a known
    * email is granted via the built `/invite-and-grant` (onboard + grant + CIAM

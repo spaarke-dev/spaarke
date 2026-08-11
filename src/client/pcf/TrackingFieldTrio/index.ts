@@ -99,8 +99,15 @@ import {
   type IAccessGrantCandidate,
   type IAccessGrantRecord,
   type IContactSearchResult,
+  type IOrganizationPick,
+  type ExternalGrantRootType,
   type AccessPermissionState,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
+// Shared side-pane Advanced Lookup (task 071) — adopted as-is per §11: the PCF
+// host wires INavigationService.openLookup (→ Xrm.Utility.lookupObjects) and
+// passes plain pickContact/pickOrganization callbacks into the Xrm-free modal.
+import { createXrmNavigationService } from '@spaarke/ui-components/dist/utils/adapters';
+import type { INavigationService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
 // Canonical `SendEmailDialog` (task 042, ADR-045) — the `EmailComposer`
 // wrapper that owns the Dialog chrome + `sendCommunication()` send flow.
 // This is the ONLY email-send surface this control is allowed to open (no
@@ -125,25 +132,50 @@ const FALLBACK_ACCESS_PERMISSION_OPTIONS: IAccessPermissionOption[] = [
   { value: ACCESS_PERMISSION_RESTRICTED, label: 'Restricted' },
 ];
 
-// task 041 (teams-app-r1) — the ONLY entity this control's access-grant
-// modal supports in R1: `sprk_externalrecordaccess` is `sprk_project`-scoped
-// per design.md §5 ("known gap #2" — extending to matters/other entities is
-// R2). This constant + the role-field map below are entity-specific
-// knowledge that lives ONLY in this file (FR-14 discipline), never in the
-// shared `AccessGrantModal` core.
-const GRANT_RECORD_ENTITY = 'sprk_project';
+// v1.0.12 (task 071, external-access-r2) — the access-grant surface is now
+// POLYMORPHIC across the three external-grant roots (Project / Matter / Work
+// Assignment), the UI companion to tasks 028 (read) + 070 (write). The host
+// entity is derived from the bound record at runtime (`context.page.entityTypeName`)
+// instead of the R1 `sprk_project` hardcode, and the modal's contact picker is
+// the SHARED side-pane Advanced Lookup (INavigationService.openLookup) rather
+// than the inline Combobox. This file remains the ONLY place that knows the
+// concrete Dataverse entity names + their `sprk_assigned*` role fields — the
+// shared `AccessGrantModal` stays entity-agnostic (ADR-012 / FR-14).
 const EXTERNAL_ACCESS_ENTITY = 'sprk_externalrecordaccess';
 
-// The R1-verified access-conferring role-field set on `sprk_project`
-// (task 021's convention-based discovery, mirrored client-side per
-// `notes/pipeline-run-guidance.md`). A newly-added `sprk_assigned*` field
+// The polymorphic external-grant root config, keyed by the host form's entity
+// (task 070/071). `recordType` is the semantic root type the modal sends as
+// `{recordType, recordId}`; `rootValueField` is the `sprk_externalrecordaccess`
+// lookup filter for reading the record's active grants (fixes the R1
+// `_sprk_projectid_value` bug — the verified lookup name is `_sprk_project_value`,
+// per task 070's live $metadata verification). Matter + Work Assignment carry
+// the SAME `sprk_assigned*` role fields as Project (verified), so a single
+// shared CANDIDATE_ROLE_FIELDS set below serves all three.
+interface IGrantRootConfig {
+  recordType: ExternalGrantRootType;
+  rootValueField: string;
+}
+const GRANT_ROOT_BY_ENTITY: Readonly<Record<string, IGrantRootConfig>> = {
+  sprk_project: { recordType: 'project', rootValueField: '_sprk_project_value' },
+  sprk_matter: { recordType: 'matter', rootValueField: '_sprk_matter_value' },
+  sprk_workassignment: { recordType: 'workassignment', rootValueField: '_sprk_workassignment_value' },
+};
+// Back-compat default when the host entity is unknown/unavailable (e.g. a
+// harness environment where `context.page` isn't populated) — preserves the
+// R1 project behavior.
+const DEFAULT_GRANT_ROOT: IGrantRootConfig = GRANT_ROOT_BY_ENTITY['sprk_project'];
+
+// The access-conferring role-field set shared by all three grant roots
+// (Project / Matter / Work Assignment carry the SAME `sprk_assigned*` lookups —
+// verified in notes/polymorphic-grant-authoring-enhancement.md; task 021's
+// convention-based discovery, mirrored client-side). A newly-added `sprk_assigned*` field
 // does NOT auto-qualify here the way it does in the server-side metadata
 // discovery (task 021/022) — this client-side list is a UI convenience for
 // the candidate section, not the security enforcement path (enforcement is
 // entirely server-side per design.md §5). If the role-field set changes,
 // update this list; nothing security-load-bearing depends on it being
 // exhaustive.
-const CANDIDATE_ROLE_FIELDS: ReadonlyArray<{ attr: string; role: string }> = [
+const CANDIDATE_ROLE_FIELDS: readonly { attr: string; role: string }[] = [
   { attr: 'sprk_assignedattorney1', role: 'Assigned Attorney 1' },
   { attr: 'sprk_assignedattorney2', role: 'Assigned Attorney 2' },
   { attr: 'sprk_assignedparalegal1', role: 'Assigned Paralegal 1' },
@@ -216,7 +248,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       this.apiBaseUrl,
       getClientUrl()
     ).catch(err => {
-      // eslint-disable-next-line no-console
+       
       console.error(
         "[TrackingFieldTrio] Auth initialization failed — the access-grant modal's BFF calls will fail until the page is reloaded.",
         err
@@ -283,6 +315,30 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return page?.entityId || null;
   }
 
+  /** The bound record's entity logical name, via `context.page.entityTypeName`
+   * (task 071 — replaces the R1 `sprk_project` hardcode). Falls back to
+   * `sprk_project` in a harness/test host where `page` isn't populated. */
+  private getHostEntity(): string {
+    const page = (this.context as unknown as { page?: { entityTypeName?: string } }).page;
+    return page?.entityTypeName || 'sprk_project';
+  }
+
+  /** Resolves the polymorphic external-grant root config for the bound host
+   * entity (task 070/071). Unknown entities fall back to the project root. */
+  private resolveGrantRoot(): IGrantRootConfig {
+    return GRANT_ROOT_BY_ENTITY[this.getHostEntity()] ?? DEFAULT_GRANT_ROOT;
+  }
+
+  /** Lazily-constructed shared navigation service backing the side-pane Advanced
+   * Lookup (task 071). Cached so the contact + org pickers reuse one instance. */
+  private navService?: INavigationService;
+  private getNavService(): INavigationService {
+    if (!this.navService) {
+      this.navService = createXrmNavigationService();
+    }
+    return this.navService;
+  }
+
   /** Real Create-privilege check on `sprk_externalrecordaccess`
    * (`PrivilegeType.Create = 1`, `PrivilegeDepth.Global = 3` per
    * `@types/powerapps-component-framework`). Fails open (returns `true`) only
@@ -345,7 +401,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const select = CANDIDATE_ROLE_FIELDS.map(f => f.attr).join(',');
     const expand = CANDIDATE_ROLE_FIELDS.map(f => `${f.attr}($select=fullname,emailaddress1)`).join(',');
     const record = (await this.context.webAPI.retrieveRecord(
-      GRANT_RECORD_ENTITY,
+      this.getHostEntity(),
       recordId,
       `?$select=${select}&$expand=${expand}`
     )) as unknown as Record<
@@ -376,8 +432,12 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const recordId = this.getRecordId();
     if (!recordId) return [];
 
+    // Filter by the bound root's lookup value field (task 070/071 polymorphic
+    // read) — e.g. `_sprk_matter_value` on a Matter form. Replaces the R1
+    // `_sprk_projectid_value` (invalid field name → matched zero rows).
+    const rootValueField = this.resolveGrantRoot().rootValueField;
     const options =
-      `?$filter=_sprk_projectid_value eq ${recordId} and statecode eq 0` +
+      `?$filter=${rootValueField} eq ${recordId} and statecode eq 0` +
       `&$select=sprk_accesslevel,sprk_granteddate` +
       `&$expand=sprk_contactid($select=fullname,emailaddress1),sprk_grantedby($select=fullname)`;
     const result = await this.context.webAPI.retrieveMultipleRecords(EXTERNAL_ACCESS_ENTITY, options);
@@ -415,6 +475,51 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       fullName: e.fullname as string,
       email: e.emailaddress1 as string | undefined,
     }));
+  };
+
+  /** Opens the SHARED side-pane Advanced Lookup for a single Contact (task 071 —
+   * INavigationService.openLookup → Xrm.Utility.lookupObjects) and enriches the
+   * pick with the contact's email via a host-context read, so the modal's
+   * external-vs-internal grant routing (which keys off email) stays correct.
+   * Returns `null` when the user cancels. The GUID is already `cleanGuid`-
+   * normalized by the adapter, so it is safe to send in an `@odata.bind`. */
+  private pickContact = async (): Promise<IContactSearchResult | null> => {
+    const results = await this.getNavService().openLookup({
+      entityType: 'contact',
+      entityTypes: ['contact'],
+      allowMultiSelect: false,
+    });
+    const picked = results[0];
+    if (!picked) return null;
+    try {
+      const rec = (await this.context.webAPI.retrieveRecord(
+        'contact',
+        picked.id,
+        '?$select=fullname,emailaddress1'
+      )) as unknown as { fullname?: string; emailaddress1?: string };
+      return {
+        contactId: picked.id,
+        fullName: rec?.fullname ?? picked.name,
+        email: rec?.emailaddress1 ?? undefined,
+      };
+    } catch {
+      // Email enrichment failed — still return the pick (routes as grant-only).
+      return { contactId: picked.id, fullName: picked.name };
+    }
+  };
+
+  /** Opens the SHARED side-pane Advanced Lookup for a single `sprk_organization`
+   * (task 071) — the optional grantee firm/org sent to the BFF as
+   * `organizationId` (the grant's `sprk_Organization` firm-scoping lookup,
+   * task 070). Returns `null` when the user cancels. */
+  private pickOrganization = async (): Promise<IOrganizationPick | null> => {
+    const results = await this.getNavService().openLookup({
+      entityType: 'sprk_organization',
+      entityTypes: ['sprk_organization'],
+      allowMultiSelect: false,
+    });
+    const picked = results[0];
+    return picked ? { id: picked.id, name: picked.name } : null;
   };
 
   /** Classifies a contact internal-workforce (has a linked `systemuser` via
@@ -481,7 +586,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
-      versionText: 'v1.0.11 • Built 2026-08-04',
+      versionText: 'v1.0.12 • Built 2026-08-11',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -551,11 +656,18 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                   this.renderControl();
                 },
                 recordId,
+                // Polymorphic root type derived from the bound host entity
+                // (task 071) — the modal sends {recordType, recordId}.
+                recordType: this.resolveGrantRoot().recordType,
                 canGrantAccess: this.canGrantAccessValue,
                 authenticatedFetch: this.authenticatedFetchGated,
                 fetchCandidates: this.fetchCandidates,
                 fetchExistingGrants: this.fetchExistingGrants,
                 searchContacts: this.searchContacts,
+                // Shared side-pane Advanced Lookup (task 071) — replaces the
+                // inline Combobox contact picker; adds an optional org picker.
+                pickContact: this.pickContact,
+                pickOrganization: this.pickOrganization,
                 isInternalContact: this.isInternalContact,
                 onSetStandingGrant: this.onSetStandingGrant,
                 // Access-Permission sharing gate (task 043, FR-14 Option A) —
@@ -577,13 +689,13 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                 authenticatedFetch: this.authenticatedFetchGated,
                 bffBaseUrl: this.apiBaseUrl,
                 titleOverride: 'Email Members',
-                regarding: { entityType: GRANT_RECORD_ENTITY, id: recordId },
+                regarding: { entityType: this.getHostEntity(), id: recordId },
                 onSent: () => {
                   this.isSendEmailDialogOpen = false;
                   this.renderControl();
                 },
                 onError: (err: Error) => {
-                  // eslint-disable-next-line no-console
+                   
                   console.error('[TrackingFieldTrio] Email-members send failed.', err);
                 },
               })
