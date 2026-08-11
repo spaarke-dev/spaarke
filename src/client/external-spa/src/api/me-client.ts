@@ -16,18 +16,24 @@
  * activates outside `VITE_DEV_MOCK=true`, so it has no production security surface (NFR-06: the
  * client is never the enforcement boundary regardless).
  *
- * STATUS(task-072): the real BFF entitlement endpoint now EXISTS —
- * `GET /api/v1/external/me/entitlements` (Option B: workforce from sprk_approlemodulemap App-Role→module;
- * CIAM blanket outside-counsel set), returning this exact `MeEntitlementsResponse` shape. The mock values
- * below are DELIBERATELY aligned with what that endpoint returns per plane (workforce =
- * ['legal-front-door','policy-library'] from the seeded map; ciam = ['assigned-work']), so the swap is a
- * one-line change with no consumer impact.
+ * STATUS(task-073): `fetchMeEntitlements` now calls the REAL BFF endpoint
+ * `GET /api/v1/external/me/entitlements` (task 072, Option B: workforce from sprk_approlemodulemap
+ * App-Role→module; CIAM blanket outside-counsel set). The BFF derives the plane from the caller's token.
  *
- * TODO(task-073): flip `fetchMeEntitlements` to
- * `bffApiCall<MeEntitlementsResponse>('/api/v1/external/me/entitlements')`, co-located with the
- * deploy + dual-plane (workforce `roles` claim + CIAM) UAT that a live auth call requires. Until then the
- * mock keeps the working SPA independent of an unverified live auth path (owner decision, 2026-08-11).
+ * Rollout safety: on ANY failure of the live call, `fetchMeEntitlements` degrades to the plane-derived
+ * `MOCK_BY_PLANE` defaults (a console.warn is emitted) so a transient live-auth hiccup never leaves the
+ * workspace tab-less. NFR-06: the client is NEVER the security boundary — the module-data endpoints
+ * enforce Tier-1/Tier-2 server-side regardless of what this returns. The mock values are deliberately
+ * aligned with the server (workforce = ['legal-front-door','policy-library'] from the seeded map; ciam =
+ * ['assigned-work']), so the fallback is behavior-identical to a correct live response for the R2 personas.
+ * During UAT, the mock `displayName` ('Sam Rivera' / 'Dana Okafor') is the tell that the fallback fired —
+ * a real live response carries the actual signed-in user's name.
+ *
+ * `VITE_DEV_MOCK=true` (local dev only) still short-circuits to the plane/persona mock without any BFF
+ * call, preserving the `?dv_persona=` override for local exercise of every persona's workspace.
  */
+
+import { bffApiCall } from '../auth/bff-client';
 
 /** Identity plane — matches the caller's auth authority (ADR-028 dual-plane). */
 export type Plane = 'workforce' | 'ciam' | 'admin';
@@ -81,15 +87,31 @@ function resolveDevPersonaOverride(): Plane | null {
 }
 
 /**
- * Resolve the caller's entitlements. `teamsHost` is the real bootstrap signal (see file header);
- * `entitlements` are mocked pending task 022. Never rejects for the mock path — a future real
- * implementation may reject on network failure, so callers (WorkspaceHomePage) still handle it.
+ * Resolve the caller's entitlements (task 073 — live). Calls the real BFF endpoint in production; on any
+ * failure degrades to plane-derived `MOCK_BY_PLANE` defaults (see file header). `teamsHost` is the real
+ * bootstrap signal used for the dev-mock plane + the rollout fallback plane; the live BFF derives the
+ * plane authoritatively from the caller's token.
  */
 export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitlementsResponse> {
   const basePlane: Plane = teamsHost ? 'workforce' : 'ciam';
-  const plane = resolveDevPersonaOverride() ?? basePlane;
-  const response = MOCK_BY_PLANE[plane];
-  // Simulate latency so the workspace's loading state is exercised — mirrors the delay()
-  // convention in mocks/mock-service.ts used elsewhere in this SPA.
-  return new Promise(resolve => window.setTimeout(() => resolve(response), 300));
+
+  // Local dev (VITE_DEV_MOCK=true): short-circuit to the plane/persona mock, no BFF call. Preserves the
+  // `?dv_persona=` override for exercising every persona's workspace without a live entitlement backend.
+  if (import.meta.env.VITE_DEV_MOCK === 'true') {
+    const plane = resolveDevPersonaOverride() ?? basePlane;
+    return new Promise(resolve => window.setTimeout(() => resolve(MOCK_BY_PLANE[plane]), 300));
+  }
+
+  // Production: the real Tier-1 entitlement endpoint (task 072). bffApiCall attaches the Bearer token +
+  // retries once on 401; the BFF resolves the plane from the token and returns this exact shape.
+  try {
+    return await bffApiCall<MeEntitlementsResponse>('/api/v1/external/me/entitlements');
+  } catch (err) {
+    // Rollout fallback (NFR-06 — client is not the security boundary): degrade to plane-derived defaults
+    // so a transient live-auth failure never leaves the workspace tab-less. The mock displayName is the
+    // UAT tell that this fired.
+    // eslint-disable-next-line no-console
+    console.warn('[me] live /api/v1/external/me/entitlements failed — falling back to plane-derived defaults.', err);
+    return MOCK_BY_PLANE[basePlane];
+  }
 }
