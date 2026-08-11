@@ -4,7 +4,7 @@
     <title>Reconciliation routing — category→team assignment (ADR-018 config) + per-team gridconfiguration views + DataGrid membershipFilter (no new entity)</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
     <gate>deps 050 complete (grid + behavior.membershipFilter)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Config-driven routing + per-team savedquery views reusing existing DataGrid membershipFilter behavior; no new entity, no new write path; STANDARD per §8.</rigor-reason>
     <model-tier>sonnet</model-tier>

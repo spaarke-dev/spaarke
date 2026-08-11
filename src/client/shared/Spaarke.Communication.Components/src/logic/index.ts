@@ -8,6 +8,7 @@
 
 export * from './connections';
 export * from './attachments';
+export * from './citations';
 // `./actions` is re-exported by explicit name (not `export *`) because its
 // `filterFileAttachments` (source-communication attachment carry-forward,
 // task 022) collides with `./attachments`' OWN `filterFileAttachments`
