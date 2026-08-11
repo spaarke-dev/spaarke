@@ -70,6 +70,8 @@ import {
   Checkbox,
   Combobox,
   Option,
+  Dropdown,
+  Field,
   Spinner,
   Text,
   MessageBar,
@@ -98,10 +100,37 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
     marginBottom: tokens.spacingVerticalXL,
   },
+  // Subsection headers — 20px semibold (task 073 UAT #5).
   sectionTitle: {
     fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
+    fontSize: tokens.fontSizeBase500,
+    lineHeight: tokens.lineHeightBase500,
     color: tokens.colorNeutralForeground1,
+  },
+  // Subsection header row: title on the left, action buttons (+ Contact / + Organization) right-aligned.
+  sectionHeaderRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalM,
+  },
+  sectionHeaderActions: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+  },
+  levelRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'end',
+    columnGap: tokens.spacingHorizontalM,
+    marginTop: tokens.spacingVerticalS,
+  },
+  levelField: {
+    minWidth: '180px',
   },
   sectionSubtitle: {
     fontSize: tokens.fontSizeBase200,
@@ -204,6 +233,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const effectiveAccessLevel =
     defaultAccessLevel ?? accessLevelOptions[0]?.value ?? DEFAULT_ACCESS_LEVEL_OPTIONS[0].value;
 
+  // Per-grant access level chosen in the modal (task 073 UAT #4). Defaults to the effective level; the
+  // admin can raise it to Collaborate / Full Access. Every grant written from this modal uses this value.
+  const [selectedLevel, setSelectedLevel] = React.useState<number>(effectiveAccessLevel);
+  const selectedLevelLabel = accessLevelOptions.find(o => o.value === selectedLevel)?.label ?? String(selectedLevel);
+
   // Access-Permission sharing gate (task 043, FR-14 Option A). Deliberately
   // computed from the prop alone — never from `effectiveAccessLevel` or any
   // other per-grant `sprk_accesslevel` concept above, so the two stay
@@ -237,6 +271,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // in THIS component (not the unmounted Dialog surface) and the reset effect keys on the `open` PROP —
   // which never changes here — so nothing is lost across the hide/show.
   const [pickerActive, setPickerActive] = React.useState(false);
+  // Contacts looked up via "+ Contact" (task 073 UAT #5) — staged into the "Available Contacts &
+  // Organizations" list alongside the role-based membership candidates, then selected + granted.
+  const [lookedUpContacts, setLookedUpContacts] = React.useState<IContactSearchResult[]>([]);
 
   const [revokeTargetId, setRevokeTargetId] = React.useState<string | null>(null);
   const [revoking, setRevoking] = React.useState(false);
@@ -267,6 +304,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       setSelectedNamed(null);
       setStandingForNamed(false);
       setPickedOrg(null);
+      setLookedUpContacts([]);
+      setSelectedLevel(effectiveAccessLevel);
       void loadData();
     }
     // Only re-run when the modal transitions open (and once per open), not on every render.
@@ -337,7 +376,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           email: contact.email,
           recordType,
           recordId,
-          accessLevel: effectiveAccessLevel,
+          accessLevel: selectedLevel,
           firstName,
           lastName,
           ...orgFields,
@@ -349,7 +388,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           contactId: contact.contactId,
           recordType,
           recordId,
-          accessLevel: effectiveAccessLevel,
+          accessLevel: selectedLevel,
           ...orgFields,
         });
         if (internal) {
@@ -370,7 +409,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
       return { notifyPending, standingGrantFailed };
     },
-    [effectiveAccessLevel, isInternalContact, onSetStandingGrant, postJson, recordId, recordType]
+    [selectedLevel, isInternalContact, onSetStandingGrant, postJson, recordId, recordType]
   );
 
   const handleApproveSelected = React.useCallback(async () => {
@@ -449,6 +488,68 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     }
   }, [grantContact, loadData, selectedNamed, standingForNamed, pickedOrg]);
 
+  // Unified "Available Contacts & Organizations" list (task 073 UAT #5): role-based membership
+  // candidates + any contacts staged via "+ Contact". Granted contacts are excluded by loadData().
+  const availableContacts = React.useMemo<IAccessGrantCandidate[]>(() => {
+    const merged = [...candidates];
+    for (const c of lookedUpContacts) {
+      if (!merged.some(m => m.contactId === c.contactId)) {
+        merged.push({ contactId: c.contactId, fullName: c.fullName, email: c.email, role: 'Looked up' });
+      }
+    }
+    return merged;
+  }, [candidates, lookedUpContacts]);
+
+  const handleGrantSelected = React.useCallback(async () => {
+    const toGrant = availableContacts.filter(c => selectedCandidateIds.has(c.contactId));
+    if (toGrant.length === 0) return;
+    setApproving(true);
+    let failures = 0;
+    let anyNotifyPending = false;
+    let anyStandingGrantFailed = false;
+    for (const contact of toGrant) {
+      try {
+        const outcome = await grantContact(contact, {
+          standingGrant: standingForCandidate.has(contact.contactId),
+          organizationId: pickedOrg?.id,
+        });
+        anyNotifyPending = anyNotifyPending || outcome.notifyPending;
+        anyStandingGrantFailed = anyStandingGrantFailed || outcome.standingGrantFailed;
+      } catch {
+        failures += 1;
+      }
+    }
+    setApproving(false);
+    setLookedUpContacts([]);
+    await loadData();
+    if (failures > 0) {
+      setNotice({
+        intent: 'error',
+        text: `${toGrant.length - failures} of ${toGrant.length} grant(s) succeeded; ${failures} failed. Try again for the failed contact(s).`,
+      });
+    } else if (anyNotifyPending) {
+      setNotice({
+        intent: 'warning',
+        text: `Granted ${selectedLevelLabel} access to ${toGrant.length} contact(s). Internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
+      });
+    } else if (anyStandingGrantFailed) {
+      setNotice({
+        intent: 'warning',
+        text: `Granted ${selectedLevelLabel} access to ${toGrant.length} contact(s), but setting the standing-grant flag failed for at least one. You can retry from the Contact form.`,
+      });
+    } else {
+      setNotice({ intent: 'success', text: `Granted ${selectedLevelLabel} access to ${toGrant.length} contact(s).` });
+    }
+  }, [
+    availableContacts,
+    selectedCandidateIds,
+    grantContact,
+    standingForCandidate,
+    pickedOrg,
+    loadData,
+    selectedLevelLabel,
+  ]);
+
   const handleSearchChange = React.useCallback(
     (query: string) => {
       setSearchQuery(query);
@@ -502,8 +603,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     try {
       const picked = await pickContact();
       if (picked) {
-        setSelectedNamed(picked);
-        setSearchQuery(picked.fullName);
+        // Stage the looked-up contact into the Available list and pre-select it (task 073 UAT #5).
+        setLookedUpContacts(prev => (prev.some(c => c.contactId === picked.contactId) ? prev : [...prev, picked]));
+        setSelectedCandidateIds(prev => {
+          const next = new Set(prev);
+          next.add(picked.contactId);
+          return next;
+        });
       }
     } catch {
       /* lookup cancelled/failed — leave the current selection unchanged */
@@ -561,9 +667,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         title={title}
         size="lg"
         dismiss="explicit"
+        footerStart={
+          <Button appearance="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+        }
         footer={
           <Button appearance="primary" onClick={onClose}>
-            Close
+            Save
           </Button>
         }
       >
@@ -592,31 +703,74 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               </div>
             ) : (
               <>
-                {/* Access-Permission sharing gate banner (task 043, FR-14 Option A) —
-                    shown only when Restricted; existing access below remains
-                    reviewable/revocable regardless of this gate. */}
+                {/* Restricted banner (task 073 UAT #4) — light-red (error intent). */}
                 {grantsBlocked && (
-                  <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
+                  <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
                     <MessageBarBody>
-                      <MessageBarTitle>External access is off for this record</MessageBarTitle>
-                      This record's Access Permission is set to Restricted, so new external grants (approving a
-                      membership candidate or adding a named contact) are blocked. Existing access can still be reviewed
-                      and revoked below.
+                      <MessageBarTitle>Restricted Access</MessageBarTitle>
+                      Only system users may have access. External users must be assigned system user licenses to access.
                     </MessageBarBody>
                   </MessageBar>
                 )}
 
-                {/* Section 1 — candidate approve list (task 021 role-allowlist source) */}
+                {/* Available Contacts & Organizations (task 073 UAT #5) — role-based members + looked-up
+                    contacts, with "+ Contact" / "+ Organization" in the header. Select, choose a level, Add. */}
                 <div className={styles.section}>
-                  <Text className={styles.sectionTitle}>Membership candidates</Text>
+                  <div className={styles.sectionHeaderRow}>
+                    <Text className={styles.sectionTitle}>Available Contacts &amp; Organizations</Text>
+                    <div className={styles.sectionHeaderActions}>
+                      {pickContact && (
+                        <Button
+                          appearance="secondary"
+                          size="small"
+                          icon={pickingContact ? <Spinner size="tiny" /> : <PersonRegular />}
+                          disabled={grantsBlocked || pickingContact}
+                          onClick={handlePickContact}
+                        >
+                          + Contact
+                        </Button>
+                      )}
+                      {pickOrganization && (
+                        <Button
+                          appearance="secondary"
+                          size="small"
+                          icon={pickingOrg ? <Spinner size="tiny" /> : <BuildingRegular />}
+                          disabled={grantsBlocked || pickingOrg}
+                          onClick={handlePickOrganization}
+                        >
+                          + Organization
+                        </Button>
+                      )}
+                    </div>
+                  </div>
                   <Text className={styles.sectionSubtitle}>
-                    Contacts assigned to this record via an access-conferring role. Approving writes a grant
-                    (provenance: membership-approved).
+                    Role-assigned members and any contacts you look up. Select who to grant, choose an access level,
+                    then Add.
                   </Text>
-                  {candidates.length === 0 ? (
-                    <Text className={styles.emptyState}>No unapproved membership candidates.</Text>
+
+                  {/* Selected organization scope (optional) — applied as firm scoping on the grant. */}
+                  {pickedOrg && (
+                    <div className={styles.row}>
+                      <BuildingRegular />
+                      <div className={styles.rowMain}>
+                        <Text className={styles.rowName}>{pickedOrg.name}</Text>
+                        <Text className={styles.rowMeta}>Organization scope applied to the grant</Text>
+                      </div>
+                      <Button
+                        appearance="subtle"
+                        size="small"
+                        icon={<DismissRegular />}
+                        aria-label="Clear organization"
+                        onClick={() => setPickedOrg(null)}
+                        disabled={grantsBlocked}
+                      />
+                    </div>
+                  )}
+
+                  {availableContacts.length === 0 ? (
+                    <Text className={styles.emptyState}>No available contacts. Use “+ Contact” to look one up.</Text>
                   ) : (
-                    candidates.map(candidate => (
+                    availableContacts.map(candidate => (
                       <div className={styles.row} key={candidate.contactId}>
                         <Checkbox
                           checked={selectedCandidateIds.has(candidate.contactId)}
@@ -644,123 +798,39 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       </div>
                     ))
                   )}
-                  {candidates.length > 0 && (
+
+                  {/* Access level + Add (task 073 UAT #4) */}
+                  <div className={styles.levelRow}>
+                    <Field label="Access level" className={styles.levelField}>
+                      <Dropdown
+                        value={selectedLevelLabel}
+                        selectedOptions={[String(selectedLevel)]}
+                        disabled={grantsBlocked}
+                        onOptionSelect={(_, data) => {
+                          if (data.optionValue) setSelectedLevel(Number(data.optionValue));
+                        }}
+                      >
+                        {accessLevelOptions.map(o => (
+                          <Option key={o.value} value={String(o.value)} text={o.label}>
+                            {o.label}
+                          </Option>
+                        ))}
+                      </Dropdown>
+                    </Field>
                     <Button
                       appearance="primary"
                       disabled={selectedCandidateIds.size === 0 || approving || grantsBlocked}
                       icon={approving ? <Spinner size="tiny" /> : undefined}
-                      onClick={handleApproveSelected}
-                      style={{ alignSelf: 'flex-start' }}
+                      onClick={handleGrantSelected}
                     >
-                      Approve selected ({selectedCandidateIds.size})
-                    </Button>
-                  )}
-                </div>
-
-                {/* Section 2 — named-contact person-picker. When the host injects
-                    `pickContact` (task 071), the picker is the SHARED side-pane
-                    Advanced Lookup (INavigationService.openLookup); otherwise it
-                    falls back to the inline Combobox search (SPA/no-lookup hosts). */}
-                <div className={styles.section}>
-                  <Text className={styles.sectionTitle}>Add a named contact</Text>
-                  <Text className={styles.sectionSubtitle}>
-                    {pickContact
-                      ? 'Use Advanced Lookup to pick any Contact to grant explicit access, regardless of role assignment.'
-                      : 'Search for any Contact to grant explicit access, regardless of role assignment.'}
-                  </Text>
-                  <div className={styles.pickerRow}>
-                    {pickContact ? (
-                      <>
-                        <Button
-                          appearance="secondary"
-                          icon={pickingContact ? <Spinner size="tiny" /> : <PersonRegular />}
-                          disabled={grantsBlocked || pickingContact}
-                          onClick={handlePickContact}
-                        >
-                          {selectedNamed ? 'Change contact' : 'Select contact'}
-                        </Button>
-                        {selectedNamed && (
-                          <div className={styles.rowMain}>
-                            <Text className={styles.rowName}>{selectedNamed.fullName}</Text>
-                            {selectedNamed.email && <Text className={styles.rowMeta}>{selectedNamed.email}</Text>}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <Combobox
-                        freeform
-                        placeholder="Search contacts by name or email…"
-                        value={searchQuery}
-                        onInput={e => handleSearchChange((e.target as HTMLInputElement).value)}
-                        onOptionSelect={(_, data) => {
-                          const found = searchResults.find(r => r.contactId === data.optionValue);
-                          setSelectedNamed(found ?? null);
-                          if (found) setSearchQuery(found.fullName);
-                        }}
-                        expandIcon={searching ? <Spinner size="tiny" /> : undefined}
-                        disabled={grantsBlocked}
-                      >
-                        {searchResults.map(result => (
-                          <Option key={result.contactId} value={result.contactId} text={result.fullName}>
-                            {result.fullName}
-                            {result.email ? ` (${result.email})` : ''}
-                          </Option>
-                        ))}
-                      </Combobox>
-                    )}
-                    {onSetStandingGrant && standingGrantAllowed && (
-                      <Checkbox
-                        label="Standing grant"
-                        checked={standingForNamed}
-                        onChange={(_, data) => setStandingForNamed(Boolean(data.checked))}
-                        disabled={!selectedNamed}
-                      />
-                    )}
-                    <Button
-                      appearance="primary"
-                      icon={addingNamed ? <Spinner size="tiny" /> : <PersonRegular />}
-                      disabled={!selectedNamed || addingNamed || grantsBlocked}
-                      onClick={handleAddNamed}
-                    >
-                      Add
+                      Add ({selectedCandidateIds.size})
                     </Button>
                   </div>
-
-                  {/* Optional grantee firm/org (task 071) — the same side-pane
-                      Advanced Lookup, scoped to sprk_organization. A chosen org is
-                      sent as `organizationId` (the grant's sprk_Organization
-                      firm-scoping lookup, task 070). Only shown when the host wires
-                      `pickOrganization`. */}
-                  {pickOrganization && (
-                    <div className={styles.pickerRow}>
-                      <Button
-                        appearance="secondary"
-                        icon={pickingOrg ? <Spinner size="tiny" /> : <BuildingRegular />}
-                        disabled={grantsBlocked || pickingOrg}
-                        onClick={handlePickOrganization}
-                      >
-                        {pickedOrg ? 'Change organization' : 'Select organization (optional)'}
-                      </Button>
-                      {pickedOrg && (
-                        <>
-                          <Text className={styles.rowName}>{pickedOrg.name}</Text>
-                          <Button
-                            appearance="subtle"
-                            size="small"
-                            icon={<DismissRegular />}
-                            aria-label="Clear organization"
-                            onClick={() => setPickedOrg(null)}
-                            disabled={grantsBlocked}
-                          />
-                        </>
-                      )}
-                    </div>
-                  )}
                 </div>
 
-                {/* Section 3 — existing grants + revoke */}
+                {/* Current Access (task 073 UAT #5 — 20px header) */}
                 <div className={styles.section}>
-                  <Text className={styles.sectionTitle}>Current access</Text>
+                  <Text className={styles.sectionTitle}>Current Access</Text>
                   {existingGrants.length === 0 ? (
                     <Text className={styles.emptyState}>No active grants for this record.</Text>
                   ) : (
