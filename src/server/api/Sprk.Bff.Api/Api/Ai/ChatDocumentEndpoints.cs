@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.EventRules;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
+using Spaarke.Dataverse;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -157,6 +158,39 @@ public static class ChatDocumentEndpoints
             .ProducesProblem(401)
             .ProducesProblem(403)
             .ProducesProblem(404);
+
+        // POST /api/ai/chat/sessions/{sessionId}/documents/from-document — ingest an EXISTING
+        // sprk_document (an archived email .eml, sprk_isemailarchive=true) as a session document
+        // (email-communication-intelligence-r2 task 064 E1c). Resolves the doc → SPE pointers
+        // (IDocumentDataverseService.GetDocumentAsync), downloads the raw .eml via the SpeFileStore
+        // facade (app-only, ADR-007 — the endpoint has HttpContext, unlike OBO-less chat tool
+        // handlers), writes the bytes to the SAME session document store the multipart upload writes,
+        // and returns {sessionId, fileId, fileName}. A launched Create*Wizard's AI-prepopulate file
+        // leg then fetches it via GET .../content and extracts the email natively (raw .eml hand-off —
+        // no server-side text materialization; the wizard's pre-fill extractor supports .eml). This is
+        // NOT the multipart upload path (which takes raw bytes + rejects .eml) — it is a by-reference
+        // ingest of an already-archived document. Placement: Documents/Chat domain, reuses existing
+        // Dataverse + SPE facades, no AI-internal injection (§10 / ADR-013).
+        group.MapPost("/sessions/{sessionId}/documents/from-document", IngestArchiveDocumentAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-upload")
+            .WithName("IngestChatDocumentFromArchive")
+            .WithSummary("Ingest an archived email (.eml) sprk_document as a session document")
+            .WithDescription(
+                "Takes a sprk_document id (an archived email, sprk_isemailarchive=true), resolves its SPE " +
+                "pointers, downloads the .eml, writes it into session-scoped storage, and returns " +
+                "{sessionId, fileId, fileName} so a launched wizard can pre-seed its AI-prepopulate step " +
+                "from the reconciled email (parity with the Assistant's current-file hand-off).")
+            .Accepts<IngestArchiveRequest>("application/json")
+            .Produces<IngestArchiveResponse>(200)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
+            .ProducesProblem(413)
+            .ProducesProblem(422)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
 
         // POST /api/ai/chat/sessions/{sessionId}/events/document-uploaded — the Event entry
         // path emission point (FR-P1-03, ai-architecture-redesign-r1 task 022). The client
@@ -754,6 +788,9 @@ public static class ChatDocumentEndpoints
             ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ".txt" => "text/plain",
             ".md" => "text/markdown",
+            // task 064 (E1c): an ingested archived email carries the real message MIME so the
+            // wizard's fetched File is content-typed message/rfc822 (the pre-fill allow-list gate).
+            ".eml" => "message/rfc822",
             _ => "application/octet-stream"
         };
 
@@ -762,6 +799,160 @@ public static class ChatDocumentEndpoints
             documentId, filename, binaryContent.Length, sessionId);
 
         return Results.File(binaryContent, contentType, fileDownloadName: filename);
+    }
+
+    /// <summary>
+    /// Ingest an EXISTING sprk_document (an archived email .eml) as a session document
+    /// (email-communication-intelligence-r2 task 064 E1c). Reuses the GetEmlRender resolution
+    /// pattern (<see cref="IDocumentDataverseService.GetDocumentAsync"/> → SPE pointers →
+    /// <see cref="SpeFileStore.DownloadFileAsync"/>, app-only per ADR-007) to obtain the raw .eml
+    /// bytes, then writes them into the SAME session document store the multipart upload writes
+    /// (<see cref="DocBinaryResource"/> + <see cref="DocMetaResource"/> + a ChatSessionFile manifest
+    /// entry). Returns {sessionId, fileId, fileName} so a launched wizard's AI-prepopulate file leg
+    /// (GET .../content) pre-seeds from the reconciled email. Raw hand-off — no server-side text
+    /// materialization or RAG indexing (the wizard's pre-fill extractor parses the .eml natively).
+    /// ADR-015: never logs binary content.
+    /// </summary>
+    private static async Task<IResult> IngestArchiveDocumentAsync(
+        string sessionId,
+        IngestArchiveRequest? request,
+        HttpContext httpContext,
+        IDocumentDataverseService dataverseService,
+        SpeFileStore speFileStore,
+        ITenantCache cache,
+        ChatSessionManager sessionManager,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
+        var ct = httpContext.RequestAborted;
+
+        // 1. Tenant identity (ADR-014) — same claim resolution as the sibling endpoints.
+        var tenantId = httpContext.User.FindFirst("tid")?.Value
+            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "Tenant identity not found in token claims");
+        }
+
+        if (request is null || string.IsNullOrWhiteSpace(request.DocumentId))
+        {
+            return Results.Problem(statusCode: 400, title: "Bad Request", detail: "A 'documentId' (sprk_document id) is required.");
+        }
+
+        // 2. Verify session exists + capacity (mirror UploadDocumentAsync's NFR-02 cap).
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, ct);
+        if (session == null)
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: $"Chat session '{sessionId}' not found or has expired");
+        }
+
+        var existingFileCount = session.UploadedFiles?.Count ?? 0;
+        if (existingFileCount >= ChatSession.MaxUploadedFiles)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: $"This chat session already has {existingFileCount} uploaded files. The per-session cap is {ChatSession.MaxUploadedFiles}.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "summarize.too-many-files" });
+        }
+
+        // 3. Resolve the sprk_document → SPE pointers (reuse the GetEmlRender pattern).
+        var document = await dataverseService.GetDocumentAsync(request.DocumentId, ct);
+        if (document == null)
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: $"Document '{request.DocumentId}' does not exist.");
+        }
+        if (document.IsEmailArchive != true)
+        {
+            return Results.Problem(statusCode: 422, title: "Unprocessable Entity", detail: "The referenced document is not an email archive (.eml).");
+        }
+        if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: "The email archive has no SPE file to ingest.");
+        }
+
+        // 4. Download the raw .eml via the facade (app-only, ADR-007 — no GraphServiceClient injection).
+        byte[] bytes;
+        var stream = await speFileStore.DownloadFileAsync(document.GraphDriveId!, document.GraphItemId!, ct);
+        if (stream == null)
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: "The email archive file could not be downloaded from storage.");
+        }
+        await using (stream)
+        {
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms, ct);
+            bytes = ms.ToArray();
+        }
+        if (bytes.Length == 0)
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: "The email archive file is empty.");
+        }
+        if (bytes.Length > MaxFileSizeBytes)
+        {
+            var sizeMb = bytes.Length / (1024.0 * 1024.0);
+            return Results.Problem(statusCode: 413, title: "Request Entity Too Large", detail: $"Email archive ({sizeMb:F1} MB) exceeds the 50 MB limit.");
+        }
+
+        // 5. Derive a stable .eml filename (the wizard's pre-fill gate keys on the extension).
+        var baseName = !string.IsNullOrWhiteSpace(document.FileName) ? document.FileName!
+            : !string.IsNullOrWhiteSpace(document.Name) ? document.Name!
+            : "email";
+        var fileName = baseName.EndsWith(".eml", StringComparison.OrdinalIgnoreCase) ? baseName : baseName + ".eml";
+
+        // 6. Mint a session file id + write to the SAME session document store the upload path writes.
+        var fileId = Guid.NewGuid().ToString("N");
+        var docCacheId = DocCacheId(sessionId, fileId);
+
+        try
+        {
+            await cache.SetAsync(tenantId, DocBinaryResource, docCacheId, CacheVersion, bytes, UploadDocumentTtl, ct: ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to store ingested archive binary in Redis: CacheId={CacheId}", docCacheId);
+            return Results.Problem(statusCode: 500, title: "Internal Server Error", detail: "Failed to store the email archive. Please try again.");
+        }
+
+        var metadata = new UploadedDocumentMetadata(fileId, fileName, 0, false);
+        try
+        {
+            await cache.SetAsync(tenantId, DocMetaResource, docCacheId, CacheVersion, metadata, UploadDocumentTtl, ct: ct);
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: the /content GET falls back to a default filename when meta is missing.
+            logger.LogWarning(ex, "Failed to cache ingested archive metadata: CacheId={CacheId}", docCacheId);
+        }
+
+        // 7. Append a ChatSessionFile manifest entry (raw .eml hand-off — no RAG index / extracted text).
+        //    Non-fatal: the binary + meta writes above already make the /content fetch work.
+        try
+        {
+            var newFile = new ChatSessionFile(
+                FileId: fileId,
+                FileName: fileName,
+                ContentType: "message/rfc822",
+                SizeBytes: bytes.Length,
+                SearchDocumentIdsCsv: string.Empty,
+                UploadedAt: DateTimeOffset.UtcNow);
+
+            var updatedFiles = (session.UploadedFiles ?? Array.Empty<ChatSessionFile>()).Append(newFile).ToList();
+            var updatedSession = session with { UploadedFiles = updatedFiles };
+            await sessionManager.UpdateSessionCacheAsync(updatedSession, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Session manifest update failed (non-fatal) for ingested archive FileId={FileId}, SessionId={SessionId}", fileId, sessionId);
+        }
+
+        logger.LogInformation(
+            "Ingested archive document as session document: SourceDocumentId={SourceDocumentId}, FileId={FileId}, SessionId={SessionId}, SizeBytes={SizeBytes}",
+            request.DocumentId, fileId, sessionId, bytes.Length);
+
+        return Results.Ok(new IngestArchiveResponse(sessionId, fileId, fileName));
     }
 
     /// <summary>
@@ -1292,6 +1483,22 @@ internal record UploadedDocumentMetadata(
     string Filename,
     int TokenEstimate,
     bool WasTruncated);
+
+/// <summary>
+/// Request body for <c>POST /api/ai/chat/sessions/{sessionId}/documents/from-document</c>
+/// (email-communication-intelligence-r2 task 064 E1c — ingest an archived email by reference).
+/// </summary>
+/// <param name="DocumentId">The sprk_document id of the archived email (.eml, sprk_isemailarchive=true).</param>
+public record IngestArchiveRequest(string DocumentId);
+
+/// <summary>
+/// Response for the archive-ingest endpoint — the session-scoped file handle the wizard's
+/// AI-prepopulate file leg fetches (GET .../sessions/{sessionId}/documents/{fileId}/content).
+/// </summary>
+/// <param name="SessionId">The chat session the archive was ingested into.</param>
+/// <param name="FileId">The minted session document id (the fetch/content key).</param>
+/// <param name="FileName">The .eml file name surfaced to the wizard.</param>
+public record IngestArchiveResponse(string SessionId, string FileId, string FileName);
 
 /// <summary>
 /// Request body for <c>POST /api/ai/chat/sessions/{sessionId}/events/document-uploaded</c>

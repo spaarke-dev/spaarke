@@ -58,16 +58,17 @@ public sealed class ProjectPreFillService
     // consumer contract, and $choices output shape are unchanged — only the
     // internal playbook-ID resolution mechanism has changed.
 
-    // Reuse same file constraints as MatterPreFillService
+    // Reuse same file constraints as MatterPreFillService (incl. task 064 E1c .eml/message/rfc822).
     private static readonly HashSet<string> AllowedExtensions =
-        new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".docx", ".xlsx" };
+        new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".docx", ".xlsx", ".eml" };
 
     private static readonly HashSet<string> AllowedContentTypes =
         new(StringComparer.OrdinalIgnoreCase)
         {
             "application/pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "message/rfc822"
         };
 
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB

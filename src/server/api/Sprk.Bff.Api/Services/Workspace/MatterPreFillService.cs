@@ -66,16 +66,20 @@ public sealed class MatterPreFillService
     // consumer contract, and $choices output shape are unchanged — only the
     // internal playbook-ID resolution mechanism has changed.
 
-    // Supported MIME types for the pre-fill endpoint
+    // Supported MIME types for the pre-fill endpoint.
+    // .eml (message/rfc822): email-communication-intelligence-r2 task 064 (E1c) — an archived
+    // email ingested from reconciliation into the session hands off as a raw .eml; the text
+    // extractor parses it natively (DocumentIntelligenceOptions .eml = Native/Email).
     private static readonly HashSet<string> AllowedExtensions =
-        new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".docx", ".xlsx" };
+        new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".docx", ".xlsx", ".eml" };
 
     private static readonly HashSet<string> AllowedContentTypes =
         new(StringComparer.OrdinalIgnoreCase)
         {
             "application/pdf",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "message/rfc822"
         };
 
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
