@@ -102,6 +102,12 @@
     <output type="test">Per-plane entitlement + data-row-only role-add (FR-08) + negative unmapped-role</output>
   </outputs>
 
+  <ui-tests>
+    <test name="internal-tab-set">Load the SPA as an internal (workforce) caller with FrontDoorUser; assert the tab set = Quick Start (pinned) + Service Requests + Policy Library, and non-listed internal widgets are not default.</test>
+    <test name="external-tab-set">Load the SPA as an external (CIAM) caller; assert the tab set = Work Assignments + Projects + Matters + Invoices + Documents (no Service Requests).</test>
+    <test name="adr-021-dark-mode">Render the tab set in dark mode; no hardcoded colors; no console errors.</test>
+  </ui-tests>
+
   <acceptance-criteria>
     <criterion testable="true">Internal caller with the FrontDoorUser App-Role gets exactly the module codes its sprk_approlemodulemap rows grant; /me.entitlements reflects them; the SPA shows Quick Start + Service Requests + Policy Library.</criterion>
     <criterion testable="true">Adding a new active sprk_approlemodulemap row changes a role's entitlements with NO code/schema change (FR-08).</criterion>
