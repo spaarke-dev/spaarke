@@ -14,7 +14,7 @@
 | **Status** | not-started |
 | **Next Action** | Begin execution: `task-execute` on `tasks/001-bump-globaljson-sdk.poml` (do NOT read/implement POMLs manually — root §4). |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
-| **Git** | Clean — all work committed + pushed (tip `6b1926823`). |
+| **Git** | Clean — all committed + pushed (tip `16639a24d`). **Synced with `origin/master` 2026-08-11** (Update Only: merged master in, 0 behind; NOT merged to master — deferred per sequencing). Merge did NOT touch BFF csproj / `Directory.Build.props` / `global.json`, so task baselines hold. |
 
 ### Critical Context (do NOT re-derive)
 - Target is **.NET 10 (LTS), NOT .NET 11** (STS/not-GA) — LTS-hopping; see memory `dotnet10-not-11`.
