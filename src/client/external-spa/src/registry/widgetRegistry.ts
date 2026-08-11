@@ -108,7 +108,9 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     description: 'Track your own requests and legal’s responses.',
     planes: ['workforce'],
     requiredEntitlement: 'legal-front-door',
-    defaultForRoles: ['workforce'],
+    // R2 task 072 (owner tab set): entitled via legal-front-door but NOT an owner internal DEFAULT tab
+    // (internal defaults = Quick Start pinned + Service Requests + Policy Library). Openable from the library.
+    defaultForRoles: [],
     lazyLoader: placeholderLoader,
   },
   {
@@ -119,7 +121,8 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     description: 'Your invention disclosures and their review stage.',
     planes: ['workforce'],
     requiredEntitlement: 'legal-front-door',
-    defaultForRoles: ['workforce'],
+    // R2 task 072 (owner tab set): entitled via legal-front-door but NOT an owner internal DEFAULT tab.
+    defaultForRoles: [],
     lazyLoader: placeholderLoader,
   },
   {
@@ -169,7 +172,9 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     description: 'One governed thread across the internal/external boundary.',
     planes: ['workforce', 'admin'],
     // No requiredEntitlement — available to everyone in the allowed planes.
-    defaultForRoles: ['workforce', 'admin'],
+    // R2 task 072 (owner tab set): Messages is not one of the 3 internal DEFAULT tabs, so it no longer
+    // auto-opens for workforce (still reachable from the library); retained as an admin default.
+    defaultForRoles: ['admin'],
     lazyLoader: placeholderLoader,
   },
   // ── Outside counsel (CIAM) — R1 Outside-Counsel surfaces re-hosted as widgets ──
@@ -180,7 +185,9 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     ariaLabel: 'Open Projects — engagements you are staffed on',
     description: 'Engagements and workstreams you are staffed on.',
     planes: ['ciam'],
-    requiredEntitlement: 'assigned-work',
+    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
+    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
+    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
     defaultForRoles: ['ciam'],
     lazyLoader: projectsLoader,
   },
@@ -191,7 +198,9 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     ariaLabel: 'Open Matters — legal matters assigned to you',
     description: 'Legal matters assigned to your firm.',
     planes: ['ciam'],
-    requiredEntitlement: 'assigned-work',
+    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
+    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
+    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
     defaultForRoles: ['ciam'],
     lazyLoader: mattersLoader,
   },
@@ -202,7 +211,9 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     ariaLabel: 'Open Work Assignments — tasks assigned to you',
     description: 'Tasks the law department has assigned to you.',
     planes: ['ciam'],
-    requiredEntitlement: 'assigned-work',
+    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
+    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
+    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
     defaultForRoles: ['ciam'],
     lazyLoader: workAssignmentsLoader,
   },
@@ -213,7 +224,9 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     ariaLabel: 'Open Documents — matter documents shared with you',
     description: 'Matter documents shared with you in the workspace.',
     planes: ['ciam'],
-    requiredEntitlement: 'assigned-work',
+    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
+    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
+    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
     defaultForRoles: ['ciam'],
     lazyLoader: documentsLoader,
   },
@@ -224,7 +237,9 @@ export const WIDGET_DEFINITIONS: WidgetDefinition[] = [
     ariaLabel: 'Open Invoices — invoices you have submitted',
     description: 'Invoices you have submitted and their status.',
     planes: ['ciam'],
-    requiredEntitlement: 'assigned-work',
+    // R2 task 072 (owner Option B): CIAM outside-counsel callers are BLANKET-entitled to the
+    // outside-counsel tabs — no requiredEntitlement gate. Record visibility within each tab is
+    // governed by Tier-2 grants (tasks 028 read / 070+071 write), not by a Tier-1 module gate.
     defaultForRoles: ['ciam'],
     lazyLoader: invoicesLoader,
   },

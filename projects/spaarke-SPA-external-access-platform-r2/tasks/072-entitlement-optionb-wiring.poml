@@ -4,7 +4,7 @@
     <title>Tier-1 entitlement Option-B wiring — resolver reads sprk_approlemodulemap (internal App-Role→module) + blanket-entitle CIAM plane + widgetRegistry tab sets (amends 021/022)</title>
     <phase>P2b Polymorphic access-write (grant authoring)</phase>
     <gate>blocked-until:020 (schema owner-created)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Defines Tier-1 module entitlement (which tabs each plane sees) — an authorization surface; bff-api + auth + frontend; /me contract + client gating.</rigor-reason>
     <model-tier>opus</model-tier>

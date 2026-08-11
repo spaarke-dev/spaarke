@@ -36,8 +36,8 @@ Legend: 🔲 not-started · ✅ completed · Tier S=sonnet O=opus · Eff h=high 
 | 018 | Cleanup inert filter + /api/v1/collab | P1 | ✅ | 015,016 | O/x | FULL | — (BFF deletion) |
 | 019 | Deploy P1 (workspace shell + Teams, SWA) | P1 | ✅ | 012,013,014,016,017 | S/h | STANDARD | — (deploy; from wt, live auth E2E owner-pending) |
 | 020 | Module/widget-entitlement Dataverse schema | P2 | ✅ (Option B; owner-created `sprk_approlemodulemap` 2026-08-10) | 015 | S/h | FULL | — (schema) |
-| 021 | Entitlement resolver (App-Role + Contact strategies) | P2 | 🔲 (amended by 072 — Option B) | 020 | O/h | FULL | — (auth core) |
-| 022 | GET /me entitlement endpoint (Redis-cached) | P2 | 🔲 (amended by 072 — Option B + tab config) | 021 | O/h | FULL | Group C |
+| 021 | Entitlement resolver (App-Role + Contact strategies) | P2 | ✅ SUPERSEDED-BY-072 (never built as a standalone; the Option-B `ModuleEntitlementResolver` delivered in 072 IS this resolver) | 020 | O/h | FULL | — (auth core) |
+| 022 | GET /me entitlement endpoint (Redis-cached) | P2 | ✅ SUPERSEDED-BY-072 (never built as a standalone; `GET /api/v1/external/me/entitlements` delivered in 072 IS this endpoint) | 021 | O/h | FULL | Group C |
 | 023 | Lazy Contact attribution (oid resolve-or-create) | P2 | 🔲 | 021 | S/h | FULL | Group C |
 | 024 | Workforce-plane external-app auth policy | P2 | 🔲 | 015 | O/h | FULL | — (auth) |
 | 025 | D1 workforce role→level grading | P2 | 🔲 | 024 | S/x | FULL | — |
@@ -46,7 +46,7 @@ Legend: 🔲 not-started · ✅ completed · Tier S=sonnet O=opus · Eff h=high 
 | 028 | Polymorphic Tier-2 scoping across roots (Project/Matter/WorkAssignment) + internal-only Service Requests tab (supersedes bff7e82e5; amends 015/016) | P2 | ✅ | 015,016 | O/x | FULL | — (auth boundary; own redeploy; deployed dev, live both-plane UAT owner-pending) |
 | 070 | Polymorphic external grant-WRITE (BFF) — grant/revoke across Project/Matter/WorkAssignment + close-project lookup-name bug fix | P2b | ✅ (deployed + live-verified 2026-08-11; ALSO fixed the fully-broken grant path: PascalCase @odata.bind nav names, grantedby oid→systemuserid, expiry field, account→org removed) | 028,020 | O/x | FULL | — (auth boundary write; own redeploy) |
 | 071 | Polymorphic grant UI — TrackingFieldTrio host + AccessGrantModal across roots; adopt shared side-pane Advanced-Lookup (INavigationService.openLookup) | P2b | ✅ (v1.0.12 built + imported to SPAARKE DEV 1 2026-08-11; host-entity-derived recordType, `_sprk_{root}_value` read-filter fix, side-pane pickContact + optional org picker; 25 modal tests; live matter-grant read verified. UI click-path smoke = task-073 UAT) | 070 | S/h | FULL | — (shared lib + PCF; solution import) |
-| 072 | Tier-1 entitlement Option-B wiring — resolver reads sprk_approlemodulemap + blanket-entitle CIAM + widgetRegistry tab sets (amends 021/022) | P2b | 🔲 | 020 | O/h | FULL | — (auth; /me + widgetRegistry) |
+| 072 | Tier-1 entitlement Option-B wiring — resolver reads sprk_approlemodulemap + blanket-entitle CIAM + widgetRegistry tab sets | P2b | ✅ (2026-08-11; PRIMARY impl — 021/022 were never built. New ModuleEntitlementResolver + `GET /api/v1/external/me/entitlements` deployed to spaarke-bff-dev; 12 resolver tests + 239 external-access pass; widgetRegistry owner tab sets; publish 48.46 MB. Client mock→real flip deferred to 073 per owner) | 020 | O/h | FULL | — (auth; /me + widgetRegistry) |
 | 073 | Deploy + both-plane UAT — polymorphic access-write wave (BFF + PCF + entitlement) | P2b | 🔲 | 070,071,072 | S/h | STANDARD | — (deploy; from wt; both-plane UAT) |
 | 030 | Intake schema (servicerequest + FR-24 feedback + thread-on-request) | P3 | 🔲 | 020 | S/h | FULL | — (schema) |
 | 031 | Generic typed-intake framework | P3 | 🔲 | 022,030 | O/h | FULL | — (framework base) |

@@ -1,34 +1,30 @@
 # Current Task State — spaarke-SPA-external-access-platform-r2
 
-> **Last Updated**: 2026-08-11 (task 071 COMPLETE — deployed to SPAARKE DEV 1; task 072 is next)
-> **Recovery**: read Quick Recovery. 070 + 071 are done/deployed/verified. 072 not started.
+> **Last Updated**: 2026-08-11 (task 072 COMPLETE — BFF entitlement deployed; task 073 is next & final P2b)
+> **Recovery**: read Quick Recovery. 070 + 071 + 072 are done/deployed/verified. 073 not started.
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Status** | Task **071 COMPLETE** — polymorphic grant UI: TrackingFieldTrio host derives the bound entity, grant-read filter `_sprk_{root}_value` (fixes Matter/WA "Failed to load access data"), AccessGrantModal sends `{recordType,recordId}` + adopts the shared side-pane Advanced Lookup (`INavigationService.openLookup`) for the contact picker + an optional `sprk_organization` picker. **PCF v1.0.12 built + imported to SPAARKE DEV 1 + published.** 25 modal tests pass; live matter-scoped grant read verified. |
-| **NEXT ACTION** | **Task 072** — Tier-1 entitlement Option-B wiring. Say "work on task 072". Amends 021 (resolver reads `sprk_approlemodulemap` App-Role→module; blanket-entitle CIAM plane) + 022 (`/me`) + `external-spa` widgetRegistry tab config per the owner tab lists (internal defaults = Service Requests + Policy Library; CIAM defaults = Work Assignments/Projects/Matters/Invoices/Documents; drop `requiredEntitlement:'assigned-work'` on CIAM widgets). See `notes/polymorphic-grant-authoring-enhancement.md` §020/§072 + `notes/module-entitlement-schema-decision.md`. `sprk_approlemodulemap` already created+seeded by owner. |
-| **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — commit 071 work + push. ~behind/ahead master (master moving; teams SSO fix already merged-in). Re-sync from master before the 073 deploy wave. |
-| **BFF deploy** | Live on spaarke-bff-dev with ALL grant fixes + org bind (task 070). |
-| **PCF deploy** | TrackingFieldTrio **v1.0.12** live on SPAARKE DEV 1 (task 071). external-spa SPA NOT deployed yet (task 073). |
+| **Status** | Task **072 COMPLETE** — Tier-1 module entitlement (owner Option B). NEW `ModuleEntitlementResolver` (workforce App-Role `roles` ∩ `sprk_approlemodulemap`; CIAM blanket `['assigned-work']`) + `GET /api/v1/external/me/entitlements` (`{displayName,email,plane,entitlements[]}`) **deployed to spaarke-bff-dev** (401 live, health OK). external-spa widgetRegistry set to owner tab sets (internal defaults = Service Requests + Policy Library + QS pinned; CIAM blanket, dropped `requiredEntitlement`). 12 resolver tests + 239 external-access tests pass. **Discovery: 021/022 were never built — 072 is the primary impl** (marked SUPERSEDED-BY-072 in TASK-INDEX). |
+| **NEXT ACTION** | **Task 073** (final P2b) — Deploy + both-plane UAT. Say "work on task 073". It: (1) **flips `me-client.ts` mock→real** `bffApiCall('/api/v1/external/me/entitlements')` (Deviation D-1, deferred from 072); (2) deploys the external-spa SPA (SWA — NOT yet deployed; includes teams-app-r1 SSO fix + 028 serviceRequests + 072 tab sets); (3) owner runs the dual-plane UAT: workforce FrontDoorUser → entitlements `['legal-front-door','policy-library']` + correct tabs; CIAM → `['assigned-work']` + 5 outside-counsel tabs; grant a Matter/WA to an external contact (071 UI) → visible in SPA with children rolling up (028 read); FR-08 add-a-map-row live; grantedby under SSO (070 follow-up). Reconcile from master before deploying. |
+| **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — commit 072 + push. ~behind master; re-sync from master before the 073 SPA/BFF deploy wave. |
+| **BFF deploy** | Live on spaarke-bff-dev: ALL grant fixes + org bind (070) + `/me/entitlements` (072). |
+| **PCF deploy** | TrackingFieldTrio **v1.0.12** live on SPAARKE DEV 1 (071). |
+| **SPA deploy** | external-spa NOT deployed yet (task 073). |
 
-## ✅ Task 071 — done (reference)
-Full detail: `notes/task-071-deviations.md`. Key: host-entity-derived `recordType` (drops `sprk_project`
-hardcode); `_sprk_{root}_value` polymorphic read filter; shared `AccessGrantModal` gains injected
-`pickContact`/`pickOrganization` callbacks (side-pane Advanced Lookup, no new abstraction §11) + stays
-Xrm-free; `{recordType,recordId}` + `organizationId` grant bodies; revoke root-agnostic. Deviation D-1:
-inline Combobox retained as the non-injected fallback (production PCF path uses openLookup). Step-6
-side-pane-over-modal spike = owner-pending browser check in the 073 UAT (sound by construction).
+## ✅ Task 072 — done (reference)
+`notes/task-072-deviations.md`. Option B: internal = App-Role→`sprk_approlemodulemap`→codes (no Contact),
+external = blanket outside-counsel. New resolver + `/me/entitlements` endpoint (ADR-009 map cache, ADR-010
+concrete, app-only). widgetRegistry owner tab sets. **D-1: client mock→real flip deferred to 073** (needs
+live dual-plane tokens); mock is value-aligned with the server so the flip is one line.
 
-## ✅ Task 070 — done (reference)
-`notes/task-070-deviations.md`. Repaired the fully-broken grant path + polymorphic write + `sprk_organization`.
-
-## Remaining P2b tasks
-- **072** Tier-1 Option-B entitlement wiring (resolver + /me + widgetRegistry tabs). NEXT.
-- **073** Deploy + both-plane UAT (BFF + PCF + entitlement live; owner runs the browser UAT incl. the
-  071 person-icon→side-pane→grant click-path on Matter/WA, and confirms grantedby under SSO).
+## ✅ 070 + 071 — done (reference)
+`notes/task-070-deviations.md` (polymorphic grant-write + repaired path + `sprk_organization`);
+`notes/task-071-deviations.md` (polymorphic grant UI + side-pane Advanced Lookup, PCF v1.0.12).
 
 ## Notes index
-`notes/`: `task-071-deviations.md`, `task-070-deviations.md`, `polymorphic-grant-authoring-enhancement.md`,
-`task-028-deviations.md`, `external-access-polymorphic-scoping-design.md`, `module-entitlement-schema-decision.md`.
+`notes/`: `task-072-deviations.md`, `task-071-deviations.md`, `task-070-deviations.md`,
+`polymorphic-grant-authoring-enhancement.md`, `module-entitlement-schema-decision.md`,
+`external-access-polymorphic-scoping-design.md`, `task-028-deviations.md`.

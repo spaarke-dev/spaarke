@@ -16,10 +16,17 @@
  * activates outside `VITE_DEV_MOCK=true`, so it has no production security surface (NFR-06: the
  * client is never the enforcement boundary regardless).
  *
- * TODO(task-022): once the real entitlement endpoint ships, replace this module's body with a
- * `bffApiCall<MeEntitlementsResponse>('/api/v1/external/me/entitlements')` call. Every consumer
- * (widgetRegistry.ts, QuickStartPane, WidgetLibraryModal, WorkspaceHomePage) already depends on
- * this exact contract shape — the swap is localized to `fetchMeEntitlements` below.
+ * STATUS(task-072): the real BFF entitlement endpoint now EXISTS —
+ * `GET /api/v1/external/me/entitlements` (Option B: workforce from sprk_approlemodulemap App-Role→module;
+ * CIAM blanket outside-counsel set), returning this exact `MeEntitlementsResponse` shape. The mock values
+ * below are DELIBERATELY aligned with what that endpoint returns per plane (workforce =
+ * ['legal-front-door','policy-library'] from the seeded map; ciam = ['assigned-work']), so the swap is a
+ * one-line change with no consumer impact.
+ *
+ * TODO(task-073): flip `fetchMeEntitlements` to
+ * `bffApiCall<MeEntitlementsResponse>('/api/v1/external/me/entitlements')`, co-located with the
+ * deploy + dual-plane (workforce `roles` claim + CIAM) UAT that a live auth call requires. Until then the
+ * mock keeps the working SPA independent of an unverified live auth path (owner decision, 2026-08-11).
  */
 
 /** Identity plane — matches the caller's auth authority (ADR-028 dual-plane). */

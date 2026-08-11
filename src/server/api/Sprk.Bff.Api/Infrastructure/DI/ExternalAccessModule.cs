@@ -69,6 +69,25 @@ public static class ExternalAccessModule
             client.Timeout = TimeSpan.FromSeconds(15);
         });
 
+        // Module entitlement resolver (task 072, owner Option B) — resolves the Tier-1 module-code set
+        // the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements): workforce
+        // from sprk_approlemodulemap (App-Role → module), CIAM blanket outside-counsel set. Typed
+        // HttpClient (app-only Dataverse read, broker-only NFR-02) with a 60s Redis map cache (ADR-009 —
+        // caches the small GLOBAL config map as DATA, never an authorization decision). Concrete
+        // registration (ADR-010) — single implementation, mirroring ExternalParticipationService.
+        services.AddHttpClient<ModuleEntitlementResolver>((sp, client) =>
+        {
+            var config = sp.GetRequiredService<IConfiguration>();
+            var dataverseUrl = config["Dataverse:ServiceUrl"];
+            if (!string.IsNullOrEmpty(dataverseUrl))
+            {
+                client.BaseAddress = new Uri($"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/");
+                client.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+                client.DefaultRequestHeaders.Add("OData-Version", "4.0");
+            }
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+
         // SPE container membership — manages Graph API permissions for external users.
         services.AddScoped<SpeContainerMembershipService>();
 
