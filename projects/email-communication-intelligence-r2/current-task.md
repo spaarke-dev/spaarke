@@ -1,8 +1,8 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-11 (task-execute 063 done). **Pillar E mount BUILT + in review (PR #755); UAT round-2 captured + prototyped; 063 labels SHIPPED to branch.** Branch **worktree-synced to master** (merge `13e2ba74e`, 0 behind), then 063 work on top. BFF deployed (endpoints live).
-> **Recovery**: Read "Quick Recovery" first. Nothing in-flight. Prototype live at **localhost:5177** (dev server bg; `.eml`-preload mock added, commit `05231e9a8` on `feature/uat-harness-framework`). Main-branch work committed + pushed to PR #755.
+> **Last Updated**: 2026-08-11 (context-handoff). **Pillar E mount BUILT + in review (PR #755). UAT round-2 behaviors: 063 (labels)+066 (Assigned-to lookup)+065 (Fields typed controls + Update-other-fields) ALL SHIPPED; only 064 remains.** HEAD `770268326`, **17 ahead / 1 behind master** (CI — re-sync before merge), **0 uncommitted / 0 unpushed** — everything on PR #755.
+> **Recovery**: Read "Quick Recovery" first. **Nothing in-flight** (clean stop before 064). Next: say "continue" → execute **064** (E1b/E1c — the last UAT behavior; BFF §10 + SpaarkeAi hot-path). Prototype approved, live at localhost:5177 (`.eml` mock `05231e9a8` on `feature/uat-harness-framework`).
 >
 > **LATEST (2026-08-11 this turn)**: Prototype **APPROVED** (use existing components) → 064/065/066 unblocked. Delivered this turn (all committed+pushed to PR #755, branch synced 0-behind-master):
 > - **063 ✅** UAT labels (E1a "New record" / E2a "Accept" verified / E3a Tasks "Create").
