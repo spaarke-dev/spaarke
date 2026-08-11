@@ -17,24 +17,26 @@ public enum ExternalGrantRootType
 /// and entity set used when WRITING a grant row, and parses the wire <c>recordType</c> token.
 ///
 /// <para>
-/// Nav-property convention verified on <c>sprk_externalrecordaccess</c> (task 070): a lookup attribute
-/// <c>sprk_X</c> exposes the single-valued navigation property <c>sprk_Xid</c>. Proven live on
-/// <c>sprk_contact → sprk_contactid</c> and <c>sprk_project → sprk_projectid</c> (both already bound by
-/// the shipped grant path); <c>sprk_matter</c>/<c>sprk_workassignment</c> follow the same owner-created
-/// shape (owner-confirmed). Read/filter value fields are <c>_sprk_project_value</c> /
-/// <c>_sprk_matter_value</c> / <c>_sprk_workassignment_value</c> (task 028).
+/// Nav-property names verified against LIVE Dataverse <c>$metadata</c>
+/// (<c>EntityDefinitions('sprk_externalrecordaccess')/ManyToOneRelationships</c>, task 070): the
+/// single-valued navigation property for a lookup attribute <c>sprk_x</c> is the PascalCase
+/// <c>sprk_X</c> (e.g. <c>sprk_project → sprk_Project</c>), NOT <c>sprk_xid</c>. The <c>sprk_xid</c> form
+/// the original (never-live-tested) teams-app-r1 grant path used was wrong and 400'd every grant. The
+/// bind VALUE uses the plural entity-set name (<c>/sprk_projects({id})</c>). Read/filter value fields are
+/// <c>_sprk_project_value</c> / <c>_sprk_matter_value</c> / <c>_sprk_workassignment_value</c> (task 028).
 /// </para>
 /// </summary>
 internal static class ExternalGrantRoot
 {
     /// <summary>
-    /// The <c>@odata.bind</c> navigation property + target entity set for a grant root type.
+    /// The <c>@odata.bind</c> navigation property (PascalCase, verified live) + target entity set
+    /// (plural collection name) for a grant root type.
     /// </summary>
     public static (string NavigationProperty, string EntitySet) BindFor(ExternalGrantRootType type) => type switch
     {
-        ExternalGrantRootType.Project => ("sprk_projectid", "sprk_projects"),
-        ExternalGrantRootType.Matter => ("sprk_matterid", "sprk_matters"),
-        ExternalGrantRootType.WorkAssignment => ("sprk_workassignmentid", "sprk_workassignments"),
+        ExternalGrantRootType.Project => ("sprk_Project", "sprk_projects"),
+        ExternalGrantRootType.Matter => ("sprk_Matter", "sprk_matters"),
+        ExternalGrantRootType.WorkAssignment => ("sprk_WorkAssignment", "sprk_workassignments"),
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown external grant root type.")
     };
 

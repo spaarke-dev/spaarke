@@ -28,9 +28,9 @@ public class PolymorphicGrantWriteTests
     // =========================================================================
 
     [Theory]
-    [InlineData(ExternalGrantRootType.Project, "sprk_projectid", "sprk_projects")]
-    [InlineData(ExternalGrantRootType.Matter, "sprk_matterid", "sprk_matters")]
-    [InlineData(ExternalGrantRootType.WorkAssignment, "sprk_workassignmentid", "sprk_workassignments")]
+    [InlineData(ExternalGrantRootType.Project, "sprk_Project", "sprk_projects")]
+    [InlineData(ExternalGrantRootType.Matter, "sprk_Matter", "sprk_matters")]
+    [InlineData(ExternalGrantRootType.WorkAssignment, "sprk_WorkAssignment", "sprk_workassignments")]
     public void BindFor_ForEachRoot_ReturnsTypedLookupNavigationAndEntitySet(
         ExternalGrantRootType type, string expectedNavProperty, string expectedEntitySet)
     {
@@ -190,12 +190,12 @@ public class PolymorphicGrantWriteTests
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
             request, ExternalGrantRootType.Project, projectId, grantedBySystemUserId: null));
 
-        payload.Should().ContainKey("sprk_projectid@odata.bind");
-        payload["sprk_projectid@odata.bind"].Should().Be($"/sprk_projects({projectId})");
-        payload["sprk_contactid@odata.bind"].Should().Be($"/contacts({request.ContactId})");
+        payload.Should().ContainKey("sprk_Project@odata.bind");
+        payload["sprk_Project@odata.bind"].Should().Be($"/sprk_projects({projectId})");
+        payload["sprk_Contact@odata.bind"].Should().Be($"/contacts({request.ContactId})");
         // Back-compat: no matter/WA lookups on a project grant.
-        payload.Should().NotContainKey("sprk_matterid@odata.bind");
-        payload.Should().NotContainKey("sprk_workassignmentid@odata.bind");
+        payload.Should().NotContainKey("sprk_Matter@odata.bind");
+        payload.Should().NotContainKey("sprk_WorkAssignment@odata.bind");
     }
 
     [Fact]
@@ -207,9 +207,9 @@ public class PolymorphicGrantWriteTests
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
             request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
 
-        payload["sprk_matterid@odata.bind"].Should().Be($"/sprk_matters({matterId})");
-        payload.Should().NotContainKey("sprk_projectid@odata.bind");
-        payload.Should().NotContainKey("sprk_workassignmentid@odata.bind");
+        payload["sprk_Matter@odata.bind"].Should().Be($"/sprk_matters({matterId})");
+        payload.Should().NotContainKey("sprk_Project@odata.bind");
+        payload.Should().NotContainKey("sprk_WorkAssignment@odata.bind");
     }
 
     [Fact]
@@ -221,9 +221,9 @@ public class PolymorphicGrantWriteTests
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
             request, ExternalGrantRootType.WorkAssignment, waId, grantedBySystemUserId: null));
 
-        payload["sprk_workassignmentid@odata.bind"].Should().Be($"/sprk_workassignments({waId})");
-        payload.Should().NotContainKey("sprk_projectid@odata.bind");
-        payload.Should().NotContainKey("sprk_matterid@odata.bind");
+        payload["sprk_WorkAssignment@odata.bind"].Should().Be($"/sprk_workassignments({waId})");
+        payload.Should().NotContainKey("sprk_Project@odata.bind");
+        payload.Should().NotContainKey("sprk_Matter@odata.bind");
     }
 
     [Theory]
@@ -238,7 +238,7 @@ public class PolymorphicGrantWriteTests
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
             request, type, rootId, grantedBySystemUserId: null));
 
-        var rootKeys = new[] { "sprk_projectid@odata.bind", "sprk_matterid@odata.bind", "sprk_workassignmentid@odata.bind" };
+        var rootKeys = new[] { "sprk_Project@odata.bind", "sprk_Matter@odata.bind", "sprk_WorkAssignment@odata.bind" };
         payload.Keys.Count(k => rootKeys.Contains(k)).Should().Be(1,
             "a grant row must bind exactly ONE root lookup (never two, never zero)");
     }
@@ -253,7 +253,7 @@ public class PolymorphicGrantWriteTests
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
             request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
 
-        payload.Should().ContainKey("sprk_contactid@odata.bind");
+        payload.Should().ContainKey("sprk_Contact@odata.bind");
         payload["sprk_accesslevel"].Should().Be((int)ExternalAccessLevel.Collaborate);
         payload.Should().ContainKey("sprk_granteddate");
     }
@@ -268,7 +268,7 @@ public class PolymorphicGrantWriteTests
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
             request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: systemUserId.ToString()));
 
-        payload["sprk_grantedby@odata.bind"].Should().Be($"/systemusers({systemUserId})");
+        payload["sprk_GrantedBy@odata.bind"].Should().Be($"/systemusers({systemUserId})");
     }
 
     [Fact]
@@ -282,7 +282,7 @@ public class PolymorphicGrantWriteTests
         var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
             request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
 
-        payload.Should().NotContainKey("sprk_grantedby@odata.bind");
+        payload.Should().NotContainKey("sprk_GrantedBy@odata.bind");
     }
 
     [Fact]

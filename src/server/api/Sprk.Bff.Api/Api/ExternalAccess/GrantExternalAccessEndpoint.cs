@@ -267,13 +267,16 @@ public static class GrantExternalAccessEndpoint
     internal static object BuildGrantPayload(
         GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId)
     {
-        // Bind exactly ONE typed root lookup per record type (never two). A project root binds
-        // sprk_projectid@odata.bind — byte-identical to the pre-070 project grant (back-compat).
+        // Bind exactly ONE typed root lookup per record type (never two). Nav property is PascalCase
+        // (sprk_Project / sprk_Matter / sprk_WorkAssignment), verified live — see ExternalGrantRoot.
         var (navigationProperty, entitySet) = ExternalGrantRoot.BindFor(rootType);
 
+        // @odata.bind nav-property names are PascalCase (sprk_Contact / sprk_GrantedBy / sprk_Project…),
+        // verified live against sprk_externalrecordaccess $metadata (task 070). The lowercase *id forms
+        // teams-app-r1 used were wrong and 400'd every grant.
         var payload = new Dictionary<string, object?>
         {
-            ["sprk_contactid@odata.bind"] = $"/contacts({request.ContactId})",
+            ["sprk_Contact@odata.bind"] = $"/contacts({request.ContactId})",
             [$"{navigationProperty}@odata.bind"] = $"/{entitySet}({rootId})",
             ["sprk_accesslevel"] = (int)request.AccessLevel,
             ["sprk_granteddate"] = DateTime.UtcNow.ToString("o")
@@ -284,7 +287,7 @@ public static class GrantExternalAccessEndpoint
         if (!string.IsNullOrEmpty(grantedBySystemUserId) &&
             Guid.TryParse(grantedBySystemUserId, out var systemUserId))
         {
-            payload["sprk_grantedby@odata.bind"] = $"/systemusers({systemUserId})";
+            payload["sprk_GrantedBy@odata.bind"] = $"/systemusers({systemUserId})";
         }
 
         if (request.ExpiryDate.HasValue)
