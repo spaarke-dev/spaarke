@@ -18,6 +18,14 @@ jest.mock('@spaarke/auth', () => ({
   authenticatedFetch: (...args: [string, RequestInit?]) => mockAuthenticatedFetch(...args),
 }));
 
+// E3b (066) — the Assigned-to OOB lookup bridge. `getXrmForPicker` is overridden per-test;
+// `undefined` = non-MDA/dev host (the guarded no-op path). Spread the real module so FormModal etc. stay real.
+const mockPickerXrm: { current: unknown } = { current: undefined };
+jest.mock('@spaarke/ui-components', () => {
+  const actual = jest.requireActual('@spaarke/ui-components');
+  return { ...actual, getXrmForPicker: () => mockPickerXrm.current };
+});
+
 import { TaskReconcileTab, TaskReconcileModal } from '../TaskReconcileTab';
 
 const COMM_ID = 'comm-1';
@@ -65,8 +73,49 @@ const renderTab = (props: Partial<React.ComponentProps<typeof TaskReconcileTab>>
   );
 
 describe('TaskReconcileTab', () => {
-  beforeEach(() => mockAuthenticatedFetch.mockReset());
+  beforeEach(() => {
+    mockAuthenticatedFetch.mockReset();
+    mockPickerXrm.current = undefined;
+  });
   afterEach(() => jest.restoreAllMocks());
+
+  // E3b (066) — Assigned-to opens the OOB advanced-lookup (systemuser/team); a pick sets the
+  // normalized id + shows the name; a non-MDA host no-ops and the text-input fallback stays usable.
+  it('E3b: Assigned-to lookup picks a systemuser → normalized id in the apply body + name shown', async () => {
+    wireDefault();
+    const lookupObjects = jest
+      .fn()
+      .mockResolvedValue([{ id: '{AAAAAAAA-1111-2222-3333-444444444444}', name: 'Dana Case' }]);
+    mockPickerXrm.current = { Utility: { lookupObjects } };
+    renderTab();
+    const card = await screen.findByTestId('task-reconcile-card');
+
+    fireEvent.click(within(card).getByTestId('task-reconcile-assignedto-lookup'));
+    await waitFor(() =>
+      expect(within(card).getByTestId('task-reconcile-assignedto-name')).toHaveTextContent('Dana Case')
+    );
+    expect(lookupObjects).toHaveBeenCalledWith(
+      expect.objectContaining({ entityTypes: ['systemuser', 'team'], allowMultiSelect: false })
+    );
+
+    // Unchanged identity → 034 apply; the body carries the brace-stripped, lowercased id.
+    fireEvent.click(within(card).getByTestId('task-reconcile-accept'));
+    await waitFor(() => expect(postCall('/create-task/apply')).toBeTruthy());
+    expect(JSON.parse(postCall('/create-task/apply')![1].body).assignedTo).toBe('aaaaaaaa-1111-2222-3333-444444444444');
+  });
+
+  it('E3b: non-MDA host → lookup no-ops; text-input fallback stays editable', async () => {
+    wireDefault();
+    mockPickerXrm.current = undefined; // dev/non-MDA — bridge absent
+    renderTab();
+    const card = await screen.findByTestId('task-reconcile-card');
+
+    fireEvent.click(within(card).getByTestId('task-reconcile-assignedto-lookup')); // silent no-op
+    expect(within(card).queryByTestId('task-reconcile-assignedto-name')).not.toBeInTheDocument();
+    const input = within(card).getByTestId('task-reconcile-assignedto');
+    fireEvent.change(input, { target: { value: 'manual-user-id' } });
+    expect(input).toHaveValue('manual-user-id');
+  });
 
   it('gates on NFR-10 when no association is confirmed and does not fetch', async () => {
     renderTab({ regarding: null });

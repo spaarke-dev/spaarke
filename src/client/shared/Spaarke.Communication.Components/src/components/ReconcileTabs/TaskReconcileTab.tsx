@@ -55,8 +55,15 @@ import {
   shorthands,
   tokens,
 } from '@fluentui/react-components';
-import { AddRegular, CheckmarkRegular, DismissRegular, ClockRegular, Link16Regular } from '@fluentui/react-icons';
-import { FormModal } from '@spaarke/ui-components';
+import {
+  AddRegular,
+  CheckmarkRegular,
+  DismissRegular,
+  ClockRegular,
+  Link16Regular,
+  SearchRegular,
+} from '@fluentui/react-icons';
+import { FormModal, getXrmForPicker } from '@spaarke/ui-components';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
 import type { AuthenticatedFetchFn } from '../EmailBody/EmailBodyView.types';
 import type { EmailCitation } from '../../logic/citations';
@@ -164,6 +171,8 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
   },
   dateGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: tokens.spacingHorizontalS },
+  assignedRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  assignedName: { flexGrow: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   meta: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS },
   actions: { display: 'flex', gap: tokens.spacingHorizontalS, marginTop: tokens.spacingVerticalXS, flexWrap: 'wrap' },
   rowError: { color: tokens.colorPaletteRedForeground1 },
@@ -249,6 +258,8 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
   const [adhoc, setAdhoc] = React.useState<TaskFormState | null>(null);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [rowError, setRowError] = React.useState<Record<string, string>>({});
+  // Display names for a picked Assigned-to (UI-only; `form.assignedTo` keeps the id sent to the BFF).
+  const [assignedNames, setAssignedNames] = React.useState<Record<string, string>>({});
 
   const load = React.useCallback(async () => {
     if (!scope) {
@@ -284,6 +295,34 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
       setForms(prev => ({ ...prev, [key]: { ...prev[key], ...patch } }));
     }
   }, []);
+
+  // Assigned-to → OOB advanced-lookup (systemuser/team), reusing the shared `getXrmForPicker`
+  // bridge (same pattern as EmailConnectionsReview). Non-MDA/dev host: the bridge is absent so
+  // this is a silent no-op and the text-input fallback stays usable. Payload keeps the id.
+  const openAssignedToLookup = React.useCallback(
+    async (key: string): Promise<void> => {
+      try {
+        const xrm = getXrmForPicker();
+        if (!xrm?.Utility?.lookupObjects) return; // dev/non-MDA host — no-op (expected)
+        const results = await xrm.Utility.lookupObjects({
+          entityTypes: ['systemuser', 'team'],
+          defaultEntityType: 'systemuser',
+          allowMultiSelect: false,
+        });
+        if (!results || results.length === 0) return; // user cancelled
+        const picked = results[0];
+        const id = picked.id.replace(/[{}]/g, '').toLowerCase();
+        patchForm(key, { assignedTo: id });
+        setAssignedNames(prev => ({ ...prev, [key]: picked.name }));
+      } catch (err) {
+        setRowError(prev => ({
+          ...prev,
+          [key]: err instanceof Error ? err.message : 'Could not open the user picker.',
+        }));
+      }
+    },
+    [patchForm]
+  );
 
   const removeProposal = React.useCallback((reviewLogId: string) => {
     setProposals(prev => prev.filter(p => p.reviewLogId !== reviewLogId));
@@ -495,13 +534,45 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
             ))}
           </Select>
         </Field>
-        <Field label="Assigned to (user id)">
-          <Input
-            value={form.assignedTo}
-            disabled={busyId === key}
-            data-testid="task-reconcile-assignedto"
-            onChange={(_, d) => patchForm(key, { assignedTo: d.value })}
-          />
+        <Field label="Assigned to">
+          {assignedNames[key] ? (
+            <div className={s.assignedRow}>
+              <Text className={s.assignedName} data-testid="task-reconcile-assignedto-name">
+                {assignedNames[key]}
+              </Text>
+              <Button
+                size="small"
+                appearance="subtle"
+                icon={<SearchRegular />}
+                disabled={busyId === key}
+                data-testid="task-reconcile-assignedto-lookup"
+                onClick={() => void openAssignedToLookup(key)}
+              >
+                Change
+              </Button>
+            </div>
+          ) : (
+            <div className={s.assignedRow}>
+              <Input
+                className={s.assignedName}
+                value={form.assignedTo}
+                disabled={busyId === key}
+                placeholder="Search or enter a user id"
+                data-testid="task-reconcile-assignedto"
+                onChange={(_, d) => patchForm(key, { assignedTo: d.value })}
+              />
+              <Button
+                size="small"
+                appearance="secondary"
+                icon={<SearchRegular />}
+                disabled={busyId === key}
+                data-testid="task-reconcile-assignedto-lookup"
+                onClick={() => void openAssignedToLookup(key)}
+              >
+                Lookup
+              </Button>
+            </div>
+          )}
         </Field>
       </div>
     </>
