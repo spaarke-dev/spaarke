@@ -319,6 +319,29 @@ export function getWidgetAssistantContract(type: string): WidgetAssistantContrac
 }
 
 /**
+ * Retrieve a registered widget's respond/direct/hybrid interaction pattern
+ * (FR-13, task 040 — the SINGLE-SOURCED runtime read point for this field).
+ *
+ * This is a thin projection of `getWidgetAssistantContract(type)?.interactionPattern`
+ * — it exists so callers that only need the pattern (the FR-14/task-041
+ * follow-on derivation is the first one) have ONE canonical accessor to
+ * import, rather than each reaching into the contract shape inline and
+ * risking a scattered, re-derived, or hardcoded per-widget-type guess
+ * (the exact anti-pattern FR-13/FR-14 close — see `AssistantInteractionPattern`'s
+ * JSDoc in `types/shared.ts`). Task 041 MUST read the pattern through this
+ * accessor (or `getWidgetAssistantContract`) — never re-encode
+ * respond/direct/hybrid logic per widget type at the call site.
+ *
+ * Returns `undefined` for widgets that have not declared a contract, mirroring
+ * `getWidgetAssistantContract`'s "no gap" semantics.
+ *
+ * @param type - Widget type string.
+ */
+export function getWidgetInteractionPattern(type: string): WidgetAssistantContract['interactionPattern'] | undefined {
+  return _registry.get(type)?.metadata.assistantContract?.interactionPattern;
+}
+
+/**
  * Retrieve the Pillar 9 agent-visibility derivation for a registered
  * workspace widget type (task 072 / D-C-27).
  *

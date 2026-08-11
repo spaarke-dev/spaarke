@@ -11,6 +11,7 @@ import {
   hasWorkspaceWidget,
   getWorkspaceWidgetMetadata,
   resolveWorkspaceWidget,
+  getWidgetInteractionPattern,
 } from '../../../registry/WorkspaceWidgetRegistry';
 import { DOCUMENT_VIEWER_WIDGET_TYPE } from '../register-document-viewer-widget';
 
@@ -63,7 +64,10 @@ describe('register-document-viewer-widget', () => {
     expect(contract).toBeDefined();
     expect(contract!.overviewTools).toEqual([]);
     expect(contract!.perItemCards.map(c => c.label)).toEqual(['Summarize', 'Draft response', 'Draft memo']);
-    expect(contract!.interactionPattern).toBe('hybrid');
+    // task 040 (FR-13 finalization, D-8): corrected from task 022's placeholder 'hybrid' to
+    // 'respond' — every perItemCards entry lands 'chat' (task 026), so 'respond' is the
+    // authoritative value per the AssistantInteractionPattern contract (types/shared.ts).
+    expect(contract!.interactionPattern).toBe('respond');
   });
 
   it('all three cards land in chat (task 026 finalization — no composer/Compose surface exists for documents; see register-document-viewer-widget.ts landing NOTE)', () => {
@@ -72,5 +76,9 @@ describe('register-document-viewer-widget', () => {
     expect(byLabel.get('Summarize')).toBe('chat');
     expect(byLabel.get('Draft response')).toBe('chat');
     expect(byLabel.get('Draft memo')).toBe('chat');
+  });
+
+  it("getWidgetInteractionPattern('document-viewer') reads the SAME 'respond' value from the live registry (task 040 single-sourced accessor)", () => {
+    expect(getWidgetInteractionPattern(DOCUMENT_VIEWER_WIDGET_TYPE)).toBe('respond');
   });
 });

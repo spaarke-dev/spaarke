@@ -63,8 +63,11 @@ export const DOCUMENT_VIEWER_WIDGET_TYPE = 'document-viewer' as const;
 // (`composeDraftRouting.ts`) would silently DROP the one-shot `documentId`
 // grounding (that alternate Binding-dispatch path does not forward
 // `body.documentId`) — a worse, ungrounded outcome than answering in chat.
-// task 040 (the interaction-pattern registration field) is the right place
-// to build a properly-grounded Compose landing for these two cards.
+// task 040 evaluated building a properly-grounded Compose landing for these
+// two cards and decided AGAINST it (out of 040's registration-field scope —
+// see the `interactionPattern` note below); D-8 (defer-issues.md) stays open
+// for a future task to pick up threading `body.documentId` into the
+// compose-draft-document Binding dispatch, if that becomes a priority.
 // Object.freeze: only one widget (document-viewer) currently uses this
 // object, but it's frozen for consistency with OVERVIEW_ONLY_CONTRACT/
 // EMAIL_CONTRACT in register-workspace-widgets.ts and to guard against
@@ -83,13 +86,21 @@ const DOCUMENT_VIEWER_PER_ITEM_CARDS: readonly AssistantContractCard[] = [
 const DOCUMENT_VIEWER_CONTRACT: WidgetAssistantContract = Object.freeze({
   overviewTools: Object.freeze([]),
   perItemCards: Object.freeze(DOCUMENT_VIEWER_PER_ITEM_CARDS),
-  // Left as task 022's original 'hybrid' value — task 026 is explicitly OUT OF SCOPE for
-  // finalizing the interaction-pattern field itself (that is task 040's job); the field is not yet
-  // consumed anywhere at runtime (grep-verified). All three cards land 'chat' for NOW (see the
-  // `landing` NOTE above) which reads closer to 'respond', but a future task-040 change to this
-  // widget's surface (e.g. a properly-grounded Compose landing for Draft memo) would make 'hybrid'
-  // correct again — left alone rather than churned twice.
-  interactionPattern: 'hybrid',
+  // task 040 finalization (D-8, CLAUDE.md §6.5 Path A — see defer-issues.md D-8 and this
+  // file's landing NOTE above): task 022 best-effort placeheld 'hybrid' anticipating
+  // Draft response/Draft memo would land on composer/Compose per FR-11's literal wording.
+  // task 026 shipped all three cards landing 'chat' instead (the only grounded option —
+  // routing through the existing compose-draft-document auto-router would silently drop
+  // the one-shot documentId grounding). task 040 evaluated building a properly-grounded
+  // Compose landing (D-8's "Fix required") and decided AGAINST it for this task: doing so
+  // would require threading body.documentId into the Binding-dispatch compose-draft-document
+  // path — new BFF-adjacent wiring outside 040's scope (register-contract field work only;
+  // no BFF C# changes). The minimal HONEST fix is to correct the DATA FIELD to match the
+  // shipped behavior instead: since every perItemCards entry lands 'chat', this widget is
+  // 'respond' per the AssistantInteractionPattern contract (types/shared.ts) — not 'hybrid'.
+  // D-8 stays open for a future task to build the grounded Compose landing; if/when that
+  // ships, flip this back to 'hybrid' (mixed chat + surface) alongside the landing changes.
+  interactionPattern: 'respond',
 });
 
 registerWorkspaceWidget(

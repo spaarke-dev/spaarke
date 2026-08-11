@@ -228,18 +228,37 @@ export type AssistantCardLanding = 'chat' | 'composer' | 'compose';
  * never model-interpreted prompt prose (ADR-039 invariant: no second
  * intent-detection mechanism).
  *
- *  - `'respond'` — the widget only ever answers IN CHAT (an overview/query
- *    surface with no per-item action cards of its own, e.g. a grid).
+ *  - `'respond'` — the widget only ever answers IN CHAT. Covers BOTH an
+ *    overview/query surface with no per-item action cards of its own (e.g. a
+ *    grid — `perItemCards: []`) AND a per-item surface whose cards ALL land
+ *    `'chat'` (e.g. `document-viewer` — see task 040/D-8: every card answers
+ *    in chat, so the widget is `'respond'` even though it has cards).
  *  - `'direct'`  — the widget's tools always open ANOTHER surface (composer
- *    or Compose) with no standalone chat answer.
- *  - `'hybrid'`  — the widget mixes both: some per-item tools answer in chat
- *    (e.g. Summarize) while others open a surface (e.g. Reply, Draft memo).
+ *    or Compose) with no standalone chat answer — every `perItemCards` entry
+ *    has `landing !== 'chat'`.
+ *  - `'hybrid'`  — the widget mixes both: at least one per-item card answers
+ *    in chat (e.g. Summarize) AND at least one opens another surface (e.g.
+ *    Reply, Draft memo). E.g. `email` — Reply/Reply All/Forward land
+ *    `'composer'`, Summarize the thread lands `'chat'`.
  *
- * task 022 defines this field on the SHAPE and best-effort populates it for
- * the in-scope widgets from the already-specified spec surfaces
- * (FR-09/FR-10/FR-11). task 040 is the single-sourcing checkpoint once
- * tasks 025/026 land the concrete per-item card implementations — coordinate
- * there before diverging from the values set here.
+ * INVARIANT (task 040, made authoritative + single-sourced): this field MUST
+ * agree with the widget's own `perItemCards[].landing` values per the three
+ * rules above — it is a derived-but-declared summary of the cards, not an
+ * independent guess. `WorkspaceWidgetRegistry.interactionPattern.test.ts`'s
+ * "interactionPattern is consistent with perItemCards landings" suite
+ * enforces this for every registered widget so the two never drift.
+ *
+ * task 022 defined this field on the SHAPE and best-effort populated it for
+ * the in-scope widgets ahead of tasks 025/026 landing the concrete per-item
+ * card implementations. task 040 is the single-sourcing checkpoint that
+ * reconciled every value against the shipped card `landing`s (`email` was
+ * already correct at `'hybrid'`; `document-viewer` was corrected from its
+ * task-022 placeholder `'hybrid'` to `'respond'` once task 026 finalized all
+ * three document cards to land `'chat'` — see `register-document-viewer-widget.ts`).
+ * Read this field ONLY via `getWidgetInteractionPattern()` /
+ * `getWidgetAssistantContract().interactionPattern` (`WorkspaceWidgetRegistry.ts`)
+ * — never re-derive or hardcode it per-widget-type at a call site (task 041's
+ * follow-on derivation is the first runtime consumer).
  */
 export type AssistantInteractionPattern = 'respond' | 'direct' | 'hybrid';
 
@@ -260,9 +279,24 @@ export interface AssistantContractCard {
    */
   readonly label: string;
   /**
-   * The ADR-039 closed-catalog tool name this card invokes (e.g.
-   * `'draft_reply'`, `'summarize_thread'`). The LLM never invokes an
-   * unlisted tool — this string MUST match a registered catalog Tool.
+   * A stable identifier for what this card does, in one of two forms
+   * (task 040 reconciliation — both are legitimate, honest shapes; a reader
+   * MUST check which one a given widget uses before assuming catalog-tool
+   * semantics):
+   *
+   *  1. An ADR-039 closed-catalog TOOL NAME the LLM can invoke (e.g.
+   *     `'draft_reply'`, `'summarize_thread'` on `email` — real
+   *     `EmailDraftToolHandler` catalog rows, task 023). The LLM never
+   *     invokes an unlisted tool — for these widgets this string MUST match
+   *     a registered catalog Tool.
+   *  2. A stable CLIENT-SIDE KEY with no catalog-tool backing (e.g.
+   *     `'summarize_document'`, `'draft_document_response'`,
+   *     `'draft_document_memo'` on `document-viewer` — documents have no
+   *     deterministic REST/tool entry point). `DocumentPerItemCards.tsx`
+   *     maps each key to a fixed chat instruction sent through the existing
+   *     `pendingOutboundMessage` seam with the document's id armed
+   *     one-shot (ADR-015) — see that file's docblock. This form never
+   *     appears as an invocable name in the tool catalog.
    */
   readonly tool: string;
   /** Where the tool's output lands once invoked. */

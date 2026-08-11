@@ -147,6 +147,9 @@ export {
   // and the registry guard (050).
   getWidgetContextTypeMap,
   getWidgetAssistantContract,
+  // FR-13 (R3 task 040) — the single-sourced interactionPattern accessor.
+  // Consumed by the follow-on derivation (task 041).
+  getWidgetInteractionPattern,
 } from './registry/WorkspaceWidgetRegistry';
 
 // Task 072 (D-C-27) — Pillar 9 visibility extension.
