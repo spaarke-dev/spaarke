@@ -1,38 +1,60 @@
-# Current Task — dotnet-10-upgrade-r1
+# Current Task State — dotnet-10-upgrade-r1
 
-> **Purpose**: Active task state tracker for context recovery. Reset at each task transition (root CLAUDE.md §7).
+> **Last Updated**: 2026-08-11 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
 
-## Active task
+## Quick Recovery (READ THIS FIRST)
 
-- **Task**: `001` — Bump global.json → 10.0.1xx SDK + re-scrape .NET 10 breaking changes (H5)
-- **Status**: not-started
-- **Phase**: P0 Retarget + build-green
-- **POML**: [`tasks/001-bump-globaljson-sdk.poml`](tasks/001-bump-globaljson-sdk.poml)
-- **Rigor**: FULL · **Model-tier**: sonnet · **Effort**: high
+| Field | Value |
+|-------|-------|
+| **Project phase** | Pipeline COMPLETE (init-only) + deploy reframed for dev-only reality. **Execution NOT started.** |
+| **Active task** | `001` — Bump global.json → 10.0.1xx SDK + re-scrape .NET 10 breaking changes (H5) |
+| **Status** | not-started |
+| **Next Action** | Begin execution: `task-execute` on `tasks/001-bump-globaljson-sdk.poml` (do NOT read/implement POMLs manually — root §4). |
+| **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
+| **Git** | Clean — all work committed + pushed (tip `6b1926823`). |
 
-## Pipeline state
+### Critical Context (do NOT re-derive)
+- Target is **.NET 10 (LTS), NOT .NET 11** (STS/not-GA) — LTS-hopping; see memory `dotnet10-not-11`.
+- **Only `spaarke-dev` is live**; demo/prod decommissioned for budget (re-provision on net10 later) — memory `active-environments`.
+- Retarget is a **serial atomic chain** — no P0 parallel groups. H1(010)/H2(020) are opus/xhigh with non-author adversarial verify (011/021).
+- Deploy tasks are **operator-driven**: **051 (deploy net10 to `spaarke-bff-dev`) is the completion gate**; **060/061 (production cutover) are DEFERRED**.
+- **CI-forced deploys DISABLED**: `deploy-bff-api.yml` (push:master) + `deploy-promote.yml` (workflow_run) → `workflow_dispatch` only, so the eventual merge won't auto-deploy. `deploy-infrastructure.yml` push:master is validate-only (kept).
 
-- **Planning artifacts**: ✅ generated 2026-08-11 (`plan.md`, 23 task POMLs, `TASK-INDEX.md`, this file).
-- **Execution**: NOT started. `/project-pipeline` was run in **INITIALIZE-ONLY** mode (operator decision — plan artifacts only, then stop). Begin execution with `task-execute` on task 001 in a fresh session.
-- **Branch**: `work/dotnet-10-upgrade-r1` (worktree already created; no branch-creation step needed).
+### Sequencing (agreed with owner this session)
+1. Build **P0–P4** concurrently with the 4–5 truly-active worktrees.
+2. **P5** off-hours, exclusive BFF-deploy window: deploy net10 to `spaarke-bff-dev` + smoke + go/no-go (task 051 = completion gate).
+3. **Merge to master** near the deploy; broadcast to the 4–5 worktrees to rebase + retarget onto net10.
+4. Fleet tail: other BFF worktrees rebase onto net10 master.
+5. **P6 (prod cutover) deferred** until demo/prod are re-provisioned on net10.
 
-## Steps completed this task
+---
 
-_(none — task not yet started)_
+## Full State (Detailed)
 
-## Files modified this task
+### What exists (all committed + pushed)
+- `plan.md` — P0–P7 WBS + discovered resources.
+- `tasks/` — 23 POMLs (21 active + 060/061 deferred); `TASK-INDEX.md`.
+- `spec.md` / `plan.md` / `README.md` / `CLAUDE.md` — refreshed; FR-16/NFR-04/NFR-06 annotated DEFERRED.
+- Lint: `scripts/Validate-TaskPoml.ps1` → 23 POMLs, **0 errors** (16 benign role="new"-on-notes warnings).
 
-_(none yet)_
+### This session's work (planning + reframe, NO src/tests code touched)
+- Generated the full plan + 23 task POMLs + TASK-INDEX + current-task; refreshed stale README/CLAUDE; appended `projects/INDEX.md` row.
+- Removed CI-forced BFF deploy triggers (`deploy-bff-api.yml`, `deploy-promote.yml`).
+- Reframed deploy for dev-only: 050/051 → `spaarke-dev`; 060/061 → deferred; 042 runbook split (§A dev direct-deploy · §B future prod slot-swap); 090 gates on 051.
+- Saved project memory: `active-environments`, `dotnet10-not-11`.
 
-## Key decisions / notes
+### Commits this session (on `work/dotnet-10-upgrade-r1`)
+- `84a646789` — generate plan + 23 task POMLs (pipeline init-only)
+- `57cca469f` — remove push:master auto-deploy from deploy-bff-api
+- `758cb415b` — reframe deploy for dev-only environment reality
+- `6b1926823` — remove workflow_run auto-promote from deploy-promote
 
-- This is a support-lifecycle retarget (net8 EOL 2026-11-10) with **zero product-behavior change** except the FR-06 telemetry carve-out.
-- The retarget is intentionally a **serial atomic chain** (design §4 principle 2) — no P0 parallel groups.
-- Deploy: **051 (dev deploy to `spaarke-bff-dev`) is the completion gate** — OPERATOR-DRIVEN (Azure + go/no-go), not autonomous. **060/061 (production cutover) are DEFERRED** — only `spaarke-dev` is live; demo/prod decommissioned for budget until re-provisioned on net10 (see memory `active-environments`).
-- `net462` Dataverse plugin is **out of scope** (NFR-05).
+### Open follow-ups (not blockers)
+- No draft PR opened (init-only). Offer one when execution starts.
+- Project not registered on the DevOps portfolio (no `> **Portfolio**:` pointer in README) → `/devops-project-sync` is a no-op this session.
 
-## Next action
-
-Run `task-execute` against `tasks/001-bump-globaljson-sdk.poml`.
+### Next action (explicit)
+Run `task-execute` against `projects/dotnet-10-upgrade-r1/tasks/001-bump-globaljson-sdk.poml`. Task 001 bumps `global.json` to a 10.0.1xx SDK and re-scrapes the .NET 10 breaking-changes page (H5) — the hard prerequisite for the whole retarget chain.
