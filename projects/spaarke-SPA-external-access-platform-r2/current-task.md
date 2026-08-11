@@ -8,7 +8,7 @@
 | Field | Value |
 |-------|-------|
 | **Status** | Task **028 COMPLETE** — polymorphic Tier-2 scoping (Project/Matter/WorkAssignment roots + internal-only Service Requests) built, unit/seam/contract-tested (10259 pass), grid configs updated, BFF **deployed to spaarke-bff-dev** (health+SHA verified), client built. Supersedes `bff7e82e5`; amends 015/016. |
-| **NEXT ACTION** | **Owner: live both-plane UAT** — log in as workforce (ralph@spaarke.com) + CIAM partner (ralph@hotmail) and confirm: Documents shows all accessible-root docs (project OR matter OR WA) in one tab; Matters/Invoices/Work Assignments populated; **Service Requests tab present for internal, ABSENT for partner**. Then choose the next P2 wave (020/021/024) — owner-gated. |
+| **NEXT ACTION** | **Owner: gate the P2b wave** — tasks **070→071→072→073** authored + lint-clean (polymorphic grant-WRITE + PCF/modal + side-pane lookup + Option-B entitlement). Say "work on task 070" to start. (Owner already did the schema: `sprk_accesspermission` on Project/WA, `sprk_approlemodulemap` created+seeded, TrackingFieldTrio placed on all 3 forms.) Also still open: **028 live both-plane UAT** (deployed, owner-pending). |
 | **Task** | none (028 done; awaiting owner UAT + next-wave decision) |
 | **Branch** | `work/spaarke-SPA-external-access-platform-r2` — synced to `origin/master`; 028 commits on top (not yet merged to master). |
 | **Pre-conditions (next BFF task)** | Deploy from worktree (NOT CI) — memory `deploy-from-worktree-not-ci.md`. `/conflict-check` before any BFF PR. |
