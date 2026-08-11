@@ -219,6 +219,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   authenticatedFetch,
   fetchCandidates,
   fetchExistingGrants,
+  fetchStandingContacts,
   searchContacts,
   pickContact,
   pickOrganization,
@@ -284,16 +285,31 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setLoading(true);
     setNotice(null);
     try {
-      const [candidateList, grantList] = await Promise.all([fetchCandidates(), fetchExistingGrants()]);
-      setExistingGrants(grantList);
+      const [candidateList, grantList, standingList] = await Promise.all([
+        fetchCandidates(),
+        fetchExistingGrants(),
+        // Standing-grant members (task 073 UAT #2) — optional; a host that
+        // hasn't wired the flag omits it. Failing soft so a standing-read
+        // problem (e.g. field-level-security denial) never blocks the modal.
+        fetchStandingContacts ? fetchStandingContacts().catch(() => [] as IAccessGrantRecord[]) : Promise.resolve([]),
+      ]);
+      // Union standing rows into Current Access, deduped by contactId — an
+      // explicit per-record `sprk_externalrecordaccess` grant (which carries an
+      // accessRecordId and IS revocable) wins over a standing row for the same
+      // contact, so a contact with both shows once and stays revocable.
       const grantedContactIds = new Set(grantList.map(g => g.contactId));
-      setCandidates(candidateList.filter(c => !grantedContactIds.has(c.contactId)));
+      const standingOnly = standingList.filter(s => !grantedContactIds.has(s.contactId));
+      setExistingGrants([...grantList, ...standingOnly]);
+      // Exclude both explicitly-granted AND standing members from the
+      // candidate-approve list (they already have access).
+      const currentAccessContactIds = new Set([...grantedContactIds, ...standingOnly.map(s => s.contactId)]);
+      setCandidates(candidateList.filter(c => !currentAccessContactIds.has(c.contactId)));
     } catch {
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
     } finally {
       setLoading(false);
     }
-  }, [fetchCandidates, fetchExistingGrants]);
+  }, [fetchCandidates, fetchExistingGrants, fetchStandingContacts]);
 
   React.useEffect(() => {
     if (open && canGrantAccess) {
@@ -834,30 +850,48 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   {existingGrants.length === 0 ? (
                     <Text className={styles.emptyState}>No active grants for this record.</Text>
                   ) : (
-                    existingGrants.map(grant => (
-                      <div className={styles.row} key={grant.accessRecordId}>
-                        <div className={styles.rowMain}>
-                          <Text className={styles.rowName}>{grant.fullName}</Text>
-                          <Text className={styles.rowMeta}>
-                            Granted by {grant.grantedByName ?? 'unknown'} on {formatGrantDate(grant.grantedDate)}
-                            {grant.provenance ? ` · ${grant.provenance}` : ''}
-                          </Text>
+                    existingGrants.map(grant => {
+                      // Standing-grant rows (task 073 UAT #2) confer ongoing
+                      // membership via the contact's global `sprk_standinggrant`
+                      // flag — there is NO per-record `sprk_externalrecordaccess`
+                      // row to revoke here, so they render non-revocable with a
+                      // "Standing" badge instead of an access-level + Revoke.
+                      const isStanding = grant.provenance === 'standing' || !grant.accessRecordId;
+                      return (
+                        <div className={styles.row} key={grant.accessRecordId ?? `standing-${grant.contactId}`}>
+                          <div className={styles.rowMain}>
+                            <Text className={styles.rowName}>{grant.fullName}</Text>
+                            <Text className={styles.rowMeta}>
+                              {isStanding
+                                ? 'Standing grant — ongoing access to assigned records'
+                                : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
+                            </Text>
+                          </div>
+                          <div className={styles.rowActions}>
+                            {isStanding ? (
+                              <Badge appearance="tint" color="success">
+                                Standing
+                              </Badge>
+                            ) : (
+                              <>
+                                <Badge appearance="tint" color="informative">
+                                  {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ??
+                                    grant.accessLevel}
+                                </Badge>
+                                <Button
+                                  appearance="subtle"
+                                  size="small"
+                                  onClick={() => setRevokeTargetId(grant.accessRecordId!)}
+                                  disabled={revoking}
+                                >
+                                  Revoke
+                                </Button>
+                              </>
+                            )}
+                          </div>
                         </div>
-                        <div className={styles.rowActions}>
-                          <Badge appearance="tint" color="informative">
-                            {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ?? grant.accessLevel}
-                          </Badge>
-                          <Button
-                            appearance="subtle"
-                            size="small"
-                            onClick={() => setRevokeTargetId(grant.accessRecordId)}
-                            disabled={revoking}
-                          >
-                            Revoke
-                          </Button>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
               </>

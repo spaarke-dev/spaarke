@@ -113,6 +113,11 @@ import type { INavigationService } from '@spaarke/ui-components/dist/types/servi
 // This is the ONLY email-send surface this control is allowed to open (no
 // forked dialog, no ad-hoc fetch to the send endpoint).
 import { SendEmailDialog } from '@spaarke/ui-components/dist/components/EmailComposer';
+// Shared per-widget error boundary (task 073 UAT #1) — wraps the dialog subtree
+// so a render error inside a shared dialog degrades to a small inline card
+// instead of blanking the whole PCF (defense-in-depth alongside the
+// react/jsx-runtime dedupe in ../webpack.config.js).
+import { WidgetErrorBoundary } from '@spaarke/ui-components/dist/components/WidgetErrorBoundary';
 import { initializeAuth } from './authInit';
 // Dataverse Environment Variable resolution (task 073 UAT fix) — the SAME mechanism
 // SemanticSearchControl uses so the grant modal's BFF auth needs NO per-control form config: the MSAL
@@ -597,6 +602,54 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     await this.context.webAPI.updateRecord('contact', contactId, { sprk_standinggrant: standingGrant });
   };
 
+  /** Reads the record's STANDING-grant members (task 073 UAT #2): the record's
+   * role-member candidates (`fetchCandidates()`) whose global
+   * `contact.sprk_standinggrant` flag is set. The intersection with THIS
+   * record's role-members mirrors the server-side union in
+   * `AccessibleRecordSetService.ComposeForContactAsync` — a standing contact
+   * with no access-conferring role on this record confers no access TO it, so
+   * it is intentionally NOT listed here (Eyal Iffergan shows only if he holds a
+   * `sprk_assigned*` role on the bound record). Returned rows carry
+   * `provenance: 'standing'` and NO `accessRecordId` (there is no per-record
+   * `sprk_externalrecordaccess` row to revoke) — the modal renders them
+   * non-revocable. `sprk_standinggrant` is field-level-secured: a signed-in user
+   * without FLS read on it silently gets an empty list (the query returns no
+   * matches), same fail-soft as the server-side reader. */
+  private fetchStandingContacts = async (): Promise<IAccessGrantRecord[]> => {
+    const candidates = await this.fetchCandidates();
+    if (candidates.length === 0) return [];
+    const filter = candidates.map(c => `contactid eq ${c.contactId}`).join(' or ');
+    let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
+    try {
+      result = await this.context.webAPI.retrieveMultipleRecords(
+        'contact',
+        `?$select=contactid&$filter=sprk_standinggrant eq true and (${filter})`
+      );
+    } catch {
+      // FLS denial or query error — standing rows are additive; fail soft so the
+      // rest of the Current Access list still loads.
+      return [];
+    }
+    const standingIds = new Set<string>();
+    for (const e of result.entities) {
+      const row = e as unknown as { contactid?: string };
+      if (row.contactid) standingIds.add(row.contactid);
+    }
+    return candidates
+      .filter(c => standingIds.has(c.contactId))
+      .map(c => ({
+        // No accessRecordId — a standing grant has no per-record row to revoke.
+        contactId: c.contactId,
+        fullName: c.fullName,
+        email: c.email,
+        // Placeholder — standing rows render a "Standing" badge, not an
+        // access level (the effective level is role-derived server-side). Value
+        // is unused by the standing-row render path; 100000000 = ViewOnly.
+        accessLevel: 100000000,
+        provenance: 'standing' as const,
+      }));
+  };
+
   // =========================================================================
   // Email-members wiring (task 042, teams-app-r1). Reuses `fetchCandidates()`
   // above verbatim — the SAME allowlist-filtered `sprk_assigned*` membership-
@@ -644,7 +697,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
-      versionText: 'v1.0.16 • Built 2026-08-11',
+      versionText: 'v1.0.17 • Built 2026-08-11',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -702,91 +755,114 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
           React.Fragment,
           null,
           React.createElement(SharedTrackingFieldTrio, props),
-          // Access-grant modal (task 041) — always mounted so AccessGrantModal's
-          // own `open`-driven effect controls data loading; `recordId` is only
-          // resolvable once the control is bound to a real record (harness
-          // environments render the toolbar but the modal has nothing to open).
-          recordId
-            ? React.createElement(AccessGrantModal, {
-                open: this.isGrantModalOpen,
-                onClose: () => {
-                  this.isGrantModalOpen = false;
-                  this.renderControl();
-                },
-                recordId,
-                // Polymorphic root type derived from the bound host entity
-                // (task 071) — the modal sends {recordType, recordId}.
-                recordType: this.resolveGrantRoot().recordType,
-                canGrantAccess: this.canGrantAccessValue,
-                authenticatedFetch: this.authenticatedFetchGated,
-                fetchCandidates: this.fetchCandidates,
-                fetchExistingGrants: this.fetchExistingGrants,
-                searchContacts: this.searchContacts,
-                // Shared side-pane Advanced Lookup (task 071) — replaces the
-                // inline Combobox contact picker; adds an optional org picker.
-                pickContact: this.pickContact,
-                pickOrganization: this.pickOrganization,
-                isInternalContact: this.isInternalContact,
-                onSetStandingGrant: this.onSetStandingGrant,
-                // Access-Permission sharing gate (task 043, FR-14 Option A) —
-                // mapped from the bound field's raw OptionSet value; see
-                // mapAccessPermissionToState()'s doc comment.
-                accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
-              })
-            : null,
-          // Canonical SendEmailDialog (task 042) — pre-populated with the
-          // record's membership-contact emails (resolveEmailMembersRecipients()
-          // above). Send flows through the engine's OWN sendCommunication()
-          // call (ADR-045) — no custom send logic here. Gated on `recordId`
-          // for the same reason as the grant modal above.
-          recordId
-            ? React.createElement(SendEmailDialog, {
-                open: this.isSendEmailDialogOpen,
-                onClose: this.closeSendEmailDialog,
-                initialTo: this.emailRecipients,
-                authenticatedFetch: this.authenticatedFetchGated,
-                bffBaseUrl: this.apiBaseUrl,
-                titleOverride: 'Email Members',
-                regarding: { entityType: this.getHostEntity(), id: recordId },
-                onSent: () => {
-                  this.isSendEmailDialogOpen = false;
-                  this.renderControl();
-                },
-                onError: (err: Error) => {
-                  console.error('[TrackingFieldTrio] Email-members send failed.', err);
-                },
-              })
-            : null,
-          // Empty-state alert (task 042) — shown INSTEAD of SendEmailDialog
-          // when the record has no membership contacts with a populated
-          // email, so the dialog never opens with zero recipients.
-          React.createElement(Dialog, {
-            open: this.isEmailEmptyStateOpen,
-            onOpenChange: (_event: unknown, data: { open: boolean }) => {
-              if (!data.open) this.closeEmailEmptyState();
-            },
-            // Passed via the `children` prop (not createElement rest-args) —
-            // Fluent v9's `Dialog` types `children` as required on `DialogProps`,
-            // which the rest-args overload of `React.createElement` does not
-            // satisfy.
+          // task 073 UAT #1 — wrap the dialog subtree in the shared
+          // WidgetErrorBoundary so a render error inside a shared dialog (e.g.
+          // the EmailComposer engine) degrades to a small inline card instead of
+          // blanking the entire control. Defense-in-depth: the root cause (a
+          // duplicate React 19 bundled via Lexical's react/jsx-runtime subpath)
+          // is fixed at the build layer in ../webpack.config.js.
+          React.createElement(WidgetErrorBoundary, {
+            widgetType: 'tracking-field-trio-dialogs',
+            displayName: 'Access & Email',
+            surface: 'TrackingFieldTrio',
+            // Children via the `children` prop (not createElement rest-args):
+            // WidgetErrorBoundaryProps types `children` as required, which the
+            // rest-args overload of React.createElement does not satisfy (same
+            // reason as the empty-state Dialog below). React.Fragment DOES
+            // accept rest-args, so wrap the dialog subtree in one.
             children: React.createElement(
-              DialogSurface,
+              React.Fragment,
               null,
-              React.createElement(
-                DialogBody,
-                null,
-                React.createElement(DialogTitle, null, 'Email members'),
-                React.createElement(
-                  DialogContent,
+              // Access-grant modal (task 041) — always mounted so AccessGrantModal's
+              // own `open`-driven effect controls data loading; `recordId` is only
+              // resolvable once the control is bound to a real record (harness
+              // environments render the toolbar but the modal has nothing to open).
+              recordId
+                ? React.createElement(AccessGrantModal, {
+                    open: this.isGrantModalOpen,
+                    onClose: () => {
+                      this.isGrantModalOpen = false;
+                      this.renderControl();
+                    },
+                    recordId,
+                    // Polymorphic root type derived from the bound host entity
+                    // (task 071) — the modal sends {recordType, recordId}.
+                    recordType: this.resolveGrantRoot().recordType,
+                    canGrantAccess: this.canGrantAccessValue,
+                    authenticatedFetch: this.authenticatedFetchGated,
+                    fetchCandidates: this.fetchCandidates,
+                    fetchExistingGrants: this.fetchExistingGrants,
+                    // Standing-grant members (task 073 UAT #2) — role-members whose
+                    // global sprk_standinggrant flag is set, merged into Current Access.
+                    fetchStandingContacts: this.fetchStandingContacts,
+                    searchContacts: this.searchContacts,
+                    // Shared side-pane Advanced Lookup (task 071) — replaces the
+                    // inline Combobox contact picker; adds an optional org picker.
+                    pickContact: this.pickContact,
+                    pickOrganization: this.pickOrganization,
+                    isInternalContact: this.isInternalContact,
+                    onSetStandingGrant: this.onSetStandingGrant,
+                    // Access-Permission sharing gate (task 043, FR-14 Option A) —
+                    // mapped from the bound field's raw OptionSet value; see
+                    // mapAccessPermissionToState()'s doc comment.
+                    accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
+                  })
+                : null,
+              // Canonical SendEmailDialog (task 042) — pre-populated with the
+              // record's membership-contact emails (resolveEmailMembersRecipients()
+              // above). Send flows through the engine's OWN sendCommunication()
+              // call (ADR-045) — no custom send logic here. Gated on `recordId`
+              // for the same reason as the grant modal above.
+              recordId
+                ? React.createElement(SendEmailDialog, {
+                    open: this.isSendEmailDialogOpen,
+                    onClose: this.closeSendEmailDialog,
+                    initialTo: this.emailRecipients,
+                    authenticatedFetch: this.authenticatedFetchGated,
+                    bffBaseUrl: this.apiBaseUrl,
+                    titleOverride: 'Email Members',
+                    regarding: { entityType: this.getHostEntity(), id: recordId },
+                    onSent: () => {
+                      this.isSendEmailDialogOpen = false;
+                      this.renderControl();
+                    },
+                    onError: (err: Error) => {
+                      console.error('[TrackingFieldTrio] Email-members send failed.', err);
+                    },
+                  })
+                : null,
+              // Empty-state alert (task 042) — shown INSTEAD of SendEmailDialog
+              // when the record has no membership contacts with a populated
+              // email, so the dialog never opens with zero recipients.
+              React.createElement(Dialog, {
+                open: this.isEmailEmptyStateOpen,
+                onOpenChange: (_event: unknown, data: { open: boolean }) => {
+                  if (!data.open) this.closeEmailEmptyState();
+                },
+                // Passed via the `children` prop (not createElement rest-args) —
+                // Fluent v9's `Dialog` types `children` as required on `DialogProps`,
+                // which the rest-args overload of `React.createElement` does not
+                // satisfy.
+                children: React.createElement(
+                  DialogSurface,
                   null,
-                  'This record has no membership contacts with an email address yet. Grant access or assign a role first.'
+                  React.createElement(
+                    DialogBody,
+                    null,
+                    React.createElement(DialogTitle, null, 'Email members'),
+                    React.createElement(
+                      DialogContent,
+                      null,
+                      'This record has no membership contacts with an email address yet. Grant access or assign a role first.'
+                    ),
+                    React.createElement(
+                      DialogActions,
+                      null,
+                      React.createElement(Button, { appearance: 'primary', onClick: this.closeEmailEmptyState }, 'OK')
+                    )
+                  )
                 ),
-                React.createElement(
-                  DialogActions,
-                  null,
-                  React.createElement(Button, { appearance: 'primary', onClick: this.closeEmailEmptyState }, 'OK')
-                )
-              )
+              })
             ),
           })
         )

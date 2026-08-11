@@ -38,8 +38,12 @@ export interface IAccessGrantCandidate {
  * as read by the caller (Xrm.WebApi, host-context, single-entity — per
  * `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`). */
 export interface IAccessGrantRecord {
-  /** `sprk_externalrecordaccessid` — required by `/revoke`. */
-  accessRecordId: string;
+  /** `sprk_externalrecordaccessid` — required by `/revoke`. ABSENT for a
+   * standing-grant row (`provenance: 'standing'`), which confers ongoing
+   * membership via the contact's `sprk_standinggrant` flag and has NO
+   * per-record `sprk_externalrecordaccess` row to revoke here (task 073 UAT
+   * #2). Rows without it render as non-revocable in Current Access. */
+  accessRecordId?: string;
   contactId: string;
   fullName: string;
   email?: string;
@@ -154,6 +158,19 @@ export interface IAccessGrantModalProps {
   /** Loads the record's existing active grants. Called when the modal opens
    * and re-called after every successful grant/revoke to refresh the list. */
   fetchExistingGrants: () => Promise<IAccessGrantRecord[]>;
+  /** Loads the record's STANDING-grant members — contacts whose global
+   * `sprk_standinggrant` flag is set AND who hold an access-conferring role on
+   * THIS record (the host intersects the standing flag with the record's
+   * role-members so the list mirrors the server-side union in
+   * `AccessibleRecordSetService` — a standing contact with no role on this
+   * record confers no access to it, task 073 UAT #2). Each returned row MUST
+   * carry `provenance: 'standing'` and NO `accessRecordId` (there is no
+   * per-record grant to revoke here). Merged into "Current Access", deduped by
+   * `contactId` against {@link fetchExistingGrants} (an explicit per-record
+   * grant wins). Omit → no standing rows (a host that hasn't wired the
+   * `sprk_standinggrant` field yet). NOTE: `sprk_standinggrant` is
+   * field-level-secured — a caller without FLS read silently gets none. */
+  fetchStandingContacts?: () => Promise<IAccessGrantRecord[]>;
   /** Searches Dataverse Contacts by free-text query (named-contact picker).
    * Debounced by the modal; the host implements the actual Contact query
    * (Xrm.WebApi, host-context). Used ONLY as the fallback inline picker when
