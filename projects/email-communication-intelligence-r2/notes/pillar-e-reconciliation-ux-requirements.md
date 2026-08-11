@@ -72,4 +72,35 @@ What the owner will see change between the :5176 prototype and the shipped page:
 
 ---
 
+## E. UAT round-2 (owner, 2026-08-11)
+
+Reviewed against the refined prototype (`localhost:5177`). "P" = mock in the prototype for review; "B" = production build requirement.
+
+### E.1 Related-to tab
+| # | Requirement | P | B |
+|---|---|---|---|
+| E1a | Rename the `Create new & link` button → **`New record`**. | ✅ | ✅ |
+| E1b | `New record` must have a real action: open the **Quick Start modal** → user selects a wizard → the wizard's FINAL step creates the new record → that new record is **added to the Related-to candidate list** → the user then uses the Related-to **`Confirm`** to associate it. This is **modal-on-modal**; when the record/wizard modal closes, the review (browse-shell) modal stays open. | ✅ mock the flow | ✅ real Quick Start wizard integration + add-created-record-to-candidates |
+
+### E.2 Fields tab
+| # | Requirement | P | B |
+|---|---|---|---|
+| E2a | Rename the `Accept & write` button → **`Accept`**. | ✅ | ✅ |
+| E2b | The editable field control must match the **field's real type** — date fields use a date picker; **lookup fields use the OOB advanced-lookup side pane**; option-sets use a dropdown; etc. | partial (date pickers; note lookups) | ✅ type-correct controls incl. OOB advanced-lookup side pane |
+| E2c | Add a full-width **`Update other fields`** button at the bottom of the Fields tab → opens the **confirmed Related-to record's form** so the user can edit other fields on that record. **Modal-on-modal**; review modal stays open on close. | ✅ mock a record-form modal | ✅ open the real record form (OOB `navigateTo` form or a record modal) for the confirmed regarding |
+
+### E.3 Tasks tab
+| # | Requirement | P | B |
+|---|---|---|---|
+| E3a | Rename the proposal `Confirm & create` button → **`Create`**. | ✅ | ✅ |
+| E3b | In the New-task modal, **`Assigned to`** uses the standard **OOB advanced-find side-pane lookup** (systemuser/team). **Build note only — do NOT mock in the prototype.** | — (note only) | ✅ OOB advanced-lookup side pane for Assigned-to |
+
+### Cross-cutting note — modal-on-modal
+E1b + E2c both stack a record/wizard modal ON the open review modal. This is an established pattern here (the browse shell already opens a `PreviewModal` overlay for "Open original", and "+ New task" now uses a `FormModal`). Production uses `SprkModal`-family surfaces; on close, the underlying review modal remains open (controlled `open` state per surface).
+
+### Production follow-up
+E1b (Quick Start integration), E2b/E3b (OOB advanced-lookup side pane), and E2c (record-form modal) are **new build work** beyond the 061/062 mount — track as follow-on tasks (063+) after prototype sign-off. Label changes (E1a/E2a/E3a) are trivial and can ship into the 055/056/052 components directly.
+
+---
+
 *Update this doc when UX requirements change. The production build (`pillar-e-mount-build-plan.md`) and any prototype refinement both trace to the items above.*
