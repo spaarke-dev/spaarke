@@ -42,7 +42,8 @@
   <constraints>
     <constraint source="project">Use `actions/setup-dotnet@v6` with `10.x`/`10.0.x`; REMOVE any `dotnet-quality: preview`; keep global.json aligned (it overrides the input).</constraint>
     <constraint source="project">MUST preserve the .NET Framework 4.8 targeting-pack step (net462 plugin build). Do NOT remove plugin-build accommodations.</constraint>
-    <constraint source="project">Run `/conflict-check` before the CI PR — `ci-cd-unit-test-remediation-r1` owns existing CI edits; coordinate.</constraint>
+    <constraint source="project">Run `/conflict-check` before the CI PR — `ci-cd-unit-test-remediation-r1` owns existing CI edits; coordinate. (Confirmed inactive 2026-08-11 → no live conflict.)</constraint>
+    <constraint source="project">The `push: master` auto-deploy trigger in `deploy-bff-api.yml` was REMOVED 2026-08-11 (manual `workflow_dispatch` only) so the net10 merge does not auto-fire a CI production deploy — deploys are operator-driven from the worktree. VERIFY it stays removed; do NOT re-arm a `push:master` or `workflow_run` auto-deploy on the BFF as part of this task.</constraint>
   </constraints>
 
   <knowledge>

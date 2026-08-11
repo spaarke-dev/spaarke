@@ -18,11 +18,9 @@
 name: Deploy BFF API
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'src/server/api/**'
+  # NOTE (dotnet-10-upgrade-r1, 2026-08-11): the `push: master` auto-deploy trigger
+  # was REMOVED. BFF deploys are operator-driven from the worktree (/bff-deploy + az);
+  # CI must never auto-deploy on merge. Deploy on demand via workflow_dispatch only.
   workflow_dispatch:
     inputs:
       environment:
