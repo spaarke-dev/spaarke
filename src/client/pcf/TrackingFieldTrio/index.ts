@@ -397,32 +397,70 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const recordId = this.getRecordId();
     if (!recordId) return [];
 
-    const select = CANDIDATE_ROLE_FIELDS.map(f => f.attr).join(',');
-    const expand = CANDIDATE_ROLE_FIELDS.map(f => `${f.attr}($select=fullname,emailaddress1)`).join(',');
-    const record = (await this.context.webAPI.retrieveRecord(
-      this.getHostEntity(),
-      recordId,
-      `?$select=${select}&$expand=${expand}`
-    )) as unknown as Record<
-      string,
-      { contactid?: string; fullname?: string; emailaddress1?: string } | null | undefined
-    >;
+    // task 073 UAT fix: read the role lookups by their FK VALUE fields (`_sprk_X_value`), NOT by the
+    // lookup logical name. You cannot `$select` a lookup by its logical name (Dataverse 400 "Could not
+    // find a property named 'sprk_assignedattorney1'"), and `$expand` would depend on the PascalCase
+    // navigation-property name. The `_X_value` form is stable and carries the contact's display name via
+    // the FormattedValue annotation — no nav-property-casing dependency. Emails (which drive the
+    // external-vs-internal grant routing) are batch-fetched separately below.
+    const valueFields = CANDIDATE_ROLE_FIELDS.map(f => `_${f.attr}_value`).join(',');
+    let record: Record<string, unknown>;
+    try {
+      record = (await this.context.webAPI.retrieveRecord(
+        this.getHostEntity(),
+        recordId,
+        `?$select=${valueFields}`
+      )) as unknown as Record<string, unknown>;
+    } catch {
+      // A host entity may not carry every role field — candidates are a convenience (the named-contact
+      // picker still works), so fail SOFT to an empty list rather than breaking the whole modal load.
+      return [];
+    }
 
+    const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
     const seen = new Set<string>();
-    const candidates: IAccessGrantCandidate[] = [];
+    const byId = new Map<string, { role: string; fullName: string }>();
     for (const field of CANDIDATE_ROLE_FIELDS) {
-      const nav = record[field.attr];
-      if (nav?.contactid && !seen.has(nav.contactid)) {
-        seen.add(nav.contactid);
-        candidates.push({
-          contactId: nav.contactid,
-          fullName: nav.fullname ?? '(no name)',
-          email: nav.emailaddress1 ?? undefined,
+      const contactId = record[`_${field.attr}_value`] as string | undefined;
+      if (contactId && !seen.has(contactId)) {
+        seen.add(contactId);
+        byId.set(contactId, {
           role: field.role,
+          fullName: (record[`_${field.attr}_value${FORMATTED}`] as string) ?? '(no name)',
         });
       }
     }
-    return candidates;
+    if (byId.size === 0) return [];
+
+    const emailById = await this.fetchContactEmails([...byId.keys()]);
+    return [...byId.entries()].map(([contactId, meta]) => ({
+      contactId,
+      fullName: meta.fullName,
+      email: emailById.get(contactId),
+      role: meta.role,
+    }));
+  };
+
+  /** Batch-fetches emails for a set of contacts (host-context). Email is best-effort — it drives the
+   * modal's external-vs-internal grant routing but a miss simply routes as grant-only. */
+  private fetchContactEmails = async (contactIds: string[]): Promise<Map<string, string>> => {
+    const map = new Map<string, string>();
+    if (contactIds.length === 0) return map;
+    const filter = contactIds.map(id => `contactid eq ${id}`).join(' or ');
+    try {
+      const res = await this.context.webAPI.retrieveMultipleRecords(
+        'contact',
+        `?$select=contactid,emailaddress1&$filter=${filter}`
+      );
+      for (const e of res.entities) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const row = e as any;
+        if (row.contactid && row.emailaddress1) map.set(row.contactid as string, row.emailaddress1 as string);
+      }
+    } catch {
+      /* email is best-effort — routing falls back to grant-only when unknown */
+    }
+    return map;
   };
 
   /** Reads the current record's active `sprk_externalrecordaccess` grants
@@ -434,27 +472,34 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // Filter by the bound root's lookup value field (task 070/071 polymorphic
     // read) — e.g. `_sprk_matter_value` on a Matter form. Replaces the R1
     // `_sprk_projectid_value` (invalid field name → matched zero rows).
+    // task 073 UAT fix: read the contact + grantedby by their FK VALUE fields + FormattedValue
+    // annotations (the contact/systemuser display names) instead of `$expand=sprk_contactid,sprk_grantedby`
+    // — those lowercase names are NOT the navigation properties (Dataverse 400 "Could not find a property
+    // named 'sprk_contactid'"; the real nav props are PascalCase per task 070). The `_X_value` form is
+    // stable and needs no nav-property-casing.
+    const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
     const rootValueField = this.resolveGrantRoot().rootValueField;
     const options =
       `?$filter=${rootValueField} eq ${recordId} and statecode eq 0` +
-      `&$select=sprk_accesslevel,sprk_granteddate` +
-      `&$expand=sprk_contactid($select=fullname,emailaddress1),sprk_grantedby($select=fullname)`;
-    const result = await this.context.webAPI.retrieveMultipleRecords(EXTERNAL_ACCESS_ENTITY, options);
+      `&$select=_sprk_contact_value,_sprk_grantedby_value,sprk_accesslevel,sprk_granteddate`;
+
+    let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
+    try {
+      result = await this.context.webAPI.retrieveMultipleRecords(EXTERNAL_ACCESS_ENTITY, options);
+    } catch {
+      return [];
+    }
 
     return result.entities.map(e => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = e as any;
-      const contact = row.sprk_contactid as
-        | { contactid?: string; fullname?: string; emailaddress1?: string }
-        | undefined;
-      const grantedBy = row.sprk_grantedby as { fullname?: string } | undefined;
       return {
         accessRecordId: row.sprk_externalrecordaccessid as string,
-        contactId: contact?.contactid ?? '',
-        fullName: contact?.fullname ?? '(unknown contact)',
-        email: contact?.emailaddress1 ?? undefined,
+        contactId: (row['_sprk_contact_value'] as string) ?? '',
+        fullName: (row[`_sprk_contact_value${FORMATTED}`] as string) ?? '(unknown contact)',
+        email: undefined,
         accessLevel: row.sprk_accesslevel as number,
-        grantedByName: grantedBy?.fullname ?? undefined,
+        grantedByName: (row[`_sprk_grantedby_value${FORMATTED}`] as string) ?? undefined,
         grantedDate: row.sprk_granteddate ?? undefined,
       };
     });
@@ -585,7 +630,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
-      versionText: 'v1.0.13 • Built 2026-08-11',
+      versionText: 'v1.0.14 • Built 2026-08-11',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
