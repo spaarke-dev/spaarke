@@ -123,6 +123,29 @@ describe('ReconciliationBrowseShell', () => {
     expect(screen.getByRole('button', { name: 'Next record' })).toBeDisabled();
   });
 
+  it('renders the A6 drag-resize PanelSplitter between the reader and tabs panes (50/50)', async () => {
+    renderShell(
+      <ReconciliationBrowseShell
+        open
+        onClose={jest.fn()}
+        queue={makeQueue()}
+        initialIndex={0}
+        renderTabs={() => <div data-testid="tabs-marker">tabs</div>}
+      />
+    );
+
+    // The two-pane body hosts a keyboard-accessible separator defaulting to 50%.
+    const splitter = await screen.findByRole('separator', { name: 'Resize panels' });
+    expect(splitter).toBeInTheDocument();
+    expect(splitter).toHaveAttribute('aria-valuenow', '50');
+    // ArrowRight nudges the reader pane wider (A6 keyboard resize).
+    fireEvent.keyDown(splitter, { key: 'ArrowRight' });
+    await waitFor(() => expect(Number(splitter.getAttribute('aria-valuenow'))).toBeGreaterThan(50));
+    // Double-click resets to the 50/50 default.
+    fireEvent.doubleClick(splitter);
+    await waitFor(() => expect(splitter).toHaveAttribute('aria-valuenow', '50'));
+  });
+
   it('folds attachment contents into the reader as readable normalized text (not chips)', async () => {
     renderShell(<ReconciliationBrowseShell open onClose={jest.fn()} queue={makeQueue()} initialIndex={0} />);
 
