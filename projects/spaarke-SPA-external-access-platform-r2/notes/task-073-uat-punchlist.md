@@ -52,7 +52,31 @@ and is **bundled into the PCF** by build:prod (via ensure-dist-fresh). The trio'
   `+ Contact`/`+ Organization` in the section header; access-level dropdown; Restricted banner light-red with
   new copy; footer Cancel(left)+Save(right).
 
-## OPEN PUNCH LIST — WORK IN ORDER
+## ✅ RESOLVED IN v1.0.17 (commit 9b4e74e41, deployed SPAARKE DEV 1 2026-08-11)
+- **#1 Email crash — FIXED at root.** Root cause: a DUPLICATE React 19 was bundled into the PCF via
+  Lexical's `react/jsx-runtime` SUBPATH (EmailComposer → RichTextEditor). pcf-scripts externalizes only
+  BARE `react`/`react-dom`, not subpaths, so `react/jsx-runtime` resolved to `@spaarke/ui-components`'
+  co-located React 19 (`Symbol.for('react.transitional.element')`) while the platform React 16.14
+  reconciler expects `react.element` → element rendered as a raw object → #31, blanking the control on
+  email-dialog mount. FIX: a SCOPED custom webpack config `src/client/pcf/webpack.config.js` aliases the
+  leaking `react/jsx-runtime`(+dev) subpaths to the trio's own React 16.14 (strict no-op for all other 16
+  controls — guarded on `basename(cwd)==='TrackingFieldTrio'`). Build log confirms `./node_modules/react/
+  jsx-runtime.js [built]` + `external "Reactv16"`. Defense-in-depth: dialog subtree wrapped in the shared
+  `WidgetErrorBoundary` so any future shared-dialog crash degrades to an inline card, not a blank PCF.
+- **#2 Standing-grant contacts in Current Access — DONE.** New optional `fetchStandingContacts` prop on
+  `AccessGrantModal` + trio callback that intersects the record's role-members (`fetchCandidates()`) with
+  contacts whose global `sprk_standinggrant` flag is set (mirrors server `AccessibleRecordSetService`
+  union; FLS-secured → fail-soft). Standing rows render NON-revocable with a "Standing" badge (no
+  per-record `accessRecordId`, now optional on `IAccessGrantRecord`), deduped by `contactId` so an
+  explicit grant wins. CAVEAT to verify in UAT: standing contact shows ONLY if they hold a `sprk_assigned*`
+  role on THIS record AND the signed-in admin has FLS read on `sprk_standinggrant`.
+- **#5 Thin-scrollbar standard — DONE.** The canonical `thinScrollbarStyle` mixin is now barrel-exported
+  from `@spaarke/ui-components` (was unreachable) and documented as THE standard in
+  `docs/standards/MODAL-DESIGN-SYSTEM.md` §6. AccessGrantModal already inherits it (SprkModal
+  `bodyScroll="native"` default). Note: AccessGrantModal already uses SprkModal, so its Cancel(left)/
+  Save(right) footer is already the standard layout too.
+
+## OPEN PUNCH LIST — WORK IN ORDER (remaining are DECISIONS awaiting owner)
 1. **Email icon → PCF crashes (React #31).** Clicking the email icon blanks the PCF. Error: "Minified React
    error #31 ... object with keys {$$typeof,type,key,ref,props}" (a React element rendered as a child). The
    email flow renders the shared `SendEmailDialog` (`@spaarke/ui-components` EmailComposer, updated by the
