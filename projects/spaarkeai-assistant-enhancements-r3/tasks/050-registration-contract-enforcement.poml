@@ -4,7 +4,7 @@
     <title>Make the Assistant-contract fields REQUIRED registration metadata + enforce presence across all four registration sites (FR-15)</title>
     <phase>Cross-cutting — Registration contract</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes the registration-contract type shape + adds structural enforcement across every registration site; a widget missing fields must FAIL — high blast radius on the registration spine</rigor-reason>
     <model-tier>opus</model-tier>

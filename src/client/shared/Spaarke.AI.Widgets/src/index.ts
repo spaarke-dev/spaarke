@@ -73,8 +73,14 @@ export type {
   AssistantContractCard,
   AssistantInteractionPattern,
   AssistantCardLanding,
+  // FR-15 (task 050) — the explicit "no Assistant contract" opt-out marker.
+  WidgetAssistantContractOptOut,
 } from './types/shared';
 export { OVERVIEW_QUERY_TOOL_NAME } from './types/shared';
+// FR-15 (task 050) — required-contract enforcement helpers. Registration sites
+// declare a documented opt-out via assistantContractOptOut(); the registry
+// guard + accessors use isAssistantContractOptOut().
+export { assistantContractOptOut, isAssistantContractOptOut } from './types/shared';
 
 // ---------------------------------------------------------------------------
 // Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)

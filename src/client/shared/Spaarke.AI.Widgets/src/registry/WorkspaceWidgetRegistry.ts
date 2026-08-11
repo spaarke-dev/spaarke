@@ -33,7 +33,14 @@ import type React from 'react';
 import type { WorkspaceWidgetComponent } from '../types/widget-types';
 // Use the canonical WidgetMetadata from shared.ts (task AIPU2-071) — it is the
 // richer definition with icon, required allowMultiple, and required defaultOrder.
-import type { WidgetMetadata, WidgetContextType, WidgetAssistantContract } from '../types/shared';
+import type {
+  WidgetMetadata,
+  WidgetContextType,
+  WidgetAssistantContract,
+  WidgetAssistantContractOptOut,
+} from '../types/shared';
+// FR-15 (task 050) — structural registration enforcement helpers.
+import { isAssistantContractOptOut } from '../types/shared';
 // Pillar 9 widget-visibility serialization contract (task 071, FR-55). The
 // registry's optional `getVisibleState` field returns a variant of this
 // discriminated union; see RegistryGetAgentVisibleState below for the full
@@ -166,6 +173,70 @@ async function _loadGenericTextWidget(): Promise<WorkspaceWidgetComponent> {
 }
 
 // ---------------------------------------------------------------------------
+// FR-15 (task 050) — Assistant-contract structural enforcement guard
+// ---------------------------------------------------------------------------
+
+/**
+ * Runtime backstop for the FR-15 (task 050) registration contract.
+ *
+ * `WidgetMetadata.assistantContract` is a REQUIRED member (compile-time type
+ * error if omitted from a typed literal), so a TypeScript caller cannot ship a
+ * contract-less registration. This guard is the runtime half of the
+ * belt-and-suspenders NFR-09 enforcement: it catches a dynamically-shaped
+ * registration a compile-time type cannot cover — a plain object cast through
+ * `as WidgetMetadata`, a JS caller, or a malformed field — and FAILS FAST so
+ * an Assistant-contract-less widget cannot silently register.
+ *
+ * Every one of the four shared-lib registration sites plus SpaarkeAi's
+ * `registerComposeWidget` funnels through `registerWorkspaceWidget` /
+ * `replaceWorkspaceWidget`, so placing the guard here enforces all five sites
+ * with one check.
+ *
+ * Throws when `assistantContract` is absent, is a blank-reason opt-out, or is a
+ * structurally-malformed contract.
+ */
+function assertAssistantContractDeclared(type: string, metadata: WidgetMetadata): void {
+  const contract: WidgetAssistantContract | WidgetAssistantContractOptOut | null | undefined =
+    metadata?.assistantContract;
+
+  if (contract === undefined || contract === null) {
+    throw new Error(
+      `[ai-widgets] WorkspaceWidgetRegistry: widget "${type}" is missing the REQUIRED ` +
+        `assistantContract (FR-15). Declare a WidgetAssistantContract (overviewTools + ` +
+        `perItemCards + interactionPattern) OR an explicit opt-out via ` +
+        `assistantContractOptOut('<reason>'). Silent absence is not allowed.`
+    );
+  }
+
+  if (isAssistantContractOptOut(contract)) {
+    if (typeof contract.reason !== 'string' || contract.reason.trim().length === 0) {
+      throw new Error(
+        `[ai-widgets] WorkspaceWidgetRegistry: widget "${type}" declared an assistantContract ` +
+          `opt-out with no reason (FR-15). An opt-out MUST document WHY the widget has no ` +
+          `Assistant contract.`
+      );
+    }
+    return;
+  }
+
+  // A positive contract — minimal structural validation (the compile-time type
+  // already enforces the full shape for typed callers; this catches dynamic /
+  // JS / cast callers passing a partial object).
+  const c = contract as Partial<WidgetAssistantContract>;
+  if (
+    !Array.isArray(c.overviewTools) ||
+    !Array.isArray(c.perItemCards) ||
+    typeof c.interactionPattern !== 'string'
+  ) {
+    throw new Error(
+      `[ai-widgets] WorkspaceWidgetRegistry: widget "${type}" declared a MALFORMED ` +
+        `assistantContract (FR-15). A contract needs overviewTools[], perItemCards[], and a ` +
+        `string interactionPattern — or use assistantContractOptOut('<reason>') to opt out.`
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -195,6 +266,10 @@ export function registerWorkspaceWidget(
   factory: () => Promise<{ default: WorkspaceWidgetComponent }>,
   getVisibleState?: RegistryGetAgentVisibleState
 ): void {
+  // FR-15 (task 050): fail fast if the widget did not declare an Assistant
+  // contract OR an explicit opt-out — checked BEFORE the first-wins early
+  // return so a malformed registration always fails, never silently no-ops.
+  assertAssistantContractDeclared(type, metadata);
   if (_registry.has(type)) {
     if (process.env.NODE_ENV !== 'production') {
       console.warn(
@@ -228,6 +303,9 @@ export function replaceWorkspaceWidget(
   factory: () => Promise<{ default: WorkspaceWidgetComponent }>,
   getVisibleState?: RegistryGetAgentVisibleState
 ): void {
+  // FR-15 (task 050): the replacement metadata is held to the same required
+  // Assistant-contract enforcement as an initial registration.
+  assertAssistantContractDeclared(type, metadata);
   _registry.set(type, { metadata, factory, getVisibleState });
 }
 
@@ -315,7 +393,16 @@ export function getWidgetContextTypeMap(): Record<string, WidgetContextType | un
  * @param type - Widget type string.
  */
 export function getWidgetAssistantContract(type: string): WidgetAssistantContract | undefined {
-  return _registry.get(type)?.metadata.assistantContract;
+  // FR-15 (task 050): `assistantContract` is now REQUIRED and may hold an
+  // explicit opt-out marker. An opt-out means "this widget has no Assistant
+  // contract" — so this accessor keeps returning `undefined` for it, exactly
+  // as it did pre-050 for an omitted field. Every downstream consumer (the
+  // FR-14/task-041 follow-on derivation, `getWidgetInteractionPattern` below,
+  // the interaction-pattern invariant suite) already treats `undefined` as
+  // "no contract", so the opt-out is transparent to them.
+  const contract = _registry.get(type)?.metadata.assistantContract;
+  if (contract === undefined || isAssistantContractOptOut(contract)) return undefined;
+  return contract;
 }
 
 /**
@@ -338,7 +425,9 @@ export function getWidgetAssistantContract(type: string): WidgetAssistantContrac
  * @param type - Widget type string.
  */
 export function getWidgetInteractionPattern(type: string): WidgetAssistantContract['interactionPattern'] | undefined {
-  return _registry.get(type)?.metadata.assistantContract?.interactionPattern;
+  // Read through getWidgetAssistantContract so opt-out widgets (FR-15/task 050)
+  // resolve to `undefined` here too — an opt-out has no interactionPattern.
+  return getWidgetAssistantContract(type)?.interactionPattern;
 }
 
 /**
@@ -408,5 +497,11 @@ export type {
   AssistantContractCard,
   AssistantInteractionPattern,
   AssistantCardLanding,
+  // FR-15 (task 050) — the explicit opt-out marker type.
+  WidgetAssistantContractOptOut,
 } from '../types/shared';
 export { OVERVIEW_QUERY_TOOL_NAME } from '../types/shared';
+// FR-15 (task 050) — the opt-out factory + guard, re-exported so registration
+// sites (incl. SpaarkeAi's registerComposeWidget) can declare a documented
+// "no Assistant contract" without reaching past the registry barrel.
+export { assistantContractOptOut, isAssistantContractOptOut } from '../types/shared';

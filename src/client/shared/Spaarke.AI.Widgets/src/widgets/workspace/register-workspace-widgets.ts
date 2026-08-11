@@ -44,6 +44,10 @@ import type { EmailTabWidgetData } from '../../types/WorkspaceTab';
 // WidgetAssistantContract's JSDoc in types/shared.ts for the full rationale.
 import type { WidgetAssistantContract, AssistantContractCard } from '../../types/shared';
 import { OVERVIEW_QUERY_TOOL_NAME } from '../../types/shared';
+// FR-15 (task 050): assistantContract is now a REQUIRED registration member.
+// Widgets with no overview tool / per-item cards declare an EXPLICIT opt-out
+// marker + reason (never silent absence). See the opt-out constants below.
+import { assistantContractOptOut } from '../../types/shared';
 // Pillar 9 visibility derivations (task 073, D-C-28). The Dashboard category
 // is attached to the 'workspace' registration (WorkspaceLayoutWidget); the
 // Table category is attached to all 5 DataverseEntityViewWidget-backed
@@ -165,6 +169,48 @@ const EMAIL_CONTRACT: WidgetAssistantContract = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
+// Assistant-contract OPT-OUTS (FR-15 ENFORCEMENT, R3 task 050)
+//
+// Task 050 makes `assistantContract` a REQUIRED registration member. Widgets
+// that legitimately have NO Assistant overview tool / per-item cards MUST
+// declare an EXPLICIT opt-out marker + reason (never silent absence) so the
+// decision is forced + auditable. Three shared, reused-by-reference markers
+// cover every non-contract widget class in THIS file (§11 reuse-first):
+//
+//   - OUTPUT_WIDGET_OPT_OUT   — the 8 R1 analysis-OUTPUT widgets (Budget
+//     Dashboard … redline-viewer). Each renders a COMPLETED analysis result
+//     payload; none is an Assistant overview/per-item data surface. Outside
+//     R3's FR-06/07 (overview) + FR-09/11 (per-item Email/Documents) scope.
+//   - DISPATCHER_OPT_OUT      — the intent-dispatcher / embedded-launcher
+//     widgets (create-*-wizard, document-upload-wizard, search-select-wizard,
+//     email-compose, meeting-schedule, find-similar-wizard, analysis-hub,
+//     create-analysis-wizard). Each OPENS a wizard or Code Page flow; none is
+//     a data surface the Assistant queries. Outside R3 scope.
+//   - METRICS_DASHBOARD_OPT_OUT — the standalone metrics/report dashboards
+//     (matters-dashboard, …). No parameterized overview tool + no per-item
+//     cards. Outside R3's FR-06/07 scope.
+//
+// Object.freeze mirrors OVERVIEW_ONLY_CONTRACT/EMAIL_CONTRACT above — these are
+// shared by reference across many registrations; freezing guards against an
+// accidental in-place mutation corrupting every widget that shares the marker.
+// ---------------------------------------------------------------------------
+
+const OUTPUT_WIDGET_OPT_OUT = assistantContractOptOut(
+  'R1 analysis-output widget — renders a completed analysis result payload; not an Assistant ' +
+    'overview or per-item data surface (outside R3 FR-06/07 + FR-09/11 scope).'
+);
+
+const DISPATCHER_OPT_OUT = assistantContractOptOut(
+  'Intent dispatcher / embedded launcher — opens a wizard or Code Page flow; not an Assistant ' +
+    'overview or per-item data surface (outside R3 FR-06/07 + FR-09/11 scope).'
+);
+
+const METRICS_DASHBOARD_OPT_OUT = assistantContractOptOut(
+  'Standalone metrics/report dashboard — no parameterized overview tool and no per-item cards ' +
+    '(outside R3 FR-06/07 scope).'
+);
+
+// ---------------------------------------------------------------------------
 // Registration helper
 // ---------------------------------------------------------------------------
 
@@ -200,6 +246,8 @@ safeRegisterWidget(
     icon: 'MoneyRegular',
     allowMultiple: false,
     defaultOrder: 10,
+    // FR-15 (task 050): R1 output widget — see OUTPUT_WIDGET_OPT_OUT.
+    assistantContract: OUTPUT_WIDGET_OPT_OUT,
   },
   wrapFactory(
     () =>
@@ -225,6 +273,8 @@ safeRegisterWidget(
     icon: 'SearchRegular',
     allowMultiple: true,
     defaultOrder: 20,
+    // FR-15 (task 050): R1 output widget — see OUTPUT_WIDGET_OPT_OUT.
+    assistantContract: OUTPUT_WIDGET_OPT_OUT,
   },
   wrapFactory(
     () =>
@@ -251,6 +301,8 @@ safeRegisterWidget(
     icon: 'DocumentEditRegular',
     allowMultiple: true,
     defaultOrder: 30,
+    // FR-15 (task 050): R1 output widget — see OUTPUT_WIDGET_OPT_OUT.
+    assistantContract: OUTPUT_WIDGET_OPT_OUT,
   },
   wrapFactory(
     () =>
@@ -278,6 +330,8 @@ safeRegisterWidget(
     defaultOrder: 40,
     // FR-B1/FR-C3 (task 020): side-by-side document clause comparison.
     contextType: 'document',
+    // FR-15 (task 050): R1 output widget — see OUTPUT_WIDGET_OPT_OUT.
+    assistantContract: OUTPUT_WIDGET_OPT_OUT,
   },
   wrapFactory(
     () =>
@@ -303,6 +357,8 @@ safeRegisterWidget(
     icon: 'CheckmarkCircleRegular',
     allowMultiple: false,
     defaultOrder: 50,
+    // FR-15 (task 050): R1 output widget — see OUTPUT_WIDGET_OPT_OUT.
+    assistantContract: OUTPUT_WIDGET_OPT_OUT,
   },
   wrapFactory(
     () =>
@@ -328,6 +384,8 @@ safeRegisterWidget(
     icon: 'LightbulbRegular',
     allowMultiple: false,
     defaultOrder: 60,
+    // FR-15 (task 050): R1 output widget — see OUTPUT_WIDGET_OPT_OUT.
+    assistantContract: OUTPUT_WIDGET_OPT_OUT,
   },
   wrapFactory(
     () =>
@@ -353,6 +411,8 @@ safeRegisterWidget(
     icon: 'TaskListSquareLtrRegular',
     allowMultiple: false,
     defaultOrder: 70,
+    // FR-15 (task 050): R1 output widget — see OUTPUT_WIDGET_OPT_OUT.
+    assistantContract: OUTPUT_WIDGET_OPT_OUT,
   },
   wrapFactory(
     () =>
@@ -393,6 +453,8 @@ registerWorkspaceWidget(
     defaultOrder: 25,
     // FR-B1/FR-C3 (task 020): a document diff is a document-viewing surface.
     contextType: 'document',
+    // FR-15 (task 050): R1 output widget (document-diff result) — see OUTPUT_WIDGET_OPT_OUT.
+    assistantContract: OUTPUT_WIDGET_OPT_OUT,
   },
   () =>
     import('./RedlineViewerWidget') as Promise<{
@@ -428,6 +490,8 @@ registerWorkspaceWidget(
      * the redline viewer (25) so they don't crowd the primary output area.
      */
     defaultOrder: 80,
+    // FR-15 (task 050): intent dispatcher / embedded wizard — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./CreateMatterWizardWidget') as Promise<{
@@ -457,6 +521,8 @@ registerWorkspaceWidget(
      * defaultOrder=85: positioned just after the Create Matter wizard.
      */
     defaultOrder: 85,
+    // FR-15 (task 050): intent dispatcher / embedded wizard — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./DocumentUploadWizardWidget') as Promise<{
@@ -486,6 +552,8 @@ registerWorkspaceWidget(
      * defaultOrder=90: positioned after the upload wizard.
      */
     defaultOrder: 90,
+    // FR-15 (task 050): intent dispatcher / embedded wizard — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./SearchSelectWizardWidget') as Promise<{
@@ -522,6 +590,8 @@ registerWorkspaceWidget(
      * defaultOrder=100: positioned after the existing wizards (80–90).
      */
     defaultOrder: 100,
+    // FR-15 (task 050): intent dispatcher (opens Analysis Builder) — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./EmailComposeWidget') as Promise<{
@@ -558,6 +628,8 @@ registerWorkspaceWidget(
      * defaultOrder=110: positioned just after email-compose.
      */
     defaultOrder: 110,
+    // FR-15 (task 050): intent dispatcher (opens Analysis Builder) — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./MeetingScheduleWidget') as Promise<{
@@ -597,6 +669,8 @@ registerWorkspaceWidget(
      * defaultOrder=120: positioned just after meeting-schedule (110).
      */
     defaultOrder: 120,
+    // FR-15 (task 050): intent dispatcher (opens Create Project Code Page) — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./CreateProjectWizardWidget') as Promise<{
@@ -635,6 +709,8 @@ registerWorkspaceWidget(
      * defaultOrder=130: positioned just after create-project-wizard (120).
      */
     defaultOrder: 130,
+    // FR-15 (task 050): intent dispatcher (opens Find Similar Code Page) — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./FindSimilarWizardWidget') as Promise<{
@@ -1019,6 +1095,8 @@ registerWorkspaceWidget(
     defaultOrder: 300,
     // FR-B1/FR-C3 (task 020): metrics/report dashboard surface.
     contextType: 'dashboard',
+    // FR-15 (task 050): standalone metrics dashboard — see METRICS_DASHBOARD_OPT_OUT.
+    assistantContract: METRICS_DASHBOARD_OPT_OUT,
   },
   createMetricsDashboardFactory('matters-dashboard')
 );
@@ -1058,6 +1136,8 @@ registerWorkspaceWidget(
      * group (300).
      */
     defaultOrder: 150,
+    // FR-15 (task 050): Analysis platform launcher surface — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./AnalysisHubWidget').then(m => ({
@@ -1086,6 +1166,8 @@ registerWorkspaceWidget(
      * (create-matter-wizard 80, document-upload-wizard 85, search-select-wizard 90).
      */
     defaultOrder: 87,
+    // FR-15 (task 050): per-type Analysis creation wizard — see DISPATCHER_OPT_OUT.
+    assistantContract: DISPATCHER_OPT_OUT,
   },
   () =>
     import('./CreateAnalysisWizardWidget').then(m => ({

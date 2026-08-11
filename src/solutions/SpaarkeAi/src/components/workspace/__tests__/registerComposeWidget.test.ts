@@ -37,16 +37,20 @@ describe("Wave 5 — Compose Direct-widget registration", () => {
     expect(fn).toBe(composeWidgetVisibility);
   });
 
-  // FR-08 enumeration (task 022): Compose IS enumerated in the widget-type ↔
-  // context-type map (contextType: 'compose-doc', task 020) but is outside
-  // R3's overview/per-item scope (spec Out-of-Scope: Compose write/read
-  // fidelity is governed separately by ADR-049) — assistantContract is
-  // deliberately omitted, not a gap.
-  it("declares the 'compose-doc' contextType and no assistantContract (task 022, deliberate)", () => {
+  // FR-08 enumeration (task 022) → FR-15 ENFORCEMENT (task 050): Compose IS
+  // enumerated in the widget-type ↔ context-type map (contextType: 'compose-doc',
+  // task 020) but is outside R3's overview/per-item scope (spec Out-of-Scope:
+  // Compose write/read fidelity is governed separately by ADR-049) — so it
+  // declares an EXPLICIT assistantContract opt-out marker (required post-050),
+  // not a silent absence.
+  it("declares the 'compose-doc' contextType and an EXPLICIT assistantContract opt-out (task 022 → task 050 FR-15)", () => {
     const meta = getWorkspaceWidgetMetadata("compose");
     expect(meta).toBeDefined();
     expect(meta?.contextType).toBe("compose-doc");
-    expect(meta?.assistantContract).toBeUndefined();
+    const declared = meta?.assistantContract as { optOut?: boolean; reason?: string };
+    expect(declared.optOut).toBe(true);
+    expect(typeof declared.reason).toBe("string");
+    expect(declared.reason!.length).toBeGreaterThan(0);
   });
 
   describe("composeWidgetVisibility (getVisibleState)", () => {

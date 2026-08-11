@@ -353,6 +353,59 @@ export interface WidgetAssistantContract {
 }
 
 // ---------------------------------------------------------------------------
+// WidgetAssistantContractOptOut (R3 task 050, FR-15 ENFORCEMENT)
+// ---------------------------------------------------------------------------
+
+/**
+ * Explicit "this widget has NO Assistant contract" marker (FR-15, task 050).
+ *
+ * Task 050 makes `WidgetMetadata.assistantContract` a REQUIRED member so a
+ * widget can no longer ship without declaring its Assistant relationship. A
+ * widget that legitimately has no overview tool / per-item cards (e.g. an R1
+ * analysis-output widget, an intent-dispatcher launcher, a standalone metrics
+ * dashboard, or Compose — whose read/write fidelity is governed separately by
+ * ADR-049) MUST say so EXPLICITLY with this marker + a documented reason,
+ * rather than by silent omission. That is the whole point of the enforcement:
+ * force a decision at every registration site, while still allowing a
+ * documented "no" (see `WidgetMetadata.assistantContract`).
+ *
+ * The `optOut: true` literal is the discriminant that distinguishes this from
+ * a real `WidgetAssistantContract`; `reason` is a human-facing sentence the
+ * registry guard requires to be non-empty. Build via `assistantContractOptOut()`.
+ */
+export interface WidgetAssistantContractOptOut {
+  /** Discriminant — always `true`. Distinguishes an opt-out from a real contract. */
+  readonly optOut: true;
+  /** Non-empty human reason WHY this widget declares no Assistant contract. */
+  readonly reason: string;
+}
+
+/**
+ * Build a frozen {@link WidgetAssistantContractOptOut} marker.
+ *
+ * @param reason - Non-empty sentence explaining why this widget has no
+ *                 Assistant contract (overview tool / per-item cards). The
+ *                 registry guard (task 050) throws if the reason is blank.
+ */
+export function assistantContractOptOut(reason: string): WidgetAssistantContractOptOut {
+  return Object.freeze({ optOut: true as const, reason });
+}
+
+/**
+ * Type guard: is this `assistantContract` value the explicit opt-out marker
+ * (rather than a real {@link WidgetAssistantContract})? Used by the registry
+ * accessors so `getWidgetAssistantContract()` keeps returning `undefined` for
+ * opt-out widgets (preserving the pre-050 "no contract → undefined" contract
+ * every downstream consumer — the FR-14/task-041 follow-on derivation, the
+ * interaction-pattern accessor — already relies on).
+ */
+export function isAssistantContractOptOut(
+  value: WidgetAssistantContract | WidgetAssistantContractOptOut | null | undefined
+): value is WidgetAssistantContractOptOut {
+  return value != null && (value as WidgetAssistantContractOptOut).optOut === true;
+}
+
+// ---------------------------------------------------------------------------
 // WidgetMetadata
 // ---------------------------------------------------------------------------
 
@@ -407,17 +460,29 @@ export interface WidgetMetadata {
   contextType?: WidgetContextType;
 
   /**
-   * OPTIONAL (R3 task 022, FR-08 + FR-15 SHAPE) Assistant-contract metadata:
+   * REQUIRED (R3 task 050, FR-15 ENFORCEMENT) Assistant-contract metadata:
    * the overview tool(s), per-item cards + landing target, and interaction
    * pattern this widget declares to the Assistant. Additive sibling to
    * `contextType` above (context-type stays that existing field — not
-   * duplicated inside this object). Optional here; task 050 (FR-15
-   * enforcement) makes it REQUIRED and adds a registry guard so no widget
-   * can ship without a contract.
+   * duplicated inside this object).
    *
-   * @see WidgetAssistantContract for the full shape + field-by-field rationale.
+   * Task 022 defined the SHAPE and left this field OPTIONAL; task 050 makes it
+   * a REQUIRED member so a widget can no longer be registered without making
+   * an EXPLICIT decision about its Assistant relationship. Every registration
+   * MUST supply EITHER:
+   *   - a real {@link WidgetAssistantContract} (overview tool + per-item cards
+   *     + interaction pattern), OR
+   *   - an explicit {@link WidgetAssistantContractOptOut} marker
+   *     (`assistantContractOptOut('<reason>')`) documenting WHY it has none.
+   *
+   * Silent omission is now BOTH a compile-time type error (this member is
+   * required) AND a runtime failure (the `WorkspaceWidgetRegistry` guard throws
+   * on a missing/blank field). See FR-15 / task 050.
+   *
+   * @see WidgetAssistantContract for the full contract shape + rationale.
+   * @see WidgetAssistantContractOptOut for the documented-no marker.
    */
-  assistantContract?: WidgetAssistantContract;
+  assistantContract: WidgetAssistantContract | WidgetAssistantContractOptOut;
 }
 
 // ---------------------------------------------------------------------------

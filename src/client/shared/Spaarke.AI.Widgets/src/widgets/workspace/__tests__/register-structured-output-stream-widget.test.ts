@@ -51,14 +51,18 @@ describe('register-structured-output-stream-widget', () => {
     expect(STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE).toBe('structured-output-stream');
   });
 
-  // FR-08 enumeration (task 022): this widget has no honest fit among the
-  // six WidgetContextType values, and is outside R3's overview/per-item
-  // scope — both fields deliberately resolve to `undefined` ("none", not a
-  // gap; see the registration-site comment).
-  it('has no contextType and no assistantContract (deliberate — task 022 FR-08 enumeration)', () => {
+  // FR-08 enumeration (task 022) → FR-15 ENFORCEMENT (task 050): this widget
+  // has no honest fit among the six WidgetContextType values (contextType stays
+  // `undefined`), and is outside R3's overview/per-item scope — so it declares
+  // an EXPLICIT assistantContract opt-out marker (required post-050), not a
+  // silent absence.
+  it('has no contextType and an EXPLICIT assistantContract opt-out (task 022 enumeration → task 050 FR-15)', () => {
     const meta = getWorkspaceWidgetMetadata(STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE);
     expect(meta).toBeDefined();
     expect(meta!.contextType).toBeUndefined();
-    expect(meta!.assistantContract).toBeUndefined();
+    const declared = meta!.assistantContract as { optOut?: boolean; reason?: string };
+    expect(declared.optOut).toBe(true);
+    expect(typeof declared.reason).toBe('string');
+    expect(declared.reason!.length).toBeGreaterThan(0);
   });
 });

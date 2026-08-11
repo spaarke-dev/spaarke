@@ -24,7 +24,7 @@
 | 030 | Tool economy — `OpenTabContextTypes` PreFilter | 3 Economy | FR-12 | opus / xhigh | FULL | ❌ | 022 | ✅ |
 | 040 | Interaction pattern as registration field | 4 Interaction | FR-13 | sonnet / high | FULL | ❌ | 022,025,026 | ✅ |
 | 041 | Deterministic follow-ons + card/chip type | 4 Interaction | FR-14 | sonnet / high | FULL | ❌ | 040 | ✅ |
-| 050 | Registration contract enforcement (4 sites) | Cross-cutting | FR-15 | opus / high | FULL | ❌ | 022,040 | 🔲 |
+| 050 | Registration contract enforcement (4 sites) | Cross-cutting | FR-15 | opus / high | FULL | ❌ | 022,040 | ✅ |
 | 080 | Deploy + verify (owner-gated; re-sync master) | Deploy | — | sonnet / high | STANDARD | ❌ | all code | 🔲 |
 | 090 | Project wrap-up (`/test-diet` gate) | Wrap-up | — | sonnet / med | MINIMAL | ❌ | 080 | 🔲 |
 

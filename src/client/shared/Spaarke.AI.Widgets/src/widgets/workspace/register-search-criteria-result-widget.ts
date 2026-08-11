@@ -16,6 +16,9 @@
  */
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
+// FR-15 (task 050): assistantContract is a REQUIRED registration member — this
+// widget declares an EXPLICIT opt-out (see the registration below).
+import { assistantContractOptOut } from '../../types/shared';
 
 /**
  * The widget type ID under which SearchCriteriaResultWidget is registered.
@@ -42,12 +45,19 @@ registerWorkspaceWidget(
      * (150, R4 task 042) so it sorts last among current widgets.
      */
     defaultOrder: 160,
-    // FR-08 enumeration (task 022): deliberately OMITTED. A search-results
-    // snapshot has no honest fit among the six WidgetContextType values
-    // (email/document/compose-doc/matter-grid/dashboard/calendar) — per
-    // `WidgetMetadata.contextType`'s own contract, omission here means
-    // "none", not an authoring gap. Not in R3's overview (FR-06/07) or
-    // per-item (FR-09/11) scope, so `assistantContract` is also omitted.
+    // FR-08 enumeration (task 022): `contextType` deliberately OMITTED. A
+    // search-results snapshot has no honest fit among the six WidgetContextType
+    // values (email/document/compose-doc/matter-grid/dashboard/calendar) — per
+    // `WidgetMetadata.contextType`'s own contract, omission here means "none",
+    // not an authoring gap.
+    // FR-15 (task 050): `assistantContract` is now REQUIRED, so the task-022
+    // "also omitted" intent is expressed EXPLICITLY as a documented opt-out —
+    // this widget is outside R3's overview (FR-06/07) and per-item (FR-09/11)
+    // scope.
+    assistantContract: assistantContractOptOut(
+      'Search-criteria/results snapshot — not an Assistant overview or per-item data surface ' +
+        '(outside R3 FR-06/07 + FR-09/11 scope).'
+    ),
   },
   () =>
     import('./SearchCriteriaResultWidget') as Promise<{

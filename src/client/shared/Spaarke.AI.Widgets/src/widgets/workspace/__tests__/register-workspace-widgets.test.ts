@@ -580,15 +580,28 @@ describe('assistantContract — Assistant-contract metadata SHAPE (task 022, FR-
     expect(byLabel.get('Summarize the thread')).toBe('summarize_thread');
   });
 
-  it('a widget with no declared contract resolves deterministically to undefined (default/none — e.g. BudgetDashboard)', () => {
+  it('a widget with no Assistant contract declares an EXPLICIT opt-out marker (FR-15/task 050) and getWidgetAssistantContract() still resolves it to undefined — e.g. BudgetDashboard', () => {
     const meta = registry.getWorkspaceWidgetMetadata('BudgetDashboard');
     expect(meta).toBeDefined();
-    expect(meta!.assistantContract).toBeUndefined();
+    // Post-050 the field is REQUIRED: instead of silent absence it now carries
+    // an explicit opt-out marker with a documented reason.
+    const declared = meta!.assistantContract as { optOut?: boolean; reason?: string };
+    expect(declared).toBeDefined();
+    expect(declared.optOut).toBe(true);
+    expect(typeof declared.reason).toBe('string');
+    expect(declared.reason!.length).toBeGreaterThan(0);
+    // The opt-out is transparent to every downstream consumer: the accessor
+    // still reports "no contract" (undefined), exactly as it did pre-050 for an
+    // omitted field.
+    expect(registry.getWidgetAssistantContract('BudgetDashboard')).toBeUndefined();
+    expect(registry.getWidgetInteractionPattern('BudgetDashboard')).toBeUndefined();
   });
 
   it('no per-item card label, tool name, or landing tag carries item content (ADR-015) — every value is a static, non-empty string from a small closed set', () => {
     for (const type of registry.getAllWorkspaceWidgetTypes()) {
-      const contract = registry.getWorkspaceWidgetMetadata(type)?.assistantContract;
+      // Read via the accessor (FR-15/task 050): it returns `undefined` for
+      // opt-out widgets, so this loop only walks REAL contracts' per-item cards.
+      const contract = registry.getWidgetAssistantContract(type);
       if (!contract) continue;
       for (const card of contract.perItemCards) {
         // Labels/tool names are short, static UI strings — never a GUID,
