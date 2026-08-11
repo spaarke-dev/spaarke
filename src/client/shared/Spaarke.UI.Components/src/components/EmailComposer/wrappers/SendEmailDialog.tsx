@@ -74,6 +74,14 @@ export interface ISendEmailDialogProps {
   initialBody?: string;
   /** Body format for the pre-filled body. Defaults to `'HTML'` in the engine — pass `'PlainText'` for `\n`-delimited plain-text templates. */
   initialBodyFormat?: EmailComposerBodyFormat;
+  /**
+   * D-5 fix (spaarkeai-assistant-enhancements-r3 task 025): the quoted-thread
+   * block for a reply/forward opened WITHOUT `sourceRecord` (e.g.
+   * `useEmailComposeActions`), so the engine's `state.quotedThread` is seeded and
+   * the in-dialog AI sparkle re-append preserves it. Forwarded to the engine
+   * unchanged via `...composerProps`. See `IEmailComposerProps.initialQuotedThread`.
+   */
+  initialQuotedThread?: string;
   associations?: ICommunicationAssociation[];
   attachmentSources?: IComposerAttachmentSource[];
   /**

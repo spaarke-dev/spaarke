@@ -186,10 +186,16 @@ public sealed class ContextBinderOrgContextTests
         // exists through which the org context could enter the grounding/dispatch decision.
         // HasAttachedRecord added by task 044 (FR-H1) — a STRUCTURAL host-record fact, not a BU/team/org
         // signal; the grounding context stays free of any organization-derived member.
+        // OpenTabContextTypes added by spaarkeai-assistant-enhancements-r3 task 030 (FR-12) — the set of
+        // context-types of the OPEN workspace tabs, derived by deterministic set-membership over the live
+        // tabs (NOT a BU/team/org-derived member); it drives the tab-economy tool PreFilter. Structural,
+        // like HasAttachedRecord — the "no organization-derived member" invariant is preserved. (Merge
+        // reconciliation 2026-08-11: task 030 updated the two sibling ctor-surface governance tests; this
+        // org-context test landed on master concurrently and is reconciled here on the same reasoning.)
         typeof(AgentToolFilterContext).GetProperties()
             .Select(p => p.Name)
             .Should().BeEquivalentTo(
-                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord" },
+                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord", "OpenTabContextTypes" },
                 "the grounding filter context is structural-facts-only — no business-unit/team-derived member exists");
     }
 

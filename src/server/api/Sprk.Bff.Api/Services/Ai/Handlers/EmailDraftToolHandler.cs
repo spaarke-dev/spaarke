@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -69,6 +70,33 @@ public sealed class EmailDraftToolHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(EmailDraftToolHandler);
 
+    // ── multi-row method dispatch (spaarkeai-assistant-enhancements-r3 task 023, FR-09) ──
+    // Four sprk_analysistool rows point at sprk_handlerclass = EmailDraftToolHandler; each row's
+    // sprk_configuration carries a "method" discriminator the handler reads at execution time to
+    // route to the matching internal path (the TextRefinementHandler multi-row precedent). The
+    // legacy email.draft row carries NO "method" (its sprk_configuration is the risk-profile
+    // object), so the discriminator DEFAULTS to "draft" — preserving task-041 behaviour exactly.
+    private const string MethodDraft = "draft";               // email.draft (existing — creates a DRAFT record)
+    private const string MethodReply = "reply";               // email.draft_reply (authors reply body TEXT)
+    private const string MethodForward = "forward";           // email.draft_forward (authors forward body TEXT)
+    private const string MethodSummarizeThread = "summarize_thread"; // email.summarize_thread (plain narrative in chat)
+
+    /// <summary>LLM-facing tool ids the four catalog rows project (used only for the result <c>tool</c> echo).</summary>
+    private const string DraftToolId = "email.draft";
+    private const string ReplyToolId = "email.draft_reply";
+    private const string ForwardToolId = "email.draft_forward";
+    private const string SummarizeThreadToolId = "email.summarize_thread";
+
+    /// <summary>Reply modes accepted by <c>email.draft_reply</c> (client owns recipient derivation; the authored body is identical).</summary>
+    private const string ReplyModeReply = "reply";
+    private const string ReplyModeReplyAll = "replyAll";
+
+    /// <summary>Communication entity-set (deterministic plural — same convention as GridOverviewHandler's hardcoded set).</summary>
+    private const string CommunicationEntitySet = "sprk_communications";
+
+    /// <summary>Archived-.eml document entity-set (the sprk_document flagged sprk_isemailarchive = true).</summary>
+    private const string DocumentEntitySet = "sprk_documents";
+
     /// <summary>Communication table logical name (the Communication service's contract).</summary>
     internal const string CommunicationTable = "sprk_communication";
 
@@ -107,13 +135,20 @@ public sealed class EmailDraftToolHandler : IToolHandler
         };
 
     private readonly IDataverseUserClient _dataverse;
+    private readonly IEmailDraftAi _emailDraftAi;
     private readonly ILogger<EmailDraftToolHandler> _logger;
 
     public EmailDraftToolHandler(
         IDataverseUserClient dataverse,
+        IEmailDraftAi emailDraftAi,
         ILogger<EmailDraftToolHandler> logger)
     {
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
+        // ADR-013 / BFF §10: AI text generation is consumed through the PublicContracts facade
+        // (never IChatClient/IOpenAiClient injected into this handler). Always resolvable — a
+        // NullEmailDraftAi mirror is registered when the AzureOpenAI gate is off (ADR-032; AiModule),
+        // so adding this dependency does NOT create an asymmetric-registration risk (§10 F.1).
+        _emailDraftAi = emailDraftAi ?? throw new ArgumentNullException(nameof(emailDraftAi));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -192,14 +227,45 @@ public sealed class EmailDraftToolHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out _, out var error))
-            return ToolValidationResult.Failure(error!);
+        var method = ResolveMethod(tool.Configuration);
+        if (method == MethodDraft)
+        {
+            // email.draft (task 041): the closed subject/body/to vocabulary.
+            if (!TryParseArgs(context.ToolArgumentsJson, out _, out var error))
+                return ToolValidationResult.Failure(error!);
+            return ToolValidationResult.Success();
+        }
 
+        // email.draft_reply / draft_forward / summarize_thread (task 023): the by-id closed
+        // vocabulary. No email content enters the arguments (ADR-015) — content is tool-fetched
+        // by communicationId over OBO at execution time.
+        if (!TryParseThreadArgs(context.ToolArgumentsJson, method, out _, out var threadError))
+            return ToolValidationResult.Failure(threadError!);
         return ToolValidationResult.Success();
     }
 
     /// <inheritdoc />
-    public async Task<ToolResult> ExecuteChatAsync(
+    public Task<ToolResult> ExecuteChatAsync(
+        ChatInvocationContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        // Multi-row dispatch (task 023): route by the row's sprk_configuration "method"
+        // discriminator. The legacy email.draft row carries no method → defaults to draft.
+        var method = ResolveMethod(tool.Configuration);
+        return method switch
+        {
+            MethodReply or MethodForward => ExecuteComposeAsync(method, context, tool, cancellationToken),
+            MethodSummarizeThread => ExecuteSummarizeThreadAsync(context, tool, cancellationToken),
+            _ => ExecuteDraftAsync(context, tool, cancellationToken)
+        };
+    }
+
+    /// <summary>
+    /// email.draft (task 041) — creates a Spaarke <c>sprk_communication</c> DRAFT record. Unchanged
+    /// behaviour; only relocated behind the method-discriminator dispatch (task 023).
+    /// </summary>
+    private async Task<ToolResult> ExecuteDraftAsync(
         ChatInvocationContext context,
         AnalysisTool tool,
         CancellationToken cancellationToken)
@@ -340,6 +406,393 @@ public sealed class EmailDraftToolHandler : IToolHandler
             return Error(tool, "email.draft failed unexpectedly.", ToolErrorCodes.InternalError, startedAt);
         }
     }
+
+    // ── per-item email tools (task 023 / FR-09) ───────────────────────────────
+
+    /// <summary>
+    /// <c>email.draft_reply</c> / <c>email.draft_forward</c> — auto-generate ONLY the authored
+    /// message body region for a selected email, addressed by <c>communicationId</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Thread-preservation invariant (FR-10 boundary)</b>: the tool returns the AI-authored draft
+    /// TEXT ONLY. It never composes, appends, or duplicates the quoted thread — task 024's client-side
+    /// <c>bodyOverride</c> injects this text ABOVE the reducer-derived <c>quotedThread</c>, which the
+    /// composer still appends. A tool that embedded the thread would be a whole-body-replacing defect.
+    /// </para>
+    /// <para>
+    /// <b>User-OBO ONLY (ADR-028 / ADR-015)</b>: the source email body/subject is read through
+    /// <see cref="IDataverseUserClient"/> under the caller's exchanged token — an email the user
+    /// cannot read fails with their own access error; no app-only path is reachable. AI generation is
+    /// consumed through the <see cref="IEmailDraftAi"/> PublicContracts facade (ADR-013).
+    /// </para>
+    /// </remarks>
+    private async Task<ToolResult> ExecuteComposeAsync(
+        string method,
+        ChatInvocationContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+        var toolId = method == MethodForward ? ForwardToolId : ReplyToolId;
+
+        if (!TryParseThreadArgs(context.ToolArgumentsJson, method, out var args, out var parseError))
+        {
+            return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        try
+        {
+            var (thread, fetchError) = await FetchThreadAsync(args.CommunicationId, tool, startedAt, cancellationToken)
+                .ConfigureAwait(false);
+            if (fetchError is not null)
+            {
+                return LogThreadOutcome(context, method, args.CommunicationId, fetchError, stopwatch, resultLength: 0);
+            }
+
+            // reply → the facade's "reply" preset; forward → a fixed forwarding-note instruction via
+            // the facade's "custom" intent. Either way ALL AI prompt text lives inside the facade;
+            // this handler never authors an LLM prompt (ADR-013). Output format follows the source
+            // email's body format so the client composes it cleanly above the quoted thread.
+            var request = method == MethodForward
+                ? new EmailDraftAiRequest
+                {
+                    Intent = "custom",
+                    UserInstruction =
+                        "Write a brief, professional note to accompany forwarding this email to a new recipient. " +
+                        "Introduce the forwarded message in one or two sentences. Do NOT restate or quote the full " +
+                        "message — the original thread is preserved separately below your note.",
+                    CurrentBody = thread!.Body,
+                    IsHtml = thread.IsHtml,
+                    Subject = thread.Subject
+                }
+                : new EmailDraftAiRequest
+                {
+                    Intent = "reply",
+                    CurrentBody = thread!.Body,
+                    IsHtml = thread.IsHtml,
+                    Subject = thread.Subject
+                };
+
+            var draft = await _emailDraftAi.DraftAsync(request, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(draft))
+            {
+                // NullEmailDraftAi (AI gate off) or a best-effort failure returns null.
+                return LogThreadOutcome(context, method, args.CommunicationId,
+                    Error(tool, "AI drafting is unavailable; no draft was produced.", ToolErrorCodes.DependencyUnavailable, startedAt),
+                    stopwatch, resultLength: 0);
+            }
+
+            var result = ToolResult.Ok(
+                HandlerId, tool.Id, tool.Name,
+                data: new
+                {
+                    tool = toolId,
+                    communicationId = args.CommunicationId.ToString("D"),
+                    mode = method == MethodReply ? (args.Mode ?? ReplyModeReply) : null,
+                    // The authored message region ONLY — the client composes it above the quoted
+                    // thread via task 024's bodyOverride (thread-preservation invariant, FR-10).
+                    draft,
+                    emlDocumentId = thread.EmlDocumentId
+                },
+                summary: method == MethodForward
+                    ? "Drafted a forwarding note. This is the authored message region only — the composer preserves the " +
+                      "original thread below it. Hand the draft to the Forward composer's bodyOverride; do not restate it in chat."
+                    : "Drafted a reply body. This is the authored message region only — the composer preserves the quoted " +
+                      "thread below it. Hand the draft to the Reply composer's bodyOverride; do not restate it in chat.",
+                confidence: 1.0,
+                execution: Timed(startedAt));
+
+            return LogThreadOutcome(context, method, args.CommunicationId, result, stopwatch, resultLength: draft.Length);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return Error(tool, $"{toolId} was cancelled.", ToolErrorCodes.Cancelled, startedAt);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[{ToolId}] failed decisionId={DecisionId}: {ErrorType}",
+                toolId, context.DecisionId, ex.GetType().Name);
+            return Error(tool, $"{toolId} failed unexpectedly.", ToolErrorCodes.InternalError, startedAt);
+        }
+    }
+
+    /// <summary>
+    /// <c>email.summarize_thread</c> — loads the selected email's thread content by
+    /// <c>communicationId</c> and answers IN CHAT with a PLAIN NARRATIVE summary, identical in shape
+    /// to the file/document-summarize path (the resolved FR-09 output shape — NOT a bespoke
+    /// structured/JSON thread format). Opens no composer.
+    /// </summary>
+    /// <remarks>
+    /// The narrative is produced through the <see cref="IEmailDraftAi"/> facade's <c>summarize</c>
+    /// preset (plain-text output, <c>IsHtml=false</c>) over the OBO-read email body — the same
+    /// single-shot summarise prompt/response path the compose "sparkle" summarise uses, mirroring the
+    /// chat file-summarize shape (plain prose in a <c>text</c> field, no sections object).
+    /// </remarks>
+    private async Task<ToolResult> ExecuteSummarizeThreadAsync(
+        ChatInvocationContext context,
+        AnalysisTool tool,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+        var stopwatch = Stopwatch.StartNew();
+
+        if (!TryParseThreadArgs(context.ToolArgumentsJson, MethodSummarizeThread, out var args, out var parseError))
+        {
+            return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        try
+        {
+            var (thread, fetchError) = await FetchThreadAsync(args.CommunicationId, tool, startedAt, cancellationToken)
+                .ConfigureAwait(false);
+            if (fetchError is not null)
+            {
+                return LogThreadOutcome(context, MethodSummarizeThread, args.CommunicationId, fetchError, stopwatch, resultLength: 0);
+            }
+
+            var request = new EmailDraftAiRequest
+            {
+                Intent = "summarize",
+                CurrentBody = thread!.Body,
+                IsHtml = false,          // plain narrative out (file-summarize shape), regardless of source format
+                Subject = thread.Subject
+            };
+
+            var narrative = await _emailDraftAi.DraftAsync(request, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(narrative))
+            {
+                return LogThreadOutcome(context, MethodSummarizeThread, args.CommunicationId,
+                    Error(tool, "AI summarization is unavailable; no summary was produced.", ToolErrorCodes.DependencyUnavailable, startedAt),
+                    stopwatch, resultLength: 0);
+            }
+
+            // Shape mirrors the chat file-summarize path (TextRefinementHandler summary): the plain
+            // narrative lives in data.text; the LLM relays it in chat. No composer is opened, no
+            // structured sections object is emitted.
+            var result = ToolResult.Ok(
+                HandlerId, tool.Id, tool.Name,
+                data: new
+                {
+                    tool = SummarizeThreadToolId,
+                    communicationId = args.CommunicationId.ToString("D"),
+                    text = narrative,
+                    emlDocumentId = thread.EmlDocumentId
+                },
+                summary: "Summarized the email thread as a plain narrative — relay it to the user in chat.",
+                confidence: 1.0,
+                execution: Timed(startedAt));
+
+            return LogThreadOutcome(context, MethodSummarizeThread, args.CommunicationId, result, stopwatch, resultLength: narrative.Length);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return Error(tool, $"{SummarizeThreadToolId} was cancelled.", ToolErrorCodes.Cancelled, startedAt);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[{ToolId}] failed decisionId={DecisionId}: {ErrorType}",
+                SummarizeThreadToolId, context.DecisionId, ex.GetType().Name);
+            return Error(tool, $"{SummarizeThreadToolId} failed unexpectedly.", ToolErrorCodes.InternalError, startedAt);
+        }
+    }
+
+    /// <summary>
+    /// Fetches the selected email's thread content by <c>communicationId</c> OVER OBO
+    /// (<see cref="IDataverseUserClient"/>): the <c>sprk_communication</c> subject + body (the OBO
+    /// authorization boundary — a user who cannot read the record fails with their own access error),
+    /// plus a best-effort resolution of the archived <c>.eml</c> document id (the
+    /// <c>sprk_document</c> flagged <c>sprk_isemailarchive = true</c>) for grounding.
+    /// </summary>
+    /// <remarks>
+    /// The email body/subject are read from Dataverse over the caller's OBO token — never app-only
+    /// (ADR-028). The archived <c>.eml</c> binary lives in SPE and is MI-written (SPE writer-identity
+    /// rule); a chat-tool handler has no request <c>HttpContext</c> / endpoint-filter OBO gate, so the
+    /// OBO-safe thread content is the <c>sprk_communication</c> record. The <c>.eml</c> id is resolved
+    /// and echoed for grounding + a future OBO-safe eml-text enrichment path.
+    /// </remarks>
+    private async Task<(ThreadContent? Content, ToolResult? Error)> FetchThreadAsync(
+        Guid communicationId,
+        AnalysisTool tool,
+        DateTimeOffset startedAt,
+        CancellationToken cancellationToken)
+    {
+        var recordResponse = await _dataverse.GetAsync(
+            $"{CommunicationEntitySet}({communicationId:D})?$select=sprk_subject,sprk_body,sprk_bodyformat",
+            cancellationToken).ConfigureAwait(false);
+        if (!recordResponse.IsSuccess)
+        {
+            // Privilege-denied / not-visible surfaces the USER's own access error — fail-closed, no escalation.
+            return (null, MapClientError(tool, recordResponse, startedAt));
+        }
+
+        var record = recordResponse.Body!.Value;
+        var subject = GetString(record, "sprk_subject") ?? string.Empty;
+        var body = GetString(record, "sprk_body") ?? string.Empty;
+        var isHtml = TryGetInt(record, "sprk_bodyformat") == (int)BodyFormat.HTML;
+
+        // Best-effort archived-.eml resolution (grounding by id). An archive-less email is a normal
+        // degradation state (email-r5 task 033), not an error — a failed lookup leaves the id null.
+        string? emlDocumentId = null;
+        var docFilter = Uri.EscapeDataString(
+            $"_sprk_communication_value eq {communicationId:D} and sprk_isemailarchive eq true");
+        var docResponse = await _dataverse.GetAsync(
+            $"{DocumentEntitySet}?$select=sprk_documentid&$filter={docFilter}&$top=1",
+            cancellationToken).ConfigureAwait(false);
+        if (docResponse.IsSuccess && docResponse.Body is { } docBody &&
+            docBody.TryGetProperty("value", out var value) &&
+            value.ValueKind == JsonValueKind.Array &&
+            value.GetArrayLength() > 0)
+        {
+            emlDocumentId = GetString(value[0], "sprk_documentid");
+        }
+
+        return (new ThreadContent(subject, body, isHtml, emlDocumentId), null);
+    }
+
+    /// <summary>Resolved thread content for the per-item tools (task 023).</summary>
+    private sealed record ThreadContent(string Subject, string Body, bool IsHtml, string? EmlDocumentId);
+
+    /// <summary>Closed by-id vocabulary for the per-item tools (task 023).</summary>
+    private sealed record ThreadToolArgs(Guid CommunicationId, string? Mode);
+
+    /// <summary>
+    /// Parses the by-id arguments for draft_reply / draft_forward / summarize_thread. NO email content
+    /// is accepted (ADR-015) — only the <c>communicationId</c> and, for reply, an optional <c>mode</c>.
+    /// Unknown members are ignored (closed vocabulary).
+    /// </summary>
+    private static bool TryParseThreadArgs(string? argsJson, string method, out ThreadToolArgs args, out string? error)
+    {
+        args = null!;
+        error = null;
+
+        if (string.IsNullOrWhiteSpace(argsJson))
+        {
+            error = "Tool arguments JSON is required (expected { \"communicationId\": \"<guid>\" }).";
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(argsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                error = "Tool arguments must be a JSON object.";
+                return false;
+            }
+
+            if (!root.TryGetProperty("communicationId", out var idProp) ||
+                idProp.ValueKind != JsonValueKind.String ||
+                string.IsNullOrWhiteSpace(idProp.GetString()))
+            {
+                error = "Tool arguments must include a non-empty 'communicationId' string (the selected email's sprk_communication GUID).";
+                return false;
+            }
+            if (!Guid.TryParse(idProp.GetString(), out var communicationId))
+            {
+                error = "'communicationId' must be a valid GUID identifying a sprk_communication record.";
+                return false;
+            }
+
+            string? mode = null;
+            if (method == MethodReply &&
+                root.TryGetProperty("mode", out var modeProp) &&
+                modeProp.ValueKind == JsonValueKind.String)
+            {
+                var raw = modeProp.GetString()?.Trim();
+                if (!string.IsNullOrEmpty(raw))
+                {
+                    if (!string.Equals(raw, ReplyModeReply, StringComparison.OrdinalIgnoreCase) &&
+                        !string.Equals(raw, ReplyModeReplyAll, StringComparison.OrdinalIgnoreCase))
+                    {
+                        error = $"'mode' must be '{ReplyModeReply}' or '{ReplyModeReplyAll}'.";
+                        return false;
+                    }
+                    mode = string.Equals(raw, ReplyModeReplyAll, StringComparison.OrdinalIgnoreCase)
+                        ? ReplyModeReplyAll
+                        : ReplyModeReply;
+                }
+            }
+
+            args = new ThreadToolArgs(communicationId, mode);
+            return true;
+        }
+        catch (JsonException ex)
+        {
+            error = $"Tool arguments JSON is malformed: {ex.Message}";
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Resolves the method discriminator from the row's <c>sprk_configuration</c>. The legacy
+    /// email.draft row carries none → defaults to <see cref="MethodDraft"/> (task-041 behaviour
+    /// preserved). Unrecognized values also fall back to draft so a mis-authored row degrades safely.
+    /// </summary>
+    private static string ResolveMethod(string? configurationJson)
+    {
+        if (string.IsNullOrWhiteSpace(configurationJson))
+            return MethodDraft;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configurationJson);
+            if (doc.RootElement.ValueKind == JsonValueKind.Object &&
+                doc.RootElement.TryGetProperty("method", out var methodProp) &&
+                methodProp.ValueKind == JsonValueKind.String)
+            {
+                var method = methodProp.GetString()?.Trim().ToLowerInvariant();
+                return method switch
+                {
+                    MethodReply => MethodReply,
+                    MethodForward => MethodForward,
+                    MethodSummarizeThread => MethodSummarizeThread,
+                    _ => MethodDraft
+                };
+            }
+        }
+        catch (JsonException)
+        {
+            // Malformed configuration → safe default.
+        }
+
+        return MethodDraft;
+    }
+
+    /// <summary>
+    /// ADR-015 / NFR-07 telemetry for the per-item tools: method + communicationId + outcome +
+    /// duration + a coarse output-length bucket ONLY — NEVER the subject/body/draft/summary text.
+    /// </summary>
+    private ToolResult LogThreadOutcome(
+        ChatInvocationContext context, string method, Guid communicationId,
+        ToolResult result, Stopwatch stopwatch, int resultLength)
+    {
+        stopwatch.Stop();
+        _logger.LogInformation(
+            "[email.{Method}][ADR-015] outcome={Outcome} communicationId={CommunicationId} " +
+            "outputLengthBucket={OutputBucket} decisionId={DecisionId} durationMs={DurationMs}",
+            method, result.Success ? "ok" : result.ErrorCode, communicationId,
+            BucketLength(resultLength), context.DecisionId, stopwatch.ElapsedMilliseconds);
+        return result;
+    }
+
+    private static string BucketLength(int length) => length switch
+    {
+        0 => "0",
+        < 100 => "<100",
+        < 500 => "100-500",
+        < 2000 => "500-2000",
+        _ => "2000+"
+    };
+
+    private static int? TryGetInt(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var p) && p.ValueKind == JsonValueKind.Number && p.TryGetInt32(out var v)
+            ? v
+            : null;
 
     // ── item construction ─────────────────────────────────────────────────────
 

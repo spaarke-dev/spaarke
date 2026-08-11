@@ -31,7 +31,7 @@ import type {
   IEmailAiDraftResult,
 } from '@spaarke/ui-components';
 import type { EmailToolbarActionHandlers } from '../EmailReadingPaneShell';
-import type { ComposerFields } from '../../logic/actions';
+import type { ComposerFields, ComposerMode } from '../../logic/actions';
 
 /**
  * `ISendEmailDialogProps` (the wrapper's DECLARED type) omits `initialCc` —
@@ -165,6 +165,24 @@ export interface EmailComposeActionsDeps {
   composerFullBleed?: boolean;
 }
 
+/**
+ * Options for the imperative {@link UseEmailComposeActionsResult.openComposer}
+ * entry point.
+ */
+export interface OpenComposerOptions {
+  /**
+   * FR-10 (BINDING thread-preservation invariant). An AI-drafted authored
+   * message that seeds ONLY the authored-message region of the composer. The
+   * composer STILL derives + appends the quoted previous thread BELOW it, so the
+   * body opens as `[AI draft] + [separator] + [quoted thread]` — parity with the
+   * in-dialog sparkle re-append (`EmailComposer.runAiDraft`). A `bodyOverride`
+   * that replaces the WHOLE body (dropping the quoted thread) is a DEFECT. The
+   * toolbar `actions` handlers are intentionally bodyOverride-free (manual
+   * reply/forward); only this entry point injects an AI draft.
+   */
+  bodyOverride?: string;
+}
+
 export interface UseEmailComposeActionsResult {
   /**
    * Pass straight through to `<EmailReadingPaneShell actions={...} />`
@@ -182,6 +200,18 @@ export interface UseEmailComposeActionsResult {
    * composer is ever introduced.
    */
   composerDialog: React.ReactElement<SendEmailDialogElementProps>;
+  /**
+   * FR-10 consumer seam — the imperative composer entry point. Opens the
+   * canonical `SendEmailDialog` in `mode` for `communicationId`, optionally
+   * seeding an AI draft via `options.bodyOverride` that composes ABOVE the
+   * PRESERVED quoted thread (`[AI draft] + [separator] + [quoted thread]`; never
+   * a whole-body replace). This is the entry point the auto-draft Reply/Reply
+   * All/Forward cards (task 025) + email tools (task 023) call. The toolbar
+   * `actions` handlers wrap this same function bodyOverride-free (manual
+   * reply/forward); existing consumers (`EmailWorkspace`,
+   * `EmailComposeStandalone`) that only use `actions` are unaffected.
+   */
+  openComposer: (mode: ComposerMode, communicationId?: string, options?: OpenComposerOptions) => void;
   /**
    * FR-15 — opens the OOB `sprk_communication` Email main form for
    * `communicationId` as an 85% `navigateTo` modal

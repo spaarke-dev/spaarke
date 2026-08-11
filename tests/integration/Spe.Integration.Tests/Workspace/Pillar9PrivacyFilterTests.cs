@@ -94,17 +94,20 @@ public sealed class Pillar9PrivacyFilterTests
         // Act — compose the per-turn block via the SAME path used by CreateAgentAsync.
         var block = factory.BuildWorkspaceStateBlock(tabs, SessionId);
 
-        // Assert — Tab 1 IS in the prompt.
+        // Assert — Tab 1 IS in the prompt (by identity — R3 task 011 FR-03 trims content).
         block.Should().NotBeEmpty();
-        block.Should().Contain("Tab1_TLDR_INCLUDE",
+        block.Should().Contain("Tab 1 (active): widgetType=Summary",
             because: "Tab 1 satisfies visibleToAssistant=true AND has derivable Summary state");
-        block.Should().Contain("Tab1_Matter_INCLUDE");
-        block.Should().Contain("widgetType=Summary");
-        block.Should().Contain("hasUserEdits: false");
+        // FR-03: the Summary's content (tldr/body) is NO LONGER emitted — only {type,label,active}.
+        block.Should().NotContain("Tab1_TLDR_INCLUDE",
+            because: "FR-03/ADR-015 — the trimmed block carries no ambient widget content");
+        block.Should().NotContain("Tab1_Matter_INCLUDE",
+            because: "FR-03 — matter context is no longer part of {type,label,active}");
+        block.Should().NotContain("hasUserEdits");
 
-        // Assert — Tab 2 (visible + no state) is filtered OUT.
+        // Assert — Tab 2 (visible + no state, no DisplayName) is filtered OUT.
         block.Should().NotContain("Tab2_Matter_EXCLUDE_NoState",
-            because: "FR-59 privacy default — widget without derivable state does NOT appear");
+            because: "FR-59 privacy default — widget without derivable state (and no DisplayName) does NOT appear");
 
         // Assert — Tab 3 (NOT visible) is filtered OUT.
         block.Should().NotContain("Tab3_Matter_EXCLUDE_Hidden",
@@ -166,14 +169,19 @@ public sealed class Pillar9PrivacyFilterTests
         var factory = CreateFactory();
         var block = factory.BuildWorkspaceStateBlock(tabs, SessionId);
 
+        // R3 task 011 (FR-03): each category appears by {type, label} — label is the derived
+        // identity name (filename / dashboard name) or the widget type. NO ambient content.
         block.Should().Contain("widgetType=DocumentViewer");
-        block.Should().Contain("filename: indemnity-clause.docx");
+        block.Should().Contain("label=\"indemnity-clause.docx\"");
         block.Should().Contain("widgetType=Dashboard");
-        block.Should().Contain("dashboardName: Corporate Workspace");
+        block.Should().Contain("label=\"Corporate Workspace\"");
         block.Should().Contain("widgetType=Table");
-        block.Should().Contain("rowCount: 12");
-        // Selected rows COUNT (stricter than POML).
-        block.Should().Contain("selectedRows: 2");
+        block.Should().Contain("label=\"Table\"");
+        // Content field NAMES must NOT appear (trimmed).
+        block.Should().NotContain("rowCount:");
+        block.Should().NotContain("selectedRows:");
+        block.Should().NotContain("filename:");
+        block.Should().NotContain("dashboardName:");
         // Row IDs must NOT leak.
         block.Should().NotContain("row-A");
         block.Should().NotContain("row-B");

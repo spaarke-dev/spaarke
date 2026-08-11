@@ -18,6 +18,9 @@ import {
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
+  // FR-15 (task 050): assistantContract is a REQUIRED registration member.
+  // These fixtures declare an explicit opt-out so they satisfy the guard.
+  assistantContractOptOut,
 } from '../WorkspaceWidgetRegistry';
 
 // ---------------------------------------------------------------------------
@@ -62,6 +65,8 @@ const defaultMetadata = {
   category: 'test',
   allowMultiple: false,
   defaultOrder: 99,
+  // FR-15 (task 050): required assistantContract — test fixture opts out.
+  assistantContract: assistantContractOptOut('Test fixture widget — no Assistant contract.'),
 };
 
 // ---------------------------------------------------------------------------
@@ -171,7 +176,14 @@ describe('resolveWorkspaceWidget — factory failure', () => {
 
 describe('getWorkspaceWidgetMetadata', () => {
   it('returns metadata for registered types', () => {
-    const meta = { displayName: 'My Widget', category: 'analysis', defaultOrder: 5, allowMultiple: false };
+    const meta = {
+      displayName: 'My Widget',
+      category: 'analysis',
+      defaultOrder: 5,
+      allowMultiple: false,
+      // FR-15 (task 050): required assistantContract — test fixture opts out.
+      assistantContract: assistantContractOptOut('Test fixture widget — no Assistant contract.'),
+    };
     registerWorkspaceWidget('my-widget', meta, () =>
       Promise.resolve({ default: FakeWidgetA as React.ComponentType<any> })
     );
@@ -218,7 +230,14 @@ describe('replaceWorkspaceWidget', () => {
     // Replace — should clear cache and use new factory.
     replaceWorkspaceWidget(
       'swappable',
-      { displayName: 'Swapped', category: 'test', allowMultiple: false, defaultOrder: 99 },
+      {
+        displayName: 'Swapped',
+        category: 'test',
+        allowMultiple: false,
+        defaultOrder: 99,
+        // FR-15 (task 050): required assistantContract — test fixture opts out.
+        assistantContract: assistantContractOptOut('Test fixture widget — no Assistant contract.'),
+      },
       () => Promise.resolve({ default: FakeWidgetB as React.ComponentType<any> })
     );
 

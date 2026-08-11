@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Derive follow-on chips/cards deterministically from mounted parity tools + interaction pattern; per-item→cards, query→chips; collapse card stacks (FR-14)</title>
+    <phase>4 — Interaction patterns + accurate follow-ons</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the ConversationPane follow-on/proactive-card surface (.tsx) — the sequential UI spine; element-type correctness per the criteria doc</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified deterministic derivation with an explicit criteria doc (per-item→cards, query→chips); literal execution against ASSISTANT-UI-ELEMENT-CRITERIA.md</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (the sequential spine — shared with 025/026 per-item cards and 040); coordinate merge order with notification-spine/analysis-hub which also touch this file.</parallel-reason>
+    <deps>040</deps>
+    <tags>spaarkeai, frontend, fluent-ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>In ConversationPane.tsx, derive follow-on chips/cards DETERMINISTICALLY from the mounted parity tools + the interaction pattern (task 040) — never model-invented. Apply the element-type rule from docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md: per-item actions on an active item render as CARDS; overview/query turn-follow-ons render as CHIPS. Collapse proactive card STACKS behind ONE disclosure header. No follow-on may reference an unmounted tool.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 expertise on the SpaarkeAi ConversationPane; comfortable applying the Assistant UI element criteria (bubble/chip/card/tab).</role>
+  <goal>Follow-ons for an open tab correspond exactly to that widget's mounted parity tools + declared pattern; none reference an unmounted tool; per-item actions render as cards and query follow-ons as chips; multiple proactive cards collapse under one disclosure header.</goal>
+  <context>
+    <background>FR-14 — deterministic follow-ons + element type. The model must NOT invent follow-ons. This task derives them deterministically from (a) the mounted parity tools for the open tab (task 030 pre-filter output) and (b) the widget's interaction pattern field (task 040). Element type follows docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md: per-item actions on an active item → CARDS (persistent act-on items — email Reply/Reply All/Forward/Summarize; document Summarize/Draft-response/Draft-memo); overview/query turn-follow-ons → CHIPS (throwaway next-questions after a chat answer). Proactive card stacks collapse behind ONE disclosure header (criteria doc + design A4). Edits land in ConversationPane.tsx — the proactive-card surface (~:164-167) and the follow-on renderer. ConversationPane is a sequential spine shared with 025/026 (per-item cards) — coordinate.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (proactive-card surface ~:164-167; follow-on derivation + renderer)</file>
+      <file>the mounted parity tools for the open tab (task 030 pre-filter output) — the deterministic source of follow-ons</file>
+      <file>the interaction-pattern registration field (task 040) — respond/direct/hybrid</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md (bubble vs chip vs card vs tab decision + collapse rule)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="follow-on derivation">Follow-ons are derived deterministically from mounted tools + the pattern field — MUST NOT be invented by the model or produced by a classifier.</constraint>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA" scope="element type">Per-item actions on an active item → CARDS; overview/query turn-follow-ons → CHIPS. No code/keys in chip/card labels; hover only on clickable regions.</constraint>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA" scope="proactive card stacks">Multiple proactive cards collapse behind ONE disclosure header.</constraint>
+    <constraint source="ADR-047" scope="the card surface">The reactive/local-selection card surface stays distinct from the server-initiated notification spine (NFR-07) — no merge, no new push channel.</constraint>
+    <constraint source="project" scope="tool references">No follow-on may reference an unmounted tool (must reflect the current pre-filter projection).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-047-notification-action-spine.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the current proactive-card surface + follow-on renderer in ConversationPane.tsx and the element criteria doc.</step>
+    <step order="2">Build the deterministic derivation: for the open tab, map its mounted parity tools + interaction pattern to a follow-on set.</step>
+    <step order="3">Select element type: per-item actions on an active item → cards; overview/query turn-follow-ons → chips.</step>
+    <step order="4">Collapse multiple proactive cards behind one disclosure header.</step>
+    <step order="5">Guard: no follow-on references an unmounted tool (reflect the current projection).</step>
+    <step order="6">Add UI tests (see ui-tests) covering the correspondence, element type, and collapse.</step>
+    <step order="7">Build the SpaarkeAi package; update TASK-INDEX ✅.</step>
+  </steps>
+  <ui-tests>
+    <test>With the Email tab open + an email selected, per-item follow-ons render as CARDS matching the mounted email tools (Reply/Reply All/Forward/Summarize); none reference an unmounted tool.</test>
+    <test>After an overview/query chat answer, turn-follow-ons render as CHIPS (not cards).</test>
+    <test>With multiple proactive cards present, they collapse behind ONE disclosure header (expand reveals the stack).</test>
+    <test>Closing a tab removes its follow-ons (they reflect the current pre-filter projection — no stale/unmounted-tool reference).</test>
+    <test>No card/chip label contains code or a raw tool key; hover affordance appears only on clickable regions.</test>
+  </ui-tests>
+  <escalation>
+    <trigger>If a required follow-on cannot be derived deterministically from mounted tools + the pattern field (i.e. it would require the model to invent it), STOP and escalate (ADR-039 / FR-14 bound) rather than emitting a model-invented follow-on.</trigger>
+  </escalation>
+  <justification>
+    <existing>The proactive-card surface exists in ConversationPane.tsx (~:164-167) but follow-ons are not deterministically bound to mounted tools + a pattern field, and element-type/collapse rules are not applied.</existing>
+    <extension>Yes — extend the existing card/chip surface with a deterministic derivation keyed off task 030 (mounted tools) + task 040 (pattern); no new surface.</extension>
+    <cost-of-doing-nothing>Follow-ons drift from actual capabilities (reference unmounted tools) or are model-invented; card/chip choice is wrong; proactive stacks clutter the pane (the FR-14 defects).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (deterministic follow-on derivation + element-type + collapse)</output>
+    <output type="test">ConversationPane UI tests (correspondence, card vs chip, collapse)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Follow-ons for an open tab correspond exactly to that widget's mounted parity tools + declared pattern.</criterion>
+    <criterion testable="true">No follow-on references an unmounted tool (negative case).</criterion>
+    <criterion testable="true">Per-item actions on an active item render as cards; overview/query follow-ons render as chips.</criterion>
+    <criterion testable="true">Multiple proactive cards collapse under one disclosure header.</criterion>
+    <criterion testable="true">Follow-ons are deterministic — not model-invented (negative case).</criterion>
+    <criterion testable="true">The reactive card surface stays distinct from the ADR-047 spine (no push channel added).</criterion>
+    <criterion testable="true">UI tests added and pass.</criterion>
+  </acceptance-criteria>
+  <notes>Depends on task 040 (interaction-pattern field) and reflects task 030's mounted-tool projection. ConversationPane is the sequential spine (shared with 025/026) — coordinate merge order with notification-spine/analysis-hub; /conflict-check before the PR.
+
+COMPLETED 2026-08-11. New `followOnElementType.ts` — the ONE deterministic card-vs-chip resolver, `resolveFollowOnElementType({widgetType, hasActiveItem})`, reading ONLY `getWidgetAssistantContract(type).perItemCards`/`overviewTools` (task 022) + `getWidgetInteractionPattern(type)` (task 040, its documented FIRST runtime consumer) — no message text parameter exists in its signature (structural no-keyword-mis-fire proof). Rule: `perItemCards.length > 0 && hasActiveItem` → 'card' (true for 'hybrid' email AND 'respond' document-viewer, since interactionPattern governs card LANDING not whether the affordance is a card); else 'direct' → 'none' (no standalone chat answer to offer); else `overviewTools.length > 0` → 'chip'; else 'none'. A companion `resolveFollowOnElementTypeForActiveItemType` maps the active-item conduit's own vocabulary ('email'/'document') through `ACTIVE_ITEM_TYPE_TO_WIDGET_TYPE` to the registry keys ('email'/'document-viewer'). New `ProactiveCardStack.tsx` — a pure presentational wrapper that collapses 2+ simultaneous proactive card slots (Rerun-full-analysis + email/document per-item cards) behind ONE outer disclosure header ("You have N pending actions", toggle, no hover per the criteria doc); 0/1 slots render exactly as before (no redundant header). Wired into `ConversationPane.tsx`'s `transcriptFooter`: `emailPerItemCards.cardSlot`/`documentPerItemCards.cardSlot` are now additionally gated on `activeItemFollowOnType === 'card'` (a belt-and-suspenders check against the same registration contract those hooks already read internally — 025/026's own components and headers are UNCHANGED). Did NOT touch `useConsumerChips`/the SNS chip mechanism — it already satisfies "overview/query turn-follow-ons render as CHIPS" structurally (it can never produce a card) and is the correct existing consumption point for chip element type; adding a second, parallel chip-producing surface sourced from `overviewTools` would have duplicated it against §11 reuse-first. Tests: `followOnElementType.test.ts` (13 tests — card/chip/none resolution across email/document-viewer/workspace/matters-list/unregistered types, determinism, explicit no-keyword-mis-fire case, active-item-type mapping) + `ProactiveCardStack.test.tsx` (6 tests — 0/1/2+/3 slot collapse, toggle expand/collapse, no-code-in-label). Regression: full `src/components/conversation` suite 73 suites / 701 tests pass (incl. the pre-existing `ConversationPane.email-per-item-cards.e2e.test.tsx` 8/8 + `ConversationPane.document-per-item-cards.e2e.test.tsx` 9/9 + all task-040-adjacent suites) — zero regressions. `Spaarke.AI.Widgets` `WorkspaceWidgetRegistry.interactionPattern.test.ts` 8/8 pass unchanged. SpaarkeAi `npm run build`: tsc-surface-gate 0 surface-owned errors, vite build + ribbon build succeeded. No deviations from scope; task 050 (registry enforcement) intentionally untouched.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>
