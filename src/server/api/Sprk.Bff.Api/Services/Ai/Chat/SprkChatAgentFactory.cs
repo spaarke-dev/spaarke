@@ -900,6 +900,18 @@ public class SprkChatAgentFactory
         var turnOptions = scope.ServiceProvider
             .GetService<IOptions<AgentTurnOptions>>()?.Value ?? new AgentTurnOptions();
         var turnContract = new AgentTurnContract(turnOptions.ToolCallBudget);
+        // FR-12 tool economy (task 030): derive the deterministic OPEN-tab context-type set from the LIVE
+        // open tabs (`liveTabs` — the source-of-record for what is actually open that task 011 re-pointed
+        // the awareness block to), mapping each tab's widgetType / typed WidgetData.Kind through the
+        // WidgetContextTypeResolver (the C# mirror of the client widget→context-type registry, task 022).
+        // Fed to the PreFilter's tab-economy predicate so a parity capability mounts ONLY while a matching
+        // tab is open. NULL when no live tabs were supplied (legacy call site) → the predicate stays inert;
+        // a non-null EMPTY set ("tabs known, none map") DOES scope tab-gated tools out. ADR-015: reads only
+        // tab identity/category — never item content. Hoisted into the pre-filter scope here (never fetched
+        // inside PreFilter).
+        var openTabContextTypes = liveTabs is not null
+            ? WidgetContextTypeResolver.ResolveOpenTabContextTypes(liveTabs)
+            : null;
         var filterContext = new AgentToolFilterContext(
             Surface: AgentToolFilterContext.AssistantSurface,
             HasSessionFiles: context.UploadedFiles is { Count: > 0 },
@@ -909,7 +921,8 @@ public class SprkChatAgentFactory
             // when ChatHostContext.IsValid() (a genuine host entity — EntityType + EntityId present +
             // known type). Feeds the requires-no-attached-record PreFilter predicate (e.g. hides
             // "Create matter" when already inside a matter). Threaded here, never fetched inside PreFilter.
-            HasAttachedRecord: hostContext?.IsValid() == true);
+            HasAttachedRecord: hostContext?.IsValid() == true,
+            OpenTabContextTypes: openTabContextTypes);
         var finalTools = AgentToolProjection.Finalize(
             tools, filterContext, turnContract, citationContext, _logger);
 

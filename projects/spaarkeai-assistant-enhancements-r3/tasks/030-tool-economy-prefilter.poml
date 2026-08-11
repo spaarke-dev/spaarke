@@ -4,7 +4,7 @@
     <title>Wire Binding.ContextTypeTags into the ADR-039 PreFilter — OpenTabContextTypes predicate; mount a widget's parity tools only when its tab is open (FR-12)</title>
     <phase>3 — Tool economy</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Server change on the ADR-039 deterministic PreFilter (the tool-mounting mechanism); touches the Services/Ai projection boundary owned by redesign-r2</rigor-reason>
     <model-tier>opus</model-tier>

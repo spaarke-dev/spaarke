@@ -134,7 +134,10 @@ public sealed class StatedProfileSecurityTests
                 // HasAttachedRecord added by task 044 (FR-H1) — a STRUCTURAL host-record fact
                 // (ChatHostContext.IsValid()), NOT a profile/User-fragment signal; grounding stays
                 // profile-independent.
-                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord" },
+                // OpenTabContextTypes added by task 030 (FR-12 tool economy) — a STRUCTURAL open-tab fact
+                // (the context-types of the workspace tabs currently open, mapped from live session.Tabs),
+                // NOT a profile/User-fragment signal; grounding stays profile-independent.
+                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord", "OpenTabContextTypes" },
                 "the grounding filter context is structural-facts-only — no profile/User-fragment-derived member exists");
 
         factsOnly.Surface.Should().Be("assistant");
