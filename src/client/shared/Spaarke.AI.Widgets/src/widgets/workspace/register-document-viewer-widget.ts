@@ -29,19 +29,42 @@ import type { WidgetAssistantContract, AssistantContractCard } from '../../types
  */
 export const DOCUMENT_VIEWER_WIDGET_TYPE = 'document-viewer' as const;
 
-// FR-11 (task 022): per-item cards Summarize/Draft response/Draft memo,
-// backed by RAG (lane 2) + on-demand body. No overview tool of its own —
-// overview parity for documents lives on the sibling 'documents-list' grid
-// (FR-06/FR-07's "all grids"); this widget is the single-doc, tab-focus
-// active-item surface (FR-04b/FR-11).
+// FR-11 (task 022, FINALIZED by task 026): per-item cards Summarize/Draft
+// response/Draft memo, backed by RAG (lane 2) + on-demand body. No overview
+// tool of its own — overview parity for documents lives on the sibling
+// 'documents-list' grid (FR-06/FR-07's "all grids"); this widget is the
+// single-doc, tab-focus active-item surface (FR-04b/FR-11).
 //
-// Tool-name NOTE: spec FR-11 names the three cards but not the backing tool
-// identifiers (unlike FR-09's email tools, which are named explicitly:
-// draft_reply/draft_forward/summarize_thread). `summarize_document` /
-// `draft_document_response` / `draft_document_memo` below are task-022
-// placeholder names chosen to mirror the email convention; the document
-// per-item build task (026) is the authoritative source — confirm/update
-// these three strings there if it lands under different catalog names.
+// Tool-name / landing NOTE (task 026 finalization, §11 reuse-first): these
+// three `tool` strings are NOT closed-catalog BFF tool names invoked
+// deterministically (unlike FR-09's email tools, which ARE — `draft_reply`/
+// `draft_forward`/`summarize_thread` back real `EmailDraftToolHandler`
+// catalog rows). Documents have no equivalent deterministic REST entry
+// point. Instead `DocumentPerItemCards.tsx` maps each `tool` string to a
+// deterministic chat instruction sent through the EXISTING SprkChat
+// `pendingOutboundMessage` host-send seam, with the active document's id
+// armed for that ONE turn via `onDecorateOutboundBody`'s `body.documentId`
+// (the SAME one-shot, ADR-015 on-demand mechanism the shipped "Summarize
+// this email" chip uses — `ConversationPane.tsx`'s `pendingEmailDocRef`/
+// `handleDecorateOutboundBodyWithRevise`). The server resolves
+// `body.documentId` through the SAME `DocumentContextService`/RAG lane-2
+// pipeline that already backs "summarize this document" today
+// (`ChatEndpoints.SendMessage` → `effectiveDocumentId` →
+// `agentFactory.CreateAgentAsync`) — no new BFF tool, no new retrieval
+// service.
+//
+// `landing` NOTE: documents have no composer-equivalent surface (that is an
+// email-only UI concept, `SendEmailDialog`). All three cards therefore land
+// `'chat'` for task 026 — a documented, narrower scope than FR-11's
+// "composer/Compose for drafts" wording (CLAUDE.md §6.5 Path A project-
+// scoped exception; see task 026 notes): the only real drafting surface for
+// documents is Compose (ADR-049), and routing "Draft memo" there via the
+// EXISTING R7-4 `compose-draft-document` keyword auto-router
+// (`composeDraftRouting.ts`) would silently DROP the one-shot `documentId`
+// grounding (that alternate Binding-dispatch path does not forward
+// `body.documentId`) — a worse, ungrounded outcome than answering in chat.
+// task 040 (the interaction-pattern registration field) is the right place
+// to build a properly-grounded Compose landing for these two cards.
 // Object.freeze: only one widget (document-viewer) currently uses this
 // object, but it's frozen for consistency with OVERVIEW_ONLY_CONTRACT/
 // EMAIL_CONTRACT in register-workspace-widgets.ts and to guard against
@@ -51,17 +74,21 @@ export const DOCUMENT_VIEWER_WIDGET_TYPE = 'document-viewer' as const;
 const DOCUMENT_VIEWER_PER_ITEM_CARDS: readonly AssistantContractCard[] = [
   // Answers IN CHAT from RAG/body with record-id citation (FR-11).
   { label: 'Summarize', tool: 'summarize_document', landing: 'chat' },
-  // Quick reply-style output — lands on the composer.
-  { label: 'Draft response', tool: 'draft_document_response', landing: 'composer' },
-  // Longer-form document output — lands on the Compose (ADR-049) surface.
-  { label: 'Draft memo', tool: 'draft_document_memo', landing: 'compose' },
+  // task 026: answers in chat (grounded via the one-shot documentId) — see the landing NOTE above.
+  { label: 'Draft response', tool: 'draft_document_response', landing: 'chat' },
+  // task 026: answers in chat (grounded via the one-shot documentId) — see the landing NOTE above.
+  { label: 'Draft memo', tool: 'draft_document_memo', landing: 'chat' },
 ];
 
 const DOCUMENT_VIEWER_CONTRACT: WidgetAssistantContract = Object.freeze({
   overviewTools: Object.freeze([]),
   perItemCards: Object.freeze(DOCUMENT_VIEWER_PER_ITEM_CARDS),
-  // hybrid: Summarize answers in chat (respond); Draft response/memo open a
-  // surface (direct) — the widget mixes both.
+  // Left as task 022's original 'hybrid' value — task 026 is explicitly OUT OF SCOPE for
+  // finalizing the interaction-pattern field itself (that is task 040's job); the field is not yet
+  // consumed anywhere at runtime (grep-verified). All three cards land 'chat' for NOW (see the
+  // `landing` NOTE above) which reads closer to 'respond', but a future task-040 change to this
+  // widget's surface (e.g. a properly-grounded Compose landing for Draft memo) would make 'hybrid'
+  // correct again — left alone rather than churned twice.
   interactionPattern: 'hybrid',
 });
 

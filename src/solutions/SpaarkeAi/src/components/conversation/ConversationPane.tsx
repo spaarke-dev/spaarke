@@ -101,6 +101,9 @@ import { useActiveItem, type ActiveItemHandle } from "../workspace/activeItemCon
 // task 025 (FR-09/FR-10) — email per-item action cards (Reply/Reply All/Forward/Summarize the
 // thread), wired to the task-022 perItemCards contract + task-023/024 tools/composer seams.
 import { useEmailPerItemCards } from "./EmailPerItemCards";
+// task 026 (FR-11) — document per-item action cards (Summarize/Draft response/Draft memo), wired
+// to the task-022 perItemCards contract; each card arms the one-shot documentId seam below.
+import { useDocumentPerItemCards } from "./DocumentPerItemCards";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
@@ -738,6 +741,14 @@ export function ConversationPane(): React.JSX.Element {
   //    sends it once (running the decorate seam above) then acks via `onOutboundConsumed`, which
   //    clears this state back to null. State (not ref) because SprkChat re-reads it as a prop.
   const pendingEmailDocRef = React.useRef<string | null>(null);
+  // task 026 (FR-11) — the document per-item cards' one-shot document handle. SAME shape/lifecycle
+  // as `pendingEmailDocRef` above (a ref so arming it never triggers a re-render): a card click
+  // sets it to the active document's id for exactly the NEXT outbound turn;
+  // `handleDecorateOutboundBodyWithRevise` reads + clears it onto `body.documentId` (ADR-015
+  // on-demand — never persisted to the session). Kept as a SEPARATE ref (not renamed/merged into
+  // `pendingEmailDocRef`) so the shipped email-summarize flow is untouched (additive, minimal
+  // edit).
+  const pendingDocumentTurnRef = React.useRef<string | null>(null);
   const [pendingOutboundMessage, setPendingOutboundMessage] = React.useState<string | null>(null);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
@@ -903,6 +914,20 @@ export function ConversationPane(): React.JSX.Element {
     bffBaseUrl,
     onSearchRecipients: handleSearchRecipients,
     enqueueAssistantMessage: injection.enqueue,
+  });
+  // task 026 (FR-11) — document per-item ACTION CARDS (Summarize/Draft response/Draft memo), keyed
+  // to the active-item conduit's document handle (`generalizedActiveItem`, task 001/026). Sibling of
+  // `emailPerItemCards` above — REACTIVE/local card surface (NFR-07), renders on tab-focus with no
+  // typing. See DocumentPerItemCards.tsx for the full §11 reuse writeup (task-022 perItemCards
+  // contract + the shipped "Summarize this email" one-shot documentId precedent). `armDocumentTurn`
+  // arms `pendingDocumentTurnRef` (read by `handleDecorateOutboundBodyWithRevise` below) then sends
+  // through the SAME `pendingOutboundMessage` host→send seam `LOCAL_CHIP.emailSummarize` uses.
+  const documentPerItemCards = useDocumentPerItemCards({
+    activeItem: generalizedActiveItem,
+    armDocumentTurn: React.useCallback((documentId: string, message: string) => {
+      pendingDocumentTurnRef.current = documentId;
+      setPendingOutboundMessage(message);
+    }, []),
   });
   // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
@@ -2206,6 +2231,17 @@ export function ConversationPane(): React.JSX.Element {
         pendingEmailDocRef.current = null;
       }
 
+      // task 026 (FR-11): the document per-item cards' one-shot document handle — SAME on-demand
+      // pattern as `pendingEmailDocRef` immediately above (ADR-015: never persisted, attached to
+      // ONLY the turn a card armed). Guarded on `!body.documentId` defensively; both refs firing on
+      // the same turn can never happen in practice (task 001's single-active-item invariant means
+      // only one active-item type is ever active at a time), but this keeps the email ref
+      // authoritative if it ever did.
+      if (!body.documentId && pendingDocumentTurnRef.current) {
+        body.documentId = pendingDocumentTurnRef.current;
+        pendingDocumentTurnRef.current = null;
+      }
+
       const messageText = typeof body.message === "string" ? body.message : "";
       const hasActiveSourceDoc =
         activeSourceDocRef.current?.sessionFileId != null && chatSessionIdRef.current != null;
@@ -2829,6 +2865,10 @@ export function ConversationPane(): React.JSX.Element {
             surface (NFR-07) — a sibling of the Rerun card + consumer chips, distinct from the
             ADR-047 spine. */}
         {emailPerItemCards.cardSlot}
+        {/* task 026 (FR-11): document per-item ACTION CARDS — renders (with no typing) whenever
+            the active-item conduit carries a single active document-viewer tab; suppresses on
+            multi-select/deselect/tab-switch-away, mirroring the email cards immediately above. */}
+        {documentPerItemCards.cardSlot}
         {reviseChipsPending ? (
           <ComposeDocActionChips onAction={handleDocAction} />
         ) : (
@@ -2856,6 +2896,7 @@ export function ConversationPane(): React.JSX.Element {
     [
       rerunFullAnalysisCard.cardSlot,
       emailPerItemCards.cardSlot,
+      documentPerItemCards.cardSlot,
       reviseChipsPending,
       handleDocAction,
       chips.consumerChipsSlot,

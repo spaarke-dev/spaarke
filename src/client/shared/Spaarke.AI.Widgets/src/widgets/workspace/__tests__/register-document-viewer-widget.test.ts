@@ -66,11 +66,11 @@ describe('register-document-viewer-widget', () => {
     expect(contract!.interactionPattern).toBe('hybrid');
   });
 
-  it('Summarize lands in chat; Draft response lands on the composer; Draft memo lands on Compose', () => {
+  it('all three cards land in chat (task 026 finalization — no composer/Compose surface exists for documents; see register-document-viewer-widget.ts landing NOTE)', () => {
     const contract = getWorkspaceWidgetMetadata(DOCUMENT_VIEWER_WIDGET_TYPE)!.assistantContract!;
     const byLabel = new Map(contract.perItemCards.map(c => [c.label, c.landing]));
     expect(byLabel.get('Summarize')).toBe('chat');
-    expect(byLabel.get('Draft response')).toBe('composer');
-    expect(byLabel.get('Draft memo')).toBe('compose');
+    expect(byLabel.get('Draft response')).toBe('chat');
+    expect(byLabel.get('Draft memo')).toBe('chat');
   });
 });

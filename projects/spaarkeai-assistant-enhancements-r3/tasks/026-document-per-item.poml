@@ -4,7 +4,7 @@
     <title>Document per-item: generalize active-doc-follows-tab to document-viewer + per-item CARDS (Summarize · Draft response · Draft memo) backed by RAG (FR-11)</title>
     <phase>2 — Capability parity</phase>
     <gate>blocked (deps 022, 024)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>SpaarkeAi .tsx on the ConversationPane spine + WorkspacePane tab-focus effect; per-item card correctness + reactive-not-proactive boundary (NFR-07). Auto-FULL on .tsx.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -91,7 +91,13 @@
     <criterion testable="true">Negative: the card surface does NOT touch the ADR-047 spine (NFR-07 preserved).</criterion>
     <criterion testable="true">SpaarkeAi builds; unit/interaction tests pass.</criterion>
   </acceptance-criteria>
-  <notes>FR-11; document selection = tab-focus (resolved unresolved-question — no in-widget selection). Depends on 022 (context-type/contract + interaction pattern) and 024 (composer bodyOverride for the draft-response landing). ConversationPane + WorkspacePane are sequential spines — sequence with 025, commit between.</notes>
+  <notes>FR-11; document selection = tab-focus (resolved unresolved-question — no in-widget selection). Depends on 022 (context-type/contract + interaction pattern) and 024 (composer bodyOverride for the draft-response landing). ConversationPane + WorkspacePane are sequential spines — sequence with 025, commit between.
+
+COMPLETED 2026-08-11. Generalized `deriveActiveItemHandle` (WorkspacePane.tsx) with a `document-viewer` branch publishing `{id: documentId ?? tab.id, type: 'document', label: filename ?? tab.displayName}`; D-3 verified NOT to recur (documentId is set synchronously at widget_load dispatch, before the tab exists — no async backfill path). Added `DocumentPerItemCards.tsx` (mirrors task 025's `EmailPerItemCards.tsx`) rendering the task-022 `perItemCards` contract; each card arms a one-shot `pendingDocumentTurnRef` + the existing `pendingOutboundMessage` host-send seam (the SAME mechanism `LOCAL_CHIP.emailSummarize` uses), and `handleDecorateOutboundBodyWithRevise` stamps `body.documentId` for that ONE turn (ADR-015 on-demand) — reusing the EXISTING `ChatEndpoints.SendMessage` → `effectiveDocumentId` → `DocumentContextService`/RAG-lane-2 pipeline that already backs "summarize this document". No new BFF surface.
+
+DEVIATION (CLAUDE.md §6.5 Path A, documented — see defer-issues.md D-8): all three cards land `'chat'` (not `'composer'`/`'compose'` as task-022 originally placeheld) because documents have no composer-equivalent surface, and routing "Draft memo" through the existing R7-4 `compose-draft-document` keyword auto-router would silently drop the one-shot `documentId` grounding (that Binding-dispatch path doesn't forward it) — a worse, ungrounded outcome. `register-document-viewer-widget.ts` updated accordingly (landing values + its test); task 040 is the right place to build a properly-grounded Compose landing.
+
+Tests: `WorkspacePane.document-active-item.test.tsx` (7 tests, deriveActiveItemHandle document-viewer branch + D-3 verification + compose-branch regression) + `ConversationPane.document-per-item-cards.e2e.test.tsx` (9 tests, card render/suppress/click/decorate/one-shot-consumption/email-no-regression/dark-mode) + updated `register-document-viewer-widget.test.ts` landing assertions. Full conversation+workspace suite: 98 suites / 886 tests passing (regression-clean). `npm run build` (SpaarkeAi) and `npm run build` (Spaarke.AI.Widgets) both green.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

@@ -283,10 +283,12 @@ function composeTabInstanceKey(tab: { widgetData?: unknown }): string | undefine
 /**
  * Derive the widget-agnostic ACTIVE-ITEM handle for a workspace tab (spaarkeai-assistant-enhancements-r3
  * task 001). Returns `null` for a multi-item / dashboard / non-single-item tab (or no tab) so the conduit
- * is CLEARED for those — the single-active-item invariant. Only the `compose` single-item type is wired
- * now; other single-item types (email → task 012, document-viewer → task 026) plug in as additional
- * branches here. The handle is a THIN identity slice ONLY — id/type/label, NEVER document bytes/content
- * (ADR-015); the id prefers the Compose document session id and falls back to the tab id.
+ * is CLEARED for those — the single-active-item invariant. `compose` (task 001) and `document-viewer`
+ * (task 026, FR-11) are the two TAB-FOCUS single-item types wired here; email (task 012) instead uses
+ * the sibling IN-WIDGET-SELECTION feed (`deriveEmailActiveItemFromPatch` below), because choosing a
+ * different email inside the SAME open Email tab does not change `activeTabId`. The handle is a THIN
+ * identity slice ONLY — id/type/label, NEVER document bytes/content (ADR-015); each branch prefers its
+ * widget's own stable id and falls back to the tab id.
  */
 export function deriveActiveItemHandle(tab: WorkspaceTab | null): ActiveItemHandle | null {
   if (!tab) return null;
@@ -307,6 +309,26 @@ export function deriveActiveItemHandle(tab: WorkspaceTab | null): ActiveItemHand
     const label =
       compose?.fileName ?? compose?.upload?.fileName ?? compose?.draft?.fileName ?? tab.displayName;
     return { id, type: 'compose', label: label ?? tab.displayName };
+  }
+  if (tab.widgetType === 'document-viewer') {
+    // task 026 (FR-11) — the document-viewer's active item IS the focused tab's document
+    // (tab-focus pattern, FR-04b), generalizing this SAME effect condition from Compose-only.
+    // `documentId` rides on `DocumentViewerWidgetData` (`DocumentViewerWidget.tsx:99-112`) and, at
+    // every current dispatch site that populates it (`WorkspacePane`'s own read-only-preview
+    // fallback, `CreateAnalysisWizardWidget`'s created-file fallback), is set SYNCHRONOUSLY in the
+    // SAME `widget_load` payload that creates the tab — i.e. BEFORE the tab exists, unlike Compose's
+    // `composeSessionId` (which back-fills ASYNCHRONOUSLY after the editor mounts and registers,
+    // the D-3 defer-issue this task verified does NOT recur here: there is no `onDataChange` /
+    // `handleTabDataChange` write-back path for `documentId` on this widget, so the value present
+    // at tab-creation is final for the tab's lifetime — no need to re-run this effect on a
+    // widgetData mutation). A small minority of legacy dispatch sites (the upload wizard's
+    // `documentIds[]` plural payload, the file-preview "toggle workspace" `fileId` payload) never
+    // populate `documentId` at all; those fall back to the tab id, mirroring the Compose branch's
+    // own `?? tab.id` fallback — never a null/undefined active-item id.
+    const doc = (tab.widgetData as { documentId?: string; filename?: string } | null | undefined) ?? undefined;
+    const id = doc?.documentId ?? tab.id;
+    const label = doc?.filename ?? tab.displayName;
+    return { id, type: 'document', label: label ?? tab.displayName };
   }
   // Multi-item widgets (grids), dashboards, and every not-yet-wired single-item type → no single handle.
   return null;
@@ -2369,7 +2391,10 @@ export function WorkspacePane(): React.JSX.Element {
     // widget-agnostic handle (id/type/label; NEVER bytes — ADR-015). `deriveActiveItemHandle` returns
     // null for multi-item / dashboard / non-single-item tabs (and no tab), which CLEARS the conduit —
     // the single-active-item invariant + clear-on-tab-switch. Does NOT alter the composeVisibility
-    // bytes flow above (a different layer). Only 'compose' is wired now (email/doc-viewer land later).
+    // bytes flow above (a different layer). 'compose' (task 001) and 'document-viewer' (task 026,
+    // FR-11) are both TAB-FOCUS feeds handled here; 'email' (task 012) instead publishes from the
+    // IN-WIDGET-SELECTION feed in `handleTabDataChange` below (a same-tab selection change doesn't
+    // change `activeTabId`, so this effect alone would miss it).
     publishActiveItem(deriveActiveItemHandle(activeTab));
     // tabState.activeTabId drives every activation path (click, compose reuse,
     // close-restore, restore-from-persistence, auto-install); composeVisibility
