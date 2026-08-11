@@ -53,32 +53,27 @@ export function useWorkspaceTabs(initialTabs: WidgetTab[] = []): UseWorkspaceTab
     activeTabId: QUICK_START_TAB,
   });
 
-  const selectTab = React.useCallback(
-    (id: string) => setState((s) => ({ ...s, activeTabId: id })),
-    [],
-  );
+  const selectTab = React.useCallback((id: string) => setState(s => ({ ...s, activeTabId: id })), []);
 
   const openTab = React.useCallback(
     (tab: WidgetTab) =>
-      setState((s) =>
-        s.widgetTabs.some((t) => t.id === tab.id)
+      setState(s =>
+        s.widgetTabs.some(t => t.id === tab.id)
           ? { ...s, activeTabId: tab.id }
-          : { widgetTabs: [...s.widgetTabs, tab], activeTabId: tab.id },
+          : { widgetTabs: [...s.widgetTabs, tab], activeTabId: tab.id }
       ),
-    [],
+    []
   );
 
   const closeTab = React.useCallback(
     (id: string) =>
-      setState((s) => {
-        const widgetTabs = s.widgetTabs.filter((t) => t.id !== id);
+      setState(s => {
+        const widgetTabs = s.widgetTabs.filter(t => t.id !== id);
         const activeTabId =
-          s.activeTabId === id
-            ? widgetTabs[widgetTabs.length - 1]?.id ?? QUICK_START_TAB
-            : s.activeTabId;
+          s.activeTabId === id ? (widgetTabs[widgetTabs.length - 1]?.id ?? QUICK_START_TAB) : s.activeTabId;
         return { widgetTabs, activeTabId };
       }),
-    [],
+    []
   );
 
   return {

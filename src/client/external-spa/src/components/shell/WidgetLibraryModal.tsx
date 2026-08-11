@@ -45,10 +45,17 @@ export const WidgetLibraryModal: React.FC<WidgetLibraryModalProps> = ({ open, on
   const openSet = React.useMemo(() => new Set(openWidgetIds), [openWidgetIds]);
 
   return (
-    <FormModal open={open} onClose={onClose} onSubmit={onClose} title="Add a widget" submitLabel="Done" cancelLabel="Close">
+    <FormModal
+      open={open}
+      onClose={onClose}
+      onSubmit={onClose}
+      title="Add a widget"
+      submitLabel="Done"
+      cancelLabel="Close"
+    >
       <Text className={s.intro}>You only see widgets you&apos;re entitled to. Pick one to add it as a tab.</Text>
       <div className={s.grid}>
-        {items.map((w) => {
+        {items.map(w => {
           const added = openSet.has(w.id);
           return (
             <div key={w.id} className={s.cell}>
@@ -73,9 +80,7 @@ export const WidgetLibraryModal: React.FC<WidgetLibraryModalProps> = ({ open, on
             </div>
           );
         })}
-        {items.length === 0 && (
-          <Text className={s.caption}>No widgets are available for your account yet.</Text>
-        )}
+        {items.length === 0 && <Text className={s.caption}>No widgets are available for your account yet.</Text>}
       </div>
     </FormModal>
   );

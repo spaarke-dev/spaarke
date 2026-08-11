@@ -1,7 +1,8 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-07 (parallel wave 013 + 040 landed; master merged in via Full Sync; full BFF unit suite 10170/0 green)
+> **Last Updated**: 2026-08-10 (Pillar E **PR #751 MERGED to master** — tasks 050–058 now in `origin/master` @ `1c37781f4`; worktree fully synced 0/0/0/0; main repo master synced. Only GATED deploys (017/026/035/044/045/059) remain.)
+> **Recovery**: Read "Quick Recovery" first. **All Pillar A–E code + R-1/R-2/R-3 remediation is MERGED to master.** Worktree = master (0 ahead/behind before this doc commit); nothing in-flight; only operator-gated deploys left.
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,11 +11,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **CLEAN BREAK POINT (2026-08-07). No task in progress. All autonomous non-gated tasks are DONE.** Everything committed+pushed; full BFF unit suite **10170 passed / 0 failed / 101 skip**; tree clean. |
-| **This session (all committed+pushed)** | **Full Sync** — merged `origin/master` into branch (0 conflicts) + fast-forwarded master to `8df339b7a` (39 project commits → master, 97 master commits → branch). **013 ✅** (`TrackingTokenRung` — reads+HMAC-verifies footer token incl. quoted history, reuses `RungKind.ExplicitReference` zero mapper change, signed→1.0/bare→0.65/forged→ignored/absent→empty; 10 tests; commit `fb47b5305`; note `013-tracking-token-rung-complete.md`). **Merge-fix ✅** — added `CanonicalHash → sprk_canonicalhash` to `DataverseEntitySchemaTests` (merge collision: task-024 field vs master's reshaped guard test; 44/44; commit `eb8945361`). **040 ✅-code** (add-in realignment code half — routed 2 mislabeled JSON sites through new `authenticatedJsonFetch` §11-justified, Word-manifest parity, cleanup; build green, jest 0 new failures; commit `feba2751e`; note `040-addin-realignment-complete.md`). |
-| **Next task** | **NONE autonomous.** All remaining 🔲 are gated: deploys (017/026/035/044/045/059 — PAUSED), 033 Dataverse seed (operator), Pillar E 050–057 (contended shared-lib, `parallel-safe:false`, sequential main-session, operator-gated), 090 wrap-up (deps all). **Pillar A code is COMPLETE** (010–016 all ✅). Next work needs operator go-ahead. |
-| **Status** | Pillar A: 010–016 ✅ (code complete) · 017 deploy (paused). Pillar C: 020–025 ✅ + 027/028/029 ✅ · 026 deploy (gated). Pillar D: 030–032 ✅ 034 ✅ · 033🔲(seed, gated) · 035 deploy. Pillar B: 041/042/043 ✅ · **040 ✅-code** (runtime NAA sign-in + dark-mode live-render operator-gated) · 044/045 deploy. Pillar E: 050–057🔲 (contended shared-lib, operator-gated). |
-| **Next Action** | Await operator decision. Options: (a) **Pillar E** (050 first, then fan-out — sequential main-session, `/conflict-check` before each shared PR vs email-communication-solution-r5 + dataset-grid-r2); (b) **unpause deploys** (017 Pillar A / 026 Pillar C / 035 Pillar D / 045 Pillar B BFF — each reports publish-size ≤60 MB); (c) **033 seed** + **live add-in verify** (040 runtime: sideload Outlook/Word vs dev tenant w/ 004 NAA reg). **KV tracking-footer is ACTIVE in dev** (secret `communication-trackingfooter-signingkey` in KV `spaarke-spekvcert`; `Enabled=true`); 013 now reads it on reply. Off-switch: `az webapp config appsettings set -n spaarke-bff-dev -g rg-spaarke-dev --settings "Communication__TrackingFooter__Enabled=false"`. **Note:** this worktree needed a root `npm install` (109 pkgs) for the prettier/lint-staged pre-commit hook — done this session. |
+| **Task** | **Pillar E COMPLETE (code + docs).** ✅: **050·051·052·053·054·055a·055b·055·056b·056·057·058**. Tree clean; worktree current with master. **The ONLY remaining item is 059** (Pillar E deploy — GATED/paused, NOT autonomous): seeds the needs-review + per-team `sprk_gridconfiguration` records, sets the `Communication:CategoryRouting` app setting, updates `NEEDS_REVIEW_CONFIG_ID` to the seeded record id. **All autonomous Pillar E work is done.** |
+| **Pillar E chain (next work — all `parallel-safe:false`, sequential main-session, /conflict-check before each shared PR)** | **050 · 051 · 052 · 053 · 054 · 055a · 055b · 055 ✅.** Remaining: **056**←034✅/052✅/053✅ (Tasks reconcile tab — Job C create-task, FR-E5; sibling of 055, consumes `queue-feed` kind=`create-task` + `POST …/proposals/{reviewLogId}/create-task/apply`), **057** (routing category→team; dep 050), **058** (r5 coordination contract — see COORD-058-01), **059** (deploy — update `NEEDS_REVIEW_CONFIG_ID`). Contended: `Spaarke.Communication.Components` (r5 — clean, no overlap). |
+| **This session (2026-08-07 — all committed+pushed; HEAD=`eeeef5ff4`)** | Worktree-sync (0 behind master, merge `87af271d7`) + /conflict-check clean + post-merge verify (BFF 0-err, Communication 13/13 apply/dismiss, package 206/206). **055a ✅** apply-OVERRIDE endpoint (`3aba6d9ca`, pre-merge). **055b ✅** Job B DISMISS endpoint (`c03a264fb`) — `POST …/proposals/{reviewLogId}/dismiss` + `DismissAsync`; caller-403 + open-pending-409 + ONE `Dismissed` (100000004) audit row, NO record write, NO allow-list/citation re-gate; 4 seam tests; §10 47.06 MB/no CVE/no ArchTest delta (verified pre-existing by stash-rerun). **055 ✅** Fields reconcile tab (`eeeef5ff4`) — `ReconcileTabs/FieldUpdateReconcileTab` (inline editable cards, browse-pane) + `FieldUpdateReconcileModal` (FormModal, form mount); NFR-10 gate+re-scope; Accept→apply{overrideValue} / Reject→dismiss / Hold→no-write; citation→054; 11 UI tests incl. 053+054+055 browse-mount seam; shared-lib build green. All Step 9.5 + conflict-check clean. |
+| **Next task** | **058 — r5 coordination contract** (`tasks/058-r5-coordination-contract.poml`). A DOCUMENTATION task: formalize the r5 BINDING coordination contract (FR-E6). All content is staged in **COORD-058-01** (`notes/defer-issues.md`): 052 `onCreateNewRecord` tile; 055a/055b/056b endpoints; 055/056 `ReconcileTabs` exports + the 056 edited-proposal→ad-hoc+dismiss Accept-routing r5 must not re-implement. Read the POML for the exact deliverable shape (likely a doc/section r5 consumes). |
+| **Status** | Pillar A: 010–016 ✅ (code) · 017 deploy (paused). Pillar C: 020–025 ✅ + 027/028/029 ✅ · 026 deploy (gated). Pillar D: 030–032 ✅ 034 ✅ · 033🔲(seed, gated) · 035 deploy. Pillar B: 041/042/043 ✅ · **040 ✅-code** · 044/045 deploy. Pillar E: **050/051/052/053/054/055a/055b/055/056b/056/057 ✅** · 058🔲 (r5 coord — DOC) · 059🔲 (deploy — GATED). |
+| **Next Action** | **Nothing in-flight — pick one:** (1) **Open the Pillar E PR** — first run `/worktree-sync` (Full Sync; branch is 17 behind master, 0 file-overlap per conflict-check 2026-08-10) then `push-to-github`. Cite the §10 as-built coordination contract; re-run `/conflict-check` at PR time. (2) **Run 059 (GATED deploy)** only on explicit operator go-ahead — deploys are PAUSED per standing note. (3) New work item. |
+| **Conflict-check (2026-08-10)** | ✅ CLEAN. 50 changed files (Communication.Components/** + BFF Communication/config/DI + Communication tests) vs all open PRs → **0 overlap**; master advanced 17 commits since sync but **0 touch my files**. Branch 18 ahead / 17 behind. Advisory: `/worktree-sync` before the PR (no conflict, just currency). |
+| **057 (this turn)** | Reconciliation routing (FR-E7). Backend: `CategoryRoutingOptions` (ADR-018) + `CategoryRoutingGate` + triage-time `ownerid`→team on the additive triage `UpdateAsync` (ADR-024/NFR-04). Frontend: `per-team.gridconfiguration.json` (`behavior.membershipFilter` owner/team; grid already forwards `membershipResolver`). No new entity (ADR-045). Tests: 2 triage seam + 6 gate unit + 3 frontend; §10 47.07 MB/no CVE/no ArchTest delta. Communication seam 150/150; package 222/222. `c2970202b`. |
+| **Backend endpoints added this session (r5 consumes; all conflict-check-clean)** | **055a** `POST …/proposals/{reviewLogId}/apply` +optional `{overrideValue}` · **055b** `POST …/proposals/{reviewLogId}/dismiss` · **056b** `POST …/{communicationId}/create-task` (ad-hoc). All extend existing Communication services (no new service/DI/package); §10 47.06 MB no-delta / no CVE / no ArchTest-delta; seam tests 13 (055a/b) + 15 (056b/034). |
+| **Frontend tabs added this session (`ReconcileTabs/`)** | **055** `FieldUpdateReconcileTab` + `FieldUpdateReconcileModal` (Fields) · **056** `TaskReconcileTab` + `TaskReconcileModal` (Tasks). Both: inline cards (browse-pane) + FormModal (email-form), NFR-10 gate+re-scope, citation→054, injected `authenticatedFetch`. 056 Accept-routing: unchanged proposal→034 apply, edited-identity→056b ad-hoc+055b dismiss, +New task→056b. Package jest 30 suites / 219 tests green. |
+| **⚠️ Before the eventual PR** | Worktree **current with master**. Re-run **`/conflict-check`** before the PR (contended `Spaarke.Communication.Components` r5 surface). Root `npm install` for the prettier/lint-staged pre-commit hook is active. |
+| **Owed coordination (task 058)** | **COORD-058-01 filed + updated** (`notes/defer-issues.md`). 058 MUST record: (a) 052 additive `onCreateNewRecord` tile; (b) **055a/055b/056b** endpoints; (c) **055 + 056** tab exports r5 mounts (browse `renderTabs` slots + email form; host supplies `regarding` from 052 `onConfirmed`, re-supplies on override) — incl. the 056 Accept-routing contract (edited-proposal→ad-hoc+dismiss) r5 must NOT re-implement. All conflict-check-clean vs r5 now. |
+| **Placeholder still open** | `NEEDS_REVIEW_CONFIG_ID` in `ReconciliationGrid.tsx` is a placeholder GUID — **task 059** must point it at the seeded `sprk_gridconfiguration` record id. |
 
 ### Completed this session (all committed)
 - **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
@@ -48,12 +57,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Task ID** | none |
-| **Task File** | — |
-| **Title** | — |
-| **Phase** | — |
-| **Status** | none |
-| **Started** | — |
+| **Task ID** | 050 ✅ COMPLETE (2026-08-07) |
+| **Task File** | tasks/050-reconciliation-grid.poml |
+| **Title** | Reconciliation grid — enhance DataGrid + "Needs review" sprk_gridconfiguration over sprk_communication (Email) |
+| **Phase** | 5 Pillar E — Reconciliation UI |
+| **Status** | completed — `ReconciliationGrid.tsx` + `needs-review.gridconfiguration.json` + 4 RTL tests in `@spaarke/communication-components`; build green, jest 162/162; Step 9.5 code-review ACCEPT + adr-check 0. **NO DataGrid-framework edit** (seams pre-shipped). Option-set values verified vs `AssociationStatusCodes.cs`/`CommunicationType` (Email=100000000). Operator-gated: live dual-mount (code-page + SpaarkeAi widget) + visual dark-mode contrast (jsdom-verified only). Deviation: subject is the DataGrid primary/clickable column (framework bypasses columnRenderers for isPrimaryName), body-preview is an adjacent custom column. **`NEEDS_REVIEW_CONFIG_ID` is a placeholder GUID — task 059 must update it to the seeded record id.** |
+| **Started** | 2026-08-07 |
+| **Rigor** | FULL · sonnet·high · directional |
+| **Pillar E next** | 051/052/057 dep 050 (now ✅); 053 startable; 054←053; 055←052,053; 056←034✅,052,053. All `parallel-safe:false` (sequential main-session, /conflict-check before each shared PR). |
+
+### KEY FINDING (de-risking — escalation trigger did NOT fire)
+The shipped `@spaarke/ui-components` DataGrid framework **already exposes every seam 050 needs** — NO framework edit required (zero `dataset-grid-framework-r2` contention):
+- `DataGridProps.onRecordOpen?` (DataGrid.tsx:170) — supplied handler fully replaces `defaultRecordOpen` (`effectiveRecordOpen = onRecordOpen ?? defaultRecordOpen`, L1140; default = `Xrm.Navigation.navigateTo`).
+- `DataGridProps.onRecordAction?` (L173) — per-row action seam.
+- `DataGridOverrides.columnRenderers?` (configResolution.ts:42) — per-field custom cells.
+- `DataGridProps.dataverseClient?` (L117, injectable → ADR-012 context-agnostic dual-mount), `hostFilters?` (L135), `membershipResolver?` (L154, FR-E7/057).
+**Deviation from POML step 2** (which said "add the seams to configResolution.ts/DataGrid.tsx"): seams already exist → do NOT touch the shared framework. 050 = author `ReconciliationGrid.tsx` + `needs-review.gridconfiguration.json` + tests in `@spaarke/communication-components` (NEW files, additive). §11 reuse-first win.
 
 ---
 

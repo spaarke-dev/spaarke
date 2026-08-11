@@ -133,7 +133,7 @@ export const TabStrip: React.FC<TabStripProps> = ({ tabs, activeId, onSelect, on
             tabIndex={isActive ? 0 : -1}
             className={mergeClasses(s.tab, isActive && s.tabActive)}
             onClick={() => onSelect(id)}
-            onKeyDown={(e) => {
+            onKeyDown={e => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 onSelect(id);
@@ -150,11 +150,11 @@ export const TabStrip: React.FC<TabStripProps> = ({ tabs, activeId, onSelect, on
                 tabIndex={0}
                 aria-label={`Close ${title} tab`}
                 className={s.closeCircle}
-                onClick={(e) => {
+                onClick={e => {
                   e.stopPropagation();
                   onClose(id);
                 }}
-                onKeyDown={(e) => {
+                onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
                     e.preventDefault();
                     e.stopPropagation();

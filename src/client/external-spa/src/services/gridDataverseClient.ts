@@ -31,10 +31,7 @@
 
 import { BFF_API_URL } from '../config';
 import { acquireActiveBffToken } from '../auth/msal-auth';
-import {
-  BffDataverseClient,
-  type AuthenticatedFetchFn,
-} from '@spaarke/ui-components/services/BffDataverseClient';
+import { BffDataverseClient, type AuthenticatedFetchFn } from '@spaarke/ui-components/services/BffDataverseClient';
 
 /**
  * `authenticatedFetch`-shaped adapter over this SPA's own MSAL token acquisition. Mirrors

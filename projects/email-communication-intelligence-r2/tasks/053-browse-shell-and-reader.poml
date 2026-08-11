@@ -4,7 +4,7 @@
     <title>Browse shell + one normalized reader — N-of-M step-through wrapping EmailReadingPaneShell(hideList) + attachment-text folding</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
     <gate>deps 050 complete (onRecordOpen override seam)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Net-new glue composing a browse shell + a normalized reader over body + attachment contents; correctness-critical substrate for NFR-11 citation anchoring (054); .tsx net-new surface; §8 FULL.</rigor-reason>
     <model-tier>opus</model-tier>
