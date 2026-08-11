@@ -147,6 +147,10 @@ public sealed class PreferenceNotPermissionInvariantTests
             // Added by task 044 (FR-H1): a STRUCTURAL host-record fact (ChatHostContext.IsValid()), not a
             // profile/learned signal — grounding stays preference-independent.
             "Boolean HasAttachedRecord",
+            // Added by task 030 (FR-12 tool economy): a STRUCTURAL open-tab fact — the context-types of the
+            // workspace tabs currently open (mapped from live session.Tabs), NOT a profile/learned signal.
+            // A tab's context-type scopes WHICH parity tools mount (economy), never a user preference.
+            "IReadOnlyCollection`1 OpenTabContextTypes",
         }, "these structural session facts are the ONLY inputs the grounding pre-filter ever sees — " +
            "there is no parameter, profile or otherwise, through which a stated or learned user signal " +
            "could reach AgentToolProjection.PreFilter");

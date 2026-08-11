@@ -60,6 +60,7 @@ jest.mock('../../../providers/useAiSession', () => ({
 import { EmailWorkspaceWidget } from '../EmailWorkspaceWidget';
 
 const SAMPLE: EmailWorkspaceVisibleState = {
+  communicationId: 'comm-1',
   emlDocumentId: 'eml-doc-1',
   subject: 'Quarterly filing update',
   from: 'jane.doe@example.com',
@@ -86,14 +87,46 @@ describe('EmailWorkspaceWidget — persisted Email carrier producer (FR-C1)', ()
     expect(persisted.subject).toBe('Quarterly filing update');
     expect(persisted.from).toBe('jane.doe@example.com');
     expect(persisted.date).toBe('2026-08-02T10:30:00Z');
-    expect(persisted.snippet).toBe('Please review the attached filing before Friday.');
     // emlDocumentId persisted as an on-demand eml-render fetch handle (FR-C4).
     expect(persisted.emlDocumentId).toBe('eml-doc-1');
     // threadId absent on the source shape → not added.
     expect(persisted.threadId).toBeUndefined();
   });
 
-  it('does NOT clobber the carrier when the surfaced state is null (nothing selected / loading)', async () => {
+  // spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — R2 FR-C1 walk-back: `snippet`
+  // (the sole content-bearing field) is no longer forwarded into the Assistant-visible
+  // persisted carrier, even though the source `EmailWorkspaceVisibleState` still carries one.
+  it('OMITS snippet (content) from the persisted patch — ADR-015 id/label-only walk-back', async () => {
+    nextVisibleState = SAMPLE;
+    const onDataChange = jest.fn();
+
+    await act(async () => {
+      render(<EmailWorkspaceWidget data={null} widgetType="email" tabId="wstab-1-email" onDataChange={onDataChange} />);
+    });
+
+    const persisted = onDataChange.mock.calls[0][0] as Record<string, unknown>;
+    expect(persisted.snippet).toBeUndefined();
+    expect('snippet' in persisted).toBe(false);
+  });
+
+  // task 012 (FR-05) — the transient bridge field the SpaarkeAi host reads to publish the
+  // active-item conduit id handle. Not part of EmailTabWidgetData; the host strips it.
+  it('includes a transient communicationId field on the patch for the SpaarkeAi active-item bridge', async () => {
+    nextVisibleState = SAMPLE;
+    const onDataChange = jest.fn();
+
+    await act(async () => {
+      render(<EmailWorkspaceWidget data={null} widgetType="email" tabId="wstab-1-email" onDataChange={onDataChange} />);
+    });
+
+    const persisted = onDataChange.mock.calls[0][0] as Record<string, unknown>;
+    expect(persisted.communicationId).toBe('comm-1');
+  });
+
+  // task 012 (FR-05) — deselect now signals a clear-only patch (`{ communicationId: null }`) so
+  // the SpaarkeAi bridge can clear the active-item conduit, WITHOUT clobbering the persisted
+  // Email carrier (no `kind`/subject/etc. on this patch — same "leave it intact" contract).
+  it('signals a clear-only patch ({ communicationId: null }) when the surfaced state is null (nothing selected / loading)', async () => {
     nextVisibleState = null;
     const onDataChange = jest.fn();
 
@@ -101,7 +134,8 @@ describe('EmailWorkspaceWidget — persisted Email carrier producer (FR-C1)', ()
       render(<EmailWorkspaceWidget data={null} widgetType="email" tabId="wstab-1-email" onDataChange={onDataChange} />);
     });
 
-    expect(onDataChange).not.toHaveBeenCalled();
+    expect(onDataChange).toHaveBeenCalledTimes(1);
+    expect(onDataChange).toHaveBeenCalledWith({ communicationId: null });
   });
 
   it('is a no-op when NOT mounted as a tab (no tabId) even with a valid shape', async () => {

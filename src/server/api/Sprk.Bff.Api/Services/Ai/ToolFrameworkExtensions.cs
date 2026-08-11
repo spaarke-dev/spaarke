@@ -1,4 +1,5 @@
 using System.Reflection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 
@@ -42,6 +43,14 @@ public static class ToolFrameworkExtensions
         // spec MUST rule audited by task 012.
         services.AddHttpClient<Handlers.Dataverse.IDataverseUserClient, Handlers.Dataverse.DataverseUserClient>();
 
+        // spaarkeai-assistant-enhancements-r3 task 020 (FR-06) — GridOverviewHandler injects
+        // TimeProvider to compute `today` deterministically server-side. Registered HERE (idempotent
+        // TryAddSingleton, matching WorkspaceModule/MembershipModule/CommunicationModule) so the
+        // handler resolves even when AddToolFramework is used in isolation — avoids the
+        // asymmetric-registration anti-pattern (CLAUDE.md §10 F.1) if the tool framework is added
+        // without a feature module that also registers TimeProvider.
+        services.TryAddSingleton(TimeProvider.System);
+
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
@@ -73,6 +82,14 @@ public static class ToolFrameworkExtensions
         // Task 008 (FR-P0-07) — same registration as the primary overload so both entry points
         // produce a resolvable handler graph (Dataverse* handlers ctor-require this client).
         services.AddHttpClient<Handlers.Dataverse.IDataverseUserClient, Handlers.Dataverse.DataverseUserClient>();
+
+        // spaarkeai-assistant-enhancements-r3 task 020 (FR-06) — GridOverviewHandler injects
+        // TimeProvider to compute `today` deterministically server-side. Registered HERE (idempotent
+        // TryAddSingleton, matching WorkspaceModule/MembershipModule/CommunicationModule) so the
+        // handler resolves even when AddToolFramework is used in isolation — avoids the
+        // asymmetric-registration anti-pattern (CLAUDE.md §10 F.1) if the tool framework is added
+        // without a feature module that also registers TimeProvider.
+        services.TryAddSingleton(TimeProvider.System);
 
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Make the Assistant-contract fields REQUIRED registration metadata + enforce presence across all four registration sites (FR-15)</title>
+    <phase>Cross-cutting — Registration contract</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the registration-contract type shape + adds structural enforcement across every registration site; a widget missing fields must FAIL — high blast radius on the registration spine</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Enforcement design is judgment-sensitive: must make the contract fields structurally required (compile-time type error and/or a registry runtime guard) at every site without breaking existing valid registrations — spans four+ sites and the shared type</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Changes the registration-contract shape (same spine as 040/041) — must land after 022 (fields defined) and 040 (interaction-pattern field); sequential registration-shape spine.</parallel-reason>
+    <deps>022,040</deps>
+    <tags>spaarkeai, frontend, react</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Make the Assistant-contract fields — context-type · overview tool(s) · per-item cards + landing target · interaction pattern — REQUIRED registration metadata, and enforce their presence structurally across ALL FOUR shared-lib registration sites plus registerComposeWidget. A widget registered without the fields MUST FAIL — a compile-time TypeScript type error and/or a registry runtime guard. Adding a new widget without a contract cannot ship.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript expertise on the SpaarkeAi widget registry; comfortable making metadata structurally required (required type members + a runtime registration guard) across multiple registration sites.</role>
+  <goal>A widget registered without the contract fields fails (compile-time type error or a registry runtime guard) at every registration site; a test proves a deliberately-incomplete registration fails at each site.</goal>
+  <context>
+    <background>FR-15 — required Assistant-contract metadata. Task 022 defines the widget-type ↔ context-type + Assistant-contract field shape; task 040 adds the interaction-pattern field. This task makes those fields REQUIRED (not optional) on the registration-contract type and enforces presence structurally at every registration site: the four shared-lib sites — register-workspace-widgets.ts, register-document-viewer-widget.ts, register-search-criteria-result-widget.ts, register-structured-output-stream-widget.ts — plus registerComposeWidget.ts in SpaarkeAi. Enforcement is structural (NFR-09) — compile-time type error and/or a registry runtime guard — NOT convention/prose. The Assistant-contract fields are: context-type, overview tool(s), per-item cards + landing target, interaction pattern.</background>
+    <relevant-files>
+      <file>the shared registration-contract metadata type (make the Assistant-contract fields required; task 022 defined the shape, task 040 added interactionPattern)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-document-viewer-widget.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-search-criteria-result-widget.ts</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-structured-output-stream-widget.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/workspace/registerComposeWidget.ts</file>
+      <file>the widget registry (runtime guard entry point, if a compile-time type error alone cannot cover a dynamically-shaped registration)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="enforcement mechanism">Enforce structurally (NFR-09) — required type members and/or a registry runtime guard. MUST NOT rely on convention, prose, or a lint comment.</constraint>
+    <constraint source="project" scope="all sites">Enforce at ALL FOUR shared-lib registration sites plus registerComposeWidget — a widget missing fields fails at EACH site.</constraint>
+    <constraint source="ADR-012" scope="shared widgets">Shared-lib widgets stay host-agnostic; contract fields are declared at registration, not host-injected.</constraint>
+    <constraint source="project" scope="existing registrations">Do NOT break existing valid registrations — supply the contract fields for all in-scope widgets so the tightened type compiles.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Tighten the registration-contract type so the Assistant-contract fields (context-type, overview tool(s), per-item cards + landing target, interaction pattern) are required members.</step>
+    <step order="2">Add a registry runtime guard for any dynamically-shaped registration path a compile-time type cannot cover (throw/fail on missing fields).</step>
+    <step order="3">Supply the required fields for every in-scope widget at all four shared-lib sites + registerComposeWidget so the tightened type compiles.</step>
+    <step order="4">Add a test that a deliberately-incomplete registration FAILS at each site (compile-error fixture and/or guard-throws test).</step>
+    <step order="5">Build the shared/SpaarkeAi packages; confirm no valid registration regressed.</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If a compile-time type error cannot cover a registration site (dynamic shape) AND a runtime guard cannot fail it before ship, STOP and escalate (NFR-09 structural-enforcement bound) rather than downgrading to a convention/prose check.</trigger>
+  </escalation>
+  <justification>
+    <existing>The registration-contract fields (task 022 + 040) exist but are OPTIONAL; nothing structurally prevents a widget shipping without them across the four sites + registerComposeWidget.</existing>
+    <extension>Yes — tighten the existing registration type to required members + add one registry guard; no new registration mechanism or store.</extension>
+    <cost-of-doing-nothing>A new widget ships without an Assistant contract; overview/per-item parity silently regresses (the §3 gap this project closes) and no build/guard catches it.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">the tightened registration-contract type (required Assistant-contract fields)</output>
+    <output type="code">the registry runtime guard + the five registration sites supplying required fields</output>
+    <output type="test">a test proving a deliberately-incomplete registration fails at each site</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A widget registered without the contract fields fails (compile-time type error or registry runtime guard) at every registration site.</criterion>
+    <criterion testable="true">A deliberately-incomplete registration fails at each of the four shared-lib sites plus registerComposeWidget (a test proves it).</criterion>
+    <criterion testable="true">Enforcement is structural (required type members and/or a runtime guard), not convention/prose (negative case).</criterion>
+    <criterion testable="true">All existing valid registrations still compile and register (no regression).</criterion>
+    <criterion testable="true">Shared/SpaarkeAi packages build.</criterion>
+  </acceptance-criteria>
+  <notes>Lands after task 022 (fields defined) + task 040 (interaction-pattern field). Spec FR-15 says "all four" registration sites; the affected-areas list enumerates the four shared-lib sites plus registerComposeWidget — enforce at all of them. Sequential registration-shape spine (coordinate with 040/041).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

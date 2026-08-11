@@ -1,0 +1,53 @@
+{
+  "_comment_top": "spaarkeai-assistant-enhancements-r3 task 023 (FR-09 — per-item Email parity) — seed row for the email.summarize_thread tool. EXTENDS EmailDraftToolHandler (§11 reuse-first / NFR-06 — NOT a new handler family) via the sprk_configuration 'method' discriminator (method = 'summarize_thread'); the TextRefinementHandler multi-row precedent.",
+  "_comment_routing": "Runtime invocation routes to EmailDraftToolHandler via sprk_handlerclass; the handler dispatches on sprk_configuration.method = 'summarize_thread'. Auto-discovered (ADR-010). The deterministic ADR-039 PreFilter/catalog projects the LLM-facing function name from sprk_name — NO classifier.",
+  "_comment_output_shape": "FR-09 RESOLVED: the output is a PLAIN NARRATIVE summary IDENTICAL in shape to the file/document-summarize path — NOT a bespoke structured/JSON thread format. The narrative is produced through the IEmailDraftAi facade's 'summarize' preset (plain text, IsHtml=false) — the same single-shot summarise prompt/response path the compose sparkle summarise uses. The answer flows in CHAT (data.text); NO composer is opened.",
+  "_comment_obo": "ADR-028 / ADR-015 MUST rule: the email subject/body is READ over the caller's OBO token via IDataverseUserClient (sprk_communication) — no app-only path. Content is tool-fetched BY communicationId; no email content enters the arguments/prompt.",
+  "_comment_eml_grounding": "The tool also resolves the archived .eml document id (sprk_document flagged sprk_isemailarchive = true) over OBO and echoes it for grounding. NOTE (task-023 deviation, ADR-028): the .eml BINARY is SPE-resident and MI-written (SPE writer-identity rule); a chat-tool handler has no request HttpContext / endpoint-filter OBO gate like the eml-render endpoint, so an OBO user SPE download would 403 and an app-only download would violate the binding 'not app-only' constraint. The OBO-safe thread content is therefore the sprk_communication record body. Full-.eml-text enrichment is deferred to a future OBO-safe eml-text path.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read). Reads the email over OBO and produces a narrative; creates no record, opens no composer — no confirmation gate.",
+  "_comment_description_parity": "Multi-row handler — sprk_description authored HERE (exempt from single-row CatalogToolDescriptionParityContractTests, matching TextRefinementHandler). Runtime parity via seed script + RoutingConsumerTypeHealthCheck.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Email Thread Summary",
+  "sprk_toolcode": "EMAIL-SUMMARIZE-THREAD",
+  "sprk_toolid": "email.summarize_thread",
+  "sprk_namespace": "email",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "sprk_description": "Summarizes the selected email thread, addressed by communicationId, and answers IN CHAT with a plain-language narrative summary (a few clear, factual sentences) — the same shape as a file summary, NOT a structured object. Reads the email under the calling user's permissions. Use this when the user asks to summarize the email that is currently open/selected ('summarize the thread', 'what's this email about'). Opens no composer. Returns { tool, communicationId, text } — relay the narrative text to the user.",
+  "sprk_handlerclass": "EmailDraftToolHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — this tool exists for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "email.summarize_thread Request",
+    "description": "Summarizes the selected email thread in chat. Content is fetched by communicationId over OBO; NO email content is passed as an argument (ADR-015).",
+    "type": "object",
+    "required": ["communicationId"],
+    "properties": {
+      "communicationId": {
+        "type": "string",
+        "format": "uuid",
+        "minLength": 1,
+        "description": "The sprk_communication record id (GUID) of the email thread to summarize (the currently selected/open email)."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "email.summarize_thread Result",
+    "type": "object",
+    "required": ["tool", "communicationId", "text"],
+    "properties": {
+      "tool": { "const": "email.summarize_thread" },
+      "communicationId": { "type": "string", "description": "The email thread that was summarized." },
+      "text": { "type": "string", "description": "The plain-narrative summary (file-summarize shape) to relay in chat — NOT a structured sections object." },
+      "emlDocumentId": { "type": ["string", "null"], "description": "The archived .eml document id, when one exists (grounding)." }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "method discriminator — read by EmailDraftToolHandler.ResolveMethod at execution time to route to the summarize_thread path.",
+    "method": "summarize_thread"
+  }
+}

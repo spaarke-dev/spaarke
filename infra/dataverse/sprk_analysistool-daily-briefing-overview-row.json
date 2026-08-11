@@ -1,0 +1,57 @@
+{
+  "_comment_top": "spaarkeai-assistant-enhancements-r3 task 021 (FR-07 — overview parity across ALL grids + Briefing + Calendar). Seed row for the spaarke.daily_briefing_overview tool — the Lane-3 (composed-service) parity-tool backing for the Daily Briefing layout tab. Grids + Calendar reuse spaarke.grid_overview (task 020) via configId (see sprk_analysistool-grid-overview-row.json); Daily Briefing's counts are NOT a single FetchXML saved query (BriefingService aggregates PortfolioService data + a membership-resolved top-priority-matter heuristic + an optional AI narrative), so it gets its OWN thin wrapper tool per the design.md §5 Lane 3 guidance ('a parity tool wraps the service directly — no reinvention'). This is NOT a new aggregate endpoint and NOT a per-grid handler — it wraps the EXISTING BriefingService.GetBriefingAsync used by the Quick Summary card / briefing dialog (GET /api/workspace/briefing).",
+  "_comment_routing": "Runtime invocation routes to DailyBriefingOverviewHandler via sprk_handlerclass. Auto-discovered (ADR-010). The deterministic ADR-039 PreFilter/catalog projects the LLM-facing function name from sprk_toolid — NO classifier, NO second dispatch surface.",
+  "_comment_obo": "project MUST rule: BriefingService resolves the caller's own briefing from the chat principal's AAD oid (ChatInvocationContext.UserId) — the SAME per-user identity the Quick Summary card / briefing dialog already use (ADR-028). No app-only fallback; a missing user id fails closed.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read). The tool only reads the caller's existing briefing; it performs no writes.",
+  "_comment_grounding": "ADR-039/ADR-015 grounding: when a top-priority matter is present its Dataverse record id is echoed as a citation (tables/sprk_matter/records/{id}). Telemetry logs the user id + counts + duration ONLY — never the narrative text (may be AI-generated free text) and never matter names.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Daily Briefing Overview",
+  "sprk_toolcode": "SPAARKE-DAILY-BRIEFING-OVERVIEW",
+  "sprk_toolid": "spaarke.daily_briefing_overview",
+  "sprk_namespace": "spaarke",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "standard",
+  "sprk_description": "Answers Daily Briefing overview questions (active matter count, matters at risk, overdue events, portfolio spend/budget utilization, and the current narrative) for the calling user, sourced from the SAME BriefingService the Quick Summary card and briefing dialog use — never from a prompt snapshot. Use this whenever the user asks to summarize their daily briefing counts, portfolio health, or 'what needs my attention'. Takes NO arguments — the briefing is always for the calling user. Returns { activeMatters, mattersAtRisk, overdueEvents, totalSpend, totalBudget, utilizationPercent, topPriorityMatter, narrative } — narrate the counts and cite the top-priority matter's record id when present; do not invent numbers.",
+  "sprk_handlerclass": "DailyBriefingOverviewHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — this tool exists for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "spaarke.daily_briefing_overview Request",
+    "description": "No arguments — the briefing is always resolved for the calling (authenticated) user.",
+    "type": "object",
+    "properties": {},
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "spaarke.daily_briefing_overview Result",
+    "type": "object",
+    "required": ["tool", "activeMatters", "mattersAtRisk", "overdueEvents", "narrative"],
+    "properties": {
+      "tool": { "const": "spaarke.daily_briefing_overview" },
+      "activeMatters": { "type": "integer", "description": "Count of matters with an active/open status." },
+      "mattersAtRisk": { "type": "integer", "description": "Count of matters where overdueeventcount > 0 or utilization > 85%." },
+      "overdueEvents": { "type": "integer", "description": "Total count of overdue events across all active matters." },
+      "totalSpend": { "type": "number", "description": "Sum of all invoiced amounts across active matters." },
+      "totalBudget": { "type": "number", "description": "Sum of all budget amounts across active matters." },
+      "utilizationPercent": { "type": "number", "description": "Portfolio-level spend / budget expressed as a percentage." },
+      "topPriorityMatter": {
+        "type": ["object", "null"],
+        "properties": {
+          "matterId": { "type": "string" },
+          "name": { "type": "string" },
+          "deadline": { "type": ["string", "null"] },
+          "reason": { "type": "string" },
+          "citationPath": { "type": "string", "description": "tables/sprk_matter/records/{id} — cite this when narrating the top-priority matter." }
+        }
+      },
+      "narrative": { "type": "string", "description": "Natural-language briefing paragraph (template-based or AI-enhanced)." },
+      "generatedAt": { "type": "string", "description": "UTC timestamp when this briefing was generated/cached." }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No configId, no method-discriminator dispatch — a single, argument-free LLM-facing function scoped to the calling user."
+  }
+}

@@ -192,9 +192,14 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
   // SAME single per-selection read above (no second Dataverse call). The SpaarkeAi
   // `email` widget mount forwards this to its tab's persisted `widgetData`; the
   // standalone code page omits the callback (NFR-06 — no per-mount branch here).
+  //
+  // spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — `selectedId` (the
+  // selected `sprk_communicationid`) is threaded through as the state's
+  // `communicationId`, the identity anchor the SpaarkeAi host redirects to the
+  // active-item conduit as an id handle (id/label only, never content — ADR-015).
   const visibleEmail = React.useMemo(
-    () => deriveEmailWorkspaceVisibleState(record.recordState, record.emlDocumentId),
-    [record.recordState, record.emlDocumentId]
+    () => deriveEmailWorkspaceVisibleState(record.recordState, record.emlDocumentId, selectedId),
+    [record.recordState, record.emlDocumentId, selectedId]
   );
   React.useEffect(() => {
     onVisibleEmailChange?.(visibleEmail);

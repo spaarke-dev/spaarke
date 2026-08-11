@@ -62,6 +62,20 @@ public sealed class WorkspaceTab
     [JsonPropertyName("widgetData")]
     public required WorkspaceTabWidgetData WidgetData { get; init; }
 
+    /// <summary>
+    /// spaarkeai-assistant-enhancements-r3 task 011 (FR-03) — human-readable tab title
+    /// (the label shown on the workspace tab strip). Additive + optional: pinned durable
+    /// rows read from <see cref="Services.Workspace.IWorkspaceStateService"/> do not carry it
+    /// (defaults <c>null</c>), while the LIVE-tab mapping from
+    /// <see cref="Services.Ai.Sessions.StoredWorkspaceTab.DisplayName"/> populates it. Consumed
+    /// by <see cref="Services.Ai.Chat.SprkChatAgentFactory.BuildWorkspaceStateBlock"/> as the
+    /// PRIMARY source of the trimmed <c>{type,label,active}</c> per-tab label (ADR-015 Path A:
+    /// the tab title is a thin identity slice — never item content). Falls back to the derived
+    /// identity name / widget type when absent.
+    /// </summary>
+    [JsonPropertyName("displayName")]
+    public string? DisplayName { get; init; }
+
     /// <summary>Chat session identity. Scopes Redis hot-tier persistence.</summary>
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
