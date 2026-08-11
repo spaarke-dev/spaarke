@@ -278,6 +278,14 @@ export const EMAIL_VISIBLE_SNIPPET_CAP_CHARS = 200;
  * `EmailWorkspaceRecordState`); the field stays optional for when one exists.
  */
 export interface EmailWorkspaceVisibleState {
+  /**
+   * spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — the `sprk_communicationid` of the
+   * currently-selected email. The identity anchor the SpaarkeAi host redirects to the
+   * widget-agnostic active-item conduit as `{ id: communicationId, type: 'email', label: subject }`
+   * (ADR-015 id/label only, NEVER content). Distinct from `emlDocumentId` (the `.eml` archive
+   * fetch handle, unrelated to the conduit).
+   */
+  communicationId: string;
   emlDocumentId: string | null;
   subject: string;
   from: string;
@@ -295,19 +303,28 @@ function deriveBodySnippet(rawBody: string): string | undefined {
 
 /**
  * Derive the compact {@link EmailWorkspaceVisibleState} from the resolved
- * record state + `.eml` handle. Returns `null` when nothing is selected, the
- * read is loading/failed (`recordState === null`), or the identity minimum
- * (`subject`/`from`/`date`) is not fully present — mirroring the required-field
- * gate in the agent-visible `emailWidgetVisibility` derivation so we never
- * persist a carrier the derivation would reject anyway. `date` prefers the
- * received timestamp, falling back to the sent timestamp (matching
- * `mapRowToEmailCardItem`'s date precedence). Pure — no React, no I/O.
+ * record state + `.eml` handle + the selected communication id. Returns
+ * `null` when nothing is selected, the read is loading/failed
+ * (`recordState === null`), `communicationId` is absent, or the identity
+ * minimum (`subject`/`from`/`date`) is not fully present — mirroring the
+ * required-field gate in the agent-visible `emailWidgetVisibility`
+ * derivation so we never persist a carrier the derivation would reject
+ * anyway. `date` prefers the received timestamp, falling back to the sent
+ * timestamp (matching `mapRowToEmailCardItem`'s date precedence). Pure — no
+ * React, no I/O.
+ *
+ * `communicationId` (task 012, FR-05) is the identity anchor for the
+ * active-item conduit's id handle — a separate concern from the `snippet`
+ * content field, which downstream consumers MUST NOT forward to any
+ * Assistant-visible carrier (ADR-015).
  */
 export function deriveEmailWorkspaceVisibleState(
   recordState: EmailWorkspaceRecordState | null,
-  emlDocumentId: string | null
+  emlDocumentId: string | null,
+  communicationId: string | null | undefined
 ): EmailWorkspaceVisibleState | null {
   if (!recordState) return null;
+  if (!communicationId) return null;
 
   const subject = recordState.subject ?? '';
   const from = recordState.from ?? '';
@@ -317,6 +334,7 @@ export function deriveEmailWorkspaceVisibleState(
   const snippet = deriveBodySnippet(recordState.sprk_body);
 
   return {
+    communicationId,
     emlDocumentId,
     subject,
     from,

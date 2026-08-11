@@ -1,0 +1,513 @@
+<title>Assistant ⇄ Workspace Interaction Contract</title>
+<style>
+  :root {
+    --paper: #f6f7f9;
+    --raised: #ffffff;
+    --sunken: #eef0f4;
+    --ink: #1a1f2b;
+    --ink-2: #4a5265;
+    --ink-3: #737b8c;
+    --hair: #e1e4ec;
+    --hair-2: #d3d7e0;
+    --accent: #3a50c4;
+    --accent-soft: #e9ecfb;
+    --good: #2e7d57;
+    --good-soft: #e4f2ea;
+    --gap: #a86a05;
+    --gap-soft: #f6ecd8;
+    --crit: #b8433f;
+    --crit-soft: #f7e4e3;
+    --shadow: 0 1px 2px rgba(20,25,40,.05), 0 8px 24px rgba(20,25,40,.05);
+
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", "Menlo", "Cascadia Mono", "Consolas", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #10131a;
+      --raised: #171b24;
+      --sunken: #1d2230;
+      --ink: #e8ebf2;
+      --ink-2: #aab2c4;
+      --ink-3: #7a8497;
+      --hair: #262b37;
+      --hair-2: #313848;
+      --accent: #8494f2;
+      --accent-soft: #1e2338;
+      --good: #63c093;
+      --good-soft: #16281f;
+      --gap: #e0a94a;
+      --gap-soft: #2c2413;
+      --crit: #e58681;
+      --crit-soft: #2e1a19;
+      --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #10131a; --raised: #171b24; --sunken: #1d2230;
+    --ink: #e8ebf2; --ink-2: #aab2c4; --ink-3: #7a8497;
+    --hair: #262b37; --hair-2: #313848;
+    --accent: #8494f2; --accent-soft: #1e2338;
+    --good: #63c093; --good-soft: #16281f;
+    --gap: #e0a94a; --gap-soft: #2c2413;
+    --crit: #e58681; --crit-soft: #2e1a19;
+    --shadow: 0 1px 2px rgba(0,0,0,.3), 0 10px 30px rgba(0,0,0,.35);
+  }
+  :root[data-theme="light"] {
+    --paper: #f6f7f9; --raised: #ffffff; --sunken: #eef0f4;
+    --ink: #1a1f2b; --ink-2: #4a5265; --ink-3: #737b8c;
+    --hair: #e1e4ec; --hair-2: #d3d7e0;
+    --accent: #3a50c4; --accent-soft: #e9ecfb;
+    --good: #2e7d57; --good-soft: #e4f2ea;
+    --gap: #a86a05; --gap-soft: #f6ecd8;
+    --crit: #b8433f; --crit-soft: #f7e4e3;
+    --shadow: 0 1px 2px rgba(20,25,40,.05), 0 8px 24px rgba(20,25,40,.05);
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .doc {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    padding: clamp(20px, 4vw, 64px) clamp(16px, 4vw, 40px) 96px;
+  }
+  .wrap { max-width: 940px; margin: 0 auto; }
+  .prose { max-width: 68ch; }
+
+  h1, h2, h3 { line-height: 1.2; text-wrap: balance; margin: 0; letter-spacing: -.01em; }
+  h1 { font-size: clamp(28px, 4.5vw, 40px); font-weight: 720; }
+  h2 { font-size: clamp(20px, 3vw, 25px); font-weight: 680; }
+  h3 { font-size: 17px; font-weight: 660; }
+  p { margin: 0; }
+  a { color: var(--accent); }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: 11.5px; font-weight: 600;
+    letter-spacing: .13em; text-transform: uppercase; color: var(--accent);
+  }
+  code, .mono { font-family: var(--mono); font-size: .86em; }
+  code {
+    background: var(--sunken); border: 1px solid var(--hair);
+    border-radius: 4px; padding: .08em .38em; color: var(--ink);
+    word-break: break-word;
+  }
+  .ref { color: var(--ink-3); white-space: nowrap; }
+
+  /* rhythm */
+  section { margin-top: clamp(40px, 6vw, 72px); }
+  section > * + * { margin-top: 18px; }
+  .lede { color: var(--ink-2); font-size: 18px; }
+
+  /* header */
+  header.masthead { border-bottom: 2px solid var(--ink); padding-bottom: 22px; }
+  header.masthead .kicker {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-family: var(--mono); font-size: 12px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-3); margin-bottom: 16px;
+  }
+  header.masthead .kicker .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .thesis {
+    margin-top: 20px; padding: 16px 18px; background: var(--accent-soft);
+    border: 1px solid var(--hair); border-left: 3px solid var(--accent);
+    border-radius: 8px; color: var(--ink); font-size: 16.5px;
+  }
+  .thesis b { font-weight: 680; }
+
+  /* generic card */
+  .card {
+    background: var(--raised); border: 1px solid var(--hair);
+    border-radius: 12px; padding: 20px 22px; box-shadow: var(--shadow);
+  }
+
+  /* evidence strip */
+  .evidence { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+  .evidence .ev { background: var(--raised); border: 1px solid var(--hair); border-radius: 10px; padding: 15px 16px; }
+  .evidence .ev .q { font-family: var(--mono); font-size: 12.5px; color: var(--ink); background: var(--sunken); border-radius: 6px; padding: 8px 10px; display: block; }
+  .evidence .ev .r { margin-top: 10px; font-size: 13.5px; color: var(--ink-2); }
+  .evidence .ev .tag { display: inline-block; margin-top: 10px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--crit); background: var(--crit-soft); border-radius: 100px; padding: 3px 9px; }
+
+  /* flow diagram */
+  .flow { background: var(--raised); border: 1px solid var(--hair); border-radius: 12px; padding: 22px; box-shadow: var(--shadow); overflow-x: auto; }
+  .flow-row { display: flex; align-items: stretch; gap: 0; min-width: 640px; }
+  .node { flex: 1; background: var(--sunken); border: 1px solid var(--hair-2); border-radius: 9px; padding: 12px 13px; display: flex; flex-direction: column; gap: 5px; }
+  .node .n-k { font-family: var(--mono); font-size: 11px; color: var(--accent); letter-spacing: .04em; }
+  .node .n-t { font-size: 13px; font-weight: 600; color: var(--ink); }
+  .node .n-s { font-size: 11.5px; color: var(--ink-3); font-family: var(--mono); }
+  .arrow { flex: 0 0 34px; display: grid; place-items: center; color: var(--ink-3); font-size: 18px; }
+  .flow .sites { display: flex; flex-direction: column; gap: 6px; }
+  .flow .sites .site { font-family: var(--mono); font-size: 11px; color: var(--ink-2); background: var(--paper); border: 1px solid var(--hair); border-radius: 6px; padding: 5px 8px; }
+
+  .verdict { display: flex; gap: 12px; align-items: flex-start; margin-top: 16px; padding: 15px 17px; border-radius: 10px; border: 1px solid var(--hair); background: var(--good-soft); }
+  .verdict .badge { flex: 0 0 auto; font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--good); border: 1px solid var(--good); border-radius: 100px; padding: 4px 11px; margin-top: 2px; }
+  .verdict p { font-size: 14.5px; color: var(--ink-2); }
+  .verdict b { color: var(--ink); }
+
+  /* contract elements */
+  .elements { display: flex; flex-direction: column; gap: 14px; }
+  .el { background: var(--raised); border: 1px solid var(--hair); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  .el-head { display: flex; align-items: baseline; gap: 12px; padding: 15px 20px 12px; flex-wrap: wrap; }
+  .el-key { font-family: var(--mono); font-size: 11.5px; font-weight: 700; letter-spacing: .08em; color: var(--accent); }
+  .el-title { font-size: 16px; font-weight: 640; color: var(--ink); }
+  .el-sub { font-size: 13px; color: var(--ink-3); margin-left: auto; }
+  .el-grid { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--hair); }
+  .el-col { padding: 14px 20px 16px; font-size: 13.5px; color: var(--ink-2); }
+  .el-col.gap { border-left: 1px solid var(--hair); }
+  .el-col .lab { display: inline-flex; align-items: center; gap: 7px; font-family: var(--mono); font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 8px; }
+  .el-col.have .lab { color: var(--good); }
+  .el-col.gap .lab { color: var(--gap); }
+  .el-col .lab::before { content: ""; width: 8px; height: 8px; border-radius: 2px; }
+  .el-col.have .lab::before { background: var(--good); }
+  .el-col.gap .lab::before { background: var(--gap); }
+  .el-col b { color: var(--ink); font-weight: 620; }
+
+  /* table */
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--hair); border-radius: 12px; box-shadow: var(--shadow); }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; background: var(--raised); font-size: 13.5px; }
+  th, td { text-align: left; padding: 11px 15px; border-bottom: 1px solid var(--hair); vertical-align: top; }
+  th { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3); font-weight: 600; background: var(--sunken); position: sticky; top: 0; }
+  tr:last-child td { border-bottom: none; }
+  td b { color: var(--ink); font-weight: 620; }
+  .chip { display: inline-block; font-family: var(--mono); font-size: 10.5px; font-weight: 600; letter-spacing: .04em; padding: 2px 8px; border-radius: 100px; white-space: nowrap; }
+  .chip.have { color: var(--good); background: var(--good-soft); }
+  .chip.gap { color: var(--gap); background: var(--gap-soft); }
+  .chip.mix { color: var(--accent); background: var(--accent-soft); }
+
+  /* phases */
+  .phases { display: flex; flex-direction: column; gap: 12px; }
+  .phase { display: grid; grid-template-columns: 54px 1fr; gap: 0; background: var(--raised); border: 1px solid var(--hair); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+  .phase .num { display: grid; place-items: center; font-family: var(--mono); font-size: 20px; font-weight: 700; color: var(--accent); background: var(--accent-soft); border-right: 1px solid var(--hair); }
+  .phase .body { padding: 14px 18px; }
+  .phase .body .pt { font-size: 15px; font-weight: 640; color: var(--ink); }
+  .phase .body .pd { font-size: 13.5px; color: var(--ink-2); margin-top: 5px; }
+  .phase .body .pmeta { margin-top: 9px; display: flex; gap: 8px; flex-wrap: wrap; }
+  .phase.now .num { color: var(--good); background: var(--good-soft); }
+  .pill { font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; padding: 3px 9px; border-radius: 100px; border: 1px solid var(--hair-2); color: var(--ink-3); }
+  .pill.hot { color: var(--good); border-color: var(--good); }
+  .pill.dep { color: var(--accent); border-color: var(--accent); }
+
+  /* acceptance */
+  .accept { background: var(--raised); border: 1px solid var(--hair); border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; }
+  .accept .top { padding: 16px 20px; border-bottom: 1px solid var(--hair); }
+  .accept .top .q { font-family: var(--mono); font-size: 14px; color: var(--ink); }
+  .accept .cols { display: grid; grid-template-columns: 1fr 1fr; }
+  .accept .cols > div { padding: 14px 20px 18px; font-size: 13.5px; }
+  .accept .cols .before { border-right: 1px solid var(--hair); }
+  .accept .cols .lab { font-family: var(--mono); font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; margin-bottom: 8px; }
+  .accept .before .lab { color: var(--crit); }
+  .accept .after .lab { color: var(--good); }
+  .accept .msg { background: var(--sunken); border-radius: 8px; padding: 11px 13px; color: var(--ink-2); }
+  .accept .after .msg { background: var(--good-soft); color: var(--ink); }
+
+  /* decisions */
+  .decisions { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .decision { background: var(--raised); border: 1px solid var(--hair); border-left: 3px solid var(--accent); border-radius: 10px; padding: 16px 18px; box-shadow: var(--shadow); }
+  .decision .dk { font-family: var(--mono); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--accent); }
+  .decision .dt { font-size: 14.5px; font-weight: 640; color: var(--ink); margin-top: 6px; }
+  .decision .dd { font-size: 13px; color: var(--ink-2); margin-top: 7px; }
+
+  ul.tight { margin: 0; padding-left: 20px; }
+  ul.tight li { margin: 4px 0; color: var(--ink-2); }
+  ul.tight li b { color: var(--ink); }
+
+  footer.foot { margin-top: 72px; padding-top: 20px; border-top: 1px solid var(--hair); font-size: 12.5px; color: var(--ink-3); font-family: var(--mono); }
+
+  @media (max-width: 680px) {
+    .el-grid, .accept .cols { grid-template-columns: 1fr; }
+    .el-col.gap, .accept .cols .before { border-left: none; border-right: none; border-top: 1px solid var(--hair); }
+    .el-sub { margin-left: 0; width: 100%; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .el, .phase, .card, .ev, .decision { transition: border-color .15s ease; }
+  }
+</style>
+
+<div class="doc">
+<div class="wrap">
+
+  <header class="masthead">
+    <div class="kicker"><span class="dot"></span> Spaarke Assistant · Architecture &amp; Build Plan <span class="dot"></span> 2026-08-07 · draft for alignment</div>
+    <h1>The Assistant ⇄ Workspace Interaction Contract</h1>
+    <p class="lede prose" style="margin-top:14px;">One definition of how the Assistant sees, answers about, and opens Workspace surfaces — so every widget behaves predictably and nothing ships without a matching Assistant capability.</p>
+    <div class="thesis prose"><b>Guiding principle.</b> The <b>Assistant</b> gives the overview and answers directly by querying the source; the <b>Workspace</b> shows the detail. The Assistant is <em>aware</em> of tabs so it can answer, open, or direct — it does not read data out of a tab (Compose is the one interactive exception).</div>
+  </header>
+
+  <section>
+    <div class="eyebrow">Why now — the evidence</div>
+    <h2>Three UAT rounds surfaced the same shape of failure</h2>
+    <p class="prose">The Assistant can see tabs (we fixed that), but it has no reliable, domain-shaped way to <em>answer</em> about them. It falls back to a generic Dataverse query it writes by hand — and gets it wrong.</p>
+    <div class="evidence">
+      <div class="ev">
+        <span class="q">“how many overdue tasks do I have”</span>
+        <div class="r">Hand-wrote <code>GETDATE()</code> — unsupported by Dataverse — then asked the user to confirm today’s date.</div>
+        <span class="tag">no task tool · no “today”</span>
+      </div>
+      <div class="ev">
+        <span class="q">“do you see the daily briefing tab?”</span>
+        <div class="r">Answered “yes” but opened a <em>second</em> Daily Briefing tab — no de-dup, and the layout tab is invisible to the agent anyway.</div>
+        <span class="tag">duplicate · unaware</span>
+      </div>
+      <div class="ev">
+        <span class="q">“show me the narrated summary”</span>
+        <div class="r">Said “no notifications today” while the briefing showed 12 updates / 11 overdue — it had the tab’s name, not its data.</div>
+        <span class="tag">no data path</span>
+      </div>
+    </div>
+    <p class="prose" style="color:var(--ink-2);font-size:14.5px;">The pattern is consistent: <b>awareness without capability parity</b>. The fix is not "put more data in the prompt" — it is "give each surface a tool the Assistant can call."</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Ground truth — how the Workspace works today</div>
+    <h2>Widgets self-register, then mount as tabs through one event path</h2>
+    <p class="prose">A widget is declared in a <b>registry</b>, and when something needs it on screen it fires a <code>widget_load</code> event on the <b>PaneEventBus</b>; <code>WorkspacePane</code> turns that into a tab via <code>WorkspaceTabManager.addTab(...)</code>. Registration is spread across <b>four sites</b>:</p>
+    <div class="flow">
+      <div class="flow-row">
+        <div class="node" style="flex:1.3;">
+          <span class="n-k">4 registration sites</span>
+          <span class="n-t">WorkspaceWidgetRegistry</span>
+          <div class="sites">
+            <span class="site">register-workspace-widgets.ts <span class="ref">·24</span></span>
+            <span class="site">register-document-viewer-widget.ts</span>
+            <span class="site">register-search-criteria / structured-output</span>
+            <span class="site">registerComposeWidget.ts <span class="ref">·SpaarkeAi</span></span>
+          </div>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node">
+          <span class="n-k">PaneEventBus</span>
+          <span class="n-t">widget_load event</span>
+          <span class="n-s">{ widgetType, widgetData, displayName }</span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node">
+          <span class="n-k">WorkspacePane</span>
+          <span class="n-t">addTab(...)</span>
+          <span class="n-s">tsx:2004 · no de-dup</span>
+        </div>
+        <div class="arrow">→</div>
+        <div class="node">
+          <span class="n-k">tab</span>
+          <span class="n-t">mounted surface</span>
+          <span class="n-s">persisted → /tabs</span>
+        </div>
+      </div>
+    </div>
+    <div class="verdict">
+      <span class="badge">Verdict</span>
+      <p><b>A good pattern with one gap to close — not a problem to undo.</b> Decentralized self-registration keeps the code modular (no god-file; Compose registers separately to avoid a package cycle). The only risk it creates for <em>us</em>: a widget added at any site could ship <b>without</b> its Assistant contract. Fix — make the contract fields (context-type · parity tool · interaction pattern) <b>required</b> in the registration metadata, so the registry enforces parity wherever a widget is declared.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">The contract — seven elements</div>
+    <h2>What the Assistant owes the Workspace, and the reverse</h2>
+    <p class="prose">Each element below is one responsibility with a clear line. For every one, most of the machinery already exists — the work is wiring, not invention.</p>
+
+    <div class="elements">
+
+      <div class="el">
+        <div class="el-head"><span class="el-key">AWARENESS</span><span class="el-title">The Assistant knows what’s open + active</span><span class="el-sub">identity only — no data</span></div>
+        <div class="el-grid">
+          <div class="el-col have"><span class="lab">Available</span><code>BuildWorkspaceStateBlock</code> <span class="ref">:1469</span> emits each tab’s type + an <b>(active)</b> marker; the active-tab-as-consent fix shipped; focus-stamp threading works.</div>
+          <div class="el-col gap"><span class="lab">Build</span>Dashboards &amp; Calendar are <b>invisible</b> — layout tabs have no <code>kind</code> so they derive to <code>null</code>, and <code>visibleToAssistant</code> isn’t even persisted. Add a layout/identity variant; <b>trim the prompt to <code>{ type, label, active }</code></b>.</div>
+        </div>
+      </div>
+
+      <div class="el">
+        <div class="el-head"><span class="el-key">PARITY</span><span class="el-title">Every widget has a matching Assistant tool</span><span class="el-sub">the core new capability</span></div>
+        <div class="el-grid">
+          <div class="el-col have"><span class="lab">Available</span>Generic Dataverse tools (<code>read_query</code>, <code>search_data</code>); the <b>DataGrid <code>sprk_gridconfiguration</code> query stack</b> backs 7+ grids; <code>BriefingService</code> backs Daily Briefing; the <code>IBriefingAi</code> capability exists.</div>
+          <div class="el-col gap"><span class="lab">Build</span>No <b>per-widget</b> tools. Author one capability per domain (tasks · grids · briefing · calendar). <b>Reuse the query <em>definition</em></b> (saved-query / fetchXml / configId) executed <b>server-side over OBO</b> — the grid runs client-side, the tool runs on the BFF.</div>
+        </div>
+      </div>
+
+      <div class="el">
+        <div class="el-head"><span class="el-key">ECONOMY</span><span class="el-title">Only open tabs’ tools reach the model</span><span class="el-sub">not 100s of tools</span></div>
+        <div class="el-grid">
+          <div class="el-col have"><span class="lab">Available</span>ADR-039 <code>PreFilter</code> <span class="ref">:101</span>; the <code>Binding.ContextTypeTags</code> column already exists (added this project, FR-B2); the mounting seam is identified <span class="ref">:826–869</span>.</div>
+          <div class="el-col gap"><span class="lab">Build</span><code>ContextTypeTags</code> is <b>client-only today</b>. Wire it server-side: add <code>OpenTabContextTypes</code> to the filter context + one predicate; hoist <code>tabs</code>. Small, and ADR-039-sanctioned.</div>
+        </div>
+      </div>
+
+      <div class="el">
+        <div class="el-head"><span class="el-key">INTERACTION</span><span class="el-title">A defined behavior per widget</span><span class="el-sub">respond · direct · hybrid</span></div>
+        <div class="el-grid">
+          <div class="el-col have"><span class="lab">Available</span>The dispatch + surface-launch plumbing exists; the model can already answer and open surfaces.</div>
+          <div class="el-col gap"><span class="lab">Build</span>Nothing is <em>defined</em> — behavior is emergent. Author a <b>per-widget policy matrix</b>: e.g. Tasks → <em>hybrid</em> (“you have 6 due; opened the Tasks tab”), Compose → <em>interactive</em>, Daily Briefing → <em>answer + direct, don’t re-open</em>.</div>
+        </div>
+      </div>
+
+      <div class="el">
+        <div class="el-head"><span class="el-key">OPEN / DIRECT</span><span class="el-title">Open or focus a surface — never duplicate</span><span class="el-sub">the duplicate-tab bug</span></div>
+        <div class="el-grid">
+          <div class="el-col have"><span class="lab">Available</span>Surface-launch registry + <code>widget_load</code>; Compose and the startup-default already de-dup by key/layoutId.</div>
+          <div class="el-col gap"><span class="lab">Build</span>The <em>generic</em> <code>widget_load</code> path calls <code>addTab</code> unconditionally <span class="ref">:2004</span>. Add a de-dup guard (by layoutId / type → <code>setActiveTab</code>).</div>
+        </div>
+      </div>
+
+      <div class="el">
+        <div class="el-head"><span class="el-key">FOLLOW-ONS</span><span class="el-title">Suggested next steps are real</span><span class="el-sub">accurate, tailored</span></div>
+        <div class="el-grid">
+          <div class="el-col have"><span class="lab">Available</span>The Phase-B proactive chip surface + grounded <code>/suggest</code> turn + <code>ContextTypeTags</code> pre-filter.</div>
+          <div class="el-col gap"><span class="lab">Build</span>Derive follow-ons from the <b>mounted parity tools + interaction pattern</b>, so a chip is always a real action for what’s open.</div>
+        </div>
+      </div>
+
+      <div class="el">
+        <div class="el-head"><span class="el-key">NAMING</span><span class="el-title">Tabs are named by their content</span><span class="el-sub">Compose = filename</span></div>
+        <div class="el-grid">
+          <div class="el-col have"><span class="lab">Available</span><code>displayName</code> persists; <code>document-viewer</code> already titles by filename; Compose hoists the filename to <code>widgetData.filename</code>.</div>
+          <div class="el-col gap"><span class="lab">Build</span>Compose tab is hard-coded <code>"Compose"</code>. Compute a <b>truncated 6–10 char label + tooltip</b> at the compose <code>addTab</code> sites.</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">The data-access layer — behind the parity tools</div>
+    <h2>Three lanes, all already built</h2>
+    <p class="prose">A parity tool is the Assistant’s <em>interface</em> to a domain; behind each is a data mechanism. The design rule is <b>one mechanism per data shape, no duplication</b>. This is how RAG, the Dataverse toolset, FetchXML, and the domain services fit together.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Lane</th><th>Mechanism (exists today)</th><th>Backs</th></tr></thead>
+        <tbody>
+          <tr><td><b>1 · Structured records</b></td><td>Native <b>Dataverse-MCP-<em>shaped</em></b> toolset in the BFF — <code>read_query</code> (SQL→OData over OBO), <code>search_data</code>, <code>describe</code>. <span class="ref">Not an external MCP server</span> — native, security-scoped, cited</td><td>tasks · matters · grids · calendar</td></tr>
+          <tr><td><b>2 · Unstructured / semantic</b></td><td><b>RAG index</b> (Azure AI Search vector) via <code>IRagService</code> / <code>DocumentSearchHandler</code> / <code>KnowledgeRetrievalHandler</code> + on-demand body</td><td>documents — summarize · "what does it say" · find-similar</td></tr>
+          <tr><td><b>3 · Composed services</b></td><td>Purpose-built services that already encapsulate the query — <code>BriefingService</code> <span class="ref">:128</span>, membership resolver</td><td>Daily Briefing · "records I'm on"</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="verdict" style="background:var(--gap-soft);">
+      <span class="badge" style="color:var(--gap);border-color:var(--gap);">Key</span>
+      <p><b>The overdue-tasks failure is a lane-1 symptom.</b> <code>read_query</code> is a <em>general</em> SQL-subset that rejects <code>GETDATE()</code>/<code>COUNT</code>/aggregates — it makes the <em>model</em> author the query, and it got the date wrong. A <b>tasks parity tool</b> encapsulates “overdue = dueDate&nbsp;&lt;&nbsp;today” server-side, reusing the grid’s saved-query / FetchXML executed over OBO. RAG and FetchXML are <b>complementary</b> (semantic content vs structured records), not competing.</p>
+    </div>
+    <p class="prose" style="font-size:14.5px;color:var(--ink-2);"><b>Parity = read + act.</b> Each surface also gets its generative verbs: email → <em>summarize · draft reply</em>; document → <em>summarize · draft response · draft memo</em>. These map to the existing Actions/Bindings catalog (<code>EmailDraftToolHandler</code>, text/analysis handlers).</p>
+  </section>
+
+  <section>
+    <div class="eyebrow">Reconciliation — one assumption the code corrected</div>
+    <h2>Which surfaces actually mount as tabs</h2>
+    <p class="prose">You expected documents/emails to appear only as Compose content. The code shows three distinct document-ish surfaces mount as their own tabs — this changes the parity list, so it’s a decision to confirm.</p>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Surface</th><th>Own tab?</th><th>What it is</th><th>Reusable data layer</th></tr></thead>
+        <tbody>
+          <tr><td><b>Grids</b> — Documents / Matters / Projects / Invoices / Work&nbsp;Assignments / My&nbsp;Tasks / Messages / Analysis</td><td><span class="chip have">yes</span></td><td>Entity grid of one saved view</td><td><code>DataGrid</code> + <code>sprk_gridconfiguration</code> <span class="ref">tsx:649 · useLazyLoad:169</span> · client Xrm</td></tr>
+          <tr><td><b>Daily Briefing</b></td><td><span class="chip mix">layout</span></td><td>Portfolio counts + AI narrative</td><td><code>BriefingService</code> <span class="ref">:128</span> + <code>/api/ai/daily-briefing/render</code> · BFF</td></tr>
+          <tr><td><b>Calendar</b></td><td><span class="chip mix">layout</span></td><td>Events + tasks</td><td><code>CalendarWorkspaceWidget</code> · client Xrm</td></tr>
+          <tr><td><b>Metrics dashboards</b> — Matters Report, etc.</td><td><span class="chip have">yes</span></td><td>Metric cards</td><td><code>MetricsDashboardWidget</code> FetchXML catalog · client Xrm</td></tr>
+          <tr><td><b>Email</b></td><td><span class="chip have">yes</span></td><td>List + reading pane + composer</td><td><code>EmailWorkspace</code> · client Xrm + BFF (eml-render / draft)</td></tr>
+          <tr><td><b>Document viewer</b></td><td><span class="chip have">yes</span></td><td>Read-only preview of an attachment</td><td><code>GET /api/documents/{id}/preview-url</code> · BFF</td></tr>
+          <tr><td><b>Compose</b></td><td><span class="chip have">yes</span></td><td>A document being edited (interactive)</td><td><code>/api/compose/*</code> · BFF (server-authoritative)</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">The build — sequenced</div>
+    <h2>Plan</h2>
+    <p class="prose">Phase 0 is independent of the contract and can ship immediately; Phases 1–4 build the contract in dependency order; the registration-contract change threads through all of them.</p>
+    <div class="phases">
+      <div class="phase now">
+        <div class="num">0</div>
+        <div class="body">
+          <div class="pt">Quick wins — ship now, no contract dependency</div>
+          <div class="pd">Inject <b>today’s date</b> into the agent context; <b>de-dup guard</b> on <code>widget_load</code> (kills duplicate tabs); <b>SignalR first-mount</b> resilience (the 401 hang); <b>Compose tab naming</b>; chat-pane <b>scroll-to-top on send</b> + <b>thin scrollbar</b>; harden the date-query tool.</div>
+          <div class="pmeta"><span class="pill hot">independent</span><span class="pill">6–7 small fixes</span></div>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="num">1</div>
+        <div class="body">
+          <div class="pt">Awareness, identity-only</div>
+          <div class="pd">Make dashboards/layouts visible (a light identity variant); persist <code>visibleToAssistant</code>; trim the prompt block to <code>{ type, label, active }</code>. The Assistant reliably knows what’s open.</div>
+          <div class="pmeta"><span class="pill dep">server</span></div>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="num">2</div>
+        <div class="body">
+          <div class="pt">Capability parity — the per-widget tools</div>
+          <div class="pd">Author a capability per domain (tasks · grids · briefing · calendar), each reusing an existing query definition executed server-side. Add the widget-type → context-type map. <b>This is where “how many overdue tasks” starts working.</b></div>
+          <div class="pmeta"><span class="pill dep">catalog + BFF</span><span class="pill">largest phase</span></div>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="num">3</div>
+        <div class="body">
+          <div class="pt">Tool economy — mount per open tab</div>
+          <div class="pd">Wire <code>ContextTypeTags</code> into the server pre-filter so only open tabs’ parity tools reach the model. Tool set stays small and stable.</div>
+          <div class="pmeta"><span class="pill dep">server · needs Phase 2</span></div>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="num">4</div>
+        <div class="body">
+          <div class="pt">Interaction patterns + accurate follow-ons</div>
+          <div class="pd">Publish the per-widget respond/direct/hybrid matrix into the prompt; derive follow-on chips from the mounted tools + pattern. The Assistant behaves predictably per surface.</div>
+          <div class="pmeta"><span class="pill dep">prompt + client</span></div>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="num">★</div>
+        <div class="body">
+          <div class="pt">Registration contract (threads through 1–4)</div>
+          <div class="pd">Make context-type · parity-tool · interaction-pattern <b>required</b> fields of widget registration, so no widget can ship without its Assistant contract — regardless of which of the four sites declares it.</div>
+          <div class="pmeta"><span class="pill dep">shared-lib types</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Definition of done</div>
+    <h2>The acceptance test</h2>
+    <p class="prose">One sentence defines success. When this works end-to-end — no query error, no asking for the date, no duplicate tab — the contract is real.</p>
+    <div class="accept">
+      <div class="top"><span class="q">“how many overdue tasks do I have?”</span></div>
+      <div class="cols">
+        <div class="before">
+          <div class="lab">Today</div>
+          <div class="msg">“I attempted to query… the system does not support the dynamic GETDATE() function… could you confirm today’s date?”</div>
+        </div>
+        <div class="after">
+          <div class="lab">After the contract</div>
+          <div class="msg">“You have <b>6</b> overdue tasks. I’ve opened your <b>Tasks</b> tab showing them.” <span style="color:var(--ink-3);">— tasks parity tool computes “overdue” server-side; date injected; existing Tasks tab focused, not duplicated.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="eyebrow">Locked — owner decisions 2026-08-07</div>
+    <h2>Decisions</h2>
+    <div class="decisions">
+      <div class="decision" style="border-left-color:var(--good);">
+        <div class="dk" style="color:var(--good);">✓ Scope</div>
+        <div class="dt">Keep standalone email + document tabs</div>
+        <div class="dd">All three document-ish tabs stay (viewer · compose · email); each gets a parity tool set with <b>read + actions</b> (email → draft reply; document → draft response / memo).</div>
+      </div>
+      <div class="decision" style="border-left-color:var(--good);">
+        <div class="dk" style="color:var(--good);">✓ Prompt</div>
+        <div class="dt">Identity-only in the prompt</div>
+        <div class="dd">Strip data snapshots → <code>{ type, label, active }</code>; keep only the live text-selection hint. All facts via tools. Single source of truth; no stale-snapshot hallucination.</div>
+      </div>
+      <div class="decision" style="border-left-color:var(--good);">
+        <div class="dk" style="color:var(--good);">✓ Home</div>
+        <div class="dt">R3 project + Phase 0 now</div>
+        <div class="dd"><code>projects/spaarkeai-assistant-enhancements-r3/design.md</code> created; Phases 1–4 run as R3; Phase 0 quick wins land now on the R2 branch.</div>
+      </div>
+    </div>
+  </section>
+
+  <footer class="foot">
+    Assistant ⇄ Workspace Interaction Contract · draft for alignment · grounded in a three-part code inventory (widgets &amp; data layers · tool architecture · tab lifecycle). Not yet a committed design doc — pending the three decisions above.
+  </footer>
+
+</div>
+</div>

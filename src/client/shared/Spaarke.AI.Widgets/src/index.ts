@@ -64,6 +64,24 @@ export type {
 // WidgetContextType — closed contextType union (FR-B1 + FR-C3, task 020).
 export type { WidgetMetadata, WidgetContextType } from './types/shared';
 
+// Assistant-contract metadata SHAPE (FR-08 + FR-15 SHAPE, R3 task 022) —
+// context-type (above) · overview tool(s) · per-item cards + landing target
+// · interaction pattern. Additive to WidgetMetadata via the optional
+// `assistantContract` field. Task 050 makes it required + enforced.
+export type {
+  WidgetAssistantContract,
+  AssistantContractCard,
+  AssistantInteractionPattern,
+  AssistantCardLanding,
+  // FR-15 (task 050) — the explicit "no Assistant contract" opt-out marker.
+  WidgetAssistantContractOptOut,
+} from './types/shared';
+export { OVERVIEW_QUERY_TOOL_NAME } from './types/shared';
+// FR-15 (task 050) — required-contract enforcement helpers. Registration sites
+// declare a documented opt-out via assistantContractOptOut(); the registry
+// guard + accessors use isAssistantContractOptOut().
+export { assistantContractOptOut, isAssistantContractOptOut } from './types/shared';
+
 // ---------------------------------------------------------------------------
 // Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)
 //
@@ -130,6 +148,14 @@ export {
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
+  // FR-08 + FR-15 SHAPE (R3 task 022) — derived widget-type ↔ context-type
+  // map + the Assistant-contract accessor. Consumed by the pre-filter (030)
+  // and the registry guard (050).
+  getWidgetContextTypeMap,
+  getWidgetAssistantContract,
+  // FR-13 (R3 task 040) — the single-sourced interactionPattern accessor.
+  // Consumed by the follow-on derivation (task 041).
+  getWidgetInteractionPattern,
 } from './registry/WorkspaceWidgetRegistry';
 
 // Task 072 (D-C-27) — Pillar 9 visibility extension.

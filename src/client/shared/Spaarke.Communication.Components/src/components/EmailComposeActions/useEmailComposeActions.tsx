@@ -35,6 +35,7 @@ import { SendEmailDialog } from '@spaarke/ui-components';
 import type { IAttachmentItem } from '@spaarke/ui-components';
 import {
   deriveComposerFields,
+  buildQuotedThread,
   fetchSourceAttachments,
   type ComposerMode,
   type RecordPrefill,
@@ -42,7 +43,11 @@ import {
   type ISourceAttachmentRecord,
 } from '../../logic/actions';
 import { fetchCommunicationPrefill } from './fetchCommunicationPrefill';
-import type { EmailComposeActionsDeps, UseEmailComposeActionsResult } from './EmailComposeActions.types';
+import type {
+  EmailComposeActionsDeps,
+  OpenComposerOptions,
+  UseEmailComposeActionsResult,
+} from './EmailComposeActions.types';
 
 interface DialogState {
   mode: ComposerMode;
@@ -52,6 +57,13 @@ interface DialogState {
   prefill: RecordPrefill | null;
   /** Source-communication attachments carried onto reply/replyAll/forward (empty for compose). */
   initialAttachments?: IAttachmentItem[];
+  /**
+   * FR-10 — an AI-drafted authored-message region (from task 025 cards / task 023 tools).
+   * Threaded into `deriveComposerFields` so the composed body is
+   * `[AI draft] + [separator] + [quoted thread]` — the quoted thread is STILL derived +
+   * appended below it (never a whole-body replace). Undefined for the toolbar's manual actions.
+   */
+  bodyOverride?: string;
 }
 
 /**
@@ -91,11 +103,14 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
   const requestIdRef = React.useRef(0);
 
   const openComposer = React.useCallback(
-    (mode: ComposerMode, communicationId?: string) => {
+    (mode: ComposerMode, communicationId?: string, options?: OpenComposerOptions) => {
       const requestId = ++requestIdRef.current;
+      // FR-10: an AI draft seeds ONLY the authored region; the reducer-derived quoted thread is
+      // STILL appended below it in `composerFields` (see `deriveComposerFields`). Never a whole-body replace.
+      const bodyOverride = options?.bodyOverride;
       if (!communicationId) {
-        // New — not record-scoped, nothing to read; open immediately, fully empty.
-        setDialogState({ mode, communicationId: undefined, prefill: null });
+        // New — not record-scoped, nothing to read; open immediately (fully empty, or an AI-drafted body).
+        setDialogState({ mode, communicationId: undefined, prefill: null, bodyOverride });
         return;
       }
       // Load the source record BEFORE opening the dialog. `initial*` props seed the
@@ -134,6 +149,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
           communicationId,
           prefill,
           initialAttachments: initialAttachments.length > 0 ? initialAttachments : undefined,
+          bodyOverride,
         });
       })();
     },
@@ -177,7 +193,21 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
   // CommunicationActionsApp's `sendMode` mapping exactly (no engine change needed).
   const engineMode = activeMode === 'replyAll' ? 'reply' : activeMode;
   const isRecordScoped = dialogState !== null && dialogState.mode !== 'compose';
-  const composerFields = dialogState ? deriveComposerFields(dialogState.mode, dialogState.prefill) : {};
+  const composerFields = dialogState
+    ? deriveComposerFields(dialogState.mode, dialogState.prefill, { bodyOverride: dialogState.bodyOverride })
+    : {};
+  // D-5 fix (spaarkeai-assistant-enhancements-r3 task 025, hand-off from task 024
+  // Step 9.5): this hook never passes `sourceRecord` to the engine — it seeds
+  // `initialBody` itself via `deriveComposerFields` above — so the engine's OWN
+  // `deriveReplyState`/`deriveForwardState` (which populate `state.quotedThread`)
+  // never run. Without a separate `initialQuotedThread`, a re-draft via the
+  // in-dialog AI sparkle (`EmailComposer.runAiDraft`, which re-appends
+  // `state.quotedThread`) silently drops an already-seeded quoted thread — this
+  // is the SAME `buildQuotedThread` computation `deriveComposerFields` already
+  // uses internally to build `composerFields.initialBody`, so the seeded
+  // `quotedThread` state is byte-identical to what is already in the body.
+  // Empty string (compose mode, `dialogState.prefill === null`) → `undefined`.
+  const initialQuotedThread = dialogState && isRecordScoped ? buildQuotedThread(dialogState.prefill) || undefined : undefined;
 
   // Header title override — "Reply: <subject>" / "Reply All: <subject>" /
   // "Forward: <subject>" for the record-scoped modes (New keeps the engine's
@@ -226,6 +256,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       fromMailbox={fromMailbox}
       associations={isRecordScoped ? associations : undefined}
       initialAttachments={isRecordScoped ? dialogState?.initialAttachments : undefined}
+      initialQuotedThread={initialQuotedThread}
       titleOverride={titleOverride}
       onSent={onSent}
       onError={onError}
@@ -233,7 +264,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
     />
   );
 
-  return { actions, composerDialog, openFullForm };
+  return { actions, composerDialog, openFullForm, openComposer };
 }
 
 export type { UseEmailComposeActionsResult };

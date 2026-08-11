@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Redirect the email widget's existing onVisibleEmailChange emit to the active-item conduit as an id handle {communicationId, emlDocumentId, subject} — id/label only, not content (FR-05)</title>
+    <phase>1 — Awareness (identity + active-item handle)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Shared email component change on the dual-mount boundary (NFR-05) + ADR-015 id-not-content redirect — code-review + adr-check at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Redirect of an existing emit to the task-001 conduit; bounded, well-specified reuse — Sonnet 5 @ high suffices.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits email-widget files (EmailWorkspace/EmailWorkspaceWidget) — disjoint from the BFF files touched by 010/011; coordinate email-communication-solution-r5 on the shared components.</parallel-reason>
+    <deps>001</deps>
+    <tags>spaarkeai, frontend, react</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Redirect the email widget's existing onVisibleEmailChange emit (EmailWorkspace.tsx:199; today consumed into tab widgetData as a content snapshot by EmailWorkspaceWidget.tsx:111) to the task-001 active-item conduit as an id handle {communicationId, emlDocumentId, subject} — id/label only, NOT the content snapshot.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React 18 + TypeScript expertise on the shared Communication components; comfortable redirecting an existing selection emit to a conduit while keeping the shared email component host-agnostic across both mounts (ADR-012).</role>
+  <goal>Selecting an email in the Email tab publishes {communicationId, emlDocumentId, subject} to the active-item conduit (id + subject label only) — never the email body — and the standalone sprk_emailpage mount is unaffected.</goal>
+  <context>
+    <background>FR-05 (small — reuse). `EmailWorkspace.onVisibleEmailChange` (`EmailWorkspace.tsx:199`) already emits the visible email's state; today `EmailWorkspaceWidget.tsx:111` consumes it into tab `widgetData` as a content snapshot (the R2 FR-C1 carrier). R3 walks that back (§6-decision-2): redirect the emit to the task-001 active-item conduit as an ID HANDLE `{communicationId, emlDocumentId, subject}` — id + subject label only, NOT the content snapshot. The Assistant gets identity to key per-item email cards to; the body is tool-fetched by id downstream (Phase 2 email tools). Depends on task 001 (the conduit). Keep the shared email component host-agnostic — the change MUST NOT break the standalone `sprk_emailpage` code-page mount (NFR-05, ADR-012). Coordinate `email-communication-solution-r5` on the shared components.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/EmailWorkspace.tsx (onVisibleEmailChange emit :199)</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/EmailWorkspaceWidget.tsx (consumes into widgetData :111 — redirect target)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-015">Publish id/label only — {communicationId, emlDocumentId, subject}. NEVER the email body or content snapshot on the conduit.</constraint>
+    <constraint source="ADR-012">Keep EmailWorkspace host-agnostic (deps as props); it must render unchanged across the SpaarkeAi mount and the standalone sprk_emailpage code page.</constraint>
+    <constraint source="ADR-030">Use the task-001 active-item conduit (sibling-pane channel) — do NOT put email content on the PaneEventBus.</constraint>
+    <constraint source="project">§11 reuse-first: redirect the EXISTING onVisibleEmailChange emit — do NOT add a new selection model.</constraint>
+    <constraint source="project">Scope clause: redirect the emit to the conduit as an id handle only. Do NOT build email per-item cards (task 025) or the draft/summarize tools (task 023).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the onVisibleEmailChange emit (EmailWorkspace.tsx:199) and its current consumer (EmailWorkspaceWidget.tsx:111 → widgetData snapshot).</step>
+    <step order="2">Redirect the emit to publish {communicationId, emlDocumentId, subject} to the task-001 active-item conduit as an id handle.</step>
+    <step order="3">Stop carrying the content snapshot into widgetData for the Assistant path (walk back the R2 FR-C1 carrier) — id/label only.</step>
+    <step order="4">On deselect, clear the handle via the conduit (single-active-item invariant).</step>
+    <step order="5">Verify the shared component still renders unchanged on the standalone sprk_emailpage mount (host-agnostic).</step>
+    <step order="6">Add/extend unit tests (selection publishes the id handle; no body/content on the handle; deselect clears).</step>
+    <step order="7">npm run build the shared package + SpaarkeAi; update TASK-INDEX.</step>
+  </steps>
+  <escalation>
+    <trigger>If the redirect cannot avoid also carrying the content snapshot (e.g. a downstream consumer still needs the body via the conduit), STOP and escalate (ADR-015 / §6-decision-2 walk-back) rather than leaving content on the handle. If the shared-component change risks the standalone sprk_emailpage mount, coordinate with email-communication-solution-r5 before proceeding.</trigger>
+  </escalation>
+  <justification>
+    <existing>onVisibleEmailChange already emits on selection; it is consumed into widgetData as a content snapshot (R2 FR-C1).</existing>
+    <extension>Yes — redirect the existing emit to the task-001 conduit as an id handle; no new selection model.</extension>
+    <cost-of-doing-nothing>The email active item stays a prompt content snapshot (ADR-015 drift) and per-item email cards have no id handle to key to — the email per-item flow can't start.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/EmailWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/EmailWorkspaceWidget.tsx</output>
+    <output type="test">email selection → id-handle publish unit test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Selecting an email in the Email tab publishes {communicationId, emlDocumentId, subject} to the active-item conduit.</criterion>
+    <criterion testable="true">The prompt carries the handle (id + subject label), never the email body (negative case: a body/content field on the handle fails review/test).</criterion>
+    <criterion testable="true">Deselecting the email clears the handle (single-active-item invariant).</criterion>
+    <criterion testable="true">EmailWorkspace renders unchanged on the standalone sprk_emailpage mount (NFR-05 — negative case: any standalone-mount regression fails).</criterion>
+    <criterion testable="true">Shared package + SpaarkeAi build; unit tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>§6-decision-2 walk-back of R2 FR-C1 ambient content. Depends on the task-001 conduit. Coordinate email-communication-solution-r5 on the shared Communication components.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

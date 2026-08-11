@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Add a thread-preserving bodyOverride param to useEmailComposeActions.openComposer (FR-10 — BINDING invariant)</title>
+    <phase>2 — Capability parity</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Shared email-component .tsx on a data-loss-adjacent invariant (a whole-body-replace drops the quoted thread); dual-mount parity (NFR-05) must not break the standalone sprk_emailpage code page. Auto-FULL on .tsx + reducer test obligation.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Thread-preservation is a BINDING invariant and data-loss-adjacent; the change sits on the shared email surface consumed by two mounts (SpaarkeAi + standalone code page) and coordinates with email-communication-solution-r5 — judgment-sensitive.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>Wave2-client</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared email components (useEmailComposeActions / EmailComposer reducer) — coordinate email-communication-solution-r5 + email-communication-intelligence-r2; must not break the standalone sprk_emailpage mount.</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, react, fluent-ui</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a `bodyOverride` parameter to `useEmailComposeActions.openComposer` that overrides ONLY the authored-message region. The composer must still derive the quoted previous thread from the source record (`EmailComposer.reducer` `deriveReplyState`/`deriveForwardState` → `state.quotedThread`) and append it BELOW the draft, so the composer opens as [AI draft] + [separator] + [quoted thread] — reaching parity with the in-dialog sparkle re-append (`EmailComposer.tsx` `runAiDraft`). A `bodyOverride` that replaces the whole body (dropping the quoted thread) is a DEFECT.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React 18 + TypeScript expertise on the shared Spaarke.Communication.Components email composer and its reducer; comfortable holding a thread-preservation invariant on a host-agnostic component consumed by two mounts without regressing the standalone code page.</role>
+  <goal>`openComposer({ bodyOverride })` opens the composer with the AI draft in the authored region AND the reducer-derived quoted thread preserved below it — never a whole-body replace.</goal>
+  <context>
+    <background>FR-10, the project's BINDING invariant. Today `useEmailComposeActions.openComposer` (`useEmailComposeActions.tsx:93`) builds Re:/Fwd: recipients + subject + the quoted body; the composer's reducer (`EmailComposer.reducer.ts` `deriveReplyState`/`deriveForwardState`) computes `state.quotedThread` from the source record, and the in-dialog sparkle (`EmailComposer.tsx` `runAiDraft` ~:824) already re-appends the thread below the AI draft (owner UAT 2026-08-03 R5 items 1/2). The NEW auto-draft path (task 023 generates the body, task 025 opens the composer via this param) must reach the SAME parity: `bodyOverride` overrides ONLY the authored-message region; the composer STILL derives and appends `quotedThread` below the draft. The composed body = [AI draft] + [separator] + [quoted thread]. A whole-body-replacing `bodyOverride` that drops the thread is a defect this task exists to prevent. NFR-05: `EmailWorkspace`/the composer are shared, host-agnostic (ADR-012) and mount both in SpaarkeAi AND the standalone `sprk_emailpage` code page — the change MUST NOT break the standalone mount. Coordinate with email-communication-solution-r5 (owns these files live).</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/EmailComposeActions/useEmailComposeActions.tsx (openComposer :93 — add bodyOverride param)</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/.../EmailComposer.reducer.ts (deriveReplyState/deriveForwardState → state.quotedThread)</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/.../EmailComposer.tsx (runAiDraft ~:824 — the in-dialog sparkle re-append to reach parity with)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">BINDING invariant: `bodyOverride` overrides ONLY the authored-message region; the composer STILL appends the reducer-derived `quotedThread`. A whole-body-replace that drops the thread is a DEFECT. Scope: the compose path.</constraint>
+    <constraint source="ADR-012">The email composer stays host-agnostic — take deps as props; the new param must not couple to either host. Scope: shared-lib component.</constraint>
+    <constraint source="NFR-05">Dual-mount parity: the change MUST NOT break the standalone `sprk_emailpage` code-page mount; `EmailWorkspace` renders unchanged across both mounts. Scope: dual mount.</constraint>
+    <constraint source="project">§11 reuse-first: add ONE param that composes above the existing `quotedThread` — do NOT fork the composer or introduce a second draft path. Scope: the openComposer signature.</constraint>
+    <constraint source="project">Coordinate with email-communication-solution-r5 / email-communication-intelligence-r2 before changing the exported `openComposer` signature.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Trace the existing compose path: `openComposer` (:93) → reducer `deriveReplyState`/`deriveForwardState` → `state.quotedThread`; and the in-dialog `runAiDraft` re-append (~:824) that this must reach parity with.</step>
+    <step order="2">Add a `bodyOverride?` parameter to `openComposer` that seeds ONLY the authored-message region of the initial composer state.</step>
+    <step order="3">Ensure the reducer STILL derives `quotedThread` from the source record and the composed body is [bodyOverride draft] + [separator] + [quotedThread] — identical structure to the sparkle re-append.</step>
+    <step order="4">Verify the standalone `sprk_emailpage` mount still opens/renders unchanged (dual-mount parity).</step>
+    <step order="5">Add a reducer/unit test asserting the composed body contains BOTH the draft AND the `quotedThread` block; add a negative test where a whole-body-replace would fail.</step>
+    <step order="6">npm run build the Spaarke.Communication.Components package (+ SpaarkeAi if consumed); update TASK-INDEX.</step>
+  </steps>
+  <escalation>
+    <trigger>If preserving the quoted thread cannot be reconciled with the auto-draft body without either forking the composer or dropping the thread, STOP and escalate (FR-10 BINDING invariant, data-loss-adjacent) rather than shipping a whole-body-replace. Coordinate the `openComposer` signature change with email-communication-solution-r5 before merging.</trigger>
+  </escalation>
+  <justification>
+    <existing>`useEmailComposeActions.openComposer` (:93) exists and already builds recipients + subject + quoted body via the reducer's `quotedThread`.</existing>
+    <extension>Yes — add ONE `bodyOverride` param that composes above the existing reducer-derived `quotedThread`; no new draft path.</extension>
+    <cost-of-doing-nothing>Auto-draft (task 025) either cannot inject a body or clobbers the quoted thread — the exact invariant this project exists to hold fails (owner UAT R5 items 1/2 regress).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailComposeActions/useEmailComposeActions.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/.../EmailComposer.reducer.ts (if the compose seam needs it)</output>
+    <output type="test">reducer/unit test asserting composed body = draft + quotedThread; whole-body-replace fails</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`openComposer({ bodyOverride })` seeds only the authored-message region; the composer opens as [AI draft] + [separator] + [quoted thread].</criterion>
+    <criterion testable="true">A reducer/unit test asserts the composed body contains BOTH the AI draft AND the reducer-derived `quotedThread` block.</criterion>
+    <criterion testable="true">Negative: a `bodyOverride` that replaces the whole body (dropping the quoted thread) FAILS the test (defect asserted against).</criterion>
+    <criterion testable="true">Reply and Forward both preserve their respective `quotedThread` (deriveReplyState / deriveForwardState).</criterion>
+    <criterion testable="true">Negative: the standalone `sprk_emailpage` mount opens/renders unchanged (dual-mount parity intact).</criterion>
+    <criterion testable="true">Spaarke.Communication.Components builds; unit tests pass.</criterion>
+  </acceptance-criteria>
+  <notes>FR-10 BINDING invariant; reaches parity with the shipped in-dialog sparkle re-append (`runAiDraft` ~:824). Consumed by task 025 (Reply/Reply All/Forward cards). Coordinate the `openComposer` signature with email-communication-solution-r5. NFR-05 dual-mount parity is a hard gate.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>
