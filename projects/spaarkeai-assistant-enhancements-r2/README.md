@@ -1,8 +1,10 @@
 # SpaarkeAI Assistant Enhancements R2
 
-> **Last Updated**: 2026-08-05
+> **Portfolio**: [Project Issue #753](https://github.com/spaarke-dev/spaarke/issues/753) · Parent [Epic #421 (SPAARKE AI)](https://github.com/spaarke-dev/spaarke/issues/421) · Board [Project #2](https://github.com/users/spaarke-dev/projects/2)
 >
-> **Status**: In Progress
+> **Last Updated**: 2026-08-10
+>
+> **Status**: ✅ Complete
 
 ## Overview
 
@@ -22,10 +24,10 @@ Makes the SpaarkeAI Assistant **surface-aware** (it sees and can act on the curr
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Development |
-| **Progress** | 0% (tasks generated, not started) |
+| **Phase** | ✅ Complete |
+| **Progress** | 100% (all 27 tasks + wrap-up ✅; E/A/B/D/C shipped + deployed) |
 | **Target Date** | — |
-| **Completed Date** | — |
+| **Completed Date** | 2026-08-10 |
 | **Owner** | spaarke-dev |
 
 ## Problem Statement
@@ -40,15 +42,17 @@ Feed the real focused tab into each chat turn via a **focus-stamp** on the exist
 
 The project is **complete** when:
 
-- [ ] Asking "summarize this" with an email focused resolves to that email (focus-stamp in body; agent prompt "(active)" matches the focused tab)
-- [ ] Opening an email tab shows ≤3 relevant follow-on chips; switching away and back fires **no** additional LLM turn (suggestion cached per `tabId`)
-- [ ] The Assistant can state an open email's subject/sender/thread (Email visible-state variant emitted)
-- [ ] Reopening a History session restores chat **+ tabs + document + attachment chip + redline** (rich-path resume)
-- [ ] A session's first turn survives Redis eviction — reopen shows the transcript, not a blank pane (awaited `messages[0]` write)
-- [ ] History rows show descriptive titles + preview + tab summary; rename/delete work; the up-arrow is gone
-- [ ] "Set related record" prompts existing-vs-new, files the analysis on the matter's Analyses tab, and the filed session is resumable after >90 days
-- [ ] The Notifications banner is removed from the Assistant; the spine + Daily Briefing + Communications badge/toast still work (regression)
-- [ ] BFF publish size ≤ 60 MB compressed on every BFF-touching task
+- [x] Asking "summarize this" with an email focused resolves to that email (focus-stamp in body; agent prompt "(active)" matches the focused tab)
+- [x] Opening an email tab shows ≤3 relevant follow-on chips; switching away and back fires **no** additional LLM turn (suggestion cached per `tabId`)
+- [x] The Assistant can state an open email's subject/sender/thread (Email visible-state variant emitted)
+- [x] Reopening a History session restores chat **+ tabs + document + attachment chip + redline** (rich-path resume)
+- [x] A session's first turn survives Redis eviction — reopen shows the transcript, not a blank pane (awaited `messages[0]` write)
+- [x] History rows show descriptive titles + preview + tab summary; rename/delete work; the up-arrow is gone
+- [x] "Set related record" prompts existing-vs-new, files the analysis on the matter's Analyses tab, and the filed session is resumable after >90 days
+- [x] The Notifications banner is removed from the Assistant; the spine + Daily Briefing + Communications badge/toast still work (regression)
+- [x] BFF publish size ≤ 60 MB compressed on every BFF-touching task (48.41–48.45 MB across the D/C deploys)
+
+> **Verification status at close (2026-08-10)**: all criteria implemented, deployed to `spaarkedev1`, and smoke-verified. Owner E2E **cleared for A + B** (2026-08-06). C + D shipped + smoke-verified with owner E2E exercised across UAT rounds 1–2 (email visibility + history restore fixes verified). The **auth cold-start re-UAT** (post `requireSilentOnly` revert, deployed 2026-08-10) is the one owner check completing at close — the fix restores known-good pre-Aug-4 popup-fallback behavior. Project closed by owner direction.
 
 ## Scope
 
@@ -101,6 +105,7 @@ The project is **complete** when:
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-08-05 | 1.0 | Project initialized via /project-pipeline | spaarke-dev |
+| 2026-08-10 | 2.0 | **Project complete.** E/A/B/D/C shipped + deployed; Phase 0 UAT quick-wins + auth cold-start fix (`requireSilentOnly` revert) deployed; test-diet clean (0 scaffolding, 0 orphans); wrap-up gates + docs finalized. | spaarke-dev |
 
 ---
 

@@ -273,3 +273,141 @@ describe('composeWorkspaceReducer — loadedContentModelWarnings lifecycle (task
     expect(state.loadedContentModelWarnings).toEqual(FLATTEN_WARNINGS);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Task 042 (FR-06, PDF intake) — the `sourceFormat` lifecycle (041-review binding test plan):
+// set + transient-key mint at loadSucceeded; cleared + re-targeted + fileName-swapped + versionId
+// re-baselined by saveSucceeded; RETAINED by saveFailed (retry dedups to the same new record);
+// cleared by every fresh mount; older-BFF omission → null (bit-identical prior behavior).
+// ---------------------------------------------------------------------------
+
+describe('composeWorkspaceReducer — sourceFormat lifecycle (task 042 / FR-06 PDF intake)', () => {
+  // null = the mount carries NO fileName at all (the undefined-name fallback case; an explicit
+  // `undefined` argument would trigger the default parameter instead).
+  function pdfLoadedState(fileName: string | null = 'Corteva NDA.pdf'): ComposeWorkspaceState {
+    let state = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'requestLoad',
+      documentRef: {
+        speDriveItemId: 'spe-pdf-1',
+        sprkDocumentId: 'source-pdf-record',
+        fileName: fileName ?? undefined,
+      },
+      sessionId: 'session-pdf',
+    });
+    state = composeWorkspaceReducer(state, {
+      kind: 'loadSucceeded',
+      docxBytes: bytes(),
+      etag: 'etag-pdf',
+      versionId: null, // MEDIUM-3: the server suppresses the .pdf item's version id
+      sessionId: 'session-pdf',
+      contentModel: LOADED_MODEL,
+      sourceFormat: 'pdf',
+      transientKey: 'pdf-dedup-key-1',
+    });
+    return state;
+  }
+
+  it('loadSucceeded sets sourceFormat and carries the minted transient dedup key onto documentRef', () => {
+    const state = pdfLoadedState();
+    expect(state.sourceFormat).toBe('pdf');
+    expect(state.documentRef?.transientKey).toBe('pdf-dedup-key-1');
+  });
+
+  it('older-BFF omission (no sourceFormat field) normalizes to null — prior behavior bit-identical', () => {
+    const state = loadedState();
+    expect(state.sourceFormat).toBeNull();
+    expect(state.documentRef?.transientKey).toBeUndefined();
+  });
+
+  it('saveSucceeded clears sourceFormat, re-targets documentRef to the NEW docx identity, swaps the fileName, and re-baselines versionId from the response (B-LOW-3)', () => {
+    let state = pdfLoadedState();
+    state = composeWorkspaceReducer(state, {
+      kind: 'saveSucceeded',
+      sprkDocumentId: 'new-docx-record',
+      documentSpeId: 'spe-new-docx-1',
+      driveId: 'drive-new-docx',
+      etag: 'etag-docx-v1',
+      versionId: 'v-docx-1',
+    });
+    expect(state.sourceFormat).toBeNull();
+    expect(state.documentRef?.speDriveItemId).toBe('spe-new-docx-1');
+    expect(state.documentRef?.driveId).toBe('drive-new-docx');
+    expect(state.documentRef?.sprkDocumentId).toBe('new-docx-record');
+    expect(state.documentRef?.fileName).toBe('Corteva NDA.docx');
+    // B-LOW-3: the load-time versionId was null (the .pdf item's version is meaningless); the save
+    // response's id becomes the new doc's baseline.
+    expect(state.versionId).toBe('v-docx-1');
+  });
+
+  it('fileName swap handles the uppercase .PDF extension and the undefined-name fallback (B-LOW-4 mirror)', () => {
+    let upper = pdfLoadedState('SIGNED AGREEMENT.PDF');
+    upper = composeWorkspaceReducer(upper, {
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-x',
+      etag: null,
+    });
+    expect(upper.documentRef?.fileName).toBe('SIGNED AGREEMENT.docx');
+
+    // 042-review LOW-3: a fileName with NO extension — the .pdf-strip regex no-ops and .docx appends.
+    let bare = pdfLoadedState('Corteva NDA');
+    bare = composeWorkspaceReducer(bare, {
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-z',
+      etag: null,
+    });
+    expect(bare.documentRef?.fileName).toBe('Corteva NDA.docx');
+
+    let noName = pdfLoadedState(null);
+    noName = composeWorkspaceReducer(noName, {
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-y',
+      etag: null,
+    });
+    // Mirrors triggerSave's ('document.pdf' → 'document.docx') fallback so local state never
+    // diverges from the server record.
+    expect(noName.documentRef?.fileName).toBe('document.docx');
+  });
+
+  it('saveFailed RETAINS sourceFormat and the transient key — a retry create-on-saves onto the SAME new record', () => {
+    let state = pdfLoadedState();
+    state = composeWorkspaceReducer(state, { kind: 'saveFailed', errorMessage: 'network blip' });
+    expect(state.sourceFormat).toBe('pdf');
+    expect(state.documentRef?.transientKey).toBe('pdf-dedup-key-1');
+    expect(state.documentRef?.speDriveItemId).toBe('spe-pdf-1');
+  });
+
+  it('every fresh mount clears sourceFormat (clear-rather-than-inherit)', () => {
+    const base = pdfLoadedState();
+    expect(
+      composeWorkspaceReducer(base, {
+        kind: 'requestLoad',
+        documentRef: { speDriveItemId: 'spe-other' },
+        sessionId: 's-next',
+      }).sourceFormat
+    ).toBeNull();
+    expect(
+      composeWorkspaceReducer(base, {
+        kind: 'mountTransient',
+        docxBytes: bytes(),
+        fileName: 'local.docx',
+        sessionId: 'b1',
+      }).sourceFormat
+    ).toBeNull();
+    expect(
+      composeWorkspaceReducer(base, { kind: 'mountDraftHtml', html: '<p></p>', sessionId: 'd1' }).sourceFormat
+    ).toBeNull();
+    expect(composeWorkspaceReducer(base, { kind: 'reset' }).sourceFormat).toBeNull();
+  });
+
+  it('a NON-pdf save keeps the pre-041 versionId adopt-only-when-null semantics (no regression)', () => {
+    let state = loadedState(); // versionId 'v-load' retained from load
+    state = composeWorkspaceReducer(state, {
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-1',
+      etag: 'e2',
+      versionId: 'v-new',
+    });
+    // A stored doc's versionId stays FIXED across saves (delta-vs-load-time-original contract).
+    expect(state.versionId).toBe('v-load');
+  });
+});

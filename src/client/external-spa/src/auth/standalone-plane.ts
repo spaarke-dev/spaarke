@@ -27,16 +27,8 @@
 import type { IPublicClientApplication } from '@azure/msal-browser';
 import type { Realm } from './realm';
 import { MSAL_BFF_SCOPE, getWorkforceEnvConfig } from '../config';
-import {
-  msalInstance,
-  createStandaloneMsalInstance,
-  workforceAuthorityConfig,
-} from './msal-config';
-import {
-  acquireStandaloneBffToken,
-  setActiveBffTokenAcquirer,
-  setActiveLoginScope,
-} from './msal-auth';
+import { msalInstance, createStandaloneMsalInstance, workforceAuthorityConfig } from './msal-config';
+import { acquireStandaloneBffToken, setActiveBffTokenAcquirer, setActiveLoginScope } from './msal-auth';
 
 /** A resolved browser sign-in plane: the MSAL instance to mount + the BFF scope to request. */
 export interface StandalonePlane {

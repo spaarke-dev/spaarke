@@ -77,6 +77,11 @@ import { WorkspacePaneMenu } from './WorkspacePaneMenu';
 // build the ribbon composeMode=editor launch seed (stored-doc pointer) that the
 // workspace handler's 'compose' branch consumes.
 import type { ComposeWidgetSeed } from './composeWidgetData';
+// spaarkeai-assistant-enhancements-r2 Phase 0 Fix 2 — derive a Compose tab's
+// short display label + full-filename tooltip from the loaded document, so
+// multiple open Compose tabs are distinguishable in the tab strip instead of
+// all reading "Compose".
+import { deriveComposeTabLabel } from './composeTabLabel';
 import {
   logTelemetryError,
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
@@ -1934,7 +1939,16 @@ export function WorkspacePane(): React.JSX.Element {
         // The tab's stable identity is re-derived from its seed on later reuse
         // decisions, so nothing extra is stamped onto widgetData.
         const composeWidgetData = seedFilename ? { ...(widgetData ?? {}), filename: seedFilename } : widgetData;
-        const composeTabId = manager.addTab('compose', composeWidgetData, displayName);
+        // Fix 2 (spaarkeai-assistant-enhancements-r2): every compose entry path
+        // (upload / draft / stored-doc / ribbon-launch) already resolves
+        // `seedFilename` above — derive the short tab label + full-filename
+        // tooltip from it HERE, the single funnel point, instead of touching
+        // each dispatch call site. A seedless/blank open (no filename known —
+        // e.g. the Workspaces-menu "Compose" selection or the welcome-card
+        // blank open) falls back to the plain `displayName` ("Compose"),
+        // identical to the pre-fix behavior.
+        const composeLabel = deriveComposeTabLabel(seedFilename, displayName);
+        const composeTabId = manager.addTab('compose', composeWidgetData, composeLabel.displayName, composeLabel.tooltip);
         syncState();
         // UC-5 truthfulness (task 020 / FR-C1): a NEW compose tab's widget has
         // NOT resolved yet — only the empty shell exists. Acking here would
@@ -1999,6 +2013,74 @@ export function WorkspacePane(): React.JSX.Element {
               ...(chatSessionId ? { sessionId: chatSessionId } : {}),
             }
           : widgetData;
+
+      // ── Fix 1 (spaarkeai-assistant-enhancements-r2, UAT: duplicate tabs) ────
+      // This generic path had NO de-dup guard, unlike the compose branch's
+      // instance-keyed reuse above and the startup-default-layout effect's
+      // layoutId match (~line 960). A second `widget_load` for an already-open
+      // workspace LAYOUT or singleton widget type stacked a duplicate tab
+      // instead of focusing the existing one — e.g. asking "do you see the
+      // daily briefing tab?" opened a SECOND Daily Briefing tab.
+      //
+      // Reuse rule (mirrors the two existing guards' style):
+      //   - widgetType === 'workspace' (a LAYOUT tab) → match an existing
+      //     'workspace' tab by `widgetData.layoutId`. The 'workspace' registry
+      //     entry is itself allowMultiple:true (different LAYOUTS may coexist
+      //     side-by-side — Corporate Workspace + Litigation Workspace), but the
+      //     SAME layoutId must not stack a second tab.
+      //   - any other widgetType → match an existing tab by widgetType alone,
+      //     but ONLY when the registry metadata's `allowMultiple` is falsy (a
+      //     true singleton, e.g. a global dashboard). Widgets registered
+      //     allowMultiple:true (email, document-viewer, analysis, …) keep
+      //     stacking as before — untouched by this guard.
+      const incomingLayoutId =
+        widgetType === 'workspace' ? (widgetData as { layoutId?: string } | null)?.layoutId : undefined;
+      const dedupeSnapshot = manager.getSnapshot();
+      const existingSingletonTab =
+        widgetType === 'workspace'
+          ? incomingLayoutId
+            ? dedupeSnapshot.tabs.find(t => {
+                if (t.widgetType !== 'workspace') return false;
+                const data = t.widgetData as { layoutId?: string } | null;
+                return data?.layoutId === incomingLayoutId;
+              })
+            : undefined
+          : !meta?.allowMultiple
+            ? dedupeSnapshot.tabs.find(t => t.kind === 'widget' && t.widgetType === widgetType)
+            : undefined;
+
+      if (existingSingletonTab) {
+        // Reuse: update the existing tab's data + focus it — no new tab, no
+        // FIFO eviction slot consumed. Mirrors the compose branch's reuse
+        // handling (update then activate) rather than a bare setActiveTab, so
+        // a re-dispatch carrying fresher widgetData (e.g. a changed
+        // workTypeValue) still reaches the mounted widget.
+        manager.updateTab(existingSingletonTab.id, effectiveWidgetData);
+        manager.setActiveTab(existingSingletonTab.id);
+        syncState();
+
+        // Same truthfulness contract as a normal open (UC-5 / FR-C1): the
+        // widget is already resolved+mounted (it was reused, not freshly
+        // created), so acking + the confirmation dispatches are safe here —
+        // no need to wait on resolveWorkspaceWidget() again.
+        if (event.frameId) {
+          sendUiActionAck(event.frameId);
+        }
+
+        const snapshotAfterReuse = manager.getSnapshot();
+        const reuseTabCount = snapshotAfterReuse.tabs.length;
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType,
+          tabId: existingSingletonTab.id,
+          ...(reuseTabCount > 0 ? { tabCount: reuseTabCount } : {}),
+        });
+        dispatch('workspace', {
+          type: 'tab_count_change',
+          tabCount: reuseTabCount,
+        });
+        return;
+      }
 
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
       const tabId = manager.addTab(widgetType, effectiveWidgetData, displayName);

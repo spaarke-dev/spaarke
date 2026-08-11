@@ -84,5 +84,5 @@ export async function fetchMeEntitlements(teamsHost: boolean): Promise<MeEntitle
   const response = MOCK_BY_PLANE[plane];
   // Simulate latency so the workspace's loading state is exercised — mirrors the delay()
   // convention in mocks/mock-service.ts used elsewhere in this SPA.
-  return new Promise((resolve) => window.setTimeout(() => resolve(response), 300));
+  return new Promise(resolve => window.setTimeout(() => resolve(response), 300));
 }

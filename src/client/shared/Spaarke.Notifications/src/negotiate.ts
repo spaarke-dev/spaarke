@@ -100,8 +100,38 @@ export async function connectSignalR(onSignal: (signal: NotificationSignal) => v
   // used authenticatedFetch, per ADR-028). This is the ONE enumerated raw-fetch
   // exception for this library — every other HTTP call this package makes goes
   // through authenticatedFetch.
+  //
+  // spaarkeai-assistant-enhancements-r2 Phase 0 FIX 3 (2026-08-07): `accessTokenFactory`
+  // used to close over the ONE `info.accessToken` snapshot taken above and return it
+  // forever — including on every `withAutomaticReconnect` attempt, by which point that
+  // short-lived SignalR-service token may well have expired. The SDK calls
+  // `accessTokenFactory` again before each (re)connect attempt specifically so callers
+  // can hand back a FRESH token — it supports returning a `Promise<string>`, so we
+  // re-run `negotiate()` (a normal `authenticatedFetch` call, itself already
+  // 401-retry-with-backoff resilient per authenticatedFetch.ts) on every invocation
+  // instead of reusing the snapshot. The originally negotiated `info.url` is reused for
+  // the connection's transport endpoint (fixed at `withUrl` build time); only the TOKEN
+  // is refreshed per-call.
   const connection = new signalR.HubConnectionBuilder()
-    .withUrl(info.url, { accessTokenFactory: () => info.accessToken })
+    .withUrl(info.url, {
+      accessTokenFactory: async () => {
+        try {
+          const fresh = await negotiate();
+          return fresh.accessToken;
+        } catch (err) {
+          // Non-fatal: fall back to the last-known token rather than throwing out of
+          // the SDK's internal token-fetch path (an uncaught rejection here would
+          // abort the (re)connect attempt with a less diagnosable error). The
+          // subsequent connect/reconnect attempt will surface its own failure/backoff
+          // via the normal SignalR retry policy if this stale token is also rejected.
+          console.warn(
+            '[@spaarke/notifications] accessTokenFactory re-negotiate failed; reusing last-known token:',
+            err
+          );
+          return info.accessToken;
+        }
+      },
+    })
     .withAutomaticReconnect([0, 2000, 5000, 10000, 30000])
     .configureLogging(signalR.LogLevel.Warning)
     .build();

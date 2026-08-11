@@ -97,6 +97,7 @@ public sealed class EmailRegardingIntentSeamTests
         return new CommunicationEnrichmentService(
             enqueuer.Object, entityService, config, producer.Object,
             triageAi.Object, proposeAi.Object, createTaskAi.Object, actionSeam.Object,
+            TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

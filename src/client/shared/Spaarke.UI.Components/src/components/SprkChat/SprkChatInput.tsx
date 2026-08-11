@@ -22,6 +22,7 @@ import { ISprkChatInputProps, ISprkChatInputHandle } from './types';
 import { SlashCommandMenu } from '../SlashCommandMenu/SlashCommandMenu';
 import { useSlashCommands } from '../../hooks/useSlashCommands';
 import { DEFAULT_SLASH_COMMANDS, type SlashCommand } from '../SlashCommandMenu/slashCommandMenu.types';
+import { thinScrollbarStyle } from '../../theme/scrollbar';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -48,6 +49,13 @@ const useStyles = makeStyles({
   },
   textarea: {
     flexGrow: 1,
+  },
+  // FIX 2 (Phase 0, spaarkeai-assistant-enhancements-r2): applied to the
+  // Fluent `textarea` slot (the native <textarea> element) so a thin,
+  // theme-aware scrollbar shows if the composer grows past its visible rows.
+  // Same canonical style as the message list (theme/scrollbar.ts).
+  textareaScrollbar: {
+    ...thinScrollbarStyle,
   },
   // UAT 2026-07-21: a light-gray toolbar tray at the bottom of the composer.
   // Left holds the host's leading slot (the Attach paperclip); right holds the
@@ -327,7 +335,10 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
               data-testid="chat-input-textarea"
               // CHAT-5 (UAT 2026-07-19): a taller default composer when the host asks for
               // it — `rows` sets the textarea's initial visible height (still user-resizable).
-              textarea={minRows ? { rows: minRows } : undefined}
+              // FIX 2: className here reaches the native <textarea> (the primary slot),
+              // unlike the outer `className={styles.textarea}` above which only styles the
+              // Fluent wrapper — that's how the thin-scrollbar rules actually apply.
+              textarea={{ ...(minRows ? { rows: minRows } : {}), className: styles.textareaScrollbar }}
               // Fluent Textarea forwards the ref to the underlying <textarea> element
               // (primary slot — confirmed by TextareaSlots.textarea JSDoc)
               ref={inputRef}

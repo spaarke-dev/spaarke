@@ -25,7 +25,11 @@ namespace Sprk.Bff.Api.Tests.Integration.Seam.Communication;
 /// under test are non-negotiable: the task is CREATED via the facade and its FR-E5 fields are PATCHed UNDER THE
 /// CONFIRMING USER'S impersonation (Path B, ADR-013), an unresolved caller fails closed (403), a non-create-task or
 /// unverifiable-citation or already-resolved proposal is refused, and every successful apply writes exactly one
-/// append-only audit row.
+/// append-only audit row. Also covers Job C AD-HOC create (<see cref="CommunicationCreateTaskApplyService.CreateAdHocAsync"/>,
+/// task 056b / FR-E5 "+ New task"): a reviewer-authored task (no proposal, no citation) is created via the SAME
+/// facade + impersonated FR-E5 PATCH + ONE Applied audit row, supports create-and-complete inline, requires a subject
+/// + regarding (422 otherwise), fails closed on an unresolved caller (403), and surfaces a post-create PATCH failure
+/// loudly (422) while still auditing the create.
 /// </summary>
 public sealed class CreateTaskApplySeamTests
 {
@@ -46,6 +50,7 @@ public sealed class CreateTaskApplySeamTests
     private const int ActionApplied = 100000005;
     private const int ActorTypeHuman = 100000001;
     private const int EventStatusOpen = 1;
+    private const int EventStatusCompleted = 2;
 
     private readonly Mock<ICallerSystemUserResolver> _callerResolver = new(MockBehavior.Strict);
     private readonly Mock<IGenericEntityService> _generic = new(MockBehavior.Strict);
@@ -280,6 +285,154 @@ public sealed class CreateTaskApplySeamTests
 
         (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(500);
         _actionSeam.Verify(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private static CreateAdHocTaskRequest AdHocRequest() => new()
+    {
+        Subject = "Call the client about the filing",
+        Description = "Follow up re: the September filing",
+        RegardingEntity = TargetEntity,
+        RegardingRecordId = RegardingRecordId,
+        DueDate = new DateOnly(2026, 9, 1),
+        BaseDate = new DateOnly(2026, 8, 1),
+        FinalDueDate = new DateOnly(2026, 9, 15),
+        Status = EventStatusOpen,
+        AssignedTo = AssignedToUserId,
+    };
+
+    // FR-E5 (task 056b) — AD-HOC: a reviewer-authored task (no proposal) is CREATED via the facade with the confirmed
+    // record as the regarding, its FR-E5 fields PATCHed UNDER the confirming user's impersonation, and ONE append-only
+    // Applied audit row written (marked ad-hoc via the __create_task__:adhoc sentinel). No proposal-load / citation /
+    // open-walk is touched (asserted by the strict envelope-reader + RetrieveAsync mocks never being called).
+    [Fact]
+    public async Task CreateAdHocAsync_WhenValid_CreatesTaskPatchesUnderImpersonationAndWritesOneAdHocAuditRow()
+    {
+        var sut = BuildSut();
+        CreateTaskRequest? created = null;
+        UpdateRecordRequest? patched = null;
+        _actionSeam
+            .Setup(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<CreateTaskRequest, CancellationToken>((r, _) => created = r)
+            .ReturnsAsync(new CreateTaskResult(true, CreatedTaskId, null));
+        _actionSeam
+            .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<UpdateRecordRequest, CancellationToken>((r, _) => patched = r)
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_basedate", "sprk_finalduedate", "sprk_eventstatus" }, null));
+
+        var result = await sut.CreateAdHocAsync(CommunicationId, AdHocRequest(), new ClaimsPrincipal(), CancellationToken.None);
+
+        created.Should().NotBeNull();
+        created!.Subject.Should().Be("Call the client about the filing");
+        created.RegardingObjectType.Should().Be(TargetEntity);
+        created.RegardingObjectId.Should().Be(RegardingRecordId);
+        created.OwnerId.Should().Be(AssignedToUserId);
+
+        patched.Should().NotBeNull();
+        patched!.ImpersonateSystemUserId.Should().Be(CallerSystemUserId);
+        patched.EntityLogicalName.Should().Be("sprk_event");
+        patched.RecordId.Should().Be(CreatedTaskId);
+
+        // Exactly one append-only Applied audit row (actor = the confirming human), marked ad-hoc via the sentinel.
+        _generic.Verify(g => g.CreateAsync(
+            It.Is<Entity>(e =>
+                e.LogicalName == "sprk_emailreviewlog"
+                && ((OptionSetValue)e["sprk_action"]).Value == ActionApplied
+                && ((OptionSetValue)e["sprk_actortype"]).Value == ActorTypeHuman
+                && (string)e["sprk_actor"] == CallerSystemUserId.ToString()
+                && (string)e["sprk_targetfield"] == "__create_task__:adhoc"
+                && ((string)e["sprk_aisuggestion"]).Contains("\"adhoc\":true")),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        // No proposal path was touched — ad-hoc has no proposal to load or citation to verify.
+        _generic.Verify(g => g.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never);
+        _envelopeReader.Verify(r => r.ReconstructEnvelopeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        result.CreatedTaskId.Should().Be(CreatedTaskId);
+        result.AuditLogId.Should().Be(AuditLogId);
+        result.RegardingEntity.Should().Be(TargetEntity);
+        result.RegardingRecordId.Should().Be(RegardingRecordId);
+    }
+
+    // FR-E5 (task 056b) — CREATE-AND-COMPLETE inline: status=Completed + completed date flow through the SAME
+    // impersonated PATCH on the created task (no separate silent complete call).
+    [Fact]
+    public async Task CreateAdHocAsync_WhenCreateAndComplete_PatchesStatusCompletedAndCompletedDate()
+    {
+        var sut = BuildSut();
+        UpdateRecordRequest? patched = null;
+        _actionSeam
+            .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
+            .Callback<UpdateRecordRequest, CancellationToken>((r, _) => patched = r)
+            .ReturnsAsync(new UpdateRecordResult(true, new[] { "sprk_eventstatus", "sprk_completeddate" }, null));
+
+        var request = AdHocRequest() with { Status = EventStatusCompleted, CompletedDate = new DateOnly(2026, 8, 7) };
+        await sut.CreateAdHocAsync(CommunicationId, request, new ClaimsPrincipal(), CancellationToken.None);
+
+        patched.Should().NotBeNull();
+        patched!.FieldMappings.Should().Contain(m => m.Field == "sprk_eventstatus" && m.Value == "2")
+            .And.Contain(m => m.Field == "sprk_completeddate");
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    // FR-E5 (task 056b) NEGATIVE — auth: an unresolved caller fails closed (403); nothing created/audited.
+    [Fact]
+    public async Task CreateAdHocAsync_WhenCallerUnresolved_Returns403AndNeverCreates()
+    {
+        var sut = BuildSut();
+        _callerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved("no oid"));
+
+        var act = () => sut.CreateAdHocAsync(CommunicationId, AdHocRequest(), new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(403);
+        _actionSeam.Verify(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // FR-E5 (task 056b) NEGATIVE — a blank subject is refused (422); nothing created.
+    [Fact]
+    public async Task CreateAdHocAsync_WhenSubjectBlank_Refuses422AndNeverCreates()
+    {
+        var sut = BuildSut();
+        var request = AdHocRequest() with { Subject = "   " };
+
+        var act = () => sut.CreateAdHocAsync(CommunicationId, request, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(422);
+        _actionSeam.Verify(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // FR-E5 (task 056b) NEGATIVE — a missing regarding is refused (422): an ad-hoc task must attach to the confirmed
+    // record (NFR-10); it is never created record-less.
+    [Fact]
+    public async Task CreateAdHocAsync_WhenRegardingMissing_Refuses422AndNeverCreates()
+    {
+        var sut = BuildSut();
+        var request = AdHocRequest() with { RegardingRecordId = null };
+
+        var act = () => sut.CreateAdHocAsync(CommunicationId, request, new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(422);
+        _actionSeam.Verify(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // FR-E5 (task 056b) NEGATIVE — deadline integrity (ADR-015): a post-create FR-E5 PATCH failure is surfaced loudly
+    // (422) — never a silent dropped field — but the create IS audited (create + failure in the ONE Applied row).
+    [Fact]
+    public async Task CreateAdHocAsync_WhenFieldPatchFails_Returns422ButStillWritesAuditRow()
+    {
+        var sut = BuildSut();
+        _actionSeam
+            .Setup(s => s.UpdateRecordAsync(It.IsAny<UpdateRecordRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new UpdateRecordResult(false, Array.Empty<string>(), "sprk_eventstatus: value '99' is not a valid option."));
+
+        var act = () => sut.CreateAdHocAsync(CommunicationId, AdHocRequest(), new ClaimsPrincipal(), CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(422);
+        _actionSeam.Verify(s => s.CreateTaskAsync(It.IsAny<CreateTaskRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        _generic.Verify(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once, "the create is audited even when the follow-on PATCH fails");
     }
 
     private static Entity ProposedRow(string targetField)
