@@ -297,10 +297,13 @@ public static class GrantExternalAccessEndpoint
             payload["sprk_expiresdate"] = request.ExpiryDate.Value.ToString("o");
         }
 
-        if (request.AccountId.HasValue)
-        {
-            payload["sprk_accountid@odata.bind"] = $"/accounts({request.AccountId.Value})";
-        }
+        // NOTE (task 070): the firm/org association is intentionally NOT written. The prior code bound
+        // sprk_accountid@odata.bind -> /accounts, but sprk_externalrecordaccess has NO account lookup AND
+        // the OOB `account` entity is the wrong target — Spaarke models the firm/org as `sprk_organization`
+        // (owner steer, 2026-08-11). Persisting it requires (a) an owner-added sprk_organization lookup on
+        // the grant table and (b) renaming the DTO AccountId -> OrganizationId. Until then AccountId is
+        // accepted but not persisted (writing the non-existent lookup would 400 every grant that sends it).
+        // Tracked for /defer.
 
         return payload;
     }
