@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="TrackingFieldTrio"
-           version="1.0.14"
+           version="1.0.15"
            display-name-key="Tracking Field Trio"
-           description-key="Compact 3-field control for tracking flags (v1.0.14). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission), plus an opt-in governance toolbar (grant-access modal + email-members icons). The grant modal is polymorphic across Project/Matter/Work Assignment and uses the side-pane Advanced Lookup for the contact + organization pickers. Designed to fit inside a 33% form column."
+           description-key="Compact 3-field control for tracking flags (v1.0.15). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission), plus an opt-in governance toolbar (grant-access modal + email-members icons). The grant modal is polymorphic across Project/Matter/Work Assignment and uses the side-pane Advanced Lookup for the contact + organization pickers. Designed to fit inside a 33% form column."
            control-type="standard">
     <!-- task 041 — the grant modal calls the BFF external-access endpoints via
          @spaarke/auth's authenticatedFetch (MSAL), so this control now needs

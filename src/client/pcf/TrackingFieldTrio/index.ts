@@ -114,6 +114,10 @@ import type { INavigationService } from '@spaarke/ui-components/dist/types/servi
 // forked dialog, no ad-hoc fetch to the send endpoint).
 import { SendEmailDialog } from '@spaarke/ui-components/dist/components/EmailComposer';
 import { initializeAuth } from './authInit';
+// Dataverse Environment Variable resolution (task 073 UAT fix) — the SAME mechanism
+// SemanticSearchControl uses so the grant modal's BFF auth needs NO per-control form config: the MSAL
+// client id / BFF app id / BFF base url come from sprk_MsalClientId / sprk_BffApiAppId / sprk_BffApiBaseUrl.
+import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environmentVariables';
 
 // sprk_communication Access Permission choice values — MUST match the
 // Dataverse OptionSet values. Entity-specific: lives ONLY here (the PCF
@@ -241,13 +245,23 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const params = context.parameters as any;
-    this.apiBaseUrl = params.apiBaseUrl?.raw ?? '';
-    this.authInitPromise = initializeAuth(
-      params.clientAppId?.raw ?? '',
-      params.bffAppId?.raw ?? '',
-      this.apiBaseUrl,
-      getClientUrl()
-    ).catch(err => {
+    const webApi = context.webAPI;
+    // task 073 UAT fix: resolve MSAL config from the manifest input properties FIRST, then fall back to
+    // the Dataverse ENVIRONMENT VARIABLES (sprk_MsalClientId / sprk_BffApiAppId / sprk_BffApiBaseUrl) —
+    // the SAME mechanism SemanticSearchControl uses. The prior code only read the (empty) manifest props,
+    // so on an environment configured purely via env vars it threw "MSAL Client ID not configured".
+    // getApiBaseUrl() normalizes the URL (strips any trailing /api) so the modal's `/api/...` paths resolve.
+    this.authInitPromise = (async () => {
+      const clientAppId =
+        (params.clientAppId?.raw as string) || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
+      const bffAppId =
+        (params.bffAppId?.raw as string) || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
+      this.apiBaseUrl = (params.apiBaseUrl?.raw as string) || (await getApiBaseUrl(webApi));
+      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl());
+      // Re-render so surfaces that read this.apiBaseUrl directly (e.g. SendEmailDialog's bffBaseUrl) pick
+      // up the resolved value now that auth init has completed.
+      this.renderControl();
+    })().catch(err => {
       console.error(
         "[TrackingFieldTrio] Auth initialization failed — the access-grant modal's BFF calls will fail until the page is reloaded.",
         err
@@ -630,7 +644,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       accessPermission: this.accessPermissionValue,
       showTitle,
       showVersion,
-      versionText: 'v1.0.14 • Built 2026-08-11',
+      versionText: 'v1.0.15 • Built 2026-08-11',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in

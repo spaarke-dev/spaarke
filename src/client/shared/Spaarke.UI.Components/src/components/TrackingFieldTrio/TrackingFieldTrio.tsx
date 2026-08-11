@@ -107,6 +107,8 @@ const useStyles = makeStyles({
     alignItems: 'center',
     width: '100%',
     boxSizing: 'border-box',
+    // Positioning context for the governance toolbar, which sits top-right (task 073 UAT).
+    position: 'relative',
     // Zero top/bottom padding so the caption row sits directly under the
     // form section title, matching the vertical rhythm of adjacent cards.
     ...shorthands.padding(0, tokens.spacingHorizontalXL),
@@ -163,18 +165,18 @@ const useStyles = makeStyles({
     textAlign: 'right',
     marginTop: tokens.spacingVerticalXS,
   },
-  // Governance toolbar (person + email icons — task 040). Spans the full
-  // grid width and sits below the existing Monitor/High-Priority/
-  // Access-Permission row. Icons resolve color via Fluent's default
-  // `currentColor` fill (ADR-021) — no hardcoded colors here.
+  // Governance toolbar (person + email icons — task 040; repositioned task 073 UAT). Sits at the
+  // TOP-RIGHT of the control box — mirroring the header-action placement of the Messages / Tasks &
+  // Events cards — rather than as a bottom row. Absolute within the position:relative container. Icons
+  // resolve color via Fluent's default `currentColor` fill (ADR-021) — no hardcoded colors here.
   toolbar: {
-    gridColumn: '1 / -1',
+    position: 'absolute',
+    top: 0,
+    right: tokens.spacingHorizontalXL,
     display: 'flex',
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalXS,
-    marginTop: tokens.spacingVerticalXS,
   },
   toolbarIconButton: {
     minWidth: 'auto',
