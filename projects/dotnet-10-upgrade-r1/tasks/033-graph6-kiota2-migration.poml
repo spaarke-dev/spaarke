@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>Graph 5.101 → 6.5.0 + Kiota 1→2 (transitive); retire the 7 Kiota pins + NoWarn</title>
+    <phase>P3 Test green + re-baseline</phase>
+    <gate>030 complete (full suite green on net10 / Graph 5.x baseline)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Breaking SDK major on a core integration (Graph auth + SPE + mail + jobs); brownfield; bff-api; security-relevant (CVE closure mechanism changes).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The break is mechanical + closed-scope per the break-assessment; no architectural judgment beyond the enumerated call sites.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial: runs AFTER the net10 retarget is proven green (030) so net10 and the Graph major stay independently verifiable; 031/032 measure the post-033 package graph.</parallel-reason>
+    <deps>030</deps>
+    <tags>dotnet, bff-api, packages, migration, security, auth</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate the BFF from `Microsoft.Graph 5.101.0` to `6.5.0` (re-pull the latest 6.x before pinning) — which pulls `Microsoft.Graph.Core 4.0.1` and transitive `Microsoft.Kiota.* 2.0.0` — then DELETE all 7 direct `Microsoft.Kiota.*` `PackageReference`s (now satisfied transitively at 2.0.0, which is > the 1.22.0 CVE floor) and confirm `NoWarn=NU1903` is gone (task 004 removed it; if present, remove). This is an owner-approved fold-in of a formerly-deferred optional major (design §6.4), justified by the break-assessment sizing it as MECHANICAL (`notes/graph6-kiota2-break-assessment.md`): the hard v4→v5 Kiota rewrite is already absorbed, direct Kiota usage is 100% on the stable side of the 2.0 break (zero hits on the 5 broken APIs), no batch usage, one `PageIterator`. Resolve the single swing factor (`Microsoft.Graph.ServiceException` under Graph.Core 4.x), fix the latent `DriveItemOperations` dead-catch bug found by the assessment, build green, re-run the Graph-affected tests, and re-smoke the four auth paths + SPE + mail + jobs. ZERO product-behavior change is still the bar — this is a version migration, not a feature change.</prompt>
+  <role>SPAARKE platform developer. Expert in the Microsoft.Graph .NET SDK v5→v6 migration, Kiota 1→2 abstractions, OBO/Managed-Identity auth, and SPE file operations. Follow ADRs strictly.</role>
+  <goal>`Sprk.Bff.Api.csproj` references `Microsoft.Graph 6.5.0` (no direct `Microsoft.Kiota.*` pins remain; transitive Kiota = 2.0.0); `NoWarn=NU1903` absent; the `ServiceException`/`ODataError` swing factor resolved; the `DriveItemOperations` dead-catch bug fixed; `dotnet build -c Release src/server/api/Sprk.Bff.Api/` green; the Graph-affected tests pass; publish hygiene (ADR-029) intact.</goal>
+
+  <context>
+    <background>Owner decision 2026-08-11: fold Graph v6 + Kiota 2.0 into THIS project (supersedes the spec's 2026-08-10 "Graph v6 out of scope" resolution). Evidence: `notes/graph6-kiota2-break-assessment.md` — churn buckets: ~1–2 files forced, 6 files contingency-only, 0 moderate, 0 deep. Direct-Kiota surface (`AzureIdentityAuthenticationProvider`, custom `IAccessTokenProvider`, `UntypedObject/String/Boolean` reads in `SpeAdminGraphService`, one `PageIterator` in `PrivilegeGroupResolver`) is all Kiota-2.0-stable; the custom `GraphHttpMessageHandler` is a plain `DelegatingHandler`, not Kiota middleware. Swing factor: does `Microsoft.Graph.ServiceException` survive into Graph.Core 4.x? — evidence says RETAINED (no changelog removal; survived v4→v5). If retained: forced change = 1 csproj + 1 module doc. If removed: delete ~72 `ServiceException` catch blocks across 6 files — but those are ALREADY DEAD on v5 (Kiota throws `ODataError`), so deletion is mechanical. Latent bug to fix in passing: `DriveItemOperations`' `ServiceException` catches are dead today, so its Graph 404/403 fall through as opaque errors — re-anchor them on `ODataError`.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file role="modify">Directory.Build.props</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/kiota-cve-finding.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-007-spefilestore.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Full suite green on the net10 / Graph 5.x baseline — the clean bisect point before the Graph major.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Sequence: run AFTER 030 (net10 proven green). Do NOT merge this into the P0 retarget — net10 and the Graph major stay independently verifiable so a bad smoke bisects cleanly.</constraint>
+    <constraint source="project">Delete all 7 direct `Microsoft.Kiota.*` pins once Graph 6.5 supplies them transitively at 2.0.0; verify with `dotnet list package --include-transitive | grep -i kiota` that ALL resolved Kiota assemblies are the SAME 2.0.x version (the version-match invariant from the module CLAUDE.md still holds — now enforced transitively). Re-introduce a direct pin ONLY if a transitive conflict forces it, with an inline reason.</constraint>
+    <constraint source="ADR-029">MUST keep `<SelfContained>false</SelfContained>` + `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>`; MUST NOT add `PublishTrimmed`/`PublishAot`/`RuntimeFrameworkVersion`. Report the publish-size delta (Graph 6/Kiota 2 vs 5/1.22) — task 031 re-baselines, but flag if this bump moves it materially (§10 ceiling ≤60 MB).</constraint>
+    <constraint source="ADR-028">Auth behavior (OBO + Managed Identity) MUST be unchanged. `AzureIdentityAuthenticationProvider` + the custom `IAccessTokenProvider` are Kiota-2.0-stable — a migration is version-only; do NOT alter token-acquisition flows.</constraint>
+    <constraint source="ADR-007">Graph access stays behind the `SpeFileStore` facade; do NOT leak `GraphServiceClient` into endpoints during the migration.</constraint>
+    <constraint source="project">ZERO product-behavior change. The two behavior-level verify items (`ODataError.ResponseHeaders` enumeration shape; CAE / backing-store defaults under Kiota 2.0) are SMOKE observations, not source edits — record the observed behavior, do not "fix" it unless it regressed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Microsoft.Graph v5→v6 + Kiota 1→2 migration on the Spaarke BFF</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md</file>
+      <file>projects/dotnet-10-upgrade-r1/notes/kiota-cve-finding.md</file>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-kiota-call-site-inventory" location="projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md">the exhaustive Graph + direct-Kiota call-site tables, churn buckets, and the ServiceException/ODataError swing-factor analysis.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load the break-assessment + CVE memo + spec FR-03/NFR-03 + design §6.4. Declare RIGOR: FULL. Run `/conflict-check` (BFF hot path).</step>
+    <step order="1">Bump `Microsoft.Graph` 5.101.0 → 6.5.0 (re-pull latest 6.x first); restore; inspect the resolved graph — confirm `Graph.Core 4.0.1` + transitive `Microsoft.Kiota.* 2.0.x`.</step>
+    <step order="2">Delete all 7 direct `Microsoft.Kiota.*` `PackageReference`s; restore again; `dotnet list package --include-transitive | grep -i kiota` — confirm a single 2.0.x across all Kiota assemblies. Confirm `NoWarn=NU1903` is absent (add nothing back).</step>
+    <step order="3">`dotnet build -c Release src/server/api/Sprk.Bff.Api/`. Resolve the `ServiceException` swing factor: if retained in Graph.Core 4.x, build passes as-is; if removed, delete the ~72 dead `ServiceException` catch blocks (6 files) per the assessment.</step>
+    <step order="4">Fix the latent `DriveItemOperations` bug: re-anchor its dead `ServiceException` 404/403 catches on `ODataError` so those statuses surface correctly (the assessment flagged this as a natural in-passing fix).</step>
+    <step order="5">Run the Graph-affected tests (unit + the Dataverse/SPE/auth seam integration tests); re-smoke the four auth paths (OBO, Managed Identity, named API-key) + SPE file ops + mail/communication + a background job tick. Record the two behavior-level verify items (`ODataError.ResponseHeaders`; CAE/backing-store) as observations.</step>
+    <step order="6">Update `src/server/api/Sprk.Bff.Api/CLAUDE.md` Package Management section: Kiota is now transitive at 2.0.x via Graph 6.5 (no direct pins); the version-match invariant is satisfied transitively.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 033 status to ✅. Note the publish-size delta for task 031.</step>
+    <step order="8">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY call site turns out to be a deep/semantic change (not the mechanical rename/version bump the assessment predicted) — e.g. `ServiceException` is removed AND its catches are load-bearing (not dead), or a direct-Kiota usage hits a 2.0 break the grep missed, or an auth/serialization behavior actually changes — STOP and surface per CLAUDE.md §6/§6.5. The fold-in was approved on the "mechanical break" premise; a deep break is a scope change the owner must re-decide (defer back out is a valid outcome).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + restore + vulnerable/transitive audit</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</output>
+    <output type="config">Directory.Build.props</output>
+    <output type="doc">src/server/api/Sprk.Bff.Api/CLAUDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`Sprk.Bff.Api.csproj` references `Microsoft.Graph 6.5.0` (or latest 6.x); NO direct `Microsoft.Kiota.*` `PackageReference` remains; `dotnet list package --include-transitive` shows all Kiota assemblies at a single 2.0.x.</criterion>
+    <criterion testable="true">`dotnet build -c Release src/server/api/Sprk.Bff.Api/` is green; the Graph-affected tests pass; `SelfContained=false` / `linux-x64` / no `PublishTrimmed`/`PublishAot`/`RuntimeFrameworkVersion` are all preserved.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no Kiota HIGH CVE (transitive 2.0.x is > the 1.22.0 floor); `NoWarn=NU1903` is absent.</criterion>
+    <criterion testable="true">The `DriveItemOperations` dead-catch bug is fixed (404/403 surface via `ODataError`), and the four auth paths + SPE + mail + jobs re-smoke clean.</criterion>
+    <criterion testable="true">Negative: no token-acquisition (OBO/MI) flow altered; no `GraphServiceClient` leaked past the `SpeFileStore` facade; no product behavior changed (version migration only).</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner-approved scope fold-in 2026-08-11 (supersedes spec §Assumptions "Graph v6 out of scope"); evidence `notes/graph6-kiota2-break-assessment.md`. Sequenced after 030; 031 (publish re-baseline) + 032 (CVE audit) run after this so they measure the final Graph-6 graph. This CLOSES the Graph/Kiota deferred major — it comes OFF the design §6.4 deferred list (090 files 5, not 6).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

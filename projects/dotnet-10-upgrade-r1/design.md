@@ -136,6 +136,8 @@ Graph v6 + Kiota 2.0 (paired), Azure.Search.Documents v12, ApplicationInsights.A
 
 > **One open watch-item (§10):** confirm Graph 5.x still receives security patches post-v6. If it does not, the Graph v6 + Kiota 2.0 pair graduates from "deferred" to "in scope" — because an unpatched Graph SDK on a supported runtime reintroduces exactly the CVE exposure this project exists to close.
 
+> **⚠️ AMENDMENT (owner decision 2026-08-11) — Graph v6 + Kiota 2.0 moved IN-SCOPE (task 033).** The deferral above (and the spec §Assumptions "stays deferred" resolution) is **superseded**. Rationale is *not* the servicing watch-item (5.x is still serviced to ~2027-05-12) — it is efficiency + core-integration ownership: Graph is a core integration and we author code directly against Kiota, so a second BFF-wide regression pass later is costly. A read-only break-assessment (`notes/graph6-kiota2-break-assessment.md`) sized Graph 5→6 / Kiota 1→2 as **MECHANICAL, not deep** (the hard v4→v5 Kiota rewrite is already absorbed; direct-Kiota usage is 100% on the stable side of the 2.0 break — 0 hits on the 5 broken APIs; no batch usage; churn ~1–2 files forced, 0 deep). Given that, the batching efficiency wins while risk isolation is preserved by sequencing it as **task 033 AFTER the net10 build is green** (031/032 then measure the post-033 graph). Escalation valve: a non-mechanical call site STOPs 033 and defer-back-out is a valid outcome. The **5 remaining** §6.4 majors stay deferred.
+
 ## 7. Deployment sequencing (a first-class deliverable)
 
 `linuxFxVersion` is on the App Service **slot-swapped settings** list — a slot swap moves the runtime string *and* the code atomically. That gives a genuine zero-downtime path (Standard tier or above):

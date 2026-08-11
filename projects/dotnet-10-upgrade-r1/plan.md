@@ -84,8 +84,11 @@ Lands as **one coherent change** — the P0 tasks are a strict dependency chain,
 | # | Task | FR | MT / E |
 |---|------|----|--------|
 | 030 | Full `dotnet test` green (unit + integration + arch); no test excluded to force green without logged rationale | FR-11 | sonnet/xhigh |
-| 031 | Publish-size re-baseline; measure compressed publish; update root `CLAUDE.md` §10 + `.claude/constraints/azure-deployment.md` (**main-session-only** write) | FR-12 | sonnet/high |
-| 032 | Transitive CVE audit `dotnet list package --vulnerable --include-transitive`; no HIGH regression vs net8; prune superseded allow-list entries | NFR-03 | sonnet/high |
+| 033 | **Graph 5.101→6.5 + Kiota 1→2** (transitive); delete 7 Kiota pins + NoWarn; fix `DriveItemOperations` dead-catch; re-smoke auth/SPE/mail/jobs (owner fold-in 2026-08-11; runs after 030-green; mechanical break per `notes/graph6-kiota2-break-assessment.md`) | FR-03, NFR-03 | sonnet/xhigh |
+| 031 | Publish-size re-baseline; measure compressed publish (post-033 graph); update root `CLAUDE.md` §10 + `.claude/constraints/azure-deployment.md` (**main-session-only** write) | FR-12 | sonnet/high |
+| 032 | Transitive CVE audit `dotnet list package --vulnerable --include-transitive`; no HIGH regression vs net8; Kiota CVE closed (transitive 2.0.x); prune superseded allow-list entries | NFR-03 | sonnet/high |
+
+> **P3 ordering**: `030 → 033 → 031 → 032`. Task 033 is numbered after 032 but runs before it — 031/032 measure the final post-Graph-6 package graph.
 
 ### Phase P4 — CI/CD + deploy plumbing (Med, operational)
 | # | Task | FR | MT / E |
@@ -113,11 +116,11 @@ Lands as **one coherent change** — the P0 tasks are a strict dependency chain,
 ### Phase P7 — Wrap-up (Low)
 | # | Task | FR | MT / E |
 |---|------|----|--------|
-| 090 | `/test-diet`; doc-drift audit; update `projects/INDEX.md` row; write **r3 handoff note** at `notes/`; file deferred majors (§6.4) via `/project-defer-issue-tracking` | FR-17 | sonnet/high |
+| 090 | `/test-diet`; doc-drift audit; update `projects/INDEX.md` row; write **r3 handoff note** at `notes/` (records Kiota CVE closed + Graph v6/Kiota 2.0 done); file the **5 remaining** deferred majors (§6.4) via `/project-defer-issue-tracking` | FR-17 | sonnet/high |
 
 ## 5. Critical path & concurrency
 
-**Critical path** (serial): `001 → 002 → 003 → 004 → 005 → 010 → 012 → 013 → 014 → 020 → 030 → 031 → 032 → 040 → 041 → 042 → 050 → 051 → 090`. Tasks **060/061 are deferred** (no production environment today) and sit off the active path until demo/prod are re-provisioned on net10.
+**Critical path** (serial): `001 → 002 → 003 → 004 → 005 → 010 → 012 → 013 → 014 → 020 → 030 → 033 → 031 → 032 → 040 → 041 → 042 → 050 → 051 → 090`. Tasks **060/061 are deferred** (no production environment today) and sit off the active path until demo/prod are re-provisioned on net10.
 
 **The only concurrency** is each adversarial-verify task pairing with its author (`011` after `010`; `021` after `020`) — and these can overlap the next author task. There are **no P0 parallel groups**: per design §4 principle 2, the retarget is intentionally atomic. See `tasks/TASK-INDEX.md`.
 
@@ -138,7 +141,7 @@ One documented exception only: **FR-06 telemetry consolidation** vs the NFR-01 "
 | # | Success criterion | Owning task(s) |
 |---|---|---|
 | 1 | All in-scope projects net10; plugin unchanged | 001–005 |
-| 2 | No NU1510 (incl. Scheduling as error); no HIGH-CVE regression | 002, 032 |
+| 2 | No NU1510 (incl. Scheduling as error); no HIGH-CVE regression (Kiota CVE closed via Graph 6/Kiota 2) | 002, 033, 032 |
 | 3 | Every `BackgroundService` per-worker verdict, adversarially reviewed | 010, 011 |
 | 4 | BFF boots clean in Development on net10 | 020, 021 |
 | 5 | Telemetry intact after consolidation | 014, 051 |
@@ -151,7 +154,7 @@ One documented exception only: **FR-06 telemetry consolidation** vs the NFR-01 "
 
 ## 9. Guardrails (spec MUST / MUST NOT)
 
-- ❌ MUST NOT touch the `net462` plugin · pull the 6 optional library majors · use self-contained publish · hardcode `ASPNETCORE_URLS`/`UseUrls()` or pin `RuntimeFrameworkVersion`.
+- ❌ MUST NOT touch the `net462` plugin · pull the **5 remaining** optional library majors (Graph v6/Kiota 2.0 is now IN scope — task 033) · use self-contained publish · hardcode `ASPNETCORE_URLS`/`UseUrls()` or pin `RuntimeFrameworkVersion`.
 - ✅ MUST retarget `Spaarke.Scheduling` first · verify inbox ≥ pinned CVE before removing a pin · re-baseline publish size · use slot-swap for production.
 - `.claude/` writes (tasks 031, 042) are **main-session-only** (root §3) — marked `parallel-safe: false`.
 

@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-12 — publish-size re-baseline on net10 + governance-doc updates</title>
     <phase>P3 Test green + re-baseline</phase>
-    <gate>030 complete</gate>
+    <gate>033 complete</gate>
     <status>not-started</status>
     <rigor>FULL</rigor>
     <rigor-reason>Writes to root CLAUDE.md §10 + .claude/ constraint (main-session-only); binding publish-size governance number.</rigor-reason>
@@ -13,7 +13,7 @@
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Writes root CLAUDE.md + .claude/constraints/azure-deployment.md — MAIN-SESSION-ONLY per root §3 sub-agent write boundary.</parallel-reason>
-    <deps>030</deps>
+    <deps>033</deps>
     <tags>dotnet, bff-api, deployment, governance, skill-directives, root-claude-md</tags>
     <estimated-effort>1-2 hours</estimated-effort>
   </metadata>
@@ -23,7 +23,7 @@
   <goal>The net10 compressed publish size is measured and recorded (absolute + diff vs 49.63 MB incl-PDB); ≤60 MB confirmed; root `CLAUDE.md` §10 and `.claude/constraints/azure-deployment.md` both carry the new baseline number with the PDB convention stated; measurement captured in `notes/publish-size-rebaseline.md`.</goal>
 
   <context>
-    <background>spec FR-12 + NFR-02 + design §10. Baseline 2026-07-08 = ~49.63 MB incl PDBs / 45.87 MB excl. A framework-version bump WILL shift the baseline. FR-04 pin removals + FR-06 classic-SDK removal REDUCE surface, so the net delta may be small or negative. ADR-029 forbids self-contained. The publish-size rule (`.claude/constraints/azure-deployment.md` "BFF Publish-Size Per-Task Verification Rule") + root CLAUDE.md §10 both encode the number — update BOTH.</background>
+    <background>spec FR-12 + NFR-02 + design §10. Baseline 2026-07-08 = ~49.63 MB incl PDBs / 45.87 MB excl. A framework-version bump WILL shift the baseline. FR-04 pin removals + FR-06 classic-SDK removal REDUCE surface; the Graph 5→6 / Kiota 1→2 move (task 033) also shifts it — measure the FINAL post-033 graph, so the net delta may be small or negative. ADR-029 forbids self-contained. The publish-size rule (`.claude/constraints/azure-deployment.md` "BFF Publish-Size Per-Task Verification Rule") + root CLAUDE.md §10 both encode the number — update BOTH.</background>
     <relevant-files>
       <file role="modify">CLAUDE.md</file>
       <file role="modify">.claude/constraints/azure-deployment.md</file>
@@ -31,7 +31,7 @@
       <file role="canonical-reference">.claude/adr/ADR-029-bff-publish-hygiene.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="030" status="pending">Full suite green — the code being published is final.</dependency>
+      <dependency task="033" status="pending">Graph 6.5/Kiota 2.0 landed — the package graph being published is final.</dependency>
     </dependencies>
   </context>
 

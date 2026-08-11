@@ -25,8 +25,9 @@
 | 020 | **H2** dev-boot DI validation (fix ValidateOnBuild/ValidateScopes) | P2 | FR-08 | **opus**/xhigh | 010 | false | 🔲 |
 | 021 | **H2 adversarial verification** (non-author) | P2 | NFR-07 | opus/xhigh | 020 | false (V2) | 🔲 |
 | 030 | Full test suite green on net10 (unit + integration + arch) | P3 | FR-11 | sonnet/xhigh | 021 | false | 🔲 |
-| 031 | Publish-size re-baseline + governance updates 🔒 | P3 | FR-12 | sonnet/high | 030 | false | 🔲 |
-| 032 | Transitive CVE audit (no HIGH regression) | P3 | NFR-03 | sonnet/high | 030 | false | 🔲 |
+| 033 | **Graph 5.101→6.5 + Kiota 1→2** (transitive); retire 7 Kiota pins + NoWarn (owner fold-in 2026-08-11) | P3 | FR-03,NFR-03 | sonnet/xhigh | 030 | false | 🔲 |
+| 031 | Publish-size re-baseline + governance updates 🔒 | P3 | FR-12 | sonnet/high | 033 | false | 🔲 |
+| 032 | Transitive CVE audit (no HIGH regression) | P3 | NFR-03 | sonnet/high | 033 | false | 🔲 |
 | 040 | CI setup-dotnet → 10.x / @v6 across 7 workflows | P4 | FR-13 | sonnet/xhigh | 032 | false | 🔲 |
 | 041 | App Service Bicep DOTNETCORE\|10.0 (+ platform.json) + Functions | P4 | FR-14 | sonnet/xhigh | 032 | false | 🔲 |
 | 042 | Adapt /bff-deploy + slot-swap runbook 🔒 | P4 | FR-14 | sonnet/high | 041 | false | 🔲 |
@@ -40,14 +41,16 @@
 🛠️ = **OPERATOR-DRIVEN** — needs Azure credentials + a recorded human go/no-go; not run autonomously.
 ⏸ = **DEFERRED** — fires only when demo/prod are re-provisioned on net10 (no production environment today).
 
-**Count**: 23 tasks across P0–P7 (P0=5, P1=5, P2=2, P3=3, P4=3, P5=2, P6=2, P7=1) — **21 active + 2 deferred** (060/061).
+**Count**: 24 tasks across P0–P7 (P0=5, P1=5, P2=2, P3=4, P4=3, P5=2, P6=2, P7=1) — **22 active + 2 deferred** (060/061).
+
+> **Note on 033 ordering**: task 033 (Graph 6/Kiota 2) is numbered after 032 but **runs before** 031/032 in execution order — it gates on 030 (net10 green) and 031/032 measure the post-033 package graph. Deps columns + the critical path above are authoritative for sequencing, not the numeric label.
 
 ---
 
 ## Critical path
 
 ```
-001 → 002 → 003 → 004 → 005 → 010 → 012 → 013 → 014 → 020 → 030 → 031 → 032
+001 → 002 → 003 → 004 → 005 → 010 → 012 → 013 → 014 → 020 → 030 → 033 → 031 → 032
     → 040 → 041 → 042 → 050 → 051 → 090          (060/061 DEFERRED — off the active path)
 ```
 
@@ -77,7 +80,7 @@ There are no concurrent code-writing waves — every code task is `parallel-safe
 
 - `/conflict-check` **before EVERY BFF PR** — 13+ active BFF worktrees (NFR-08); no parallel BFF-wide project merges.
 - Publish-size ≤60 MB, framework-dependent only (re-baselined in 031).
-- `net462` plugin **untouched** (NFR-05); do NOT pull the 6 deferred optional majors.
+- `net462` plugin **untouched** (NFR-05); do NOT pull the **5 remaining** deferred optional majors (Graph v6/Kiota 2.0 is now IN scope — task 033).
 - MUST NOT weaken `TreatWarningsAsErrors` / disable DI validation / exclude tests to force green.
 
 ## Success-criteria → task map
@@ -85,7 +88,7 @@ There are no concurrent code-writing waves — every code task is `parallel-safe
 | SC | Criterion | Task(s) |
 |----|-----------|---------|
 | 1 | in-scope net10; plugin unchanged | 001–005 |
-| 2 | no NU1510; no HIGH-CVE regression | 002, 032 |
+| 2 | no NU1510; no HIGH-CVE regression (Kiota CVE closed) | 002, 033, 032 |
 | 3 | per-worker verdict, adversarially reviewed | 010, 011 |
 | 4 | Dev DI validation clean | 020, 021 |
 | 5 | telemetry intact | 014, 051 |

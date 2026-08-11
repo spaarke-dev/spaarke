@@ -29,7 +29,7 @@ Retarget the Spaarke server backend (BFF + 3 shared libraries + ~7 test projects
 ### Out of Scope
 - `Spaarke.Dataverse.CustomApiProxy` (net462 — Dataverse sandbox-fixed; **never moves**).
 - Client / PCF / Code-Page surfaces (`src/solutions/**`, `src/client/**`) — unaffected; talk HTTP to the BFF.
-- The 6 **optional library major-version** modernizations: Graph v6 + Kiota 2.0 (paired), Azure.Search.Documents v12, PowerBI.Api v5, Azure.AI.Projects 2.x GA, Microsoft.Agents.AI GA, `Http.Polly` → `Http.Resilience`. (Each keeps working at current major on net10; deferred to follow-on.)
+- The **5 remaining optional library major-version** modernizations: Azure.Search.Documents v12, PowerBI.Api v5, Azure.AI.Projects 2.x GA, Microsoft.Agents.AI GA, `Http.Polly` → `Http.Resilience`. (Each keeps working at current major on net10; deferred to follow-on.) — **NOTE (2026-08-11): Graph v6 + Kiota 2.0 was moved IN-SCOPE as task 033** (owner fold-in; see design §6.4 amendment).
 - `Microsoft.Extensions.AI` 10.3.0 → 10.8.x (would drag `OpenAI` ≥ 2.12 — leave at 10.3.0, works on net10).
 - Any functional/product behavior change (except the FR-06 telemetry carve-out).
 - `knowledge/**` samples and `projects/**/spike/**` harnesses (not shipped by CI).
@@ -62,7 +62,7 @@ Retarget the Spaarke server backend (BFF + 3 shared libraries + ~7 test projects
 14. **FR-14** — `/bff-deploy` skill adapted for the net10 runtime string + a documented slot-swap runbook (staging slot → validate → swap → rollback-by-swap). Acceptance: runbook exists with exact `az` commands (`DOTNETCORE|10.0` pipe for `linux-fx-version`; `DOTNETCORE:10.0` colon for create/list); `/bff-deploy` no longer encodes 8.0.
 15. **FR-15** *(reframed 2026-08-11 → dev-only; PROJECT COMPLETION GATE)* — **Dev cutover + validation (go/no-go gate)**: deploy the net10 build to `spaarke-bff-dev` on `DOTNETCORE|10.0` (direct worktree deploy, or a slot if it has one — NOT via CI); smoke all four auth paths (OBO, MI app-only, named API-key), SSE chat streaming, a real Service Bus job, a real background-worker tick, and FR-06 telemetry. Acceptance: all smoke checks pass on the actual net10 stack; documented evidence; explicit go/no-go recorded.
 16. **FR-16** *(⏸ DEFERRED 2026-08-11 — no production environment today)* — **Production cutover** via slot swap (design §7): staging slot on net10, validate, swap (runtime+code atomic), monitor, rollback-ready (swap back). **Deferred until demo/prod are re-provisioned on net10**; procedure preserved in the task-042 runbook (§B), tasks 060/061 parked. Acceptance (when active): production serving on `DOTNETCORE|10.0` with no dropped requests during swap; rollback rehearsed on the slot before the forward swap.
-17. **FR-17** — Wrap-up: `/test-diet`, doc-drift audit, update `projects/INDEX.md` row, and write the **r3 handoff note** (net10 baseline assumptions: don't re-pin superseded CVE packages; H1/H2 already fixed; publish baseline moved). Acceptance: INDEX updated; handoff note exists at `projects/dotnet-10-upgrade-r1/notes/`; deferred optional majors (§6.4) filed as follow-on issues via `/project-defer-issue-tracking`.
+17. **FR-17** — Wrap-up: `/test-diet`, doc-drift audit, update `projects/INDEX.md` row, and write the **r3 handoff note** (net10 baseline assumptions: don't re-pin superseded CVE packages; H1/H2 already fixed; publish baseline moved). Acceptance: INDEX updated; handoff note exists at `projects/dotnet-10-upgrade-r1/notes/`; the 5 remaining deferred optional majors (§6.4; Graph v6/Kiota 2.0 excluded — done in task 033) filed as follow-on issues via `/project-defer-issue-tracking`.
 
 ### Non-Functional Requirements
 
@@ -90,7 +90,7 @@ Retarget the Spaarke server backend (BFF + 3 shared libraries + ~7 test projects
 - ✅ MUST re-baseline publish size and update the governance number (FR-12).
 - ✅ MUST use the slot-swap path for production cutover (P1v3 supports it).
 - ❌ MUST NOT touch the `net462` plugin.
-- ❌ MUST NOT pull in the 6 optional library majors (defeats the "no issues" mandate).
+- ❌ MUST NOT pull in the **5 remaining** optional library majors (defeats the "no issues" mandate). *(Graph v6/Kiota 2.0 is the one exception — folded in as task 033 per the 2026-08-11 owner decision, sequenced after net10 build-green with a mechanical-break assessment + escalation valve.)*
 - ❌ MUST NOT hardcode `ASPNETCORE_URLS`/`UseUrls()` or pin `RuntimeFrameworkVersion`.
 - ❌ MUST NOT use self-contained publish as a region-lag escape hatch.
 
@@ -160,12 +160,12 @@ Retarget the Spaarke server backend (BFF + 3 shared libraries + ~7 test projects
 
 ## Assumptions
 - **M.E.AI**: staying at 10.3.0 (works on net10; bumping would drag OpenAI ≥2.12) — will revisit only if a dependency forces it.
-- **Graph 5.x**: ✅ **RESOLVED (research 2026-08-10)** — staying on Graph 5.x is safe. Microsoft services the prior major for **security fixes for 12 months from v6 GA** → 5.x covered to **~2027-05-12**; the one relevant CVE (CVE-2026-44503, GHSA-7j59-v9qr-6fq9, RedirectHandler header leak) is **already patched at Kiota 1.22.0** (our pin — MUST keep). Graph v6 + Kiota 2.0 stays **deferred** to a separate project (hard deadline ~2027-04). Optional cheap hygiene: bump `Microsoft.Graph` 5.101.0 → **5.105.0** (final 5.x; its Graph.Core raises the Kiota floor to the patched 1.22.0 natively) as part of FR-05.
+- **Graph 5.x**: ✅ **RESOLVED (research 2026-08-10)** — staying on Graph 5.x is safe. Microsoft services the prior major for **security fixes for 12 months from v6 GA** → 5.x covered to **~2027-05-12**; the one relevant CVE (CVE-2026-44503, GHSA-7j59-v9qr-6fq9, RedirectHandler header leak) is **already patched at Kiota 1.22.0** (our pin — MUST keep). ~~Graph v6 + Kiota 2.0 stays **deferred** to a separate project.~~ **⚠️ SUPERSEDED (owner 2026-08-11): Graph v6 + Kiota 2.0 folded IN as task 033** — break sized as mechanical (`notes/graph6-kiota2-break-assessment.md`); sequenced after net10 build-green. See design §6.4 amendment. Optional cheap hygiene bump `Microsoft.Graph` 5.101.0 → **5.105.0** stays in FR-05 for the P0 retarget (task 004); the full 6.5.0 move is task 033.
 - **Region**: prod region has .NET 10 GA (portal may lag; CLI/ARM works regardless) — verified at execution time.
 - **Telemetry**: the OTel→Azure Monitor pipeline (redis-remediation R7-S7) is complete and is the sole telemetry path after FR-06.
 
 ## Unresolved Questions
-- [x] ~~**Graph 5.x servicing**~~ — ✅ RESOLVED 2026-08-10 (see Assumptions): 5.x security-serviced to ~2027-05-12; CVE already patched at Kiota 1.22.0. Graph v6 stays out of scope; optional 5.105.0 hygiene bump folded into FR-05.
+- [x] ~~**Graph 5.x servicing**~~ — ✅ RESOLVED 2026-08-10; **re-decided 2026-08-11**: Graph v6/Kiota 2.0 is now IN scope (task 033, owner fold-in — mechanical break per `notes/graph6-kiota2-break-assessment.md`). 5.x servicing is no longer the deciding factor; efficiency + core-integration ownership is. Optional 5.105.0 hygiene bump stays in FR-05 (task 004); full 6.5.0 is task 033.
 - [ ] **Region runtime evidence** — Paste `az webapp list-runtimes --os-type linux` for the prod subscription/region as FR-15 evidence (execution-time verification).
 - [ ] **Slot availability** — Confirm a staging slot exists or can be created on the target App Service without disrupting current config (execution-time verification).
 

@@ -23,10 +23,12 @@
   <goal>`Sprk.Bff.Api.csproj` targets `net10.0`; all required + §6.3 routine same-major bumps applied; superseded CVE pins (RegEx + `System.Security.Cryptography.Xml 8.0.4`) removed after inbox check; `SelfContained=false` + `RuntimeIdentifier=linux-x64` preserved; `dotnet build -c Release src/server/api/Sprk.Bff.Api/` green.</goal>
 
   <context>
-    <background>design §3.1/§6.1/§6.3/§6.4. BFF = 120+ endpoints, ~99 DI regs, 13+ job types. §6.3 catch-ups are all same-major (servicing trains, no API break). §6.4 optional majors (Graph v6/Kiota 2.0, Search v12, AppInsights 3.x, PowerBI v5, Azure.AI.Projects 2.x, Agents.AI GA, Http.Polly→Http.Resilience) are DEFERRED — pulling them in defeats the "no issues" mandate. M.E.AI stays at 10.3.0 (bumping drags OpenAI ≥2.12). The classic App Insights SDK removal is a SEPARATE task (014), not here.</background>
+    <background>design §3.1/§6.1/§6.3/§6.4. BFF = 120+ endpoints, ~99 DI regs, 13+ job types. §6.3 catch-ups are all same-major (servicing trains, no API break). §6.4 optional majors (Search v12, AppInsights 3.x, PowerBI v5, Azure.AI.Projects 2.x, Agents.AI GA, Http.Polly→Http.Resilience) are DEFERRED — pulling them in defeats the "no issues" mandate. (Graph v6/Kiota 2.0 was moved IN-SCOPE 2026-08-11 as task 033 — but still NOT in this P0 task; keep P0 on Graph 5.x.) M.E.AI stays at 10.3.0 (bumping drags OpenAI ≥2.12). The classic App Insights SDK removal is a SEPARATE task (014), not here.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file role="modify">Directory.Build.props</file>
       <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/pin-removals.md</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/kiota-cve-finding.md</file>
       <file role="canonical-reference">.claude/adr/ADR-029-bff-publish-hygiene.md</file>
     </relevant-files>
     <dependencies>
@@ -36,8 +38,8 @@
 
   <constraints>
     <constraint source="ADR-029">MUST keep `<SelfContained>false</SelfContained>` + `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` + the wwwroot sourcemap exclusion; MUST NOT add `PublishTrimmed`/`PublishAot`; MUST NOT pin `RuntimeFrameworkVersion`.</constraint>
-    <constraint source="project">Scope: BFF csproj only. §6.3 bumps are same-major ONLY — no §6.4 optional majors, no M.E.AI 10.3.0→10.8.x, no Http.Polly→Http.Resilience.</constraint>
-    <constraint source="project">Remove superseded CVE pins after inbox-≥-pin check; keep `NoWarn=NU1903` (Kiota transitive CVE accepted per ADR-029) unless the Graph 5.105 bump raises the Kiota floor to the patched 1.22.0 natively (then reconcile).</constraint>
+    <constraint source="project">Scope: BFF csproj only. §6.3 bumps are same-major ONLY — no §6.4 optional majors, no M.E.AI 10.3.0→10.8.x, no Http.Polly→Http.Resilience. Graph stays at 5.x here (optional 5.101→5.105 hygiene bump OK); the Graph 5→6 major is task 033, NOT this task.</constraint>
+    <constraint source="project">Remove superseded CVE pins after inbox-≥-pin check. DELETE the stale `NoWarn=NU1903` suppression + its obsolete comment: the 7 direct `Microsoft.Kiota.* 1.22.0` pins already clear the Kiota HIGH CVE (GHSA-7j59-v9qr-6fq9) — the resolved graph carries no 1.21.x, so NU1903 is a no-op mask, NOT accepted risk. Gate the delete on a clean `dotnet restore` showing zero NU1903. Keep the 7 Kiota `1.22.0` direct pins and keep Graph on 5.x for THIS task — do NOT downgrade below 1.22.0, and do NOT pull Graph 6.x / Kiota 2.x here. The Graph 5→6 / Kiota 1→2 move is a separate owner-approved task (**033**, after the net10 build is green) so net10 and the Graph major stay independently verifiable; 033 removes the 7 direct pins once Graph 6.5 supplies Kiota 2.0.x transitively. See `notes/kiota-cve-finding.md`.</constraint>
     <constraint source="ADR-013">No AI-internal types cross the CRUD boundary; retarget only.</constraint>
   </constraints>
 
@@ -53,7 +55,7 @@
       <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
     </files>
     <patterns>
-      <pattern name="routine-catchups" location="projects/dotnet-10-upgrade-r1/design.md">design §6.3 — the exact same-major bump list; §6.4 — the deferred majors NOT to touch.</pattern>
+      <pattern name="routine-catchups" location="projects/dotnet-10-upgrade-r1/design.md">design §6.3 — the exact same-major bump list; §6.4 — the deferred majors NOT to touch (Graph v6/Kiota 2.0 is now task 033, still not in P0).</pattern>
     </patterns>
   </knowledge>
 
@@ -62,7 +64,7 @@
     <step order="1">Set `<TargetFramework>net10.0</TargetFramework>` on the BFF csproj; confirm `SelfContained=false` + `RuntimeIdentifier=linux-x64` + sourcemap exclusion are intact.</step>
     <step order="2">Align remaining `Microsoft.Extensions.*` / auth packages to the required wave (consistent with task 003).</step>
     <step order="3">Apply the §6.3 same-major catch-ups (Azure.Identity 1.17.1→1.21.0, Azure.Core →1.61.0, Blobs, ServiceBus, KeyVault.Secrets, Azure.Monitor.OTel →1.6.0, OpenTelemetry 1.15→1.17 + instrumentation, Polly 8.6.5→8.7.0, Cosmos →3.62.1, Caching.StackExchangeRedis →10.0.10, MimeKit →4.17.0, MsgReader →6.1.0, HtmlSanitizer →9.2.995, Handlebars.Net →2.4.3, OpenMcdf →3.2.0) + optional Graph 5.101→5.105.</step>
-    <step order="4">Remove the BFF's superseded CVE pins after inbox-≥-pin check; append evidence to `notes/pin-removals.md`; reconcile `NoWarn=NU1903` if Graph 5.105 raises the Kiota floor to 1.22.0.</step>
+    <step order="4">Remove the BFF's superseded CVE pins after inbox-≥-pin check; append evidence to `notes/pin-removals.md`. Then delete the stale `NoWarn=NU1903` (+ its comment) from `Directory.Build.props`: run `dotnet restore src/server/api/Sprk.Bff.Api/` with NU1903 removed, confirm zero NU1903 in the output, then commit the delete. Keep the 7 Kiota `1.22.0` direct pins.</step>
     <step order="5">`dotnet build -c Release src/server/api/Sprk.Bff.Api/`; resolve warnings (source SYSLIB items belong to tasks 012/013 — note, don't fix here).</step>
     <step order="6">Update `tasks/TASK-INDEX.md`: set 004 status to ✅.</step>
     <step order="7">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
@@ -85,6 +87,7 @@
     <criterion testable="true">Given the retargeted BFF, `dotnet build -c Release src/server/api/Sprk.Bff.Api/` succeeds.</criterion>
     <criterion testable="true">`SelfContained=false`, `RuntimeIdentifier=linux-x64`, and the wwwroot sourcemap exclusion are all present and unchanged.</criterion>
     <criterion testable="true">All §6.3 bumps applied are same-major; no §6.4 optional major, no M.E.AI 10.8.x, no Http.Resilience swap is present.</criterion>
+    <criterion testable="true">The stale `NoWarn=NU1903` is deleted from `Directory.Build.props` and a clean `dotnet restore` reports zero NU1903; the 7 Kiota `1.22.0` direct pins remain (no downgrade, no Graph 6.x/Kiota 2.x).</criterion>
     <criterion testable="true">Negative: no `PublishTrimmed`/`PublishAot`/`RuntimeFrameworkVersion` was added.</criterion>
   </acceptance-criteria>
 
