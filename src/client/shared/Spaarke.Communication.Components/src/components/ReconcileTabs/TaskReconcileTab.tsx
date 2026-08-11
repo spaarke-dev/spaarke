@@ -603,7 +603,7 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
                 data-testid="task-reconcile-accept"
                 onClick={() => void acceptProposal(p)}
               >
-                Accept
+                Create
               </Button>
               <Button
                 appearance="secondary"

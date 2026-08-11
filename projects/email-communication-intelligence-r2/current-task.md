@@ -1,8 +1,10 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-11 (context-handoff — pre-compaction). **Pillar E mount BUILT + in review (PR #755); UAT round-2 captured + prototyped.** BFF deployed (endpoints live). Branch `fb5180f22`, **7 ahead / 25 behind** master (others merged — worktree-sync before merging #755), 0 uncommitted/unpushed.
-> **Recovery**: Read "Quick Recovery" first. Nothing in-flight. Prototype live at **localhost:5177** (dev server bg). Everything committed + pushed (main branch + spaarke-prototype `feature/uat-harness-framework`).
+> **Last Updated**: 2026-08-11 (task-execute 063 done). **Pillar E mount BUILT + in review (PR #755); UAT round-2 captured + prototyped; 063 labels SHIPPED to branch.** Branch **worktree-synced to master** (merge `13e2ba74e`, 0 behind), then 063 work on top. BFF deployed (endpoints live).
+> **Recovery**: Read "Quick Recovery" first. Nothing in-flight. Prototype live at **localhost:5177** (dev server bg; `.eml`-preload mock added, commit `05231e9a8` on `feature/uat-harness-framework`). Main-branch work committed + pushed to PR #755.
+>
+> **LATEST (2026-08-11 this turn)**: worktree-synced to master (25→0 behind, clean merge) + /conflict-check clean (no overlap vs open PRs). **E1c captured** (wizard `.eml` auto-load via existing Assistant `QuickStartModal fileCtx.fileIds`→`launchSurface`→`SurfaceHandoffEnvelope.fileIds`) in UX §E + plan §7.5. **Tasks 063–066 registered.** **063 ✅ EXECUTED**: E1a tile "New record", E2a Fields "Accept" (verified), E3a Tasks "Create" (testid/handler kept stable) — tsc 0-err (needed `@spaarke/ui-components` dist rebuild — build-order artifact, dist gitignored, CI-safe), jest 24/24, Step 9.5 clean. **064/065/066 = GATED on prototype sign-off** (Quick Start+.eml / typed-controls+Update-other-fields / Assigned-to lookup; reuse-only per §7.5).
 
 ## Quick Recovery (READ THIS FIRST)
 

@@ -266,7 +266,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
               onClick={onCreateNewRecord}
               data-testid="create-new-record"
             >
-              <span className={s.linkCardLabel}>Create new record</span>
+              <span className={s.linkCardLabel}>New record</span>
               <span className={s.linkCardIconRow}>
                 <DocumentAdd20Regular className={s.linkCardIcon} aria-hidden="true" />
               </span>
