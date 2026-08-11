@@ -138,7 +138,8 @@ describe('TaskReconcileTab', () => {
     fireEvent.click(screen.getByTestId('task-reconcile-new'));
     const adhocCard = await screen.findByTestId('task-reconcile-adhoc-card');
     fireEvent.change(within(adhocCard).getByTestId('task-reconcile-name'), { target: { value: 'Call the client' } });
-    fireEvent.click(within(adhocCard).getByTestId('task-reconcile-adhoc-accept'));
+    // The ad-hoc form now lives in a standard FormModal (ADR-050); Create routes through the footer "Create task" button.
+    fireEvent.click(screen.getByRole('button', { name: /^create task$/i }));
 
     await waitFor(() => expect(postCall(`/${COMM_ID}/create-task`)).toBeTruthy());
     expect(JSON.parse(postCall(`/${COMM_ID}/create-task`)![1].body).subject).toBe('Call the client');

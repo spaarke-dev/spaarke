@@ -526,39 +526,29 @@ export const TaskReconcileTab: React.FC<TaskReconcileTabProps> = ({
         </Button>
       </div>
 
-      {/* Ad-hoc form (opened by "+ New task"). */}
-      {adhoc !== null ? (
-        <div className={s.card} data-testid="task-reconcile-adhoc-card">
-          <Text weight="semibold">New task</Text>
-          {renderFields('adhoc', adhoc)}
-          {rowError.adhoc ? (
-            <Caption1 className={s.rowError} role="alert">
-              {rowError.adhoc}
-            </Caption1>
-          ) : null}
-          <div className={s.actions}>
-            <Button
-              appearance="primary"
-              size="small"
-              icon={busyId === 'adhoc' ? <Spinner size="tiny" /> : <CheckmarkRegular />}
-              disabled={busyId === 'adhoc'}
-              data-testid="task-reconcile-adhoc-accept"
-              onClick={() => void createAdHoc()}
-            >
-              Create
-            </Button>
-            <Button
-              appearance="subtle"
-              size="small"
-              disabled={busyId === 'adhoc'}
-              data-testid="task-reconcile-adhoc-cancel"
-              onClick={() => setAdhoc(null)}
-            >
-              Cancel
-            </Button>
+      {/* Ad-hoc form (opened by "+ New task") — standard FormModal (ADR-050). */}
+      <FormModal
+        open={adhoc !== null}
+        onClose={() => {
+          if (busyId !== 'adhoc') setAdhoc(null);
+        }}
+        onSubmit={() => void createAdHoc()}
+        title="New task"
+        submitLabel="Create task"
+        cancelLabel="Cancel"
+        busy={busyId === 'adhoc'}
+      >
+        {adhoc !== null ? (
+          <div data-testid="task-reconcile-adhoc-card">
+            {renderFields('adhoc', adhoc)}
+            {rowError.adhoc ? (
+              <Caption1 className={s.rowError} role="alert">
+                {rowError.adhoc}
+              </Caption1>
+            ) : null}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </FormModal>
 
       {proposals.length === 0 && adhoc === null ? (
         <div className={s.state} role="note" data-testid="task-reconcile-empty">
