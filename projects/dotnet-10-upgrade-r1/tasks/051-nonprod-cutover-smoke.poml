@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>FR-15 — non-prod slot deploy + full smoke + recorded go/no-go</title>
+    <phase>P5 Non-prod cutover (OPERATOR-DRIVEN)</phase>
+    <gate>050 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Runtime cutover on a real net10 slot; the go/no-go gate for production; deployment-critical.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Execute the runbook + record smoke evidence; well-specified but high-stakes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>OPERATOR-DRIVEN — needs Azure credentials + a real slot; the go/no-go gate before P6.</parallel-reason>
+    <deps>050</deps>
+    <tags>deployment, dotnet, auth, background-jobs, observability, migration</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>OPERATOR-DRIVEN. Deploy the net10 framework-dependent build to the dev/staging slot on `DOTNETCORE|10.0` (per the task-042 runbook) and run the full smoke: all four auth paths (OBO, MI app-only, named API-key), SSE chat streaming, a real Service Bus job, a real background-worker tick, and FR-06 telemetry (confirm requests/deps/exceptions + the 12 Meters + Redis instrumentation appear in App Insights on the slot). Record the evidence and an EXPLICIT go/no-go decision before any production cutover (task 061).</prompt>
+  <role>SPAARKE release engineer + platform developer. Expert in slot deploys, OBO/MI auth, SSE streaming, Service Bus jobs, and App Insights validation. Follow ADRs strictly.</role>
+  <goal>The net10 build runs on the staging slot; every smoke check passes on the actual net10 stack; `notes/nonprod-smoke.md` records the evidence per check + an explicit recorded go/no-go decision (the gate for FR-16).</goal>
+
+  <context>
+    <background>spec FR-15 (the go/no-go gate) + design §7/§9. This is where FR-06 telemetry is proven live (task 014 proved wiring; this proves signal), where H3/ADR-028 auth paths are smoke-tested, and where H1 workers are exercised via a real worker tick + Service Bus job. The slot runs the real `DOTNETCORE|10.0` stack — framework mismatch would 503 here, not in prod.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/region-slot-evidence.md</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/nonprod-smoke.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Region runtime + slot confirmed.</dependency>
+      <dependency task="014" status="pending">Telemetry consolidation wired (validated live here).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">OPERATOR-DRIVEN: real Azure slot + credentials. The go/no-go MUST be explicit and recorded — production (061) does not proceed without a "go".</constraint>
+    <constraint source="ADR-028">Smoke ALL FOUR auth paths (OBO, MI app-only, named API-key) — auth is the highest-consequence surface.</constraint>
+    <constraint source="NFR-01">Any behavior delta observed on the slot (beyond the FR-06 telemetry carve-out) is a defect → no-go until resolved.</constraint>
+    <constraint source="project">Set the runtime string ON THE SLOT ONLY; production stays on `DOTNETCORE|8.0` until task 061.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Non-prod slot cutover smoke on net10</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="slot-smoke" location="projects/dotnet-10-upgrade-r1/design.md">design §9 — non-prod slot smoke of auth + SSE + job + worker before any prod swap.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load spec FR-15 + design §9 + the runbook. Declare RIGOR: FULL. Confirm operator + Azure auth + a "go" is required to proceed.</step>
+    <step order="1">Set the slot runtime to `DOTNETCORE|10.0` (slot only) and deploy the net10 framework-dependent build per the runbook.</step>
+    <step order="2">Smoke all four auth paths (OBO, MI app-only, named API-key); record pass/fail per path.</step>
+    <step order="3">Smoke SSE chat streaming, a real Service Bus job, and a real background-worker tick (exercises H1).</step>
+    <step order="4">Confirm FR-06 telemetry: requests/deps/exceptions + 12 Meters + Redis instrumentation appear in App Insights from the slot.</step>
+    <step order="5">Record all evidence in `notes/nonprod-smoke.md`; write an EXPLICIT go/no-go decision.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 051 status to ✅ (only on "go"; on "no-go" record the blocker + reopen the relevant task).</step>
+    <step order="7">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any smoke failure (an auth path, SSE, job, worker tick, or a telemetry signal not appearing) is a NO-GO: STOP, record the blocker, and route back to the owning task per CLAUDE.md §6 — do NOT proceed to the production swap (061).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish + deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/nonprod-smoke.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All four auth paths (OBO, MI app-only, named API-key), SSE streaming, a real Service Bus job, and a real worker tick pass on the net10 slot.</criterion>
+    <criterion testable="true">FR-06 telemetry (requests/deps/exceptions + 12 Meters + Redis) appears in App Insights from the slot.</criterion>
+    <criterion testable="true">`notes/nonprod-smoke.md` records per-check evidence + an explicit recorded go/no-go.</criterion>
+    <criterion testable="true">Negative: production is still on `DOTNETCORE|8.0` after this task (slot-only runtime change).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-15. OPERATOR-DRIVEN go/no-go gate. A "go" is the precondition for tasks 060/061.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

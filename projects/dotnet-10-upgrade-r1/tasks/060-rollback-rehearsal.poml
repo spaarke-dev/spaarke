@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>NFR-06 — rehearse rollback (prove swap-back to 8.0) before the forward swap</title>
+    <phase>P6 Production cutover (OPERATOR-DRIVEN)</phase>
+    <gate>051 go</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Production-safety rehearsal; the rollback guarantee for the cutover; deployment-critical.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Execute + verify the swap-back per runbook; well-specified, high-stakes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>OPERATOR-DRIVEN — real slot; must precede the forward swap (061).</parallel-reason>
+    <deps>051</deps>
+    <tags>deployment, dotnet, migration</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>OPERATOR-DRIVEN. Rehearse the rollback: prove that a swap-back to the 8.0 app + 8.0 runtime works BEFORE the production forward swap. The staging slot still holds the 8.0 app + runtime, so demonstrate the swap-back path returns cleanly to 8.0 and record the evidence. This is the rollback guarantee (NFR-06) that de-risks task 061.</prompt>
+  <role>SPAARKE release engineer. Expert in App Service slot swaps, swap-back rollback, and zero-downtime cutover safety. Follow ADRs strictly.</role>
+  <goal>The swap-back (net10 → 8.0) is demonstrated on the slot and returns cleanly; `notes/rollback-rehearsal.md` records the evidence, confirming the rollback path works before the production forward swap.</goal>
+
+  <context>
+    <background>spec NFR-06 + design §7 (rollback = swap again; staging holds the 8.0 app + runtime). The whole safety argument for the cutover (design §3/§4 principle 3) is that runtime + binary swap atomically and rollback is another swap. Proving swap-back BEFORE the forward swap is what makes the production cutover reversible.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/nonprod-smoke.md</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/rollback-rehearsal.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="051" status="pending">Non-prod smoke passed with a recorded "go".</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-06">Rollback MUST be rehearsed (swap-back to 8.0 proven) BEFORE the production forward swap — this task is a hard precondition for 061.</constraint>
+    <constraint source="project">OPERATOR-DRIVEN: real slot + credentials. Record actual swap evidence, not an assertion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Slot swap-back rollback rehearsal</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="rollback-by-swap" location="projects/dotnet-10-upgrade-r1/design.md">design §7 step 6 — rollback = swap again (staging holds 8.0).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load spec NFR-06 + design §7 + the runbook. Declare RIGOR: FULL. Confirm operator + a recorded "go" from 051.</step>
+    <step order="1">Confirm the staging slot holds a known-good 8.0 app + runtime as the rollback target.</step>
+    <step order="2">Rehearse the swap-back (net10 → 8.0) on the slot; verify a clean return to 8.0 (health + a quick smoke).</step>
+    <step order="3">Record the rehearsal evidence in `notes/rollback-rehearsal.md`.</step>
+    <step order="4">Update `tasks/TASK-INDEX.md`: set 060 status to ✅.</step>
+    <step order="5">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the swap-back does NOT return cleanly to 8.0, STOP and surface per CLAUDE.md §6 — the production forward swap (061) MUST NOT proceed without a proven rollback path.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">n/a (az CLI)</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/rollback-rehearsal.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The swap-back (net10 → 8.0) is demonstrated on the slot and returns cleanly (health + smoke green on 8.0).</criterion>
+    <criterion testable="true">`notes/rollback-rehearsal.md` records the actual swap evidence.</criterion>
+    <criterion testable="true">Negative: if swap-back fails, task 061 is blocked and the failure is escalated.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec NFR-06. Hard precondition for task 061.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

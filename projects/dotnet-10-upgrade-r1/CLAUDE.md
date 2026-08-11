@@ -7,8 +7,9 @@
 
 ## Status
 
-- **Phase**: Design (initial draft 2026-08-10). Not yet `/design-to-spec`.
-- **Next action**: owner decides §13-A (standalone vs fold into `code-quality-and-assurance-r3`), then `/design-to-spec`.
+- **Phase**: Ready for execution — `/project-pipeline` complete 2026-08-11 (INITIALIZE-ONLY: plan + tasks generated, execution NOT started).
+- **Next action**: run `task-execute` on `tasks/001-bump-globaljson-sdk.poml`. Deploy tasks (050/051/060/061) are **operator-driven** (Azure + go/no-go).
+- **§13-A**: RESOLVED (owner 2026-08-10) — separate/sequential, .NET 10 first, then r3 re-planned on the net10 baseline.
 
 ## What / why
 
@@ -18,6 +19,10 @@
 
 ## Key files
 
+- [`spec.md`](spec.md) — AI implementation spec (17 FRs, 8 NFRs) — permanent reference for acceptance
+- [`plan.md`](plan.md) — implementation plan (P0–P7 WBS + discovered resources)
+- [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) — task registry + serial critical path + operator-gate flags
+- [`current-task.md`](current-task.md) — active task state (context recovery)
 - [`design.md`](design.md) — full analysis (permanent reference; §5 hit-sites, §6 packages, §7 deploy sequencing, §8 phasing, §11 r3 relationship, §13 open questions)
 - [`README.md`](README.md) — overview
 

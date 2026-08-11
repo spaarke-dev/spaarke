@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>Retarget Spaarke.Scheduling to net10 FIRST (warnings-as-errors) + clear NU1510/SYSLIB</title>
+    <phase>P0 Retarget + build-green</phase>
+    <gate>001 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .csproj build config; TreatWarningsAsErrors makes every NU1510/SYSLIB a build error; brownfield root-cause.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical retarget fully specified by design §3.1/§5; the judgment (which pins are superseded) is bounded and enumerated.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial P0 chain; must land before the other libs so warnings-as-errors surface NU1510/SYSLIB early on the smallest project.</parallel-reason>
+    <deps>001</deps>
+    <tags>dotnet, migration, packages, bff-api</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Retarget `Spaarke.Scheduling` from net8.0 to net10.0 FIRST, because it sets `TreatWarningsAsErrors=true` — so any NU1510 (direct reference superseded by the net10 inbox) or SYSLIB obsolete warning is a hard build error there. Resolve every such warning by removing superseded CVE-pin `PackageReference`s (after confirming the inbox version ≥ the pinned CVE-fixed version) so this project compiles clean on net10. This is the canary that de-risks the rest of the retarget.</prompt>
+  <role>SPAARKE platform developer. Expert in .NET SDK package resolution, NU1510, SYSLIB obsoletions, and MSBuild warning policy. Follow ADRs strictly.</role>
+  <goal>`Spaarke.Scheduling.csproj` targets `net10.0`; `dotnet build -c Release src/server/shared/Spaarke.Scheduling/` is green with zero warnings (warnings-as-errors); every removed pin is documented with its inbox-version-≥-CVE-version justification in `notes/pin-removals.md`.</goal>
+
+  <context>
+    <background>design §3.1 flags `Spaarke.Scheduling` with `TreatWarningsAsErrors=true` → "handle first." design §5 H4 lists the superseded CVE pins (`System.Text.Json 8.0.5`, `System.Formats.Asn1 8.0.1`, `System.Security.Cryptography.Pkcs 8.0.1`, `System.Text.RegularExpressions 4.3.1`, `System.Security.Cryptography.Xml 8.0.4`) — remove only after confirming the net10 inbox version is ≥ the pinned CVE-fixed version. Root `Directory.Build.props` also carries `TreatWarningsAsErrors=true` with a `WarningsNotAsErrors` downgrade list — do not weaken it to force green.</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Scheduling/Spaarke.Scheduling.csproj</file>
+      <file role="canonical-reference">Directory.Build.props</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/pin-removals.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">10.0.x SDK resolvable via global.json.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ONLY `Spaarke.Scheduling.csproj` (+ the pin-removals note). Do NOT retarget Core/Dataverse/BFF/tests in this task.</constraint>
+    <constraint source="project">MUST verify the net10 inbox version ≥ each pinned CVE-fixed version BEFORE removing that pin (spec FR-04). Record the evidence per pin. Keep any pin the framework does NOT supply.</constraint>
+    <constraint source="project">MUST NOT weaken `TreatWarningsAsErrors` or expand `WarningsNotAsErrors` to force a green build — resolve the root cause.</constraint>
+    <constraint source="ADR-029">No SelfContained / RID / trimming changes; framework-dependent only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>.NET 10 inbox package supersession (NU1510) + SYSLIB obsoletions</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="nu1510-pin-cleanup" location="projects/dotnet-10-upgrade-r1/design.md">design §5 H4 + §6.2 enumerate the superseded pins and the inbox-≥-pin verification rule.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-01/FR-04 + design §5 H4. Declare RIGOR: FULL.</step>
+    <step order="1">Change `Spaarke.Scheduling.csproj` `<TargetFramework>` to `net10.0`.</step>
+    <step order="2">Run `dotnet build -c Release src/server/shared/Spaarke.Scheduling/`; capture every NU1510/SYSLIB warning-turned-error.</step>
+    <step order="3">For each NU1510 (superseded direct reference), confirm the net10 inbox version ≥ the pinned CVE-fixed version (nuget.org / restore graph); if yes, remove the `PackageReference`; record the evidence in `notes/pin-removals.md`.</step>
+    <step order="4">For each SYSLIB obsolete warning, note it — if it is a source-code obsoletion (e.g. X509 ctor) it belongs to task 012, not here; if it can be resolved by a package bump within scope, do so.</step>
+    <step order="5">Re-build until green (zero warnings). Do NOT suppress; resolve.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 002 status to ✅.</step>
+    <step order="7">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any NU1510 pin CANNOT be confirmed as inbox-≥-CVE (i.e. removing it would regress a CVE fix), STOP — do not remove it and do not suppress the error; surface it per CLAUDE.md §6 for a keep-the-pin decision.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + restore Spaarke.Scheduling</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/shared/Spaarke.Scheduling/Spaarke.Scheduling.csproj</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/pin-removals.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the retargeted csproj, when `dotnet build -c Release src/server/shared/Spaarke.Scheduling/` runs, then it succeeds with zero warnings (warnings-as-errors satisfied).</criterion>
+    <criterion testable="true">Every removed pin has a recorded inbox-version-≥-CVE-fixed-version justification in `notes/pin-removals.md`.</criterion>
+    <criterion testable="true">Negative: `TreatWarningsAsErrors` and the root `WarningsNotAsErrors` list are unchanged (not weakened to force green).</criterion>
+    <criterion testable="true">Negative: no other project's csproj is modified by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-01 (Scheduling first) + FR-04 (pin removal after inbox check). This is the canary — the pin-removal evidence collected here is reused by task 003 for Core/Dataverse.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>FR-15 — gather region/slot evidence (resolves the 2 execution-time unknowns)</title>
+    <phase>P5 Non-prod cutover (OPERATOR-DRIVEN)</phase>
+    <gate>042 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Evidence-gathering + Azure read commands; operator-driven; no code change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Run az read commands + record; well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>OPERATOR-DRIVEN — needs Azure credentials; gate for the non-prod cutover.</parallel-reason>
+    <deps>042</deps>
+    <tags>deployment, dotnet, migration</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>OPERATOR-DRIVEN. Gather the two execution-time verifications the spec deferred: (1) run `az webapp list-runtimes --os-type linux` for the prod subscription/region and confirm `DOTNETCORE:10.0` is available (CLI/ARM works even if the portal picker lags), and (2) confirm a dev/staging slot exists or can be created on the target App Service without disrupting current config. Record both as FR-15 evidence.</prompt>
+  <role>SPAARKE release engineer + platform developer. Expert in Azure App Service runtimes, deployment slots, and az CLI. Follow ADRs strictly.</role>
+  <goal>`notes/region-slot-evidence.md` contains the pasted `az webapp list-runtimes` output confirming `DOTNETCORE:10.0` in the prod region, and confirmation that a staging slot exists or a clean creation path is verified — resolving the two open Unresolved Questions in spec.</goal>
+
+  <context>
+    <background>spec Dependencies + Unresolved Questions: "Region runtime evidence" and "Slot availability" are execution-time verifications, not planning blockers. Design §7: colon form for `list-runtimes`. This is the first P5 task and a prerequisite to the non-prod deploy (051). It is operator-driven because it needs Azure credentials to the prod subscription.</background>
+    <relevant-files>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/region-slot-evidence.md</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042" status="pending">Runbook exists (defines the slot the evidence confirms).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">OPERATOR-DRIVEN: requires Azure credentials; do not fabricate output — paste real `az` results. If the runtime is not listed in-region, STOP (see escalation) rather than proceeding to deploy.</constraint>
+    <constraint source="project">Read-only Azure commands only in this task — no config changes to the live App Service (slot creation, if needed, is verified as a path, executed with the operator).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure region runtime availability + slot verification</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="list-runtimes" location="projects/dotnet-10-upgrade-r1/design.md">design §7 — verify prod region with `az webapp list-runtimes --os-type linux` (colon form).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load spec FR-15 + design §7 Unresolved Questions. Declare RIGOR: STANDARD. Confirm operator + Azure auth.</step>
+    <step order="1">Run `az webapp list-runtimes --os-type linux`; capture the output; confirm `DOTNETCORE:10.0` present.</step>
+    <step order="2">Confirm a staging slot exists (or verify the clean creation path with the operator) on the target App Service.</step>
+    <step order="3">Write `notes/region-slot-evidence.md` with the pasted evidence; mark the two Unresolved Questions resolved.</step>
+    <step order="4">Update `tasks/TASK-INDEX.md`: set 050 status to ✅.</step>
+    <step order="5">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `DOTNETCORE:10.0` is NOT available in the prod region, STOP and surface per CLAUDE.md §6 — do NOT reach for a self-contained-publish escape hatch (spec MUST NOT); this is a go/no-go input for the whole cutover.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">n/a (az CLI)</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/region-slot-evidence.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/region-slot-evidence.md` contains real `az webapp list-runtimes` output confirming `DOTNETCORE:10.0` in the prod region.</criterion>
+    <criterion testable="true">A staging slot is confirmed to exist or a clean creation path is verified.</criterion>
+    <criterion testable="true">Negative: if the runtime is absent in-region, the task STOPPED and escalated (no self-contained workaround).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-15 (evidence half). OPERATOR-DRIVEN. Resolves the two Unresolved Questions in spec.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

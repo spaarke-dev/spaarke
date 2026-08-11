@@ -1,6 +1,6 @@
 # dotnet-10-upgrade-r1
 
-> **Created**: 2026-08-10 · **Status**: Design (initial) · **Driver**: .NET 8 EOL **2026-11-10**
+> **Created**: 2026-08-10 · **Status**: Ready for execution (pipeline complete 2026-08-11) · **Driver**: .NET 8 EOL **2026-11-10**
 
 Upgrade the Spaarke server backend from **.NET 8 → .NET 10 (LTS)** before .NET 8 loses support.
 
@@ -21,12 +21,16 @@ A **support-lifecycle** migration — supported runtime, zero behavior change, "
 ## Documents
 
 - [`design.md`](design.md) — **the analysis** (lifecycle, hit-sites, package strategy, deployment sequencing, phasing, verification, relationship to `code-quality-and-assurance-r3`)
-- `spec.md` — TBD (`/design-to-spec` after open question §13-A is decided)
-- `plan.md` / `tasks/` — TBD (`/project-pipeline`)
+- [`spec.md`](spec.md) — AI implementation spec (17 FRs, 8 NFRs) — Ready for Implementation
+- [`plan.md`](plan.md) — implementation plan (P0–P7 WBS + discovered resources)
+- [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) — 22 tasks; serial critical path; deploy tasks operator-driven
+- [`current-task.md`](current-task.md) — active task state (context recovery)
 
-## Top decision before pipeline
+## Execution status
 
-**§13-A — relationship to `code-quality-and-assurance-r3`**: fold in as r3's first ("Runtime") workstream (recommended) vs ship standalone. See [`design.md` §11](design.md).
+Pipeline was run **INITIALIZE-ONLY** (operator decision 2026-08-11 — plan artifacts only, then stop). Execution has **not** started. Begin with `task-execute` on task 001 (`tasks/001-bump-globaljson-sdk.poml`). Deploy phases (P5/P6) are **operator-driven** (Azure credentials + recorded go/no-go).
+
+**§13-A resolved** (owner 2026-08-10): separate/sequential — .NET 10 ships + merges FIRST, then `code-quality-and-assurance-r3` re-plans on the net10 baseline. See [`design.md` §11](design.md).
 
 ## Hot-path
 

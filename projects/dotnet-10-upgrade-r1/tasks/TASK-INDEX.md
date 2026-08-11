@@ -1,0 +1,95 @@
+# TASK-INDEX — .NET 8 → .NET 10 Backend Upgrade (r1)
+
+> **Generated**: 2026-08-11 by `/project-pipeline`
+> **Branch**: `work/dotnet-10-upgrade-r1` · **Spec**: [`../spec.md`](../spec.md) · **Plan**: [`../plan.md`](../plan.md)
+> **Status legend**: 🔲 not-started · 🔄 in-progress/needs-retry · ✅ complete · ⏸ blocked
+> **Execution**: per-task via `task-execute` (root CLAUDE.md §4). Deploy tasks (050/051/060/061) are **OPERATOR-DRIVEN** (Azure + go/no-go).
+
+---
+
+## Task registry
+
+| # | Task | Phase | FR | MT / E | Deps | Parallel-safe | Status |
+|---|------|-------|----|--------|------|---------------|--------|
+| 001 | Bump global.json → 10.0.1xx + re-scrape breaking changes (H5) | P0 | FR-02 | sonnet/high | — | false | 🔲 |
+| 002 | Retarget **Spaarke.Scheduling FIRST** (warnings-as-errors) + NU1510/SYSLIB | P0 | FR-01,04 | sonnet/xhigh | 001 | false | 🔲 |
+| 003 | Retarget Core + Dataverse; required package moves + pin removals | P0 | FR-01,03,04 | sonnet/xhigh | 002 | false | 🔲 |
+| 004 | Retarget Sprk.Bff.Api; package alignment + §6.3 catch-ups | P0 | FR-01,03,05 | sonnet/xhigh | 003 | false | 🔲 |
+| 005 | Retarget tests/**; clean solution build + publish (**P0 exit gate**) | P0 | FR-01 | sonnet/high | 004 | false | 🔲 |
+| 010 | **H1** BackgroundService.ExecuteAsync audit (closed per-worker list) | P1 | FR-07 | **opus**/xhigh | 005 | false | 🔲 |
+| 011 | **H1 adversarial verification** (non-author) | P1 | NFR-07 | opus/xhigh | 010 | false (V1) | 🔲 |
+| 012 | **H3** X509Certificate2 → X509CertificateLoader.LoadPkcs12 | P1 | FR-09 | sonnet/high | 005 | false | 🔲 |
+| 013 | **H6 + secondary sweep** (grep + per-item verdict) | P1 | FR-10 | sonnet/xhigh | 005 | false | 🔲 |
+| 014 | **FR-06** telemetry consolidation (drop classic App Insights SDK) | P1 | FR-06 | sonnet/high | 004 | false | 🔲 |
+| 020 | **H2** dev-boot DI validation (fix ValidateOnBuild/ValidateScopes) | P2 | FR-08 | **opus**/xhigh | 010 | false | 🔲 |
+| 021 | **H2 adversarial verification** (non-author) | P2 | NFR-07 | opus/xhigh | 020 | false (V2) | 🔲 |
+| 030 | Full test suite green on net10 (unit + integration + arch) | P3 | FR-11 | sonnet/xhigh | 021 | false | 🔲 |
+| 031 | Publish-size re-baseline + governance updates 🔒 | P3 | FR-12 | sonnet/high | 030 | false | 🔲 |
+| 032 | Transitive CVE audit (no HIGH regression) | P3 | NFR-03 | sonnet/high | 030 | false | 🔲 |
+| 040 | CI setup-dotnet → 10.x / @v6 across 7 workflows | P4 | FR-13 | sonnet/xhigh | 032 | false | 🔲 |
+| 041 | App Service Bicep DOTNETCORE\|10.0 (+ platform.json) + Functions | P4 | FR-14 | sonnet/xhigh | 032 | false | 🔲 |
+| 042 | Adapt /bff-deploy + slot-swap runbook 🔒 | P4 | FR-14 | sonnet/high | 041 | false | 🔲 |
+| 050 | Region/slot evidence (resolves 2 unknowns) 🛠️ | P5 | FR-15 | sonnet/high | 042 | false | 🔲 |
+| 051 | Non-prod slot deploy + full smoke + **go/no-go** 🛠️ | P5 | FR-15 | sonnet/high | 050 | false | 🔲 |
+| 060 | Rehearse rollback (swap-back to 8.0) 🛠️ | P6 | NFR-06 | sonnet/high | 051 | false | 🔲 |
+| 061 | Production slot swap to net10 🛠️ | P6 | FR-16 | sonnet/high | 060 | false | 🔲 |
+| 090 | Wrap-up: test-diet, doc-drift, INDEX, r3 handoff, defer majors 🔒 | P7 | FR-17 | sonnet/high | 061 | false | 🔲 |
+
+🔒 = writes root `CLAUDE.md` / `.claude/` / `projects/INDEX.md` → **main-session-only** (root §3).
+🛠️ = **OPERATOR-DRIVEN** — needs Azure credentials + a recorded human go/no-go; not run autonomously.
+
+**Count**: 23 tasks across P0–P7 (P0=5, P1=5, P2=2, P3=3, P4=3, P5=2, P6=2, P7=1).
+
+---
+
+## Critical path
+
+```
+001 → 002 → 003 → 004 → 005 → 010 → 012 → 013 → 014 → 020 → 030 → 031 → 032
+    → 040 → 041 → 042 → 050 → 051 → 060 → 061 → 090
+```
+
+The adversarial-verify tasks (011 after 010; 021 after 020) hang off the path but are not on the longest chain — each can overlap the next author task.
+
+## Parallel execution groups
+
+**By design, this project has NO P0 parallel groups.** Per design §4 principle 2 ("one coherent change, not a drip"), the retarget is intentionally an atomic serial chain — a half-migrated state (net10 code + 8.0 SDK, or mixed Extensions versions) is its own failure mode. The whole in-scope tree lands together on one branch.
+
+| Group | Tasks | Prerequisite | Notes |
+|-------|-------|--------------|-------|
+| V1 | 011 | 010 complete | Adversarial verify of H1 — **different agent than 010's author** (NFR-07); read-only, may overlap 012/013 |
+| V2 | 021 | 020 complete | Adversarial verify of H2 — **different agent than 020's author** (NFR-07); read-only |
+
+There are no concurrent code-writing waves — every code task is `parallel-safe: false`.
+
+## Dependency notes / gates
+
+- **001 is the hard prerequisite** (H5): until global.json moves to 10.0.1xx nothing builds net10 (NETSDK1045).
+- **002 before 003/004**: `Spaarke.Scheduling` has `TreatWarningsAsErrors=true` — do it first so NU1510/SYSLIB surface early on the smallest project.
+- **005 is the P0 exit gate**: whole-solution build + publish green before any P1 hit-site work.
+- **021 gates P3**: H2 fixes must be adversarially verified before the test suite is declared green.
+- **051 "go" gates P6**: production cutover (060/061) does NOT proceed without a recorded non-prod go/no-go.
+- **060 before 061**: rollback (swap-back to 8.0) must be rehearsed before the production forward swap (NFR-06).
+
+## Governance reminders (per task)
+
+- `/conflict-check` **before EVERY BFF PR** — 13+ active BFF worktrees (NFR-08); no parallel BFF-wide project merges.
+- Publish-size ≤60 MB, framework-dependent only (re-baselined in 031).
+- `net462` plugin **untouched** (NFR-05); do NOT pull the 6 deferred optional majors.
+- MUST NOT weaken `TreatWarningsAsErrors` / disable DI validation / exclude tests to force green.
+
+## Success-criteria → task map
+
+| SC | Criterion | Task(s) |
+|----|-----------|---------|
+| 1 | in-scope net10; plugin unchanged | 001–005 |
+| 2 | no NU1510; no HIGH-CVE regression | 002, 032 |
+| 3 | per-worker verdict, adversarially reviewed | 010, 011 |
+| 4 | Dev DI validation clean | 020, 021 |
+| 5 | telemetry intact | 014, 051 |
+| 6 | full test suite green | 030 |
+| 7 | publish ≤60 MB; baseline documented | 031 |
+| 8 | CI green on net10 | 040 |
+| 9 | non-prod smoke + go/no-go | 050, 051 |
+| 10 | prod on DOTNETCORE\|10.0; rollback rehearsed | 060, 061 |
+| 11 | r3 handoff note; deferred majors filed | 090 |

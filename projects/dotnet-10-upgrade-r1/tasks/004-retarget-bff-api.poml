@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>Retarget Sprk.Bff.Api to net10; finish package alignment + routine same-major catch-ups</title>
+    <phase>P0 Retarget + build-green</phase>
+    <gate>003 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the primary deployable csproj; BFF-wide; brownfield; many runtime-tied packages.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Enumerated package moves (design §6.1/§6.3); no architectural judgment beyond the closed list.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial P0 chain; BFF is the largest surface and depends on Core/Dataverse being on net10.</parallel-reason>
+    <deps>003</deps>
+    <tags>dotnet, migration, packages, bff-api</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Retarget `Sprk.Bff.Api` from net8.0 to net10.0, finish aligning its `Microsoft.Extensions.*` / auth packages to the required 10.0.x + Identity.Web/MSAL wave (consistent with tasks 003), and apply the owner-approved routine same-major catch-up bumps from design §6.3 (Azure SDKs, OpenTelemetry + instrumentation, Polly, Cosmos, Caching.StackExchangeRedis, MimeKit, MsgReader, HtmlSanitizer, Handlebars.Net, OpenMcdf, plus the optional Graph 5.101→5.105 hygiene bump). Keep it framework-dependent linux-x64; do NOT pull any of the 6 deferred optional majors. Remove the BFF's own superseded CVE pins after inbox-≥-pin check.</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core minimal-API hosting, Azure SDK families, OpenTelemetry, and BFF publish hygiene. Follow ADRs strictly.</role>
+  <goal>`Sprk.Bff.Api.csproj` targets `net10.0`; all required + §6.3 routine same-major bumps applied; superseded CVE pins (RegEx + `System.Security.Cryptography.Xml 8.0.4`) removed after inbox check; `SelfContained=false` + `RuntimeIdentifier=linux-x64` preserved; `dotnet build -c Release src/server/api/Sprk.Bff.Api/` green.</goal>
+
+  <context>
+    <background>design §3.1/§6.1/§6.3/§6.4. BFF = 120+ endpoints, ~99 DI regs, 13+ job types. §6.3 catch-ups are all same-major (servicing trains, no API break). §6.4 optional majors (Graph v6/Kiota 2.0, Search v12, AppInsights 3.x, PowerBI v5, Azure.AI.Projects 2.x, Agents.AI GA, Http.Polly→Http.Resilience) are DEFERRED — pulling them in defeats the "no issues" mandate. M.E.AI stays at 10.3.0 (bumping drags OpenAI ≥2.12). The classic App Insights SDK removal is a SEPARATE task (014), not here.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/pin-removals.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Core + Dataverse on net10 with aligned Extensions/auth versions.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029">MUST keep `<SelfContained>false</SelfContained>` + `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` + the wwwroot sourcemap exclusion; MUST NOT add `PublishTrimmed`/`PublishAot`; MUST NOT pin `RuntimeFrameworkVersion`.</constraint>
+    <constraint source="project">Scope: BFF csproj only. §6.3 bumps are same-major ONLY — no §6.4 optional majors, no M.E.AI 10.3.0→10.8.x, no Http.Polly→Http.Resilience.</constraint>
+    <constraint source="project">Remove superseded CVE pins after inbox-≥-pin check; keep `NoWarn=NU1903` (Kiota transitive CVE accepted per ADR-029) unless the Graph 5.105 bump raises the Kiota floor to the patched 1.22.0 natively (then reconcile).</constraint>
+    <constraint source="ADR-013">No AI-internal types cross the CRUD boundary; retarget only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF net10 retarget + same-major catch-ups + publish hygiene</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="routine-catchups" location="projects/dotnet-10-upgrade-r1/design.md">design §6.3 — the exact same-major bump list; §6.4 — the deferred majors NOT to touch.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-01/FR-03/FR-05 + design §6.1/§6.3/§6.4. Declare RIGOR: FULL.</step>
+    <step order="1">Set `<TargetFramework>net10.0</TargetFramework>` on the BFF csproj; confirm `SelfContained=false` + `RuntimeIdentifier=linux-x64` + sourcemap exclusion are intact.</step>
+    <step order="2">Align remaining `Microsoft.Extensions.*` / auth packages to the required wave (consistent with task 003).</step>
+    <step order="3">Apply the §6.3 same-major catch-ups (Azure.Identity 1.17.1→1.21.0, Azure.Core →1.61.0, Blobs, ServiceBus, KeyVault.Secrets, Azure.Monitor.OTel →1.6.0, OpenTelemetry 1.15→1.17 + instrumentation, Polly 8.6.5→8.7.0, Cosmos →3.62.1, Caching.StackExchangeRedis →10.0.10, MimeKit →4.17.0, MsgReader →6.1.0, HtmlSanitizer →9.2.995, Handlebars.Net →2.4.3, OpenMcdf →3.2.0) + optional Graph 5.101→5.105.</step>
+    <step order="4">Remove the BFF's superseded CVE pins after inbox-≥-pin check; append evidence to `notes/pin-removals.md`; reconcile `NoWarn=NU1903` if Graph 5.105 raises the Kiota floor to 1.22.0.</step>
+    <step order="5">`dotnet build -c Release src/server/api/Sprk.Bff.Api/`; resolve warnings (source SYSLIB items belong to tasks 012/013 — note, don't fix here).</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 004 status to ✅.</step>
+    <step order="7">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any §6.3 "same-major" bump turns out to carry a breaking API surface (not a servicing train), STOP and surface per CLAUDE.md §6 — the catch-up is owner-approved ONLY on the same-major/no-break premise.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + restore BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/pin-removals.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the retargeted BFF, `dotnet build -c Release src/server/api/Sprk.Bff.Api/` succeeds.</criterion>
+    <criterion testable="true">`SelfContained=false`, `RuntimeIdentifier=linux-x64`, and the wwwroot sourcemap exclusion are all present and unchanged.</criterion>
+    <criterion testable="true">All §6.3 bumps applied are same-major; no §6.4 optional major, no M.E.AI 10.8.x, no Http.Resilience swap is present.</criterion>
+    <criterion testable="true">Negative: no `PublishTrimmed`/`PublishAot`/`RuntimeFrameworkVersion` was added.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-01/FR-03/FR-05. FR-06 (App Insights removal) is task 014. Publish measurement is task 031. Full-solution build+publish green is the task 005 exit gate.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
