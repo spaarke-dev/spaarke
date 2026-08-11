@@ -104,6 +104,11 @@ import { useEmailPerItemCards } from "./EmailPerItemCards";
 // task 026 (FR-11) — document per-item action cards (Summarize/Draft response/Draft memo), wired
 // to the task-022 perItemCards contract; each card arms the one-shot documentId seam below.
 import { useDocumentPerItemCards } from "./DocumentPerItemCards";
+// task 041 (FR-14) — the deterministic card-vs-chip follow-on resolver (reads task-022
+// perItemCards + task-040 getWidgetInteractionPattern; NO message text, NO keyword heuristic)
+// plus the stack-collapse wrapper for multiple simultaneous proactive card slots.
+import { resolveFollowOnElementTypeForActiveItemType } from "./followOnElementType";
+import { ProactiveCardStack } from "./ProactiveCardStack";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
@@ -929,6 +934,17 @@ export function ConversationPane(): React.JSX.Element {
       setPendingOutboundMessage(message);
     }, []),
   });
+  // task 041 (FR-14) — the DETERMINISTIC card-vs-chip resolution for the current active item, read
+  // through the ONE canonical registry accessor pair (task-022 `perItemCards` + task-040
+  // `getWidgetInteractionPattern`). Gates `emailPerItemCards`/`documentPerItemCards` below as a
+  // belt-and-suspenders check against the SAME registration contract those hooks already read
+  // internally — never re-derived from message content, never a keyword. Closing a tab / deselecting
+  // clears `generalizedActiveItem`, which flows straight through to `'none'` here (no stale/unmounted
+  // follow-on can survive a tab close).
+  const activeItemFollowOnType = React.useMemo(
+    () => resolveFollowOnElementTypeForActiveItemType(generalizedActiveItem?.type ?? null),
+    [generalizedActiveItem?.type]
+  );
   // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
@@ -2852,23 +2868,41 @@ export function ConversationPane(): React.JSX.Element {
   const transcriptFooter = React.useMemo(
     () => (
       <>
-        {/* UAT round-6 (item #14): the "Rerun a full analysis" card renders FIRST in the transcript
-            footer — i.e. INLINE in the transcript, directly beneath the last message, which right after
-            a Quick review is the "Quick scan — … I've finished reviewing…" completion message. It
-            scrolls WITH the conversation (it lives inside SprkChat's transcriptFooterSlot) instead of
-            floating pinned at the top of the pane (the owner's round-6 complaint). Renders nothing until
-            a quick run arms it; single-slot (never stacks). */}
-        {rerunFullAnalysisCard.cardSlot}
-        {/* task 025 (FR-09/FR-10): email per-item ACTION CARDS — renders (with no typing) whenever
-            the active-item conduit carries a single active email; suppresses on multi-select/
-            deselect/tab-switch-away (the conduit's single-active-item invariant). REACTIVE/local
-            surface (NFR-07) — a sibling of the Rerun card + consumer chips, distinct from the
-            ADR-047 spine. */}
-        {emailPerItemCards.cardSlot}
-        {/* task 026 (FR-11): document per-item ACTION CARDS — renders (with no typing) whenever
-            the active-item conduit carries a single active document-viewer tab; suppresses on
-            multi-select/deselect/tab-switch-away, mirroring the email cards immediately above. */}
-        {documentPerItemCards.cardSlot}
+        {/* task 041 (FR-14): the three proactive card sources below (Rerun-full-analysis / email
+            per-item / document per-item) can be simultaneously present (e.g. a quick NDA review just
+            completed WHILE an email tab with an active email is open) — `ProactiveCardStack` collapses
+            2+ of them behind ONE outer disclosure header per ASSISTANT-UI-ELEMENT-CRITERIA.md §5;
+            0 or 1 present renders unwrapped exactly as before. `emailPerItemCards`/`documentPerItemCards`
+            are additionally gated on `activeItemFollowOnType === 'card'` — the DETERMINISTIC resolution
+            read through task-022's `perItemCards` + task-040's `getWidgetInteractionPattern` (never
+            message text, never a keyword) — a belt-and-suspenders check against the SAME registration
+            contract those hooks already read internally. */}
+        <ProactiveCardStack
+          slots={[
+            {
+              /* UAT round-6 (item #14): the "Rerun a full analysis" card — INLINE in the transcript,
+                 directly beneath the last message. Renders nothing until a quick run arms it;
+                 single-slot (never stacks) on its own. */
+              key: "rerun-full-analysis",
+              node: rerunFullAnalysisCard.cardSlot,
+            },
+            {
+              /* task 025 (FR-09/FR-10): email per-item ACTION CARDS — renders (with no typing)
+                 whenever the active-item conduit carries a single active email; suppresses on
+                 multi-select/deselect/tab-switch-away (the conduit's single-active-item invariant).
+                 REACTIVE/local surface (NFR-07), distinct from the ADR-047 spine. */
+              key: "email-per-item",
+              node: activeItemFollowOnType === "card" ? emailPerItemCards.cardSlot : null,
+            },
+            {
+              /* task 026 (FR-11): document per-item ACTION CARDS — renders (with no typing) whenever
+                 the active-item conduit carries a single active document-viewer tab; suppresses on
+                 multi-select/deselect/tab-switch-away, mirroring the email cards above. */
+              key: "document-per-item",
+              node: activeItemFollowOnType === "card" ? documentPerItemCards.cardSlot : null,
+            },
+          ]}
+        />
         {reviseChipsPending ? (
           <ComposeDocActionChips onAction={handleDocAction} />
         ) : (
@@ -2897,6 +2931,7 @@ export function ConversationPane(): React.JSX.Element {
       rerunFullAnalysisCard.cardSlot,
       emailPerItemCards.cardSlot,
       documentPerItemCards.cardSlot,
+      activeItemFollowOnType,
       reviseChipsPending,
       handleDocAction,
       chips.consumerChipsSlot,
