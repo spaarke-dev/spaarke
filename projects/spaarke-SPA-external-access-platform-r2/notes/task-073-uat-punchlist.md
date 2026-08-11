@@ -60,6 +60,16 @@ and is **bundled into the PCF** by build:prod (via ensure-dist-fresh). The trio'
    EmailComposer/SendEmailDialog incompatibility surfaced by the trio's props (open/onClose/initialTo/
    authenticatedFetch/bffBaseUrl/titleOverride/regarding{entityType,id}/onSent/onError). Diagnose the
    object-as-child; consider an error boundary around the dialogs so a shared-component crash can't blank the PCF.
+   - INVESTIGATION SO FAR (2026-08-11): the `regarding` prop shape is FINE — `ISendEmailDialogRegarding` =
+     `{entityType, id, name?}`, matches the trio's `{entityType:getHostEntity(), id:recordId}`; SendEmailDialog
+     folds it into ADR-024 `associations` (not rendered as a child). So the object-as-child is elsewhere in the
+     EmailComposer engine render OR the trio's empty-state Dialog (`index.ts` ~line 763, uses `children:` via
+     createElement) — the empty-state path (record with NO emailable members) is the likely trigger for test
+     records. NEXT STEPS: (a) reproduce with a non-minified/dev build (or React devtools) to get the real
+     component stack for error #31; (b) add a React-16 class ErrorBoundary around BOTH the SendEmailDialog and
+     the empty-state Dialog in the trio so a shared-EmailComposer crash degrades gracefully instead of blanking
+     the whole PCF; (c) fix the underlying element-as-child once the stack points to it. The email flow was
+     never live-tested in teams-app-r1 (like the grant flow), so treat it as latent.
 2. **Standing-grant contacts auto-listed in "Current Access".** If a Contact has `sprk_standinggrant=true`
    (e.g. Eyal Iffergan), they should already appear in Current Access for a record (they have standing
    membership). Needs a NEW read: query contacts where `sprk_standinggrant=true` and union them into the
