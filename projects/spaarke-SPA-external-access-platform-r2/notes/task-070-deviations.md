@@ -42,14 +42,21 @@ oid `c74ac1af…` ↔ systemuserid `1d02f31c…`) → invalid reference → 400.
 `sprk_expirydate` → **`sprk_expiresdate`** (verified live). Would 400 any grant carrying an expiry
 (e.g. task 071's modal).
 
-### Bug 4 — firm/org association (owner steer)
+### Bug 4 — firm/org association (owner steer) — FIXED IN THIS PROJECT
 
-The prior `sprk_accountid@odata.bind → /accounts` is wrong twice: (a) `sprk_externalrecordaccess` has NO
+The prior `sprk_accountid@odata.bind → /accounts` was wrong twice: (a) `sprk_externalrecordaccess` had NO
 account lookup, and (b) Spaarke models the firm/org as **`sprk_organization`**, not the OOB `account`
-(owner, 2026-08-11). There is currently **no org/account lookup on the grant table** at all, so the bind
-was removed (it 400'd every grant that sent `AccountId`, incl. `/invite-and-grant`). `AccountId` is now
-accepted-but-not-persisted. **Follow-up (owner + 071/072)**: add a `sprk_organization` lookup to
-`sprk_externalrecordaccess`, rename DTO `AccountId → OrganizationId`, and bind it. → /defer.
+(owner, 2026-08-11). Owner directed this be built now (not deferred). Delivered:
+
+- Created a **`sprk_Organization` lookup** on `sprk_externalrecordaccess` (Web API RelationshipDefinitions;
+  attribute `sprk_organization`, nav property `sprk_Organization`, target `sprk_organization`, set
+  `sprk_organizations`). Published.
+- Renamed grant DTOs `AccountId → OrganizationId` (a `sprk_organization` id).
+- `BuildGrantPayload` binds `sprk_Organization@odata.bind → /sprk_organizations({id})` when supplied;
+  `/invite-and-grant` threads it. **Live-verified**: a matter grant with `organizationId` populated both
+  `sprk_matter` and `sprk_organization`.
+- `ProvisionProjectEndpoint`'s `sprk_externalaccountid` (a project-level external-access account on
+  `sprk_project`) is a DIFFERENT concept and intentionally left as OOB account.
 
 ## Polymorphic generalization (the task's nominal scope)
 
@@ -101,9 +108,9 @@ correct implementation), applied + live-verified. Surfaced to the owner in the s
 - Deployed to spaarke-bff-dev from worktree (health + SHA verified); worktree updated from master
   (0 behind), `/conflict-check` clean.
 
-## /defer items (need owner intent — file to notes/defer-issues.md + GitHub)
+## Follow-ups
 
-1. **Org-scoping**: add `sprk_organization` lookup to `sprk_externalrecordaccess`; DTO `AccountId →
-   OrganizationId`; bind it. (Currently accepted-but-not-persisted.)
-2. **grantedby under SSO**: confirm systemuser resolution populates `sprk_grantedby` with a real
-   workforce token (073 UAT).
+1. **Org-scoping** — ✅ DONE in this project (see Bug 4). `sprk_Organization` lookup created + wired +
+   live-verified. Task 071 will surface an org picker in the modal.
+2. **grantedby under SSO** — confirm systemuser resolution populates `sprk_grantedby` with a real
+   workforce token (owner will confirm during the 073 UAT). Non-blocking (omitted-not-failed by design).

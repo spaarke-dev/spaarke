@@ -19,9 +19,9 @@
 - Live UAT green (matter/WA/project 200 + correct binding; no-root 400). Test rows cleaned up.
 - Docs: `notes/task-070-deviations.md` (full root-cause + UAT + /defer items).
 
-## /defer items (owner intent needed — pending filing)
-1. **Org-scoping**: add `sprk_organization` lookup to `sprk_externalrecordaccess`; DTO `AccountId → OrganizationId`; bind it (currently accepted-but-not-persisted; OOB `account` was wrong per owner).
-2. **grantedby under SSO**: confirm systemuser resolution populates `sprk_grantedby` with a real workforce token (073 UAT).
+## Follow-ups
+1. **Org-scoping** — ✅ DONE (owner: build now). `sprk_Organization` lookup created on the grant table + DTO `AccountId→OrganizationId` + bound + **live-verified** (matter grant with `organizationId` populated `sprk_organization`). Task 071 adds the modal org picker.
+2. **grantedby under SSO**: owner will confirm `sprk_grantedby` populates under a real workforce token (073 UAT). Non-blocking.
 
 ## Remaining (project)
 - **P2b**: 071 → 072 → 073 (073 also live-tests revoke + close-project + deploys the SPA incl. teams fix).
