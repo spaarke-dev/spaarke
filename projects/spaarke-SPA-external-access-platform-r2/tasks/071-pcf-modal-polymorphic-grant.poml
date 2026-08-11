@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Polymorphic grant UI — TrackingFieldTrio host + AccessGrantModal across Project/Matter/WorkAssignment; adopt the shared side-pane Advanced-Lookup (INavigationService.openLookup) for the contact picker</title>
+    <phase>P2b Polymorphic access-write (grant authoring)</phase>
+    <gate>blocked-until:070</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared @spaarke/ui-components AccessGrantModal (consumed by other surfaces) + the TrackingFieldTrio PCF; touches the access-grant UX; pcf/frontend; ends in a PCF solution deploy.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified now: the polymorphic surface is a known 3-place change and the side-pane lookup helper already exists (INavigationService.openLookup) — adoption + parameterization, not novel design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Spaarke.UI.Components (AccessGrantModal) + the PCF; deploys to shared Dataverse — coordinate; serialize after 070 (depends on the {recordType,recordId} grant DTO).</parallel-reason>
+    <deps>070</deps>
+    <tags>pcf, react, frontend, fluent-ui, deploy</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the existing "Manage Access" surface (TrackingFieldTrio PCF + shared AccessGrantModal) work on
+    Matter and Work Assignment records, not just Project — the UI companion to tasks 028 (read) + 070
+    (write). The PCF is hardcoded to sprk_project (GRANT_RECORD_ENTITY, project role-fields, _sprk_projectid_value
+    grant filter, retrieveRecord('sprk_project',…)); parameterize it by the host entity. The shared modal is
+    entity-agnostic except 3 projectId body keys → send {recordType,recordId} matching task 070's DTO. Replace
+    section-2's Fluent Combobox contact picker with the SHARED side-pane Advanced Lookup
+    (INavigationService.openLookup — Xrm.Utility.lookupObjects; already built + cross-surface). Follow
+    MODAL-DECISION-CRITERIA / MODAL-DESIGN-SYSTEM (the modal is already on the SprkModal base). Binding design:
+    notes/polymorphic-grant-authoring-enhancement.md.
+  </prompt>
+
+  <role>SPAARKE frontend engineer fluent in PCF host context, Fluent v9 modal patterns (SprkModal), and the @spaarke/ui-components INavigationService abstraction. Keeps shared components Xrm-agnostic (coupling lives in the PCF host). Follows ADR-012/021/022/028 strictly.</role>
+
+  <goal>
+    Clicking the person icon on a Matter or Work Assignment (or Project) form opens the grant modal, loads the
+    record's membership candidates + current grants for that entity, and — via the side-pane Advanced Lookup —
+    lets the admin pick any contact and grant them access to that record (write goes through task 070's
+    polymorphic endpoint). The "Failed to load access data" error on Matter/WA forms is gone. The
+    Access-Permission gate reads sprk_accesspermission on whichever root the trio is bound to. The shared modal
+    stays Xrm-free; the side-pane lookup helper is adopted (not re-built).
+  </goal>
+
+  <context>
+    <background>
+      Inventory (notes/polymorphic-grant-authoring-enhancement.md): TrackingFieldTrio/index.ts hardcodes
+      GRANT_RECORD_ENTITY='sprk_project' (134), project CANDIDATE_ROLE_FIELDS (146-153 — Matter + WA carry the
+      SAME sprk_assigned* lookups, verified), grant-read filter _sprk_projectid_value (380), and
+      retrieveRecord('sprk_project',…) (347). AccessGrantModal (@spaarke/ui-components) is entity-agnostic except
+      3 projectId: body keys (310/320/442) tracking the BFF DTO. The reusable side-pane Advanced Lookup already
+      exists: INavigationService.openLookup (types/serviceInterfaces.ts:363) → Xrm.Utility.lookupObjects via
+      createXrmNavigationService (utils/adapters/xrmNavigationServiceAdapter.ts:92, with cleanGuid normalization);
+      createBffNavigationService is the SPA no-op fallback; createMockNavigationService for tests. Access-Permission
+      (sprk_accesspermission choice Standard/Limited/Restricted) is now on Matter + Project + WA (owner-added), and
+      the trio is placed on all three forms (owner-done).
+    </background>
+    <relevant-files>
+      <file>src/client/pcf/TrackingFieldTrio/index.ts (derive host entity from context; per-entity role-field map; grant-read filter by root; wire createXrmNavigationService.openLookup as the contact picker; send {recordType,recordId})</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx (3 projectId body keys → recordType/recordId; section-2 Combobox → openLookup-backed "Select contact" button)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts (add openLookup/pickContact callback + recordType prop; keep Xrm-free)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/serviceInterfaces.ts (INavigationService.openLookup — reuse as-is)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts (createXrmNavigationService — reuse as-is)</file>
+      <file>src/client/pcf/TrackingFieldTrio/ControlManifest.Input.xml (version bump; confirm Utility/Navigation feature usage)</file>
+    </relevant-files>
+    <dependencies>070 (the {recordType,recordId} grant DTO the modal now sends). Shared INavigationService.openLookup + adapters (reuse). teams-app-r1 TrackingFieldTrio/AccessGrantModal (now R2-owned).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Contact picker MUST use the side-pane Advanced Lookup (INavigationService.openLookup → Xrm.Utility.lookupObjects), not the Fluent Combobox. Reuse the EXISTING helper + adapters — do NOT build a new lookup abstraction (§11).</constraint>
+    <constraint source="design">Keep AccessGrantModal Xrm-agnostic: the modal takes an injected openLookup/pickContact callback (same DI pattern as its other callbacks); the PCF host wires createXrmNavigationService. No Xrm/entity literals enter the shared modal.</constraint>
+    <constraint source="owner">Parameterize the PCF host by the bound record's entity: GRANT_RECORD_ENTITY, the candidate role-field set, and the grant-read filter (_sprk_{root}_value) all derive from the host entity (project/matter/workassignment). The Access-Permission gate reads sprk_accesspermission on that entity.</constraint>
+    <constraint source="MODAL">Follow docs/standards/MODAL-DECISION-CRITERIA.md + MODAL-DESIGN-SYSTEM.md — the modal stays on the SprkModal base shell (task 041 baseline); the 043 Access-Permission gate behavior is unchanged.</constraint>
+    <constraint source="ADR-021">Dark-mode correct; Fluent v9 semantic tokens only; no hardcoded hex. SCOPE: any new/changed modal UI.</constraint>
+    <constraint source="project">PCF version bump in all 4 locations (PCF-DEPLOYMENT-GUIDE.md); build with npm run build:prod (NOT npm run build); solution import to shared Dataverse — /conflict-check + coordinate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/polymorphic-grant-authoring-enhancement.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared side-pane Advanced Lookup" location="src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts">INavigationService.openLookup({entityTypes:['contact'],allowMultiSelect:false}) → Xrm.Utility.lookupObjects; cleanGuid-normalized; SPA fallback via createBffNavigationService; mock via createMockNavigationService. Adopt as-is.</pattern>
+      <pattern name="Entity-agnostic modal via injected callbacks" location="src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx">The modal already takes fetchCandidates/fetchExistingGrants/searchContacts as props; add openLookup/pickContact the same way; the PCF host supplies the Xrm-coupled implementations.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check (shared Spaarke.UI.Components + PCF + Dataverse import).</step>
+    <step order="2">Parameterize TrackingFieldTrio/index.ts by the bound host entity: replace GRANT_RECORD_ENTITY='sprk_project' with the context's entity; map candidate role-fields per entity (project/matter/WA share sprk_assigned*); grant-read filter uses _sprk_{root}_value; retrieveRecord uses the host entity. Fixes the Matter/WA "Failed to load access data" error.</step>
+    <step order="3">Wire the contact picker to the shared side-pane Advanced Lookup: construct createXrmNavigationService() in the PCF host; pass an openLookup/pickContact callback into AccessGrantModal that calls openLookup({entityTypes:['contact'],allowMultiSelect:false}) and returns the selected contact.</step>
+    <step order="4">AccessGrantModal: add the openLookup/pickContact prop (types.ts) + a recordType prop; replace section-2's Fluent Combobox with a "Select contact" button that invokes the callback and shows the picked contact; send {recordType,recordId} in the grant/invite-and-grant/revoke bodies (the 3 former projectId keys) to match task 070.</step>
+    <step order="5">Confirm the Access-Permission gate reads sprk_accesspermission on the host entity (now present on Matter/Project/WA) and that the 043 Restricted/Limited/Standard behavior is unchanged.</step>
+    <step order="6">Spike + verify: opening the side-pane Advanced Lookup while the SprkModal is open layers correctly, returns the contact, and restores focus (the one integration risk). Note the result in the task deviations.</step>
+    <step order="7">Tests: modal loads candidates/grants for matter + WA; picking a contact via openLookup then granting sends {recordType,recordId}; Access-Permission gate per state; dark-mode; use createMockNavigationService for openLookup. Update the existing AccessGrantModal tests for the new callback.</step>
+    <step order="8">PCF version bump (4 locations); npm run build:prod; rebuild Spaarke.UI.Components dist; pack + import the solution to Dataverse; verify the footer version + smoke-test grant on a Matter and a WorkAssignment form.</step>
+    <step order="9">Quality gates (code-review + adr-check) per task-execute Step 9.5. Update TASK-INDEX.md (071 ✅). Document deviations (esp. the side-pane-over-modal spike result) in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the shared library + PCF (build:prod)</tool>
+    <tool name="pac">PCF solution import</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">TrackingFieldTrio host parameterized by entity + side-pane Advanced Lookup contact picker</output>
+    <output type="code">AccessGrantModal: openLookup/pickContact callback + recordType; {recordType,recordId} grant bodies</output>
+    <output type="test">Matter/WA candidate+grant load, openLookup-driven grant, Access-Permission gate, dark-mode</output>
+    <output type="deploy">TrackingFieldTrio PCF (version-bumped) imported to Dataverse</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="matter-manage-access-loads">Open the person icon on a Matter form; assert candidates + current grants load (no "Failed to load access data").</test>
+    <test name="side-pane-lookup-grant">Pick a contact via the side-pane Advanced Lookup, grant, and assert the request sends recordType=matter + the matter id.</test>
+    <test name="access-permission-gate">Restricted blocks external grants; Limited hides standing; Standard allows all — on a Matter record.</test>
+    <test name="adr-021-dark-mode">Render the modal + picker in dark mode; no hardcoded colors; no console errors.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">On a Matter and a Work Assignment form, the person-icon modal loads the record's candidates + current grants (the project-only "Failed to load access data" error is gone).</criterion>
+    <criterion testable="true">The contact picker uses the shared side-pane Advanced Lookup (INavigationService.openLookup) — NOT a hand-rolled picker and NOT a new abstraction; the shared AccessGrantModal contains no Xrm/entity literals.</criterion>
+    <criterion testable="true">Granting from a Matter/WA record writes a grant for that root (request carries {recordType,recordId}; verified end-to-end against the task-070 endpoint).</criterion>
+    <criterion testable="true">The Access-Permission gate reads sprk_accesspermission on the host entity; Restricted/Limited/Standard behave per task 043 on Matter/Project/WA.</criterion>
+    <criterion testable="true">PCF built with npm run build:prod, version bumped in 4 locations, imported cleanly; footer shows the new version; grant smoke-tested on Matter + WorkAssignment.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>TrackingFieldTrio + AccessGrantModal exist (teams-app-r1, now R2-owned) but are project-only; INavigationService.openLookup + adapters already provide the side-pane Advanced Lookup.</existing>
+    <extension>Yes — parameterize the existing PCF host by entity + adopt the existing openLookup helper; the shared modal gains one injected callback. No new component, no new lookup abstraction, no new modal.</extension>
+    <cost-of-doing-nothing>Without it, "Manage Access" errors on Matter/WA forms and there is no way to grant those roots to an external contact from the record — the polymorphic grant WRITE (070) has no UI entry point, and the owner-requested side-pane lookup is not adopted.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>
+    The side-pane Advanced Lookup is a REUSABLE cross-PCF feature already present as INavigationService.openLookup — this task ADOPTS it (per §11) and proves the side-pane-over-open-modal interaction (step 6 spike), making the pattern safe for other PCF surfaces to reuse. Depends on task 070's {recordType,recordId} grant DTO.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting. Reuse INavigationService.openLookup + createXrmNavigationService as-is. /conflict-check before the shared-lib + PCF changes. build:prod for the PCF. FULL-rigor gates at Step 9.5.</protocol>
+  </execution>
+</task>

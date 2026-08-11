@@ -4,7 +4,14 @@
 > Execution owner-gated wave-by-wave.
 > **Foundation**: workspace shell (branded portal + pinned Quick Start tab + tabbed role-defaulted widgets
 > + widget library + dockable assistant) — NOT the card-launcher (superseded). See `design.md` §12.
-> **Total**: 41 tasks (P0:4 ✅ · P1:10 · P2:9 · P3:9 · P4:4 · P5:4 · wrap-up:1). Includes 2 spikes.
+> **Total**: 45 tasks (P0:4 ✅ · P1:10 · P2:9 · P2b:4 · P3:9 · P4:4 · P5:4 · wrap-up:1). Includes 2 spikes.
+> **Amendment (2026-08-10, P2b wave)**: Tasks **070–073** added — "Polymorphic access-write (grant authoring)",
+> the WRITE/admin companion to task 028's polymorphic reads. Generalizes the teams-app-r1 grant surface (BFF
+> grant-write + TrackingFieldTrio PCF + AccessGrantModal) from PROJECT-only to Project/Matter/WorkAssignment,
+> adopts the shared side-pane Advanced Lookup (INavigationService.openLookup), and wires Tier-1 entitlement
+> **Option B** (owner-created `sprk_approlemodulemap`; CIAM blanket-entitled). Owner already completed the schema
+> (020 ✅), `sprk_accesspermission` on Project/WA, and TrackingFieldTrio form placement. Binding design:
+> notes/polymorphic-grant-authoring-enhancement.md.
 > **Amendment (2026-08-10)**: Task **028** added — polymorphic Tier-2 scoping across roots (Project/Matter/Work
 > Assignment) + internal-only Service Requests tab, discovered via R2 grid-widget UAT. It **amends completed
 > tasks 015 + 016** (single-parent framework + registrations) and **supersedes** the partial documents-by-project
@@ -28,15 +35,19 @@ Legend: 🔲 not-started · ✅ completed · Tier S=sonnet O=opus · Eff h=high 
 | 017 | Cleanup dead Power Pages proxy/config | P1 | ✅ | 011 | S/h | STANDARD | Group B |
 | 018 | Cleanup inert filter + /api/v1/collab | P1 | ✅ | 015,016 | O/x | FULL | — (BFF deletion) |
 | 019 | Deploy P1 (workspace shell + Teams, SWA) | P1 | ✅ | 012,013,014,016,017 | S/h | STANDARD | — (deploy; from wt, live auth E2E owner-pending) |
-| 020 | Module/widget-entitlement Dataverse schema | P2 | 🔲 | 015 | S/h | FULL | — (schema) |
-| 021 | Entitlement resolver (App-Role + Contact strategies) | P2 | 🔲 | 020 | O/h | FULL | — (auth core) |
-| 022 | GET /me entitlement endpoint (Redis-cached) | P2 | 🔲 | 021 | O/h | FULL | Group C |
+| 020 | Module/widget-entitlement Dataverse schema | P2 | ✅ (Option B; owner-created `sprk_approlemodulemap` 2026-08-10) | 015 | S/h | FULL | — (schema) |
+| 021 | Entitlement resolver (App-Role + Contact strategies) | P2 | 🔲 (amended by 072 — Option B) | 020 | O/h | FULL | — (auth core) |
+| 022 | GET /me entitlement endpoint (Redis-cached) | P2 | 🔲 (amended by 072 — Option B + tab config) | 021 | O/h | FULL | Group C |
 | 023 | Lazy Contact attribution (oid resolve-or-create) | P2 | 🔲 | 021 | S/h | FULL | Group C |
 | 024 | Workforce-plane external-app auth policy | P2 | 🔲 | 015 | O/h | FULL | — (auth) |
 | 025 | D1 workforce role→level grading | P2 | 🔲 | 024 | S/x | FULL | — |
 | 026 | Core-user admin UI (grant/revoke; reuse AccessGrantModal) | P2 | 🔲 | 021 | S/h | FULL | Group C |
 | 027 | Deploy P2 (BFF + entitlement schema) | P2 | 🔲 | 022,023,024,025,026 | S/h | STANDARD | — (deploy) |
 | 028 | Polymorphic Tier-2 scoping across roots (Project/Matter/WorkAssignment) + internal-only Service Requests tab (supersedes bff7e82e5; amends 015/016) | P2 | ✅ | 015,016 | O/x | FULL | — (auth boundary; own redeploy; deployed dev, live both-plane UAT owner-pending) |
+| 070 | Polymorphic external grant-WRITE (BFF) — grant/revoke across Project/Matter/WorkAssignment + close-project lookup-name bug fix | P2b | 🔲 | 028,020 | O/x | FULL | — (auth boundary write; own redeploy) |
+| 071 | Polymorphic grant UI — TrackingFieldTrio host + AccessGrantModal across roots; adopt shared side-pane Advanced-Lookup (INavigationService.openLookup) | P2b | 🔲 | 070 | S/h | FULL | — (shared lib + PCF; solution import) |
+| 072 | Tier-1 entitlement Option-B wiring — resolver reads sprk_approlemodulemap + blanket-entitle CIAM + widgetRegistry tab sets (amends 021/022) | P2b | 🔲 | 020 | O/h | FULL | — (auth; /me + widgetRegistry) |
+| 073 | Deploy + both-plane UAT — polymorphic access-write wave (BFF + PCF + entitlement) | P2b | 🔲 | 070,071,072 | S/h | STANDARD | — (deploy; from wt; both-plane UAT) |
 | 030 | Intake schema (servicerequest + FR-24 feedback + thread-on-request) | P3 | 🔲 | 020 | S/h | FULL | — (schema) |
 | 031 | Generic typed-intake framework | P3 | 🔲 | 022,030 | O/h | FULL | — (framework base) |
 | 032 | NDA AI 3-outcome assessment (FR-23) | P3 | 🔲 | 031 | O/x | FULL | — (auth+AI) |

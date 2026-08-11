@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Polymorphic external grant-WRITE (BFF) — grant/revoke across Project · Matter · Work Assignment + close-project lookup-name bug fix</title>
+    <phase>P2b Polymorphic access-write (grant authoring)</phase>
+    <gate>blocked-until:none (028 shipped; 020 schema owner-created)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Rewrites the external grant-WRITE authorization boundary (creates sprk_externalrecordaccess rows that confer external access); bff-api + auth; modifies .cs; ends in a live redeploy. Security-sensitive per root CLAUDE.md §6.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth-boundary write generalization + a latent-bug fix on the cascade-revoke path — high blast radius; same tier as 028 (the read-side companion).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared external-access BFF surface (Api/ExternalAccess) — /conflict-check required; auth-sensitive; single-owner serial.</parallel-reason>
+    <deps>028,020</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <escalation>
+      <trigger>If the live @odata.bind navigation-property name for the grant table's matter/work-assignment lookups differs from the owner-provided sprk_matterid / sprk_workassignmentid (verify via metadata before writing), OR a grant write for a matter/WA fails against live Dataverse — STOP and surface per §6 before shipping.</trigger>
+    </escalation>
+  </metadata>
+
+  <prompt>
+    Generalize the external grant-WRITE path from PROJECT-only to POLYMORPHIC (Project · Matter · Work
+    Assignment), the write-side companion to task 028's read-side polymorphism. teams-app-r1 built the
+    grant write hardcoded to sprk_project (GrantExternalAccessEndpoint.BuildGrantPayload binds
+    sprk_projectid@odata.bind); it explicitly deferred matter/WA to R2. Add a polymorphic root
+    {recordType, recordId} to the grant contract, bind the correct typed lookup, relax the ProjectId-required
+    checks where the write does not actually use project, and FIX the latent close-project bug
+    (_sprk_projectid_value → _sprk_project_value). Binding design: notes/polymorphic-grant-authoring-enhancement.md.
+  </prompt>
+
+  <role>SPAARKE platform BFF engineer with external-access authorization fluency. Precise about fail-closed grant writes, Dataverse @odata.bind navigation-property vs _value field naming, and dual-plane authz. Follows ADR-008/010/028 strictly.</role>
+
+  <goal>
+    A workforce admin can grant an external contact access to a Project, Matter, OR Work Assignment via the
+    BFF: the grant row's typed root lookup is bound correctly per record type; revoke works unchanged (by
+    record id); the close-project cascade-revoke actually matches its grant rows (bug fixed); no over-grant
+    (a missing/empty root is rejected); tests green; publish ≤60 MB; redeployed from the worktree.
+  </prompt>
+
+  <context>
+    <background>
+      Grant write core: GrantExternalAccessEndpoint.CreateGrantAsync → BuildGrantPayload (line 175 hardcodes
+      sprk_projectid@odata.bind → /sprk_projects). DTO GrantAccessRequest requires ProjectId. /invite-and-grant
+      delegates to the same core. /revoke + /invite validate ProjectId but do NOT use it in the write (revoke
+      deactivates by AccessRecordId). ProjectClosureEndpoint.cs:162 filters _sprk_projectid_value (WRONG — the
+      grant table's value field is _sprk_project_value, verified by task 028's working read) → the project-close
+      cascade-revoke likely matches ZERO rows today. The grant table already carries typed lookups for all three
+      roots (sprk_project/sprk_matter/sprk_workassignment) — no schema change. Owner-verified write bind names:
+      sprk_projectid@odata.bind→/sprk_projects, sprk_matterid@odata.bind→/sprk_matters,
+      sprk_workassignmentid@odata.bind→/sprk_workassignments; read/filter value fields
+      _sprk_project_value/_sprk_matter_value/_sprk_workassignment_value.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs (BuildGrantPayload — generalize the typed-lookup bind; CreateGrantAsync shared core)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Dtos/ (GrantAccessRequest / RevokeAccessRequest / InviteExternalUserRequest — add polymorphic root)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteAndGrantExternalUserEndpoint.cs (passes the root through to the grant core)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs + InviteExternalUserEndpoint.cs (relax ProjectId-required; project unused in their writes)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProjectClosureEndpoint.cs (line 162 — fix _sprk_projectid_value → _sprk_project_value)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/ (grant-payload + endpoint contract tests — extend for matter/WA)</file>
+    </relevant-files>
+    <dependencies>028 (read-side polymorphism). 020 (sprk_approlemodulemap — Tier-1, not required by the write but same wave). No Dataverse schema change for the grant table.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design">Follow notes/polymorphic-grant-authoring-enhancement.md (§ generalization surface + § locked lookup names). It is the binding spec.</constraint>
+    <constraint source="owner">Grant contract carries a polymorphic root: {recordType ∈ project|matter|workassignment, recordId}. BuildGrantPayload binds the ONE correct typed lookup per recordType. Exactly one root per grant row (never bind two). Keep the existing sprk_contactid/sprk_accesslevel/sprk_granteddate/sprk_grantedby provenance.</constraint>
+    <constraint source="NFR-08">Fail-closed: a grant with a missing/unknown recordType or empty recordId is rejected (400), never written as an unscoped/project-defaulted row. Negative test per root type + the reject case.</constraint>
+    <constraint source="project">Back-compat: keep the existing project grant behavior byte-identical (a project grant must still bind sprk_projectid@odata.bind). Consider accepting the legacy ProjectId field as shorthand for {recordType:project} so no client breaks before task 071 updates the modal.</constraint>
+    <constraint source="ADR-010">No new interface — generalize the concrete payload builder (a switch on recordType is data/logic on the existing endpoint).</constraint>
+    <constraint source="project">§10 BFF Hygiene: Placement Justification (cite .claude/constraints/bff-extensions.md); /conflict-check before the PR; publish ≤60 MB + report delta; no new HIGH CVE; tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+    <constraint source="project">Deploy from the worktree (scripts/Deploy-BffApi.ps1 → spaarke-bff-dev), NOT CI (memory deploy-from-worktree-not-ci).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/polymorphic-grant-authoring-enhancement.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/task-028-deviations.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-008-authorization-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Polymorphic typed-lookup bind" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/GrantExternalAccessEndpoint.cs">Switch on recordType → bind sprk_projectid/sprk_matterid/sprk_workassignmentid @odata.bind to /sprk_projects|/sprk_matters|/sprk_workassignments respectively; mirror of task 028's read-side dimension mapping.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check for the external-access BFF surface; record result.</step>
+    <step order="2">Verify (mcp__dataverse metadata) the exact @odata.bind navigation-property names for the grant table's matter + work-assignment lookups (owner says sprk_matterid / sprk_workassignmentid; confirm before writing). Fire the escalation trigger if they differ.</step>
+    <step order="3">Add a polymorphic root to GrantAccessRequest: recordType (enum project|matter|workassignment) + recordId. Keep legacy ProjectId as accepted shorthand (maps to recordType:project) for pre-071 back-compat.</step>
+    <step order="4">Generalize BuildGrantPayload: switch on recordType → bind the correct typed lookup. Reject missing/unknown recordType or empty recordId (400, ProblemDetails).</step>
+    <step order="5">Thread the root through InviteAndGrantExternalUserEndpoint (it delegates to the grant core). Relax the ProjectId-required validation on /revoke + /invite (they do not use project in the write).</step>
+    <step order="6">Fix ProjectClosureEndpoint.cs:162 — _sprk_projectid_value → _sprk_project_value (the cascade-revoke filter). Add a regression test asserting close-project deactivates the project's grant rows.</step>
+    <step order="7">Extend tests: grant a project/matter/WA binds the right lookup; reject unknown recordType/empty recordId (fail-closed); legacy ProjectId still works; close-project regression.</step>
+    <step order="8">dotnet build + dotnet test; dotnet publish -c Release + report size delta + no new HIGH CVE. Deploy the BFF from the worktree (scripts/Deploy-BffApi.ps1 → spaarke-bff-dev). Verify via App Insights.</step>
+    <step order="9">Quality gates (code-review + adr-check) per task-execute Step 9.5. Update TASK-INDEX.md (070 ✅). Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="mcp__dataverse">Verify grant-table lookup navigation-property names</tool>
+    <tool name="terminal">Deploy script / shell</tool>
+    <tool name="az">App Insights verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Polymorphic grant-write: GrantAccessRequest {recordType,recordId}; BuildGrantPayload typed-lookup switch; relaxed revoke/invite validation</output>
+    <output type="code">ProjectClosureEndpoint cascade-revoke filter fix (_sprk_project_value)</output>
+    <output type="test">Grant-per-root-type + fail-closed reject + legacy-ProjectId + close-project regression tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A grant request for recordType=matter writes a sprk_externalrecordaccess row with sprk_matterid bound (verifiable via read_query _sprk_matter_value populated, _sprk_project_value null); same for workassignment; project unchanged (sprk_projectid bound).</criterion>
+    <criterion testable="true">A grant with a missing/unknown recordType or empty recordId is rejected 400 (ProblemDetails) and writes NO row (fail-closed).</criterion>
+    <criterion testable="true">Legacy clients sending ProjectId (no recordType) still create a project grant identically (back-compat until task 071 updates the modal).</criterion>
+    <criterion testable="true">Revoke deactivates the grant by AccessRecordId regardless of root type; /revoke + /invite no longer require ProjectId.</criterion>
+    <criterion testable="true">close-project deactivates the project's grant rows (regression proving the _sprk_project_value fix; the prior _sprk_projectid_value matched zero).</criterion>
+    <criterion testable="true">BFF publish ≤60 MB (report delta); dotnet test green; no new HIGH CVE; /conflict-check clean or coordinated; deployed to spaarke-bff-dev.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>The grant WRITE (GrantExternalAccessEndpoint.BuildGrantPayload) exists but binds only sprk_projectid; the sprk_externalrecordaccess table already has matter/WA typed lookups (task 028 reads them).</existing>
+    <extension>Yes — generalize the existing concrete payload builder (switch on recordType); no new endpoint, no new table, no new interface. This is the write-side mirror of task 028.</extension>
+    <cost-of-doing-nothing>Without it a matter or work-assignment CANNOT be granted to an external contact (the admin modal errors on those forms), so task 028's polymorphic reads have no way to be populated for matter/WA-rooted access — the access model is half-built.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>
+    teams-app-r1 explicitly deferred "extend external grants to matters" to R2 (design.md:114/131/181/194; spec.md:33). This is that R2 work. No Dataverse schema change for the grant table (typed lookups already exist). Task 071 updates the PCF + modal to send {recordType,recordId}; keep the legacy ProjectId path working until then.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files (esp. the enhancement design note) before starting. /conflict-check before the BFF PR. Deploy from the worktree, NOT CI. Honor the escalation trigger on the lookup-name verification.</protocol>
+  </execution>
+</task>
