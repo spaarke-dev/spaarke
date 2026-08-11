@@ -35,6 +35,7 @@ import { SendEmailDialog } from '@spaarke/ui-components';
 import type { IAttachmentItem } from '@spaarke/ui-components';
 import {
   deriveComposerFields,
+  buildQuotedThread,
   fetchSourceAttachments,
   type ComposerMode,
   type RecordPrefill,
@@ -195,6 +196,18 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
   const composerFields = dialogState
     ? deriveComposerFields(dialogState.mode, dialogState.prefill, { bodyOverride: dialogState.bodyOverride })
     : {};
+  // D-5 fix (spaarkeai-assistant-enhancements-r3 task 025, hand-off from task 024
+  // Step 9.5): this hook never passes `sourceRecord` to the engine — it seeds
+  // `initialBody` itself via `deriveComposerFields` above — so the engine's OWN
+  // `deriveReplyState`/`deriveForwardState` (which populate `state.quotedThread`)
+  // never run. Without a separate `initialQuotedThread`, a re-draft via the
+  // in-dialog AI sparkle (`EmailComposer.runAiDraft`, which re-appends
+  // `state.quotedThread`) silently drops an already-seeded quoted thread — this
+  // is the SAME `buildQuotedThread` computation `deriveComposerFields` already
+  // uses internally to build `composerFields.initialBody`, so the seeded
+  // `quotedThread` state is byte-identical to what is already in the body.
+  // Empty string (compose mode, `dialogState.prefill === null`) → `undefined`.
+  const initialQuotedThread = dialogState && isRecordScoped ? buildQuotedThread(dialogState.prefill) || undefined : undefined;
 
   // Header title override — "Reply: <subject>" / "Reply All: <subject>" /
   // "Forward: <subject>" for the record-scoped modes (New keeps the engine's
@@ -243,6 +256,7 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
       fromMailbox={fromMailbox}
       associations={isRecordScoped ? associations : undefined}
       initialAttachments={isRecordScoped ? dialogState?.initialAttachments : undefined}
+      initialQuotedThread={initialQuotedThread}
       titleOverride={titleOverride}
       onSent={onSent}
       onError={onError}

@@ -4,7 +4,7 @@
     <title>Email per-item CARDS (Reply · Reply All · Forward · Summarize the thread) keyed to the active email (FR-09/FR-10 client)</title>
     <phase>2 — Capability parity</phase>
     <gate>blocked (deps 023, 024, 022)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>SpaarkeAi .tsx on the ConversationPane spine; per-item card correctness + reactive-not-proactive surface boundary (NFR-07). Auto-FULL on .tsx.</rigor-reason>
     <model-tier>sonnet</model-tier>

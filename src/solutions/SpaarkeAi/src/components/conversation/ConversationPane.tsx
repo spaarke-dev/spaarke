@@ -98,6 +98,9 @@ import {
 // ADDITIVE and does NOT replace `activeSourceDocRef`'s Compose bytes → chat-context flow (a different
 // layer). Consuming it here proves the conduit carries the Compose handle end-to-end.
 import { useActiveItem, type ActiveItemHandle } from "../workspace/activeItemConduit";
+// task 025 (FR-09/FR-10) — email per-item action cards (Reply/Reply All/Forward/Summarize the
+// thread), wired to the task-022 perItemCards contract + task-023/024 tools/composer seams.
+import { useEmailPerItemCards } from "./EmailPerItemCards";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
@@ -888,6 +891,19 @@ export function ConversationPane(): React.JSX.Element {
     (query: string) => searchUsersAndContacts(emailLookupDataService, query),
     [emailLookupDataService]
   );
+  // task 025 (FR-09/FR-10) — email per-item ACTION CARDS (Reply/Reply All/Forward/Summarize the
+  // thread), keyed to the active-item conduit's email handle (`generalizedActiveItem`, task 001/012).
+  // REACTIVE/local card surface (NFR-07) — distinct from the ADR-047 spine; renders on selection with
+  // no typing. See EmailPerItemCards.tsx for the full §11 reuse writeup (task-022 perItemCards
+  // contract + task-023's IEmailDraftAi facade via the existing /api/communications/draft endpoint +
+  // task-024's openComposer bodyOverride, incl. the D-5 thread-preservation fix).
+  const emailPerItemCards = useEmailPerItemCards({
+    activeItem: generalizedActiveItem,
+    authenticatedFetch,
+    bffBaseUrl,
+    onSearchRecipients: handleSearchRecipients,
+    enqueueAssistantMessage: injection.enqueue,
+  });
   // P1-8 (UAT 2026-07-18): the chips' trailing "More…" affordance now opens Quick Start
   // (the playbook library is retired). Owned here so the `openLibraryModalRef` the chips
   // reach through (below) points at this modal instead of the library modal.
@@ -2807,6 +2823,12 @@ export function ConversationPane(): React.JSX.Element {
             floating pinned at the top of the pane (the owner's round-6 complaint). Renders nothing until
             a quick run arms it; single-slot (never stacks). */}
         {rerunFullAnalysisCard.cardSlot}
+        {/* task 025 (FR-09/FR-10): email per-item ACTION CARDS — renders (with no typing) whenever
+            the active-item conduit carries a single active email; suppresses on multi-select/
+            deselect/tab-switch-away (the conduit's single-active-item invariant). REACTIVE/local
+            surface (NFR-07) — a sibling of the Rerun card + consumer chips, distinct from the
+            ADR-047 spine. */}
+        {emailPerItemCards.cardSlot}
         {reviseChipsPending ? (
           <ComposeDocActionChips onAction={handleDocAction} />
         ) : (
@@ -2833,6 +2855,7 @@ export function ConversationPane(): React.JSX.Element {
     ),
     [
       rerunFullAnalysisCard.cardSlot,
+      emailPerItemCards.cardSlot,
       reviseChipsPending,
       handleDocAction,
       chips.consumerChipsSlot,
@@ -3296,6 +3319,12 @@ export function ConversationPane(): React.JSX.Element {
         bffBaseUrl={bffBaseUrl}
         onSent={() => setEmailSeed(null)}
       />
+
+      {/* task 025 (FR-09/FR-10): the record-scoped composer for the Reply/Reply All/Forward per-item
+          cards — a SEPARATE `useEmailComposeActions` instance (record-scoped: mode + communicationId +
+          bodyOverride) from the raw "New" SendEmailDialog above (compose-only, `emailSeed`). Reuses the
+          CANONICAL composer, never a fork. */}
+      {emailPerItemCards.composerDialog}
 
       {playbook.toastPlaybookName !== null && <PlaybookToast name={playbook.toastPlaybookName} />}
 

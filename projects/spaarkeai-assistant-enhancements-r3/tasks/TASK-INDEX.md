@@ -19,7 +19,7 @@
 | 022 | widget↔context-type map + contract metadata shape | 2 Parity | FR-08,15 | sonnet / high | FULL | ✅ | 001 | ✅ |
 | 023 | Email per-item tools (extend `EmailDraftToolHandler`) | 2 Parity | FR-09 | opus / high | FULL | ❌ | 011 | ✅ |
 | 024 | `bodyOverride` — thread-preserving compose (invariant) | 2 Parity | FR-10 | opus / xhigh | FULL | ❌ | 001 | ✅ |
-| 025 | Email per-item cards (Reply/RA/Fwd/Summarize) | 2 Parity | FR-09,10 | sonnet / high | FULL | ❌ | 023,024,022 | 🔲 |
+| 025 | Email per-item cards (Reply/RA/Fwd/Summarize) | 2 Parity | FR-09,10 | sonnet / high | FULL | ❌ | 023,024,022 | ✅ |
 | 026 | Document per-item (tab-focus + RAG cards) | 2 Parity | FR-11 | sonnet / high | FULL | ❌ | 022,024 | 🔲 |
 | 030 | Tool economy — `OpenTabContextTypes` PreFilter | 3 Economy | FR-12 | opus / xhigh | FULL | ❌ | 022 | 🔲 |
 | 040 | Interaction pattern as registration field | 4 Interaction | FR-13 | sonnet / high | FULL | ❌ | 022,025,026 | 🔲 |

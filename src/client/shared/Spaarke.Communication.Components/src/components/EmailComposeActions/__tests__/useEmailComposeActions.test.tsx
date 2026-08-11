@@ -196,6 +196,38 @@ describe('useEmailComposeActions — FR-10 thread-preserving bodyOverride (BINDI
     }
   );
 
+  // D-5 fix (task 025, hand-off from task 024 Step 9.5): the props-only path (no
+  // `sourceRecord`) must ALSO seed `initialQuotedThread` on the rendered composer
+  // element, so the engine's `state.quotedThread` is populated and an in-dialog
+  // re-sparkle after a card-seeded body does not drop the quoted thread.
+  it.each(['reply', 'replyAll', 'forward'] as const)(
+    'D-5: %s: openComposer({ bodyOverride }) ALSO passes initialQuotedThread (non-empty, contained in initialBody)',
+    async mode => {
+      const dataService = makeDataService(MULTI_RECIPIENT_RECORD);
+      const { result } = renderHook(() => useEmailComposeActions(makeDeps({ dataService })));
+
+      act(() => result.current.openComposer(mode, 'comm-1', { bodyOverride: AI_DRAFT }));
+      await waitFor(() => expect(result.current.composerDialog.props.initialBody).toBeDefined());
+
+      const quotedThread = (
+        result.current.composerDialog.props as unknown as { initialQuotedThread?: string }
+      ).initialQuotedThread;
+      expect(quotedThread).toBeTruthy();
+      expect(quotedThread).toContain(THREAD_MARKER);
+      // The seeded quotedThread is exactly the tail of the composed initialBody (byte-identical
+      // to what deriveComposerFields already baked into the body — no divergent second copy).
+      expect(result.current.composerDialog.props.initialBody as string).toContain(quotedThread as string);
+    }
+  );
+
+  it('D-5: New (compose) never seeds initialQuotedThread — nothing to preserve', () => {
+    const { result } = renderHook(() => useEmailComposeActions(makeDeps()));
+    act(() => result.current.openComposer('compose', undefined, { bodyOverride: AI_DRAFT }));
+    expect(
+      (result.current.composerDialog.props as unknown as { initialQuotedThread?: string }).initialQuotedThread
+    ).toBeUndefined();
+  });
+
   it('REGRESSION: openComposer WITHOUT a bodyOverride is byte-identical to the toolbar action (dual-mount parity)', async () => {
     const dataService = makeDataService(MULTI_RECIPIENT_RECORD);
 
