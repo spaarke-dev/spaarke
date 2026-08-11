@@ -69,8 +69,11 @@ public static class GrantExternalAccessEndpoint
         if (request.ContactId == Guid.Empty)
             return ProblemDetailsHelper.ValidationError("ContactId is required and must be a valid GUID.");
 
-        if (request.ProjectId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
+        // Resolve the polymorphic grant root (project|matter|workassignment) or the legacy ProjectId
+        // shorthand. Fail-closed: a missing/unknown root is rejected 400 and NO row is written.
+        var root = ResolveGrantRoot(request);
+        if (!root.Ok)
+            return ProblemDetailsHelper.ValidationError(root.Error!);
 
         if (!Enum.IsDefined(typeof(ExternalAccessLevel), request.AccessLevel))
             return ProblemDetailsHelper.ValidationError(
@@ -80,20 +83,20 @@ public static class GrantExternalAccessEndpoint
         var callerSystemUserId = ResolveCallerSystemUserId(httpContext);
 
         logger.LogInformation(
-            "[EXT-GRANT] Granting {AccessLevel} access to Contact {ContactId} for Project {ProjectId}",
-            request.AccessLevel, request.ContactId, request.ProjectId);
+            "[EXT-GRANT] Granting {AccessLevel} access to Contact {ContactId} for {RootType} {RootId}",
+            request.AccessLevel, request.ContactId, root.Type, root.Id);
 
         // ── Create the access record (Dataverse) + invalidate cache ──────────
         Guid accessRecordId;
         try
         {
-            accessRecordId = await CreateGrantAsync(request, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+            accessRecordId = await CreateGrantAsync(request, root.Type, root.Id, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "[EXT-GRANT] Failed to create Dataverse access record for Contact {ContactId} / Project {ProjectId}",
-                request.ContactId, request.ProjectId);
+                "[EXT-GRANT] Failed to create Dataverse access record for Contact {ContactId} / {RootType} {RootId}",
+                request.ContactId, root.Type, root.Id);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -117,6 +120,8 @@ public static class GrantExternalAccessEndpoint
     /// </summary>
     internal static async Task<Guid> CreateGrantAsync(
         GrantAccessRequest request,
+        ExternalGrantRootType rootType,
+        Guid rootId,
         string? callerSystemUserId,
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
@@ -124,12 +129,12 @@ public static class GrantExternalAccessEndpoint
         ILogger logger,
         CancellationToken ct)
     {
-        var payload = BuildGrantPayload(request, callerSystemUserId);
+        var payload = BuildGrantPayload(request, rootType, rootId, callerSystemUserId);
         var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
 
         logger.LogInformation(
-            "[EXT-GRANT] Created access record {AccessRecordId} for Contact {ContactId} / Project {ProjectId}",
-            accessRecordId, request.ContactId, request.ProjectId);
+            "[EXT-GRANT] Created access record {AccessRecordId} for Contact {ContactId} / {RootType} {RootId}",
+            accessRecordId, request.ContactId, rootType, rootId);
 
         // Invalidate Redis participation cache (non-fatal).
         try
@@ -167,12 +172,61 @@ public static class GrantExternalAccessEndpoint
     // Helpers
     // =========================================================================
 
-    private static object BuildGrantPayload(GrantAccessRequest request, string? callerSystemUserId)
+    /// <summary>
+    /// Result of resolving the polymorphic grant root from a <see cref="GrantAccessRequest"/>.
+    /// <c>Ok == false</c> carries a caller-safe validation <see cref="Error"/> (→ 400, no write).
+    /// </summary>
+    internal readonly record struct GrantRootResolution(bool Ok, ExternalGrantRootType Type, Guid Id, string? Error);
+
+    /// <summary>
+    /// Resolves the ONE grant root a request targets. Precedence: an explicit
+    /// <c>RecordType</c> + <c>RecordId</c> wins; otherwise the legacy <c>ProjectId</c> shorthand maps to a
+    /// project root. Fail-closed (NFR-08): an unknown <c>RecordType</c>, an explicit <c>RecordType</c> with
+    /// an empty <c>RecordId</c>, or no root at all (incl. a bare <c>RecordId</c> without <c>RecordType</c>)
+    /// returns <c>Ok == false</c> — the caller rejects 400 and writes NO row.
+    /// </summary>
+    internal static GrantRootResolution ResolveGrantRoot(GrantAccessRequest request)
     {
+        // Explicit polymorphic root takes precedence over the legacy shorthand.
+        if (!string.IsNullOrWhiteSpace(request.RecordType))
+        {
+            if (!ExternalGrantRoot.TryParse(request.RecordType, out var type))
+                return new GrantRootResolution(false, default, Guid.Empty,
+                    "RecordType must be one of: project, matter, workassignment.");
+
+            var explicitId = request.RecordId ?? Guid.Empty;
+            if (explicitId == Guid.Empty)
+                return new GrantRootResolution(false, default, Guid.Empty,
+                    "RecordId is required and must be a valid GUID when RecordType is specified.");
+
+            return new GrantRootResolution(true, type, explicitId, null);
+        }
+
+        // Legacy shorthand: a bare ProjectId maps to the project root (back-compat until task 071).
+        if (request.ProjectId != Guid.Empty)
+            return new GrantRootResolution(true, ExternalGrantRootType.Project, request.ProjectId, null);
+
+        // Fail-closed: no usable root (also covers RecordId supplied without RecordType).
+        return new GrantRootResolution(false, default, Guid.Empty,
+            "A grant root is required: provide recordType + recordId, or the legacy projectId.");
+    }
+
+    /// <summary>
+    /// Builds the <c>sprk_externalrecordaccess</c> create payload. Internal (not private) so the test
+    /// assembly (<c>InternalsVisibleTo("Sprk.Bff.Api.Tests")</c>) can assert the typed-lookup bind
+    /// contract directly — a wrong <c>@odata.bind</c> key silently breaks the grant.
+    /// </summary>
+    internal static object BuildGrantPayload(
+        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? callerSystemUserId)
+    {
+        // Bind exactly ONE typed root lookup per record type (never two). A project root binds
+        // sprk_projectid@odata.bind — byte-identical to the pre-070 project grant (back-compat).
+        var (navigationProperty, entitySet) = ExternalGrantRoot.BindFor(rootType);
+
         var payload = new Dictionary<string, object?>
         {
             ["sprk_contactid@odata.bind"] = $"/contacts({request.ContactId})",
-            ["sprk_projectid@odata.bind"] = $"/sprk_projects({request.ProjectId})",
+            [$"{navigationProperty}@odata.bind"] = $"/{entitySet}({rootId})",
             ["sprk_accesslevel"] = (int)request.AccessLevel,
             ["sprk_granteddate"] = DateTime.UtcNow.ToString("o")
         };

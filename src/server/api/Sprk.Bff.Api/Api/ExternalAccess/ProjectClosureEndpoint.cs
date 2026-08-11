@@ -149,6 +149,21 @@ public static class ProjectClosureEndpoint
     // =========================================================================
 
     /// <summary>
+    /// Builds the OData filter selecting a project's ACTIVE grant rows for cascade-revoke.
+    ///
+    /// <para>
+    /// Bug fix (task 070): the grant table's project lookup value field is <c>_sprk_project_value</c>
+    /// (attribute <c>sprk_project</c>), NOT <c>_sprk_projectid_value</c>. The prior name matched ZERO rows
+    /// (invalid field), so close-project silently revoked nothing. Verified live against
+    /// <c>sprk_externalrecordaccess</c> metadata and mirrors task 028's working read-side filter.
+    /// </para>
+    ///
+    /// Internal (not private) so the test assembly can regression-guard the exact field name.
+    /// </summary>
+    internal static string BuildActiveProjectGrantsFilter(Guid projectId)
+        => $"_sprk_project_value eq {projectId} and statecode eq 0";
+
+    /// <summary>
     /// Queries all active sprk_externalrecordaccess records for the given project.
     /// </summary>
     private static async Task<IReadOnlyList<ExternalAccessRecord>> QueryActiveAccessRecordsAsync(
@@ -159,7 +174,7 @@ public static class ProjectClosureEndpoint
     {
         try
         {
-            var filter = $"_sprk_projectid_value eq {projectId} and statecode eq 0";
+            var filter = BuildActiveProjectGrantsFilter(projectId);
             var select = "sprk_externalrecordaccessid,_sprk_contactid_value";
 
             var rows = await dataverseClient.QueryAsync<ExternalAccessRow>(

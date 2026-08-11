@@ -75,12 +75,13 @@ public static class RevokeExternalAccessEndpoint
         if (request.ContactId == Guid.Empty)
             return ProblemDetailsHelper.ValidationError("ContactId is required and must be a valid GUID.");
 
-        if (request.ProjectId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
+        // Note (task 070): ProjectId is NOT required — revoke deactivates by AccessRecordId and is
+        // root-agnostic (works for a project/matter/work-assignment grant alike). The field is retained
+        // on the DTO for back-compat but no longer gates the request.
 
         logger.LogInformation(
-            "[EXT-REVOKE] Revoking access record {AccessRecordId} for Contact {ContactId} / Project {ProjectId}",
-            request.AccessRecordId, request.ContactId, request.ProjectId);
+            "[EXT-REVOKE] Revoking access record {AccessRecordId} for Contact {ContactId}",
+            request.AccessRecordId, request.ContactId);
 
         // ── Step 1: Deactivate the sprk_externalrecordaccess record ──────────
         try

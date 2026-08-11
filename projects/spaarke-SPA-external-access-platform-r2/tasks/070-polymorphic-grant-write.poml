@@ -4,7 +4,15 @@
     <title>Polymorphic external grant-WRITE (BFF) — grant/revoke across Project · Matter · Work Assignment + close-project lookup-name bug fix</title>
     <phase>P2b Polymorphic access-write (grant authoring)</phase>
     <gate>blocked-until:none (028 shipped; 020 schema owner-created)</gate>
-    <status>not-started</status>
+    <status>code-complete-deploy-gated</status>
+    <status-note>2026-08-10: BFF code + tests + quality gates DONE. Polymorphic grant-write
+    (Project/Matter/WorkAssignment) via {recordType,recordId}; legacy ProjectId shorthand kept;
+    fail-closed reject; close-project _sprk_project_value bug fixed. Build clean; full BFF suite
+    10293 pass/0 fail (+34 new PolymorphicGrantWriteTests); publish 48.44 MB (Δ0, ≤60); no CVE;
+    code-review + adr-check PASS. REMAINING: owner-gated Azure deploy (Deploy-BffApi.ps1 → spaarke-bff-dev,
+    from worktree) + live matter/WA grant smoke test = the escalation gate (nav-property final check).
+    2 pre-existing latent bugs discovered + documented for /defer (sprk_expiresdate, sprk_accountid) —
+    out of scope (byte-identical back-compat). See notes/task-070-deviations.md.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Rewrites the external grant-WRITE authorization boundary (creates sprk_externalrecordaccess rows that confer external access); bff-api + auth; modifies .cs; ends in a live redeploy. Security-sensitive per root CLAUDE.md §6.</rigor-reason>
     <model-tier>opus</model-tier>

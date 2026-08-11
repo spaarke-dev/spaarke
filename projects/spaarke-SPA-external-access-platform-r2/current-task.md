@@ -1,33 +1,32 @@
 # Current Task State — spaarke-SPA-external-access-platform-r2
 
-> **Last Updated**: 2026-08-10 (task 028 complete)
-> **Recovery**: read Quick Recovery. Task 028 shipped + deployed; live both-plane UAT is owner-pending.
+> **Last Updated**: 2026-08-10 (task 070 — code complete, deploy-gated)
+> **Recovery**: read Quick Recovery. Task 070 BFF code+tests+quality-gates DONE; the Azure deploy +
+> live matter/WA grant smoke test (escalation gate) is the one remaining, owner-gated step.
 
 ## Quick Recovery
 
 | Field | Value |
 |-------|-------|
-| **Status** | Task **028 COMPLETE** — polymorphic Tier-2 scoping (Project/Matter/WorkAssignment roots + internal-only Service Requests) built, unit/seam/contract-tested (10259 pass), grid configs updated, BFF **deployed to spaarke-bff-dev** (health+SHA verified), client built. Supersedes `bff7e82e5`; amends 015/016. |
-| **NEXT ACTION** | **Owner: gate the P2b wave** — tasks **070→071→072→073** authored + lint-clean (polymorphic grant-WRITE + PCF/modal + side-pane lookup + Option-B entitlement). Say "work on task 070" to start. (Owner already did the schema: `sprk_accesspermission` on Project/WA, `sprk_approlemodulemap` created+seeded, TrackingFieldTrio placed on all 3 forms.) Also still open: **028 live both-plane UAT** (deployed, owner-pending). |
-| **Task** | none (028 done; awaiting owner UAT + next-wave decision) |
-| **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` @ `5230a8250` — **pushed** (0 unpushed; durable on origin). **NOT yet merged to master: 40 behind / 9 ahead.** Master integration (merge branch→master + update-from-master) was deliberately deferred — do it as a considered step (needs `dotnet build`+test after pulling 40 master commits into the 028 BFF code). |
-| **Pre-conditions (next BFF task)** | Deploy from worktree (NOT CI) — memory `deploy-from-worktree-not-ci.md`. `/conflict-check` before any BFF PR. |
+| **Status** | Task **070 CODE-COMPLETE** — polymorphic external grant-WRITE (Project/Matter/WorkAssignment) + close-project cascade-revoke bug fix. Build clean; full BFF suite **10293 pass / 0 fail** (+34 new); publish **48.44 MB** (Δ0, ≤60); no CVE; code-review + adr-check **PASS**. NOT yet deployed. |
+| **NEXT ACTION** | **Owner: gate the BFF deploy** — `scripts/Deploy-BffApi.ps1` → spaarke-bff-dev (from worktree, NOT CI), then the **escalation-gate live smoke test**: grant a Matter AND a Work Assignment to an external contact via `/api/v1/external-access/grant` `{recordType,recordId}` and confirm `_sprk_matter_value`/`_sprk_workassignment_value` populate (read_query). If a matter/WA grant write fails live → STOP + escalate (nav-property mismatch). Then mark 070 ✅ and proceed to 071. Say "deploy task 070" to proceed. |
+| **Task** | 070 (code done; deploy + live-write verification pending) |
+| **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — 070 code committed locally (see git log). 40 behind / (10+) ahead of master; master integration still deferred. |
+| **Escalation** | ARMED for Step 8 live-write: matter/WA nav-property names (`sprk_matterid`/`sprk_workassignmentid`) verified by convention (2 on-table data points) + owner + schema describe, but the definitive faithful check is the live grant write. |
 
-## ✅ Task 028 — what shipped
-- **BFF**: `GetGrantSetAsync` reads all typed grant lookups (project/matter/WA), cache v2; `AccessibleRecordSetService` grant term spans matter/WA; `CallerPrincipal` + both plane strategies carry accessible matter/WA sets (CIAM grant-only; workforce membership ∪ grants); `ExternalModuleDescriptor` → N OR'd `ScopeDimensions` (single-attr shorthand retained); `Tier2ScopeFilterInjector` emits `<filter type="or">`; module registrations rewired (documents [project|matter|WA], invoices [matter|project], matters by M, work-assignments by W own-id, + internal-only service-requests).
-- **Grid configs (live Dataverse)**: Documents +sprk_matter+sprk_workassignment; Invoices +sprk_matter; Matters real empty-state; **new Service Requests config `403e5d37-cb94-f111-b8db-00224835447a`** (added to the BFF grid-config allow-list).
-- **Client**: `ServiceRequestsWidget` (internal-only, `planes:['workforce']`) + registry entry.
-- **Verification**: 10259 unit tests pass; publish 48.44 MB (+0.15, ≤60); no CVE; code-review + adr-check clean.
-- **Deployed**: spaarke-bff-dev (from worktree). Docs: `notes/task-028-deviations.md`, `notes/external-access-polymorphic-scoping-design.md`.
+## ✅ Task 070 — what shipped (code)
+- **New** `ExternalGrantRoot.cs` (enum + `BindFor`/`TryParse`; no interface, ADR-010).
+- `GrantAccessRequest`/`InviteExternalUserRequest` gained optional `{RecordType, RecordId}`; legacy `ProjectId` = back-compat shorthand.
+- `GrantExternalAccessEndpoint`: `ResolveGrantRoot` (fail-closed) + polymorphic `BuildGrantPayload` (binds exactly one typed lookup; project grant byte-identical).
+- `/invite-and-grant` threads the root (400 before onboarding side effects); `/revoke` + `/invite` no longer require `ProjectId`.
+- `ProjectClosureEndpoint`: bug fix `_sprk_projectid_value` → `_sprk_project_value` (+ extracted `BuildActiveProjectGrantsFilter` for regression test).
+- Tests: `PolymorphicGrantWriteTests.cs` (34) — per-root payload contract, fail-closed rejects, legacy ProjectId, root parse/bind, close-project filter regression. 3 existing tests updated for relaxed contracts.
+- Docs: `notes/task-070-deviations.md` (incl. 2 discovered pre-existing latent bugs → recommend /defer: `sprk_expiresdate`, `sprk_accountid`).
 
-## Escalation trigger — did NOT fire
-All access sources verified live via MCP before coding: grant table has sprk_project/sprk_matter/sprk_workassignment typed lookups; sprk_document/sprk_invoice have the needed parent lookups; sprk_servicerequest.sprk_requestedby exists. No Dataverse schema change.
-
-## Remaining (project)
-- **Owner**: live both-plane UAT of 028 (above); re-upload Teams package (domain-qualified `webApplicationInfo.resource`); merge 028 branch → master when ready.
-- **P2**: 020 (entitlement schema) · 021 (entitlement resolver) · 022/023/026 (Group C) · 024/025 (workforce auth) · 027 (deploy P2).
-- **P3+**: 030–037 (Service Request **creation** wizard + law-dept mgmt — 028 added only the SR read tab), NDA/Policy, spikes 033/050.
-- **ISS-018-1**: 2 pre-existing `DataverseEntitySchemaTests` fails — `/defer` to Documents owner.
+## Remaining after 070 deploy
+- **P2b wave**: 071 (PCF/modal polymorphism + side-pane Advanced Lookup), 072 (Tier-1 Option-B entitlement + widgetRegistry tab sets), 073 (wave deploy + both-plane UAT).
+- **028 live both-plane UAT** (deployed dev, owner-pending).
+- **Master integration** deferred (40 behind).
 
 ## Notes index
-`notes/`: `task-028-deviations.md` (this task), `external-access-polymorphic-scoping-design.md` (028 binding spec), `grid-widget-empty-diagnosis.md` (+UAT), `task-018-deviations.md`, `task-019-deployment-record.md`, `access-model-systemuser-contact-grant-union.md`, `teams-sso-fix-and-entra-app-ownership.md`.
+`notes/`: `task-070-deviations.md` (this task), `polymorphic-grant-authoring-enhancement.md` (P2b binding design), `task-028-deviations.md`, `external-access-polymorphic-scoping-design.md`, `module-entitlement-schema-decision.md`, `grid-widget-empty-diagnosis.md`.
