@@ -23,8 +23,20 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// narrated tab-names-not-data). This is ONE parameterized tool keyed by <c>configId</c> — NOT N
 /// per-grid handlers and NOT a model-authored-SQL path. It reuses the query DEFINITION each
 /// surface already owns (its grid's saved FetchXML) and only injects <c>today</c> + executes it.
-/// Task 021 wires this same tool across all grids + Briefing + Calendar via <c>configId</c>; the
-/// contract here stays surface-agnostic.
+/// Task 021 (FR-07) wires this same tool across all grids + Calendar via <c>configId</c>; the
+/// contract here stays surface-agnostic. Daily Briefing is a Lane-3 composed service
+/// (<see cref="Sprk.Bff.Api.Services.Workspace.BriefingService"/>, not a FetchXML-shaped saved
+/// query) and is wired separately by <see cref="DailyBriefingOverviewHandler"/> — this handler
+/// deliberately does NOT try to serve it.
+/// </para>
+/// <para>
+/// <b>Task 021 configId wiring (FR-07)</b>: the per-tab workspace-state prompt block is trimmed
+/// to <c>{type,label,active}</c> ONLY (task 011's binding ADR-015 invariant — no ambient widget
+/// content), so the model cannot read a surface's configId off the open tab. Instead, the known
+/// grid/Calendar configIds are published as static tool metadata in <see cref="Metadata"/>'s
+/// <c>Description</c> (deterministic catalog DATA per ADR-039, not per-turn tab content, not a
+/// classifier) — see the "Known configId values" sentence there, kept byte-equal with
+/// <c>infra/dataverse/sprk_analysistool-grid-overview-row.json</c>'s <c>sprk_description</c>.
 /// </para>
 /// <para>
 /// <b>User-OBO ONLY (ADR-028 / ADR-015)</b>: both the config read AND the query execution go
@@ -94,7 +106,17 @@ public sealed class GridOverviewHandler : IToolHandler
         Name: "Grid Overview",
         // Mirror of the authored sprk_description in
         // infra/dataverse/sprk_analysistool-grid-overview-row.json — keep byte-equal; edit the JSON.
-        Description: @"Runs a grid or workspace surface's EXISTING saved view (its configuration's FetchXML), addressed by configId, under the calling user's permissions, and returns an accurate record count plus grid-shaped rows with record-id citations. The current date is injected server-side automatically (overdue/due-today/due-this-week predicates resolve against today with no date needed from you) — do NOT ask the user for the date. Use this instead of dataverse.read_query whenever the user asks 'how many' / a status overview / an overdue-or-upcoming count for a known grid, because this reuses the grid's own saved query (which read_query cannot express: GETDATE(), COUNT, and aggregates are rejected there). It takes ONE required argument, configId (the sprk_gridconfiguration record id for the target grid). Returns { count, rows, entity } — narrate the count and cite the returned record ids; do not invent numbers.",
+        // The trailing "Known configId values" table is task 021 (FR-07) wiring: the per-tab
+        // workspace-state prompt block is trimmed to {type,label,active} ONLY (ADR-015 — no
+        // ambient widget content, task 011's binding invariant), so the model cannot learn a
+        // surface's configId from the open tab. Instead the mapping is published as STATIC
+        // catalog/tool metadata (this description), which is deterministic DATA the model always
+        // sees regardless of turn (ADR-039 — not a classifier, not per-tab content). The GUIDs
+        // mirror ENTITY_VIEW_CONFIG_IDS in register-workspace-widgets.ts (same sprk_gridconfiguration
+        // rows the grids already use to fetch data — §11 reuse, zero new Dataverse rows for grids)
+        // plus EVENT_CONFIG_ID from CalendarWorkspaceWidget.tsx (same sprk_event grid configuration
+        // the standalone EventsPage and the Calendar workspace widget already share).
+        Description: @"Runs a grid or workspace surface's EXISTING saved view (its configuration's FetchXML), addressed by configId, under the calling user's permissions, and returns an accurate record count plus grid-shaped rows with record-id citations. The current date is injected server-side automatically (overdue/due-today/due-this-week predicates resolve against today with no date needed from you) — do NOT ask the user for the date. Use this instead of dataverse.read_query whenever the user asks 'how many' / a status overview / an overdue-or-upcoming count for a known grid, because this reuses the grid's own saved query (which read_query cannot express: GETDATE(), COUNT, and aggregates are rejected there). It takes ONE required argument, configId (the sprk_gridconfiguration record id for the target grid). Returns { count, rows, entity } — narrate the count and cite the returned record ids; do not invent numbers. Known configId values for the currently-deployed workspace surfaces (reuse these directly — do not guess a GUID): Documents=1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6, Matters=113ad380-9e63-f111-ab0c-70a8a53ec687, Projects=97ee98e7-7a63-f111-ab0c-70a8a53ec687, Invoices=d021827b-9b5e-f111-ab0c-7c1e521545d7, Work Assignments=9c5b0ee7-7a63-f111-ab0c-000d3a4d8152, Communications/Messages=e1826c4c-9575-f111-ab0e-7ced8ddc4a05, My Tasks=ac05e4f1-8d85-f111-8075-7c1e5268570d, Calendar/Events=5294c28a-f078-f111-ab0e-7ced8ddc4a05. For Daily Briefing questions (portfolio counts + narrative), use the daily-briefing overview tool instead — do not pass a Briefing configId here.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]

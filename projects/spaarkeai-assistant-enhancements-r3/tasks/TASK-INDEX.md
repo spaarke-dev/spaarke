@@ -15,9 +15,9 @@
 | 011 | Trim prompt block + thread active-item handle (server) | 1 Awareness | FR-03,04 | opus / xhigh | FULL | ❌ | 001,010 | ✅ |
 | 012 | Email widget publishes selection as id handle | 1 Awareness | FR-05 | sonnet / high | FULL | ✅ | 001 | ✅ |
 | 020 | Parameterized `configId` overview tool (DoD driver) | 2 Parity | FR-06 | opus / xhigh | FULL | ❌ | 011 | ✅ |
-| 021 | Wire overview tool: all grids + Briefing + Calendar | 2 Parity | FR-07 | sonnet / high | FULL | ❌ | 020 | 🔲 |
+| 021 | Wire overview tool: all grids + Briefing + Calendar | 2 Parity | FR-07 | sonnet / high | FULL | ❌ | 020 | ✅ |
 | 022 | widget↔context-type map + contract metadata shape | 2 Parity | FR-08,15 | sonnet / high | FULL | ✅ | 001 | ✅ |
-| 023 | Email per-item tools (extend `EmailDraftToolHandler`) | 2 Parity | FR-09 | opus / high | FULL | ❌ | 011 | 🔲 |
+| 023 | Email per-item tools (extend `EmailDraftToolHandler`) | 2 Parity | FR-09 | opus / high | FULL | ❌ | 011 | ✅ |
 | 024 | `bodyOverride` — thread-preserving compose (invariant) | 2 Parity | FR-10 | opus / xhigh | FULL | ❌ | 001 | ✅ |
 | 025 | Email per-item cards (Reply/RA/Fwd/Summarize) | 2 Parity | FR-09,10 | sonnet / high | FULL | ❌ | 023,024,022 | 🔲 |
 | 026 | Document per-item (tab-focus + RAG cards) | 2 Parity | FR-11 | sonnet / high | FULL | ❌ | 022,024 | 🔲 |
