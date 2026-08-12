@@ -40,10 +40,13 @@ import {
   type EmailConnectionsReviewProps,
   type ReconcileRegarding,
   type EmailWorkspaceWebApi,
+  type CreatedRecordRef,
+  type EmlSource,
 } from '@spaarke/communication-components';
 import { XrmDataverseClient, getXrm } from '@spaarke/ui-components';
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
+import { CreateRecordChooserModal, type ChooserFileArgs } from './CreateRecordChooserModal';
 
 const COMMUNICATION_ENTITY = 'sprk_communication';
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
@@ -116,13 +119,91 @@ function resolveRegarding(record: Record<string, unknown>): ReconcileRegarding |
  */
 export const ReconciliationWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
   const styles = useStyles();
-  const { authenticatedFetch } = useAiSession();
+  const { authenticatedFetch, bffBaseUrl, chatSessionId, setChatSessionId } = useAiSession();
 
   // Bumped after an association is confirmed so the grid re-loads and
   // `resolveRegarding` reflects the new association (the prop's documented
   // "host refreshes the grid" contract). Used as a React `key` remount signal.
   const [refreshKey, setRefreshKey] = React.useState(0);
   const handleAssociationsChanged = React.useCallback(() => setRefreshKey(n => n + 1), []);
+
+  // ── Task 064 (E1b/E1c): "New record" → full Quick Start menu → confirmable candidate ──
+  // The chooser (shared `CreateRecordChooserModal`, reusing `GetStartedCardsWidget` +
+  // `launchSurface`) opens on "New record"; a committed record resolves the launcher
+  // promise, and `ReconciliationWorkspace` files it via the shared confirm path (NFR-10).
+  const [chooserOpen, setChooserOpen] = React.useState(false);
+  const [chooserFileArgs, setChooserFileArgs] = React.useState<ChooserFileArgs | undefined>(undefined);
+  const chooserResolveRef = React.useRef<((ref: CreatedRecordRef | null) => void) | null>(null);
+
+  // E1c: materialize the reconciled email's archived `.eml` into a chat session so the
+  // launched wizard's AI-prepopulate step opens pre-seeded. Best-effort (NFR-04): any
+  // failure → undefined and the wizard opens un-seeded (E1b still confirms).
+  const buildEmlFileArgs = React.useCallback(
+    async (emlSource?: EmlSource): Promise<ChooserFileArgs | undefined> => {
+      if (!emlSource?.documentId || !bffBaseUrl) return undefined;
+      try {
+        let sid = chatSessionId;
+        if (!sid) {
+          const created = await authenticatedFetch(`${bffBaseUrl}/api/ai/chat/sessions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({}),
+          });
+          if (!created.ok) return undefined;
+          sid = ((await created.json()) as { sessionId?: string }).sessionId ?? null;
+          if (sid) setChatSessionId(sid);
+        }
+        if (!sid) return undefined;
+        const res = await authenticatedFetch(
+          `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sid)}/documents/from-document`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ documentId: emlSource.documentId }),
+          }
+        );
+        if (!res.ok) return undefined;
+        const { fileId, fileName } = (await res.json()) as { fileId: string; fileName: string };
+        return {
+          fileIds: [fileId],
+          source: { sessionId: sid },
+          provenance: { sourceFiles: fileName ? [fileName] : [] },
+        };
+      } catch {
+        return undefined;
+      }
+    },
+    [authenticatedFetch, bffBaseUrl, chatSessionId, setChatSessionId]
+  );
+
+  const onLaunchCreateRecord = React.useCallback(
+    async (ctx: { emlSource?: EmlSource }): Promise<CreatedRecordRef | null> => {
+      const fileArgs = await buildEmlFileArgs(ctx.emlSource);
+      return new Promise<CreatedRecordRef | null>(resolve => {
+        chooserResolveRef.current = resolve;
+        setChooserFileArgs(fileArgs);
+        setChooserOpen(true);
+      });
+    },
+    [buildEmlFileArgs]
+  );
+
+  // E1c: the reconciled email's archived `.eml` sprk_document id. The needs-review grid
+  // does not yet SELECT the archive doc id, so this is undefined today (the wizard opens
+  // un-seeded; E1b still confirms). Activates once the grid query carries the archive
+  // `sprk_document` id (follow-on — no shared-lib change needed here).
+  const resolveEmlSource = React.useCallback((record: Record<string, unknown>): EmlSource | undefined => {
+    const id = str(record, 'sprk_emailarchivedocumentid') ?? str(record, 'emlDocumentId');
+    return id ? { documentId: id } : undefined;
+  }, []);
+
+  const handleChooserResult = React.useCallback((ref: CreatedRecordRef | null): void => {
+    chooserResolveRef.current?.(ref);
+    chooserResolveRef.current = null;
+    setChooserOpen(false);
+  }, []);
+
+  const handleChooserClose = React.useCallback((): void => setChooserOpen(false), []);
 
   // One Xrm-backed adapter set per mount (matches `XrmDataverseClient`'s
   // "instantiate once" guidance — see DataGrid.tsx's defaultClientRef pattern).
@@ -167,6 +248,15 @@ export const ReconciliationWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () 
         resolveReview={resolveReview}
         resolveRegarding={resolveRegarding}
         onAssociationsChanged={handleAssociationsChanged}
+        onLaunchCreateRecord={onLaunchCreateRecord}
+        resolveEmlSource={resolveEmlSource}
+      />
+      <CreateRecordChooserModal
+        open={chooserOpen}
+        bffBaseUrl={bffBaseUrl ?? ''}
+        fileArgs={chooserFileArgs}
+        onResult={handleChooserResult}
+        onClose={handleChooserClose}
       />
     </div>
   );

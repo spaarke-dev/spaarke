@@ -193,6 +193,16 @@ export { default as DocumentViewerWidget } from './widgets/workspace/DocumentVie
 export type { DocumentViewerWidgetData } from './widgets/workspace/DocumentViewerWidget';
 export { DOCUMENT_VIEWER_WIDGET_TYPE } from './widgets/workspace/register-document-viewer-widget';
 
+// email-communication-intelligence-r2 task 064 (E1b/E1c): the SHARED full-menu
+// "create a record" chooser both reconciliation hosts mount (the AI widget +
+// the standalone code page can't import the SpaarkeAi-only QuickStartModal).
+export { CreateRecordChooserModal } from './widgets/workspace/CreateRecordChooserModal';
+export type {
+  CreateRecordChooserModalProps,
+  ChooserCreatedRecordRef,
+  ChooserFileArgs,
+} from './widgets/workspace/CreateRecordChooserModal';
+
 // ---------------------------------------------------------------------------
 // Widgets: SearchCriteriaResultWidget — Context pane mount-source demo (R4 task 043)
 //
