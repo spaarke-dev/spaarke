@@ -90,8 +90,27 @@ public sealed class CallerPrincipal
     /// <summary>The caller's Tier-2 record scope: the projects they may access, with levels.</summary>
     public required IReadOnlyList<CallerProjectAccess> ProjectAccess { get; init; }
 
+    /// <summary>The caller's accessible MATTER root ids (task 028 — polymorphic Tier-2 scoping). Composed
+    /// per plane (CIAM: matter grants; workforce: membership ∪ matter grants). Empty when the caller has
+    /// no accessible matters — never "all matters" (NFR-08). Defaults empty for construction sites that
+    /// predate the polymorphic model.</summary>
+    public IReadOnlySet<Guid> AccessibleMatterIds { get; init; } = EmptyIdSet;
+
+    /// <summary>The caller's accessible WORK-ASSIGNMENT root ids (task 028). A work assignment is a
+    /// first-class root: a standalone WA (no project/matter) can be granted to outside counsel and carry
+    /// its own documents. Empty when the caller has no accessible work assignments (NFR-08).</summary>
+    public IReadOnlySet<Guid> AccessibleWorkAssignmentIds { get; init; } = EmptyIdSet;
+
+    private static readonly IReadOnlySet<Guid> EmptyIdSet = new HashSet<Guid>();
+
     /// <summary>All project ids the caller can access (for list construction).</summary>
     public IEnumerable<Guid> GetAccessibleProjectIds() => ProjectAccess.Select(p => p.ProjectId);
+
+    /// <summary>All matter ids the caller can access (task 028).</summary>
+    public IReadOnlySet<Guid> GetAccessibleMatterIds() => AccessibleMatterIds;
+
+    /// <summary>All work-assignment ids the caller can access (task 028).</summary>
+    public IReadOnlySet<Guid> GetAccessibleWorkAssignmentIds() => AccessibleWorkAssignmentIds;
 
     /// <summary>Whether the caller can access the specified project (the record∈set check).</summary>
     public bool HasProjectAccess(Guid projectId) => ProjectAccess.Any(p => p.ProjectId == projectId);
@@ -294,15 +313,18 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
                 ProblemDetailsHelper.Forbidden("sdap.access.deny.contact_not_found"));
         }
 
-        var participations = await _participations
-            .GetParticipationsAsync(contactId.Value, httpContext.RequestAborted)
+        // Outside-counsel access is GRANT-ONLY and explicit (task 028 / design §2): the caller sees
+        // exactly the roots granted via sprk_externalrecordaccess — projects (with level), matters, and
+        // work assignments. No membership/assignment/rollup-derived access for a CIAM partner.
+        var grantSet = await _participations
+            .GetGrantSetAsync(contactId.Value, httpContext.RequestAborted)
             .ConfigureAwait(false);
 
         _logger.LogInformation(
-            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — {Count} active project participations",
-            contactId.Value, !string.IsNullOrEmpty(oid), participations.Count);
+            "[EXT-AUTH] Contact {ContactId} authenticated (oid-resolved: {ByOid}) — grants: {Projects} project / {Matters} matter / {Was} work-assignment",
+            contactId.Value, !string.IsNullOrEmpty(oid), grantSet.Projects.Count, grantSet.Matters.Count, grantSet.WorkAssignments.Count);
 
-        var projectAccess = participations
+        var projectAccess = grantSet.Projects
             .Select(p => new CallerProjectAccess { ProjectId = p.ProjectId, AccessLevel = p.AccessLevel })
             .ToList();
 
@@ -313,7 +335,9 @@ public sealed class CiamContactPrincipalStrategy : ICallerPrincipalStrategy
             SystemUserId = null,
             Email = email ?? string.Empty,
             Oid = oid,
-            ProjectAccess = projectAccess
+            ProjectAccess = projectAccess,
+            AccessibleMatterIds = grantSet.Matters,
+            AccessibleWorkAssignmentIds = grantSet.WorkAssignments,
         });
     }
 }
@@ -335,8 +359,11 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
     // per-project levels. Documented decision — see notes/r2-coordination-response.md.
     internal const ExternalAccessLevel WorkforceProjectAccessLevel = ExternalAccessLevel.Collaborate;
 
-    /// <summary>Grants are project-scoped in R1; record scope for the collaboration surface is projects.</summary>
+    /// <summary>The root entity types whose accessible sets are composed onto the principal (task 028 —
+    /// polymorphic Tier-2 scoping). Each is membership/assignment ∪ own-contact grants for that type.</summary>
     internal const string ProjectEntity = "sprk_project";
+    internal const string MatterEntity = "sprk_matter";
+    internal const string WorkAssignmentEntity = "sprk_workassignment";
 
     private readonly IWorkforcePrincipalResolver _resolver;
     private readonly IAccessibleRecordSetService _accessibleSet;
@@ -386,12 +413,18 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
 
         var principal = resolution.Principal!;
 
-        // Compose the Tier-2 record scope (task 022) — the SAME common accessible-record-set the
-        // workforce download gate uses. This is what prevents a workforce caller from seeing all
-        // projects merely by authenticating (R2 NFR-08).
+        // Compose the Tier-2 record scope (task 022, generalized to polymorphic roots by task 028) — the
+        // SAME common accessible-record-set the workforce download gate uses, now composed for EACH root
+        // type (project / matter / work assignment). This is what prevents a workforce caller from seeing
+        // all records merely by authenticating (R2 NFR-08). Each set = membership/assignment ∪ own-contact
+        // grants for that type.
+        var reqCt = httpContext.RequestAborted;
         var accessibleProjects = await _accessibleSet
-            .ComposeAsync(principal, ProjectEntity, httpContext.RequestAborted)
-            .ConfigureAwait(false);
+            .ComposeAsync(principal, ProjectEntity, reqCt).ConfigureAwait(false);
+        var accessibleMatters = await _accessibleSet
+            .ComposeAsync(principal, MatterEntity, reqCt).ConfigureAwait(false);
+        var accessibleWorkAssignments = await _accessibleSet
+            .ComposeAsync(principal, WorkAssignmentEntity, reqCt).ConfigureAwait(false);
 
         var projectAccess = accessibleProjects.RecordIds
             .Select(id => new CallerProjectAccess { ProjectId = id, AccessLevel = WorkforceProjectAccessLevel })
@@ -399,9 +432,9 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
 
         _logger.LogInformation(
             "[WF-AUTH] Workforce {Kind} (systemuser={SystemUserId}, contact={ContactId}) resolved with " +
-            "{Count} accessible projects (sources: {Sources}).",
+            "{Projects} project / {Matters} matter / {Was} work-assignment accessible roots (project sources: {Sources}).",
             principal.Kind, principal.SystemUserId, principal.ContactId, projectAccess.Count,
-            accessibleProjects.Sources);
+            accessibleMatters.Count, accessibleWorkAssignments.Count, accessibleProjects.Sources);
 
         return CallerPrincipalResolution.Resolved(new CallerPrincipal
         {
@@ -410,7 +443,9 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             SystemUserId = principal.SystemUserId,
             Email = WorkforcePrincipalResolver.ExtractVerifiedEmail(httpContext.User) ?? string.Empty,
             Oid = principal.Oid,
-            ProjectAccess = projectAccess
+            ProjectAccess = projectAccess,
+            AccessibleMatterIds = accessibleMatters.RecordIds,
+            AccessibleWorkAssignmentIds = accessibleWorkAssignments.RecordIds,
         });
     }
 }

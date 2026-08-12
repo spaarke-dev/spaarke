@@ -91,11 +91,33 @@ public readonly record struct AccessibleRecordSetSources(
 public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 {
     /// <summary>
-    /// The only entity type <c>sprk_externalrecordaccess</c> grants cover in R1 (grants carry a
-    /// project FK). Membership (ADR-034) and standing-grant membership span all entities; grants do
-    /// not (extending grants beyond projects is R2 per design §5 known-gap #2).
+    /// The root entity types <c>sprk_externalrecordaccess</c> grants can target (task 028 — closes the
+    /// R1 design §5 known-gap #2: grants are no longer project-only). Each grant row carries exactly one
+    /// typed root FK (project / matter / work assignment — verified live). Membership (ADR-034) and
+    /// standing-grant membership span all entities; grants now span these three root types.
     /// </summary>
     internal const string ProjectEntity = "sprk_project";
+    internal const string MatterEntity = "sprk_matter";
+    internal const string WorkAssignmentEntity = "sprk_workassignment";
+
+    private static readonly HashSet<string> GrantSupportedRootEntities =
+        new(StringComparer.OrdinalIgnoreCase) { ProjectEntity, MatterEntity, WorkAssignmentEntity };
+
+    /// <summary>Whether <c>sprk_externalrecordaccess</c> grants apply to the given entity type.</summary>
+    private static bool IsGrantSupported(string entityType) =>
+        GrantSupportedRootEntities.Contains(entityType);
+
+    /// <summary>The granted record ids of <paramref name="entityType"/> within a grant set.</summary>
+    private static IEnumerable<Guid> GrantedIdsFor(ExternalGrantSet grants, string entityType)
+    {
+        if (string.Equals(entityType, ProjectEntity, StringComparison.OrdinalIgnoreCase))
+            return grants.Projects.Select(p => p.ProjectId);
+        if (string.Equals(entityType, MatterEntity, StringComparison.OrdinalIgnoreCase))
+            return grants.Matters;
+        if (string.Equals(entityType, WorkAssignmentEntity, StringComparison.OrdinalIgnoreCase))
+            return grants.WorkAssignments;
+        return Enumerable.Empty<Guid>();
+    }
 
     private readonly IMembershipResolverService _membership;
     private readonly ExternalParticipationService _participations;
@@ -173,11 +195,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         var ids = new HashSet<Guid>(membership.Ids);
 
-        // Contact-grants union — grants are sprk_project-scoped in R1, so this term only applies when
-        // enumerating projects (design §5 gap #2). Prefer the derived contact (sprk_primarycontact);
-        // fall back to a verified-email match when the systemuser has no linked contact.
+        // Contact-grants union — grants now span project / matter / work-assignment root types
+        // (task 028, closing R1 gap #2), so this term applies for any grant-supported entity. Prefer the
+        // derived contact (sprk_primarycontact); fall back to a verified-email match when the systemuser
+        // has no linked contact.
         var contactGrantsApplied = false;
-        if (string.Equals(entityType, ProjectEntity, StringComparison.OrdinalIgnoreCase))
+        if (IsGrantSupported(entityType))
         {
             Guid? grantContactId =
                 principal.ContactId is { } cid && cid != Guid.Empty ? cid : null;
@@ -191,12 +214,12 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
             if (grantContactId is { } resolved && resolved != Guid.Empty)
             {
-                var participations = await _participations
-                    .GetParticipationsAsync(resolved, ct)
+                var grants = await _participations
+                    .GetGrantSetAsync(resolved, ct)
                     .ConfigureAwait(false);
-                foreach (var p in participations)
+                foreach (var id in GrantedIdsFor(grants, entityType))
                 {
-                    ids.Add(p.ProjectId);
+                    ids.Add(id);
                 }
                 contactGrantsApplied = true;
             }
@@ -228,17 +251,18 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         var ids = new HashSet<Guid>();
 
-        // Term 1 — explicit sprk_externalrecordaccess grants (per-record, materialized). Grants are
-        // sprk_project-scoped in R1: they only contribute when enumerating projects (design §5 gap #2).
+        // Term 1 — explicit sprk_externalrecordaccess grants (per-record, materialized). Grants now span
+        // project / matter / work-assignment root types (task 028, closing R1 gap #2): they contribute
+        // for any grant-supported entity, restricted to that entity's granted-id slice.
         var grantsApplied = false;
-        if (string.Equals(entityType, ProjectEntity, StringComparison.OrdinalIgnoreCase))
+        if (IsGrantSupported(entityType))
         {
-            var participations = await _participations
-                .GetParticipationsAsync(contactId, ct)
+            var grants = await _participations
+                .GetGrantSetAsync(contactId, ct)
                 .ConfigureAwait(false);
-            foreach (var p in participations)
+            foreach (var id in GrantedIdsFor(grants, entityType))
             {
-                ids.Add(p.ProjectId);
+                ids.Add(id);
             }
             grantsApplied = true;
         }

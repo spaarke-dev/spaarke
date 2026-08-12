@@ -25,10 +25,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class ProjectClosureEndpoint
 {
     private const string ExternalAccessEntitySet = "sprk_externalrecordaccesses";
-    // Resource identifier for ITenantCache (FR-05). Per-Contact participation cache —
-    // not an authz decision. Tenant scope is derived from the caller's 'tid' claim.
-    private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 1;
+    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
+    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
+    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so the
+    // cascade-revoke invalidation on project closure relied on the 60s TTL. Per-Contact participation
+    // cache — not an authz decision (ADR-009); tenant scope is derived from the caller's 'tid' claim.
+    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
+    private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     /// <summary>
     /// Registers the close-project endpoint on the external-access management group.
@@ -149,6 +152,21 @@ public static class ProjectClosureEndpoint
     // =========================================================================
 
     /// <summary>
+    /// Builds the OData filter selecting a project's ACTIVE grant rows for cascade-revoke.
+    ///
+    /// <para>
+    /// Bug fix (task 070): the grant table's project lookup value field is <c>_sprk_project_value</c>
+    /// (attribute <c>sprk_project</c>), NOT <c>_sprk_projectid_value</c>. The prior name matched ZERO rows
+    /// (invalid field), so close-project silently revoked nothing. Verified live against
+    /// <c>sprk_externalrecordaccess</c> metadata and mirrors task 028's working read-side filter.
+    /// </para>
+    ///
+    /// Internal (not private) so the test assembly can regression-guard the exact field name.
+    /// </summary>
+    internal static string BuildActiveProjectGrantsFilter(Guid projectId)
+        => $"_sprk_project_value eq {projectId} and statecode eq 0";
+
+    /// <summary>
     /// Queries all active sprk_externalrecordaccess records for the given project.
     /// </summary>
     private static async Task<IReadOnlyList<ExternalAccessRecord>> QueryActiveAccessRecordsAsync(
@@ -159,7 +177,7 @@ public static class ProjectClosureEndpoint
     {
         try
         {
-            var filter = $"_sprk_projectid_value eq {projectId} and statecode eq 0";
+            var filter = BuildActiveProjectGrantsFilter(projectId);
             var select = "sprk_externalrecordaccessid,_sprk_contactid_value";
 
             var rows = await dataverseClient.QueryAsync<ExternalAccessRow>(

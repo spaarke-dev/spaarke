@@ -60,12 +60,14 @@ public class AccessibleRecordSetServiceTests
         var set = await sut.ComposeAsync(SystemUserPrincipal(), MatterEntity, CancellationToken.None);
 
         set.PrincipalKind.Should().Be(WorkforcePrincipalKind.SystemUser);
+        // With NO matter grants in the fake, the result is EXACTLY ADR-034 membership (task 028: the
+        // matter grant term is now applied for a systemuser — ContactGrants=true — but contributes
+        // nothing here, so the RESULT is unchanged: membership only).
         set.RecordIds.Should().BeEquivalentTo(new[] { MemberRecordA, MemberRecordB });
         set.Sources.SystemUserMembership.Should().BeTrue();
-        set.Sources.ContactGrants.Should().BeFalse();
         set.Sources.StandingGrantMembership.Should().BeFalse();
 
-        // A systemuser NEVER consults grants or the standing-grant flag (design §5 exact rule).
+        // A systemuser NEVER consults the standing-grant flag (design §5 exact rule).
         standing.Verify(s => s.HasStandingGrantAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         membership.Verify(
             m => m.ResolveByContactAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
@@ -235,22 +237,28 @@ public class AccessibleRecordSetServiceTests
     }
 
     [Fact]
-    public async Task ComposeAsync_ContactWithStandingGrant_NonProjectEntity_SkipsGrantsButUnionsMembership()
+    public async Task ComposeAsync_ContactWithStandingGrant_MatterEntity_ConsultsMatterGrantsWithoutLeakingProjectGrants()
     {
-        // Grants are sprk_project-scoped (design §5 gap #2); standing membership spans all entities.
+        // Task 028: grants now span project/matter/work-assignment. A matter query consults MATTER
+        // grants (not project grants) — a project grant must NOT leak into a matter set — unioned with
+        // standing membership (which spans all entities).
         var membership = new Mock<IMembershipResolverService>();
         membership
             .Setup(m => m.ResolveByContactAsync(ContactId, MatterEntity, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(MatterEntity, StandingMatter));
 
-        // Even if a (project) participation exists, it must NOT leak into a matter query.
-        var sut = CreateSut(membership.Object, ParticipationsFor(GrantedProject), AlwaysStanding());
+        var grantedMatter = Guid.Parse("d0000000-0000-0000-0000-000000000001");
+        // The contact holds BOTH a project grant (must not leak) and a matter grant (must apply).
+        var participations = new FakeParticipationService(
+            new[] { new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly } },
+            matters: new HashSet<Guid> { grantedMatter });
+        var sut = CreateSut(membership.Object, participations, AlwaysStanding());
 
         var set = await sut.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None);
 
-        set.RecordIds.Should().BeEquivalentTo(new[] { StandingMatter });
+        set.RecordIds.Should().BeEquivalentTo(new[] { StandingMatter, grantedMatter });
         set.RecordIds.Should().NotContain(GrantedProject, "project grants do not apply to a matter query");
-        set.Sources.ContactGrants.Should().BeFalse("grants are project-scoped in R1");
+        set.Sources.ContactGrants.Should().BeTrue("matter grants are now a grant-supported term (task 028)");
         set.Sources.StandingGrantMembership.Should().BeTrue();
     }
 
@@ -280,6 +288,55 @@ public class AccessibleRecordSetServiceTests
 
         (await sut.IsRecordAccessibleAsync(SystemUserPrincipal(), MatterEntity, Guid.Empty, CancellationToken.None))
             .Should().BeFalse("an empty record id cannot prove access — fail closed");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // (4) polymorphic grants (task 028) — matter / work-assignment grant terms
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ComposeAsync_ContactWithMatterGrantNoStanding_ReturnsExactlyMatterGrants()
+    {
+        var grantedMatter = Guid.Parse("d0000000-0000-0000-0000-000000000001");
+        var participations = new FakeParticipationService(
+            Array.Empty<ExternalParticipation>(), matters: new HashSet<Guid> { grantedMatter });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RecordIds.Should().BeEquivalentTo(new[] { grantedMatter },
+            "a contact granted a matter sees exactly that matter (grant-only, no standing membership)");
+        set.Sources.ContactGrants.Should().BeTrue();
+        set.Sources.StandingGrantMembership.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ComposeAsync_ContactWithWorkAssignmentGrant_ReturnsExactlyWorkAssignmentGrants()
+    {
+        const string waEntity = "sprk_workassignment";
+        var grantedWa = Guid.Parse("e0000000-0000-0000-0000-000000000001");
+        var participations = new FakeParticipationService(
+            Array.Empty<ExternalParticipation>(), workAssignments: new HashSet<Guid> { grantedWa });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), waEntity, CancellationToken.None);
+
+        set.RecordIds.Should().BeEquivalentTo(new[] { grantedWa },
+            "a standalone work assignment is a first-class grantable root (task 028)");
+        set.Sources.ContactGrants.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ComposeAsync_ContactWithProjectGrantOnly_MatterQuery_ReturnsEmpty()
+    {
+        // Negative cross-type: a project-only grant must NOT surface any matter (no type bleed).
+        var participations = new FakeParticipationService(
+            new[] { new ExternalParticipation { ProjectId = GrantedProject, AccessLevel = ExternalAccessLevel.ViewOnly } });
+        var sut = CreateSut(new Mock<IMembershipResolverService>().Object, participations, NeverStanding());
+
+        var set = await sut.ComposeAsync(ContactPrincipal(), MatterEntity, CancellationToken.None);
+
+        set.RecordIds.Should().BeEmpty("a project grant does not confer matter access");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -339,26 +396,33 @@ public class AccessibleRecordSetServiceTests
             .ToList());
 
     /// <summary>
-    /// Thin test double overriding only the virtual grant loader — avoids driving the real Dataverse
-    /// OData path while composing on the real service surface (design §5 reuse).
+    /// Thin test double overriding only the virtual grant loader (<see cref="ExternalParticipationService.GetGrantSetAsync"/>,
+    /// task 028 — the base <c>GetParticipationsAsync</c> delegates to it) — avoids driving the real
+    /// Dataverse OData path while composing on the real service surface (design §5 reuse). Carries an
+    /// optional matter/work-assignment grant set for the polymorphic composition tests.
     /// </summary>
     private sealed class FakeParticipationService : ExternalParticipationService
     {
-        private readonly IReadOnlyList<ExternalParticipation> _participations;
+        private readonly ExternalGrantSet _grantSet;
         private readonly Guid? _resolveContactId;
 
         public FakeParticipationService(
-            IReadOnlyList<ExternalParticipation> participations, Guid? resolveContactId = null)
+            IReadOnlyList<ExternalParticipation> participations, Guid? resolveContactId = null,
+            IReadOnlySet<Guid>? matters = null, IReadOnlySet<Guid>? workAssignments = null)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
                    httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
         {
-            _participations = participations;
+            _grantSet = new ExternalGrantSet
+            {
+                Projects = participations,
+                Matters = matters ?? new HashSet<Guid>(),
+                WorkAssignments = workAssignments ?? new HashSet<Guid>(),
+            };
             _resolveContactId = resolveContactId;
         }
 
-        public override Task<IReadOnlyList<ExternalParticipation>> GetParticipationsAsync(
-            Guid contactId, CancellationToken ct = default)
-            => Task.FromResult(_participations);
+        public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult(_grantSet);
 
         // Email-fallback resolution (systemuser with no derived contact). Returns the configured
         // contact id regardless of the (oid, email) passed — the test controls whether a match exists.

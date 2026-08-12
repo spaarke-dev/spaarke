@@ -23,6 +23,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
 import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IContactSearchResult } from '../types';
+import { createMockNavigationService } from '../../../__mocks__/mockNavigationService';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
   render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
@@ -155,7 +156,11 @@ describe('AccessGrantModal (task 041)', () => {
         (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
       ) as [string, RequestInit];
       const body = JSON.parse(init.body as string);
-      expect(body).toMatchObject({ email: CANDIDATE_EXTERNAL.email, projectId: 'project-1' });
+      expect(body).toMatchObject({
+        email: CANDIDATE_EXTERNAL.email,
+        recordType: 'project',
+        recordId: 'project-1',
+      });
 
       expect(await screen.findByText(/membership-approved/)).toBeInTheDocument();
     });
@@ -212,11 +217,12 @@ describe('AccessGrantModal (task 041)', () => {
         (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/revoke'
       ) as [string, RequestInit];
       const body = JSON.parse(init.body as string);
+      // Revoke is root-agnostic (task 070) — no projectId/recordType sent.
       expect(body).toMatchObject({
         accessRecordId: 'grant-1',
         contactId: 'contact-existing-1',
-        projectId: 'project-1',
       });
+      expect(body.projectId).toBeUndefined();
 
       await waitFor(() => {
         expect(screen.queryByText('Prior Grantee')).not.toBeInTheDocument();
@@ -273,6 +279,115 @@ describe('AccessGrantModal (task 041)', () => {
 
       errorSpy.mockRestore();
       warnSpy.mockRestore();
+    });
+  });
+
+  describe('task 071 — polymorphic root + side-pane Advanced Lookup', () => {
+    it('sends {recordType, recordId} for a Matter root when approving an external candidate', async () => {
+      const props = makeProps({ recordType: 'matter', recordId: 'matter-9' });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Jane Outside');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Jane Outside' }));
+      fireEvent.click(screen.getByRole('button', { name: /Approve selected/ }));
+
+      await waitFor(() => {
+        expect(props.authenticatedFetch).toHaveBeenCalledWith(
+          '/api/v1/external-access/invite-and-grant',
+          expect.objectContaining({ method: 'POST' })
+        );
+      });
+      const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
+        (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
+      ) as [string, RequestInit];
+      const body = JSON.parse(init.body as string);
+      expect(body).toMatchObject({ recordType: 'matter', recordId: 'matter-9' });
+      expect(body.projectId).toBeUndefined();
+    });
+
+    it('picks a contact via the side-pane Advanced Lookup (openLookup) and grants it', async () => {
+      // Build pickContact from the shared mock navigation service — the same
+      // INavigationService.openLookup the PCF host wires via createXrmNavigationService.
+      const nav = createMockNavigationService();
+      nav.openLookup.mockResolvedValue([{ id: 'contact-picked-1', name: 'Picked Person', entityType: 'contact' }]);
+      const pickContact = jest.fn(async (): Promise<IContactSearchResult | null> => {
+        const [r] = await nav.openLookup({ entityType: 'contact', entityTypes: ['contact'], allowMultiSelect: false });
+        return r ? { contactId: r.id, fullName: r.name, email: 'picked@outsidefirm.com' } : null;
+      });
+      const props = makeProps({
+        recordType: 'workassignment',
+        recordId: 'wa-3',
+        pickContact,
+        isInternalContact: jest.fn(async () => false),
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Jane Outside');
+      // The inline Combobox is replaced by the side-pane "Select contact" button.
+      expect(screen.queryByPlaceholderText('Search contacts by name or email…')).not.toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: /Select contact/ }));
+      await waitFor(() => expect(nav.openLookup).toHaveBeenCalled());
+      expect(await screen.findByText('Picked Person')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+      await waitFor(() => {
+        expect(props.authenticatedFetch).toHaveBeenCalledWith(
+          '/api/v1/external-access/invite-and-grant',
+          expect.objectContaining({ method: 'POST' })
+        );
+      });
+      const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
+        (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
+      ) as [string, RequestInit];
+      const body = JSON.parse(init.body as string);
+      expect(body).toMatchObject({ recordType: 'workassignment', recordId: 'wa-3', email: 'picked@outsidefirm.com' });
+    });
+
+    it('sends organizationId when a firm/org is picked via the side-pane lookup', async () => {
+      const contactNav = createMockNavigationService();
+      contactNav.openLookup.mockResolvedValue([
+        { id: 'contact-picked-2', name: 'Firm Attorney', entityType: 'contact' },
+      ]);
+      const orgNav = createMockNavigationService();
+      orgNav.openLookup.mockResolvedValue([{ id: 'org-42', name: 'Acme LLP', entityType: 'sprk_organization' }]);
+
+      const pickContact = jest.fn(async (): Promise<IContactSearchResult | null> => {
+        const [r] = await contactNav.openLookup({ entityType: 'contact', allowMultiSelect: false });
+        return r ? { contactId: r.id, fullName: r.name, email: 'attorney@acme.com' } : null;
+      });
+      const pickOrganization = jest.fn(async () => {
+        const [r] = await orgNav.openLookup({ entityType: 'sprk_organization', allowMultiSelect: false });
+        return r ? { id: r.id, name: r.name } : null;
+      });
+
+      const props = makeProps({
+        recordType: 'matter',
+        recordId: 'matter-7',
+        pickContact,
+        pickOrganization,
+        isInternalContact: jest.fn(async () => false),
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Jane Outside');
+      fireEvent.click(screen.getByRole('button', { name: /Select contact/ }));
+      await screen.findByText('Firm Attorney');
+      fireEvent.click(screen.getByRole('button', { name: /Select organization/ }));
+      expect(await screen.findByText('Acme LLP')).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+      await waitFor(() => {
+        expect(props.authenticatedFetch).toHaveBeenCalledWith(
+          '/api/v1/external-access/invite-and-grant',
+          expect.objectContaining({ method: 'POST' })
+        );
+      });
+      const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
+        (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
+      ) as [string, RequestInit];
+      const body = JSON.parse(init.body as string);
+      expect(body).toMatchObject({ recordType: 'matter', recordId: 'matter-7', organizationId: 'org-42' });
     });
   });
 
