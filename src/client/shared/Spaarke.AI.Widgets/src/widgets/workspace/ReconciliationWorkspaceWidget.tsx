@@ -46,7 +46,7 @@ import {
 import { XrmDataverseClient, getXrm } from '@spaarke/ui-components';
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
-import { CreateRecordChooserModal, type ChooserFileArgs } from './CreateRecordChooserModal';
+import { CreateRecordChooserModal, type ChooserFileArgs } from '@spaarke/ui-components';
 
 const COMMUNICATION_ENTITY = 'sprk_communication';
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
@@ -140,7 +140,12 @@ export const ReconciliationWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () 
   // failure → undefined and the wizard opens un-seeded (E1b still confirms).
   const buildEmlFileArgs = React.useCallback(
     async (emlSource?: EmlSource): Promise<ChooserFileArgs | undefined> => {
-      if (!emlSource?.documentId || !bffBaseUrl) return undefined;
+      const idBody = emlSource?.communicationId
+        ? { communicationId: emlSource.communicationId }
+        : emlSource?.documentId
+          ? { documentId: emlSource.documentId }
+          : null;
+      if (!idBody || !bffBaseUrl) return undefined;
       try {
         let sid = chatSessionId;
         if (!sid) {
@@ -159,7 +164,7 @@ export const ReconciliationWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () 
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ documentId: emlSource.documentId }),
+            body: JSON.stringify(idBody),
           }
         );
         if (!res.ok) return undefined;
@@ -188,13 +193,13 @@ export const ReconciliationWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () 
     [buildEmlFileArgs]
   );
 
-  // E1c: the reconciled email's archived `.eml` sprk_document id. The needs-review grid
-  // does not yet SELECT the archive doc id, so this is undefined today (the wizard opens
-  // un-seeded; E1b still confirms). Activates once the grid query carries the archive
-  // `sprk_document` id (follow-on — no shared-lib change needed here).
+  // E1c: pass the row's `sprk_communicationid` (ALWAYS present) — the BFF resolves that
+  // communication's archived `.eml` sprk_document server-side (via the sprk_communication
+  // lookup + sprk_isemailarchive), so no grid-column / client-side document lookup is needed.
+  // Best-effort: a communication with no archived .eml simply opens the wizard un-seeded.
   const resolveEmlSource = React.useCallback((record: Record<string, unknown>): EmlSource | undefined => {
-    const id = str(record, 'sprk_emailarchivedocumentid') ?? str(record, 'emlDocumentId');
-    return id ? { documentId: id } : undefined;
+    const communicationId = str(record, PRIMARY_ID_FIELD);
+    return communicationId ? { communicationId } : undefined;
   }, []);
 
   const handleChooserResult = React.useCallback((ref: CreatedRecordRef | null): void => {

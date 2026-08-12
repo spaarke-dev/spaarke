@@ -23,8 +23,9 @@
  * ADR-021 (Fluent v9 tokens via the shared shell), ADR-050 (`SprkModal`).
  */
 import * as React from 'react';
-import { SprkModal, launchSurface, type LaunchSurfaceOutcome } from '@spaarke/ui-components';
-import { GetStartedCardsWidget, type GetStartedCardId } from '../context/GetStartedCardsWidget';
+import { SprkModal } from '../SprkModal';
+import { launchSurface, type LaunchSurfaceOutcome } from '../../services/surfaceHandoff/launchSurface';
+import { GetStartedCardsWidget, type GetStartedCardId } from './GetStartedCardsWidget';
 
 /** A record the chooser created via a Quick Start card's wizard. */
 export interface ChooserCreatedRecordRef {

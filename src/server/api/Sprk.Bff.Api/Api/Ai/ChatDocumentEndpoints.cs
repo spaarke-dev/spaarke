@@ -836,9 +836,11 @@ public static class ChatDocumentEndpoints
             return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "Tenant identity not found in token claims");
         }
 
-        if (request is null || string.IsNullOrWhiteSpace(request.DocumentId))
+        var hasDocumentId = request is not null && !string.IsNullOrWhiteSpace(request.DocumentId);
+        var hasCommunicationId = request is not null && !string.IsNullOrWhiteSpace(request.CommunicationId);
+        if (!hasDocumentId && !hasCommunicationId)
         {
-            return Results.Problem(statusCode: 400, title: "Bad Request", detail: "A 'documentId' (sprk_document id) is required.");
+            return Results.Problem(statusCode: 400, title: "Bad Request", detail: "Either a 'documentId' (sprk_document id) or a 'communicationId' (sprk_communication id) is required.");
         }
 
         // 2. Verify session exists + capacity (mirror UploadDocumentAsync's NFR-02 cap).
@@ -858,15 +860,34 @@ public static class ChatDocumentEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "summarize.too-many-files" });
         }
 
-        // 3. Resolve the sprk_document → SPE pointers (reuse the GetEmlRender pattern).
-        var document = await dataverseService.GetDocumentAsync(request.DocumentId, ct);
-        if (document == null)
+        // 3. Resolve the archived .eml sprk_document → SPE pointers.
+        //  - documentId path (direct): resolve by id (reuses the GetEmlRender pattern), then verify it's an archive.
+        //  - communicationId path (reconciliation): the grid shows sprk_communication rows, so resolve the
+        //    communication's archived .eml document via the sprk_communication lookup (task 064 E1c).
+        DocumentEntity? document;
+        if (hasDocumentId)
         {
-            return Results.Problem(statusCode: 404, title: "Not Found", detail: $"Document '{request.DocumentId}' does not exist.");
+            document = await dataverseService.GetDocumentAsync(request!.DocumentId!, ct);
+            if (document == null)
+            {
+                return Results.Problem(statusCode: 404, title: "Not Found", detail: $"Document '{request.DocumentId}' does not exist.");
+            }
+            if (document.IsEmailArchive != true)
+            {
+                return Results.Problem(statusCode: 422, title: "Unprocessable Entity", detail: "The referenced document is not an email archive (.eml).");
+            }
         }
-        if (document.IsEmailArchive != true)
+        else
         {
-            return Results.Problem(statusCode: 422, title: "Unprocessable Entity", detail: "The referenced document is not an email archive (.eml).");
+            if (!Guid.TryParse(request!.CommunicationId, out var communicationGuid))
+            {
+                return Results.Problem(statusCode: 400, title: "Bad Request", detail: "'communicationId' must be a valid GUID.");
+            }
+            document = await dataverseService.GetEmailArchiveByCommunicationAsync(communicationGuid, ct);
+            if (document == null)
+            {
+                return Results.Problem(statusCode: 404, title: "Not Found", detail: "No archived email (.eml) is linked to that communication.");
+            }
         }
         if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
         {
@@ -950,7 +971,7 @@ public static class ChatDocumentEndpoints
 
         logger.LogInformation(
             "Ingested archive document as session document: SourceDocumentId={SourceDocumentId}, FileId={FileId}, SessionId={SessionId}, SizeBytes={SizeBytes}",
-            request.DocumentId, fileId, sessionId, bytes.Length);
+            document.Id, fileId, sessionId, bytes.Length);
 
         return Results.Ok(new IngestArchiveResponse(sessionId, fileId, fileName));
     }
@@ -1488,8 +1509,9 @@ internal record UploadedDocumentMetadata(
 /// Request body for <c>POST /api/ai/chat/sessions/{sessionId}/documents/from-document</c>
 /// (email-communication-intelligence-r2 task 064 E1c — ingest an archived email by reference).
 /// </summary>
-/// <param name="DocumentId">The sprk_document id of the archived email (.eml, sprk_isemailarchive=true).</param>
-public record IngestArchiveRequest(string DocumentId);
+/// <param name="DocumentId">The sprk_document id of the archived email (.eml, sprk_isemailarchive=true). Optional when CommunicationId is supplied.</param>
+/// <param name="CommunicationId">The sprk_communication id whose archived .eml to ingest (the reconciliation path — the grid shows communications). Optional when DocumentId is supplied.</param>
+public record IngestArchiveRequest(string? DocumentId = null, string? CommunicationId = null);
 
 /// <summary>
 /// Response for the archive-ingest endpoint — the session-scoped file handle the wizard's

@@ -272,6 +272,21 @@ export * from './TrackingFieldTrio';
 // 009) -> a plain `export *`; see docs/standards/MODAL-DESIGN-SYSTEM.md + ADR-050.
 export * from './SprkModal';
 
+// GetStartedCards - the shared "Quick Start" create menu (GetStartedCardsWidget) +
+// the full-menu create-record chooser (CreateRecordChooserModal). Relocated here from
+// @spaarke/ai-widgets (email-communication-intelligence-r2 task 064) so ANY surface —
+// the SpaarkeAi Assistant, the reconciliation AI-widget, the standalone reconciliation
+// code page, and future surfaces — can present the full create menu without depending
+// on the heavy ai-widgets bundle. `@spaarke/ai-widgets` re-exports these for back-compat.
+export { GetStartedCardsWidget } from './GetStartedCards/GetStartedCardsWidget';
+export type { GetStartedCardId, GetStartedCardsWidgetProps } from './GetStartedCards/GetStartedCardsWidget';
+export { CreateRecordChooserModal } from './GetStartedCards/CreateRecordChooserModal';
+export type {
+  CreateRecordChooserModalProps,
+  ChooserCreatedRecordRef,
+  ChooserFileArgs,
+} from './GetStartedCards/CreateRecordChooserModal';
+
 // AccessGrantModal - the person-icon access-grant modal opened from
 // TrackingFieldTrio's onOpenGrantModal (task 040 → 041, teams-app-r1). Built
 // directly on the SprkModal base shell (Family 2 per MODAL-DECISION-CRITERIA);

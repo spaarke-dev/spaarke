@@ -194,14 +194,11 @@ export type { DocumentViewerWidgetData } from './widgets/workspace/DocumentViewe
 export { DOCUMENT_VIEWER_WIDGET_TYPE } from './widgets/workspace/register-document-viewer-widget';
 
 // email-communication-intelligence-r2 task 064 (E1b/E1c): the SHARED full-menu
-// "create a record" chooser both reconciliation hosts mount (the AI widget +
-// the standalone code page can't import the SpaarkeAi-only QuickStartModal).
-export { CreateRecordChooserModal } from './widgets/workspace/CreateRecordChooserModal';
-export type {
-  CreateRecordChooserModalProps,
-  ChooserCreatedRecordRef,
-  ChooserFileArgs,
-} from './widgets/workspace/CreateRecordChooserModal';
+// "create a record" chooser. RELOCATED to @spaarke/ui-components (task 064 Option C)
+// so any surface can present the full create menu without the heavy ai-widgets dep;
+// re-exported here for back-compat with existing ai-widgets consumers.
+export { CreateRecordChooserModal } from '@spaarke/ui-components';
+export type { CreateRecordChooserModalProps, ChooserCreatedRecordRef, ChooserFileArgs } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Widgets: SearchCriteriaResultWidget — Context pane mount-source demo (R4 task 043)
@@ -450,8 +447,9 @@ export type { PlaybookGalleryData, PlaybookSummary } from './widgets/context/Pla
 // for "what can render in the Context pane".
 // ---------------------------------------------------------------------------
 
-export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
-export type { GetStartedCardId, GetStartedCardsWidgetProps } from './widgets/context/GetStartedCardsWidget';
+// RELOCATED to @spaarke/ui-components (task 064 Option C); re-exported for back-compat.
+export { GetStartedCardsWidget } from '@spaarke/ui-components';
+export type { GetStartedCardId, GetStartedCardsWidgetProps } from '@spaarke/ui-components';
 
 // Widgets: AnalysisCardsWidget — the 3 analysis work-type launch cards for the
 // tabbed Quick Start modal's "Analysis" tab (ai-advanced-capabilities-analysis-hub-r1).

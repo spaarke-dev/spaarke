@@ -45,8 +45,15 @@ export interface CreatedRecordRef {
  * a session file via the BFF `.eml`→session-document ingest endpoint.
  */
 export interface EmlSource {
-  /** The `sprk_document` id of the reconciled email's `.eml` archive. */
-  documentId: string;
+  /** The `sprk_document` id of the reconciled email's `.eml` archive (direct resolution). */
+  documentId?: string;
+  /**
+   * The `sprk_communication` id whose archived `.eml` to resolve. Preferred for the
+   * reconciliation grid (it shows `sprk_communication` rows): the BFF resolves the
+   * communication's archive `.eml` `sprk_document` server-side (via the `sprk_communication`
+   * lookup), so no grid-column / client-side document lookup is required.
+   */
+  communicationId?: string;
 }
 
 export interface EmailConnectionsReviewProps {

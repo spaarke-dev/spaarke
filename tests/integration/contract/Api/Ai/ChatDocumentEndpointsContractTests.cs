@@ -455,6 +455,57 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         response.StatusCode.Should().Be((HttpStatusCode)422);
     }
 
+    [Fact]
+    public async Task IngestFromDocument_WhenCommunicationId_ResolvesArchiveAndReturns200()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        var commId = Guid.NewGuid();
+        var emlBytes = Encoding.UTF8.GetBytes("From: a@x.com\r\nSubject: Re Acme\r\n\r\nbody");
+        _fx.DataverseMock
+            .Setup(d => d.GetEmailArchiveByCommunicationAsync(commId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = "doc-eml-1",
+                Name = "Re Acme",
+                GraphDriveId = "drive-1",
+                GraphItemId = "item-1",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+        _fx.SpeMock
+            .Setup(s => s.DownloadFileAsync("drive-1", "item-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream)new MemoryStream(emlBytes));
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { communicationId = commId.ToString() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<IngestArchiveResponse>();
+        body!.FileName.Should().Be("Re Acme.eml");
+        _fx.Sessions.PersistedSession!.UploadedFiles.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenCommunicationHasNoArchive_ReturnsNotFound()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetEmailArchiveByCommunicationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DocumentEntity?)null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { communicationId = Guid.NewGuid().ToString() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string sessionId, IReadOnlyList<ChatSessionFile>? uploadedFiles)
