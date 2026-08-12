@@ -70,32 +70,24 @@ import {
   Checkbox,
   Option,
   Dropdown,
-  Input,
+  Link,
   Spinner,
   Text,
+  Tooltip,
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
   Badge,
-  OverlayDrawer,
-  DrawerHeader,
-  DrawerHeaderTitle,
-  DrawerBody,
   makeStyles,
   tokens,
   shorthands,
 } from '@fluentui/react-components';
-import {
-  PersonRegular,
-  DismissCircleRegular,
-  BuildingRegular,
-  DismissRegular,
-  SearchRegular,
-} from '@fluentui/react-icons';
+import { PersonRegular, DismissCircleRegular, BuildingRegular } from '@fluentui/react-icons';
 import { SprkModal } from '../SprkModal';
-// Record picker (task 073 v1.0.23 redesign) — "+ Contact" / "+ Organization"
-// open a Fluent `OverlayDrawer` side pane (search + pick) that portals ABOVE the
-// modal, so the modal is never hidden while the user picks.
+// Record picker (task 073 v1.0.24) — "+ Contact" / "+ Organization" open the host's
+// NATIVE Dataverse advanced-lookup side pane (Xrm.Utility.lookupObjects, injected as
+// pickContact/pickOrganization) — the same advanced-find surface the wizards use. The
+// modal renders `nonBlocking` so that page-level pane is not covered by a backdrop.
 import type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,
@@ -133,6 +125,18 @@ const useStyles = makeStyles({
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalS,
     flexShrink: 0,
+  },
+  // Padding below the "Add Access Permissions" header row, before the list
+  // (task 073 UAT v1.0.24 #3).
+  listArea: {
+    display: 'flex',
+    flexDirection: 'column',
+    marginTop: tokens.spacingVerticalM,
+  },
+  // Contact name rendered as a link that opens the Contact record (v1.0.24 #6).
+  contactLink: {
+    fontSize: tokens.fontSizeBase300,
+    cursor: 'pointer',
   },
   levelRow: {
     display: 'flex',
@@ -187,26 +191,9 @@ const useStyles = makeStyles({
     fontStyle: 'italic',
     ...shorthands.padding(tokens.spacingVerticalS, 0),
   },
-  pickerRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalS,
-  },
   // Per-row access-level dropdown (task 073 v1.0.23) — sized so "Pick access level" fits.
   rowLevelDropdown: {
     minWidth: '160px',
-  },
-  // A clickable result row inside the side-pane picker.
-  pickerResultRow: {
-    display: 'flex',
-    flexDirection: 'column',
-    ...shorthands.padding(tokens.spacingVerticalS, tokens.spacingHorizontalS),
-    ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    cursor: 'pointer',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
   },
   notAuthorized: {
     display: 'flex',
@@ -247,10 +234,15 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   fetchCandidates,
   fetchExistingGrants,
   fetchStandingContacts,
-  searchContacts,
-  searchOrganizations,
+  // searchContacts / searchOrganizations remain in the props contract (SPA-host
+  // fallback) but are unused by this PCF-hosted modal, which uses the native
+  // advanced-lookup pickers below (task 073 UAT v1.0.24 #1/#4).
+  pickContact,
+  pickOrganization,
+  onOpenContact,
   isInternalContact,
-  onSetStandingGrant,
+  // onSetStandingGrant remains in the props contract but is unused: the standing
+  // grant is now set on the Contact record itself, not here (task 073 UAT v1.0.24 #5).
   title = 'Manage Access',
   accessLevelOptions = DEFAULT_ACCESS_LEVEL_OPTIONS,
   defaultAccessLevel,
@@ -263,30 +255,24 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // other per-grant `sprk_accesslevel` concept above, so the two stay
   // structurally independent (see the module doc comment).
   const grantsBlocked = accessPermissionState === 'restricted';
-  const standingGrantAllowed = accessPermissionState === 'standard';
 
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
   const [existingGrants, setExistingGrants] = React.useState<IAccessGrantRecord[]>([]);
   // Items (contacts OR organizations) checked to grant, keyed by contactId/orgId.
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
-  const [standingForCandidate, setStandingForCandidate] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
+  // A native advanced-lookup pick is in flight — used only to disable the
+  // "+ Contact"/"+ Organization" buttons so a double-click can't open two panes.
+  const [picking, setPicking] = React.useState(false);
 
   // Per-row access level (task 073 v1.0.23) — keyed by item id (contactId/orgId).
   // NO default: a row is not grantable until the admin picks its level ("Pick access level").
   const [rowLevels, setRowLevels] = React.useState<Record<string, number>>({});
-  // Contacts + organizations staged via the "+ Contact" / "+ Organization" side pane —
-  // appended into the "Available Contacts & Organizations" list as selectable rows.
+  // Contacts + organizations staged via the native "+ Contact" / "+ Organization"
+  // advanced lookup — appended into the "Add Access Permissions" list as selectable rows.
   const [lookedUpContacts, setLookedUpContacts] = React.useState<IContactSearchResult[]>([]);
   const [lookedUpOrgs, setLookedUpOrgs] = React.useState<IOrganizationPick[]>([]);
-
-  // Fluent OverlayDrawer side-pane picker (task 073 v1.0.23) — opened by the
-  // "+ Contact" / "+ Organization" buttons; searches + picks without hiding the modal.
-  const [pickerMode, setPickerMode] = React.useState<'contact' | 'organization' | null>(null);
-  const [pickerQuery, setPickerQuery] = React.useState('');
-  const [pickerResults, setPickerResults] = React.useState<Array<{ id: string; name: string; meta?: string }>>([]);
-  const [pickerSearching, setPickerSearching] = React.useState(false);
 
   const [revokeTargetId, setRevokeTargetId] = React.useState<string | null>(null);
   const [revoking, setRevoking] = React.useState(false);
@@ -326,13 +312,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   React.useEffect(() => {
     if (open && canGrantAccess) {
       setSelectedCandidateIds(new Set());
-      setStandingForCandidate(new Set());
       setRowLevels({});
       setLookedUpContacts([]);
       setLookedUpOrgs([]);
-      setPickerMode(null);
-      setPickerQuery('');
-      setPickerResults([]);
       void loadData();
     }
     // Only re-run when the modal transitions open (and once per open), not on every render.
@@ -355,28 +337,25 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   );
 
   /** Outcome of a single {@link grantContact} call — the grant write itself
-   * either succeeds or throws; these flags describe the two BEST-EFFORT,
-   * non-blocking follow-ons (NFR-06) so callers can build one combined notice
-   * instead of each sub-step clobbering the other's message. */
+   * either succeeds or throws; `notifyPending` describes the one BEST-EFFORT,
+   * non-blocking follow-on (NFR-06 — the escalated internal deep-link notify gap)
+   * so callers can build one combined notice. */
   interface IGrantOutcome {
     notifyPending: boolean;
-    standingGrantFailed: boolean;
   }
 
   /**
    * The single grant core shared by candidate-approve and named-add (per the
    * task's "no duplicate write path" constraint). Classifies the contact
-   * internal-vs-external, routes to the correct BUILT endpoint, then
-   * best-effort applies the standing-grant flag (NFR-06 — never rolls back
-   * the grant on a standing-grant-write or notify failure). Throws only when
-   * the grant write itself fails; the two follow-on concerns are reported via
-   * the returned flags so a caller driving multiple grants (approve-selected)
-   * can aggregate one notice instead of each write overwriting the last.
+   * internal-vs-external and routes to the correct BUILT endpoint. Throws only
+   * when the grant write itself fails; the notify concern is reported via the
+   * returned flag so a caller driving multiple grants (approve-selected) can
+   * aggregate one notice instead of each write overwriting the last.
    */
   const grantContact = React.useCallback(
     async (
       contact: { contactId: string; fullName: string; email?: string },
-      opts: { standingGrant: boolean; level: number }
+      opts: { level: number }
     ): Promise<IGrantOutcome> => {
       const [firstName, ...rest] = contact.fullName.trim().split(/\s+/);
       const lastName = rest.join(' ') || firstName;
@@ -420,18 +399,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         }
       }
 
-      let standingGrantFailed = false;
-      if (opts.standingGrant && onSetStandingGrant) {
-        try {
-          await onSetStandingGrant(contact.contactId, true);
-        } catch {
-          standingGrantFailed = true;
-        }
-      }
-
-      return { notifyPending, standingGrantFailed };
+      return { notifyPending };
     },
-    [isInternalContact, onSetStandingGrant, postJson, recordId, recordType]
+    [isInternalContact, postJson, recordId, recordType]
   );
 
   // Unified "Available Contacts & Organizations" list (task 073 v1.0.23): role-based membership
@@ -497,14 +467,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     let failures = 0;
     let granted = 0;
     let anyNotifyPending = false;
-    let anyStandingGrantFailed = false;
     for (const it of selected) {
       const level = rowLevels[it.id];
       try {
         if (it.kind === 'contact' && it.contact) {
-          const outcome = await grantContact(it.contact, { standingGrant: standingForCandidate.has(it.id), level });
+          const outcome = await grantContact(it.contact, { level });
           anyNotifyPending = anyNotifyPending || outcome.notifyPending;
-          anyStandingGrantFailed = anyStandingGrantFailed || outcome.standingGrantFailed;
         } else if (it.kind === 'organization' && it.org) {
           await grantOrganization(it.org, level);
         }
@@ -516,7 +484,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
     setApproving(false);
     setSelectedCandidateIds(new Set());
-    setStandingForCandidate(new Set());
     setRowLevels({});
     setLookedUpContacts([]);
     setLookedUpOrgs([]);
@@ -532,79 +499,42 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         intent: 'warning',
         text: `Granted access to ${granted} item(s). Internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
       });
-    } else if (anyStandingGrantFailed) {
-      setNotice({
-        intent: 'warning',
-        text: `Granted access to ${granted} item(s), but setting the standing-grant flag failed for at least one contact. You can retry from the Contact form.`,
-      });
     } else {
       setNotice({ intent: 'success', text: `Granted access to ${granted} item(s).` });
     }
-  }, [
-    availableItems,
-    selectedCandidateIds,
-    rowLevels,
-    grantContact,
-    grantOrganization,
-    standingForCandidate,
-    loadData,
-  ]);
+  }, [availableItems, selectedCandidateIds, rowLevels, grantContact, grantOrganization, loadData]);
 
-  // ── Side-pane record picker (task 073 v1.0.23) ──────────────────────────────
-  // `+ Contact` / `+ Organization` open a Fluent OverlayDrawer that searches +
-  // picks WITHOUT hiding the modal. Contact picks need the email (external-vs-
-  // internal routing), so cache full contact results by id and resolve on pick.
-  const contactSearchCacheRef = React.useRef<Map<string, IContactSearchResult>>(new Map());
+  // ── Native advanced-lookup pickers (task 073 v1.0.24 #1/#4) ─────────────────
+  // `+ Contact` / `+ Organization` open the host's NATIVE Dataverse advanced-lookup
+  // side pane (Xrm.Utility.lookupObjects, injected as pickContact/pickOrganization)
+  // — the same advanced-find surface the wizards use. The pick is staged into the
+  // "Add Access Permissions" list and auto-selected. Works because the modal is
+  // `nonBlocking` (no backdrop covering the page-level lookup pane).
+  const openContactPicker = React.useCallback(async () => {
+    if (!pickContact) return;
+    setPicking(true);
+    try {
+      const picked = await pickContact();
+      if (!picked) return;
+      setLookedUpContacts(prev => (prev.some(c => c.contactId === picked.contactId) ? prev : [...prev, picked]));
+      setSelectedCandidateIds(prev => new Set(prev).add(picked.contactId));
+    } finally {
+      setPicking(false);
+    }
+  }, [pickContact]);
 
-  const openPicker = React.useCallback((mode: 'contact' | 'organization') => {
-    setPickerMode(mode);
-    setPickerQuery('');
-    setPickerResults([]);
-  }, []);
-  const closePicker = React.useCallback(() => setPickerMode(null), []);
-
-  const runPickerSearch = React.useCallback(
-    async (query: string, mode: 'contact' | 'organization') => {
-      setPickerQuery(query);
-      if (!query || query.trim().length < 2) {
-        setPickerResults([]);
-        return;
-      }
-      setPickerSearching(true);
-      try {
-        if (mode === 'contact') {
-          const results = await searchContacts(query);
-          for (const r of results) contactSearchCacheRef.current.set(r.contactId, r);
-          setPickerResults(results.map(r => ({ id: r.contactId, name: r.fullName, meta: r.email })));
-        } else if (searchOrganizations) {
-          const results = await searchOrganizations(query);
-          setPickerResults(results.map(r => ({ id: r.id, name: r.name })));
-        }
-      } catch {
-        setPickerResults([]);
-      } finally {
-        setPickerSearching(false);
-      }
-    },
-    [searchContacts, searchOrganizations]
-  );
-
-  const pickResult = React.useCallback(
-    (result: { id: string; name: string }) => {
-      if (pickerMode === 'contact') {
-        const full = contactSearchCacheRef.current.get(result.id) ?? { contactId: result.id, fullName: result.name };
-        setLookedUpContacts(prev => (prev.some(c => c.contactId === full.contactId) ? prev : [...prev, full]));
-        setSelectedCandidateIds(prev => new Set(prev).add(full.contactId));
-      } else if (pickerMode === 'organization') {
-        setLookedUpOrgs(prev =>
-          prev.some(o => o.id === result.id) ? prev : [...prev, { id: result.id, name: result.name }]
-        );
-        setSelectedCandidateIds(prev => new Set(prev).add(result.id));
-      }
-      closePicker();
-    },
-    [pickerMode, closePicker]
-  );
+  const openOrgPicker = React.useCallback(async () => {
+    if (!pickOrganization) return;
+    setPicking(true);
+    try {
+      const picked = await pickOrganization();
+      if (!picked) return;
+      setLookedUpOrgs(prev => (prev.some(o => o.id === picked.id) ? prev : [...prev, picked]));
+      setSelectedCandidateIds(prev => new Set(prev).add(picked.id));
+    } finally {
+      setPicking(false);
+    }
+  }, [pickOrganization]);
 
   const confirmRevoke = React.useCallback(async () => {
     const target = existingGrants.find(g => g.accessRecordId === revokeTargetId);
@@ -639,29 +569,22 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     });
   };
 
-  const toggleCandidateStanding = (contactId: string) => {
-    setStandingForCandidate(prev => {
-      const next = new Set(prev);
-      if (next.has(contactId)) next.delete(contactId);
-      else next.add(contactId);
-      return next;
-    });
-  };
-
   const revokeTarget = existingGrants.find(g => g.accessRecordId === revokeTargetId) ?? null;
 
   return (
     <>
       <SprkModal
-        // task 073 v1.0.23 — the modal never hides for picking: "+ Contact" /
-        // "+ Organization" open a Fluent OverlayDrawer that portals ABOVE the
-        // modal (see the drawer at the end of this component). So `open` is just
-        // the prop.
+        // task 073 v1.0.24 — the modal is `nonBlocking` (Fluent non-modal: no
+        // backdrop, no focus trap) so the host's NATIVE advanced-lookup pane
+        // (Xrm.Utility.lookupObjects, opened by "+ Contact"/"+ Organization")
+        // renders on top and stays interactive instead of being covered by a
+        // modal backdrop — the proven CommunicationActions composer pattern.
         open={open}
         onClose={onClose}
         title={title}
         size="lg"
         dismiss="explicit"
+        nonBlocking
         footerStart={
           <Button appearance="secondary" onClick={onClose}>
             Cancel
@@ -708,93 +631,108 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   </MessageBar>
                 )}
 
-                {/* Available Contacts & Organizations (task 073 UAT #5) — role-based members + looked-up
-                    contacts, with "+ Contact" / "+ Organization" in the header. Select, choose a level, Add. */}
+                {/* Add Access Permissions (task 073 UAT v1.0.24 #2) — role-based members + looked-up
+                    contacts/orgs. "+ Contact" / "+ Organization" (icon-only, #4) open the NATIVE
+                    advanced-lookup pane. Select, choose a level, Add. */}
                 <div className={styles.section} style={{ marginTop: tokens.spacingVerticalL }}>
-                  {/* Header: title left, "+ Contact" / "+ Organization" side-pane triggers right
-                      (task 073 v1.0.23). Each opens a Fluent OverlayDrawer that overlays the modal. */}
                   <div className={styles.sectionHeaderRow}>
-                    <Text className={styles.sectionTitle}>Available Contacts &amp; Organizations</Text>
+                    <Text className={styles.sectionTitle}>Add Access Permissions</Text>
                     <div className={styles.sectionHeaderActions}>
-                      <Button
-                        appearance="secondary"
-                        size="small"
-                        icon={<PersonRegular />}
-                        onClick={() => openPicker('contact')}
-                        disabled={grantsBlocked}
-                      >
-                        + Contact
-                      </Button>
-                      {searchOrganizations && (
-                        <Button
-                          appearance="secondary"
-                          size="small"
-                          icon={<BuildingRegular />}
-                          onClick={() => openPicker('organization')}
-                          disabled={grantsBlocked}
-                        >
-                          + Organization
-                        </Button>
+                      {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4) — open the native
+                          advanced-lookup pane (pickContact/pickOrganization). */}
+                      {pickContact && (
+                        <Tooltip content="Add contact" relationship="label">
+                          <Button
+                            appearance="secondary"
+                            size="small"
+                            icon={<PersonRegular />}
+                            onClick={() => void openContactPicker()}
+                            disabled={grantsBlocked || picking}
+                            aria-label="Add contact"
+                          >
+                            +
+                          </Button>
+                        </Tooltip>
+                      )}
+                      {pickOrganization && (
+                        <Tooltip content="Add organization" relationship="label">
+                          <Button
+                            appearance="secondary"
+                            size="small"
+                            icon={<BuildingRegular />}
+                            onClick={() => void openOrgPicker()}
+                            disabled={grantsBlocked || picking}
+                            aria-label="Add organization"
+                          >
+                            +
+                          </Button>
+                        </Tooltip>
                       )}
                     </div>
                   </div>
 
-                  {availableItems.length === 0 ? (
-                    <Text className={styles.emptyState}>
-                      No contacts or organizations yet. Use “+ Contact” or “+ Organization” to add.
-                    </Text>
-                  ) : (
-                    availableItems.map(item => (
-                      <div className={styles.row} key={item.id}>
-                        <Checkbox
-                          checked={selectedCandidateIds.has(item.id)}
-                          onChange={() => toggleCandidateSelected(item.id)}
-                          aria-label={`Select ${item.name}`}
-                          disabled={grantsBlocked}
-                        />
-                        <div className={styles.rowMain}>
-                          <Text className={styles.rowName}>
-                            {item.kind === 'organization' ? <BuildingRegular /> : null} {item.name}
-                          </Text>
-                          <Text className={styles.rowMeta}>{item.meta}</Text>
-                        </div>
-                        <div className={styles.rowActions}>
-                          {/* Per-row access level (task 073 v1.0.23) — no default; "Pick access level". */}
-                          <Dropdown
-                            className={styles.rowLevelDropdown}
-                            placeholder="Pick access level"
-                            value={
-                              rowLevels[item.id] !== undefined
-                                ? (accessLevelOptions.find(o => o.value === rowLevels[item.id])?.label ?? '')
-                                : ''
-                            }
-                            selectedOptions={rowLevels[item.id] !== undefined ? [String(rowLevels[item.id])] : []}
+                  {/* Padding below the header row, before the list (task 073 UAT v1.0.24 #3). */}
+                  <div className={styles.listArea}>
+                    {availableItems.length === 0 ? (
+                      <Text className={styles.emptyState}>
+                        No contacts or organizations yet. Use “+ Contact” or “+ Organization” to add.
+                      </Text>
+                    ) : (
+                      availableItems.map(item => (
+                        <div className={styles.row} key={item.id}>
+                          <Checkbox
+                            checked={selectedCandidateIds.has(item.id)}
+                            onChange={() => toggleCandidateSelected(item.id)}
+                            aria-label={`Select ${item.name}`}
                             disabled={grantsBlocked}
-                            onOptionSelect={(_, data) => {
-                              if (data.optionValue) {
-                                const v = Number(data.optionValue);
-                                setRowLevels(prev => ({ ...prev, [item.id]: v }));
+                          />
+                          <div className={styles.rowMain}>
+                            {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6);
+                                organization rows show a building glyph + plain name. */}
+                            {item.kind === 'contact' && item.contact && onOpenContact ? (
+                              <Link
+                                className={styles.contactLink}
+                                onClick={() => onOpenContact(item.contact!.contactId)}
+                              >
+                                {item.name}
+                              </Link>
+                            ) : (
+                              <Text className={styles.rowName}>
+                                {item.kind === 'organization' ? <BuildingRegular /> : null} {item.name}
+                              </Text>
+                            )}
+                            <Text className={styles.rowMeta}>{item.meta}</Text>
+                          </div>
+                          <div className={styles.rowActions}>
+                            {/* Per-row access level (task 073 v1.0.23) — no default; "Pick access level". */}
+                            <Dropdown
+                              className={styles.rowLevelDropdown}
+                              placeholder="Pick access level"
+                              value={
+                                rowLevels[item.id] !== undefined
+                                  ? (accessLevelOptions.find(o => o.value === rowLevels[item.id])?.label ?? '')
+                                  : ''
                               }
-                            }}
-                          >
-                            {accessLevelOptions.map(o => (
-                              <Option key={o.value} value={String(o.value)} text={o.label}>
-                                {o.label}
-                              </Option>
-                            ))}
-                          </Dropdown>
-                          {item.kind === 'contact' && onSetStandingGrant && standingGrantAllowed && (
-                            <Checkbox
-                              label="Standing"
-                              checked={standingForCandidate.has(item.id)}
-                              onChange={() => toggleCandidateStanding(item.id)}
-                              disabled={!selectedCandidateIds.has(item.id)}
-                            />
-                          )}
+                              selectedOptions={rowLevels[item.id] !== undefined ? [String(rowLevels[item.id])] : []}
+                              disabled={grantsBlocked}
+                              onOptionSelect={(_, data) => {
+                                if (data.optionValue) {
+                                  const v = Number(data.optionValue);
+                                  setRowLevels(prev => ({ ...prev, [item.id]: v }));
+                                }
+                              }}
+                            >
+                              {accessLevelOptions.map(o => (
+                                <Option key={o.value} value={String(o.value)} text={o.label}>
+                                  {o.label}
+                                </Option>
+                              ))}
+                            </Dropdown>
+                          </div>
                         </div>
-                      </div>
-                    ))
-                  )}
+                      ))
+                    )}
+                  </div>
 
                   <div className={styles.levelRow}>
                     <Button
@@ -808,60 +746,70 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                   </div>
                 </div>
 
-                {/* Current Access (task 073 UAT #5 — 20px header) */}
-                <div className={styles.section}>
+                {/* Current Access (task 073 UAT v1.0.24 #7 — extra top padding above the section) */}
+                <div className={styles.section} style={{ marginTop: tokens.spacingVerticalXXL }}>
                   <Text className={styles.sectionTitle}>Current Access</Text>
-                  {existingGrants.length === 0 ? (
-                    <Text className={styles.emptyState}>No active grants for this record.</Text>
-                  ) : (
-                    existingGrants.map(grant => {
-                      // Standing-grant rows (task 073 UAT #2) confer ongoing
-                      // membership via the contact's global `sprk_standinggrant`
-                      // flag — there is NO per-record `sprk_externalrecordaccess`
-                      // row to revoke here, so they render non-revocable with a
-                      // "Standing" badge instead of an access-level + Revoke.
-                      const isStanding = grant.provenance === 'standing' || !grant.accessRecordId;
-                      // Organization grant (task 073 #7): everyone at the firm inherits access. Unlike a
-                      // standing grant it IS a real per-record row, so it keeps the level badge + Revoke.
-                      const isOrg = grant.provenance === 'organization';
-                      return (
-                        <div className={styles.row} key={grant.accessRecordId ?? `standing-${grant.contactId}`}>
-                          <div className={styles.rowMain}>
-                            <Text className={styles.rowName}>{grant.fullName}</Text>
-                            <Text className={styles.rowMeta}>
-                              {isStanding
-                                ? 'Standing grant — ongoing access to assigned records'
-                                : isOrg
-                                  ? 'Organization grant — all organization contacts have access'
-                                  : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
-                            </Text>
-                          </div>
-                          <div className={styles.rowActions}>
-                            {isStanding ? (
-                              <Badge appearance="tint" color="success">
-                                Standing
-                              </Badge>
-                            ) : (
-                              <>
-                                <Badge appearance="tint" color="informative">
-                                  {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ??
-                                    grant.accessLevel}
+                  <div className={styles.listArea}>
+                    {existingGrants.length === 0 ? (
+                      <Text className={styles.emptyState}>No active grants for this record.</Text>
+                    ) : (
+                      existingGrants.map(grant => {
+                        // Standing-grant rows (task 073 UAT #2) confer ongoing
+                        // membership via the contact's global `sprk_standinggrant`
+                        // flag — there is NO per-record `sprk_externalrecordaccess`
+                        // row to revoke here, so they render non-revocable with a
+                        // "Standing" badge instead of an access-level + Revoke.
+                        const isStanding = grant.provenance === 'standing' || !grant.accessRecordId;
+                        // Organization grant (task 073 #7): everyone at the firm inherits access. Unlike a
+                        // standing grant it IS a real per-record row, so it keeps the level badge + Revoke.
+                        const isOrg = grant.provenance === 'organization';
+                        return (
+                          <div className={styles.row} key={grant.accessRecordId ?? `standing-${grant.contactId}`}>
+                            <div className={styles.rowMain}>
+                              {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6).
+                                Org grants key on the org id (not a contact), so they stay plain text. */}
+                              {!isOrg && onOpenContact ? (
+                                <Link className={styles.contactLink} onClick={() => onOpenContact(grant.contactId)}>
+                                  {grant.fullName}
+                                </Link>
+                              ) : (
+                                <Text className={styles.rowName}>{grant.fullName}</Text>
+                              )}
+                              <Text className={styles.rowMeta}>
+                                {isStanding
+                                  ? 'Standing grant — ongoing access to assigned records'
+                                  : isOrg
+                                    ? 'Organization grant — all organization contacts have access'
+                                    : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
+                              </Text>
+                            </div>
+                            <div className={styles.rowActions}>
+                              {isStanding ? (
+                                <Badge appearance="tint" color="success">
+                                  Standing
                                 </Badge>
-                                <Button
-                                  appearance="subtle"
-                                  size="small"
-                                  onClick={() => setRevokeTargetId(grant.accessRecordId!)}
-                                  disabled={revoking}
-                                >
-                                  Revoke
-                                </Button>
-                              </>
-                            )}
+                              ) : (
+                                <>
+                                  <Badge appearance="tint" color="informative">
+                                    {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ??
+                                      grant.accessLevel}
+                                  </Badge>
+                                  <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    onClick={() => setRevokeTargetId(grant.accessRecordId!)}
+                                    disabled={revoking}
+                                  >
+                                    Revoke
+                                  </Button>
+                                </>
+                              )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })
-                  )}
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </>
             )}
@@ -900,61 +848,6 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           (unless a standing grant or other membership still applies).
         </Text>
       </SprkModal>
-
-      {/* Record picker side pane (task 073 v1.0.23) — a Fluent OverlayDrawer that portals ABOVE the modal
-          (position="end"), so the user searches + picks a contact/organization WITHOUT the modal hiding.
-          Picking appends the item to the Available list and closes the drawer. */}
-      <OverlayDrawer
-        position="end"
-        size="small"
-        open={pickerMode !== null}
-        onOpenChange={(_, data) => {
-          if (!data.open) closePicker();
-        }}
-      >
-        <DrawerHeader>
-          <DrawerHeaderTitle
-            action={<Button appearance="subtle" icon={<DismissRegular />} aria-label="Close" onClick={closePicker} />}
-          >
-            {pickerMode === 'organization' ? 'Add organization' : 'Add contact'}
-          </DrawerHeaderTitle>
-        </DrawerHeader>
-        <DrawerBody>
-          <Input
-            placeholder={pickerMode === 'organization' ? 'Search organizations…' : 'Search contacts…'}
-            value={pickerQuery}
-            contentBefore={<SearchRegular />}
-            onChange={(_, data) => {
-              if (pickerMode) void runPickerSearch(data.value, pickerMode);
-            }}
-            style={{ width: '100%', marginBottom: tokens.spacingVerticalM }}
-          />
-          {pickerSearching && (
-            <div className={styles.loadingRow}>
-              <Spinner size="tiny" />
-              <Text>Searching…</Text>
-            </div>
-          )}
-          {!pickerSearching && pickerQuery.trim().length >= 2 && pickerResults.length === 0 && (
-            <Text className={styles.emptyState}>No matches.</Text>
-          )}
-          {pickerResults.map(r => (
-            <div
-              key={r.id}
-              className={styles.pickerResultRow}
-              role="button"
-              tabIndex={0}
-              onClick={() => pickResult(r)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') pickResult(r);
-              }}
-            >
-              <Text className={styles.rowName}>{r.name}</Text>
-              {r.meta && <Text className={styles.rowMeta}>{r.meta}</Text>}
-            </div>
-          ))}
-        </DrawerBody>
-      </OverlayDrawer>
     </>
   );
 };

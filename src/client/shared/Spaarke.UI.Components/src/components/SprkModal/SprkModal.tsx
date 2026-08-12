@@ -127,6 +127,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   size = 'md',
   layout,
   dismiss = 'light',
+  nonBlocking = false,
   uiScale = 1,
   maximizable = true,
   nav,
@@ -151,7 +152,10 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   const effectiveSize: SprkModalSize = maximized ? 'full' : size;
   const surfaceStyle = getSurfaceStyle(effectiveSize, uiScale);
   const effectiveLayout: SprkModalLayout = layout ?? SIZE_SPEC[size].layout;
-  const modalType = dismiss === 'alert' ? 'alert' : 'modal';
+  // `alert` is intentionally blocking; otherwise `nonBlocking` maps to Fluent's
+  // `non-modal` (no backdrop, no focus trap) so a page-level lookup pane opened
+  // over the modal stays interactive (see `nonBlocking` prop doc).
+  const modalType = dismiss === 'alert' ? 'alert' : nonBlocking ? 'non-modal' : 'modal';
   const hasFooter = Boolean(footer || footerStart);
 
   return (

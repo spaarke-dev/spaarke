@@ -185,16 +185,27 @@ export interface IAccessGrantModalProps {
    * When supplied, section 2 shows an inline org `LookupField` that stacks
    * inside the modal (no side-pane, no modal-hide). Omit → no org picker. */
   searchOrganizations?: (query: string) => Promise<ILookupItem[]>;
-  /** @deprecated task 073 UAT #4 — the side-pane Advanced Lookup forced hiding
-   * the modal (the Xrm pane renders behind the Fluent portal). The modal now
-   * uses the inline {@link searchContacts} `LookupField` instead. Retained
-   * (unused by the modal) only so existing hosts that still pass it compile;
-   * safe to stop passing. */
+  /** Opens the host's NATIVE Dataverse advanced-lookup side pane for a single
+   * Contact (task 073 UAT v1.0.24 — `Xrm.Utility.lookupObjects`), returning the
+   * pick (or `null` on cancel). This is the PRIMARY "+ Contact" mechanism — same
+   * advanced-find surface the wizards use (search/views/filters/recent). Works
+   * because the modal renders `nonBlocking` (no backdrop covering the lookup
+   * pane). When supplied, the "+ Contact" button opens this; {@link searchContacts}
+   * is only the fallback for hosts (e.g. an SPA) that can't open the native pane.
+   * (Earlier v1.0.23 deprecated this in favor of an in-modal box; v1.0.24
+   * restored it per owner UAT — the native lookup is preferred.) */
   pickContact?: () => Promise<IContactSearchResult | null>;
-  /** @deprecated task 073 UAT #4 — replaced by the inline
-   * {@link searchOrganizations} `LookupField` for the same modal-hide reason as
-   * {@link pickContact}. Retained (unused) for host back-compat. */
+  /** Opens the host's NATIVE advanced-lookup side pane for a single
+   * `sprk_organization` (task 073 UAT v1.0.24) — the PRIMARY "+ Organization"
+   * mechanism, mirroring {@link pickContact}. Omit → the "+ Organization" button
+   * is hidden. */
   pickOrganization?: () => Promise<IOrganizationPick | null>;
+  /** Opens the Contact record (task 073 UAT v1.0.24 #6) — wired by the host to
+   * `Xrm.Navigation.navigateTo` (entityrecord, modal target) so a user with write
+   * access to the Contact can view/edit it. When supplied, each contact name in
+   * the Available + Current Access lists renders as a link. Omit → names render
+   * as plain text. */
+  onOpenContact?: (contactId: string) => void;
   /** Classifies a contact as internal-workforce (has a linked `systemuser`)
    * vs external. Drives the notify branch: an external contact with a known
    * email is granted via the built `/invite-and-grant` (onboard + grant + CIAM
