@@ -4,7 +4,7 @@
     <title>Retarget all tests/** to net10; clean solution build + publish (P0 exit gate)</title>
     <phase>P0 Retarget + build-green</phase>
     <gate>004 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** csproj + achieves the P0 exit gate (whole-solution build + publish); test-modifying.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -91,7 +91,9 @@
     <criterion testable="true">Negative: no test was deleted or excluded to achieve the build (git diff shows only TFM + package version edits in tests/**).</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-01 (build acceptance). Test PASS/green (running the suite) is FR-11 / task 030 — this task proves BUILD + publish only. P0 exit gate.</notes>
+  <notes>spec FR-01 (build acceptance). Test PASS/green (running the suite) is FR-11 / task 030 — this task proves BUILD + publish only. P0 exit gate.
+
+  COMPLETION (2026-08-11): all 8 tests/** csproj retargeted net8.0 → net10.0. Whole-solution `dotnet build -c Release Spaarke.sln` GREEN (0 errors). `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` succeeds framework-dependent (no runtime DLLs / no runtimes/ tree; 183 files/136M uncompressed — compressed re-baseline is task 031). net462 plugin csproj diff EMPTY. Test-package alignment (NU1605 fixes): Sprk.Bff.Api.Tests Cosmos 3.47.0→3.62.1 + MimeKit/MimeKitLite 4.15.1→4.17.0; Spaarke.Scheduling.Tests Logging.Abstractions 8.0.3→10.0.1; Spe.Integration.Tests Jwt 8.15.0→8.22.0. Removed framework-superseded System.Text.RegularExpressions 4.3.1 pin from 4 test projects (NU1510; Sprk.Bff.Api.Tests had TWAE→error). ZERO .cs changes, ZERO tests deleted/excluded → escalation trigger did NOT fire; ADR-038 clean. Step 9.5 (binding override for test-modifying): adr-check PASSED (ADR-038/002/029 compliant, 0 violations); code-review N/A on pure TFM/version diff. **P0 CLOSED.**
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

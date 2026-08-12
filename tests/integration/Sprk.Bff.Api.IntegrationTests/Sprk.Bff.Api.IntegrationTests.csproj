@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
@@ -20,7 +20,8 @@
     <PackageReference Include="Moq" Version="4.20.70" />
 
     <!-- Security: Override vulnerable transitive dependency -->
-    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <!-- System.Text.RegularExpressions pin removed (task 005): net10 framework-superseded (NU1510). -->
+
   </ItemGroup>
 
   <ItemGroup>

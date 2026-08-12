@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | EXECUTION STARTED. P0 chain underway. **001 ✅ 002 ✅ 003 ✅ 004 ✅ complete** (2026-08-11). |
-| **Active task** | `005` — Retarget **all `tests/**`** to net10; clean-solution `dotnet build -c Release` + `dotnet publish` (**P0 EXIT GATE**) |
+| **Project phase** | **P0 COMPLETE** (001–005 ✅). Entering P1 hit-site remediation. Whole-solution net10 build + publish GREEN; whole graph vulnerable-clean. |
+| **Active task** | `010` — **H1**: `BackgroundService.ExecuteAsync` audit (net10 runs it on a background thread) — closed per-worker verdict list; `TodoGenerationService` 500.30 guard |
 | **Status** | not-started |
-| **Next Action** | Begin execution: `task-execute` on `tasks/005-*.poml` (do NOT read/implement POMLs manually — root §4). Depends on 004 ✅. net462 plugin UNTOUCHED. |
+| **Next Action** | Begin execution: `task-execute` on `tasks/010-*.poml`. **model-tier=opus** (session is Opus 4.8 ✓). Depends on 005 ✅. This is the highest-risk task — H1. 011 adversarially verifies it (non-author). |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
 | **Git** | 001 (`8077e33f5`) + 002 (`3f6027aa5`) committed + pushed. 003 changes UNCOMMITTED (`Spaarke.Core.csproj`, `Spaarke.Dataverse.csproj`, `notes/pin-removals.md`). Synced w/ `origin/master` 2026-08-11 (0 behind; NOT merged — deferred). |
 

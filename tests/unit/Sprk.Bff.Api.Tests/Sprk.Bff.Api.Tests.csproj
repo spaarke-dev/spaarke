@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <IsPackable>false</IsPackable>
@@ -9,10 +9,11 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.23" />
     <!-- Cosmos DB SDK — required to mock CosmosClient in SessionPersistenceService tests (AIPU2-030) -->
-    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.47.0" />
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
-    <!-- MimeKit 4.15.1: fixes CVE-2026-30227 (CRLF injection in SMTP envelope address) -->
-    <PackageReference Include="MimeKit" Version="4.15.1" />
+    <!-- MimeKit 4.17.0: aligned with Sprk.Bff.Api (task 004/005) to avoid NU1605; retains the
+         CVE-2026-30227 fix (CRLF injection in SMTP envelope address, fixed 4.15.1). -->
+    <PackageReference Include="MimeKit" Version="4.17.0" />
     <PackageReference Include="NSubstitute" Version="5.3.0" />
     <PackageReference Include="xunit" Version="2.9.0" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
@@ -31,13 +32,14 @@
     <PackageReference Include="QuestPDF" Version="2025.12.1" />
 
     <!-- Security: Override vulnerable transitive dependencies -->
-    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <!-- System.Text.RegularExpressions pin removed (task 005): net10 framework-superseded (NU1510). -->
+
     <PackageReference Include="System.Linq.Dynamic.Core" Version="1.6.0" />
     <!-- GHSA-24c8-4792-22hx (HIGH) + GHSA-q6rr-fm2g-g5x8 / GHSA-6q7j-xr26-3h2c (Moderate, DoS): WireMock.Net 1.5.45 pins Scriban.Signed 5.5.0; all patched in 7.2.1. Test-only assembly; WireMock response templating unaffected in our fixtures. -->
     <PackageReference Include="Scriban.Signed" Version="7.2.1" />
 
     <!-- Exclude MimeKitLite to avoid conflict with MimeKit -->
-    <PackageReference Include="MimeKitLite" Version="4.15.1">
+    <PackageReference Include="MimeKitLite" Version="4.17.0">
       <ExcludeAssets>all</ExcludeAssets>
     </PackageReference>
 
