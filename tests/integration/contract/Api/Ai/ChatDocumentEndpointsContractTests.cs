@@ -34,6 +34,7 @@ using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Spaarke.Dataverse;
+using Spaarke.Core.Auth;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
@@ -506,6 +507,40 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
+    [Fact]
+    public async Task IngestFromDocument_WhenCallerLacksReadAccess_ReturnsForbidden()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync("doc-eml-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = "doc-eml-1",
+                Name = "Re Acme",
+                GraphDriveId = "drive-1",
+                GraphItemId = "item-1",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+        // Caller is NOT authorized to read this archive document → 403, and the .eml is NEVER downloaded.
+        _fx.AuthzMock
+            .Setup(a => a.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Spaarke.Core.Auth.AuthorizationResult { IsAllowed = false, ReasonCode = "sdap.access.denied", RuleName = "Test" });
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = "doc-eml-1" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fx.SpeMock.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "an unauthorized caller must never trigger the app-only SPE download of the .eml");
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string sessionId, IReadOnlyList<ChatSessionFile>? uploadedFiles)
@@ -555,6 +590,9 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     // contract tests exercise the happy / not-found / not-archive branches deterministically.
     public Mock<IDocumentDataverseService> DataverseMock { get; } = new();
     public Mock<SpeFileStore> SpeMock { get; } = BuildSpeMock();
+    // task 064 (E1c): the from-document ingest endpoint applies per-document authorization
+    // (mirrors eml-render's DocumentAuthorizationFilter). Default: allow; the 403 test flips it.
+    public Mock<IAuthorizationService> AuthzMock { get; } = new();
     public List<string> CacheCalls { get; } = new();
 
     /// <summary>
@@ -649,6 +687,9 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         // IDocumentDataverseService — register the mock so the ingest contract tests drive it.
         builder.Services.AddSingleton<IDocumentDataverseService>(DataverseMock.Object);
 
+        // task 064 (E1c): per-document authorization mock (endpoint injects IAuthorizationService).
+        builder.Services.AddSingleton<IAuthorizationService>(AuthzMock.Object);
+
         // IPostUploadIndexingEnqueuer is needed by PersistDocumentAsync (Phase 3a — sync OBO
         // post-upload indexing). Same registration pattern as SpeFileStore above — endpoint
         // parameter binding requires the type to resolve at startup; not exercised by upload tests.
@@ -708,6 +749,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         OpenAiClientMock.Reset();
         DataverseMock.Reset();
         SpeMock.Reset();
+        AuthzMock.Reset();
         CacheCalls.Clear();
         ConfigureDefaults();
     }
@@ -721,6 +763,11 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
                 "Stub extracted text content for testing.",
                 TextExtractionMethod.DocumentIntelligence));
 
+        // Default per-document authorization — ALLOW (the 403 test overrides to denied).
+        AuthzMock
+            .Setup(a => a.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Spaarke.Core.Auth.AuthorizationResult { IsAllowed = true, ReasonCode = "sdap.access.granted", RuleName = "Test" });
+
         // Default auth filter — the filter passes through when no document IDs are
         // present in the request args (the upload endpoint takes sessionId + IFormFile,
         // neither is a Guid). Default mock still returns Authorized for completeness.
@@ -729,7 +776,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
                 It.IsAny<IReadOnlyList<Guid>>(),
                 It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AuthorizationResult.Authorized(Array.Empty<Guid>()));
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.AuthorizationResult.Authorized(Array.Empty<Guid>()));
 
         // Default chunking — one small chunk so embedding/upload paths succeed.
         ChunkingServiceMock

@@ -14,7 +14,9 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.EventRules;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Spaarke.Dataverse;
+using Spaarke.Core.Auth;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -821,6 +823,7 @@ public static class ChatDocumentEndpoints
         SpeFileStore speFileStore,
         ITenantCache cache,
         ChatSessionManager sessionManager,
+        IAuthorizationService authorizationService,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
@@ -892,6 +895,32 @@ public static class ChatDocumentEndpoints
         if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
         {
             return Results.Problem(statusCode: 404, title: "Not Found", detail: "The email archive has no SPE file to ingest.");
+        }
+
+        // 3a. Per-document authorization (BROKEN-OBJECT-LEVEL-AUTHZ guard). The AI-session filter gates
+        // SESSION access; it does NOT verify the caller may read THIS archive document. Because the SPE
+        // download below is app-only (bypassing the caller's SPE permissions), an unchecked caller could
+        // exfiltrate any communication's .eml by id. Mirror the sibling eml-render endpoint, which adds
+        // DocumentAuthorizationFilter("read") for exactly this reason — applied here in-handler because the
+        // resource id is resolved from the body (documentId) / lookup (communicationId), not a route value.
+        var callerUserId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(callerUserId))
+        {
+            return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "User identity not found in token claims");
+        }
+        var authz = await authorizationService.AuthorizeAsync(new AuthorizationContext
+        {
+            UserId = callerUserId,
+            ResourceId = document.Id,
+            Operation = "read",
+            CorrelationId = httpContext.TraceIdentifier
+        }, ct);
+        if (!authz.IsAllowed)
+        {
+            logger.LogWarning(
+                "Archive ingest denied: caller {UserId} lacks read access to document {DocumentId} (session {SessionId}).",
+                callerUserId, document.Id, sessionId);
+            return ProblemDetailsHelper.Forbidden(authz.ReasonCode);
         }
 
         // 4. Download the raw .eml via the facade (app-only, ADR-007 — no GraphServiceClient injection).
