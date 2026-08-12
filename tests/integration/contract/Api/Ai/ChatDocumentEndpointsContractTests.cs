@@ -32,6 +32,8 @@ using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Spaarke.Dataverse;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
@@ -363,6 +365,96 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             "the FR-P1-03 opt-out bound persists per user (real EventPathUserState over the fixture cache)");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 064 (E1c) — from-document ingest: an archived .eml sprk_document becomes
+    // a session document the wizard's AI-prepopulate file leg can fetch.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task IngestFromDocument_WhenArchive_Returns200AndCachesBinaryAndManifest()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        var emlBytes = Encoding.UTF8.GetBytes("From: a@x.com\r\nSubject: Re Acme\r\n\r\nbody");
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync("doc-eml-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = "doc-eml-1",
+                Name = "Re Acme",
+                GraphDriveId = "drive-1",
+                GraphItemId = "item-1",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+        _fx.SpeMock
+            .Setup(s => s.DownloadFileAsync("drive-1", "item-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream)new MemoryStream(emlBytes));
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = "doc-eml-1" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<IngestArchiveResponse>();
+        body!.SessionId.Should().Be(TestSessionId);
+        body.FileId.Should().NotBeNullOrEmpty();
+        body.FileName.Should().Be("Re Acme.eml");
+
+        // The .eml bytes were written to the session document store (the /content GET reads this key).
+        _fx.CacheCalls.Should().Contain(c => c.Contains("doc-upload-binary"),
+            "the ingested .eml binary must be cached so the wizard's file leg can fetch it");
+        // The session manifest gained the ingested file, content-typed as the real email MIME.
+        _fx.Sessions.PersistedSession.Should().NotBeNull();
+        _fx.Sessions.PersistedSession!.UploadedFiles.Should().ContainSingle();
+        _fx.Sessions.PersistedSession.UploadedFiles![0].ContentType.Should().Be("message/rfc822");
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenDocumentMissing_ReturnsNotFound()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DocumentEntity?)null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = "missing" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenNotEmailArchive_Returns422()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = "not-archive",
+                Name = "contract",
+                GraphDriveId = "d",
+                GraphItemId = "i",
+                FileName = "contract.pdf",
+                IsEmailArchive = false,
+                HasFile = true
+            });
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = "not-archive" });
+
+        response.StatusCode.Should().Be((HttpStatusCode)422);
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string sessionId, IReadOnlyList<ChatSessionFile>? uploadedFiles)
@@ -407,7 +499,27 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     public Mock<IRagService> RagServiceMock { get; } = new();
     public Mock<ITextChunkingService> ChunkingServiceMock { get; } = new();
     public Mock<IOpenAiClient> OpenAiClientMock { get; } = new();
+    // task 064 (E1c): the from-document ingest endpoint resolves a sprk_document → SPE pointers
+    // (IDocumentDataverseService) and downloads the .eml (SpeFileStore). Both mockable so the
+    // contract tests exercise the happy / not-found / not-archive branches deterministically.
+    public Mock<IDocumentDataverseService> DataverseMock { get; } = new();
+    public Mock<SpeFileStore> SpeMock { get; } = BuildSpeMock();
     public List<string> CacheCalls { get; } = new();
+
+    /// <summary>
+    /// Build a loose <see cref="SpeFileStore"/> mock (concrete facade with a null-checking ctor —
+    /// the established idiom, cf. <c>CommunicationServiceArchiveEmbedTests.BuildSpeMock</c>).
+    /// <c>DownloadFileAsync</c> is virtual; per-test setup supplies the .eml bytes.
+    /// </summary>
+    private static Mock<SpeFileStore> BuildSpeMock()
+    {
+        var gcf = Mock.Of<IGraphClientFactory>();
+        var containerOps = new ContainerOperations(gcf, Mock.Of<ILogger<ContainerOperations>>());
+        var driveItemOps = new DriveItemOperations(gcf, Mock.Of<ILogger<DriveItemOperations>>());
+        var uploadMgr = new UploadSessionManager(gcf, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>());
+        var userOps = new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>());
+        return new Mock<SpeFileStore>(MockBehavior.Loose, containerOps, driveItemOps, uploadMgr, userOps, null!);
+    }
 
     private WebApplication? _app;
     private RecordingTenantCache _recordingCache = null!;
@@ -478,10 +590,13 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
             }));
         builder.Services.AddSingleton<RagIndexingPipeline>();
 
-        // SpeFileStore is needed by PersistDocumentAsync but not by UploadDocumentAsync;
-        // the endpoint mapping still resolves the type at startup so register a stub.
-        builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>(_ =>
-            null!); // not exercised by upload tests
+        // SpeFileStore is needed by PersistDocumentAsync + the task-064 from-document ingest;
+        // register the mockable facade (DownloadFileAsync setup per-test). Not exercised by upload tests.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>(SpeMock.Object);
+
+        // task 064 (E1c): the from-document ingest endpoint resolves the sprk_document via
+        // IDocumentDataverseService — register the mock so the ingest contract tests drive it.
+        builder.Services.AddSingleton<IDocumentDataverseService>(DataverseMock.Object);
 
         // IPostUploadIndexingEnqueuer is needed by PersistDocumentAsync (Phase 3a — sync OBO
         // post-upload indexing). Same registration pattern as SpeFileStore above — endpoint
@@ -540,6 +655,8 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         RagServiceMock.Reset();
         ChunkingServiceMock.Reset();
         OpenAiClientMock.Reset();
+        DataverseMock.Reset();
+        SpeMock.Reset();
         CacheCalls.Clear();
         ConfigureDefaults();
     }
