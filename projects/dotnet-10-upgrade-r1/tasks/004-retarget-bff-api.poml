@@ -4,7 +4,7 @@
     <title>Retarget Sprk.Bff.Api to net10; finish package alignment + routine same-major catch-ups</title>
     <phase>P0 Retarget + build-green</phase>
     <gate>003 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the primary deployable csproj; BFF-wide; brownfield; many runtime-tied packages.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -91,7 +91,11 @@
     <criterion testable="true">Negative: no `PublishTrimmed`/`PublishAot`/`RuntimeFrameworkVersion` was added.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-01/FR-03/FR-05. FR-06 (App Insights removal) is task 014. Publish measurement is task 031. Full-solution build+publish green is the task 005 exit gate.</notes>
+  <notes>spec FR-01/FR-03/FR-05. FR-06 (App Insights removal) is task 014. Publish measurement is task 031. Full-solution build+publish green is the task 005 exit gate.
+
+  COMPLETION (2026-08-11): BFF TFM net8.0 → net10.0, `dotnet build -c Release` green (0 errors; 22 warnings = 8 NU1510 framework-Extensions + SYSLIB/CS owned by 012/013). ADR-029 intact (SelfContained=false, RID=linux-x64, sourcemap exclusion; no Trim/AOT/RuntimeFrameworkVersion). §6.1 required (Hosting.Abstractions→10.0.3, Identity.Client→4.87.0, Identity.Web+MicrosoftGraph→4.14.2) + §6.3 same-major catch-ups (Azure.Identity→1.21.0, Cosmos→3.62.1, Handlebars→2.4.3, Caching.StackExchangeRedis→10.0.10, Graph→5.105.0, MimeKit→4.17.0, MsgReader→6.1.0, HtmlSanitizer→9.2.995, OpenTelemetry+Api→1.17.0, Instrumentation.AspNetCore→1.15.2/Http→1.15.1, Azure.Monitor.OTel→1.6.0, Polly→8.7.0, OpenMcdf→3.2.0) applied. 7 Kiota 1.22.0 pins KEPT; Graph stays 5.x (Graph6/Kiota2 = task 033); M.E.AI 10.3.0 not bumped. Escalation trigger (§6.3 API break) did NOT fire. BFF CVE pins RegEx + S.S.C.Xml 8.0.4 REMOVED (NU1510 framework-superseded on Web framework).
+
+  DEVIATIONS (documented): (1) Scheduling Extensions 8.0.x→10.0.1 — forced by NU1605 when composed (task-002 deferred alignment coming due). (2) 🔴 SECURITY ESCALATION + owner-approved Option 1: deleting NoWarn=NU1903 revealed the task premise was FALSE — it masked a LIVE HIGH crypto CVE (System.Security.Cryptography.Xml 8.0.2, 8 HIGH advisories) transitive in Core/Dataverse/Scheduling, not just the already-fixed Kiota one. Fixed by pinning S.S.C.Xml 10.0.11 (+ Pkcs 8.0.1→10.0.11 to match) in the 3 shared libs, THEN deleting NU1903. VERIFIED: zero NU1903 + 'no vulnerable packages' across BFF+Core+Dataverse+Scheduling. Retroactively closes the task-003 S.S.C.Xml carry-forward. kiota-cve-finding.md 'no-op' claim corrected. Full evidence: notes/pin-removals.md task-004 section. Quality gates SKIPPED — config-only (csproj/props, zero .cs), not test-modifying; ADR-029 verified by inspection; change is security-positive.
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

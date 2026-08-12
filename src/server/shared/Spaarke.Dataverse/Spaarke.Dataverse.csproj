@@ -21,8 +21,14 @@
          CVE pins REMOVED — NU1510 confirmed the net10 framework supersedes them (framework version ≥ the
          CVE-fixed pin). System.Security.Cryptography.Pkcs is NOT framework-pruned (no NU1510) so its pin is
          retained until the transitive graph is confirmed ≥ 8.0.1. Evidence: notes/pin-removals.md. -->
-    <!-- CVE-2023-29331 (HIGH): System.Security.Cryptography.Pkcs 6.0.1 → 8.0.1 -->
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.1" />
+    <!-- CVE-2023-29331 (HIGH): System.Security.Cryptography.Pkcs 6.0.1 → 8.0.1; bumped to 10.0.11 (task 004)
+         to match the S.S.C.Xml 10.0.11 pin below, which drags Pkcs >= 10.0.11 (would otherwise NU1605). -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.11" />
+    <!-- net10 retarget (task 004): pin System.Security.Cryptography.Xml to a non-vulnerable 10.0.x.
+         The transitive 8.0.2 (via Dataverse.Client/MSAL) carries 8 HIGH advisories that NoWarn=NU1903
+         was silently masking. Non-web lib → framework does NOT prune S.S.C.Xml (no NU1510) → explicit
+         override required. 10.0.11 clears all 8. Enabled deleting NoWarn=NU1903. Owner Option 1, 2026-08-11. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
   </ItemGroup>
 
 </Project>

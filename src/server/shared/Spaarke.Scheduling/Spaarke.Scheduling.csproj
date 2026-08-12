@@ -17,9 +17,15 @@
     <PackageReference Include="Cronos" Version="0.13.0" />
 
     <!-- BackgroundService base + DI / logging abstractions for ScheduledJobHost (task 013) -->
-    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Options" Version="8.0.2" />
+    <!-- Extensions aligned to the 10.0.x wave (task 004, forced by NU1605 when composed with Core/Dataverse
+         at 10.0.1). Deferred from task 002 per the "align atomically across the graph" note. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.1" />
+    <!-- net10 retarget (task 004): pin System.Security.Cryptography.Xml to a non-vulnerable 10.0.x.
+         Transitive 8.0.2 (via Core→Dataverse→Dataverse.Client) carries 8 HIGH advisories NoWarn=NU1903
+         masked. Non-web lib → no framework prune → explicit override. 10.0.11 clears all 8. Owner Option 1. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>

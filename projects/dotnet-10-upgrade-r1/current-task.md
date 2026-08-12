@@ -9,20 +9,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | EXECUTION STARTED. P0 chain underway. **001 ✅ + 002 ✅ + 003 ✅ complete** (2026-08-11). |
-| **Active task** | `004` — Retarget **Sprk.Bff.Api** to net10; finish package alignment (Identity.Web→4.14.2, Extensions→10.0.x); delete stale `NoWarn=NU1903`; §6.3 same-major catch-ups |
+| **Project phase** | EXECUTION STARTED. P0 chain underway. **001 ✅ 002 ✅ 003 ✅ 004 ✅ complete** (2026-08-11). |
+| **Active task** | `005` — Retarget **all `tests/**`** to net10; clean-solution `dotnet build -c Release` + `dotnet publish` (**P0 EXIT GATE**) |
 | **Status** | not-started |
-| **Next Action** | Begin execution: `task-execute` on `tasks/004-retarget-bff-api.poml` (do NOT read/implement POMLs manually — root §4). Depends on 003 ✅. |
+| **Next Action** | Begin execution: `task-execute` on `tasks/005-*.poml` (do NOT read/implement POMLs manually — root §4). Depends on 004 ✅. net462 plugin UNTOUCHED. |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
 | **Git** | 001 (`8077e33f5`) + 002 (`3f6027aa5`) committed + pushed. 003 changes UNCOMMITTED (`Spaarke.Core.csproj`, `Spaarke.Dataverse.csproj`, `notes/pin-removals.md`). Synced w/ `origin/master` 2026-08-11 (0 behind; NOT merged — deferred). |
 
 ### net10 retarget state so far (do NOT re-derive)
-- **net10.0 now**: `Spaarke.Scheduling` (002), `Spaarke.Core` + `Spaarke.Dataverse` (003). Still net8: `Sprk.Bff.Api` (004) + `tests/**` (005). `net462` plugin never moves.
-- **NU1510 pin-removal pattern (proven in 003)**: retarget with CVE pins still in → `TreatWarningsAsErrors` turns NU1510 into errors for exactly the framework-superseded pins → remove those; keep any pin NOT NU1510-flagged (framework doesn't supply it). In 003: Asn1/STJ/RegEx removed; **Pkcs 8.0.1 KEPT**. Apply same method to BFF in 004.
-- **Package versions locked in**: Extensions.* → **10.0.1**; MSAL (Identity.Client) → **4.87.0**; Dataverse.Client → **1.2.26**. BFF (004) must align to these same versions to avoid NU1605.
-- **🔴 CARRY-FORWARD for task 004 (+032)**: transitive **`System.Security.Cryptography.Xml 8.0.2`** has 8 HIGH advisories. BFF already pins it at **8.0.4** (`Sprk.Bff.Api.csproj:147`). Task 004 MUST confirm 8.0.4 clears all 8 advisories (several are fixed only ABOVE 8.0.4) — if not, **bump** it. Pre-existing (not a retarget regression).
-- **BFF task 004 also**: delete the stale `NoWarn=NU1903` in `Directory.Build.props:31` (Kiota CVE already fixed by 1.22.0 pins; only valid once restore is clean). Graph 5→6 / Kiota 1→2 is NOT task 004 — that's **task 033** (post-030-green).
-- **§10 BFF governance for 004**: state Placement Justification (net-negative — removes pins, adds no service); publish-size re-baseline is task 031 (not 004); `/conflict-check` before the eventual BFF PR.
+- **net10.0 now**: `Spaarke.Scheduling` (002), `Spaarke.Core` + `Spaarke.Dataverse` (003), `Sprk.Bff.Api` (004). Still net8: `tests/**` (005). `net462` plugin never moves.
+- **✅ S.S.C.Xml HIGH CVE fully CLOSED (task 004, owner Option 1)**: the task-003 carry-forward + a live-CVE-mask discovered when deleting NU1903 are both resolved — Core/Dataverse/Scheduling now pin `System.Security.Cryptography.Xml 10.0.11` (+ Pkcs bumped to 10.0.11 to match). `NoWarn=NU1903` DELETED. VERIFIED: zero NU1903 + `dotnet list --vulnerable` = "no vulnerable packages" across BFF+Core+Dataverse+Scheduling. **Task 032 has no S.S.C.Xml regression to chase.**
+- **Package versions locked in**: Extensions.* → 10.0.1 (BFF Caching 10.0.3); MSAL → 4.87.0; Dataverse.Client → 1.2.26; Identity.Web(+MicrosoftGraph) → 4.14.2; crypto Pkcs+Xml → 10.0.11 (shared libs). 7 Kiota 1.22.0 pins KEPT; Graph 5.105.0 (Graph6/Kiota2 = task 033).
+- **NU1510 pin-removal pattern (proven 003/004)**: framework-superseded pins (Asn1/STJ/RegEx everywhere; S.S.C.Xml on the BFF Web framework) removed; pins the framework does NOT supply (Pkcs, and S.S.C.Xml on non-web libs) kept/bumped to a clean version.
+- **Task 005 (P0 EXIT GATE)**: retarget every `tests/**` csproj to net10; achieve clean-solution `dotnet build -c Release` + `dotnet publish`. net462 plugin untouched. This is the gate before any P1 hit-site work (010+).
+- **§10 BFF governance**: publish-size re-baseline is task 031; `/conflict-check` before the eventual BFF PR (owner runs at merge).
 
 ### Critical Context (do NOT re-derive)
 - Target is **.NET 10 (LTS), NOT .NET 11** (STS/not-GA) — LTS-hopping; see memory `dotnet10-not-11`.

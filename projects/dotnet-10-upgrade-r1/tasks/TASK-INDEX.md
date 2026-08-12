@@ -15,7 +15,7 @@
 | 001 | Bump global.json → 10.0.1xx + re-scrape breaking changes (H5) | P0 | FR-02 | sonnet/high | — | false | ✅ |
 | 002 | Retarget **Spaarke.Scheduling FIRST** (warnings-as-errors) + NU1510/SYSLIB | P0 | FR-01,04 | sonnet/xhigh | 001 | false | ✅ |
 | 003 | Retarget Core + Dataverse; required package moves + pin removals | P0 | FR-01,03,04 | sonnet/xhigh | 002 | false | ✅ |
-| 004 | Retarget Sprk.Bff.Api; package alignment + §6.3 catch-ups | P0 | FR-01,03,05 | sonnet/xhigh | 003 | false | 🔲 |
+| 004 | Retarget Sprk.Bff.Api; package alignment + §6.3 catch-ups | P0 | FR-01,03,05 | sonnet/xhigh | 003 | false | ✅ |
 | 005 | Retarget tests/**; clean solution build + publish (**P0 exit gate**) | P0 | FR-01 | sonnet/high | 004 | false | 🔲 |
 | 010 | **H1** BackgroundService.ExecuteAsync audit (closed per-worker list) | P1 | FR-07 | **opus**/xhigh | 005 | false | 🔲 |
 | 011 | **H1 adversarial verification** (non-author) | P1 | NFR-07 | opus/xhigh | 010 | false (V1) | 🔲 |

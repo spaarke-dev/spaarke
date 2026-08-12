@@ -74,4 +74,30 @@ Not runnable at this stage (needs BFF + test projects retargeted — tasks 004/0
 
 ## Task 004 — `Sprk.Bff.Api`
 
-_(to be filled by task 004 — remaining pins + the `NoWarn=NU1903` stale-suppression deletion)_
+**Date**: 2026-08-11 · **Outcome**: BFF retargeted `net8.0 → net10.0`, `dotnet build -c Release` green (0 errors, 22 warnings = 8 NU1510 framework-provided-Extensions + SYSLIB/CS source obsoletions owned by tasks 012/013). Escalation trigger (a §6.3 same-major bump carrying an API break) did **not** fire — 0 compile errors.
+
+### Landed cleanly
+- TFM net8.0 → net10.0. `SelfContained=false` + `RuntimeIdentifier=linux-x64` + wwwroot sourcemap exclusion all preserved. No `PublishTrimmed`/`PublishAot`/`RuntimeFrameworkVersion` added.
+- §6.1 required: `Hosting.Abstractions` 8.0.0→10.0.3; `Identity.Client` 4.79.2→**4.87.0**; `Identity.Web`(+`.MicrosoftGraph`) 4.3.0→**4.14.2**.
+- §6.3 same-major catch-ups: `Azure.Identity` 1.17.1→**1.21.0** (also fixed an NU1605 — Identity.Web 4.14.2→Certificate wants Azure.Identity ≥1.17.2); `Cosmos` 3.47.0→3.62.1; `Handlebars.Net` 2.1.6→2.4.3; `Caching.StackExchangeRedis` 10.0.1→10.0.10; `Graph` 5.101.0→**5.105.0** (stays 5.x — Graph 6/Kiota 2 is task 033); `MimeKit` 4.15.1→4.17.0; `MsgReader` 6.0.6→6.1.0; `HtmlSanitizer` 9.1.973→9.2.995; `OpenTelemetry`(+Extensions.Hosting) 1.15.0→1.17.0; `OpenTelemetry.Api` 1.15.3→1.17.0; `Instrumentation.AspNetCore` 1.15.0→1.15.2 + `Instrumentation.Http` 1.14.0→1.15.1 (NU1605 floors from Azure.Monitor.OTel 1.6.0); `Azure.Monitor.OpenTelemetry.AspNetCore` 1.4.0→1.6.0; `Polly` 8.6.5→8.7.0; `OpenMcdf` 3.1.4→3.2.0.
+- **Kept per constraint**: 7 Kiota `1.22.0` direct pins (no downgrade, no Graph 6/Kiota 2 here); M.E.AI 10.3.0 (not bumped — would drag OpenAI ≥2.12); `Azure.AI.Projects` beta.8, `PowerBI.Api` 4.x, `Search.Documents` 11.x (§6.4 deferred majors). Left `Blobs`/`ServiceBus`/`KeyVault.Secrets` at current (already recent same-major; design gave no explicit target).
+- **BFF pin removals (NU1510-confirmed framework-superseded on the net10 Web framework)**: `System.Text.RegularExpressions` 4.3.1 AND `System.Security.Cryptography.Xml` 8.0.4 both REMOVED — the net10 ASP.NET shared framework supplies 10.0.x (non-vulnerable). NU1510, not NU1903, confirmed for the BFF.
+
+### Forced deviation (documented): `Spaarke.Scheduling` Extensions → 10.0.1
+Composing the BFF pulled an **NU1605** downgrade: `Spaarke.Scheduling` still pinned `Logging.Abstractions 8.0.3` while `Spaarke.Core` is 10.0.1. This is the task-002 "align Extensions atomically across the graph, deferred to 003/004" note coming due. Bumped Scheduling's `Hosting.Abstractions`/`Logging.Abstractions`/`Options` 8.0.x → 10.0.1. (Touches a task-002 file — legitimate cross-task fix forced by the composed graph; noted in the Scheduling csproj.)
+
+### 🔴🔴 BLOCKED — NU1903 deletion revealed a live HIGH CVE (task premise was FALSE)
+
+The task constraint + `notes/kiota-cve-finding.md` asserted `NoWarn=NU1903` was a **stale no-op** masking only the already-fixed Kiota 1.21.2 CVE, and told me to "gate the delete on a clean `dotnet restore` showing zero NU1903." **I removed it and the gate FAILED — but not for Kiota.** The clean restore surfaced:
+
+> **`System.Security.Cryptography.Xml 8.0.2` — 8 HIGH advisories** (GHSA-37gx-xxp4-5rgx, w3x6-4m5h-cxqf, g8r8-53c2-pm3f, 8q5v-6pqq-x66h, cvvh-rhrc-wg4q, 23rf-6693-g89p, mmjf-rqrv-855v, 6588-8gv4-xfgh), transitive in **Core, Dataverse, AND Scheduling** (which have `TreatWarningsAsErrors=true` → NU1903 = build error).
+
+So `NoWarn=NU1903` was **actively masking a live HIGH crypto CVE** in the shared libs, NOT a no-op. This is exactly the task-003 carry-forward S.S.C.Xml finding — the shared libs never pinned it and relied on this suppression; the BFF composed its own 8.0.4 pin. On net10 the BFF's S.S.C.Xml is now framework-provided (clean), but the shared libs (non-web) don't get the framework version and still resolve transitive 8.0.2.
+
+**✅ RESOLVED — owner approved Option 1 (2026-08-11).** Applied:
+- Pinned `System.Security.Cryptography.Xml` **10.0.11** (latest 10.0.x, non-vulnerable) in Core + Dataverse + Scheduling. This drags `System.Security.Cryptography.Pkcs ≥ 10.0.11`, so the task-003 Pkcs pin (8.0.1) was bumped 8.0.1 → **10.0.11** in Core + Dataverse to avoid NU1605 (an upgrade — still the CVE-fixed line, now net10-aligned).
+- Deleted `NoWarn=NU1903` from `Directory.Build.props`.
+- **Verified**: `dotnet build -c Release` green; **NU1903 count = 0**; `dotnet list package --vulnerable --include-transitive` reports **"no vulnerable packages"** for BFF + Core + Dataverse + Scheduling (all 4). The 8 S.S.C.Xml HIGH advisories are genuinely CLOSED, not masked.
+- **Retroactively resolves the task-003 S.S.C.Xml carry-forward** — the whole composed graph is now clean, so task 032 has no S.S.C.Xml regression to chase.
+
+**Premise correction recorded**: the task constraint + `notes/kiota-cve-finding.md` "NU1903 = stale no-op" claim was FALSE (it masked a live HIGH crypto CVE). `kiota-cve-finding.md` corrected 2026-08-11. Escalated + resolved per CLAUDE.md §6.
