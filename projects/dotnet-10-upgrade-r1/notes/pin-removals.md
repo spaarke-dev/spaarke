@@ -34,7 +34,43 @@ Design §6.1 calls for aligning `Microsoft.Extensions.*` to 10.0.x. **Not done i
 
 ## Task 003 — `Spaarke.Core` + `Spaarke.Dataverse`
 
-_(to be filled by task 003 — this is where the H4 CVE pins are actually removed, each with inbox-≥-CVE evidence)_
+**Date**: 2026-08-11 · **Outcome**: both retargeted `net8.0 → net10.0`, `dotnet build -c Release` green (**0 warnings / 0 errors**, 0 NU1605). Escalation trigger (ServiceClient API break) did **not** fire — 1.2.26 compiled clean.
+
+### Package moves landed (design §6.1)
+
+| Package | From | To | Notes |
+|---|---|---|---|
+| `Microsoft.Extensions.DependencyInjection.Abstractions` (Core) | 8.0.2 | 10.0.1 | ends 8.0/10.0 split-brain |
+| `Microsoft.Extensions.Logging.Abstractions` (Core+Dv) | 8.0.3 | 10.0.1 | |
+| `Microsoft.Extensions.Configuration.Abstractions` (Dv) | 8.0.0 | 10.0.1 | |
+| `Microsoft.Extensions.Caching.Abstractions` (both) | 10.0.1 | 10.0.1 | already aligned; unchanged |
+| `Microsoft.Identity.Client` (MSAL, Dv) | 4.79.2 | 4.87.0 | ≥ 4.84.2 floor dragged by Dataverse.Client 1.2.26 ✓ |
+| `Microsoft.PowerPlatform.Dataverse.Client` (Dv) | 1.1.32 | 1.2.26 | same ServiceClient API surface (ADR-028 OBO/MI unchanged) |
+
+**Deviation from POML step 3**: `Microsoft.Identity.Web` (+`.MicrosoftGraph`) → 4.14.2 is **N/A here** — neither Core nor Dataverse references Identity.Web; it's a BFF package → **task 004**.
+
+### Pin removals — inbox-≥-CVE evidence (the forcing function)
+
+Retargeted with the 4 CVE pins still present, then built: `TreatWarningsAsErrors` turned **NU1510** into build errors for exactly the framework-superseded packages. NU1510 = "the net10 framework provides this; the pin is unnecessary" → framework version ≥ the CVE-fixed pin. Evidence per pin:
+
+| Pin | CVE (fixed-in) | NU1510 fired? | Action | Justification |
+|---|---|---|---|---|
+| `System.Formats.Asn1` 8.0.1 | CVE-2024-38095 (8.0.1) | ✅ yes (Core+Dv) | **REMOVED** | net10 shared framework supplies Asn1 (10.0.x ≥ 8.0.1) |
+| `System.Text.Json` 8.0.5 | CVE-2024-30105 (8.0.5) | ✅ yes (Core+Dv) | **REMOVED** | net10 supplies STJ (10.0.x ≥ 8.0.5) |
+| `System.Text.RegularExpressions` 4.3.1 | CVE-2019-0820 (4.3.1) | ✅ yes (Core+Dv) | **REMOVED** | net10 supplies RegEx (inbox ≥ 4.3.1) |
+| `System.Security.Cryptography.Pkcs` 8.0.1 | CVE-2023-29331 (8.0.1) | ❌ **no** | **KEPT** | framework does NOT prune Pkcs → constraint "keep any pin the framework does not supply" applies. Build resolves 8.0.1 with 0 NU1605. |
+
+### ⚠️ Carry-forward finding for task 004 + task 032 (NOT a task-003 regression)
+
+`dotnet list package --vulnerable --include-transitive` on the **isolated** Core/Dataverse libs flags **`System.Security.Cryptography.Xml 8.0.2` (8× HIGH advisories** — GHSA-37gx-xxp4-5rgx, w3x6-4m5h-cxqf, g8r8-53c2-pm3f, 8q5v-6pqq-x66h, cvvh-rhrc-wg4q, 23rf-6693-g89p, mmjf-rqrv-855v, 6588-8gv4-xfgh), pulled transitively (Dataverse.Client/MSAL/Azure.Identity).
+
+- **Pre-existing, NOT introduced by task 003**: Core/Dataverse have never pinned S.S.C.Xml (net8 baseline `git show HEAD~2` confirms) → the isolated net8 build pulled a vulnerable transitive Xml too. No regression → **NFR-03 satisfied for task 003**.
+- **Resolved at composition today**: the **BFF pins `System.Security.Cryptography.Xml 8.0.4`** (`Sprk.Bff.Api.csproj:147`). Not duplicated into the libs by design (avoids double-pin; keeping task-003 scope to Core+Dataverse).
+- **ACTION for task 004 / 032**: confirm the BFF's `8.0.4` pin actually clears all 8 advisories (several S.S.C.Xml HIGH advisories are fixed only **above** 8.0.4). If 8.0.4 is still in-range → **task 004 must bump** S.S.C.Xml (to the fixed 8.0.x / 10.0.x) and task 032 re-audits the composed graph.
+
+### Step 6 (Dataverse seam integration test)
+
+Not runnable at this stage (needs BFF + test projects retargeted — tasks 004/005). **Deferred to task 030** (full test-suite green) per the POML note. FR-03 acceptance proof lands there.
 
 ## Task 004 — `Sprk.Bff.Api`
 

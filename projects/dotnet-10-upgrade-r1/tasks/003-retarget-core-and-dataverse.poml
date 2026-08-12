@@ -4,7 +4,7 @@
     <title>Retarget Spaarke.Core + Spaarke.Dataverse; required package moves + pin removals</title>
     <phase>P0 Retarget + build-green</phase>
     <gate>002 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .csproj + runtime-tied packages (Dataverse.Client/MSAL/Identity.Web); brownfield; tags include bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -90,7 +90,9 @@
     <criterion testable="true">Negative: no token-acquisition (OBO/MI) code path is altered — the change is TFM + package versions only.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-01/FR-03/FR-04. Dataverse seam integration test is the FR-03 acceptance proof — if not runnable until the BFF retargets, defer its execution to task 030 and note that here.</notes>
+  <notes>spec FR-01/FR-03/FR-04. Dataverse seam integration test is the FR-03 acceptance proof — if not runnable until the BFF retargets, defer its execution to task 030 and note that here.
+
+  COMPLETION (2026-08-11): Core + Dataverse TFM net8.0 → net10.0. `dotnet build -c Release` green (0 warnings / 0 errors, 0 NU1605). Package moves: Extensions.* (DI/Logging/Config) 8.0.x → 10.0.1 (Caching already 10.0.1); MSAL 4.79.2 → 4.87.0 (≥4.84.2 floor ✓); Dataverse.Client 1.1.32 → 1.2.26 (compiled clean → ServiceClient-API-break escalation did NOT fire). Identity.Web step = N/A (BFF-only pkg, task 004). Pin removals via NU1510 forcing-function: Asn1/STJ/RegEx REMOVED (framework-superseded, NU1510 confirmed inbox≥CVE); Pkcs 8.0.1 KEPT (no NU1510 → framework doesn't supply → constraint 'keep pins framework doesn't supply'). Evidence in notes/pin-removals.md. CARRY-FORWARD (task 004/032, NOT a 003 regression): isolated vulnerable scan flags transitive System.Security.Cryptography.Xml 8.0.2 (8 HIGH) — pre-existing (libs never pinned it; net8 baseline same), resolved at BFF via 8.0.4 pin; task 004/032 must confirm 8.0.4 clears all 8 advisories or bump. Step 6 Dataverse seam test deferred to 030. Quality gates SKIPPED — config-only (csproj TFM+versions, zero .cs); ADR-028 (no token-flow code touched) + ADR-029 (no SelfContained/RID/trim) verified by inspection. Negative criteria: no .cs changed; only the 2 csproj + note.
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

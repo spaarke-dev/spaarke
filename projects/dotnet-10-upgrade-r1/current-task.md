@@ -9,17 +9,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | EXECUTION STARTED. P0 chain underway. **001 ✅ + 002 ✅ complete** (2026-08-11). |
-| **Active task** | `003` — Retarget **Spaarke.Core + Spaarke.Dataverse** to net10; required package moves + H4 CVE-pin removals (inbox-≥-CVE evidence) |
+| **Project phase** | EXECUTION STARTED. P0 chain underway. **001 ✅ + 002 ✅ + 003 ✅ complete** (2026-08-11). |
+| **Active task** | `004` — Retarget **Sprk.Bff.Api** to net10; finish package alignment (Identity.Web→4.14.2, Extensions→10.0.x); delete stale `NoWarn=NU1903`; §6.3 same-major catch-ups |
 | **Status** | not-started |
-| **Next Action** | Begin execution: `task-execute` on `tasks/003-retarget-core-and-dataverse.poml` (do NOT read/implement POMLs manually — root §4). Depends on 002 ✅. |
+| **Next Action** | Begin execution: `task-execute` on `tasks/004-retarget-bff-api.poml` (do NOT read/implement POMLs manually — root §4). Depends on 003 ✅. |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
-| **Git** | 001 committed + pushed (`8077e33f5`). 002 changes UNCOMMITTED (`Spaarke.Scheduling.csproj` TFM + `notes/pin-removals.md`). Synced with `origin/master` 2026-08-11 (0 behind; NOT merged — deferred). |
+| **Git** | 001 (`8077e33f5`) + 002 (`3f6027aa5`) committed + pushed. 003 changes UNCOMMITTED (`Spaarke.Core.csproj`, `Spaarke.Dataverse.csproj`, `notes/pin-removals.md`). Synced w/ `origin/master` 2026-08-11 (0 behind; NOT merged — deferred). |
 
-### Task 002 finding to carry into 003 (do NOT re-derive)
-- Scheduling had **no** superseded CVE pins — the design §5 H4 pins (`System.Text.Json 8.0.5`, `System.Formats.Asn1 8.0.1`, `System.Security.Cryptography.Pkcs 8.0.1`, `System.Text.RegularExpressions 4.3.1`, `System.Security.Cryptography.Xml 8.0.4`) are in **Core/Dataverse/BFF** → task 003 is where they actually get removed (each needs inbox-≥-CVE evidence in `notes/pin-removals.md`, which is pre-seeded).
-- **Solution-wide `Microsoft.Extensions.*` → 10.0.x alignment is DEFERRED to 003/004** — do it atomically across Core+Dataverse(+BFF), not piecemeal, to avoid version skew. Scheduling currently builds clean on net10 with Extensions still at 8.0.x.
-- `dotnet build` builds Core+Dataverse as deps of Scheduling — when 003 retargets them, re-run the Scheduling build too to confirm the net10→net10 graph stays green.
+### net10 retarget state so far (do NOT re-derive)
+- **net10.0 now**: `Spaarke.Scheduling` (002), `Spaarke.Core` + `Spaarke.Dataverse` (003). Still net8: `Sprk.Bff.Api` (004) + `tests/**` (005). `net462` plugin never moves.
+- **NU1510 pin-removal pattern (proven in 003)**: retarget with CVE pins still in → `TreatWarningsAsErrors` turns NU1510 into errors for exactly the framework-superseded pins → remove those; keep any pin NOT NU1510-flagged (framework doesn't supply it). In 003: Asn1/STJ/RegEx removed; **Pkcs 8.0.1 KEPT**. Apply same method to BFF in 004.
+- **Package versions locked in**: Extensions.* → **10.0.1**; MSAL (Identity.Client) → **4.87.0**; Dataverse.Client → **1.2.26**. BFF (004) must align to these same versions to avoid NU1605.
+- **🔴 CARRY-FORWARD for task 004 (+032)**: transitive **`System.Security.Cryptography.Xml 8.0.2`** has 8 HIGH advisories. BFF already pins it at **8.0.4** (`Sprk.Bff.Api.csproj:147`). Task 004 MUST confirm 8.0.4 clears all 8 advisories (several are fixed only ABOVE 8.0.4) — if not, **bump** it. Pre-existing (not a retarget regression).
+- **BFF task 004 also**: delete the stale `NoWarn=NU1903` in `Directory.Build.props:31` (Kiota CVE already fixed by 1.22.0 pins; only valid once restore is clean). Graph 5→6 / Kiota 1→2 is NOT task 004 — that's **task 033** (post-030-green).
+- **§10 BFF governance for 004**: state Placement Justification (net-negative — removes pins, adds no service); publish-size re-baseline is task 031 (not 004); `/conflict-check` before the eventual BFF PR.
 
 ### Critical Context (do NOT re-derive)
 - Target is **.NET 10 (LTS), NOT .NET 11** (STS/not-GA) — LTS-hopping; see memory `dotnet10-not-11`.
