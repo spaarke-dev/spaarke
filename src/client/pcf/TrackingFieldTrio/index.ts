@@ -108,6 +108,7 @@ import {
 // passes plain pickContact/pickOrganization callbacks into the Xrm-free modal.
 import { createXrmNavigationService } from '@spaarke/ui-components/dist/utils/adapters';
 import type { INavigationService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
+import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 // Canonical `SendEmailDialog` (task 042, ADR-045) — the `EmailComposer`
 // wrapper that owns the Dialog chrome + `sendCommunication()` send flow.
 // This is the ONLY email-send surface this control is allowed to open (no
@@ -540,6 +541,23 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }));
   };
 
+  /** In-app `sprk_organization` search for the modal's inline org LookupField
+   * (task 073 UAT #4) — host-context, single-entity, capped at 10 — returns
+   * `{ id, name }` items. Replaces the side-pane org Advanced Lookup so the
+   * modal never has to hide to pick a firm/org. */
+  private searchOrganizations = async (query: string): Promise<ILookupItem[]> => {
+    const escaped = query.replace(/'/g, "''");
+    const options =
+      `?$filter=contains(sprk_organizationname,'${escaped}')` +
+      `&$select=sprk_organizationid,sprk_organizationname&$top=10`;
+    const result = await this.context.webAPI.retrieveMultipleRecords('sprk_organization', options);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return result.entities.map((e: any) => ({
+      id: e.sprk_organizationid as string,
+      name: (e.sprk_organizationname as string) ?? '(no name)',
+    }));
+  };
+
   /** Opens the SHARED side-pane Advanced Lookup for a single Contact (task 071 —
    * INavigationService.openLookup → Xrm.Utility.lookupObjects) and enriches the
    * pick with the contact's email via a host-context read, so the modal's
@@ -695,9 +713,12 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       monitor: this.monitorValue,
       highPriority: this.highPriorityValue,
       accessPermission: this.accessPermissionValue,
+      // Optional control header title (task 073 UAT #3) — when set, the shared
+      // core renders a 32px header row (title left, grant/email icons right).
+      title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.17 • Built 2026-08-11',
+      versionText: 'v1.0.18 • Built 2026-08-11',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -796,10 +817,11 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     // global sprk_standinggrant flag is set, merged into Current Access.
                     fetchStandingContacts: this.fetchStandingContacts,
                     searchContacts: this.searchContacts,
-                    // Shared side-pane Advanced Lookup (task 071) — replaces the
-                    // inline Combobox contact picker; adds an optional org picker.
-                    pickContact: this.pickContact,
-                    pickOrganization: this.pickOrganization,
+                    // In-app org search for the modal's inline org LookupField
+                    // (task 073 UAT #4) — replaces the side-pane org picker so the
+                    // modal never hides to pick. `pickContact`/`pickOrganization`
+                    // (side-pane) are intentionally no longer passed.
+                    searchOrganizations: this.searchOrganizations,
                     isInternalContact: this.isInternalContact,
                     onSetStandingGrant: this.onSetStandingGrant,
                     // Access-Permission sharing gate (task 043, FR-14 Option A) —

@@ -84,6 +84,11 @@ import {
 } from '@fluentui/react-components';
 import { PersonRegular, DismissCircleRegular, BuildingRegular, DismissRegular } from '@fluentui/react-icons';
 import { SprkModal } from '../SprkModal';
+// Inline record picker (task 073 UAT #4) — the wizard pattern: renders its
+// result list as an inline dropdown INSIDE the modal body (no portal, no
+// Xrm side-pane), so it stacks within the modal and never has to hide it.
+import { LookupField } from '../LookupField';
+import type { ILookupItem } from '../../types/LookupTypes';
 import type {
   IAccessGrantModalProps,
   IAccessGrantCandidate,
@@ -221,8 +226,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   fetchExistingGrants,
   fetchStandingContacts,
   searchContacts,
-  pickContact,
-  pickOrganization,
+  searchOrganizations,
   isInternalContact,
   onSetStandingGrant,
   title = 'Manage Access',
@@ -259,21 +263,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [selectedNamed, setSelectedNamed] = React.useState<IContactSearchResult | null>(null);
   const [standingForNamed, setStandingForNamed] = React.useState(false);
   const [addingNamed, setAddingNamed] = React.useState(false);
-  // Side-pane Advanced Lookup state (task 071). `pickingContact`/`pickingOrg`
-  // guard against re-entrant openLookup calls while a lookup pane is open;
-  // `pickedOrg` is the optional grantee firm/org sent as `organizationId`.
-  const [pickingContact, setPickingContact] = React.useState(false);
+  // Optional grantee firm/org (task 071) sent as `organizationId`. Picked via
+  // the in-app org `LookupField` (task 073 UAT #4 — no more side-pane).
   const [pickedOrg, setPickedOrg] = React.useState<IOrganizationPick | null>(null);
-  const [pickingOrg, setPickingOrg] = React.useState(false);
-  // task 073 UAT fix (#2): the Xrm side-pane Advanced Lookup (Xrm.Utility.lookupObjects) renders in the
-  // host shell BELOW this Fluent `Dialog`'s portal, so the pane opened behind the modal and was
-  // unusable. While a pick is in flight we HIDE this modal (SprkModal `open={open && !pickerActive}`) so
-  // the pane is fully visible + interactable, then restore it. State (selectedNamed/pickedOrg) is held
-  // in THIS component (not the unmounted Dialog surface) and the reset effect keys on the `open` PROP —
-  // which never changes here — so nothing is lost across the hide/show.
-  const [pickerActive, setPickerActive] = React.useState(false);
-  // Contacts looked up via "+ Contact" (task 073 UAT #5) — staged into the "Available Contacts &
-  // Organizations" list alongside the role-based membership candidates, then selected + granted.
+  // Contacts looked up via the in-app "Add contact" LookupField (task 073 UAT
+  // #4/#5) — staged into the "Available Contacts & Organizations" list alongside
+  // the role-based membership candidates, then selected + granted.
   const [lookedUpContacts, setLookedUpContacts] = React.useState<IContactSearchResult[]>([]);
 
   const [revokeTargetId, setRevokeTargetId] = React.useState<string | null>(null);
@@ -607,50 +602,41 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     }
   }, [existingGrants, loadData, postJson, revokeTargetId]);
 
-  /** Opens the shared side-pane Advanced Lookup for a Contact (task 071) and,
-   * on a selection, sets it as the named contact to grant. The host's
-   * `pickContact` wires `INavigationService.openLookup` and enriches the result
-   * with the contact's email; a cancel resolves to `null` and leaves state
-   * unchanged. */
-  const handlePickContact = React.useCallback(async () => {
-    if (!pickContact) return;
-    setPickingContact(true);
-    setPickerActive(true); // hide the modal so the Xrm lookup pane is usable (task 073 UAT #2)
-    try {
-      const picked = await pickContact();
-      if (picked) {
-        // Stage the looked-up contact into the Available list and pre-select it (task 073 UAT #5).
-        setLookedUpContacts(prev => (prev.some(c => c.contactId === picked.contactId) ? prev : [...prev, picked]));
-        setSelectedCandidateIds(prev => {
-          const next = new Set(prev);
-          next.add(picked.contactId);
-          return next;
-        });
-      }
-    } catch {
-      /* lookup cancelled/failed — leave the current selection unchanged */
-    } finally {
-      setPickingContact(false);
-      setPickerActive(false);
-    }
-  }, [pickContact]);
+  // In-app contact picker (task 073 UAT #4). `LookupField` returns `{id, name}`
+  // only, but the grant routing needs the contact's EMAIL (external-vs-internal),
+  // so cache each search result by id and resolve the full record on pick.
+  const contactSearchCacheRef = React.useRef<Map<string, IContactSearchResult>>(new Map());
 
-  /** Opens the side-pane Advanced Lookup for a `sprk_organization` (task 071);
-   * a selection becomes the optional grantee firm/org sent as `organizationId`. */
-  const handlePickOrganization = React.useCallback(async () => {
-    if (!pickOrganization) return;
-    setPickingOrg(true);
-    setPickerActive(true); // hide the modal so the Xrm lookup pane is usable (task 073 UAT #2)
-    try {
-      const picked = await pickOrganization();
-      if (picked) setPickedOrg(picked);
-    } catch {
-      /* lookup cancelled/failed — leave the current selection unchanged */
-    } finally {
-      setPickingOrg(false);
-      setPickerActive(false);
-    }
-  }, [pickOrganization]);
+  /** onSearch for the contact `LookupField` — runs the host `searchContacts`,
+   * caches full results (for email), and maps to `ILookupItem` for the field. */
+  const handleSearchContactsForLookup = React.useCallback(
+    async (query: string): Promise<ILookupItem[]> => {
+      const results = await searchContacts(query);
+      for (const r of results) contactSearchCacheRef.current.set(r.contactId, r);
+      return results.map(r => ({ id: r.contactId, name: r.fullName }));
+    },
+    [searchContacts]
+  );
+
+  /** onChange for the contact `LookupField` — stages the picked contact into the
+   * Available list (with its cached email) and pre-selects it. Runs entirely
+   * in-modal (no side-pane, no modal-hide). */
+  const handleAddLookedUpContact = React.useCallback((item: ILookupItem | null) => {
+    if (!item) return;
+    const full = contactSearchCacheRef.current.get(item.id) ?? { contactId: item.id, fullName: item.name };
+    setLookedUpContacts(prev => (prev.some(c => c.contactId === full.contactId) ? prev : [...prev, full]));
+    setSelectedCandidateIds(prev => {
+      const next = new Set(prev);
+      next.add(full.contactId);
+      return next;
+    });
+  }, []);
+
+  /** onChange for the organization `LookupField` — sets the optional grantee
+   * firm/org (sent as `organizationId`). Clearing the field clears the scope. */
+  const handlePickOrgLookup = React.useCallback((item: ILookupItem | null) => {
+    setPickedOrg(item ? { id: item.id, name: item.name } : null);
+  }, []);
 
   const toggleCandidateSelected = (contactId: string) => {
     setSelectedCandidateIds(prev => {
@@ -675,10 +661,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   return (
     <>
       <SprkModal
-        // Hidden while a side-pane Advanced Lookup is in flight (task 073 UAT #2) so the Xrm lookup
-        // pane — which renders below this Fluent Dialog's portal — is fully usable. `open` is the prop;
-        // the reset effect keys on it, so hiding via `pickerActive` does not reset the modal's state.
-        open={open && !pickerActive}
+        // task 073 UAT #4 — the modal no longer hides for picking: contact + org
+        // pickers are inline `LookupField`s that render their result list INSIDE
+        // the modal body (no Xrm side-pane behind the portal). So `open` is just
+        // the prop.
+        open={open}
         onClose={onClose}
         title={title}
         size="lg"
@@ -734,35 +721,32 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                 <div className={styles.section}>
                   <div className={styles.sectionHeaderRow}>
                     <Text className={styles.sectionTitle}>Available Contacts &amp; Organizations</Text>
-                    <div className={styles.sectionHeaderActions}>
-                      {pickContact && (
-                        <Button
-                          appearance="secondary"
-                          size="small"
-                          icon={pickingContact ? <Spinner size="tiny" /> : <PersonRegular />}
-                          disabled={grantsBlocked || pickingContact}
-                          onClick={handlePickContact}
-                        >
-                          + Contact
-                        </Button>
-                      )}
-                      {pickOrganization && (
-                        <Button
-                          appearance="secondary"
-                          size="small"
-                          icon={pickingOrg ? <Spinner size="tiny" /> : <BuildingRegular />}
-                          disabled={grantsBlocked || pickingOrg}
-                          onClick={handlePickOrganization}
-                        >
-                          + Organization
-                        </Button>
-                      )}
-                    </div>
                   </div>
                   <Text className={styles.sectionSubtitle}>
-                    Role-assigned members and any contacts you look up. Select who to grant, choose an access level,
-                    then Add.
+                    Role-assigned members and any contacts you look up. Search to add a contact (or organization),
+                    select who to grant, choose an access level, then Add.
                   </Text>
+                  {/* In-app pickers (task 073 UAT #4) — inline `LookupField`s that
+                      drop their result list INSIDE the modal body (the wizard
+                      pattern: no Xrm side-pane, no modal-hide). Contact search
+                      reuses the host `searchContacts`; the org picker uses
+                      `searchOrganizations` when the host wires it. */}
+                  <LookupField
+                    label="Add contact"
+                    value={null}
+                    onChange={handleAddLookedUpContact}
+                    onSearch={handleSearchContactsForLookup}
+                    minSearchLength={2}
+                  />
+                  {searchOrganizations && (
+                    <LookupField
+                      label="Add organization"
+                      value={null}
+                      onChange={handlePickOrgLookup}
+                      onSearch={searchOrganizations}
+                      minSearchLength={2}
+                    />
+                  )}
 
                   {/* Selected organization scope (optional) — applied as firm scoping on the grant. */}
                   {pickedOrg && (

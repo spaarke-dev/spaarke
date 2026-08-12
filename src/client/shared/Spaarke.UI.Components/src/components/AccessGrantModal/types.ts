@@ -19,6 +19,7 @@
  */
 
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import type { ILookupItem } from '../../types/LookupTypes';
 
 /** A single access-conferring membership candidate for the current record —
  * sourced from the contact-anchored role-allowlist (task 021's convention-based
@@ -178,23 +179,21 @@ export interface IAccessGrantModalProps {
    * lookup); when `pickContact` is provided the modal uses the side-pane
    * Advanced Lookup instead and this is not called. */
   searchContacts: (query: string) => Promise<IContactSearchResult[]>;
-  /** Opens the shared side-pane Advanced Lookup for a single Contact and
-   * resolves to the picked contact (or `null` if the user cancelled). Injected
-   * by the host, which wires `INavigationService.openLookup` via
-   * `createXrmNavigationService` (Dataverse) — the modal stays Xrm-free (§11,
-   * ADR-012). When supplied, section 2's inline Combobox is replaced by a
-   * "Select contact" button that invokes this. The host SHOULD enrich the
-   * result with the contact's email (a second host-context read) so the
-   * external-vs-internal grant routing stays correct. Omit to fall back to the
-   * {@link searchContacts} inline picker. */
+  /** Searches `sprk_organization` firms/orgs by free-text query for the in-app
+   * "Add organization" inline picker (task 073 UAT #4). Host implements the
+   * actual query (Xrm.WebApi, host-context) and returns `{ id, name }[]`.
+   * When supplied, section 2 shows an inline org `LookupField` that stacks
+   * inside the modal (no side-pane, no modal-hide). Omit → no org picker. */
+  searchOrganizations?: (query: string) => Promise<ILookupItem[]>;
+  /** @deprecated task 073 UAT #4 — the side-pane Advanced Lookup forced hiding
+   * the modal (the Xrm pane renders behind the Fluent portal). The modal now
+   * uses the inline {@link searchContacts} `LookupField` instead. Retained
+   * (unused by the modal) only so existing hosts that still pass it compile;
+   * safe to stop passing. */
   pickContact?: () => Promise<IContactSearchResult | null>;
-  /** Opens the shared side-pane Advanced Lookup for a single
-   * `sprk_organization` and resolves to the picked firm/org (or `null` if
-   * cancelled). Injected by the host (same `openLookup` mechanism as
-   * {@link pickContact}). When supplied, section 2 shows an optional
-   * "Organization" picker; a chosen org is sent to the BFF as `organizationId`
-   * (the grant's `sprk_Organization` firm-scoping lookup, task 070). Omit to
-   * hide the org picker entirely. */
+  /** @deprecated task 073 UAT #4 — replaced by the inline
+   * {@link searchOrganizations} `LookupField` for the same modal-hide reason as
+   * {@link pickContact}. Retained (unused) for host back-compat. */
   pickOrganization?: () => Promise<IOrganizationPick | null>;
   /** Classifies a contact as internal-workforce (has a linked `systemuser`)
    * vs external. Drives the notify branch: an external contact with a known

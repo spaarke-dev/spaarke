@@ -165,6 +165,36 @@ const useStyles = makeStyles({
     textAlign: 'right',
     marginTop: tokens.spacingVerticalXS,
   },
+  // Control header (task 073 UAT #3) — opt-in via the `title` prop. A full-width
+  // 32px-tall row: title on the left (14px semibold), governance icons on the
+  // right. Only rendered when a `title` is supplied.
+  header: {
+    gridColumn: '1 / -1',
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: '32px',
+    columnGap: tokens.spacingHorizontalM,
+  },
+  headerTitle: {
+    // 14px semibold per owner UAT #3 (fontSizeBase300 = 14px, fontWeightSemibold
+    // = "semi bold"); token-only so it resolves in light + dark (ADR-021).
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    lineHeight: tokens.lineHeightBase300,
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  headerActions: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
   // Governance toolbar (person + email icons — task 040; repositioned task 073 UAT). Sits at the
   // TOP-RIGHT of the control box — mirroring the header-action placement of the Messages / Tasks &
   // Events cards — rather than as a bottom row. Absolute within the position:relative container. Icons
@@ -189,6 +219,7 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   monitor,
   highPriority,
   accessPermission,
+  title,
   showTitle = true,
   showVersion = false,
   versionText,
@@ -208,8 +239,57 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
   // (canGrantAccess omitted); an explicit `false` disables the icon.
   const grantEnabled = canGrantAccess !== false;
 
+  // Governance icons (person + email) — rendered EITHER inside the opt-in header
+  // row (when `title` is set, task 073 UAT #3) OR in the prior absolute
+  // top-right toolbar (no title — unchanged for existing consumers).
+  const toolbarIcons =
+    onOpenGrantModal || onOpenEmailMembers ? (
+      <>
+        {onOpenGrantModal && (
+          <Tooltip
+            content={grantEnabled ? 'Grant access' : 'You do not have permission to grant access'}
+            relationship="label"
+          >
+            <Button
+              className={styles.toolbarIconButton}
+              appearance="subtle"
+              size="small"
+              icon={<PersonRegular />}
+              aria-label="Grant access"
+              disabled={!grantEnabled}
+              // No handler at all when disabled — a genuinely disabled Fluent
+              // Button (not merely dimmed) with no dead click.
+              onClick={grantEnabled ? onOpenGrantModal : undefined}
+            />
+          </Tooltip>
+        )}
+        {onOpenEmailMembers && (
+          <Tooltip content="Email members" relationship="label">
+            <Button
+              className={styles.toolbarIconButton}
+              appearance="subtle"
+              size="small"
+              icon={<MailRegular />}
+              aria-label="Email members"
+              onClick={onOpenEmailMembers}
+            />
+          </Tooltip>
+        )}
+      </>
+    ) : null;
+
   return (
     <div className={styles.container}>
+      {/* Control header (task 073 UAT #3) — opt-in via `title`: title left
+          (14px semibold), governance icons right, in a 32px row. When no title
+          is supplied the header is skipped and the icons fall back to the
+          absolute top-right toolbar below (existing-consumer behavior). */}
+      {title && (
+        <div className={styles.header}>
+          <Text className={styles.headerTitle}>{title}</Text>
+          {toolbarIcons && <div className={styles.headerActions}>{toolbarIcons}</div>}
+        </div>
+      )}
       {/* Row 1 (only rendered when showTitle=true) — field labels, sourced
           from the caller's own field metadata (entity-agnostic). */}
       {showTitle && (
@@ -268,45 +348,11 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
         })}
       </div>
 
-      {/* Governance toolbar (task 040) — person icon opens the access-grant
-          modal (task 041), email icon opens email-members (task 042). Each
-          icon is opt-in: it renders only when the caller supplies the
-          corresponding callback, so consumers that haven't wired the
-          toolbar see no visual change. */}
-      {(onOpenGrantModal || onOpenEmailMembers) && (
-        <div className={styles.toolbar}>
-          {onOpenGrantModal && (
-            <Tooltip
-              content={grantEnabled ? 'Grant access' : 'You do not have permission to grant access'}
-              relationship="label"
-            >
-              <Button
-                className={styles.toolbarIconButton}
-                appearance="subtle"
-                size="small"
-                icon={<PersonRegular />}
-                aria-label="Grant access"
-                disabled={!grantEnabled}
-                // No handler at all when disabled — a genuinely disabled
-                // Fluent Button (not merely dimmed) with no dead click.
-                onClick={grantEnabled ? onOpenGrantModal : undefined}
-              />
-            </Tooltip>
-          )}
-          {onOpenEmailMembers && (
-            <Tooltip content="Email members" relationship="label">
-              <Button
-                className={styles.toolbarIconButton}
-                appearance="subtle"
-                size="small"
-                icon={<MailRegular />}
-                aria-label="Email members"
-                onClick={onOpenEmailMembers}
-              />
-            </Tooltip>
-          )}
-        </div>
-      )}
+      {/* Governance toolbar (task 040) — absolute top-right FALLBACK, used only
+          when no `title` is supplied (the header above already hosts the icons
+          when a title is present, task 073 UAT #3). Opt-in per consumer: renders
+          only when a callback is wired, so existing consumers are unchanged. */}
+      {!title && toolbarIcons && <div className={styles.toolbar}>{toolbarIcons}</div>}
 
       {showVersion && versionText && <span className={styles.versionFooter}>{versionText}</span>}
     </div>
