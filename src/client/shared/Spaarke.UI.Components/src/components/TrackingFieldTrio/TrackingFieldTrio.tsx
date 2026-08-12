@@ -151,9 +151,12 @@ const useStyles = makeStyles({
     minHeight: '26px',
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase200,
-    justifyContent: 'space-between',
-    columnGap: tokens.spacingHorizontalXS,
-    maxWidth: '160px',
+    // Fixed width + centered label so every value (Standard/Limited/Restricted)
+    // renders the SAME size regardless of text length (owner UAT v1.0.28). The
+    // menu chevron is suppressed (menuIcon={null}) so the label centers cleanly.
+    width: '116px',
+    justifyContent: 'center',
+    textAlign: 'center',
   },
   versionFooter: {
     gridColumn: '1 / -1',
@@ -338,6 +341,9 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
                   appearance="transparent"
                   size="small"
                   aria-label={accessPermissionLabel}
+                  // Suppress the chevron so the fixed-width pill centers its label
+                  // (owner UAT v1.0.28). The colored pill is affordance enough.
+                  menuIcon={null}
                   style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
                 >
                   {selOpt?.label ?? ''}
