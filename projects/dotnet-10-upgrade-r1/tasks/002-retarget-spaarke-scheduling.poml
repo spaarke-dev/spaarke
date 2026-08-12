@@ -4,7 +4,7 @@
     <title>Retarget Spaarke.Scheduling to net10 FIRST (warnings-as-errors) + clear NU1510/SYSLIB</title>
     <phase>P0 Retarget + build-green</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .csproj build config; TreatWarningsAsErrors makes every NU1510/SYSLIB a build error; brownfield root-cause.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -85,7 +85,9 @@
     <criterion testable="true">Negative: no other project's csproj is modified by this task.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-01 (Scheduling first) + FR-04 (pin removal after inbox check). This is the canary — the pin-removal evidence collected here is reused by task 003 for Core/Dataverse.</notes>
+  <notes>spec FR-01 (Scheduling first) + FR-04 (pin removal after inbox check). This is the canary — the pin-removal evidence collected here is reused by task 003 for Core/Dataverse.
+
+  COMPLETION (2026-08-11): `Spaarke.Scheduling.csproj` TFM net8.0 → net10.0 (1-line change). `dotnet build -c Release src/server/shared/Spaarke.Scheduling/` → **0 warnings / 0 errors** (warnings-as-errors satisfied; also built Core+Dataverse deps at net8, valid consume-down). FINDING: Scheduling carries NO superseded CVE pins — the design §5 H4 pins (System.Text.Json 8.0.5 etc.) are actually in Core/Dataverse/BFF (tasks 003/004), NOT here. Scheduling's Microsoft.Extensions.* 8.0.x are ordinary class-library NuGet refs (not shared-framework-provided → no NU1510); Cronos is third-party. NO pins removed → escalation trigger did NOT fire. Solution-wide Extensions.*→10.0.x alignment DEFERRED to 003/004 (atomic graph move; bumping only Scheduling now would increase skew). Ledger: `notes/pin-removals.md`. Quality gates (9.5) SKIPPED — config-only (TFM bump) + doc note, not test-modifying. ADR-029 verified by inspection (no SelfContained/RID/Trim/AOT). Negative criteria: Directory.Build.props unchanged; only Scheduling.csproj modified (git diff = 1 file, 1 line).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

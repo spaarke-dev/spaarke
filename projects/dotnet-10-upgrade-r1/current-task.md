@@ -9,12 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | EXECUTION STARTED. P0 chain underway. **001 ✅ complete** (2026-08-11). |
-| **Active task** | `002` — Retarget **Spaarke.Scheduling FIRST** (TreatWarningsAsErrors=true) + clear NU1510/SYSLIB |
+| **Project phase** | EXECUTION STARTED. P0 chain underway. **001 ✅ + 002 ✅ complete** (2026-08-11). |
+| **Active task** | `003` — Retarget **Spaarke.Core + Spaarke.Dataverse** to net10; required package moves + H4 CVE-pin removals (inbox-≥-CVE evidence) |
 | **Status** | not-started |
-| **Next Action** | Begin execution: `task-execute` on `tasks/002-retarget-scheduling.poml` (do NOT read/implement POMLs manually — root §4). Depends on 001 ✅. |
+| **Next Action** | Begin execution: `task-execute` on `tasks/003-retarget-core-and-dataverse.poml` (do NOT read/implement POMLs manually — root §4). Depends on 002 ✅. |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
-| **Git** | 001 changes UNCOMMITTED in worktree (`global.json` + `notes/breaking-changes-rescrape.md` + researcher memory files). Prior tip `16639a24d`, synced with `origin/master` 2026-08-11 (0 behind; NOT merged to master — deferred). Commit 001 before/with 002 per owner cadence. |
+| **Git** | 001 committed + pushed (`8077e33f5`). 002 changes UNCOMMITTED (`Spaarke.Scheduling.csproj` TFM + `notes/pin-removals.md`). Synced with `origin/master` 2026-08-11 (0 behind; NOT merged — deferred). |
+
+### Task 002 finding to carry into 003 (do NOT re-derive)
+- Scheduling had **no** superseded CVE pins — the design §5 H4 pins (`System.Text.Json 8.0.5`, `System.Formats.Asn1 8.0.1`, `System.Security.Cryptography.Pkcs 8.0.1`, `System.Text.RegularExpressions 4.3.1`, `System.Security.Cryptography.Xml 8.0.4`) are in **Core/Dataverse/BFF** → task 003 is where they actually get removed (each needs inbox-≥-CVE evidence in `notes/pin-removals.md`, which is pre-seeded).
+- **Solution-wide `Microsoft.Extensions.*` → 10.0.x alignment is DEFERRED to 003/004** — do it atomically across Core+Dataverse(+BFF), not piecemeal, to avoid version skew. Scheduling currently builds clean on net10 with Extensions still at 8.0.x.
+- `dotnet build` builds Core+Dataverse as deps of Scheduling — when 003 retargets them, re-run the Scheduling build too to confirm the net10→net10 graph stays green.
 
 ### Critical Context (do NOT re-derive)
 - Target is **.NET 10 (LTS), NOT .NET 11** (STS/not-GA) — LTS-hopping; see memory `dotnet10-not-11`.
