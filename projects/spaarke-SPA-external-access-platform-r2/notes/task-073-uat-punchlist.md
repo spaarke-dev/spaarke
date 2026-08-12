@@ -76,7 +76,33 @@ and is **bundled into the PCF** by build:prod (via ensure-dist-fresh). The trio'
   `bodyScroll="native"` default). Note: AccessGrantModal already uses SprkModal, so its Cancel(left)/
   Save(right) footer is already the standard layout too.
 
-## OPEN PUNCH LIST — WORK IN ORDER (remaining are DECISIONS awaiting owner)
+## ✅ RESOLVED IN v1.0.18 (commit da64b5e24, deployed SPAARKE DEV 1 2026-08-11)
+- **#3 Reusable PCF header — DONE.** Shared `TrackingFieldTrio` core gained an opt-in `title` prop → a 32px
+  header row with the title on the LEFT (14px semibold / `fontSizeBase300` + `fontWeightSemibold`, token-only)
+  and the grant/email icons on the RIGHT. No title → no header + icons keep prior absolute top-right placement
+  (other consumer `EmailTrackingPanel` unchanged). New optional `title` PCF manifest input, wired via index.ts.
+  Owner spec: "font 14px, semi bold, row height 32px." (Owner wrote "(800)" but semibold=600 in Fluent; used
+  `fontWeightSemibold`. If a heavier weight is wanted, say so — Fluent has no 800 token so it'd be a hardcode.)
+- **#4 In-app inline pickers — DONE (Option A, the wizard pattern).** Replaced the Xrm side-pane Advanced
+  Lookup (which forced hiding the modal because the pane renders behind the Fluent portal) with inline
+  `LookupField`s that drop their result list INSIDE the modal body — modal never hides. Contact picker reuses
+  the existing `searchContacts` prop (email preserved via a search cache for external/internal routing); new
+  optional `searchOrganizations` prop drives the org picker (trio queries `sprk_organization` by name).
+  Removed the `pickerActive` hide-hack; `pickContact`/`pickOrganization` (side-pane) props deprecated + no
+  longer passed. NOTE: the trio's now-unused `pickContact`/`pickOrganization`/`getNavService` methods +
+  createXrmNavigationService import remain (harmless dead code) — clean up in a later pass if desired.
+
+## REMAINING (decisions / new scope)
+- **#6 Save/Cancel — RESOLVED (no code).** Owner: "the user just needs to know it's saved — cosmetic Save is
+  fine." Grants already commit immediately on Add (with a success notice) + Save closes. No change needed.
+- **#7 "+ Organization" — SCOPE EXPANSION, needs design.** Owner does NOT want firm-scope-metadata (current
+  built behavior, task 070/071); they want **adding an Organization to GRANT EVERYONE associated with that org**.
+  That is a NEW access-model capability requiring BFF work (define the contact↔org association + fan-out grants
+  OR a runtime org-grant union like standing-grant) — NOT a PCF tweak. Surfaced to owner as a design decision
+  (recommend runtime-union approach, mirrors standing-grant: revocable, no stale rows). Do NOT build until the
+  association definition + fan-out-vs-union is agreed. This is R2 access-control (P2) territory.
+
+## ORIGINAL PUNCH LIST (all items above now addressed except #7 design)
 1. **Email icon → PCF crashes (React #31).** Clicking the email icon blanks the PCF. Error: "Minified React
    error #31 ... object with keys {$$typeof,type,key,ref,props}" (a React element rendered as a child). The
    email flow renders the shared `SendEmailDialog` (`@spaarke/ui-components` EmailComposer, updated by the
