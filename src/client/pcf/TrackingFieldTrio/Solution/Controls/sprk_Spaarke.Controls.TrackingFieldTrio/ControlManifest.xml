@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="TrackingFieldTrio" version="1.0.26" display-name-key="Tracking Field Trio" description-key="Compact 3-field control for tracking flags (v1.0.26). Combines two Yes/No toggles (Monitor, High Priority) with a single-value Access Permission dropdown (Standard/Limited/Restricted — responsive, no horizontal sprawl), plus an opt-in governance toolbar (grant-access modal + email-members icons). The grant modal is polymorphic across Project/Matter/Work Assignment and uses the native advanced-lookup pane for the contact + organization pickers. Designed to fit inside a 33% form column." control-type="standard" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="TrackingFieldTrio" version="1.0.27" display-name-key="Tracking Field Trio" description-key="Compact 3-field control for tracking flags (v1.0.27). Combines two Yes/No toggles (Monitor, High Priority) with a single-value Access Permission pill selector (Standard/Limited/Restricted — responsive, no horizontal sprawl), plus an opt-in governance toolbar (grant-access modal + email-members icons). The grant modal is polymorphic across Project/Matter/Work Assignment and uses the native advanced-lookup pane for the contact + organization pickers. Designed to fit inside a 33% form column." control-type="standard" api-version="1.3.18">
     <external-service-usage enabled="true">
       <domain>*.azurewebsites.net</domain>
       <domain>login.microsoftonline.com</domain>

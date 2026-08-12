@@ -2,9 +2,11 @@
  * TrackingFieldTrio — entity-agnostic shared core (FR-14, task 023).
  *
  * Renders and read/writes three tracking flags: a Monitor toggle, a High
- * Priority toggle, and an access-permission dropdown (owner UAT v1.0.24 #2 —
- * was a 3-button segmented picker; changed to a single-value dropdown that
- * fits any width instead of sprawling horizontally). Lifted from
+ * Priority toggle, and an access-permission PILL selector (owner UAT — was a
+ * 3-button segmented picker → a dropdown in v1.0.25 → a single colored pill in
+ * v1.0.27 that opens a menu of the options; fits any width instead of sprawling
+ * horizontally, and reads as a pill consistent with the app's badge language).
+ * Lifted from
  * the `TrackingFieldTrio` PCF's `TrackingFieldTrioApp.tsx` into
  * `@spaarke/ui-components` so both the OOB-form PCF (React 16/17) and the
  * Phase-3 reading-pane tracking view (React 19, task 035) can consume ONE
@@ -46,8 +48,12 @@ import {
   Text,
   Button,
   Tooltip,
-  Dropdown,
-  Option,
+  Menu,
+  MenuTrigger,
+  MenuButton,
+  MenuPopover,
+  MenuList,
+  MenuItem,
   shorthands,
 } from '@fluentui/react-components';
 import { PersonRegular, MailRegular } from '@fluentui/react-icons';
@@ -133,14 +139,21 @@ const useStyles = makeStyles({
     // vertically within the row and their baselines line up.
     minHeight: '32px',
   },
-  // Access Permission dropdown (owner UAT v1.0.24 #2) — replaces the 3-button
-  // segmented picker, which sprawled horizontally and got cut off at lower
-  // resolutions. A single-value dropdown fits any width; the selected value keeps
-  // its pale semantic tint (Standard/Limited/Restricted) via the `button` slot.
-  accessDropdown: {
-    minWidth: '120px',
+  // Access Permission PILL selector (owner UAT v1.0.27) — a single rounded pill
+  // showing the current value in its pale semantic tint (Standard/Limited/
+  // Restricted), clicked to open a menu of the three options. Reads as a colored
+  // pill (consistent with the app's badge/chip language) rather than a form
+  // dropdown, while staying single-value + responsive (no horizontal sprawl).
+  accessPill: {
+    ...shorthands.borderRadius(tokens.borderRadiusCircular),
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', 'transparent'),
+    ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalS),
+    minHeight: '26px',
+    fontWeight: tokens.fontWeightSemibold,
+    fontSize: tokens.fontSizeBase200,
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalXS,
     maxWidth: '160px',
-    width: '100%',
   },
   versionFooter: {
     gridColumn: '1 / -1',
@@ -308,34 +321,38 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
         />
       </div>
       <div className={styles.controlCell}>
-        {/* Access Permission dropdown (owner UAT v1.0.24 #2) — single value, no
-            horizontal sprawl. Default display = the first option ("Standard") when
-            the bound value is unset; the selected value keeps its pale semantic
-            tint via the trigger `button` slot. */}
+        {/* Access Permission PILL selector (owner UAT v1.0.27) — a single colored
+            pill (current value; default "Standard" when unset) that opens a menu
+            of the three options. Single value + responsive; reads as a pill
+            consistent with the app's badge language. */}
         {(() => {
           const selIdx = accessPermissionOptions.findIndex(o => o.value === accessPermission);
           const idx = selIdx >= 0 ? selIdx : 0;
           const selOpt = accessPermissionOptions[idx];
           const colors = selOpt ? getSelectedSegmentColors(idx, selOpt) : undefined;
           return (
-            <Dropdown
-              className={styles.accessDropdown}
-              aria-label={accessPermissionLabel}
-              value={selOpt?.label ?? ''}
-              selectedOptions={selOpt ? [String(selOpt.value)] : []}
-              button={{
-                style: colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined,
-              }}
-              onOptionSelect={(_, data) => {
-                if (data.optionValue !== undefined) onAccessPermissionChange(Number(data.optionValue));
-              }}
-            >
-              {accessPermissionOptions.map(opt => (
-                <Option key={opt.value} value={String(opt.value)} text={opt.label}>
-                  {opt.label}
-                </Option>
-              ))}
-            </Dropdown>
+            <Menu positioning="below-start">
+              <MenuTrigger disableButtonEnhancement>
+                <MenuButton
+                  className={styles.accessPill}
+                  appearance="transparent"
+                  size="small"
+                  aria-label={accessPermissionLabel}
+                  style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
+                >
+                  {selOpt?.label ?? ''}
+                </MenuButton>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  {accessPermissionOptions.map(opt => (
+                    <MenuItem key={opt.value} onClick={() => onAccessPermissionChange(opt.value)}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </MenuList>
+              </MenuPopover>
+            </Menu>
           );
         })()}
       </div>
