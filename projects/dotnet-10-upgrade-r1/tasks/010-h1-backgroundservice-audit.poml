@@ -4,7 +4,7 @@
     <title>H1 — BackgroundService.ExecuteAsync threading audit (closed per-worker verdict list)</title>
     <phase>P1 Hit-site remediation</phase>
     <gate>005 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Behavioral .NET 10 change across ~10+ workers; startup-ordering/fail-fast assumptions; highest-risk hit-site.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -84,7 +84,9 @@
     <criterion testable="true">Negative: no worker's functional behavior (what it does) changed — only where init/ordering is anchored.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-07 + NFR-07. This task's output is adversarially verified by a non-author in task 011 before P1 is considered done.</notes>
+  <notes>spec FR-07 + NFR-07. This task's output is adversarially verified by a non-author in task 011 before P1 is considered done.
+
+  COMPLETION (2026-08-12): closed-set audit of **28 hosted-service implementers** (23 BackgroundService + 5 IHostedService), discovered by grep across `src/server/**` (BFF + Spaarke.Scheduling); archived `JobProcessor.cs.archived-2025-10-03` excluded (not compiled). **Verdict: 28/28 SAFE, 0 REMEDIATE, 0 code changes.** Full per-worker table + rationale: `notes/h1-backgroundservice-audit.md`. Root cause of all-SAFE: the codebase already follows ADR-001 worker discipline — the single fail-fast that must abort startup (config validation) already lives in `StartupValidationService : IHostedService.StartAsync` (throw preserved under net10, which changes ONLY BackgroundService.ExecuteAsync); every BackgroundService reaches its first `await` after only a trivial synchronous prefix (log + options read) and uses graceful `return` (never a pre-await `throw`) for disabled/misconfig paths; warm-up/initial-sync patterns were already async-and-tolerant under net8; ordering-sensitive registry bootstraps run in StartAsync against a self-healing ScheduledJobRegistry. **`TodoGenerationService` 500.30 guard explicitly analyzed (audit §4)**: it is a *constructor-avoidance* guard (keeps eager-connecting Dataverse resolution out of the ctor, resolving lazily post-await at line 213), so the net10 ExecuteAsync-threading change does not touch it — guard remains valid + necessary, unchanged. Escalation trigger did NOT fire (no worker needed a behavior change). BFF build GREEN on net10 (Release, 0 errors; zero source changes → P0 baseline stands). Step 9.5: code-review N/A (0 code changes); adr-check PASS (ADR-001 single-runtime worker model preserved). Two residual empirical items handed to task 011 (non-author): dashboard-cache cold-tolerance (§5) + SB CreateProcessor pre-await-throw (§6) — both argued SAFE (net10 opens no window absent on net8).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

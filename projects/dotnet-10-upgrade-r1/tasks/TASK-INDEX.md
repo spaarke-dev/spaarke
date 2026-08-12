@@ -17,7 +17,7 @@
 | 003 | Retarget Core + Dataverse; required package moves + pin removals | P0 | FR-01,03,04 | sonnet/xhigh | 002 | false | ✅ |
 | 004 | Retarget Sprk.Bff.Api; package alignment + §6.3 catch-ups | P0 | FR-01,03,05 | sonnet/xhigh | 003 | false | ✅ |
 | 005 | Retarget tests/**; clean solution build + publish (**P0 exit gate**) | P0 | FR-01 | sonnet/high | 004 | false | ✅ |
-| 010 | **H1** BackgroundService.ExecuteAsync audit (closed per-worker list) | P1 | FR-07 | **opus**/xhigh | 005 | false | 🔲 |
+| 010 | **H1** BackgroundService.ExecuteAsync audit (closed per-worker list) | P1 | FR-07 | **opus**/xhigh | 005 | false | ✅ |
 | 011 | **H1 adversarial verification** (non-author) | P1 | NFR-07 | opus/xhigh | 010 | false (V1) | 🔲 |
 | 012 | **H3** X509Certificate2 → X509CertificateLoader.LoadPkcs12 | P1 | FR-09 | sonnet/high | 005 | false | 🔲 |
 | 013 | **H6 + secondary sweep** (grep + per-item verdict) | P1 | FR-10 | sonnet/xhigh | 005 | false | 🔲 |
