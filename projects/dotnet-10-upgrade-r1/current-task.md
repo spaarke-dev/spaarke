@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-11 (by context-handoff)
+> **Last Updated**: 2026-08-11 (by context-handoff — pre-compact, P0 complete)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -14,10 +14,10 @@
 | **Status** | not-started |
 | **Next Action** | Begin execution: `task-execute` on `tasks/010-*.poml`. **model-tier=opus** (session is Opus 4.8 ✓). Depends on 005 ✅. This is the highest-risk task — H1. 011 adversarially verifies it (non-author). |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
-| **Git** | 001 (`8077e33f5`) + 002 (`3f6027aa5`) committed + pushed. 003 changes UNCOMMITTED (`Spaarke.Core.csproj`, `Spaarke.Dataverse.csproj`, `notes/pin-removals.md`). Synced w/ `origin/master` 2026-08-11 (0 behind; NOT merged — deferred). |
+| **Git** | ✅ **CLEAN — all P0 committed + pushed** (tip `cdb31e0b0`, 0 unpushed, 0 behind master). Session commits: 001 `8077e33f5` · 002 `3f6027aa5` · 003 `9b7e9b1ea` · 004 `d39de8665` · 005 `cdb31e0b0`. Synced w/ `origin/master`; **NOT merged to master — deferred per owner sequencing**. Safe to `/compact`. |
 
 ### net10 retarget state so far (do NOT re-derive)
-- **net10.0 now**: `Spaarke.Scheduling` (002), `Spaarke.Core` + `Spaarke.Dataverse` (003), `Sprk.Bff.Api` (004). Still net8: `tests/**` (005). `net462` plugin never moves.
+- **net10.0 now (P0 COMPLETE)**: `Spaarke.Scheduling` (002), `Spaarke.Core` + `Spaarke.Dataverse` (003), `Sprk.Bff.Api` (004), all 8 `tests/**` (005). Whole-solution `dotnet build -c Release Spaarke.sln` GREEN + BFF publish framework-dependent. `net462` plugin never moves (untouched, verified).
 - **✅ S.S.C.Xml HIGH CVE fully CLOSED (task 004, owner Option 1)**: the task-003 carry-forward + a live-CVE-mask discovered when deleting NU1903 are both resolved — Core/Dataverse/Scheduling now pin `System.Security.Cryptography.Xml 10.0.11` (+ Pkcs bumped to 10.0.11 to match). `NoWarn=NU1903` DELETED. VERIFIED: zero NU1903 + `dotnet list --vulnerable` = "no vulnerable packages" across BFF+Core+Dataverse+Scheduling. **Task 032 has no S.S.C.Xml regression to chase.**
 - **Package versions locked in**: Extensions.* → 10.0.1 (BFF Caching 10.0.3); MSAL → 4.87.0; Dataverse.Client → 1.2.26; Identity.Web(+MicrosoftGraph) → 4.14.2; crypto Pkcs+Xml → 10.0.11 (shared libs). 7 Kiota 1.22.0 pins KEPT; Graph 5.105.0 (Graph6/Kiota2 = task 033).
 - **NU1510 pin-removal pattern (proven 003/004)**: framework-superseded pins (Asn1/STJ/RegEx everywhere; S.S.C.Xml on the BFF Web framework) removed; pins the framework does NOT supply (Pkcs, and S.S.C.Xml on non-web libs) kept/bumped to a clean version.
