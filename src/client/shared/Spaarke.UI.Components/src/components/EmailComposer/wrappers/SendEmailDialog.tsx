@@ -226,10 +226,34 @@ export interface ISendEmailDialogProps {
    * (SpaarkeAi `useUiScale()` hosts). Omitted → 1 (unchanged for all callers).
    */
   uiScale?: number;
+  /**
+   * Render the composer as a NON-BLOCKING (Fluent non-modal) surface — no backdrop
+   * scrim and no focus trap — so a host-level native lookup pane opened over it
+   * (the To/Cc people picker via `onLookupRecipients`, or the "link a record" /
+   * "add a relationship" advanced lookup via `onLookupRecord`/`onAddRelationship`,
+   * both `Xrm.Utility.lookupObjects`) stays interactive instead of being covered
+   * by the modal backdrop. Default `false` (standard blocking `alert` modal —
+   * unchanged for all existing callers). When `true`, dismiss is `explicit` (still
+   * no ESC/backdrop discard of an in-progress draft) rather than `alert`. Use for
+   * MDA/PCF hosts that wire the native lookup callbacks. (owner UAT 2026-08-12.)
+   */
+  nonBlocking?: boolean;
 }
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {
-  const { open, onClose, mode, onSent, onError, regarding, associations, fullBleed, uiScale, ...composerProps } = props;
+  const {
+    open,
+    onClose,
+    mode,
+    onSent,
+    onError,
+    regarding,
+    associations,
+    fullBleed,
+    uiScale,
+    nonBlocking,
+    ...composerProps
+  } = props;
 
   // Shell title: mirrors the engine's mode-derived header word (which the seam
   // suppresses), honoring the same `titleOverride` hosts already pass (e.g.
@@ -276,7 +300,11 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
       // `alert`: no Esc/backdrop dismiss — an accidental click outside can't
       // discard an in-progress draft (owner UAT 2026-07-30, item 12). Close is
       // the shell × or the ComposerActionBar Cancel, both routed to onClose.
-      dismiss="alert"
+      // When `nonBlocking`, use `explicit` instead (same no-ESC/backdrop-discard
+      // protection) so the SprkModal non-modal mapping actually applies — `alert`
+      // is intentionally always blocking (owner UAT 2026-08-12).
+      dismiss={nonBlocking ? 'explicit' : 'alert'}
+      nonBlocking={nonBlocking}
       // The composer owns its internal padding + single scroll region.
       padded={false}
       uiScale={uiScale}

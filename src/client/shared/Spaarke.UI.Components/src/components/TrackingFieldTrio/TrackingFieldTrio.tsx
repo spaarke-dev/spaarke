@@ -179,7 +179,8 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: tokens.spacingHorizontalXS,
+    // A little breathing room between the grant + email icons (owner UAT v1.0.26 #3).
+    columnGap: tokens.spacingHorizontalS,
     flexShrink: 0,
   },
   // Governance toolbar (person + email icons — task 040; repositioned task 073 UAT). Sits at the

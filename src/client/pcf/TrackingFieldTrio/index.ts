@@ -823,7 +823,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.25 • Built 2026-08-12',
+      versionText: 'v1.0.26 • Built 2026-08-12',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -952,6 +952,10 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     authenticatedFetch: this.authenticatedFetchGated,
                     bffBaseUrl: this.apiBaseUrl,
                     titleOverride: 'Email Members',
+                    // Non-blocking so the native To/Cc people picker + "link a record"
+                    // advanced-lookup panes render ON TOP instead of behind the modal
+                    // backdrop (owner UAT v1.0.26 — same fix as Manage Access).
+                    nonBlocking: true,
                     // "Related to" chip shows the record's number/name, not the bare
                     // entity type (task 073 UAT v1.0.24 #9).
                     regarding: {
