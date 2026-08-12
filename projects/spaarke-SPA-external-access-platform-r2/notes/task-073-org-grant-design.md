@@ -76,6 +76,44 @@ runtime union.
   "grantee type = organization" marker so `sprk_Contact` can be empty for these rows (small schema change:
   relax contact-required + a discriminator), OR a dedicated small org-grant table. Decide alongside the model.
 
+## FINALIZED DESIGN (2026-08-11 — owner chose the junction model; building now)
+
+**Membership model (owner-built):** `sprk_contactorganization` junction (N:1 → contact, N:1 → sprk_organization),
+subgrids on both forms, `statecode` = active/former gate. Query fields: `_sprk_contact_value`,
+`_sprk_organization_value`, `statecode`.
+
+**Org-grant STORAGE — reuse `sprk_externalrecordaccess` (no new table):** an org grant = a row with
+`sprk_Organization` set + `sprk_Contact` **empty** + one root lookup + `sprk_accesslevel`. Type is INFERRED
+from empty contact (a per-contact grant ALWAYS has a contact, so "contact empty" uniquely = org grant — **no
+discriminator column needed**). Reuse means Current-Access read + revoke-by-id already work.
+
+**⚠️ OWNER SCHEMA PREREQUISITE (the one thing needed before org grants can be written):** on
+`sprk_externalrecordaccess`, set the **`sprk_Contact` lookup to Optional** (RequiredLevel = None). Today it's
+`Required=Yes` in the schema doc, and the BFF also hard-rejects empty ContactId in code (which I'll relax).
+Both must change; the Dataverse field-required-level is the owner's one action (it can't be empty otherwise).
+
+**BFF changes (this project, hot-path §10):**
+1. WRITE — `GrantExternalAccessEndpoint`: relax the `ContactId == Guid.Empty` guard to allow an org grant when
+   `OrganizationId` is present + contact empty; `BuildGrantPayload` omits the `sprk_Contact@odata.bind` for
+   org rows (keeps `sprk_Organization` bind + root + level).
+2. READ (Term 3) — `AccessibleRecordSetService.ComposeForContactAsync` after Term 2 (`:286`): resolve the
+   contact's ACTIVE orgs from `sprk_contactorganization` (new reader, `_sprk_contact_value eq {c} and statecode
+   eq 0`), query org-grant rows (`_sprk_organization_value in {orgs} and _sprk_contact_value eq null and
+   statecode eq 0`), union the granted record ids. Add an `OrganizationGrants` flag to `AccessibleRecordSetSources`.
+   Bump `ExternalParticipationService.CacheVersion` (2 → 3). Fail-closed like Terms 1/2. Add the same term to
+   `ComposeForSystemUserAsync` for a systemuser who is a member of a granted org (parity).
+3. REVOKE — works by `AccessRecordId` unchanged (deactivates the org row); relax the revoke DTO's
+   ContactId-required guard for org rows. Cache: rely on the 60s participation TTL for member fan-out in MVP
+   (note the org-scoped-invalidation option as a follow-up).
+
+**PCF modal (`AccessGrantModal` + trio):** "Add organization" + level + Add → POST `/grant` with ContactId
+empty + OrganizationId set. `fetchExistingGrants` also selects `_sprk_organization_value` (+ FormattedValue);
+rows with empty contact render in Current Access as "Everyone at {org}" with a Revoke button.
+
+**Tests:** BFF unit tests for org-grant write (contact empty allowed only with org), Term-3 union (member of
+granted org gets the record; NON-member does NOT; former member `statecode=1` does NOT — the negative/authz
+cases), and org revoke. adr-check + code-review + publish-size before deploy.
+
 ## Scope / governance
 
 This is **BFF access-control (hot path, §10)** + a **Dataverse schema change** + a **PCF modal change** — a

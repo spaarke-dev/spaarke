@@ -66,8 +66,14 @@ public static class GrantExternalAccessEndpoint
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
-        if (request.ContactId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ContactId is required and must be a valid GUID.");
+        // Grantee kind (task 073 #7): a normal grant names a Contact; an ORGANIZATION grant names an
+        // Organization with NO ContactId — every ACTIVE member of that org then inherits access at
+        // check time (AccessibleRecordSetService Term 3). Exactly one grantee kind is required; an
+        // empty ContactId is only valid when an OrganizationId is supplied.
+        var isOrgGrant = request.ContactId == Guid.Empty;
+        if (isOrgGrant && !request.OrganizationId.HasValue)
+            return ProblemDetailsHelper.ValidationError(
+                "ContactId is required, unless granting to an Organization (supply OrganizationId with no ContactId).");
 
         // Resolve the polymorphic grant root (project|matter|workassignment) or the legacy ProjectId
         // shorthand. Fail-closed: a missing/unknown root is rejected 400 and NO row is written.
@@ -145,7 +151,17 @@ public static class GrantExternalAccessEndpoint
         try
         {
             var tenantId = ExtractTenantId(httpContext);
-            if (!string.IsNullOrEmpty(tenantId))
+            if (request.ContactId == Guid.Empty)
+            {
+                // Organization grant (task 073 #7): there is no single grantee contact to invalidate —
+                // every active member's participation set is affected. We deliberately DO NOT fan out an
+                // invalidation per member here (that would need a members-of-org read on the write path);
+                // members pick up the new org grant within the 60s participation-cache TTL. (An org-scoped
+                // cache key is a possible future optimization — see the org-grant design note.)
+                logger.LogDebug(
+                    "[EXT-GRANT] Organization grant — no per-contact cache to invalidate; members refresh within the participation TTL.");
+            }
+            else if (!string.IsNullOrEmpty(tenantId))
             {
                 await cache.RemoveAsync(
                     tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion, ct: ct);
@@ -276,11 +292,20 @@ public static class GrantExternalAccessEndpoint
         // teams-app-r1 used were wrong and 400'd every grant.
         var payload = new Dictionary<string, object?>
         {
-            ["sprk_Contact@odata.bind"] = $"/contacts({request.ContactId})",
             [$"{navigationProperty}@odata.bind"] = $"/{entitySet}({rootId})",
             ["sprk_accesslevel"] = (int)request.AccessLevel,
             ["sprk_granteddate"] = DateTime.UtcNow.ToString("o")
         };
+
+        // Grantee: bind the Contact for a per-contact grant; OMIT it for an ORGANIZATION grant (task 073
+        // #7 — an empty ContactId + a bound sprk_Organization identifies the grantee, and every active
+        // org member inherits at check time). A row with NO sprk_Contact is exactly how the read path
+        // (AccessibleRecordSetService Term 3) distinguishes an org grant from a per-contact grant, so this
+        // omission is load-bearing, not cosmetic.
+        if (request.ContactId != Guid.Empty)
+        {
+            payload["sprk_Contact@odata.bind"] = $"/contacts({request.ContactId})";
+        }
 
         // grantedBySystemUserId is already a resolved Dataverse systemuserid (see
         // ResolveGrantedBySystemUserIdAsync) — NOT the caller's raw AAD oid. Omitted when unresolved.

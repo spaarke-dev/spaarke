@@ -20,9 +20,11 @@ public class ExternalParticipationService
     // data (project list), not an authorization decision per ADR-009.
     private const string ExternalAccessResource = "external-access-grant";
     // CacheVersion 2 (task 028): the cached shape widened from project-only participations to the full
-    // polymorphic grant set (projects + matters + work assignments). The version bump orphans any v1
-    // entry (it simply expires on its 60s TTL) so no stale narrow-shape read can occur.
-    private const int CacheVersion = 2;
+    // polymorphic grant set (projects + matters + work assignments). CacheVersion 3 (task 073 #7): the
+    // cached grant set now ALSO includes records inherited via ORGANIZATION grants (Term 3 — org
+    // memberships from sprk_contactorganization). The bump orphans any v2 entry (it expires on its 60s
+    // TTL) so no stale pre-org-grant read can occur.
+    private const int CacheVersion = 3;
 
     private readonly HttpClient _httpClient;
     private readonly ITenantCache _cache;
@@ -433,9 +435,38 @@ public class ExternalParticipationService
                 .Select(r => r._sprk_workassignment_value!.Value)
                 .ToHashSet();
 
+            // Term 3 (task 073 #7): union ORGANIZATION grants — records granted to any organization the
+            // contact is an ACTIVE member of (sprk_contactorganization junction). This mirrors the
+            // standing-grant runtime union: no per-contact rows exist, membership is resolved live, and
+            // staleness is bounded by the 60s cache TTL. Fail-closed by construction — a junction or
+            // org-grant read fault returns an empty list and contributes nothing, never 500s the authz path.
+            var orgRows = await QueryOrganizationGrantRowsAsync(contactId, token, apiUrl, ct);
+            if (orgRows.Count > 0)
+            {
+                projects.AddRange(orgRows
+                    .Where(r => r._sprk_project_value.HasValue && r.sprk_accesslevel.HasValue)
+                    .Select(r => new ExternalParticipation
+                    {
+                        ProjectId = r._sprk_project_value!.Value,
+                        AccessLevel = (ExternalAccessLevel)r.sprk_accesslevel!.Value
+                    }));
+                foreach (var r in orgRows.Where(r => r._sprk_matter_value.HasValue))
+                    matters.Add(r._sprk_matter_value!.Value);
+                foreach (var r in orgRows.Where(r => r._sprk_workassignment_value.HasValue))
+                    workAssignments.Add(r._sprk_workassignment_value!.Value);
+            }
+
+            // Dedupe project grants by id, keeping the HIGHEST access level — a contact may hold a direct
+            // project grant AND inherit one via an org grant; the strongest level wins (the enum orders
+            // ViewOnly < Collaborate < FullAccess).
+            projects = projects
+                .GroupBy(p => p.ProjectId)
+                .Select(g => new ExternalParticipation { ProjectId = g.Key, AccessLevel = g.Max(x => x.AccessLevel) })
+                .ToList();
+
             _logger.LogInformation(
-                "[EXT-ACCESS] Loaded grants for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment",
-                contactId, projects.Count, matters.Count, workAssignments.Count);
+                "[EXT-ACCESS] Loaded grants for Contact {ContactId}: {Projects} project / {Matters} matter / {Was} work-assignment (incl. {OrgRows} org-grant rows)",
+                contactId, projects.Count, matters.Count, workAssignments.Count, orgRows.Count);
 
             return new ExternalGrantSet
             {
@@ -448,6 +479,99 @@ public class ExternalParticipationService
         {
             _logger.LogError(ex, "[EXT-ACCESS] Error querying Dataverse for Contact {ContactId}", contactId);
             return ExternalGrantSet.Empty;
+        }
+    }
+
+    /// <summary>
+    /// Term 3 (task 073 #7) — the ORGANIZATION-grant rows a contact inherits: active org grants (contact
+    /// empty) for every organization the contact is an ACTIVE member of (<c>sprk_contactorganization</c>).
+    /// Two reads (memberships → org grants); fail-closed at every step (an empty list on any fault so an
+    /// org-side read problem NEVER widens NOR 500s the authz decision). Returns the org-grant rows in the
+    /// same shape as per-contact grants so the caller unions them identically.
+    /// </summary>
+    private async Task<List<ExternalAccessRow>> QueryOrganizationGrantRowsAsync(
+        Guid contactId, string token, string apiUrl, CancellationToken ct)
+    {
+        var orgIds = await QueryActiveOrgIdsAsync(contactId, token, apiUrl, ct);
+        if (orgIds.Count == 0)
+            return new List<ExternalAccessRow>();
+
+        try
+        {
+            // Active org grants (sprk_Contact EMPTY — the org-grant marker) for any of the contact's orgs.
+            var orgFilter = string.Join(" or ", orgIds.Select(id => $"_sprk_organization_value eq {id}"));
+            var query = $"{apiUrl}/sprk_externalrecordaccesses" +
+                        $"?$filter=({orgFilter}) and _sprk_contact_value eq null and statecode eq 0" +
+                        $"&$select=_sprk_project_value,_sprk_matter_value,_sprk_workassignment_value,sprk_accesslevel";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, query);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            var response = await _httpClient.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "[EXT-ACCESS] Org-grant query failed for Contact {ContactId} ({OrgCount} orgs): {Status}",
+                    contactId, orgIds.Count, response.StatusCode);
+                return new List<ExternalAccessRow>();
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ExternalAccessRow>>(ct);
+            return result?.Value ?? new List<ExternalAccessRow>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-ACCESS] Error querying org grants for Contact {ContactId}", contactId);
+            return new List<ExternalAccessRow>();
+        }
+    }
+
+    /// <summary>
+    /// The <c>sprk_organization</c> ids the contact is an ACTIVE member of, from the
+    /// <c>sprk_contactorganization</c> junction (<c>statecode eq 0</c> = active membership; a former
+    /// member is a deactivated row and is excluded, so leaving a firm drops inherited access). Fail-closed
+    /// to an empty list. NOTE: assumes the junction's lookup logical names are <c>sprk_contact</c> /
+    /// <c>sprk_organization</c> (→ <c>_sprk_contact_value</c> / <c>_sprk_organization_value</c>), matching
+    /// the grant table's convention — confirm against the created junction schema.
+    /// </summary>
+    private async Task<List<Guid>> QueryActiveOrgIdsAsync(
+        Guid contactId, string token, string apiUrl, CancellationToken ct)
+    {
+        try
+        {
+            var query = $"{apiUrl}/sprk_contactorganizations" +
+                        $"?$filter=_sprk_contact_value eq {contactId} and statecode eq 0" +
+                        $"&$select=_sprk_organization_value";
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, query);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            request.Headers.Add("OData-MaxVersion", "4.0");
+            request.Headers.Add("OData-Version", "4.0");
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            var response = await _httpClient.SendAsync(request, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "[EXT-ACCESS] Contact-organization membership query failed for Contact {ContactId}: {Status}",
+                    contactId, response.StatusCode);
+                return new List<Guid>();
+            }
+
+            var result = await response.Content.ReadFromJsonAsync<DataverseQueryResult<ContactOrgRow>>(ct);
+            return (result?.Value ?? new List<ContactOrgRow>())
+                .Where(r => r._sprk_organization_value.HasValue)
+                .Select(r => r._sprk_organization_value!.Value)
+                .Distinct()
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[EXT-ACCESS] Error querying contact-organization memberships for Contact {ContactId}", contactId);
+            return new List<Guid>();
         }
     }
 
@@ -535,6 +659,13 @@ public class ExternalParticipationService
 
         [JsonPropertyName("sprk_accesslevel")]
         public int? sprk_accesslevel { get; set; }
+    }
+
+    /// <summary>A `sprk_contactorganization` junction row — projects the org lookup value (task 073 #7).</summary>
+    private sealed class ContactOrgRow
+    {
+        [JsonPropertyName("_sprk_organization_value")]
+        public Guid? _sprk_organization_value { get; set; }
     }
 
     private sealed class ContactRow

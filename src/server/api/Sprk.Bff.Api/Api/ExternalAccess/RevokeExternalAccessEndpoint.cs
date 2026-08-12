@@ -72,9 +72,12 @@ public static class RevokeExternalAccessEndpoint
         if (request.AccessRecordId == Guid.Empty)
             return ProblemDetailsHelper.ValidationError("AccessRecordId is required and must be a valid GUID.");
 
-        if (request.ContactId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ContactId is required and must be a valid GUID.");
-
+        // ContactId is OPTIONAL (task 073 #7): revoke is authoritative by AccessRecordId (root- AND
+        // grantee-agnostic). A per-contact revoke SHOULD still pass ContactId so its participation cache
+        // is invalidated immediately (Step 3); an ORGANIZATION-grant revoke has no single grantee contact
+        // — it passes an empty ContactId, the org row is deactivated by AccessRecordId, and affected
+        // members refresh within the 60s participation TTL.
+        //
         // Note (task 070): ProjectId is NOT required — revoke deactivates by AccessRecordId and is
         // root-agnostic (works for a project/matter/work-assignment grant alike). The field is retained
         // on the DTO for back-compat but no longer gates the request.
@@ -143,7 +146,15 @@ public static class RevokeExternalAccessEndpoint
         try
         {
             var tenantId = ExtractTenantId(httpContext);
-            if (!string.IsNullOrEmpty(tenantId))
+            if (request.ContactId == Guid.Empty)
+            {
+                // Organization-grant revoke (task 073 #7): no single grantee contact to invalidate — every
+                // active member's participation set changes. Members refresh within the 60s TTL (an
+                // org-scoped fan-out invalidation is a possible future optimization).
+                logger.LogDebug(
+                    "[EXT-REVOKE] Organization-grant revoke — no per-contact cache to invalidate; members refresh within the participation TTL.");
+            }
+            else if (!string.IsNullOrEmpty(tenantId))
             {
                 await cache.RemoveAsync(
                     tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion,
