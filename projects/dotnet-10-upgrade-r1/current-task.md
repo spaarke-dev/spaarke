@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-12 (by task-execute — 020 H2 COMPLETE + verified; probe promoted to CI guard)
+> **Last Updated**: 2026-08-12 (by context-handoff — P0+P1(010/011/012)+P2(020) done; 021 next)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -9,12 +9,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **P1 IN PROGRESS**. P0 (001–005 ✅) + **H1 DONE + verified (010 ✅, 011 ✅ PASS)** + **H3 (012 ✅)**. BFF build GREEN net10; graph vulnerable-clean. |
-| **Active task** | **020 H2 ✅ COMPLETE + verified.** Next: **021** (H2 adversarial verify, non-author). |
-| **Status** | between-tasks |
-| **Next Action** | Dispatch **021** to a fresh opus subagent (NON-AUTHOR, NFR-07): independently re-run the DI-graph guard, review the 10-root fixes for NFR-01 behavior preservation (esp. stream-scope lifetimes in R1/R9), confirm no captive dep remains + no functional change. CAN overlap **013** (H6 sweep). Remaining after: 013, 014, then P3 030→033→031/032. |
-| **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
-| **Git** | Wave 1 committed: `969e15471` (task 010). Wave-1b (011+012) pending commit at this checkpoint. Session P0 commits: 001 `8077e33f5` · 002 `3f6027aa5` · 003 `9b7e9b1ea` · 004 `d39de8665` · 005 `cdb31e0b0`. **NOT merged to master — deferred per owner sequencing.** |
+| **Project phase** | P0 (001–005 ✅) · P1: **010 ✅ 011 ✅(PASS) 012 ✅** (013/014 remain) · P2: **020 ✅** (021 remains). BFF build GREEN net10; graph vulnerable-clean; DI graph passes ValidateOnBuild/ValidateScopes. |
+| **Active task** | none active — **020 H2 ✅ COMPLETE + independently verified**. Next: **021** (H2 adversarial verify, non-author). |
+| **Status** | between-tasks (clean tree, all pushed) |
+| **Next Action** | Dispatch **021** to a fresh opus subagent (NON-AUTHOR per NFR-07; the fix was done by main session + `fix-h2` subagent — 021 MUST be a different agent): independently re-run the DI-graph guard (`dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --filter DiGraphValidationTests`), review the 10-root fixes in `notes/h2-di-validation.md` §4 for NFR-01 behavior preservation (esp. stream-scope lifetimes in R1 UploadFinalizationWorker + R9 CommunicationService), confirm no captive dep remains + no functional change. Read-only → **CAN overlap 013 (H6 sweep)** as a parallel wave. Remaining after 021: **013** (H6 secondary sweep), **014** (FR-06 telemetry), then P3 **030**→**033**→**031/032** (013/014/020/021 all gate 030). |
+| **Branch** | `work/dotnet-10-upgrade-r1` (worktree; exists on origin) |
+| **Git** | ✅ **CLEAN — tip `d9eb30305`, 0 unpushed, 44 behind origin/master.** Session commits: P0 001 `8077e33f5`·002 `3f6027aa5`·003 `9b7e9b1ea`·004 `d39de8665`·005 `cdb31e0b0` · 010 `969e15471` · 011+012 `5191efb6a` · **020 `d9eb30305`**. **NOT merged to master — deferred per owner sequencing.** Safe to `/compact`. |
+
+### H2 result (020) — VERIFIED, do NOT re-derive
+- **45 captive-dependency (singleton→scoped) errors → 10 root singletons → ALL FIXED → probe CLEAN.** Method: in-process probe reused `CustomWebAppFactory` neutralization (mocked IDataverseService + fake IGraphClientFactory + removed hosted services) with ValidateOnBuild+ValidateScopes RE-ENABLED; iterated 45→19→2→0.
+- Fixes (behavior-preserving, NFR-01): **Family A scope-per-unit-of-work** (IServiceScopeFactory, scope spans stream consumption) for R1/R2/R3/R4/R6/R7/R8/R9/R10; **Family B demote singleton→scoped** for R5 ActionResolver (+ NullActionResolver peer, ADR-032 symmetry) — safe because the CLEAN probe proves no singleton consumer. 9 BFF source + 24 test files + 2 scope-factory stubs.
+- **FR-08 honored** (validations NOT disabled; no IsDevelopment branch; Production path unaffected). Probe **promoted** to permanent CI guard `tests/unit/Sprk.Bff.Api.Tests/DiGraphValidationTests.cs` (asserting, network-free) — flagged for 021/030 shape review.
+- Main-session independent verification: probe CLEAN + BFF Release build 0 errors + targeted Nodes/Communication tests 44 pass/0 fail + full 9-file diff review (stream scopes span consumption). Step 9.5 code-review + adr-check PASS. Full detail: `notes/h2-di-validation.md`.
 
 ### H1 result (010+011) — VERIFIED, do NOT re-derive
 - **28 hosted-service implementers (closed set, grep) → 28 SAFE · 0 REMEDIATE · 0 code changes.** Author doc `notes/h1-backgroundservice-audit.md`; non-author PASS `notes/h1-adversarial-verification.md` (independent grep MATCH=28; all 28 CONFIRMED; 0 refuted/missed).
