@@ -76,6 +76,15 @@ runtime union.
   "grantee type = organization" marker so `sprk_Contact` can be empty for these rows (small schema change:
   relax contact-required + a discriminator), OR a dedicated small org-grant table. Decide alongside the model.
 
+## ✅ SHIPPED (2026-08-11) — deployed to spaarke-bff-dev + PCF v1.0.19 on SPAARKE DEV 1
+BFF commit 57e71d2bf (write + Term-3 union + revoke), modal/trio + write test commit f0b648b7b. Owner
+prereqs confirmed (sprk_Contact Optional; junction lookups `sprk_contact`/`sprk_organization`). BFF package
+48.48 MB (no size regression); 39/39 external-access tests pass. **Awaiting owner live UAT:** firm member
+sees record ✓ / non-member ✗ / former-member (deactivated junction row) ✗ / revoke removes whole firm.
+Known follow-ups: formal code-review before master merge; org revoke relies on 60s TTL (org-scoped cache
+fan-out is a future optimization); PRE-EXISTING grant/revoke CacheVersion=1 vs read CacheVersion=3 mismatch
+(per-contact invalidation already TTL-bounded — out of #7 scope, flagged).
+
 ## FINALIZED DESIGN (2026-08-11 — owner chose the junction model; building now)
 
 **Membership model (owner-built):** `sprk_contactorganization` junction (N:1 → contact, N:1 → sprk_organization),
