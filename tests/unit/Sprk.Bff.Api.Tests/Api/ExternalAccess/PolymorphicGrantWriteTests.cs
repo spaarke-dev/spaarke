@@ -332,6 +332,30 @@ public class PolymorphicGrantWriteTests
         payload.Should().NotContainKey("sprk_Organization@odata.bind");
     }
 
+    [Fact]
+    public void BuildGrantPayload_OrganizationGrant_OmitsContactBind_KeepsOrganizationAndRoot()
+    {
+        // task 073 #7: an ORGANIZATION grant is a row with an EMPTY ContactId + an OrganizationId. The
+        // contact bind MUST be omitted — a contact-empty row is the load-bearing marker the access-check
+        // read path keys on to treat the row as an org grant (every active firm member then inherits).
+        // A regression that re-adds the contact bind here silently converts an org grant into a broken
+        // per-contact row, so this contract is caller-observable.
+        var matterId = Guid.NewGuid();
+        var orgId = Guid.NewGuid();
+        var request = new GrantAccessRequest(
+            ContactId: Guid.Empty, ProjectId: Guid.Empty, AccessLevel: ExternalAccessLevel.FullAccess,
+            ExpiryDate: null, OrganizationId: orgId, RecordType: "matter", RecordId: matterId);
+
+        var payload = ToDict(GrantExternalAccessEndpoint.BuildGrantPayload(
+            request, ExternalGrantRootType.Matter, matterId, grantedBySystemUserId: null));
+
+        payload.Should().NotContainKey("sprk_Contact@odata.bind",
+            "an org grant has no contact grantee — the contact-empty row IS the org-grant marker");
+        payload["sprk_Organization@odata.bind"].Should().Be($"/sprk_organizations({orgId})");
+        payload["sprk_Matter@odata.bind"].Should().Be($"/sprk_matters({matterId})");
+        payload["sprk_accesslevel"].Should().Be((int)ExternalAccessLevel.FullAccess);
+    }
+
     // =========================================================================
     // ProjectClosureEndpoint — cascade-revoke filter regression (task 070 fix)
     // =========================================================================

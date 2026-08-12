@@ -511,9 +511,23 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     return merged;
   }, [candidates, lookedUpContacts]);
 
+  /** Writes a first-class ORGANIZATION grant (task 073 #7) — access for EVERYONE at the picked firm.
+   * `contactId` is omitted so the BFF treats (empty contact + organizationId) as an org grant; every
+   * active member of the firm then inherits access at check time (server Term-3 union). */
+  const grantOrganization = React.useCallback(async (): Promise<void> => {
+    if (!pickedOrg) return;
+    await postJson('/api/v1/external-access/grant', {
+      recordType,
+      recordId,
+      accessLevel: selectedLevel,
+      organizationId: pickedOrg.id,
+    });
+  }, [pickedOrg, postJson, recordType, recordId, selectedLevel]);
+
   const handleGrantSelected = React.useCallback(async () => {
     const toGrant = availableContacts.filter(c => selectedCandidateIds.has(c.contactId));
-    if (toGrant.length === 0) return;
+    const orgToGrant = pickedOrg; // capture before reset (used for the write + the notice)
+    if (toGrant.length === 0 && !orgToGrant) return;
     setApproving(true);
     let failures = 0;
     let anyNotifyPending = false;
@@ -522,7 +536,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       try {
         const outcome = await grantContact(contact, {
           standingGrant: standingForCandidate.has(contact.contactId),
-          organizationId: pickedOrg?.id,
+          // Org selection now writes a first-class ORG grant (below), not per-contact scope metadata.
         });
         anyNotifyPending = anyNotifyPending || outcome.notifyPending;
         anyStandingGrantFailed = anyStandingGrantFailed || outcome.standingGrantFailed;
@@ -530,31 +544,55 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         failures += 1;
       }
     }
+
+    // Organization grant (task 073 #7) — grants access to EVERYONE at the firm.
+    let orgGranted = false;
+    let orgFailed = false;
+    if (orgToGrant) {
+      try {
+        await grantOrganization();
+        orgGranted = true;
+      } catch {
+        orgFailed = true;
+      }
+    }
+
     setApproving(false);
     setLookedUpContacts([]);
+    setPickedOrg(null);
     await loadData();
-    if (failures > 0) {
+
+    const granted: string[] = [];
+    if (toGrant.length - failures > 0) granted.push(`${toGrant.length - failures} contact(s)`);
+    if (orgGranted) granted.push(`everyone at ${orgToGrant!.name}`);
+    const grantedText = granted.length > 0 ? granted.join(' and ') : 'no one';
+
+    if (failures > 0 || orgFailed) {
+      const failed: string[] = [];
+      if (failures > 0) failed.push(`${failures} contact grant(s)`);
+      if (orgFailed) failed.push('the organization grant');
       setNotice({
         intent: 'error',
-        text: `${toGrant.length - failures} of ${toGrant.length} grant(s) succeeded; ${failures} failed. Try again for the failed contact(s).`,
+        text: `Granted ${selectedLevelLabel} access to ${grantedText}; ${failed.join(' and ')} failed. Please try again.`,
       });
     } else if (anyNotifyPending) {
       setNotice({
         intent: 'warning',
-        text: `Granted ${selectedLevelLabel} access to ${toGrant.length} contact(s). Internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
+        text: `Granted ${selectedLevelLabel} access to ${grantedText}. Internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
       });
     } else if (anyStandingGrantFailed) {
       setNotice({
         intent: 'warning',
-        text: `Granted ${selectedLevelLabel} access to ${toGrant.length} contact(s), but setting the standing-grant flag failed for at least one. You can retry from the Contact form.`,
+        text: `Granted ${selectedLevelLabel} access to ${grantedText}, but setting the standing-grant flag failed for at least one contact. You can retry from the Contact form.`,
       });
     } else {
-      setNotice({ intent: 'success', text: `Granted ${selectedLevelLabel} access to ${toGrant.length} contact(s).` });
+      setNotice({ intent: 'success', text: `Granted ${selectedLevelLabel} access to ${grantedText}.` });
     }
   }, [
     availableContacts,
     selectedCandidateIds,
     grantContact,
+    grantOrganization,
     standingForCandidate,
     pickedOrg,
     loadData,
@@ -748,13 +786,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                     />
                   )}
 
-                  {/* Selected organization scope (optional) — applied as firm scoping on the grant. */}
+                  {/* Selected organization (task 073 #7) — clicking Add grants access to EVERYONE at this
+                      firm (a first-class org grant), not just firm-scoping metadata on a contact grant. */}
                   {pickedOrg && (
                     <div className={styles.row}>
                       <BuildingRegular />
                       <div className={styles.rowMain}>
                         <Text className={styles.rowName}>{pickedOrg.name}</Text>
-                        <Text className={styles.rowMeta}>Organization scope applied to the grant</Text>
+                        <Text className={styles.rowMeta}>Grants access to everyone at this firm</Text>
                       </div>
                       <Button
                         appearance="subtle"
@@ -819,11 +858,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                     </Field>
                     <Button
                       appearance="primary"
-                      disabled={selectedCandidateIds.size === 0 || approving || grantsBlocked}
+                      // Enabled when at least one contact is selected OR an organization is picked
+                      // (an org-only grant is valid — it grants the whole firm; task 073 #7).
+                      disabled={(selectedCandidateIds.size === 0 && !pickedOrg) || approving || grantsBlocked}
                       icon={approving ? <Spinner size="tiny" /> : undefined}
                       onClick={handleGrantSelected}
                     >
-                      Add ({selectedCandidateIds.size})
+                      Add ({selectedCandidateIds.size + (pickedOrg ? 1 : 0)})
                     </Button>
                   </div>
                 </div>
@@ -841,6 +882,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       // row to revoke here, so they render non-revocable with a
                       // "Standing" badge instead of an access-level + Revoke.
                       const isStanding = grant.provenance === 'standing' || !grant.accessRecordId;
+                      // Organization grant (task 073 #7): everyone at the firm inherits access. Unlike a
+                      // standing grant it IS a real per-record row, so it keeps the level badge + Revoke.
+                      const isOrg = grant.provenance === 'organization';
                       return (
                         <div className={styles.row} key={grant.accessRecordId ?? `standing-${grant.contactId}`}>
                           <div className={styles.rowMain}>
@@ -848,7 +892,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                             <Text className={styles.rowMeta}>
                               {isStanding
                                 ? 'Standing grant — ongoing access to assigned records'
-                                : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
+                                : isOrg
+                                  ? 'Organization grant — everyone at this firm has access'
+                                  : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
                             </Text>
                           </div>
                           <div className={styles.rowActions}>

@@ -55,7 +55,7 @@ export interface IAccessGrantRecord {
   /** Display-only provenance label — NOT sent to the BFF (the endpoint has no
    * provenance field; this is a client-side annotation of HOW the grant was
    * created, inferred by the caller or defaulted by this modal's own writes). */
-  provenance?: 'membership-approved' | 'named' | 'standing' | 'unknown';
+  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown';
 }
 
 /** A single Dataverse Contact search result (named-contact person-picker). */

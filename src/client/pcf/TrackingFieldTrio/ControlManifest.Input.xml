@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="TrackingFieldTrio"
-           version="1.0.18"
+           version="1.0.19"
            display-name-key="Tracking Field Trio"
-           description-key="Compact 3-field control for tracking flags (v1.0.18). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission), plus an opt-in governance toolbar (grant-access modal + email-members icons) and an optional header title. The grant modal is polymorphic across Project/Matter/Work Assignment and uses in-app inline pickers for the contact + organization lookups. Designed to fit inside a 33% form column."
+           description-key="Compact 3-field control for tracking flags (v1.0.19). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission), plus an opt-in governance toolbar (grant-access modal + email-members icons) and an optional header title. The grant modal is polymorphic across Project/Matter/Work Assignment and uses in-app inline pickers for the contact + organization lookups. Designed to fit inside a 33% form column."
            control-type="standard">
     <!-- task 041 — the grant modal calls the BFF external-access endpoints via
          @spaarke/auth's authenticatedFetch (MSAL), so this control now needs
@@ -56,7 +56,7 @@
               required="false"
               default-value="false" />
 
-    <!-- v1.0.18 (task 073 UAT #3) — optional control header title. When set, the
+    <!-- v1.0.19 (task 073 UAT #3) — optional control header title. When set, the
          control renders a 32px header row with this title (14px semibold) on the
          left and the governance icons (grant/email) on the right. When left
          blank, no header is drawn and the icons keep their prior top-right

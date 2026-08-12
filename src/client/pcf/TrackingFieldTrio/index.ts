@@ -501,7 +501,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const rootValueField = this.resolveGrantRoot().rootValueField;
     const options =
       `?$filter=${rootValueField} eq ${recordId} and statecode eq 0` +
-      `&$select=_sprk_contact_value,_sprk_grantedby_value,sprk_accesslevel,sprk_granteddate`;
+      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,sprk_accesslevel,sprk_granteddate`;
 
     let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
     try {
@@ -513,14 +513,25 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return result.entities.map(e => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = e as any;
+      const contactId = (row['_sprk_contact_value'] as string) ?? '';
+      const organizationId = (row['_sprk_organization_value'] as string) ?? '';
+      // An ORGANIZATION grant (task 073 #7) is a row with NO contact + an organization set — it grants
+      // access to everyone at that firm, so it renders as "Everyone at {firm}" (revocable) instead of a
+      // person. A normal per-contact grant keeps the contact's name.
+      const isOrgGrant = !contactId && !!organizationId;
+      const orgName = (row[`_sprk_organization_value${FORMATTED}`] as string) ?? 'this firm';
       return {
         accessRecordId: row.sprk_externalrecordaccessid as string,
-        contactId: (row['_sprk_contact_value'] as string) ?? '',
-        fullName: (row[`_sprk_contact_value${FORMATTED}`] as string) ?? '(unknown contact)',
+        // Org rows have no contact — use the org id so the row still has a stable, non-empty key.
+        contactId: isOrgGrant ? organizationId : contactId,
+        fullName: isOrgGrant
+          ? `Everyone at ${orgName}`
+          : ((row[`_sprk_contact_value${FORMATTED}`] as string) ?? '(unknown contact)'),
         email: undefined,
         accessLevel: row.sprk_accesslevel as number,
         grantedByName: (row[`_sprk_grantedby_value${FORMATTED}`] as string) ?? undefined,
         grantedDate: row.sprk_granteddate ?? undefined,
+        provenance: isOrgGrant ? ('organization' as const) : undefined,
       };
     });
   };
@@ -718,7 +729,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.18 • Built 2026-08-11',
+      versionText: 'v1.0.19 • Built 2026-08-11',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
