@@ -454,14 +454,18 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     [postJson, recordType, recordId]
   );
 
-  const handleGrantSelected = React.useCallback(async () => {
+  // Commits the checked rows (the "Add (N)" action). Returns `true` only when every
+  // selected row was granted successfully — Save uses this to decide whether to close
+  // (task 073 UAT v1.0.29 #1B). Returns `false` (staying open) when a level is missing
+  // or any grant failed, so the notice explains what to fix.
+  const handleGrantSelected = React.useCallback(async (): Promise<boolean> => {
     const selected = availableItems.filter(it => selectedCandidateIds.has(it.id));
-    if (selected.length === 0) return;
+    if (selected.length === 0) return true;
     // Every selected row must have a level (no default) before it can be granted.
     const missing = selected.filter(it => rowLevels[it.id] === undefined);
     if (missing.length > 0) {
       setNotice({ intent: 'warning', text: `Pick an access level for: ${missing.map(m => m.name).join(', ')}.` });
-      return;
+      return false;
     }
     setApproving(true);
     let failures = 0;
@@ -502,7 +506,30 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     } else {
       setNotice({ intent: 'success', text: `Granted access to ${granted} item(s).` });
     }
+    // Success (for Save's close decision) iff nothing failed — a notify-pending
+    // grant still succeeded (the record-access row was written).
+    return failures === 0;
   }, [availableItems, selectedCandidateIds, rowLevels, grantContact, grantOrganization, loadData]);
+
+  // Save (task 073 UAT v1.0.29 #1B): if rows are staged but not yet added, COMMIT
+  // them (respecting the level-required guard), then close on success; otherwise
+  // just close. So the user's pending selection isn't silently lost on Save.
+  const handleSave = React.useCallback(async () => {
+    if (selectedCandidateIds.size === 0) {
+      onClose();
+      return;
+    }
+    const ok = await handleGrantSelected();
+    if (ok) onClose();
+  }, [selectedCandidateIds, handleGrantSelected, onClose]);
+
+  // Cancel / × (task 073 UAT v1.0.29 #1B): warn if there are pending (staged,
+  // not-yet-added) selections so they aren't silently discarded.
+  const [showPendingWarning, setShowPendingWarning] = React.useState(false);
+  const handleCancelAttempt = React.useCallback(() => {
+    if (selectedCandidateIds.size > 0) setShowPendingWarning(true);
+    else onClose();
+  }, [selectedCandidateIds, onClose]);
 
   // ── Native advanced-lookup pickers (task 073 v1.0.24 #1/#4) ─────────────────
   // `+ Contact` / `+ Organization` open the host's NATIVE Dataverse advanced-lookup
@@ -580,18 +607,22 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // renders on top and stays interactive instead of being covered by a
         // modal backdrop — the proven CommunicationActions composer pattern.
         open={open}
-        onClose={onClose}
+        onClose={handleCancelAttempt}
         title={title}
         size="lg"
         dismiss="explicit"
         nonBlocking
+        // While a native advanced-lookup pane is open (picking), hide this surface
+        // so the (higher-z-index) modal doesn't cover the lookup (task 073 UAT
+        // v1.0.29 #1A). The modal stays mounted — staged picks survive.
+        hidden={picking}
         footerStart={
-          <Button appearance="secondary" onClick={onClose}>
+          <Button appearance="secondary" onClick={handleCancelAttempt}>
             Cancel
           </Button>
         }
         footer={
-          <Button appearance="primary" onClick={onClose}>
+          <Button appearance="primary" onClick={() => void handleSave()}>
             Save
           </Button>
         }
@@ -846,6 +877,37 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         <Text>
           Revoke access for <strong>{revokeTarget?.fullName}</strong>? They will immediately lose access to this record
           (unless a standing grant or other membership still applies).
+        </Text>
+      </SprkModal>
+
+      {/* Pending-changes warning (task 073 UAT v1.0.29 #1B) — the user staged a
+          contact/organization but didn't click "Add" before Cancel/×. */}
+      <SprkModal
+        open={showPendingWarning}
+        onClose={() => setShowPendingWarning(false)}
+        title="Unsaved access permissions"
+        size="xs"
+        dismiss="alert"
+        maximizable={false}
+        footerStart={
+          <Button
+            appearance="secondary"
+            onClick={() => {
+              setShowPendingWarning(false);
+              onClose();
+            }}
+          >
+            Discard &amp; close
+          </Button>
+        }
+        footer={
+          <Button appearance="primary" onClick={() => setShowPendingWarning(false)}>
+            Keep editing
+          </Button>
+        }
+      >
+        <Text>
+          New access permissions are pending. Click <strong>Add</strong> to confirm, or they will not be saved.
         </Text>
       </SprkModal>
     </>

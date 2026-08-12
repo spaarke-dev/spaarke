@@ -128,6 +128,7 @@ export const SprkModal: React.FC<SprkModalProps> = ({
   layout,
   dismiss = 'light',
   nonBlocking = false,
+  hidden = false,
   uiScale = 1,
   maximizable = true,
   nav,
@@ -170,7 +171,9 @@ export const SprkModal: React.FC<SprkModalProps> = ({
     >
       <DialogSurface
         className={mergeClasses(styles.surface, effectiveSize === 'full' && styles.surfaceFull)}
-        style={surfaceStyle}
+        // `hidden` keeps the surface mounted (state preserved) but out of the way
+        // of a page-level native lookup pane — see the `hidden` prop doc.
+        style={hidden ? { ...surfaceStyle, visibility: 'hidden', pointerEvents: 'none' } : surfaceStyle}
         aria-labelledby={titleId}
       >
         <div className={styles.header}>

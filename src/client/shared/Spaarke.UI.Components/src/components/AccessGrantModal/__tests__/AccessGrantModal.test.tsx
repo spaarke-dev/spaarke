@@ -336,7 +336,9 @@ describe('AccessGrantModal (v1.0.26)', () => {
   });
 
   describe('revoke', () => {
-    it('revoking an existing grant calls /revoke and removes it after confirm', async () => {
+    it('revoking an existing grant calls /revoke and removes it after confirm — with zero console errors/warnings', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const props = makeProps();
       renderWithTheme(<AccessGrantModal {...props} />);
 
@@ -361,6 +363,11 @@ describe('AccessGrantModal (v1.0.26)', () => {
       expect(body.projectId).toBeUndefined();
 
       await waitFor(() => expect(screen.queryByText('Prior Grantee')).not.toBeInTheDocument());
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     });
   });
 
@@ -387,7 +394,7 @@ describe('AccessGrantModal (v1.0.26)', () => {
   });
 
   describe('console-error-check', () => {
-    it('opens, grants, and revokes with zero console errors/warnings', async () => {
+    it('opens and grants with zero console errors/warnings', async () => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -398,20 +405,11 @@ describe('AccessGrantModal (v1.0.26)', () => {
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Jane Outside' }));
       await pickLevelFor('Jane Outside', 'View Only');
       fireEvent.click(addButton());
-      // Wait for the grant's SUCCESS notice — it only appears after the grant's
-      // trailing loadData() re-render settles, so the subsequent revoke doesn't
-      // race an in-flight refresh.
       await screen.findByText(/Granted access to 1 item/);
 
-      await screen.findByText('Prior Grantee');
-      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
-      await screen.findByText('Revoke access?');
-      const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(revokeButtons[revokeButtons.length - 1]);
-      await waitFor(() =>
-        expect(props.authenticatedFetch).toHaveBeenCalledWith('/api/v1/external-access/revoke', expect.anything())
-      );
-
+      // Revoke's console-cleanliness is asserted in the dedicated revoke test —
+      // combining grant+revoke here races the grant's trailing loadData() in the
+      // full-suite run (flaky), so this check stays scoped to the grant path.
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();
 

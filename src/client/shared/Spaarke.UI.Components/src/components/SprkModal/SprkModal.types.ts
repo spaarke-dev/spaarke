@@ -47,6 +47,17 @@ export interface SprkModalProps {
    * not dim the background — use only when a host-level lookup pane must overlay it.
    */
   nonBlocking?: boolean;
+  /**
+   * When `true`, the modal stays MOUNTED (all state preserved) but its surface is
+   * rendered `visibility: hidden` + `pointer-events: none` — invisible and
+   * non-interactive. Used together with `nonBlocking` to get a page-level native
+   * lookup pane (Xrm.Utility.lookupObjects) fully in the clear: the caller flips
+   * `hidden` on while the lookup is open, so the (higher-z-index) dialog surface
+   * doesn't cover it, then flips it off when the pick resolves — the modal
+   * reappears with the pick applied, its in-progress state intact (unlike an
+   * open→false unmount, which would reset it). Default `false`.
+   */
+  hidden?: boolean;
   /** The `--sprk-ui-scale` factor for sizing (default 1). */
   uiScale?: number;
   /** Whether the maximize/restore control is shown (default true). */

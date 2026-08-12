@@ -287,10 +287,32 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     return [{ entityType: regarding.entityType, entityId: regarding.id, entityName: regarding.name }, ...base];
   }, [associations, regarding]);
 
+  // While a native lookup pane (To/Cc people picker, "link a record"/"add a
+  // relationship" advanced lookup) is open, HIDE this surface so the (higher
+  // z-index) modal doesn't cover it — same fix as AccessGrantModal (owner UAT
+  // 2026-08-12 #2A/#2B). The modal stays mounted; the draft is preserved. Only
+  // applies when `nonBlocking` (an MDA/PCF host that wired the native lookups).
+  const [lookupHidden, setLookupHidden] = React.useState(false);
+  const wrapLookup = React.useCallback(
+    function <A extends unknown[], R>(fn?: (...args: A) => Promise<R>): ((...args: A) => Promise<R>) | undefined {
+      if (!fn || !nonBlocking) return fn;
+      return async (...args: A): Promise<R> => {
+        setLookupHidden(true);
+        try {
+          return await fn(...args);
+        } finally {
+          setLookupHidden(false);
+        }
+      };
+    },
+    [nonBlocking]
+  );
+
   return (
     <SprkModal
       open={open}
       onClose={onClose}
+      hidden={lookupHidden}
       title={title}
       // fullBleed hosts (record-modal reply, dedicated compose window) start —
       // and stay — at the shell's true-takeover `full` size; everyone else gets
@@ -311,6 +333,11 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     >
       <EmailComposer
         {...composerProps}
+        // Wrap the native-lookup callbacks so the modal auto-hides while the
+        // Xrm lookup pane is open (#2A/#2B). No-op when not nonBlocking.
+        onLookupRecipients={wrapLookup(composerProps.onLookupRecipients)}
+        onLookupRecord={wrapLookup(composerProps.onLookupRecord)}
+        onAddRelationship={wrapLookup(composerProps.onAddRelationship)}
         associations={mergedAssociations}
         mount="dialog"
         mode={effectiveMode}
