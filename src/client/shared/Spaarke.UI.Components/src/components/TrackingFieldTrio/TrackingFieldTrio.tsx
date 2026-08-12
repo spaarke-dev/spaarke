@@ -176,6 +176,9 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     minHeight: '32px',
     columnGap: tokens.spacingHorizontalM,
+    // Breathing room below the header/title/toolbar row before the field row
+    // (owner UAT v1.0.20 follow-up).
+    marginBottom: tokens.spacingVerticalS,
   },
   headerTitle: {
     // 14px semibold per owner UAT #3 (fontSizeBase300 = 14px, fontWeightSemibold

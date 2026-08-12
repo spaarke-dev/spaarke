@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="TrackingFieldTrio"
-           version="1.0.20"
+           version="1.0.21"
            display-name-key="Tracking Field Trio"
-           description-key="Compact 3-field control for tracking flags (v1.0.20). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission), plus an opt-in governance toolbar (grant-access modal + email-members icons) and an optional header title. The grant modal is polymorphic across Project/Matter/Work Assignment and uses in-app inline pickers for the contact + organization lookups. Designed to fit inside a 33% form column."
+           description-key="Compact 3-field control for tracking flags (v1.0.21). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission), plus an opt-in governance toolbar (grant-access modal + email-members icons) and an optional header title. The grant modal is polymorphic across Project/Matter/Work Assignment and uses in-app inline pickers for the contact + organization lookups. Designed to fit inside a 33% form column."
            control-type="standard">
     <!-- task 041 — the grant modal calls the BFF external-access endpoints via
          @spaarke/auth's authenticatedFetch (MSAL), so this control now needs
@@ -36,6 +36,17 @@
               usage="bound"
               required="true" />
 
+    <!-- v1.0.21 (task 073 UAT #3) — optional control header title. When set, the
+         control renders a 32px header row with this title (14px semibold) on the
+         left and the governance icons (grant/email) on the right. Ordered first
+         (owner UAT v1.0.21 follow-up): Header Title, then Show Title, then Show Version. -->
+    <property name="title"
+              display-name-key="Header Title"
+              description-key="Optional header title shown on the left of the control header row (14px semibold). The grant/email icons always sit at the right of that row. Leave blank for an icons-only header."
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
+
     <!-- v1.0.1 — display toggles. v1.0.3 — showTitle default flipped to true
          so captions render out of the box (matches the visual rhythm of the
          standard field labels on adjacent cards). Set to No in form editor
@@ -55,18 +66,6 @@
               usage="input"
               required="false"
               default-value="false" />
-
-    <!-- v1.0.20 (task 073 UAT #3) — optional control header title. When set, the
-         control renders a 32px header row with this title (14px semibold) on the
-         left and the governance icons (grant/email) on the right. When left
-         blank, no header is drawn and the icons keep their prior top-right
-         placement (backward-compatible). -->
-    <property name="title"
-              display-name-key="Header Title"
-              description-key="Optional header title shown above the control (14px semibold, in a 32px row with the grant/email icons on the right). Leave blank for no header."
-              of-type="SingleLine.Text"
-              usage="input"
-              required="false" />
 
     <!-- v1.0.9 (task 041, teams-app-r1) — auth config for the access-grant
          modal's BFF calls (@spaarke/auth). Mirrors SemanticSearchControl's
