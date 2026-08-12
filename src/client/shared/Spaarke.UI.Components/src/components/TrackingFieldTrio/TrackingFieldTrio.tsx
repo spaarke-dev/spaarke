@@ -2,7 +2,9 @@
  * TrackingFieldTrio — entity-agnostic shared core (FR-14, task 023).
  *
  * Renders and read/writes three tracking flags: a Monitor toggle, a High
- * Priority toggle, and an access-permission segmented picker. Lifted from
+ * Priority toggle, and an access-permission dropdown (owner UAT v1.0.24 #2 —
+ * was a 3-button segmented picker; changed to a single-value dropdown that
+ * fits any width instead of sprawling horizontally). Lifted from
  * the `TrackingFieldTrio` PCF's `TrackingFieldTrioApp.tsx` into
  * `@spaarke/ui-components` so both the OOB-form PCF (React 16/17) and the
  * Phase-3 reading-pane tracking view (React 19, task 035) can consume ONE
@@ -44,8 +46,9 @@ import {
   Text,
   Button,
   Tooltip,
+  Dropdown,
+  Option,
   shorthands,
-  mergeClasses,
 } from '@fluentui/react-components';
 import { PersonRegular, MailRegular } from '@fluentui/react-icons';
 import type { IAccessPermissionOption, ITrackingFieldTrioProps } from './types';
@@ -130,33 +133,14 @@ const useStyles = makeStyles({
     // vertically within the row and their baselines line up.
     minHeight: '32px',
   },
-  segmentGroup: {
-    display: 'flex',
-    flexDirection: 'row',
-    ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.overflow('hidden'),
-  },
-  segment: {
-    ...shorthands.borderRadius(0),
-    ...shorthands.border(0),
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
-    minWidth: '76px',
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase200,
-    minHeight: '28px',
-  },
-  segmentUnselected: {
-    backgroundColor: tokens.colorNeutralBackground4,
-    color: tokens.colorNeutralForeground2,
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground4Hover,
-      color: tokens.colorNeutralForeground2,
-    },
-  },
-  segmentSeparator: {
-    borderLeftWidth: '1px',
-    borderLeftStyle: 'solid',
-    borderLeftColor: tokens.colorNeutralStroke2,
+  // Access Permission dropdown (owner UAT v1.0.24 #2) — replaces the 3-button
+  // segmented picker, which sprawled horizontally and got cut off at lower
+  // resolutions. A single-value dropdown fits any width; the selected value keeps
+  // its pale semantic tint (Standard/Limited/Restricted) via the `button` slot.
+  accessDropdown: {
+    minWidth: '120px',
+    maxWidth: '160px',
+    width: '100%',
   },
   versionFooter: {
     gridColumn: '1 / -1',
@@ -322,35 +306,37 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
           labelPosition="after"
         />
       </div>
-      <div
-        className={mergeClasses(styles.controlCell, styles.segmentGroup)}
-        role="radiogroup"
-        aria-label={accessPermissionLabel}
-      >
-        {accessPermissionOptions.map((opt, idx) => {
-          const isSelected = accessPermission === opt.value;
-          const selectedColors = isSelected ? getSelectedSegmentColors(idx, opt) : null;
+      <div className={styles.controlCell}>
+        {/* Access Permission dropdown (owner UAT v1.0.24 #2) — single value, no
+            horizontal sprawl. Default display = the first option ("Standard") when
+            the bound value is unset; the selected value keeps its pale semantic
+            tint via the trigger `button` slot. */}
+        {(() => {
+          const selIdx = accessPermissionOptions.findIndex(o => o.value === accessPermission);
+          const idx = selIdx >= 0 ? selIdx : 0;
+          const selOpt = accessPermissionOptions[idx];
+          const colors = selOpt ? getSelectedSegmentColors(idx, selOpt) : undefined;
           return (
-            <Button
-              key={opt.value}
-              appearance="subtle"
-              role="radio"
-              aria-checked={isSelected}
-              onClick={() => onAccessPermissionChange(opt.value)}
-              className={mergeClasses(
-                styles.segment,
-                !isSelected && styles.segmentUnselected,
-                idx > 0 && !isSelected && styles.segmentSeparator
-              )}
-              // Selected background/foreground come from the injected option's
-              // color (pale via rgba(alpha=0.28)) or the position-based
-              // fallback palette.
-              style={selectedColors ? { backgroundColor: selectedColors.bg, color: selectedColors.fg } : undefined}
+            <Dropdown
+              className={styles.accessDropdown}
+              aria-label={accessPermissionLabel}
+              value={selOpt?.label ?? ''}
+              selectedOptions={selOpt ? [String(selOpt.value)] : []}
+              button={{
+                style: colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined,
+              }}
+              onOptionSelect={(_, data) => {
+                if (data.optionValue !== undefined) onAccessPermissionChange(Number(data.optionValue));
+              }}
             >
-              {opt.label}
-            </Button>
+              {accessPermissionOptions.map(opt => (
+                <Option key={opt.value} value={String(opt.value)} text={opt.label}>
+                  {opt.label}
+                </Option>
+              ))}
+            </Dropdown>
           );
-        })}
+        })()}
       </div>
 
       {showVersion && versionText && <span className={styles.versionFooter}>{versionText}</span>}

@@ -378,16 +378,42 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
   /** Opens the Contact record as an OOB modal (task 073 UAT v1.0.24 #6) via
    * `Xrm.Navigation.navigateTo` (entityrecord, `target: 2` = dialog) — per
    * MODAL-DECISION-CRITERIA, opening a record uses the OOB navigator, not a
-   * proprietary Fluent dialog. A user with write access can then edit the Contact. */
+   * proprietary Fluent dialog. A user with write access can then edit the Contact.
+   *
+   * v1.0.24 UAT #1: the Manage Access modal is a Fluent portal (top-window
+   * z-index) that renders ABOVE the platform Contact dialog, so the Contact
+   * dialog appeared BEHIND it. Fix: HIDE Manage Access while the Contact dialog
+   * is open (so the Contact dialog is unambiguously in front and fully covers it)
+   * and RESTORE it when the Contact dialog closes. The dialog opens large (70% ×
+   * 80%) so it covers the Manage Access footprint. */
   private openContactRecord = (contactId: string): void => {
     const xrm = this.getXrm();
+    const wasGrantOpen = this.isGrantModalOpen;
+    const restore = (): void => {
+      if (wasGrantOpen && !this.isGrantModalOpen) {
+        this.isGrantModalOpen = true;
+        this.renderControl();
+      }
+    };
     try {
-      void xrm?.Navigation?.navigateTo?.(
+      if (wasGrantOpen) {
+        this.isGrantModalOpen = false;
+        this.renderControl();
+      }
+      const p = xrm?.Navigation?.navigateTo?.(
         { pageType: 'entityrecord', entityName: 'contact', entityId: contactId },
-        { target: 2, position: 1, width: { value: 60, unit: '%' } }
+        { target: 2, position: 1, width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } }
       );
+      // navigateTo resolves/rejects when the dialog closes — restore Manage Access
+      // either way. If a host returns no thenable (legacy), restore immediately.
+      if (p && typeof p.then === 'function') {
+        p.then(restore, restore);
+      } else {
+        restore();
+      }
     } catch (err) {
       console.warn('[TrackingFieldTrio] open Contact record failed.', err);
+      restore();
     }
   };
 
@@ -797,7 +823,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.24 • Built 2026-08-12',
+      versionText: 'v1.0.25 • Built 2026-08-12',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
