@@ -209,9 +209,8 @@ describe('useEmailComposeActions — FR-10 thread-preserving bodyOverride (BINDI
       act(() => result.current.openComposer(mode, 'comm-1', { bodyOverride: AI_DRAFT }));
       await waitFor(() => expect(result.current.composerDialog.props.initialBody).toBeDefined());
 
-      const quotedThread = (
-        result.current.composerDialog.props as unknown as { initialQuotedThread?: string }
-      ).initialQuotedThread;
+      const quotedThread = (result.current.composerDialog.props as unknown as { initialQuotedThread?: string })
+        .initialQuotedThread;
       expect(quotedThread).toBeTruthy();
       expect(quotedThread).toContain(THREAD_MARKER);
       // The seeded quotedThread is exactly the tail of the composed initialBody (byte-identical

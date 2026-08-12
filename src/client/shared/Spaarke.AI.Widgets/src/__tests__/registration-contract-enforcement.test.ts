@@ -87,7 +87,13 @@ describe('FR-15 completeness scan — every registered widget declares a contrac
 
     for (const type of types) {
       const contract = registry.getWorkspaceWidgetMetadata(type)!.assistantContract as
-        | { optOut?: boolean; reason?: string; overviewTools?: unknown; perItemCards?: unknown; interactionPattern?: unknown }
+        | {
+            optOut?: boolean;
+            reason?: string;
+            overviewTools?: unknown;
+            perItemCards?: unknown;
+            interactionPattern?: unknown;
+          }
         | undefined;
 
       // Required member — never undefined post-050.
@@ -143,11 +149,23 @@ describe('FR-15 runtime guard — a registration missing the contract fails at e
   const SITE_METADATA_WITHOUT_CONTRACT: ReadonlyArray<{ site: string; metadata: Record<string, unknown> }> = [
     {
       site: 'register-workspace-widgets (grid/output/dispatcher)',
-      metadata: { displayName: 'Bad Grid', category: 'data', allowMultiple: true, defaultOrder: 999, contextType: 'matter-grid' },
+      metadata: {
+        displayName: 'Bad Grid',
+        category: 'data',
+        allowMultiple: true,
+        defaultOrder: 999,
+        contextType: 'matter-grid',
+      },
     },
     {
       site: 'register-document-viewer-widget',
-      metadata: { displayName: 'Bad Doc Viewer', category: 'document', allowMultiple: true, defaultOrder: 998, contextType: 'document' },
+      metadata: {
+        displayName: 'Bad Doc Viewer',
+        category: 'document',
+        allowMultiple: true,
+        defaultOrder: 998,
+        contextType: 'document',
+      },
     },
     {
       site: 'register-search-criteria-result-widget',
@@ -159,7 +177,13 @@ describe('FR-15 runtime guard — a registration missing the contract fails at e
     },
     {
       site: 'registerComposeWidget (SpaarkeAi)',
-      metadata: { displayName: 'Bad Compose', category: 'document', allowMultiple: false, defaultOrder: 995, contextType: 'compose-doc' },
+      metadata: {
+        displayName: 'Bad Compose',
+        category: 'document',
+        allowMultiple: false,
+        defaultOrder: 995,
+        contextType: 'compose-doc',
+      },
     },
   ];
 
@@ -234,9 +258,9 @@ describe('FR-15 runtime guard — a registration missing the contract fails at e
 
   it('replaceWorkspaceWidget applies the same guard (a contract-less replacement THROWS)', () => {
     const meta = { displayName: 'Bad Replace', category: 'test', allowMultiple: false, defaultOrder: 990 };
-    expect(() =>
-      registry.replaceWorkspaceWidget('bad-replace', meta as unknown as WidgetMetadata, okFactory)
-    ).toThrow(/missing the REQUIRED assistantContract/i);
+    expect(() => registry.replaceWorkspaceWidget('bad-replace', meta as unknown as WidgetMetadata, okFactory)).toThrow(
+      /missing the REQUIRED assistantContract/i
+    );
   });
 });
 
