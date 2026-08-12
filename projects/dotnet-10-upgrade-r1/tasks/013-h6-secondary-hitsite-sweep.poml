@@ -4,7 +4,7 @@
     <title>H6 + secondary hit-site sweep (grep + per-item verdict)</title>
     <phase>P1 Hit-site remediation</phase>
     <gate>005 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Multiple behavioral .NET 9/10 changes across the BFF; root-cause grep sweep; bff-api tag.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,7 +82,9 @@
     <criterion testable="true">Negative: no item is left unassessed (no illustrative subset).</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-10. H6 is expected n/a per research greps — re-verify. Coordinate the App Service `DOTNET_*`/config audit with task 050.</notes>
+  <notes>spec FR-10. H6 is expected n/a per research greps — re-verify. Coordinate the App Service `DOTNET_*`/config audit with task 050.
+
+  COMPLETION (2026-08-12): Closed 10-item sweep (8 from design §5/FR-10 + 2 from task-001 re-scrape follow-up #2). **ALL 10 items = n/a → ZERO code changes.** BFF net10 Release build GREEN (0 errors, 21 warnings = unchanged post-012 baseline; **0× CS9258/CS9259** = definitive `field`-keyword clearance). Verdicts: (1) H6 `ConfigurePrimaryHttpMessageHandler` 0 matches; (2) `System.Linq.Async` 0 csproj refs; (3) `field` keyword — only comments/strings + method-body locals, no property-accessor identifier, build 0× CS9258; (4) `IPNetwork`/`KnownNetworks` 0 matches; (5) `IExceptionHandler.TryHandleAsync` — no interface impl, only lambda `UseExceptionHandler` with explicit `logger.LogError` (MiddlewarePipelineExtensions.cs:29-60), suppression change n/a, `SuppressDiagnosticsCallback` not needed; (6) config-null — 2 nulls both in `appsettings.template.json` (CopyToPublishDirectory=Never, not runtime-loaded) + all consumers `IsNullOrWhiteSpace`/`??` null-tolerant; (7) `DOTNET_*` — 0 App Service app settings in infra (`.github` hits are CI runner vars + `DOTNET_VERSION:'8.x'`=task 040); (8) `MailAddress` — 2 outbound-recipient validators only, no inbound parsing, escalation trigger did NOT fire; (9) C#14 span/array overload — build clean, no ambiguity; (10) `XmlSerializer` 0 matches (re-scrape's ComposeService note stale). Escalation triggers (MailAddress, config) did not fire. Step 9.5 quality gates N/A (zero source/test changes — doc-only, same as task 010). Downstream coordination noted: task 050 (live-env `DOTNET_*` confirm), task 040 (CI `DOTNET_VERSION`), task 031/032 (2× residual NU1510 on BFF — H4/P0 hygiene, not a behavioral sweep item), task 051 (ActivitySource/W3C propagator smoke). Full closed checklist: `notes/secondary-sweep.md`.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

@@ -4,7 +4,7 @@
     <title>H2 — adversarial verification of DI-graph fixes by a non-author</title>
     <phase>P2 Dev-boot DI validation</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Independent behavioral verification of DI fixes (NFR-07); mandatory non-author pass.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -81,7 +81,9 @@
     <criterion testable="true">Negative: the reviewer is a different agent than the task-020 author (recorded).</criterion>
   </acceptance-criteria>
 
-  <notes>spec NFR-07. Pairs with task 020. Dispatch as a separate agent/session.</notes>
+  <notes>spec NFR-07. Pairs with task 020. Dispatch as a separate agent/session.
+
+  COMPLETION (2026-08-12): Executed by a NON-AUTHOR opus subagent in an isolated worktree (different agent than task 020's main-session + `fix-h2` author). **Verdict: PASS.** Independently re-ran `dotnet test ... --filter DiGraphValidationTests` on net10 → `Passed: 1, Failed: 0` (clean boot confirmed without trusting the author). All 10 roots R1–R10 CONFIRMED behavior-preserving (0 REFUTED). Stream-scope lifetimes (R1 UploadFinalizationWorker, R9 CommunicationService) CONFIRMED — every SPE stream materialized to memory (CopyToAsync→ToArray / in-memory MemoryStream) before scope disposal; no use-after-dispose; behavior-preservation rests on `SpeFileStore` being a stateless ADR-007 facade (holds). R5 ActionResolver demote + NullActionResolver symmetry CONFIRMED (stateless resolver; no singleton consumer via grep; guard-pass dispositive; null-object P3 fail-fast throw unchanged by lifetime). `ValidateOnBuild`/`ValidateScopes` NOT disabled anywhere in production (only test-fixture, which the guard re-enables). Guard test `DiGraphValidationTests.cs` truly asserts (reachable `Assert.Fail`, network-free, no file I/O) — recommend KEEP. No §6.5 escalation. Task 020 stands (not reopened). Full report: `notes/h2-verification.md`.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

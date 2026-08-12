@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-12 (by context-handoff — P0+P1(010/011/012)+P2(020) done; 021 next)
+> **Last Updated**: 2026-08-12 (by task-execute — 013 ✅ ‖ 021 ✅ parallel wave done; P2 COMPLETE; only 014 left in P1 before P3)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | P0 (001–005 ✅) · P1: **010 ✅ 011 ✅(PASS) 012 ✅** (013/014 remain) · P2: **020 ✅** (021 remains). BFF build GREEN net10; graph vulnerable-clean; DI graph passes ValidateOnBuild/ValidateScopes. |
-| **Active task** | none active — **020 H2 ✅ COMPLETE + independently verified**. Next: **021** (H2 adversarial verify, non-author). |
-| **Status** | between-tasks (clean tree, all pushed) |
-| **Next Action** | Dispatch **021** to a fresh opus subagent (NON-AUTHOR per NFR-07; the fix was done by main session + `fix-h2` subagent — 021 MUST be a different agent): independently re-run the DI-graph guard (`dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --filter DiGraphValidationTests`), review the 10-root fixes in `notes/h2-di-validation.md` §4 for NFR-01 behavior preservation (esp. stream-scope lifetimes in R1 UploadFinalizationWorker + R9 CommunicationService), confirm no captive dep remains + no functional change. Read-only → **CAN overlap 013 (H6 sweep)** as a parallel wave. Remaining after 021: **013** (H6 secondary sweep), **014** (FR-06 telemetry), then P3 **030**→**033**→**031/032** (013/014/020/021 all gate 030). |
+| **Project phase** | P0 (001–005 ✅) · P1: **010 ✅ 011 ✅ 012 ✅ 013 ✅** (only **014** remains) · P2: **020 ✅ 021 ✅ COMPLETE**. BFF build GREEN net10 (0 err, 21 warn = post-012 baseline); graph vulnerable-clean; DI graph passes ValidateOnBuild/ValidateScopes (adversarially verified). |
+| **Active task** | none active — **013 H6 sweep ✅ + 021 H2 verify ✅ (parallel wave complete)**. Next: **014** (FR-06 telemetry consolidation) — the LAST P1 blocker for P3/030. |
+| **Status** | between-tasks (uncommitted: 013+021 artifacts — commit+push pending this turn) |
+| **Next Action** | Run `task-execute` on **014** (`tasks/014-fr06-telemetry-consolidation.poml`): remove classic `Microsoft.ApplicationInsights.AspNetCore` SDK; verify OpenTelemetry→Azure Monitor is the sole telemetry path (12 Meters + Redis instrumentation intact). Touches Program.cs + BFF csproj → serial (no overlap with a build-bearing task). Deps 004 ✅. **After 014 → P3 opens: 030** (full test suite green; gates on 013✅/014/020✅/021✅) **→ 033** (Graph6/Kiota2) **→ 031/032** (publish re-baseline + CVE). |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; exists on origin) |
 | **Git** | ✅ **CLEAN — tip `d9eb30305`, 0 unpushed, 44 behind origin/master.** Session commits: P0 001 `8077e33f5`·002 `3f6027aa5`·003 `9b7e9b1ea`·004 `d39de8665`·005 `cdb31e0b0` · 010 `969e15471` · 011+012 `5191efb6a` · **020 `d9eb30305`**. **NOT merged to master — deferred per owner sequencing.** Safe to `/compact`. |
 
@@ -21,6 +21,15 @@
 - Fixes (behavior-preserving, NFR-01): **Family A scope-per-unit-of-work** (IServiceScopeFactory, scope spans stream consumption) for R1/R2/R3/R4/R6/R7/R8/R9/R10; **Family B demote singleton→scoped** for R5 ActionResolver (+ NullActionResolver peer, ADR-032 symmetry) — safe because the CLEAN probe proves no singleton consumer. 9 BFF source + 24 test files + 2 scope-factory stubs.
 - **FR-08 honored** (validations NOT disabled; no IsDevelopment branch; Production path unaffected). Probe **promoted** to permanent CI guard `tests/unit/Sprk.Bff.Api.Tests/DiGraphValidationTests.cs` (asserting, network-free) — flagged for 021/030 shape review.
 - Main-session independent verification: probe CLEAN + BFF Release build 0 errors + targeted Nodes/Communication tests 44 pass/0 fail + full 9-file diff review (stream scopes span consumption). Step 9.5 code-review + adr-check PASS. Full detail: `notes/h2-di-validation.md`.
+
+### H2 ADVERSARIAL VERIFY (021) — PASS, do NOT re-derive
+- **Non-author opus subagent (isolated worktree) → PASS.** Independently re-ran `dotnet test ... --filter DiGraphValidationTests` on net10 = `Passed: 1, Failed: 0` (clean boot confirmed without trusting author). **All 10 roots R1–R10 CONFIRMED behavior-preserving; 0 REFUTED → task 020 stands.**
+- Stream-scope lifetimes (R1/R9) CONFIRMED: every SPE stream materialized to memory before scope disposal (no use-after-dispose); rests on `SpeFileStore` stateless ADR-007 facade. R5 demote + NullActionResolver symmetry CONFIRMED (stateless resolver, no singleton consumer, guard-pass dispositive, null-object throw unaffected by lifetime). ValidateOnBuild/ValidateScopes NOT disabled in production. Guard test truly asserts (KEEP). No §6.5. Full report: `notes/h2-verification.md`.
+
+### H6 result (013) — do NOT re-derive
+- **Closed 10-item secondary sweep → ALL n/a → ZERO code changes.** (8 design-§5/FR-10 items + 2 re-scrape follow-up items.) BFF net10 Release build GREEN (0 err, 21 warn = unchanged post-012 baseline; **0× CS9258/CS9259** = definitive `field`-keyword clearance).
+- n/a verdicts: H6 handler-cast (0 matches) · System.Linq.Async (0 csproj) · `field` keyword (comments/locals only, no accessor identifier) · IPNetwork/KnownNetworks (0) · IExceptionHandler (lambda handler w/ explicit LogError, no interface impl) · config-null (2 nulls in non-runtime-loaded `appsettings.template.json`; all consumers `IsNullOrWhiteSpace`/`??`) · DOTNET_* (0 App Service settings in infra) · MailAddress (2 outbound validators only, no inbound parse — escalation did NOT fire) · C#14 overload (build clean) · XmlSerializer (0 matches; re-scrape ComposeService note stale).
+- Downstream (NOT 013 fixes): task 050 live-env `DOTNET_*` confirm · task 040 CI `DOTNET_VERSION:'8.x'` bump · task 031/032 2× residual NU1510 on BFF (H4/P0 hygiene) · task 051 ActivitySource/W3C propagator smoke. Full checklist: `notes/secondary-sweep.md`.
 
 ### H1 result (010+011) — VERIFIED, do NOT re-derive
 - **28 hosted-service implementers (closed set, grep) → 28 SAFE · 0 REMEDIATE · 0 code changes.** Author doc `notes/h1-backgroundservice-audit.md`; non-author PASS `notes/h1-adversarial-verification.md` (independent grep MATCH=28; all 28 CONFIRMED; 0 refuted/missed).
