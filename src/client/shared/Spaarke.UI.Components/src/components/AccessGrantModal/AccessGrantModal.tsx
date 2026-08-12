@@ -564,7 +564,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
     const granted: string[] = [];
     if (toGrant.length - failures > 0) granted.push(`${toGrant.length - failures} contact(s)`);
-    if (orgGranted) granted.push(`everyone at ${orgToGrant!.name}`);
+    if (orgGranted) granted.push(`all contacts at ${orgToGrant!.name}`);
     const grantedText = granted.length > 0 ? granted.join(' and ') : 'no one';
 
     if (failures > 0 || orgFailed) {
@@ -793,7 +793,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       <BuildingRegular />
                       <div className={styles.rowMain}>
                         <Text className={styles.rowName}>{pickedOrg.name}</Text>
-                        <Text className={styles.rowMeta}>Grants access to everyone at this firm</Text>
+                        <Text className={styles.rowMeta}>Grants access to all organization contacts</Text>
                       </div>
                       <Button
                         appearance="subtle"
@@ -893,7 +893,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                               {isStanding
                                 ? 'Standing grant — ongoing access to assigned records'
                                 : isOrg
-                                  ? 'Organization grant — everyone at this firm has access'
+                                  ? 'Organization grant — all organization contacts have access'
                                   : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
                             </Text>
                           </div>

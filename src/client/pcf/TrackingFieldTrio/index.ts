@@ -516,16 +516,16 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       const contactId = (row['_sprk_contact_value'] as string) ?? '';
       const organizationId = (row['_sprk_organization_value'] as string) ?? '';
       // An ORGANIZATION grant (task 073 #7) is a row with NO contact + an organization set — it grants
-      // access to everyone at that firm, so it renders as "Everyone at {firm}" (revocable) instead of a
-      // person. A normal per-contact grant keeps the contact's name.
+      // access to all contacts at that organization, so it renders as "All contacts at {org}" (revocable)
+      // instead of a person. A normal per-contact grant keeps the contact's name.
       const isOrgGrant = !contactId && !!organizationId;
-      const orgName = (row[`_sprk_organization_value${FORMATTED}`] as string) ?? 'this firm';
+      const orgName = (row[`_sprk_organization_value${FORMATTED}`] as string) ?? 'this organization';
       return {
         accessRecordId: row.sprk_externalrecordaccessid as string,
         // Org rows have no contact — use the org id so the row still has a stable, non-empty key.
         contactId: isOrgGrant ? organizationId : contactId,
         fullName: isOrgGrant
-          ? `Everyone at ${orgName}`
+          ? `All contacts at ${orgName}`
           : ((row[`_sprk_contact_value${FORMATTED}`] as string) ?? '(unknown contact)'),
         email: undefined,
         accessLevel: row.sprk_accesslevel as number,
@@ -729,7 +729,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.21 • Built 2026-08-12',
+      versionText: 'v1.0.22 • Built 2026-08-12',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
