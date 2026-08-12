@@ -26,11 +26,14 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class GrantExternalAccessEndpoint
 {
     private const string EntitySet = "sprk_externalrecordaccesses";
-    // Resource identifier for ITenantCache (FR-05). Tenant scope is derived from the caller's
-    // 'tid' claim. The cached value is a list of active participations per Contact — not an
-    // authorization decision.
-    private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 1;
+    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
+    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
+    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so grant
+    // invalidation never actually cleared the cache (it relied on the 60s TTL). Tenant scope is derived
+    // from the caller's 'tid' claim; the cached value is per-Contact participation data, not an authz
+    // decision (ADR-009).
+    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
+    private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     /// <summary>
     /// Registers the grant endpoint on the external-access group.

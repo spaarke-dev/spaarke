@@ -18,13 +18,20 @@ public class ExternalParticipationService
     private static readonly TimeSpan CacheTtl = TimeSpan.FromSeconds(60);
     // Resource identifier for ITenantCache (FR-05). Cached value is per-Contact participation
     // data (project list), not an authorization decision per ADR-009.
-    private const string ExternalAccessResource = "external-access-grant";
+    //
+    // PUBLIC by design (task 073 #7): this service is the SINGLE SOURCE OF TRUTH for the participation
+    // cache key. The write-side endpoints that INVALIDATE this cache — GrantExternalAccessEndpoint,
+    // RevokeExternalAccessEndpoint, ProjectClosureEndpoint — MUST reference these constants rather than
+    // re-declaring their own, so a version bump here automatically propagates to every invalidator. (A
+    // prior local `CacheVersion = 1` in those endpoints silently missed the v2/v3 stored key — the exact
+    // drift this shared constant removes.)
+    public const string ExternalAccessResource = "external-access-grant";
     // CacheVersion 2 (task 028): the cached shape widened from project-only participations to the full
     // polymorphic grant set (projects + matters + work assignments). CacheVersion 3 (task 073 #7): the
     // cached grant set now ALSO includes records inherited via ORGANIZATION grants (Term 3 — org
     // memberships from sprk_contactorganization). The bump orphans any v2 entry (it expires on its 60s
     // TTL) so no stale pre-org-grant read can occur.
-    private const int CacheVersion = 3;
+    public const int CacheVersion = 3;
 
     private readonly HttpClient _httpClient;
     private readonly ITenantCache _cache;

@@ -7,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -28,10 +29,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class RevokeExternalAccessEndpoint
 {
     private const string AccessEntitySet = "sprk_externalrecordaccesses";
-    // Resource identifier for ITenantCache (FR-05). Per-Contact participation cache —
-    // not an authz decision. Tenant scope is derived from the caller's 'tid' claim.
-    private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 1;
+    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
+    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
+    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so revoke
+    // invalidation relied on the 60s TTL. Per-Contact participation cache — not an authz decision
+    // (ADR-009); tenant scope is derived from the caller's 'tid' claim.
+    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
+    private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     /// <summary>
     /// Registers the revoke endpoint on the external-access group.
