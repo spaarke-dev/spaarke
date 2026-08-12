@@ -4,7 +4,7 @@
     <title>H3 — migrate obsolete X509Certificate2 ctor to X509CertificateLoader.LoadPkcs12</title>
     <phase>P1 Hit-site remediation</phase>
     <gate>005 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches auth (CIAM cert loading, ADR-028); tags include auth/bff-api.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -79,7 +79,9 @@
     <criterion testable="true">Negative: the certificate source, lifetime, and `EphemeralKeySet` semantics are unchanged.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-09. ADR-028 auth path — OBO/MI smoke happens holistically in task 051, but the cert-load unit coverage lives here.</notes>
+  <notes>spec FR-09. ADR-028 auth path — OBO/MI smoke happens holistically in task 051, but the cert-load unit coverage lives here.
+
+  COMPLETION (2026-08-12): executed by sonnet subagent (`fix-h3`) in parallel with task 011. Single-line change at `CiamGraphClientFactory.cs:167`: `new X509Certificate2(pfxBytes, (string?)null, X509KeyStorageFlags.EphemeralKeySet)` → `X509CertificateLoader.LoadPkcs12(pfxBytes, (string?)null, X509KeyStorageFlags.EphemeralKeySet)`. `byte[]`→`ReadOnlySpan<byte>` implicit; password (null) + `EphemeralKeySet` preserved EXACTLY → cert source/lifetime/key-storage semantics unchanged (negative criterion met). `using System.Security.Cryptography.X509Certificates;` already present. BFF build GREEN (0 errors; warning count 22→21 — **SYSLIB0057 for this file GONE**, verified by log grep). Test coverage gap documented in `notes/h3-x509-loader.md` (LoadCertificateAsync is private + live-SecretClient-dependent; no existing unit exercises it; holistic OBO/MI/CIAM smoke is task 051 — acceptance-criterion escape hatch taken). Scope: ONLY CiamGraphClientFactory.cs changed. Step 9.5: adr-check ADR-028 — cert-load path semantics preserved, no auth-flow change (retarget only), PASS.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

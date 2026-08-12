@@ -4,7 +4,7 @@
     <title>H1 — adversarial verification of BackgroundService verdicts by a non-author</title>
     <phase>P1 Hit-site remediation</phase>
     <gate>010 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Independent behavioral verification of the highest-risk change (NFR-07); mandatory non-author pass.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -81,7 +81,9 @@
     <criterion testable="true">Negative: the reviewer is a different agent than the task-010 author (recorded in the report).</criterion>
   </acceptance-criteria>
 
-  <notes>spec NFR-07. Pairs with task 010. Dispatch as a separate agent/session to satisfy the non-author requirement.</notes>
+  <notes>spec NFR-07. Pairs with task 010. Dispatch as a separate agent/session to satisfy the non-author requirement.
+
+  COMPLETION (2026-08-12): executed by a NON-AUTHOR opus subagent (`verify-h1`), separate from task 010's author (recorded — negative criterion satisfied). Read-only; no source edits, no build. **VERDICT: PASS.** Independent grep closed-set = **28 (MATCH)** = 23 BackgroundService + 5 IHostedService; all 20 non-worker mentions confirmed comment/`IJobHandler`/`IScheduledJob`; archived `JobProcessor.cs.archived-*` legitimately excluded (not `.cs`, not compiled); 0 `IHostedLifecycleService`. **All 28 CONFIRMED SAFE — 0 REFUTED, 0 MISSED** → task 010 NOT reopened (no 🔄). Two residual items empirically closed: §5 dashboard-cache reader `Endpoints/SpeAdmin/DashboardEndpoints.cs:72-76` returns **204 when metrics==null** (built for cold cache — no populate-before-traffic assumption); §6 `CreateProcessor` in ProfileSummaryWorker:82 / IndexingWorkerHostedService:76 uses compile-time `const` queue names + null-checked client → effectively un-throwable, listener wiring not a fail-fast. TodoGenerationService 500.30 constructor-avoidance guard reconfirmed (ctor :168-176 no Dataverse touch; resolution post-await :213). Escalation trigger did NOT fire. Output written to `notes/h1-adversarial-verification.md` (POML goal named `h1-verification.md`; the descriptive name was kept because task 010's audit-doc §8 handoff already cross-references it — filename reconciled here, content complete). H1 (010+011) is DONE + independently verified.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

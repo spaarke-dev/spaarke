@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-12 (by task-execute — task 010 H1 COMPLETE)
+> **Last Updated**: 2026-08-12 (by task-execute — Wave 1 COMPLETE: 010+011+012)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -9,19 +9,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **P1 IN PROGRESS**. P0 (001–005 ✅) + **010 H1 ✅** done. Whole-solution net10 build GREEN; whole graph vulnerable-clean. |
-| **Active task** | `011` — **H1 adversarial verification** (non-author) of task 010's `notes/h1-backgroundservice-audit.md`. |
-| **Status** | not-started |
-| **Next Action** | ⚠️ **011 MUST be run by a NON-AUTHOR (NFR-07)** — this main session authored 010, so dispatch 011 to a fresh subagent (opus) rather than running it inline here. It re-audits the 28-worker closed set + probes the two residual items (audit §5 dashboard-cache cold-tolerance, §6 SB CreateProcessor pre-await-throw). Alternatively proceed to `012` (H3 X509CertificateLoader) / `013` (H6 sweep) which are author-agnostic and depend only on 005 ✅ — 011 can overlap per the V1 group. |
+| **Project phase** | **P1 IN PROGRESS**. P0 (001–005 ✅) + **H1 DONE + verified (010 ✅, 011 ✅ PASS)** + **H3 (012 ✅)**. BFF build GREEN net10; graph vulnerable-clean. |
+| **Active task** | none active — Wave 1 (010+011+012) closed. Choose Wave 2 (see Next Action). |
+| **Status** | between-tasks |
+| **Next Action** | Remaining P1: **013** (H6 secondary sweep) · **014** (FR-06 telemetry consolidation). P2: **020** (H2 dev-boot DI validation — opus/xhigh; unblocked now 010 ✅) + **021** (verify 020). ⚠️ **These contend on `Program.cs` + share the `Sprk.Bff.Api` build output** → NOT safe to fan out as parallel same-worktree agents (bin/obj race + Program.cs merge conflict). Run them **serially**. Recommended order: **020 first** (critical-path long pole: 010→020→030; gates 021 + the full test suite), then 013 → 014, pairing 020 with its non-author verify 021 (which CAN overlap the next code task, like 011 overlapped 012). |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
-| **Git** | Uncommitted: task 010 deliverables (`notes/h1-backgroundservice-audit.md` NEW + 010 POML + TASK-INDEX + this file). Prior tip `aa3056f83`. Session P0 commits: 001 `8077e33f5` · 002 `3f6027aa5` · 003 `9b7e9b1ea` · 004 `d39de8665` · 005 `cdb31e0b0`. **NOT merged to master — deferred per owner sequencing.** |
+| **Git** | Wave 1 committed: `969e15471` (task 010). Wave-1b (011+012) pending commit at this checkpoint. Session P0 commits: 001 `8077e33f5` · 002 `3f6027aa5` · 003 `9b7e9b1ea` · 004 `d39de8665` · 005 `cdb31e0b0`. **NOT merged to master — deferred per owner sequencing.** |
 
-### Task 010 (H1) result — do NOT re-derive
-- **28 hosted-service implementers audited (closed set, grep-discovered)** → **28 SAFE · 0 REMEDIATE · 0 code changes.** Doc: `notes/h1-backgroundservice-audit.md`.
-- **Root cause all-SAFE**: codebase already follows ADR-001 worker discipline. The one genuine fail-fast (config validation) lives in `StartupValidationService : IHostedService.StartAsync` — net10 changes ONLY `BackgroundService.ExecuteAsync`, so it's preserved. Every BackgroundService hits its first `await` after a trivial sync prefix (log + options) and uses graceful `return` (never pre-await `throw`).
-- **`TodoGenerationService` 500.30 guard = constructor-avoidance** (lazy Dataverse resolution kept out of ctor, done post-await line 213). net10 ExecuteAsync-threading change does not touch ctor semantics → guard valid + necessary, unchanged.
-- Escalation trigger did NOT fire. BFF build GREEN net10 (0 errors). Step 9.5: code-review N/A (0 code), adr-check PASS (ADR-001).
-- **Handoff to 011**: two residual empirical items (audit §5, §6) — both argued SAFE (net10 opens no window absent on net8).
+### H1 result (010+011) — VERIFIED, do NOT re-derive
+- **28 hosted-service implementers (closed set, grep) → 28 SAFE · 0 REMEDIATE · 0 code changes.** Author doc `notes/h1-backgroundservice-audit.md`; non-author PASS `notes/h1-adversarial-verification.md` (independent grep MATCH=28; all 28 CONFIRMED; 0 refuted/missed).
+- Root cause all-SAFE: codebase already follows ADR-001. Genuine fail-fast lives in `StartupValidationService : IHostedService.StartAsync` (net10 changes ONLY `BackgroundService.ExecuteAsync`). Every BG hits first `await` after trivial sync prefix; graceful `return` never pre-await `throw`.
+- `TodoGenerationService` 500.30 guard = constructor-avoidance (post-await resolution line 213); net10 doesn't touch ctor semantics.
+- Residuals closed empirically: dashboard cache reader `DashboardEndpoints.cs:72-76` returns 204 on cold cache; SB `CreateProcessor` uses `const` queue names (un-throwable). H1 does NOT reopen.
+
+### H3 result (012) — do NOT re-derive
+- `CiamGraphClientFactory.cs:167` → `X509CertificateLoader.LoadPkcs12(pfxBytes, (string?)null, EphemeralKeySet)`. Flags/password/cert-source unchanged. SYSLIB0057 GONE (warnings 22→21). Build GREEN. Coverage-gap note `notes/h3-x509-loader.md` (private live-secret path → task 051 smoke).
 
 ### net10 retarget state so far (do NOT re-derive)
 - **net10.0 now (P0 COMPLETE)**: `Spaarke.Scheduling` (002), `Spaarke.Core` + `Spaarke.Dataverse` (003), `Sprk.Bff.Api` (004), all 8 `tests/**` (005). Whole-solution `dotnet build -c Release Spaarke.sln` GREEN + BFF publish framework-dependent. `net462` plugin never moves (untouched, verified).
