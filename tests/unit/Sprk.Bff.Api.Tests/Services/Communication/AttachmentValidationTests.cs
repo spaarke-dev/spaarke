@@ -78,7 +78,6 @@ public class AttachmentValidationTests
             Mock.Of<ICommunicationDataverseService>(),
             Mock.Of<IGenericEntityService>(),
             Mock.Of<IDocumentDataverseService>(),
-            null!, // SpeFileStore — not tested here
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),

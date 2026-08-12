@@ -45,13 +45,11 @@ public sealed class EmailTriageSeamTests
         var config = new ConfigurationBuilder().Build();
 
         return new CommunicationEnrichmentService(
-            enqueuer.Object,
+            EnrichmentScopeFactoryStub.Create(
+                enqueuer.Object, triageAi, new NullCommunicationProposeAi(), new NullCommunicationCreateTaskAi()),
             entityService,
             config,
             producer.Object,
-            triageAi,
-            new NullCommunicationProposeAi(),
-            new NullCommunicationCreateTaskAi(),
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             routingGate ?? TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);

@@ -64,7 +64,6 @@ public class PlaybookExecutionTests
                 mockServiceProvider.Object,
                 null!, // ReferenceRetrievalService — not exercised in integration tests
                 Mock.Of<IRagService>(),
-                Mock.Of<IRecordSearchService>(),
                 Mock.Of<ILogger<AiAnalysisNodeExecutor>>()),
             new CreateTaskNodeExecutor(
                 mockTemplateEngine.Object,
@@ -142,7 +141,6 @@ public class PlaybookExecutionTests
                 mockServiceProvider2.Object,
                 null!, // ReferenceRetrievalService — not exercised in integration tests
                 Mock.Of<IRagService>(),
-                Mock.Of<IRecordSearchService>(),
                 Mock.Of<ILogger<AiAnalysisNodeExecutor>>()),
             new CreateTaskNodeExecutor(
                 mockTemplateEngine.Object,

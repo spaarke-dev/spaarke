@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-12 (by task-execute — Wave 1 COMPLETE: 010+011+012)
+> **Last Updated**: 2026-08-12 (by task-execute — 020 H2 COMPLETE + verified; probe promoted to CI guard)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Project phase** | **P1 IN PROGRESS**. P0 (001–005 ✅) + **H1 DONE + verified (010 ✅, 011 ✅ PASS)** + **H3 (012 ✅)**. BFF build GREEN net10; graph vulnerable-clean. |
-| **Active task** | none active — Wave 1 (010+011+012) closed. Choose Wave 2 (see Next Action). |
+| **Active task** | **020 H2 ✅ COMPLETE + verified.** Next: **021** (H2 adversarial verify, non-author). |
 | **Status** | between-tasks |
-| **Next Action** | Remaining P1: **013** (H6 secondary sweep) · **014** (FR-06 telemetry consolidation). P2: **020** (H2 dev-boot DI validation — opus/xhigh; unblocked now 010 ✅) + **021** (verify 020). ⚠️ **These contend on `Program.cs` + share the `Sprk.Bff.Api` build output** → NOT safe to fan out as parallel same-worktree agents (bin/obj race + Program.cs merge conflict). Run them **serially**. Recommended order: **020 first** (critical-path long pole: 010→020→030; gates 021 + the full test suite), then 013 → 014, pairing 020 with its non-author verify 021 (which CAN overlap the next code task, like 011 overlapped 012). |
+| **Next Action** | Dispatch **021** to a fresh opus subagent (NON-AUTHOR, NFR-07): independently re-run the DI-graph guard, review the 10-root fixes for NFR-01 behavior preservation (esp. stream-scope lifetimes in R1/R9), confirm no captive dep remains + no functional change. CAN overlap **013** (H6 sweep). Remaining after: 013, 014, then P3 030→033→031/032. |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; branch already exists on origin) |
 | **Git** | Wave 1 committed: `969e15471` (task 010). Wave-1b (011+012) pending commit at this checkpoint. Session P0 commits: 001 `8077e33f5` · 002 `3f6027aa5` · 003 `9b7e9b1ea` · 004 `d39de8665` · 005 `cdb31e0b0`. **NOT merged to master — deferred per owner sequencing.** |
 

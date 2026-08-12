@@ -4,7 +4,7 @@
     <title>H2 — dev-boot DI validation on net10 (fix ValidateOnBuild/ValidateScopes failures)</title>
     <phase>P2 Dev-boot DI validation</phase>
     <gate>010 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Behavioral .NET 9 change surfacing latent DI defects across ~99 registrations (ADR-032); brownfield root-cause.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -84,7 +84,9 @@
     <criterion testable="true">Any asymmetric feature-gated registration is fixed via the ADR-032 null-object pattern, not by removing the endpoint mapping.</criterion>
   </acceptance-criteria>
 
-  <notes>spec FR-08 + NFR-07 (verified in task 021). This is a quality forcing-function per design §4 principle 5.</notes>
+  <notes>spec FR-08 + NFR-07 (verified in task 021). This is a quality forcing-function per design §4 principle 5.
+
+  COMPLETION (2026-08-12): H2 validation executed in-process without live infra via a diagnostic probe that reused CustomWebAppFactory's neutralization (mocked IDataverseService + fake IGraphClientFactory + RemoveAll&lt;IHostedService&gt; + full fake config) with ValidateOnBuild+ValidateScopes RE-ENABLED. Surfaced **45 captive-dependency (singleton→scoped) errors, zero infra noise**, cascading from **10 root singletons** (7 analysed + R8/R9/R10 unmasked during iteration — the validator reports one captured-scoped dep per descriptor). Probe iterated **45→19→2→0 = CLEAN**. Fixes (all behavior-preserving lifetime/anchoring corrections, NFR-01): **Family A scope-per-unit-of-work** (inject/reuse IServiceScopeFactory, resolve scoped dep in a per-operation scope spanning any stream consumption) for R1 UploadFinalizationWorker, R2 ProfileSummaryWorker, R3 CommunicationEnrichmentService, R4 IncomingCommunicationProcessor, R6 AiAnalysisNodeExecutor, R7 LiveFactNode, R8/R9 CommunicationService/R10; **Family B demote-to-Scoped** for R5 ActionResolver (+ NullActionResolver peer demoted symmetrically per ADR-032 — validated safe because the CLEAN probe proves no singleton consumes it). 9 BFF source files + 24 test files (ctor rewires + 2 scope-factory stubs). **MUST-NOT-disable-validation honored** (FR-08); no IsDevelopment branch; Production path unaffected (env-agnostic lifetime changes). Escalation trigger did NOT fire (no behavior change needed). VERIFIED independently by main session: probe CLEAN + BFF Release build 0 errors + targeted Nodes/Communication tests 44 pass/0 fail + full diff review (stream scopes span consumption). Probe **promoted** to a permanent CI regression guard `tests/unit/Sprk.Bff.Api.Tests/DiGraphValidationTests.cs` (asserting, network-free) — flagged for 021/030 shape review. Closed defect list + as-built fixes: `notes/h2-di-validation.md`. Step 9.5: code-review PASS (scope pattern correct, behavior-preserving); adr-check PASS (ADR-032 symmetry, ADR-010, ADR-001). Adversarially verified next by task 021 (non-author).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

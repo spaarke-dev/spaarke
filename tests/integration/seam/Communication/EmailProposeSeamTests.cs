@@ -123,13 +123,11 @@ public sealed class EmailProposeSeamTests
         var config = new ConfigurationBuilder().Build();
 
         return new CommunicationEnrichmentService(
-            enqueuer.Object,
+            EnrichmentScopeFactoryStub.Create(
+                enqueuer.Object, triageAi.Object, proposeAi, new NullCommunicationCreateTaskAi()),
             entityService,
             config,
             producer.Object,
-            triageAi.Object,
-            proposeAi,
-            new NullCommunicationCreateTaskAi(),
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);

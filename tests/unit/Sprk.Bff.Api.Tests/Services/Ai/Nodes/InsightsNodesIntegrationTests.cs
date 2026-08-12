@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Models.Insights;
@@ -220,9 +221,20 @@ public sealed class InsightsNodesIntegrationTests
         var subjectParser = new SubjectParser(
             Microsoft.Extensions.Options.Options.Create(new SubjectSchemeCatalogOptions()));
 
+        // LiveFactNode resolves the Scoped resolver dictionary from IServiceScopeFactory
+        // (dotnet-10-upgrade task 020, R7). Wire a scope chain that yields the test dictionary.
+        var liveFactScopedProvider = new Mock<IServiceProvider>();
+        liveFactScopedProvider
+            .Setup(sp => sp.GetService(typeof(IReadOnlyDictionary<string, ILiveFactResolver>)))
+            .Returns(resolvers);
+        var liveFactScope = new Mock<IServiceScope>();
+        liveFactScope.Setup(s => s.ServiceProvider).Returns(liveFactScopedProvider.Object);
+        var liveFactScopeFactory = new Mock<IServiceScopeFactory>();
+        liveFactScopeFactory.Setup(f => f.CreateScope()).Returns(liveFactScope.Object);
+
         var executors = new INodeExecutor[]
         {
-            new LiveFactNode(resolvers, subjectParser, NullLogger<LiveFactNode>.Instance),
+            new LiveFactNode(liveFactScopeFactory.Object, subjectParser, NullLogger<LiveFactNode>.Instance),
             new IndexRetrieveNode(searchIndexClient.Object, openAiMock.Object, NullLogger<IndexRetrieveNode>.Instance),
             new EvidenceSufficiencyNode(NullLogger<EvidenceSufficiencyNode>.Instance),
             new DeclineToFindNode(NullLogger<DeclineToFindNode>.Instance),

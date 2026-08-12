@@ -560,7 +560,9 @@ public static class AnalysisServicesModule
         // these peers, minimal-API parameter inference aborts host startup when the
         // compound AI gate is OFF. The endpoint's catch (FeatureDisabledException) emits
         // the SSE error chunk / 503 pattern.
-        services.AddSingleton<IActionResolver, NullActionResolver>();
+        // IActionResolver Null peer is Scoped to stay symmetric with the real ActionResolver
+        // (demoted to Scoped in dotnet-10-upgrade task 020, R5 / ADR-032 lifetime symmetry).
+        services.AddScoped<IActionResolver, NullActionResolver>();
         services.AddSingleton<IActionRunner, NullActionRunner>();
 
         // B6 — IPlaybookService (P3 Fail-Fast). Real impl registered in AddPlaybookServices as typed HttpClient.

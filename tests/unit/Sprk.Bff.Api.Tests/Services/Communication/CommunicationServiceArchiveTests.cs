@@ -56,7 +56,6 @@ public class CommunicationServiceArchiveTests
             Mock.Of<ICommunicationDataverseService>(),
             entityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!, // SpeFileStore — not reached on the idempotent / not-found paths
             null!, // CommunicationAccountService — not reached
             null!, // JobSubmissionService — not reached
             Mock.Of<ICommunicationEnrichmentService>(),

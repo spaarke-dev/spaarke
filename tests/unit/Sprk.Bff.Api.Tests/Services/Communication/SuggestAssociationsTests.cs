@@ -65,7 +65,6 @@ public class SuggestAssociationsTests
             Mock.Of<ICommunicationDataverseService>(),
             entityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!, // SpeFileStore — not reached on the reconstruction path
             null!, // CommunicationAccountService — not reached
             null!, // JobSubmissionService — not reached
             Mock.Of<ICommunicationEnrichmentService>(),
