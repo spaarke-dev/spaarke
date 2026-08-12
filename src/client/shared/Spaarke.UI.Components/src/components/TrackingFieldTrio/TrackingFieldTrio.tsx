@@ -280,13 +280,15 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
 
   return (
     <div className={styles.container}>
-      {/* Control header (task 073 UAT #3) — opt-in via `title`: title left
-          (14px semibold), governance icons right, in a 32px row. When no title
-          is supplied the header is skipped and the icons fall back to the
-          absolute top-right toolbar below (existing-consumer behavior). */}
-      {title && (
+      {/* Control header (task 073 UAT #3, always-on since v1.0.20) — a 32px row
+          with the optional title on the LEFT (14px semibold) and the governance
+          icons (grant/email) on the RIGHT. Renders whenever there are icons OR a
+          title, so the toolbar is ALWAYS in a proper header row rather than
+          floating (owner UAT: "toolbars not in the title row"). When no title is
+          set, an empty spacer keeps the icons right-aligned. */}
+      {(title || toolbarIcons) && (
         <div className={styles.header}>
-          <Text className={styles.headerTitle}>{title}</Text>
+          {title ? <Text className={styles.headerTitle}>{title}</Text> : <span />}
           {toolbarIcons && <div className={styles.headerActions}>{toolbarIcons}</div>}
         </div>
       )}
@@ -347,12 +349,6 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
           );
         })}
       </div>
-
-      {/* Governance toolbar (task 040) — absolute top-right FALLBACK, used only
-          when no `title` is supplied (the header above already hosts the icons
-          when a title is present, task 073 UAT #3). Opt-in per consumer: renders
-          only when a callback is wired, so existing consumers are unchanged. */}
-      {!title && toolbarIcons && <div className={styles.toolbar}>{toolbarIcons}</div>}
 
       {showVersion && versionText && <span className={styles.versionFooter}>{versionText}</span>}
     </div>
