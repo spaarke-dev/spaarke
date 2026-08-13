@@ -61,6 +61,11 @@ import { composeEditorRegistration } from "./sections/composeEditor.registration
 // Outlook-style reading pane over sprk_communication. Pattern D dual-use with
 // the `email` direct widget in @spaarke/ai-widgets/register-workspace-widgets.
 import { emailRegistration } from "./sections/email.registration";
+// email-communication-intelligence-r2 UAT Fix #6 (2026-08-13): Reconciliation
+// section — email-association review/triage/follow-up surface. Pattern D dual-use
+// with the `communications-reconciliation` direct widget; appears as a system
+// widget in the workspace dropdown via a "Reconciliation" sprk_workspacelayout row.
+import { reconciliationRegistration } from "./sections/reconciliation.registration";
 // ai-advanced-capabilities-analysis-hub-r1 (front door, 2026-07-29): Analysis
 // section — the Analysis platform home/launcher (create-by-type cards + grid of
 // sprk_analysis). Pattern D dual-use with the `analysis-hub` direct widget in
@@ -131,6 +136,7 @@ export function createLegalWorkspaceSectionRegistry(
     calendarRegistration,
     composeEditorRegistration,
     emailRegistration,
+    reconciliationRegistration,
     analysisHubRegistration,
   ] as const;
 

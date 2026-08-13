@@ -812,7 +812,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     {
         _logger.LogDebug("Querying email-archive document by communication: {CommunicationId}", communicationId);
 
-        // The Spaarke communication model archives the .eml against sprk_communication (NOT the OOB
+        // The Spaarke communication model archives the .eml against the sprk_relatedcommunication lookup
+        // on sprk_document (NOT a sprk_communication lookup — that column does not exist; NOT the OOB
         // email activity — cf. GetDocumentByEmailLookupAsync). Filter that lookup + IsEmailArchive=true.
         var query = new QueryExpression("sprk_document")
         {
@@ -827,7 +828,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             {
                 Conditions =
                 {
-                    new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId),
+                    new ConditionExpression("sprk_relatedcommunication", ConditionOperator.Equal, communicationId),
                     new ConditionExpression("sprk_isemailarchive", ConditionOperator.Equal, true)
                 }
             },
