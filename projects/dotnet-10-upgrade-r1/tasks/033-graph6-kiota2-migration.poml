@@ -4,7 +4,7 @@
     <title>Graph 5.101 → 6.5.0 + Kiota 1→2 (transitive); retire the 7 Kiota pins + NoWarn</title>
     <phase>P3 Test green + re-baseline</phase>
     <gate>030 complete (full suite green on net10 / Graph 5.x baseline)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Breaking SDK major on a core integration (Graph auth + SPE + mail + jobs); brownfield; bff-api; security-relevant (CVE closure mechanism changes).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -98,7 +98,9 @@
     <criterion testable="true">Negative: no token-acquisition (OBO/MI) flow altered; no `GraphServiceClient` leaked past the `SpeFileStore` facade; no product behavior changed (version migration only).</criterion>
   </acceptance-criteria>
 
-  <notes>Owner-approved scope fold-in 2026-08-11 (supersedes spec §Assumptions "Graph v6 out of scope"); evidence `notes/graph6-kiota2-break-assessment.md`. Sequenced after 030; 031 (publish re-baseline) + 032 (CVE audit) run after this so they measure the final Graph-6 graph. This CLOSES the Graph/Kiota deferred major — it comes OFF the design §6.4 deferred list (090 files 5, not 6).</notes>
+  <notes>Owner-approved scope fold-in 2026-08-11 (supersedes spec §Assumptions "Graph v6 out of scope"); evidence `notes/graph6-kiota2-break-assessment.md`. Sequenced after 030; 031 (publish re-baseline) + 032 (CVE audit) run after this so they measure the final Graph-6 graph. This CLOSES the Graph/Kiota deferred major — it comes OFF the design §6.4 deferred list (090 files 5, not 6).
+
+  COMPLETION (2026-08-13): MECHANICAL as the break-assessment predicted — escalation did NOT fire. `Microsoft.Graph` 5.105.0→**6.5.0** → transitive `Graph.Core 4.0.1` + all 7 `Microsoft.Kiota.*` uniformly **2.0.0** (verified `dotnet list --include-transitive`). Deleted all 7 direct Kiota pins; `NoWarn=NU1903` absent; `dotnet list --vulnerable` = no vulnerable packages (CVE-2026-44503 closed transitively; 2.0.0 > 1.22.0 floor). **ServiceException RETAINED** in Graph.Core 4.x → build 0 errors as-is (the ~72 dead ServiceException catches in the other 6 files left harmless per assessment). Fixed the latent **DriveItemOperations** bug: 40 dead `catch (ServiceException) when (ResponseStatusCode==X)` → `catch (ODataError) when (...)` (dead since v4→v5 Kiota rewrite; Graph 404/403/429 fell through to opaque generic catch) — identical predicate structure; Retry-After adapted to ODataError's `IDictionary<string,IEnumerable<string>>` headers via a `GetRetryAfterSeconds` helper (mirrors OfficeExceptionFilter). Behavior-observation: `ODataError.ResponseHeaders` is a plain string-dict (not `ServiceException`'s typed `HttpResponseHeaders.RetryAfter.Delta`) — handled via helper, no product-behavior change. Executed by a sonnet subagent, **independently verified by main session**: build 0 errors + `Sprk.Bff.Api.Tests` **10408 pass/0 fail/101 skip (identical to baseline — zero regression)** + full diff review (40-catch re-anchoring behavior-preserving) + package-graph + CVE + ADR-029 hygiene (`SelfContained=false`/`linux-x64`/no Trimmed/Aot preserved) + ADR-028 auth flows untouched (only exception-catch types changed, no token-acquisition edits). **Publish ~44.06 MB compressed (decrease from ~45.87 MB excl-PDB baseline) → note for task 031 re-baseline.** Watch item for 051 smoke: `Identity.Web.MicrosoftGraph 4.14.2` transitively requests Graph 5.88.0 (resolved up to 6.5.0) — no build/test issue surfaced, but the live OBO-Graph path should be smoke-confirmed at 051. Live 4-auth-path/SPE/mail/jobs smoke deferred to task 051. Graph/Kiota deferred major now CLOSED (090 files 5 deferred majors, not 6). 3 files changed: csproj, DriveItemOperations.cs, module CLAUDE.md. Commit `9e0903bc3`.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

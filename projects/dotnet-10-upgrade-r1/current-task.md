@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-13 (by task-execute — 030 ✅ COMPLETE: full net10 suite GREEN; master synced (79 commits); all pre-existing arch/test debt fixed at root. Next: 033)
+> **Last Updated**: 2026-08-13 (by task-execute — 033 ✅ Graph6/Kiota2 done (mechanical, suite still 10408 green). Next: 031/032)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Project phase** | **P0 ✅ · P1 ✅ (010–014 all ✅) · P2 ✅ (020/021)**. → **P3 open** (030→033→031/032). BFF build GREEN net10 (0 err, 21 warn = post-012 baseline); graph vulnerable-clean; DI graph adversarially verified; classic App Insights SDK removed (OTel sole path). |
-| **Active task** | none active — **030 ✅ COMPLETE** (full net10 suite green; master synced; all pre-existing arch/test debt fixed at root). Next: **033**. |
-| **Status** | between-tasks (all pushed; branch current with master — behind 0). |
-| **Next Action** | Run `task-execute` on **033** (`tasks/033-*.poml`): Graph 5.101→6.5 + transitive Kiota 1→2; retire the 7 direct Kiota pins + stale `NoWarn=NU1903`. Gates on 030 ✅. Escalation valve if a call site is non-mechanical. **After 033 → 031** (publish re-baseline 🔒 main-session) **/ 032** (transitive CVE audit). Then P4 (040/041/042 CI+deploy) → P5 (050/051 dev deploy = completion gate) → P7 (090 wrap-up). 060/061 deferred. **NOTE**: branch↔master is now synced (master→branch only); the branch→master publish stays deferred to P5 (no cascade to other worktrees yet). |
+| **Active task** | none active — **033 ✅ COMPLETE** (Graph 6.5/Kiota 2.0; mechanical; suite still 10408 green). Next: **031 / 032**. |
+| **Status** | between-tasks (all pushed; branch was current with master at sync — master has since advanced ~39+). |
+| **Next Action** | Run `task-execute` on **031** (publish-size re-baseline 🔒 main-session — writes root `CLAUDE.md` §10 + `.claude/constraints/azure-deployment.md`) and **032** (transitive CVE audit — no HIGH regression). Both gate on 033 ✅ and measure the FINAL Graph-6 package graph. **033 already recorded publish ~44.06 MB compressed (decrease) + `dotnet list --vulnerable`=none** — 031/032 formalize these. Then P4 (040/041/042 CI+deploy) → P5 (050/051 dev deploy = completion gate) → P7 (090 wrap-up). 060/061 deferred. **NOTE**: branch→master publish stays deferred to P5 (no cascade). |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; exists on origin) |
 | **Git** | ✅ **CLEAN — tip `d9eb30305`, 0 unpushed, 44 behind origin/master.** Session commits: P0 001 `8077e33f5`·002 `3f6027aa5`·003 `9b7e9b1ea`·004 `d39de8665`·005 `cdb31e0b0` · 010 `969e15471` · 011+012 `5191efb6a` · **020 `d9eb30305`**. **NOT merged to master — deferred per owner sequencing.** Safe to `/compact`. |
 
@@ -25,6 +25,11 @@
 ### H2 ADVERSARIAL VERIFY (021) — PASS, do NOT re-derive
 - **Non-author opus subagent (isolated worktree) → PASS.** Independently re-ran `dotnet test ... --filter DiGraphValidationTests` on net10 = `Passed: 1, Failed: 0` (clean boot confirmed without trusting author). **All 10 roots R1–R10 CONFIRMED behavior-preserving; 0 REFUTED → task 020 stands.**
 - Stream-scope lifetimes (R1/R9) CONFIRMED: every SPE stream materialized to memory before scope disposal (no use-after-dispose); rests on `SpeFileStore` stateless ADR-007 facade. R5 demote + NullActionResolver symmetry CONFIRMED (stateless resolver, no singleton consumer, guard-pass dispositive, null-object throw unaffected by lifetime). ValidateOnBuild/ValidateScopes NOT disabled in production. Guard test truly asserts (KEEP). No §6.5. Full report: `notes/h2-verification.md`.
+
+### 033 result (COMPLETE) — do NOT re-derive
+- **Graph 5.105→6.5.0 + Kiota 1→2 (transitive). MECHANICAL — escalation did NOT fire.** Graph 6.5.0 → `Graph.Core 4.0.1` + all 7 `Microsoft.Kiota.*` uniformly **2.0.0**; 7 direct Kiota pins DELETED; `NoWarn=NU1903` absent; `dotnet list --vulnerable`=**none** (CVE closed transitively). ServiceException RETAINED (build 0 err as-is).
+- Fixed latent **DriveItemOperations** bug: 40 dead `catch (ServiceException) when (ResponseStatusCode==X)` → `catch (ODataError)` (Graph 404/403/429 now surface; identical predicate; Retry-After via `GetRetryAfterSeconds` for ODataError dict-headers). Behavior-preserving.
+- Executed by sonnet subagent, **main-session verified**: build 0 err + **Sprk.Bff.Api.Tests 10408/0-fail/101-skip (identical to baseline)** + diff review + package-graph + CVE + ADR-029 hygiene (SelfContained=false/linux-x64/no Trimmed-Aot) + ADR-028 auth untouched. **Publish ~44.06 MB compressed (decrease from ~45.87 excl-PDB) → task 031.** 051-smoke watch: `Identity.Web.MicrosoftGraph 4.14.2` transitively wants Graph 5.88.0 (resolved→6.5.0; no build/test issue). Graph/Kiota deferred major CLOSED (090: 5 deferred majors). Commit `9e0903bc3`.
 
 ### 030 result (COMPLETE) — do NOT re-derive
 - **Full net10 suite GREEN**: Core 45/45 · Scheduling 47(+10skip) · RecordSyncJob 12/12 · **ArchTests 28/28** · **Sprk.Bff.Api.Tests 10408/0-fail/101-skip** · integration projects build net10 (Live infra-gated → CI). Solution 0 errors; H2 DI guard passes post-merge.
