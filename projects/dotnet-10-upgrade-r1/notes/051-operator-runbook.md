@@ -26,7 +26,11 @@ az webapp deployment slot create \
 ```
 Expect: slot `staging` created. (It starts as a copy of main → currently `DOTNETCORE|8.0`; we fix that in Step 3.)
 
-### Step 2 — attach the SAME user-assigned MI to the slot
+### ⚠️ Step 2 has TWO parts — both required or the app crashes at startup (exit 134)
+
+A cloned slot resets `keyVaultReferenceIdentity` to `SystemAssigned`, so every `@Microsoft.KeyVault(...)` app setting (Redis, ServiceBus, Graph cert) fails to resolve and the app aborts parsing the literal KV-ref string. You must BOTH attach the MI (2a) AND point `keyVaultReferenceIdentity` at it (2b). *(This is a slot-provisioning artifact, NOT a net10 issue — main dev already has 2b set, so a real swap-cutover doesn't need it.)*
+
+### Step 2a — attach the SAME user-assigned MI to the slot
 
 ```bash
 az webapp identity assign \
@@ -34,6 +38,25 @@ az webapp identity assign \
   --identities /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourcegroups/spe-infrastructure-westus2/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-bff-api-dev
 ```
 Expect: the slot now lists `mi-bff-api-dev`. This is what makes MI→Dataverse / Graph / KeyVault work on the slot (same principal `9fd47efb-...` that's already registered as Dataverse Application User + granted Graph roles).
+
+### Step 2b — point keyVaultReferenceIdentity at that MI (from PowerShell — path-safe)
+
+```powershell
+$mi = "/subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourcegroups/spe-infrastructure-westus2/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-bff-api-dev"
+$slotId = "/subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/rg-spaarke-dev/providers/Microsoft.Web/sites/spaarke-bff-dev/slots/staging"
+az resource update --ids $slotId --set "properties.keyVaultReferenceIdentity=$mi"
+# verify -> should print the MI resource id, NOT 'SystemAssigned':
+az webapp show -g rg-spaarke-dev -n spaarke-bff-dev --slot staging --query keyVaultReferenceIdentity -o tsv
+```
+> `az webapp update --set keyVaultReferenceIdentity=...` returns **Bad Request** — use `az resource update --ids` as above. Run from **bash** and the leading-slash ids get mangled by Git Bash → run this from **PowerShell**.
+
+### Step 2c — disable the classic App Insights codeless agent (net10 + FR-06)
+
+```powershell
+az webapp config appsettings set -g rg-spaarke-dev -n spaarke-bff-dev --slot staging --settings `
+  ApplicationInsightsAgent_EXTENSION_VERSION=disabled DiagnosticServices_EXTENSION_VERSION=disabled XDT_MicrosoftApplicationInsights_Mode=disabled
+```
+FR-06 made OTel→Azure Monitor the sole telemetry path; the codeless `~2` profiler predates net10. OTel (via `APPLICATIONINSIGHTS_CONNECTION_STRING`) is unaffected.
 
 ### Step 3 — set the slot runtime to net10 (pipe form, slot ONLY)
 

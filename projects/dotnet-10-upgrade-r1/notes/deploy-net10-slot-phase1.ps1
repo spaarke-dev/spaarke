@@ -39,6 +39,19 @@ if ($Provision) {
     Write-Host "[provision] creating slot (clone config), attaching MI, setting net10 runtime..." -ForegroundColor Yellow
     az webapp deployment slot create -g $ResourceGroup -n $AppName --slot $SlotName --configuration-source $AppName | Out-Null
     az webapp identity assign  -g $ResourceGroup -n $AppName --slot $SlotName --identities $UamiResourceId | Out-Null
+
+    # CRITICAL (learned 2026-08-13): a cloned slot resets keyVaultReferenceIdentity to 'SystemAssigned',
+    # so ALL @Microsoft.KeyVault(...) app settings (Redis/ServiceBus/Graph cert) fail to resolve and the
+    # app crashes at startup (exit 134) parsing the literal KV-ref string. Point it at the user-assigned MI
+    # — same as main dev. Must use `az resource update` on the slot resource id (webapp update rejects it).
+    $slotId = "/subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$AppName/slots/$SlotName"
+    az resource update --ids $slotId --set "properties.keyVaultReferenceIdentity=$UamiResourceId" | Out-Null
+
+    # Disable the classic App Insights codeless agent (~2). FR-06 made OTel->Azure Monitor the sole telemetry
+    # path; the codeless ~2 profiler predates net10. OTel via APPLICATIONINSIGHTS_CONNECTION_STRING is unaffected.
+    az webapp config appsettings set -g $ResourceGroup -n $AppName --slot $SlotName --settings `
+        ApplicationInsightsAgent_EXTENSION_VERSION=disabled DiagnosticServices_EXTENSION_VERSION=disabled XDT_MicrosoftApplicationInsights_Mode=disabled | Out-Null
+
     # NOTE: the '|' in DOTNETCORE|10.0 is re-parsed as a pipe by cmd.exe when PowerShell calls az.cmd.
     # The escaped-quote wrapper '"..."' makes cmd.exe treat it as one literal token. Do NOT use a plain "..." here.
     az webapp config set       -g $ResourceGroup -n $AppName --slot $SlotName --linux-fx-version '"DOTNETCORE|10.0"' | Out-Null
