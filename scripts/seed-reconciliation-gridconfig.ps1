@@ -14,6 +14,8 @@ $headers = @{
 }
 $root = 'src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid'
 $needsReviewId = '00000000-0000-4000-8000-000000005001'  # == NEEDS_REVIEW_CONFIG_ID in code
+$emailReviewAllId       = '00000000-0000-4000-8000-000000005002'  # == EMAIL_REVIEW_ALL_CONFIG_ID (UAT Fix #5)
+$emailReviewCompletedId = '00000000-0000-4000-8000-000000005003'  # == EMAIL_REVIEW_COMPLETED_CONFIG_ID (UAT Fix #5)
 
 function Seed-Config($id, $name, $jsonPath) {
   # Existence check (by id when provided, else by name). Double apostrophes for OData.
@@ -46,7 +48,13 @@ function Seed-Config($id, $name, $jsonPath) {
 Write-Host '--- Seeding reconciliation grid configs (spaarkedev1) ---'
 $nr = Seed-Config $needsReviewId 'Communication Reconciliation - Needs Review' "$root/needs-review.gridconfiguration.json"
 $pt = Seed-Config $null 'Communication Reconciliation - My Team''s Reviews' "$root/per-team.gridconfiguration.json"
+$ra = Seed-Config $emailReviewAllId 'Communication Reconciliation - Email Review All' "$root/email-review-all.gridconfiguration.json"
+$rc = Seed-Config $emailReviewCompletedId 'Communication Reconciliation - Email Review Completed' "$root/email-review-completed.gridconfiguration.json"
 Write-Host ''
-Write-Host "NEEDS_REVIEW_CONFIG_ID = $nr"
-Write-Host "PER_TEAM_CONFIG_ID     = $pt"
+Write-Host "NEEDS_REVIEW_CONFIG_ID          = $nr"
+Write-Host "PER_TEAM_CONFIG_ID              = $pt"
+Write-Host "EMAIL_REVIEW_ALL_CONFIG_ID      = $ra"
+Write-Host "EMAIL_REVIEW_COMPLETED_CONFIG_ID = $rc"
 if ($nr -ne $needsReviewId) { Write-Warning "Needs-review id != code constant $needsReviewId — code update required!" }
+if ($ra -ne $emailReviewAllId) { Write-Warning "Email-review-all id != code constant $emailReviewAllId — code update required!" }
+if ($rc -ne $emailReviewCompletedId) { Write-Warning "Email-review-completed id != code constant $emailReviewCompletedId — code update required!" }

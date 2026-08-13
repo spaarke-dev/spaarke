@@ -54,6 +54,7 @@ import {
 import { resolveRuntimeConfig, getAuthProvider } from '@spaarke/auth';
 import {
   ReconciliationWorkspace,
+  RECONCILIATION_VIEWS,
   derivePrimaryReview,
   type EmailConnectionsReviewProps,
   type ReconcileRegarding,
@@ -374,6 +375,7 @@ function Root() {
       // placeholder (task 059 seeds the real gridconfiguration record + sets it).
       <>
         <ReconciliationWorkspace
+          views={RECONCILIATION_VIEWS}
           dataverseClient={dataverseClient}
           authenticatedFetch={authenticatedFetch}
           resolveReview={resolveReview}

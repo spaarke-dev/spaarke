@@ -260,4 +260,24 @@ describe('ReconciliationWorkspace', () => {
     // And the old modal-behind-a-picker affordance is gone from the tab body.
     expect(within(tabBody).queryByTestId('related-to-open-picker')).not.toBeInTheDocument();
   });
+
+  it('renders the view-switcher with the default view active when `views` is supplied (UAT Fix #5)', async () => {
+    renderWorkspace({
+      views: [
+        { id: 'view-needs-review', name: 'Needs Review', isDefault: true },
+        { id: 'view-all', name: 'Email Review All' },
+        { id: 'view-completed', name: 'Email Review Completed' },
+      ],
+    });
+
+    const switcher = await screen.findByTestId('reconciliation-view-switcher');
+    // The active (default) view name is shown in the selector.
+    expect(within(switcher).getByText('Needs Review')).toBeInTheDocument();
+  });
+
+  it('renders NO view-switcher when `views` is omitted (UAT Fix #5)', async () => {
+    renderWorkspace();
+    await screen.findByTestId('reconciliation-workspace');
+    expect(screen.queryByTestId('reconciliation-view-switcher')).not.toBeInTheDocument();
+  });
 });

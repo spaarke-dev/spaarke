@@ -32,7 +32,13 @@
  */
 import * as React from 'react';
 import { Tab, TabList, Text, makeStyles, tokens } from '@fluentui/react-components';
-import type { DataGridProps, IDataverseClient, MembershipResolver } from '@spaarke/ui-components';
+import {
+  DataGridViewSelector,
+  type DataGridProps,
+  type IDataverseClient,
+  type MembershipResolver,
+  type SavedView,
+} from '@spaarke/ui-components';
 import { ReconciliationGrid } from '../ReconciliationGrid';
 import { EmailConnectionsReview } from '../EmailAssociationsAndTracking';
 import { ReconciliationBrowseShell } from '../ReconciliationBrowseShell';
@@ -61,6 +67,14 @@ type TabValue = 'related' | 'fields' | 'tasks';
 export interface ReconciliationWorkspaceProps {
   /** GUID of the "Needs-review" `sprk_gridconfiguration` record (forwarded to the grid). */
   configId?: string;
+  /**
+   * UAT Fix #5 — optional view-switcher list. When supplied with ≥2 entries, a
+   * `DataGridViewSelector` renders above the grid; selecting a view swaps the grid's
+   * `configId` to that view's id (each id is a `sprk_gridconfiguration` GUID). The
+   * default view (or the first) is active initially. Omitted ⇒ no switcher; the grid
+   * uses `configId`. Reconciliation hosts pass `RECONCILIATION_VIEWS`.
+   */
+  views?: ReadonlyArray<SavedView>;
   /**
    * Dataverse access implementation (ADR-012). Non-MDA hosts (Code Pages,
    * SpaarkeAi widgets) MUST pass an explicit client (`BffDataverseClient`); MDA
@@ -163,6 +177,13 @@ function defaultToBrowseRecord(record: Record<string, unknown>): ReconciliationB
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%', width: '100%' },
+  viewBar: {
+    display: 'flex',
+    alignItems: 'center',
+    paddingInline: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    flexShrink: 0,
+  },
   grid: { flex: '1 1 auto', minHeight: 0 },
   tabRoot: { display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, height: '100%' },
   tabList: {
@@ -191,6 +212,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   membershipResolver,
   uiScale,
   className,
+  views,
   toBrowseRecord = defaultToBrowseRecord,
   resolveRegarding,
   resolveReview,
@@ -202,6 +224,15 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   resolveEmlSource,
 }) => {
   const s = useStyles();
+
+  // UAT Fix #5 — view-switcher. When `views` is supplied, the active view's id is the
+  // grid's effective configId; selecting a view swaps the grid query. Default = the
+  // flagged default view, else the first, else the `configId` prop.
+  const hasViews = !!views && views.length > 0;
+  const [activeViewId, setActiveViewId] = React.useState<string>(
+    () => views?.find(v => v.isDefault)?.id ?? views?.[0]?.id ?? configId ?? ''
+  );
+  const effectiveConfigId = hasViews ? activeViewId : configId;
 
   // The rows the grid loaded (page 1 ∪ page 2 ∪ …) — the browse queue source.
   const [rows, setRows] = React.useState<ReadonlyArray<Record<string, unknown>>>([]);
@@ -231,6 +262,13 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   );
 
   const handleClose = React.useCallback(() => setOpenIndex(null), []);
+
+  // UAT Fix #5 — switch the active view: swap the grid's configId AND close the browse
+  // shell (the row set changes, so the open index no longer maps to the same record).
+  const handleViewChange = React.useCallback((viewId: string) => {
+    setActiveViewId(viewId);
+    setOpenIndex(null);
+  }, []);
 
   // Live browse queue — re-maps on every rows refresh so "N of M" tracks the grid.
   const queue = React.useMemo<ReconciliationBrowseRecord[]>(() => rows.map(toBrowseRecord), [rows, toBrowseRecord]);
@@ -384,9 +422,14 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
   return (
     <div className={className ? `${s.root} ${className}` : s.root} data-testid="reconciliation-workspace">
+      {hasViews && views!.length > 1 && (
+        <div className={s.viewBar} data-testid="reconciliation-view-switcher">
+          <DataGridViewSelector views={views!} activeViewId={activeViewId} onViewChange={handleViewChange} />
+        </div>
+      )}
       <div className={s.grid}>
         <ReconciliationGrid
-          configId={configId}
+          configId={effectiveConfigId}
           dataverseClient={dataverseClient}
           membershipResolver={membershipResolver}
           relatedTo={relatedTo}
