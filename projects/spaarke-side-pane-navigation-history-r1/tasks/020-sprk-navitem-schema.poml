@@ -4,7 +4,7 @@
     <title>sprk_navitem schema authoring — entity-schema.md + Deploy-SprkNavItemEntity.ps1</title>
     <phase>2 Entity</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New-file authoring (Dataverse entity-schema doc + PowerShell deploy script); no .ts/.tsx code, no BFF/pcf/plugin. The actual environment mutation is a separate task (021).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -83,6 +83,8 @@
     <criterion testable="true">Given the deploy script, when inspected, then every metadata create is guarded by an existence check (Test-EntityExists / Test-AttributeExists) so it is idempotent.</criterion>
     <criterion testable="true">Negative: given the script is re-run against an already-provisioned entity, then it neither errors nor creates duplicate entities/attributes/option-set values.</criterion>
   </acceptance-criteria>
-  <notes>Maps to spec FR-06 + the "Data Model — sprk_navitem" section + plan.md Phase 2 task 020. The actual deploy against the target environment is task 021 (do not deploy here). Mirror sprk_todo but override to UserOwned. Web API + PowerShell only — no PAC table/column create.</notes>
+  <notes>Maps to spec FR-06 + the "Data Model — sprk_navitem" section + plan.md Phase 2 task 020. The actual deploy against the target environment is task 021 (do not deploy here). Mirror sprk_todo but override to UserOwned. Web API + PowerShell only — no PAC table/column create.
+
+COMPLETED 2026-08-13. Authored src/solutions/SpaarkeCore/entities/sprk_navitem/entity-schema.md (UserOwned, primary name = sprk_displayname, 9 data-model fields + ownerid/PK/system fields documented, 3 global-option-set Choice Values tables) and scripts/Deploy-SprkNavItemEntity.ps1 (idempotent Web API + PowerShell; Step 1 creates the 3 global option sets sprk_type/sprk_source/sprk_pagetype BEFORE Step 2 entity create and Step 3 attribute creates; every create guarded by Test-GlobalOptionSetExists/Test-EntityExists/Test-AttributeExists mirroring Deploy-SprkTodoEntity.ps1's guards; targets SpaarkeCore via MSCRM.SolutionUniqueName header). Escalation trigger evaluated for sprk_targetid (GUID vs Text) — did NOT fire; resolved as String/Text (100 chars) matching the sprk_todo.sprk_regardingrecordid precedent for polymorphic-target ids, documented in entity-schema.md "Type Decision" note and notes/task-020-sprk-navitem-schema-decisions.md. Script author-only — not executed against any environment. All 4 acceptance criteria met.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

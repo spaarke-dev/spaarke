@@ -8,10 +8,10 @@
 
 | # | Task | Phase | Rigor | Tier/Effort | Deps | Group | Parallel-safe | Status |
 |---|---|---|---|---|---|---|---|---|
-| 001 | SPIKE/GATE — Path B bootstrap on current UCI | 0 Spike | FULL | opus/xhigh | — | Gate | ❌ | 🔲 |
-| 010 | Widen `xrmContext.ts` typings (getPane/select, 3-frame, webresourceName) | 1 Framework | FULL | sonnet/high | 001 | A | ✅ | 🔲 |
-| 011 | `SprkSidePaneHost` + `sidePaneRegistry` (wrap shell + generalize orchestrator) | 1 Framework | FULL | sonnet/high | 010 | B | ✅ | 🔲 |
-| 020 | `sprk_navitem` schema authoring (entity-schema.md + deploy script) | 2 Entity | STANDARD | sonnet/high | 001 | A | ✅ | 🔲 |
+| 001 | SPIKE/GATE — Path B bootstrap on current UCI | 0 Spike | FULL | opus/xhigh | — | Gate | ❌ | ✅ GO |
+| 010 | Widen `xrmContext.ts` typings (getPane/select, 3-frame, webresourceName) | 1 Framework | FULL | sonnet/high | 001 | A | ✅ | ✅ |
+| 011 | `SprkSidePaneHost` + `sidePaneRegistry` (wrap shell + generalize orchestrator) | 1 Framework | FULL | sonnet/high | 010 | B | ✅ | ✅ |
+| 020 | `sprk_navitem` schema authoring (entity-schema.md + deploy script) | 2 Entity | STANDARD | sonnet/high | 001 | A | ✅ | ✅ |
 | 021 | Deploy `sprk_navitem` + security roles | 2 Entity | STANDARD | sonnet/high | 020 | B | ❌ env | 🔲 |
 | 030 | Capture (Viewed) — re-adopt `contextService` poll → history upsert | 3 Capture | FULL | sonnet/high | 011,021 | C | ✅ | 🔲 |
 | 031 | Retention — prune-on-write, 30-day age | 3 Capture | FULL | sonnet/high | 030 | E | ✅ | 🔲 |

@@ -9,3 +9,19 @@
  */
 
 export { SidePaneShell, type SidePaneShellProps } from './SidePaneShell';
+
+// SprkSidePaneHost + sidePaneRegistry — the reusable, multi-contributor
+// docked side-pane framework (spaarke-side-pane-navigation-history-r1 task 011).
+export { SprkSidePaneHost, type SprkSidePaneHostProps } from './SprkSidePaneHost';
+export {
+  registerSidePaneContributor,
+  replaceSidePaneContributor,
+  getSidePaneRegistryEntry,
+  hasSidePaneContributor,
+  listSidePaneRegistryEntries,
+  resolveSidePaneContributor,
+  clearSidePaneRegistry,
+  type SidePaneRegistryEntry,
+  type SidePaneContributorProps,
+  type SidePaneContributorComponent,
+} from './sidePaneRegistry';

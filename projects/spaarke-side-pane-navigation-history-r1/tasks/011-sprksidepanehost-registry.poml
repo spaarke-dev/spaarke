@@ -4,7 +4,7 @@
     <title>SprkSidePaneHost + sidePaneRegistry — reusable docked side-pane framework</title>
     <phase>1 Framework</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New shared-lib component + registry in @spaarke/ui-components (.tsx); frontend/fluent-ui; architecture surface every future quick-access feature contributes to.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -117,6 +117,8 @@
     <criterion testable="true">Negative: given an unknown registry id, when the host looks it up/selects it, then it degrades gracefully (no throw).</criterion>
     <criterion testable="true">All unit + render tests pass; shared-lib build green.</criterion>
   </acceptance-criteria>
-  <notes>Maps to spec FR-01 (+ FR-13 framework-proof, exercised later by stub task 085) and plan.md Phase 1 task 011. NFR-08 reuse is mandatory: wrap SidePaneShell, generalize DataGridSidePaneOrchestrator, follow WorkspaceWidgetRegistry/surfaceLaunchRegistry. Run /conflict-check before the @spaarke/ui-components PR (shared lib touched by other worktrees; SidePane/ subfolder currently untouched).</notes>
+  <notes>Maps to spec FR-01 (+ FR-13 framework-proof, exercised later by stub task 085) and plan.md Phase 1 task 011. NFR-08 reuse is mandatory: wrap SidePaneShell, generalize DataGridSidePaneOrchestrator, follow WorkspaceWidgetRegistry/surfaceLaunchRegistry. Run /conflict-check before the @spaarke/ui-components PR (shared lib touched by other worktrees; SidePane/ subfolder currently untouched).
+
+COMPLETED 2026-08-13 (sonnet, FULL rigor). Escalation trigger did NOT fire — DataGridSidePaneOrchestrator.ts was GENERALIZED IN PLACE (not forked): two additive fields (`webResourceName` made optional; new `alwaysRender` passthrough) plus a swap from the untyped `services/xrmGlobal.ts` getXrm() to the widened `utils/xrmContext.ts` getXrm() (task 010, same runtime semantics, adds typing). Zero behavior change for the sole existing consumer (EventsPage/src/App.tsx — always passes webResourceName, never sets alwaysRender). Built: sidePaneRegistry.ts (static contributor table, lazy factory + resolve/cache per WorkspaceWidgetRegistry, resolve->undefined-never-throw per surfaceLaunchRegistry), SprkSidePaneHost.tsx (wraps SidePaneShell + PaneHeader for chrome; right-rail icon strip; idempotent createPane via the generalized orchestrator with canClose:false+alwaysRender:true; theme via resolveCodePageTheme/setupCodePageThemeListener + useUiScale/scaleTheme + --sprk-ui-scale CSS var per the SpaarkeAi/LegalWorkspace app-shell precedent; explicit ADR-021 portal FluentProvider re-wrap on the rail Tooltip content), __tests__/SprkSidePaneHost.test.tsx (11 tests, all passing). Verification: `npm run build` (tsc) clean; `npx jest src/components/SidePane src/components/DataGrid` 75/75 green (DataGrid regression proves existing consumers unaffected); `npx eslint` clean on all new/modified files (one PRE-EXISTING unrelated warning left untouched in the orchestrator's catch block). Full suite (`npx jest`) has 10 pre-existing failing suites unrelated to this task (surfaceLaunchRegistry, ConversationView, XrmDataverseClient, etc. — none touch SidePane/DataGrid/xrmContext) — not introduced by task 011, left as-is per scope boundary.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

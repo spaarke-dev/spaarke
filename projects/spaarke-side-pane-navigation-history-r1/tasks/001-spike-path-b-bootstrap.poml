@@ -4,7 +4,7 @@
     <title>SPIKE / GATE — Re-validate + productionize the Path B Code Page-injection bootstrap on current UCI</title>
     <phase>0 Spike / Gate</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Spike / brownfield root-cause on current UCI; go/no-go gate whose outcome re-baselines FR-02/FR-03; touches shell-level global JS behavior.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -82,6 +82,8 @@
     <criterion testable="true">Given the spike concludes, when the report is written, then projects/spaarke-side-pane-navigation-history-r1/notes/task-001-spike-report.md exists and states an explicit GO or NO-GO verdict with per-criterion evidence.</criterion>
     <criterion testable="true">Negative: if the bootstrap is unreliable, then the report documents the Path A (launch-on-open) fallback and re-baselines FR-02/FR-03, and the escalation trigger is raised (no unreliable global bootstrap is shipped).</criterion>
   </acceptance-criteria>
-  <notes>Maps to spec FR-00 and plan.md Phase 0 (go/no-go gate). Canonical references: notes/retired-sidepane-code/SidePaneManager.ts (bootstrap + PANE_REGISTRY) and contextService.ts (poll loop). Watch R1 (Path B on current UCI), R2 (getPageContext @me literal by build), R3/OQ-6 (custom-page name resolution). Assumed poll interval ~0.5–2s (spec Assumptions).</notes>
+  <notes>Maps to spec FR-00 and plan.md Phase 0 (go/no-go gate). Canonical references: notes/retired-sidepane-code/SidePaneManager.ts (bootstrap + PANE_REGISTRY) and contextService.ts (poll loop). Watch R1 (Path B on current UCI), R2 (getPageContext @me literal by build), R3/OQ-6 (custom-page name resolution). Assumed poll interval ~0.5–2s (spec Assumptions).
+
+COMPLETED 2026-08-13 (task-execute, FULL rigor). VERDICT: GO. Validated on spaarkedev1 / Matter Management via owner browser-observation with a self-contained diagnostic harness (spike/, deployed as sprk_sidepanespike.html + sprk_sidepanespikebootstrap.js). Proven: alwaysRender:true keeps pane JS alive while collapsed (147 heartbeats through a collapse); getPageContext + top-URL polling tracks every navigation (6 distinct visits, record+list) WHEN the Xrm ref is re-acquired each poll (NOT cached — key lesson); host-context Xrm.WebApi.retrieveMultipleRecords + current-user filter (_modifiedby_value eq userId) work. Criterion 1 (app-load auto-injection) validated-by-proxy (recovered global-ribbon pattern, git 7d80565a6^) → Stage 2 at task 086. Full report + productionization approach: notes/task-001-spike-report.md. Step 9.5: no production code shipped (throwaway diagnostic harness under documented ADR-006 spike exception, §6.5 path A); production NavigatorPane (task 040) is a proper Vite React code page subject to full gates.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

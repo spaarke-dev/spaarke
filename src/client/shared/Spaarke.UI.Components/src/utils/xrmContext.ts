@@ -97,7 +97,14 @@ export interface PageInput {
   pageType: 'entityrecord' | 'entitylist' | 'webresource' | 'custom';
   entityName?: string;
   entityId?: string;
-  data?: Record<string, any>;
+  /**
+   * Web resource logical name for `pageType: 'webresource'` pane navigation.
+   * Matches the real `Xrm.App.sidePanes` pane.navigate() contract (widened
+   * 2026-08-13, task 010, per the `pageType:'webresource'` usage already in
+   * DataGridSidePaneOrchestrator / CalendarSidePane).
+   */
+  webresourceName?: string;
+  data?: Record<string, any> | string;
   name?: string;
 }
 
@@ -150,6 +157,12 @@ export interface SidePanesApi {
   createPane(options: CreatePaneOptions): Promise<SidePane>;
   getSelectedPane(): SidePane | undefined;
   getAllPanes(): SidePane[];
+  /**
+   * Look up a previously-created pane by id. Returns `undefined` when no pane
+   * with that id exists yet — used as the idempotency check before calling
+   * `createPane` again (see DataGridSidePaneOrchestrator.registerPane).
+   */
+  getPane(paneId: string): SidePane | undefined;
 }
 
 export interface CreatePaneOptions {
@@ -169,6 +182,8 @@ export interface SidePane {
   title?: string;
   navigate(pageInput: PageInput): Promise<void>;
   close(): void;
+  /** Select (focus/expand) this pane in the pane launcher. */
+  select(): void;
 }
 
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -177,8 +192,17 @@ export interface SidePane {
  * Get the Xrm object from the appropriate context.
  *
  * - PCF controls have Xrm on window.Xrm or via context.webAPI
- * - Custom Pages run in an iframe, so Xrm is on window.parent.Xrm
- * - Returns undefined if Xrm is not available (graceful degradation)
+ * - Custom Pages run in a single iframe, so Xrm is on window.parent.Xrm
+ * - Side-pane hosts (task 010, spaarke-side-pane-navigation-history-r1) run
+ *   the code page nested one level deeper inside UCI's pane iframe, so Xrm
+ *   may only be reachable on window.top.Xrm
+ * - Returns undefined if Xrm is not available on any of the three frames
+ *   (graceful degradation) — this function NEVER throws.
+ *
+ * Cheap and safe to call on every poll tick: it does no caching itself, so
+ * callers that need fresh Xrm (e.g. a capture poller) should call getXrm()
+ * again each time rather than holding a reference — per the task 001 spike
+ * lesson, a cached Xrm reference can go stale across MDA navigations.
  *
  * @returns XrmContext or undefined if not available
  *
@@ -192,6 +216,7 @@ export interface SidePane {
  */
 export function getXrm(): XrmContext | undefined {
   // SDK boundary: Xrm is injected at runtime by the host (PCF / Custom Page).
+  // Walk window -> parent -> top and return the first frame with a usable Xrm.
   // Try window.Xrm first (PCF controls or direct script access)
   try {
     const windowXrm = (window as unknown as { Xrm?: XrmContext }).Xrm;
@@ -202,12 +227,24 @@ export function getXrm(): XrmContext | undefined {
     // window.Xrm not available
   }
 
-  // Try parent.Xrm for Custom Pages running in iframe
+  // Try parent.Xrm for Custom Pages running in a single iframe
   try {
     if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
       const parentXrm = (window.parent as unknown as { Xrm?: XrmContext }).Xrm;
       if (parentXrm?.WebApi) {
         return parentXrm;
+      }
+    }
+  } catch {
+    // Cross-origin access denied - expected in some environments
+  }
+
+  // Try top.Xrm for hosts nested deeper than one iframe (e.g. side panes)
+  try {
+    if (typeof window !== 'undefined' && window.top && window.top !== window) {
+      const topXrm = (window.top as unknown as { Xrm?: XrmContext }).Xrm;
+      if (topXrm?.WebApi) {
+        return topXrm;
       }
     }
   } catch {

@@ -4,7 +4,7 @@
     <title>Widen xrmContext.ts typings — getPane/pane.select, webresourceName, 3-frame getXrm()</title>
     <phase>1 Framework</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies shared-lib .ts (@spaarke/ui-components) consumed by multiple surfaces; frontend tag; foundational typings the whole framework builds on.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -78,6 +78,16 @@
     <criterion testable="true">Negative: given no Xrm on any of the three frames, when getXrm() runs, then it returns undefined and does not throw.</criterion>
     <criterion testable="true">All unit tests pass; shared-lib typecheck/build green.</criterion>
   </acceptance-criteria>
-  <notes>Maps to spec Affected Areas (xrmContext.ts widen) + plan.md Phase 1 task 010. NFR-08 reuse: widen the existing typed Xrm.App.sidePanes iface + getXrm(), no parallel implementation. Task 011 (host) depends on these typings.</notes>
+  <notes>Maps to spec Affected Areas (xrmContext.ts widen) + plan.md Phase 1 task 010. NFR-08 reuse: widen the existing typed Xrm.App.sidePanes iface + getXrm(), no parallel implementation. Task 011 (host) depends on these typings.
+
+COMPLETED 2026-08-13 (Sonnet 5, FULL rigor). Summary:
+- SidePanesApi widened with getPane(paneId): SidePane | undefined; SidePane widened with select(): void — matches real Xrm.App.sidePanes surface confirmed against sprk_openSprkChatPane.js / sprk_event_sidepane_form.js usage.
+- PageInput widened additively with webresourceName?: string (no prior `webresource` field existed to rename, so this was purely additive — no breaking change, escalation trigger did NOT fire). Also widened `data` to `Record&lt;string, any&gt; | string` to match the real pane.navigate({pageType:'webresource', data: &lt;query-string&gt;}) contract observed in the canonical reference notes/retired-sidepane-code/SidePaneManager.ts — flagged in code-review as a minor beyond-the-letter addition, judged in-scope (additive, directly evidenced by the cited reference).
+- getXrm() extended to a 3-frame walk (window -&gt; parent -&gt; top), each frame try/catch-guarded, never throws; returns first frame with a WebApi-bearing Xrm, else undefined. Doc comment encodes the task-001 spike lesson (never cache Xrm; safe/cheap to call every poll).
+- Verified zero breaking changes: full-project `npm run build` (tsc) across @spaarke/ui-components compiled clean with no consumer changes needed (14 existing importers of xrmContext.ts, none required edits).
+- Co-located tests extended in __tests__/xrmContext.test.ts (28 tests, all passing): 3-frame precedence (window &gt; parent &gt; top), undefined-no-throw negative case, repeated-call/no-caching behavior, SidePanesApi.getPane + pane.select typed-surface exercise, PageInput.webresourceName contract. Test-env note: jsdom marks `window.top` non-configurable ([LegacyUnforgeable]), so tests mock it via the internal `window._top` backing field (documented inline) rather than Object.defineProperty (which works for window.parent but throws for window.top).
+- Build/test commands + results: `npm install --legacy-peer-deps --no-audit --no-fund` (Spaarke.UI.Components + sibling Spaarke.Auth + Spaarke.SdapClient, whose dist/ was pre-req for the shared-lib tsc build — pre-existing repo build-order gap, unrelated to this task, resolved by building the two siblings first); `npm run build` (tsc) → 0 errors; `npx eslint src/utils/xrmContext.ts src/utils/__tests__/xrmContext.test.ts` → clean; `npx jest --ci --maxWorkers=2` → 2565 passed / 20 failed across 208 suites — all 20 failures are pre-existing and unrelated (TimelineComposeBox, recordHeader.integration, ConversationView.forward, XrmDataverseClient, EntityCreationService.cascade, toolbarLaunchDefaults, buildDynamicWorkspaceConfig, surfaceLaunchRegistry, RichFilePreview — none import xrmContext.ts; confirmed via `git status --porcelain` scoping to only the 2 files this task touched). xrmContext.test.ts itself: 28/28 passing.
+- Quality gates (Step 9.5): code-review — 0 critical/warning findings, 2 suggestions (jsdom `_top` mock fragility note; PageInput.data widening visibility note), both non-blocking. adr-check — 0 violations; ADR-022 confirmed compliant (zero React/JSX surface in this file).
+- Escalation trigger did not fire (no breaking change to PageInput or any other type).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
