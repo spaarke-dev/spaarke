@@ -36,7 +36,7 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 
 | Secret | Status | When safe to delete |
 |---|---|---|
-| `Dataverse-ClientSecret` | No longer consumed by production code when `Graph__ManagedIdentity__Enabled=true` (BFF MI is the Dataverse Application User per ADR-028) | After the MI cutover is verified by smoke test ([`auth-deployment-setup.md`](auth-deployment-setup.md) §9c). Keep for local-dev environments only. |
+| `Dataverse-ClientSecret` | ⚠️ **STILL REQUIRED (corrected 2026-08-13)** — AUTHV2-042 migrated only the `Services/Ai` raw-HTTP camp; the shared-lib Dataverse path (`DataverseWebApiService`/`DataverseOptions` `[Required]`+`ValidateOnStart`, `DataverseServiceClientImpl`) still hard-requires the secret backing `Dataverse:ClientSecret` regardless of the MI flag | ⚠️ **NOT yet — removing it crashes the BFF at startup.** Gated on the #3b shared-lib `ClientSecret`→MI migration (project `code-quality-and-assurance-r3` task 011 / NG1). See `projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md`. |
 | `Email-WebhookSecret` | Superseded by `Email-WebhookSigningKey` (HMAC-SHA256 per Phase C) | After verifying Dataverse Service Endpoint is re-registered with the HMAC key |
 | `communication-webhook-secret` (HMAC pre-v2) | Superseded by `communication-webhook-signing-key` (HMAC-SHA256 per Phase C) | After verifying Graph subscription is re-registered with the HMAC key |
 

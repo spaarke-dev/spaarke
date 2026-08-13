@@ -12,7 +12,7 @@
 >
 > **For new-environment provisioning, follow** [`auth-deployment-setup.md`](auth-deployment-setup.md) (the canonical 10-section operator runbook) instead of this guide. That runbook covers §3 App Service settings, §5 Azure AD MI Graph permission grants, §6 Dataverse Application User (the MI is the App User), §7 Exchange ApplicationAccessPolicy.
 >
-> **`Dataverse-ClientSecret` is no longer consumed by production code paths.** It can be removed from Key Vault on environments where MI is enabled (after the MI cutover is verified by smoke test).
+> **⚠️ CORRECTION (2026-08-13): `Dataverse-ClientSecret` is STILL required — do NOT remove it.** AUTHV2-042 migrated only the `Services/Ai` raw-HTTP camp; the shared-lib Dataverse path (`DataverseWebApiService.cs:51-52` + `DataverseOptions.cs:32` `[Required]`+`ValidateOnStart`, plus `DataverseServiceClientImpl`) still hard-requires the secret backing `Dataverse:ClientSecret` regardless of `Graph__ManagedIdentity__Enabled` — removing it from Key Vault **crashes the BFF at startup**. Full removal is gated on the #3b shared-lib `ClientSecret`→MI migration (project `code-quality-and-assurance-r3` task 011 / NG1). See `projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md`.
 >
 > **What's still canonical in this guide**: the local-dev `ServiceClient` connection-string pattern, `IDataverseService` interface, troubleshooting (HTTP error codes, MSAL exceptions), naming conventions. Treat the "PRODUCTION READY" assertion as historically accurate for the pre-v2 ClientSecret path; the v2 canonical production path is documented in the runbook.
 
