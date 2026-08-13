@@ -86,6 +86,7 @@ $SharedLibs = @(
     @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }
     @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" }
     @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
+    @{ Name = "Spaarke.Communication.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.Communication.Components" } # depends on Auth + UI.Components; consumed by AI.Widgets (file: dep + dist paths-map) → MUST build BEFORE AI.Widgets. Added 2026-08-11 by email-communication-intelligence-r2 task 063 (stale-dist fix; same class as Spaarke.Notifications line above — its own `prebuild` also rebuilds Auth+UI.Components for standalone safety).
     @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
     @{ Name = "Spaarke.DailyBriefing.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.DailyBriefing.Components" } # depends on Auth + UI.Components; standalone build restored 2026-07-08 (supersedes PR #506)
     @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + DocumentOperations + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets — re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added

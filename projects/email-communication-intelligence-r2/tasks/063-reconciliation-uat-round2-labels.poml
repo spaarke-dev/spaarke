@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Reconciliation UAT round-2 label reconciliation (E1a "+ New record" · E2a verify "Accept" · E3a Tasks proposal "Create")</title>
+    <phase>5 Pillar E — Reconciliation UI (mount build, UAT follow-on)</phase>
+    <gate>none — shippable now; no dependency on prototype sign-off (trivial renames per UX §E, owner-approved E1a/E2a/E3a)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override (root CLAUDE.md §8): renames change accessible button names, so the shipped RTL tests for those buttons must be updated; touches shared-lib Spaarke.Communication.Components. Step 9.5 gates run unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical label reconciliation against explicitly-named files + lines; no architectural novelty.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches shared Spaarke.Communication.Components (hot-path, parallel-safe:false per project rule); sequential main-session; /conflict-check before PR.</parallel-reason>
+    <deps>052,055,056</deps>
+    <tags>react, typescript, frontend, fluent-ui, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Reconcile the three UAT round-2 button labels (owner, 2026-08-11) in the SHIPPED reconcile components against the
+    owner's requested wording. The UAT feedback referenced the PROTOTYPE labels; the shipped components have already
+    diverged in places, so this is a reconciliation, not a blind rename. Apply ONLY the three label changes below +
+    their test updates. Do NOT touch behavior, routing, or add new surfaces (those are tasks 064-066, gated on sign-off).
+  </prompt>
+  <role>SPAARKE frontend developer. Expert in @spaarke/communication-components + Fluent v9 + RTL. Follow ADRs strictly. Make the minimal, exact change requested — nothing above-and-beyond.</role>
+  <goal>
+    The three reconcile surfaces show the owner-approved labels with test parity: Related-to create tile = "+ New record"
+    (Add icon, consistent with "+ New task"); Fields proposal primary = "Accept" (verify already present); Tasks proposal
+    primary = "Create" (changed from the shipped "Accept" — honoring the explicit E3a request; Fields stays "Accept").
+  </goal>
+
+  <context>
+    <background>
+      UX source of truth: projects/email-communication-intelligence-r2/notes/pillar-e-reconciliation-ux-requirements.md §E
+      (E1a/E2a/E3a) + the E-cross button-label-consistency note ("+ {verb}" pattern with Add icon, consistent with
+      "+ New task"). The shipped state at authoring time: Fields proposal already reads "Accept" (E2a satisfied); Tasks
+      proposal reads "Accept" (needs → "Create"); Related-to create tile reads "Create new record" (needs → "+ New record").
+    </background>
+    <relevant-files>
+      <file role="edit">src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx</file>
+      <file role="edit">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx</file>
+      <file role="verify">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx</file>
+      <file role="edit-tests">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/TaskReconcileTab.test.tsx</file>
+      <file role="edit-tests">(any EmailConnectionsReview test asserting the create-tile label — locate + update if present)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="052" status="done">EmailConnectionsReview create-new tile (the "New record" affordance).</dependency>
+      <dependency task="055" status="done">FieldUpdateReconcileTab (Accept/Reject/Hold).</dependency>
+      <dependency task="056" status="done">TaskReconcileTab (proposal Accept/Reject/Hold + "+ New task").</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: labels only. Change ONLY the three button/tile labels named below + the tests that assert their accessible names. Do NOT change onClick handlers, routing, apply/dismiss logic, testids, or add surfaces.</constraint>
+    <constraint source="UX-§E">E1a: EmailConnectionsReview create-new tile label "Create new record" → "New record", rendered in the "+ {verb}" consistency form ("+ New record") with an Add icon (AddRegular / Add16Regular) matching the "+ New task" button in TaskReconcileTab. If the tile is a link-card (span label, not a Button), keep its structure — just set the label text + ensure the add/plus affordance is visible.</constraint>
+    <constraint source="UX-§E">E2a: verify FieldUpdateReconcileTab proposal primary already reads "Accept". If it already does, make NO change (it does at authoring time, ~line 440). Do not restyle.</constraint>
+    <constraint source="UX-§E">E3a: TaskReconcileTab proposal primary button (data-testid="task-reconcile-accept", ~line 606) text "Accept" → "Create". Keep the testid, icon, appearance, and onClick unchanged. NOTE the divergence: the shipped component had unified on "Accept"; this restores the owner's explicit E3a wording. The "+ New task" ad-hoc FormModal submitLabel ("Create task") is unchanged.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only; reuse the existing AddRegular icon import already present in TaskReconcileTab for the E1a icon (import into EmailConnectionsReview from @fluentui/react-icons if not already imported).</constraint>
+    <constraint source="ADR-050/012">Do not change modal chrome or component contracts — text + icon only.</constraint>
+    <constraint source="project">SCOPE: no deploy. Build + test only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>projects/email-communication-intelligence-r2/notes/pillar-e-reconciliation-ux-requirements.md</file>
+    </files>
+    <patterns>
+      <pattern name="+ New task button (consistency reference)" location="src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx">The "New task" secondary Button with icon={&lt;AddRegular /&gt;} (~line 517-526) is the exact consistency reference for E1a's "+ New record".</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load this POML + UX §E. Re-grep the three current labels to confirm live state (they may have shifted since authoring): EmailConnectionsReview create tile, FieldUpdateReconcileTab Accept, TaskReconcileTab proposal primary. Run /conflict-check (shared Communication.Components).</step>
+    <step order="1">E1a: in EmailConnectionsReview.tsx, set the create-new tile label to "New record" in the "+ New record" consistency form + ensure an Add icon renders (match the "+ New task" pattern). Preserve the tile's gated-by-onCreateNewRecord structure.</step>
+    <step order="2">E2a: verify FieldUpdateReconcileTab proposal primary reads "Accept" — if already correct, no change.</step>
+    <step order="3">E3a: in TaskReconcileTab.tsx, change the proposal-primary button text "Accept" → "Create" (testid/icon/onClick unchanged).</step>
+    <step order="4">Update tests: TaskReconcileTab.test.tsx assertions on the proposal button's accessible name (Accept → Create); any EmailConnectionsReview test asserting the create-tile label. Keep all other assertions intact.</step>
+    <step order="5">Build the shared lib green (tsc 0-err) + run the affected jest suites (TaskReconcileTab, FieldUpdateReconcileTab, EmailConnectionsReview) — all green.</step>
+    <step order="6">Update TASK-INDEX.md: add/confirm 063 row → ✅. Note the E3a "Accept"→"Create" divergence in notes/063-*.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If E2a is NOT already "Accept" (shipped state shifted), STOP and report — the reconciliation table in this POML assumed the shipped state; a mismatch means the UX §E table needs re-checking before proceeding.</trigger>
+    <trigger>If changing the Tasks proposal to "Create" breaks a routing/semantic assumption in the tests beyond the label (e.g., a test keys off the word "Accept" for behavior, not just display), STOP and surface it — the E3a rename may need an owner call on consistency vs. explicit wording.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build + test the shared lib.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/TaskReconcileTab.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EmailConnectionsReview create-new tile renders "New record" in the "+ New record" consistency form with an Add icon (matching "+ New task").</criterion>
+    <criterion testable="true">FieldUpdateReconcileTab proposal primary reads "Accept" (verified; unchanged).</criterion>
+    <criterion testable="true">TaskReconcileTab proposal-primary button (data-testid="task-reconcile-accept") reads "Create"; testid, icon, appearance, and onClick are unchanged.</criterion>
+    <criterion testable="true">The "+ New task" ad-hoc FormModal submitLabel ("Create task") is unchanged; Reject/Hold labels unchanged.</criterion>
+    <criterion testable="true">Updated tests assert the new accessible names; all affected jest suites pass; no other assertions changed.</criterion>
+    <criterion testable="true">Shared lib builds green (tsc 0-err).</criterion>
+    <criterion testable="true">Negative: no behavior/routing/testid/contract changes; no new surface; no deploy.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    E1b/E1c (Quick Start + .eml auto-load), E2b/E2c (typed controls + OOB advanced-lookup + Update-other-fields record modal), and E3b (Assigned-to OOB advanced-lookup) are the GATED modal-on-modal build tasks 064-066 — do NOT start them here. This task is the shippable label slice only. Reuse constraints for 064-066 live in pillar-e-mount-build-plan.md §7.5.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Follow task-execute FULL; run Step 9.5 (code-review + adr-check); /conflict-check before PR (shared Communication.Components).</protocol>
+  </execution>
+</task>

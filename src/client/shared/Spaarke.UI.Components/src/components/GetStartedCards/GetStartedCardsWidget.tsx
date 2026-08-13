@@ -89,8 +89,8 @@ import {
 } from '@fluentui/react-icons';
 import type { FluentIcon } from '@fluentui/react-icons';
 
-import { ActionCard } from '@spaarke/ui-components';
-import type { ActionCardProps } from '@spaarke/ui-components';
+import { ActionCard } from '../WorkspaceShell/ActionCard';
+import type { ActionCardProps } from '../WorkspaceShell/ActionCard';
 
 // ---------------------------------------------------------------------------
 // Public types

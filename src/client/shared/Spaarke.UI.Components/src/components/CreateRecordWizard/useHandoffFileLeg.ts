@@ -34,6 +34,12 @@ const HANDOFF_EXT_TO_FILE_TYPE: Readonly<Record<string, UploadedFileType>> = {
   '.pdf': 'pdf',
   '.docx': 'docx',
   '.xlsx': 'xlsx',
+  // email-communication-intelligence-r2 task 064 (E1c): an archived email ingested as a
+  // session document (raw .eml hand-off) flows through this leg. `fileType` is only an
+  // icon/display hint, so map to the existing 'docx' value rather than widen the type
+  // union; the server pre-fill extractor parses the .eml natively (see MatterPreFillService/
+  // ProjectPreFillService AllowedExtensions + AllowedContentTypes).
+  '.eml': 'docx',
 };
 
 /**
