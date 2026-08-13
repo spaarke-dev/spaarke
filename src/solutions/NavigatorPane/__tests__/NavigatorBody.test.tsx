@@ -88,7 +88,7 @@ describe('NavigatorBody', () => {
   // Tab scaffold + search-bar placeholder
   // ───────────────────────────────────────────────────────────────────────
 
-  it('render_WithXrm_ShowsRecentPinnedViewsTabsAndSearchBarPlaceholder', () => {
+  it('render_WithXrm_ShowsRecentPinnedViewsTabsAndSearchBarPlaceholder', async () => {
     renderNavigatorBody();
 
     expect(screen.getByTestId('navigator-tab-recent')).toHaveTextContent('Recent');
@@ -96,9 +96,12 @@ describe('NavigatorBody', () => {
     expect(screen.getByTestId('navigator-tab-views')).toHaveTextContent('Views');
     expect(screen.getByTestId('navigator-search-placeholder')).toBeInTheDocument();
 
-    // Default active tab is Recent.
-    expect(screen.getByTestId('navigator-tab-panel-recent')).toHaveTextContent(
-      'Recently viewed and edited records will appear here.'
+    // Default active tab is Recent — task 041 wires this panel to <RecentTab>
+    // (replacing the task-040 placeholder text for the `recent` tab only).
+    // installMockXrm() here has no `Utility`, so RecentTab's load short-circuits
+    // to its empty state rather than querying history rows.
+    expect(await screen.findByTestId('recent-tab-empty')).toHaveTextContent(
+      'Recently viewed records will appear here.'
     );
   });
 
@@ -108,8 +111,12 @@ describe('NavigatorBody', () => {
 
     await user.click(screen.getByTestId('navigator-tab-pinned'));
 
-    expect(await screen.findByTestId('navigator-tab-panel-pinned')).toHaveTextContent(
-      'Pinned records, bookmarks, and monitored items will appear here.'
+    // Task 050 wires the `pinned` panel to <PinnedTab/>. installMockXrm() here
+    // has no `Utility`, so PinnedTab's load short-circuits to its empty state
+    // (mirrors the `recent`-tab assertion above) rather than the pre-050
+    // static placeholder text.
+    expect(await screen.findByTestId('pinned-tab-empty')).toHaveTextContent(
+      'Pinned records will appear here.'
     );
     expect(screen.queryByTestId('navigator-tab-panel-recent')).not.toBeInTheDocument();
 

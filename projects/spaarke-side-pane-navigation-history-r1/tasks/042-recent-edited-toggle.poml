@@ -4,7 +4,7 @@
     <title>Recent (Edited) toggle — Viewed/Edited segmented control via modifiedby=me per-entity queries</title>
     <phase>4 Navigator core</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared Recent tab (.tsx) in the code page; frontend; user-facing derivation across multiple entity queries.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,6 +96,27 @@
     <criterion testable="true">Negative: given an entity in the core set with no matching results, when Edited is shown, then it contributes nothing and no error is raised.</criterion>
     <criterion testable="true">All tests pass; code-page build green.</criterion>
   </acceptance-criteria>
-  <notes>Maps to spec FR-04 (OQ-5 resolved) and plan.md Phase 4 task 042. Fixed core set: sprk_matter, sprk_project, sprk_document, sprk_todo, sprk_event, sprk_communication (confirm final logical names against schema). parallel-safe:false — shares the Recent tab component with 041 (plan.md §5). Watch the @me OData literal on the current build (R2).</notes>
+  <notes>Maps to spec FR-04 (OQ-5 resolved) and plan.md Phase 4 task 042. Fixed core set: sprk_matter, sprk_project, sprk_document, sprk_todo, sprk_event, sprk_communication (confirm final logical names against schema). parallel-safe:false — shares the Recent tab component with 041 (plan.md §5). Watch the @me OData literal on the current build (R2).
+
+COMPLETED 2026-08-13. Core set validated live against spaarkedev1 EntityDefinitions — all
+six entities confirmed present, none dropped. R2 escalation trigger evaluated and did NOT
+fire (already resolved by task-001 spike; no @me literal used, GUID interpolated from
+getGlobalContext().userSettings.userId, no audit entity). Built
+src/solutions/NavigatorPane/src/services/editedByMeService.ts (N per-entity
+retrieveMultipleRecords, modifiedby=me, merged + sorted modifiedon desc client-side;
+display-name resolved via Xrm.Utility.getEntityMetadata, mirroring
+navigatorCaptureService.ts's resolveDisplayName pattern rather than a hardcoded map).
+Extended RecentTab.tsx with a local Viewed/Edited segmented toggle (Griffel-styled,
+matching ViewToggle.styles.ts's pattern without touching the shared ViewToggle component
+— see notes/task-042-edited-by-me-deviations.md §3 for the reuse-vs-extend reasoning).
+Viewed behavior unchanged (same testids). No shared-lib files touched this task. Tests:
+editedByMeService.test.ts (10 cases) + RecentTab.test.tsx toggle describe block (4 cases,
+light+dark, restore-to-Viewed, flow-edited + empty-entity harmless, audit-entity-never-
+queried). Verification: shared-lib tsc build clean; NavigatorPane npx jest 3 suites/27
+tests green; npx tsc --noEmit clean; cache-cleared npm run build (Vite) succeeds with
+recent-tab-mode-edited/recent-tab-edited/_modifiedby_value strings confirmed in
+dist/index.html. npm run lint pre-existing gap (eslint not installed in this package) —
+not introduced by this task, documented not fixed (out of scope). Full deviation record:
+notes/task-042-edited-by-me-deviations.md.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

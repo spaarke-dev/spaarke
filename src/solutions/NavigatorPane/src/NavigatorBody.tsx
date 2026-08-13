@@ -7,10 +7,15 @@
  * rework — no dependency on SprkSidePaneHost internals beyond the
  * `SidePaneContributorProps` shape it is registered under in `main.tsx`.
  *
- * This task ships the SCAFFOLD ONLY: a 3-tab layout (Recent / Pinned /
- * Views) + a persistent top-of-pane search-bar placeholder. No data wiring —
- * later tasks (041/042 Recent, 050/051/052 Pinned, 060 Views, 070 search)
- * fill each tab and wire the search box.
+ * This task shipped the SCAFFOLD: a 3-tab layout (Recent / Pinned / Views) +
+ * a persistent top-of-pane search-bar placeholder. Task 041 wires the
+ * `recent` panel to `RecentTab` (history rows + type chips + navigate +
+ * promote-to-pin). Task 050 wires the `pinned` panel to `PinnedTab`'s
+ * Records group (the full pin gesture — see `pinService.ts`); `PinnedTab`
+ * itself has seams for 051 (Bookmarks) and 052 (Monitored) to add sibling
+ * groups without this file changing again. Task 060 wires the `views` panel
+ * to `ViewsTab` (userquery views grouped by entity, via `ViewService`). The
+ * search box wiring lands in 070.
  *
  * ADR-021 compliance:
  *  - Fluent v9 tokens only (no hardcoded colors) — light/dark handled by
@@ -61,6 +66,9 @@ import {
   setupCodePageThemeListener,
   useUiScale,
 } from '@spaarke/ui-components';
+import { PinnedTab } from './tabs/PinnedTab';
+import { RecentTab } from './tabs/RecentTab';
+import { ViewsTab } from './tabs/ViewsTab';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -85,12 +93,6 @@ const TAB_LABELS: Record<NavigatorTabValue, string> = {
   recent: 'Recent',
   pinned: 'Pinned',
   views: 'Views',
-};
-
-const TAB_PLACEHOLDER_TEXT: Record<NavigatorTabValue, string> = {
-  recent: 'Recently viewed and edited records will appear here.',
-  pinned: 'Pinned records, bookmarks, and monitored items will appear here.',
-  views: 'Your saved views will appear here.',
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -226,7 +228,13 @@ export const NavigatorBody: React.FC<NavigatorBodyProps> = ({ paneId }) => {
         role="tabpanel"
         data-testid={`navigator-tab-panel-${selectedTab}`}
       >
-        {TAB_PLACEHOLDER_TEXT[selectedTab]}
+        {selectedTab === 'recent' ? (
+          <RecentTab />
+        ) : selectedTab === 'pinned' ? (
+          <PinnedTab />
+        ) : (
+          <ViewsTab />
+        )}
       </div>
     </div>
   );

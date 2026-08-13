@@ -3,8 +3,8 @@
   <metadata>
     <title>Pin gesture — inline star creates/removes a per-user sprk_type=pin sprk_navitem (never writes sprk_monitor)</title>
     <phase>5 Pinned</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared Navigator body / Pinned tab (.tsx) + writes sprk_navitem via Xrm.WebApi; frontend; per-user data mutation with a strict MUST-NOT (sprk_monitor).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,6 +99,8 @@
     <criterion testable="true">Negative: given an already-pinned target, when the user stars it again, then no duplicate sprk_navitem is created.</criterion>
     <criterion testable="true">All tests pass; code-page build green.</criterion>
   </acceptance-criteria>
-  <notes>Maps to spec FR-07 and plan.md Phase 5 task 050. parallel-safe:false — shares the Pinned tab / Navigator body with 051 (bookmarks) and 052 (Monitored) (plan.md §5). The pin-write path is reused by 041 promote-to-pin. sprk_monitor decoupling is a hard MUST-NOT.</notes>
+  <notes>Maps to spec FR-07 and plan.md Phase 5 task 050. parallel-safe:false — shares the Pinned tab / Navigator body with 051 (bookmarks) and 052 (Monitored) (plan.md §5). The pin-write path is reused by 041 promote-to-pin. sprk_monitor decoupling is a hard MUST-NOT.
+
+COMPLETED 2026-08-13. Extended navItemRepository.ts (shared lib) with findPinItem + deleteNavItem — reuses task-041's createPinItem/listPinItems rather than a second CRUD path. Built pinService.ts (pin/unpin/unpinById/findPin — dedupe-before-create + single-flight UI guard for idempotency, decision documented in notes/task-050-dedupe-approach.md; escalation trigger evaluated, did NOT fire — Path C, replicates task-041's already-accepted pattern). Built PinnedTab.tsx (Records group; seams left for 051 Bookmarks/052 Monitored as sibling &lt;section&gt;s). Wired PinnedTab into NavigatorBody.tsx's `pinned` panel (Views untouched). Updated one pre-existing NavigatorBody.test.tsx assertion to match the new panel content. Tests: pinService.test.ts (9 tests) + PinnedTab.test.tsx (8 tests), incl. hard assertions that sprk_monitor is never touched (also confirmed via 0 occurrences of the literal string in the built dist/index.html) and owner-scoping isolation. Full suite: 43/43 passed (5 suites). tsc --noEmit clean. Vite build green (known strings "Pinned records will appear here." + "pinned-tab-group-records" verified in dist/index.html). code-review + adr-check self-run: 0 Critical, 0 Violations, 1 precedented Warning (local chip/nav duplication, matches 041/042 convention).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

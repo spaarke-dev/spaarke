@@ -1,6 +1,9 @@
 /**
  * navItemRepository — `Xrm.WebApi` CRUD for the per-user `sprk_navitem`
- * entity (spaarke-side-pane-navigation-history-r1 task 030, spec FR-03/FR-06).
+ * entity (spaarke-side-pane-navigation-history-r1 task 030, spec FR-03/FR-06;
+ * `listHistoryItems`/`listPinItems`/`createPinItem` added task 041 — Recent
+ * (Viewed) tab read + minimal promote-to-pin, extended by 050/052 rather than
+ * introducing a second read/write path).
  *
  * Mirrors `src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts`'s
  * `Xrm.WebApi` CRUD shape (`retrieveMultipleRecords` / `createRecord` /
@@ -22,6 +25,11 @@
  * @see src/solutions/EventDetailSidePane/src/services/eventService.ts
  * @see src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts
  * @see projects/spaarke-side-pane-navigation-history-r1/notes/task-001-spike-report.md
+ *
+ * `findPinItem`/`deleteNavItem` added task 050 (full pin gesture — pinService.ts
+ * dedupe-before-create + unstar/delete) — extends this module rather than
+ * introducing a second sprk_navitem read/write path, per the file's own
+ * "task 050/052 own the full pin gesture ... may extend this helper" note.
  */
 
 import { getXrm } from '../../utils/xrmContext';
@@ -77,6 +85,20 @@ export interface CreateHistoryItemInput {
   displayName: string;
   /** Defaults to `new Date()`. Exposed for deterministic tests. */
   visitedAt?: Date;
+}
+
+/**
+ * Input for {@link createPinItem}. Deliberately mirrors {@link CreateHistoryItemInput}'s
+ * shape (same target/pageType/displayName triple) rather than introducing a divergent
+ * pin-specific contract — task 050 (full pin gesture: toggle/un-pin/pin-from-page) builds
+ * on this same shape.
+ */
+export interface CreatePinItemInput {
+  targetLogicalName: string;
+  targetId: string;
+  /** One of {@link NavItemPageType}. */
+  pageType: number;
+  displayName: string;
 }
 
 /**
@@ -220,6 +242,127 @@ export async function bumpHistoryItem(
       sprk_lastvisited: visitedAt.toISOString(),
       sprk_visitcount: nextVisitCount,
     });
+  } catch (err) {
+    throw new NavItemRepositoryError(parseWebApiError(err), err);
+  }
+}
+
+/**
+ * List the current user's `history` `sprk_navitem` rows, newest-first by
+ * `sprk_lastvisited` (task 041, spec FR-03 UI). Owner-scoped — mirrors
+ * {@link findHistoryItem}'s `_ownerid_value eq {ownerId}` filter.
+ *
+ * @param ownerId - Current user id (GUID, no braces) — `_ownerid_value`.
+ */
+export async function listHistoryItems(ownerId: string): Promise<NavItemRecord[]> {
+  const webApi = requireWebApi();
+  const filter = `_ownerid_value eq ${ownerId} and sprk_type eq ${NavItemType.History}`;
+  const query = `?$select=${HISTORY_SELECT}&$filter=${filter}&$orderby=sprk_lastvisited desc`;
+
+  try {
+    const result = await webApi.retrieveMultipleRecords(ENTITY, query);
+    return (result.entities ?? []) as unknown as NavItemRecord[];
+  } catch (err) {
+    throw new NavItemRepositoryError(parseWebApiError(err), err);
+  }
+}
+
+/**
+ * List the current user's `pin` `sprk_navitem` rows (task 041 minimal read —
+ * used to hydrate a row's pinned-state; task 050/052 own the full pin-gesture
+ * read/write surface and may extend this rather than duplicating a second
+ * pin-list query).
+ *
+ * @param ownerId - Current user id (GUID, no braces) — `_ownerid_value`.
+ */
+export async function listPinItems(ownerId: string): Promise<NavItemRecord[]> {
+  const webApi = requireWebApi();
+  const filter = `_ownerid_value eq ${ownerId} and sprk_type eq ${NavItemType.Pin}`;
+  const query = `?$select=${HISTORY_SELECT}&$filter=${filter}&$orderby=sprk_lastvisited desc`;
+
+  try {
+    const result = await webApi.retrieveMultipleRecords(ENTITY, query);
+    return (result.entities ?? []) as unknown as NavItemRecord[];
+  } catch (err) {
+    throw new NavItemRepositoryError(parseWebApiError(err), err);
+  }
+}
+
+/**
+ * Create a per-user `pin` `sprk_navitem` (task 041 MINIMAL promote-to-pin —
+ * the Recent tab's inline star). `sprk_source` is always `Manual` here: a
+ * user explicitly promoted a history row, as distinct from a future
+ * `Captured` "Pin this page" gesture (FR-08, task 050/051) which this helper
+ * does not attempt to distinguish. Task 050 owns the FULL pin gesture
+ * (toggle/un-pin/duplicate-guard/pin-current-page) and may extend this
+ * helper rather than introducing a second create path.
+ */
+export async function createPinItem(input: CreatePinItemInput): Promise<{ id: string }> {
+  const webApi = requireWebApi();
+  const now = new Date().toISOString();
+  const data: Record<string, unknown> = {
+    sprk_type: NavItemType.Pin,
+    sprk_source: NavItemSource.Manual,
+    sprk_targetlogicalname: input.targetLogicalName,
+    sprk_targetid: normalizeGuid(input.targetId),
+    sprk_pagetype: input.pageType,
+    sprk_displayname: input.displayName,
+    sprk_lastvisited: now,
+    sprk_visitcount: 1,
+  };
+
+  try {
+    const created = await webApi.createRecord(ENTITY, data);
+    return { id: created.id };
+  } catch (err) {
+    throw new NavItemRepositoryError(parseWebApiError(err), err);
+  }
+}
+
+/**
+ * Find the current user's existing `pin` `sprk_navitem` for a given target, if
+ * one exists (task 050). Mirrors {@link findHistoryItem}'s shape/filter but
+ * for `sprk_type=Pin` — used by `pinService.ts` to dedupe-before-create (a
+ * star on an already-pinned target must not create a duplicate row) and to
+ * resolve the row id to delete on unstar.
+ *
+ * @param ownerId - Current user id (GUID, no braces) — `_ownerid_value`.
+ * @param targetLogicalName - e.g. `sprk_matter`.
+ * @param targetId - Target record GUID (normalized internally).
+ */
+export async function findPinItem(
+  ownerId: string,
+  targetLogicalName: string,
+  targetId: string
+): Promise<NavItemRecord | null> {
+  const webApi = requireWebApi();
+  const normalizedTargetId = normalizeGuid(targetId);
+  const filter =
+    `_ownerid_value eq ${ownerId} and sprk_type eq ${NavItemType.Pin}` +
+    ` and sprk_targetlogicalname eq '${escapeODataString(targetLogicalName)}'` +
+    ` and sprk_targetid eq '${escapeODataString(normalizedTargetId)}'`;
+  const query = `?$select=${HISTORY_SELECT}&$filter=${filter}&$top=1`;
+
+  try {
+    const result = await webApi.retrieveMultipleRecords(ENTITY, query);
+    const entities = (result.entities ?? []) as unknown as NavItemRecord[];
+    return entities[0] ?? null;
+  } catch (err) {
+    throw new NavItemRepositoryError(parseWebApiError(err), err);
+  }
+}
+
+/**
+ * Delete a `sprk_navitem` by id (task 050 — unstar removes the per-user pin
+ * row). Generic by design (not `deletePinItem`): the same primitive is the
+ * correct shape for any future `sprk_navitem` removal (e.g. a "clear history"
+ * affordance), so it is not pin-specific in name or implementation — only its
+ * CALLERS (`pinService.ts`) are pin-specific.
+ */
+export async function deleteNavItem(navItemId: string): Promise<void> {
+  const webApi = requireWebApi();
+  try {
+    await webApi.deleteRecord(ENTITY, navItemId);
   } catch (err) {
     throw new NavItemRepositoryError(parseWebApiError(err), err);
   }

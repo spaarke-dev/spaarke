@@ -104,6 +104,13 @@ export interface PageInput {
    * DataGridSidePaneOrchestrator / CalendarSidePane).
    */
   webresourceName?: string;
+  /**
+   * Saved view id for `pageType: 'entitylist'` navigation — matches the real
+   * `Xrm.Navigation.navigateTo` `PageInputEntityList.viewId` contract
+   * (widened 2026-08-13, task 060, spaarke-side-pane-navigation-history-r1,
+   * for the Navigator Views tab's click-to-open-with-view-selected flow).
+   */
+  viewId?: string;
   data?: Record<string, any> | string;
   name?: string;
 }

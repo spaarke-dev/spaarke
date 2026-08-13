@@ -3,8 +3,8 @@
   <metadata>
     <title>Recent (Viewed) tab — render history sprk_navitem rows with type chips + navigate + promote-to-pin</title>
     <phase>4 Navigator core</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies the shared Navigator body (.tsx) in the code page; frontend/fluent-ui; user-facing history rendering + navigation.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -108,6 +108,8 @@
     <criterion testable="true">Negative: given a row whose target the user cannot access, when the tab renders, then that row is trimmed and the tab does not crash (full trimming deferred to 080).</criterion>
     <criterion testable="true">All render tests pass; shared-lib/code-page build green.</criterion>
   </acceptance-criteria>
-  <notes>Maps to spec FR-03 (UI) and plan.md Phase 4 task 041. parallel-safe:false — coordinate with 042 (Edited toggle on this tab) and 050/052 (Pinned) which touch shared NavigatorPane body files (plan.md §5). Promote-to-pin shares the 050 pin-write path. Custom-page labeling is OQ-6 (best-effort, resolve during impl).</notes>
+  <notes>Maps to spec FR-03 (UI) and plan.md Phase 4 task 041. parallel-safe:false — coordinate with 042 (Edited toggle on this tab) and 050/052 (Pinned) which touch shared NavigatorPane body files (plan.md §5). Promote-to-pin shares the 050 pin-write path. Custom-page labeling is OQ-6 (best-effort, resolve during impl).
+
+COMPLETED 2026-08-13. Built src/solutions/NavigatorPane/src/tabs/RecentTab.tsx (history rows newest-first via new navItemRepository.listHistoryItems, closed 5-value chip set, Xrm.Navigation click-to-navigate, minimal promote-to-pin via new navItemRepository.createPinItem) + src/solutions/NavigatorPane/src/tabs/__tests__/RecentTab.test.tsx (8 tests, all green). Wired into NavigatorBody.tsx's `recent` tab panel only (pinned/views placeholders untouched). Shared-lib edit: navItemRepository.ts gained listHistoryItems/listPinItems/createPinItem (additive, no signature changes) — flag for 050/052 to extend rather than duplicate. OQ-6 escalation trigger deliberately NOT fired per explicit task-dispatch override — see notes/task-041-oq6-deviation.md (generic "Page" chip for unresolvable custom pages; capture engine never actually produces Custom-pagetype history rows today, so this is defensive/future-proofing). Also closed a latent NavigatorPane tsconfig/vite gap (no alias for @spaarke/ui-components deep service-subpath imports, no jest-dom types under tsc scope) — same notes file. Verified: tsc --noEmit clean (both shared-lib and NavigatorPane), npx jest 13/13 green (5 NavigatorBody + 8 RecentTab, including one pre-existing NavigatorBody assertion updated for the new recent-panel content), and a real `npm run build` (Vite production bundle) succeeds with RecentTab strings present in dist/index.html.</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -19,6 +19,20 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // task 041 — RecentTab deep-imports navItemRepository (DEF-10 tree-shaking
+      // convention already used by Notepad's useSprkMemoRepository.ts for
+      // PolymorphicResolverService). Without a package.json "exports" map on
+      // @spaarke/ui-components, Node/Vite's default subpath resolution can't
+      // find `services/navigator/navItemRepository` (it only lives under
+      // `dist/`, not the package root). Aliased to `dist/services` (NOT
+      // source, unlike Notepad's resolveSharedLibDeps approach) so
+      // NavigatorPane keeps consuming the pre-built shared-lib bundle per this
+      // file's original design note — matches jest.config.cjs's moduleNameMapper
+      // and tsconfig.json's paths entry for the same subpath.
+      "@spaarke/ui-components/services": path.resolve(
+        __dirname,
+        "../../client/shared/Spaarke.UI.Components/dist/services"
+      ),
     },
   },
   build: {
