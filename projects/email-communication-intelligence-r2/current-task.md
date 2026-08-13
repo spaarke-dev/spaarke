@@ -9,10 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | R2 **deployed to dev + UAT in progress**. Reconciliation UI has real gaps (below). |
-| **Branch** | `work/email-communication-intelligence-r2` @ `b94ad4a61` · clean · **5 ahead / 8 behind `origin/master`** |
-| **Status** | in-progress — UAT fix plan. **#1,#2,#3,#5,#6 DONE**; **#4 DONE + wired** (live e2e pending inbound email). Commits: `7807c02a1`,`6757a55ae`,`a0e58c9ee`,`97e97e1b9`,`4d166fc28`,`d9ff4df82`. |
-| **Next Action** | **#8 deploy all** — (a) rebuild+redeploy CommunicationReconciliation code page (carries #2/#3/#5); (b) redeploy SpaarkeAi/LegalWorkspace bundle (carries #6 section). Then **#7** (merge `.eml` archive fix `0026af5e1` to master) + **#9** (cleanup). **Operator TODO:** send a test email to `mailbox-central@spaarke.com` to confirm #4 triage populates. |
+| **Phase** | R2 UAT fixes **MERGED to master (PR #765, merge `1825a3047`) + DEPLOYED to dev**. |
+| **Branch** | `work/email-communication-intelligence-r2` synced to master (0 behind). |
+| **Status** | **ALL 6 UAT fixes (#1-#6) + .eml archive (#7) DONE, merged, deployed.** Plus a real BFF bug found+fixed: compound-OFF host-boot crash (asymmetric IEmailTemplateService/IEmailDraftAi registration, ADR-032 §F.1) — was the Tier-1 CI blocker. Also fixed the Tier-2 Compose-LFS CI gap. |
+| **Next Action** | **#9 cleanup test data** (`seed-uat-communication-corpus.ps1 -Clean` + delete `uat-e2e-20260813-*`) when UAT confirms. **Operator TODO:** send a test email to `mailbox-central@spaarke.com` → confirm #4 triage columns populate on the new capture. |
+
+### Deploy status (2026-08-13, dev)
+- **#1 grid config** — live (data). **#4 triage catalog** — live (data + wired). **#7 archive** — live (BFF, verified earlier).
+- **#2/#3/#5 code page** — `sprk_communicationreconciliation` web resource redeployed (`1e191e05-...`, bundle verified: "Email Review All/Completed", `email-connections-review`, `reconciliation-view-switcher`).
+- **#2/#3/#6 SpaarkeAi/LegalWorkspace** — `Deploy SpaarkeAi` workflow auto-fired on the master merge → success (dev).
+- **BFF host-boot fix** — on master; NOT redeployed to dev (dev is compound-ON so it never crashed; my BFF fixes #4/#7 already live). Deploy only if an AI-disabled env is provisioned.
 
 ### Critical context (3 sentences)
 R2 is deployed to **dev** (spaarke-bff-dev + spaarkedev1); the reconciliation code page works but is **substantially incomplete vs the prototype** — the Related-to pane is collapsed to "Requires review" text, Fields/Tasks tabs are always disabled, no suggestions render, and triage columns are blank because **triage AI never populates real captures**. Root causes are known + file-referenced (below). The **`.eml` archive bug is fixed on this branch but NOT yet merged to master** (commit `0026af5e1`).
