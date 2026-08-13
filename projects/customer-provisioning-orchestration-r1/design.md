@@ -1,10 +1,11 @@
 # Customer Provisioning & Deployment Orchestration — Design Specification
 
-> **Status**: Draft v3 — post-2026-08-12 assessment refresh, pending owner review
+> **Status**: **Draft v3.1 — PAUSED pending [`code-quality-and-assurance-r3`](../code-quality-and-assurance-r3/) assessment of the D20 refactor ask** ([ask doc](../code-quality-and-assurance-r3/notes/deployment-complexity-refactors-ask-2026-08-12.md)). r1 resumes once r3 completes; will confirm/update D20 + Phase B/E accordingly, then run `/design-to-spec` → `/project-pipeline`.
 > **Created**: 2026-06-15
 > **Revised**:
 > - 2026-06-16 (feedback round 1: resource inventory, identity spec, config capture, Q1–Q6 resolved)
-> - 2026-08-12 (v3: D3 ADR-tension amendment, TF Power Platform provider adoption, H12 promoted to first-class config-seed manifest, silent-failure trap catalog, Cosmos DB provisioning added, SPE confidential-client fix, resolved v2 open items B1–B3/I1–I3/I5–I6)
+> - 2026-08-12 (v3: D3 rewritten for two tiers, TF Power Platform provider adoption, H12 promoted to first-class config-seed manifest, silent-failure trap catalog, Cosmos DB provisioning added, SPE confidential-client fix, resolved v2 open items B1–B3/I1–I3/I5–I6)
+> - 2026-08-12 (v3.1: D20 fail-fast config + Graph role constants added as PENDING per r3 handoff; sourced pricing research; D3 rewritten in place; §3A reframed as rationale not amendment)
 > **Author**: Ralph Schroeder / Claude Code
 > **Project**: customer-provisioning-orchestration-r1
 > **Supersedes**: `projects/spaarke-environment-factory-r1/design.md`
@@ -69,6 +70,7 @@ These are inputs, not proposals. The design conforms to them. D1-D11 from `disco
 | D17 | **Decommission out of scope.** Existing `Decommission-Customer.ps1` remains operational as-is. Registry-aware teardown handlers deferred to r2. | No decommission handlers in this project. |
 | D18 | **(v3, 2026-08-12) BFF doubles as consent-capture onboarding client.** For Model 2 customer-tenant deploys, the BFF exposes a consent callback endpoint that captures the customer admin's `tid` on consent grant and triggers the provisioning pipeline. Closes the "self-service" gap where admin consent is the one irreducible customer-tenant action. | New BFF endpoint + handler H0.5 (consent-capture) that seeds the run parameters. |
 | D19 | **(v3, 2026-08-12) Per-tenant token-metering layer is a no-regret investment.** Build regardless of D3 outcome. Powers pricing (§3A) under any tenancy model — usage-passthrough for dedicated (D3), fair billing for shared trial tier. Implementation: APIM gateway with per-tenant token attribution OR app-level custom App-Insights metric keyed on `tenantId`. | New non-handler capability tracked in fast-follow list; not on the H0–H14 critical path but ships in r1. |
+| D20 | **(v3 refinement, 2026-08-12) Fail-fast configuration validation + code-constant Graph role enforcement — PENDING r3 assessment.** Intent: all BFF `IOptions<T>` classes carry `[Required]` on customer-critical properties, registered with `.ValidateDataAnnotations().ValidateOnStart()`; Graph app-role parity between BFF app-reg and UAMI service principal enforced via a compile-time constant in code (list of role GUIDs + display names + owning module), not a runbook-verified script. **r1 is pausing pending [`code-quality-and-assurance-r3`](../../projects/code-quality-and-assurance-r3/) assessment** ([ask doc](../../projects/code-quality-and-assurance-r3/notes/deployment-complexity-refactors-ask-2026-08-12.md)). r3 owns the decision on where this discipline lands (r1 Phase E, r3 forcing-functions task 040/042, or a mix). r1 resumes once r3 completes; §14 phasing + §17 placement justification update accordingly. | Silent-fail traps T1 (`keyVaultReferenceIdentity`), T2 (MI as Dataverse App User), T3 (MI Graph role parity) surface at BFF startup and fail the `/health` probe — hard deploy failure instead of runtime-first-use failure. Whichever project lands the discipline, r1 H4 + H10 verification queries become redundant post-r3 (r1's verification remains a safety net until r3 forcing-functions active). |
 
 ---
 
@@ -167,9 +169,9 @@ Six known-issue guardrails baked into handlers as **verified post-conditions**, 
 
 | # | Trap | Where it bites | Handler that owns the fix | Verification |
 |---|---|---|---|---|
-| **T1** | **`keyVaultReferenceIdentity` not PATCHed to UAMI** — App Service resolves `@Microsoft.KeyVault(...)` refs with the wrong identity → all KV-ref settings become `null` at runtime | H4 completes but BFF startup fails resolving `Dataverse:ClientSecret` etc. | H4 | ARM read: App Service `keyVaultReferenceIdentity` == UAMI resource ID |
-| **T2** | **MI not registered as Dataverse Application User** in the target env | Every BFF → Dataverse call 403s → surfaces as 500 to callers; Communication/Email module fails silently on subscription setup | H10 (was semi-auto in v2; TF-driven in v3) | Dataverse query: `systemusers?$filter=applicationid eq {mi-app-id}` returns 1 |
-| **T3** | **MI Graph app-role parity broken** — the ~11 Graph app-roles granted on the BFF app-reg are NOT replicated onto the MI service principal | App-only Graph calls from BFF (SPE, mail, groups) 403 despite delegated flow working | H10 (post-step) | Graph query: MI SP `appRoleAssignments` includes all 11 role IDs |
+| **T1** | **`keyVaultReferenceIdentity` not PATCHed to UAMI** — App Service resolves `@Microsoft.KeyVault(...)` refs with the wrong identity → all KV-ref settings become `null` at runtime | H4 completes but BFF startup fails resolving `Dataverse:ClientSecret` etc. | H4 | ARM read: App Service `keyVaultReferenceIdentity` == UAMI resource ID. **Post-D20**: fail-fast config validation catches this at BFF startup (`/health` probe fails → deploy fails visibly) instead of at first Dataverse call. |
+| **T2** | **MI not registered as Dataverse Application User** in the target env | Every BFF → Dataverse call 403s → surfaces as 500 to callers; Communication/Email module fails silently on subscription setup | H10 (was semi-auto in v2; TF-driven in v3) | Dataverse query: `systemusers?$filter=applicationid eq {mi-app-id}` returns 1. **Post-D20**: BFF startup smoke-tests a Dataverse call via UAMI; missing App User surfaces as `/health` failure. |
+| **T3** | **MI Graph app-role parity broken** — the ~11 Graph app-roles granted on the BFF app-reg are NOT replicated onto the MI service principal | App-only Graph calls from BFF (SPE, mail, groups) 403 despite delegated flow working | H10 (post-step) | Graph query: MI SP `appRoleAssignments` includes all 11 role IDs. **Post-D20**: expected role list is compile-time constant; H10 syncs UAMI SP against constant + ArchTest enforces "no new Graph role added without constant update." |
 | **T4** | **Only one Exchange ApplicationAccessPolicy** created (BFF app-reg, missing MI) — app-only mail calls scope-fail | Email/Communication module ingestion 403s despite delegated Mail.Send working | H14 (v3 enumerated) | Exchange `Get-ApplicationAccessPolicy` returns 2 entries (both principals) |
 | **T5** | **Staging slot MI differs from prod slot MI** — KV RBAC granted only to prod slot → staging deploys can't resolve KV refs → cold-start failures on slot swap | Production deploy triggers a 503 window post-swap | H4 (extended) | ARM read of BOTH slots' MI object IDs; KV RBAC check for both |
 | **T6** | **SPE container creation on delegated token 403s** (`public client not allowed`) | H8 fails on fresh customer with unhelpful auth error; blocks the whole pipeline | H8 (v3, confidential-client) | Container-type creation uses confidential-client cert from KV; no `az login`-style delegated flow |
@@ -1077,12 +1079,12 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 | Phase | Content | Depends on | Notes |
 |---|---|---|---|
 | **A** | Doc consolidation (Gap 4 — one authoritative guide + env-var/app-setting manifest) + AI Search index schema audit (R9) + INVENTORY §12 verification backlog (33-vs-7 PCF, 87-entity roster export, two-source AI seed drift resolution, managed-solution export coverage) + doc-drift fixes (R6) | — | Parallel with B |
-| **B** | Gap automation scripts — hardened & idempotent (Entra apps 11-grant H3 per R4, SPE H8 confidential-client per T6, solution export/fix managed H6, `Deploy-Release.ps1` Phase 4 hardening per Gap 2, Cosmos DB provisioning added per R11) | — | Parallel with A |
+| **B** | Gap automation scripts — hardened & idempotent (Entra apps 11-grant H3 per R4, SPE H8 confidential-client per T6, solution export/fix managed H6, `Deploy-Release.ps1` Phase 4 hardening per Gap 2, Cosmos DB provisioning added per R11) + **conditionally** #4 Graph app-role parity via code constant (per D20; if r3 hasn't landed the discipline first) | — | Parallel with A. **D20 conditional**: if r3 owns #4 as ArchTest, this phase's H10 constant work is skipped; r1 references r3's constant instead. |
 | **B'** *(v3, new)* | TF Power Platform provider adoption — SP BAP bootstrap (per R15), TF module for `powerplatform_environment` + `powerplatform_user`, integration tests against Sandbox env | — | Parallel with A + B; unlocks H5 + H10 |
 | **C** | Registry schema extension (9 columns per §6.1) + ProvisioningRun data model (Cosmos, shapes per §6.2) + `customer.bicep` extension (Cosmos + SignalR + `model1-shared.bicep` first-class) + `platform.bicep` rebuild (L2 App Service + Cosmos + platform KV) + **L2 control-plane** (REST API + AAD per B1, App Service per B2, concurrency per I5, crash-recovery per I6) integrating all 19 handlers | A, B, B' | Core build phase |
 | **C'** *(v3, new)* | H12a/b/c config-seed manifest implementation — declarative seed authoritative-source table resolving R14 drift; all seeders idempotent + resumable; H14 integration wiring (2× Exchange policies per T4, Graph webhooks, S2S consent) | A (drift resolution), C | Highest functional payoff (Gap 1) |
 | **D** | `/provision-environment` operator skill + L2 REST API integration + Model 2 consent-capture landing (BFF endpoint per D18) + per-tenant token-metering layer (D19) | C | L3 + fast-follow |
-| **E** | `DemoExpirationService` migration + Azure legacy-config deletion + verification | — | Parallel; BFF task, FULL rigor (per CLAUDE.md §10 BFF Hygiene checklist) |
+| **E** | `DemoExpirationService` migration + Azure legacy-config deletion + verification + **conditionally** #2 fail-fast config validation (per D20; if r3 hasn't landed the discipline first — `[Required]` annotations on 26 `IOptions<T>` classes + `.ValidateDataAnnotations().ValidateOnStart()`) | — | Parallel; BFF task, FULL rigor (per CLAUDE.md §10 BFF Hygiene checklist). **D20 conditional**: if r3 owns #2 as CI gate, this phase's IOptions annotation work is skipped; r1 verifies r3's discipline is active as a Phase F prerequisite. |
 | **F** | E2E dry run: new environment end-to-end (Model 2 + Model 1 trial both verified) + all silent-fail traps cleared + r1 live sign-off items + wrap-up | C, C', D, E | Acceptance |
 
 **Parallelism**: A, B, B', E can start immediately in parallel. C waits on {A, B, B'}. C' waits on {A drift resolution, C}. D waits on C. F is acceptance.
@@ -1108,6 +1110,7 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 13. **Model 1** (trial/SMB per D3 v3): shared fixed-floor tier deployed via `model1-shared.bicep`; per-tenant token-metering layer (D19/A2) enforces `tokenBudgetMonthlyUSD` and blocks pipeline calls when exceeded; per-tenant AI Search filter on every query verified in H13
 14. **Cost envelope conforms to pricing model** ([`notes/pricing-research-2026-08-12.md`](notes/pricing-research-2026-08-12.md)): Model 2 empty-environment Azure floor ≤$400/mo (dev-Redis) or ≤$800/mo (prod-P1); Model 1 marginal per-customer ≤$430/mo (5–10 users, capped tokens); shared platform floor for Model 1 ≤$400/mo — deviations >20% flagged in H13 as cost drift
 15. **BFF publish size** ≤60 MB compressed (CLAUDE.md §10 NFR-01); Phase E DemoExpirationService migration verifies ~0 MB delta
+16. **D20 fail-fast config discipline active** — either r3 has landed #2 (`[Required]` + `ValidateOnStart()`) + #4 (Graph role code constant) as ArchTests/CI gates OR r1 Phase E absorbed them. Verified: (a) BFF misconfig causes `/health` startup failure not runtime failure; (b) adding a new Graph role without updating the constant fails ArchTest/CI; (c) silent-fail traps T1/T2/T3 verification queries in H4/H10 remain as safety nets but are no longer the primary defense
 
 ---
 
@@ -1149,10 +1152,12 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 - **New scripts + skill + procedure doc**: `scripts/`, `.claude/skills/`, `docs/procedures/` — no BFF impact.
 - **Provisioning handlers**: Register in the **control-plane service**, not the BFF. The control plane is Spaarke-internal fleet management (D3, D8, D12); the BFF is per-customer. Zero BFF DI impact.
 - **Control-plane service**: New standalone service in `rg-spaarke-platform-{env}`. Not the BFF. Cosmos DB for state. No shared-resource conflict.
-- **Only BFF changes** (v3 — two additions vs v2):
+- **Only BFF changes** (v3 — up to four additions vs v2, subject to r3 assessment per D20):
   - **Phase E** — `DemoExpirationService` migration (R5 carry-over): modifies an existing registered service to use `DataverseEnvironmentService`. No new endpoints, packages, or DI registrations. Expected publish-size delta: ~0.
   - **Phase D** — **BFF `/api/onboarding/consent-callback` endpoint** (v3, D18) for Model 2 self-service consent capture. NEW endpoint + one new handler. Expected publish-size delta: ~0.1 MB (single controller + verification helper).
-  - Both changes MUST follow the CLAUDE.md §10 BFF Hygiene checklist: load `.claude/constraints/bff-extensions.md`, publish-size verification (60 MB ceiling), test update obligation, no new HIGH CVEs.
+  - **Phase E (conditional per D20)** — `[Required]` annotations on 26 `IOptions<T>` classes + `.ValidateDataAnnotations().ValidateOnStart()` middleware. **Skipped if r3 owns as CI gate.** No new endpoints; no new packages; middleware adds ~1 registration. Expected publish-size delta: ~0.
+  - **Phase B (conditional per D20)** — Graph app-role compile-time constant + H10 SDK helper reading the constant. **Skipped if r3 owns as ArchTest.** No new endpoints; one new class + one helper. Expected publish-size delta: <~0.05 MB.
+  - All changes MUST follow the CLAUDE.md §10 BFF Hygiene checklist: load `.claude/constraints/bff-extensions.md`, publish-size verification (60 MB ceiling), test update obligation, no new HIGH CVEs.
 - **Registry schema extension**: Dataverse-only (**9 new columns v3**, was 6 v2 — adds `sprk_currentrunid`, `sprk_tenancymodel`, `sprk_tenantid`).
 - **`customer.bicep` extension**: Infrastructure-as-Code only. Adds per-customer AI resources (OpenAI, AI Search, Doc Intelligence, App Insights) **+ Cosmos DB (v3, R11) + optional SignalR (v3)** — no BFF code changes.
 - **`platform.bicep` rebuild**: Infrastructure-as-Code only. Shrinks to control-plane resources (L2 App Service, Cosmos, platform KV, monitoring).
@@ -1217,6 +1222,22 @@ These items require detailed verification during Phase A (doc consolidation + au
 ---
 
 ## 20. CHANGELOG
+
+### v3.1 — 2026-08-12 (D20 + r3 handoff for #1/#3)
+
+**Trigger**: owner feedback surfaced deployment complexity concerns around app-registration proliferation + env-var/config plumbing. Analysis identified 4 refactors (#1 KV federation, #2 fail-fast config validation, #3 app-reg consolidation via UAMI federated credentials, #4 Graph app-role parity via code constants). Cross-referenced against `code-quality-and-assurance-r3` (on-hold BFF quality program) which already owns the axis for #3 as NG1 and has natural homes for #2/#4 as forcing functions.
+
+**Changes**:
+- **§3 D3**: rewritten IN PLACE (no longer "no shared resources ever"; describes both Model 2 dedicated + Model 1 shared trial/SMB directly). Eliminates the v2 "rule says X but §3A adds Y" reader-confusion pattern.
+- **§3A**: reframed from "ADR-Tensions D3 Path A Amendment" to "D3 Two-Tier Rationale" — economic *why*, not rule *what*.
+- **§3 D20 (NEW)**: locked decision for fail-fast config validation + Graph app-role code constants — **status PENDING r3 assessment**. r1 pauses after design.md complete; r3 decides whether these land in r1 Phase E or r3 forcing-functions.
+- **§4B trap catalog**: T1/T2/T3 updated with "Post-D20" notes explaining fail-at-deploy vs fail-at-runtime semantics.
+- **§14 phasing**: Phase B + Phase E gained conditional D20 tasks (skipped if r3 owns discipline).
+- **§15 success criteria**: added #16 (D20 discipline active + verifiable) and updated #14 for cost envelope.
+- **§17 placement justification**: expanded from 2 BFF changes to up to 4 (conditional on r3 assessment outcome).
+- Companion doc: [`notes/pricing-research-2026-08-12.md`](notes/pricing-research-2026-08-12.md) added with Model 1 §5B shareable-vs-dedicated segregation.
+- **Handoff to r3**: [`ask doc`](../code-quality-and-assurance-r3/notes/deployment-complexity-refactors-ask-2026-08-12.md) written; #1 KV federation + #3 app-reg consolidation are r3's decision to accept/defer. r3 evaluates whether to bring NG1 in-scope for #3.
+- **r1 pause**: r1 is paused pending r3 assessment. When r3 completes, r1 resumes and confirms/updates D20 + Phase B/E accordingly, then runs `/design-to-spec` → `/project-pipeline`.
 
 ### v3 — 2026-08-12 (post-assessment refresh)
 
