@@ -24,7 +24,7 @@
 | 014 | **FR-06** telemetry consolidation (drop classic App Insights SDK) | P1 | FR-06 | sonnet/high | 004 | false | ✅ |
 | 020 | **H2** dev-boot DI validation (fix ValidateOnBuild/ValidateScopes) | P2 | FR-08 | **opus**/xhigh | 010 | false | ✅ |
 | 021 | **H2 adversarial verification** (non-author) | P2 | NFR-07 | opus/xhigh | 020 | false (V2) | ✅ |
-| 030 | Full test suite green on net10 (unit + integration + arch) | P3 | FR-11 | sonnet/xhigh | 021 | false | 🔲 |
+| 030 | Full test suite green on net10 (unit + integration + arch) | P3 | FR-11 | sonnet/xhigh | 021 | false | ✅ |
 | 033 | **Graph 5.101→6.5 + Kiota 1→2** (transitive); retire 7 Kiota pins + NoWarn (owner fold-in 2026-08-11) | P3 | FR-03,NFR-03 | sonnet/xhigh | 030 | false | 🔲 |
 | 031 | Publish-size re-baseline + governance updates 🔒 | P3 | FR-12 | sonnet/high | 033 | false | 🔲 |
 | 032 | Transitive CVE audit (no HIGH regression) | P3 | NFR-03 | sonnet/high | 033 | false | 🔲 |

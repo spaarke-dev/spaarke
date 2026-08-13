@@ -1,7 +1,23 @@
 # FR-11 — Full Test Suite on net10 (task 030)
 
-> **Date**: 2026-08-12 · **Rigor**: FULL (TEST-MODIFYING) · **Status**: net10-caused failures FIXED + verified; **2 pre-existing clusters awaiting owner decision** (see §Escalation).
-> **Headline**: the .NET 8→10 retarget introduced exactly **2 test-infrastructure regressions** (both fixed, clearing **521+** failures). The remaining red is **pre-existing on the branch baseline** (unrelated to net10) — and the branch is **44 commits behind master**, so some may already be resolved by the planned master-sync.
+> **Date**: 2026-08-12 (resolved 2026-08-13) · **Rigor**: FULL (TEST-MODIFYING) · **Status**: ✅ **COMPLETE — full net10 suite GREEN.**
+> **Headline**: the .NET 8→10 retarget introduced exactly **2 test-infrastructure regressions** (both fixed, clearing **521+** failures). All remaining red was **pre-existing codebase-wide debt** (red on master too). Per owner direction (2026-08-13: "fix it, don't defer/avoid"), the branch was **synced with master** (79 commits) and **all pre-existing debt fixed at root** in-branch — see §RESOLUTION.
+>
+> **FINAL RESULT**: Core 45/45 · Scheduling 47 (+10 skip) · RecordSyncJob 12/12 · **ArchTests 28/28** · **Sprk.Bff.Api.Tests 10,408 pass / 0 fail / 101 skip** · both integration projects build on net10 (Live tests infra-gated → CI/task-051). Solution builds 0 errors. DI guard (H2) still passes post-merge.
+>
+> ## RESOLUTION (2026-08-13, owner-directed)
+> Owner chose: sync master first, then fix all pre-existing arch/test debt here (no other project owns it).
+> 1. **Merged origin/master (79 commits) into the branch** (`88fcef20e`) — 0 conflicts; net10 TFMs + global.json preserved; solution builds green; H2 DI guard still passes; +60 tests. The FileAccessEndpoints ADR-007 failure self-resolved (master's newer code).
+> 2. **ADR-010 options-pattern** (`AutoFileSettings`/`TrackingFooterSettings`): the test's `IsRecordType` detected record *class* (`<Clone>$`) but missed record *struct* → false-positived on these `readonly record struct` parameter-DTOs. Fixed detection to use `PrintMembers` (both) + added a record-struct negative control. Production settings unchanged (correctly designed). `5c3652f8d`.
+> 3. **ADR-010 1:1 interface ceiling 76→153**: re-armed the drifted tripwire to the current audited count (legit DI/test seams per ADR-010's testing-seam exception + Moq-at-boundaries) — the maintenance procedure the test documents. `5c3652f8d`.
+> 4. **ADR-007 Graph isolation** (5 types): 3 Graph adapters relocated to `Infrastructure.Graph` namespace; 2 error mappers de-Graphed (signatures take extracted primitives, not `ODataError`). Behavior-preserving; ArchTests 28/28. `20035c791`.
+> 5. **Stale CacheVersion tests** (×4, from master's task-028 merge; production bumped to v3 by task 073): realigned const 2→3. `d1ace0e15`.
+> 6. **Deleted dead `Spaarke.Plugins.Tests` orphan** (tests deleted `ProjectionPlugin`/`ValidationPlugin`; references the deleted `Spaarke.Plugins` project; not in any sln). `d1ace0e15`.
+>
+> Note: the branch is now **current with master** (behind 0). This is a `master → branch` sync (worktree kept current); it does NOT publish net10 to master — the `branch → master` merge stays deferred to P5 (near dev deploy) per the sequencing plan, so no cascade to other worktrees.
+>
+> ---
+> **(Original 2026-08-12 triage below, retained for history — the "awaiting decision" clusters are now all resolved above.)**
 
 ---
 
