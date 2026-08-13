@@ -40,6 +40,8 @@ ADR-039 (closed catalogs / no classifier / no second dispatch surface) exists to
 
 > **ADR-039 relationship**: this is expected to be a **Path A/B tension** (per CLAUDE.md §6.5) — either a project-scoped exception documenting the grounded-recommend tier, or a small ADR-039 amendment clarifying that "closed catalog" governs *capability existence and fact-grounding*, not *reasoning latitude over grounded results*. `/design-to-spec` must surface this explicitly.
 
+> **OWNER DECISION (2026-08-13)**: **Add the grounded-recommend tier — APPROVED.** Guiding principle, verbatim: *"get full advantage of what an LLM provides and do not restrict all its wonderfulness — BUT within the limits of not 'making stuff up'."* So: maximize LLM latitude for **reasoning, chaining grounded tools, prioritizing, and proactively guiding**; the ONLY hard limits are (1) the capability catalog stays closed (no inventing tools) and (2) every **fact** is tool-grounded (never fabricated). `/design-to-spec` should treat the tier as decided and focus on *where exactly* the fact/recommendation line sits per capability + the ADR-039 exception-vs-amendment mechanics (§9 Q1 is now a HOW, not a WHETHER).
+
 ---
 
 ## 3. Enhancement areas
