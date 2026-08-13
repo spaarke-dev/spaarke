@@ -30,6 +30,24 @@
  * dedupe-before-create + unstar/delete) — extends this module rather than
  * introducing a second sprk_navitem read/write path, per the file's own
  * "task 050/052 own the full pin gesture ... may extend this helper" note.
+ *
+ * `deleteHistoryItemsOlderThan` added task 031 (30-day prune-on-write
+ * retention, spec FR-05 / OQ-2) — extends this module with an owner+type+age
+ * scoped bulk delete rather than a new repository, called inline from
+ * `navigatorCaptureService.ts` after a successful history upsert.
+ *
+ * `CreatePinItemInput.source` (optional) + `createWeblinkPinItem` added task
+ * 051 (Bookmarks, spec FR-08 / OQ-7). `source` lets a caller override the
+ * `sprk_source` written by {@link createPinItem} — it defaults to `Manual`
+ * (unchanged behavior for every existing 041/050/052 caller), and is set to
+ * `Captured` by `bookmarkService.ts`'s "Pin this page" gesture. A raw weblink
+ * bookmark (a pasted non-Dataverse URL) has no `targetLogicalName`/`targetId`
+ * identity to dedupe on, so rather than widening those two fields to
+ * `string | null` on the existing, pervasively-used {@link CreatePinItemInput}
+ * shape (which would weaken type-safety for every other caller),
+ * {@link createWeblinkPinItem} is a small, separate additive function that
+ * writes `sprk_url` + `sprk_pagetype=WebLink` with `sprk_targetlogicalname`/
+ * `sprk_targetid` left `null`.
  */
 
 import { getXrm } from '../../utils/xrmContext';
@@ -99,6 +117,22 @@ export interface CreatePinItemInput {
   /** One of {@link NavItemPageType}. */
   pageType: number;
   displayName: string;
+  /**
+   * `sprk_source` override — one of {@link NavItemSource}. Defaults to
+   * `Manual` (task 041/050/052 callers never set this and are unaffected).
+   * Added task 051 so "Pin this page" can write `Captured` through the same
+   * create path as the manual star/bookmark gestures.
+   */
+  source?: number;
+}
+
+/** Input for {@link createWeblinkPinItem} (task 051 — "+ Add bookmark" raw-URL fallback). */
+export interface CreateWeblinkPinItemInput {
+  /** The raw, non-Dataverse URL to store as `sprk_url`. */
+  url: string;
+  displayName: string;
+  /** `sprk_source` override — one of {@link NavItemSource}. Defaults to `Manual` ("+ Add bookmark" is the only caller today). */
+  source?: number;
 }
 
 /**
@@ -302,10 +336,42 @@ export async function createPinItem(input: CreatePinItemInput): Promise<{ id: st
   const now = new Date().toISOString();
   const data: Record<string, unknown> = {
     sprk_type: NavItemType.Pin,
-    sprk_source: NavItemSource.Manual,
+    sprk_source: input.source ?? NavItemSource.Manual,
     sprk_targetlogicalname: input.targetLogicalName,
     sprk_targetid: normalizeGuid(input.targetId),
     sprk_pagetype: input.pageType,
+    sprk_displayname: input.displayName,
+    sprk_lastvisited: now,
+    sprk_visitcount: 1,
+  };
+
+  try {
+    const created = await webApi.createRecord(ENTITY, data);
+    return { id: created.id };
+  } catch (err) {
+    throw new NavItemRepositoryError(parseWebApiError(err), err);
+  }
+}
+
+/**
+ * Create a per-user `pin` `sprk_navitem` for a raw, non-Dataverse URL (task
+ * 051, spec FR-08 / OQ-7 — "+ Add bookmark"'s fallback when a pasted string
+ * does not parse as an MDA record/view URL). `sprk_targetlogicalname`/
+ * `sprk_targetid` are left `null` — a weblink has no target-entity identity —
+ * and `sprk_url` carries the raw URL. See this module's own docblock for why
+ * this is a separate function rather than a `CreatePinItemInput` variant.
+ * Never dedupes (no identity to dedupe on) — every call creates a new row.
+ */
+export async function createWeblinkPinItem(input: CreateWeblinkPinItemInput): Promise<{ id: string }> {
+  const webApi = requireWebApi();
+  const now = new Date().toISOString();
+  const data: Record<string, unknown> = {
+    sprk_type: NavItemType.Pin,
+    sprk_source: input.source ?? NavItemSource.Manual,
+    sprk_targetlogicalname: null,
+    sprk_targetid: null,
+    sprk_pagetype: NavItemPageType.WebLink,
+    sprk_url: input.url,
     sprk_displayname: input.displayName,
     sprk_lastvisited: now,
     sprk_visitcount: 1,
@@ -363,6 +429,44 @@ export async function deleteNavItem(navItemId: string): Promise<void> {
   const webApi = requireWebApi();
   try {
     await webApi.deleteRecord(ENTITY, navItemId);
+  } catch (err) {
+    throw new NavItemRepositoryError(parseWebApiError(err), err);
+  }
+}
+
+/**
+ * Delete the current user's `history` `sprk_navitem` rows whose
+ * `sprk_lastvisited` is strictly older than `cutoff` (retention prune-on-write,
+ * task 031, spec FR-05 / OQ-2). The OData filter always ANDs together
+ * `_ownerid_value eq {ownerId}` AND `sprk_type eq {NavItemType.History}` AND
+ * `sprk_lastvisited lt {cutoff}` — a `sprk_type=pin` row (pins/bookmarks never
+ * auto-expire) or another user's row can never match, by construction of the
+ * filter (NFR-03). Mirrors {@link listHistoryItems}'s owner-scoped filter
+ * shape but adds the age predicate and deletes rather than lists.
+ *
+ * Callers (the task-030 capture poller, `navigatorCaptureService.ts`) run this
+ * inline on each capture write and treat any {@link NavItemRepositoryError}
+ * as non-fatal — a failed prune is retried on the next capture write, not
+ * immediately.
+ *
+ * @param ownerId - Current user id (GUID, no braces) — `_ownerid_value`.
+ * @param cutoff - Rows with `sprk_lastvisited` older than this are deleted.
+ * @returns The number of rows deleted.
+ */
+export async function deleteHistoryItemsOlderThan(ownerId: string, cutoff: Date): Promise<number> {
+  const webApi = requireWebApi();
+  const filter =
+    `_ownerid_value eq ${ownerId} and sprk_type eq ${NavItemType.History}` +
+    ` and sprk_lastvisited lt ${cutoff.toISOString()}`;
+  const query = `?$select=sprk_navitemid&$filter=${filter}`;
+
+  try {
+    const result = await webApi.retrieveMultipleRecords(ENTITY, query);
+    const candidates = (result.entities ?? []) as unknown as Array<Pick<NavItemRecord, 'sprk_navitemid'>>;
+    for (const candidate of candidates) {
+      await webApi.deleteRecord(ENTITY, candidate.sprk_navitemid);
+    }
+    return candidates.length;
   } catch (err) {
     throw new NavItemRepositoryError(parseWebApiError(err), err);
   }

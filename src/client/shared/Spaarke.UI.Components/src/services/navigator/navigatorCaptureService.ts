@@ -30,8 +30,17 @@
  * The loop itself has NO dependency on pane visibility/collapse state — it is
  * a plain start/stop function, not a React hook, so the caller (the
  * persistent `SprkSidePaneHost`, `alwaysRender:true`) can start it once at
- * mount and it keeps running while the pane is collapsed (NFR-05). Retention
- * pruning is explicitly NOT done here (task 031).
+ * mount and it keeps running while the pane is collapsed (NFR-05).
+ *
+ * Retention (task 031, spec FR-05 / OQ-2): after a SUCCESSFUL history upsert
+ * this tick, the loop prunes the same user's `history` rows older than
+ * {@link HISTORY_RETENTION_DAYS} days via `navItemRepository.ts`'s
+ * `deleteHistoryItemsOlderThan` — inline, no scheduled job, no plugin. Prune
+ * only runs in the branch that just wrote a history row (never on a no-op
+ * tick) and reuses the `xrm`/`ownerId` already resolved this tick rather than
+ * re-acquiring. A prune failure is routed through `options.onError` exactly
+ * like an upsert failure and never stops the poll (best-effort — retried on
+ * the next successful capture write).
  *
  * @see projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts
  * @see navItemRepository.ts
@@ -43,6 +52,7 @@ import {
   NavItemPageType,
   bumpHistoryItem,
   createHistoryItem,
+  deleteHistoryItemsOlderThan,
   findHistoryItem,
   normalizeGuid,
 } from './navItemRepository';
@@ -53,6 +63,11 @@ import {
 
 /** Default poll interval — task-001 spike observed every visit with no misses at 1.5s. */
 export const DEFAULT_CAPTURE_POLL_INTERVAL_MS = 1_500;
+
+/** Retention window (task 031, spec FR-05 / OQ-2) — history rows older than this are pruned on write. Pins never auto-expire. */
+export const HISTORY_RETENTION_DAYS = 30;
+
+const MS_PER_DAY = 24 * 60 * 60 * 1_000;
 
 // ---------------------------------------------------------------------------
 // Xrm.Utility.getPageContext() typing
@@ -270,6 +285,18 @@ export function startNavigatorCapture(options: NavigatorCaptureOptions = {}): St
 
       try {
         await upsertHistoryItem(xrm, ownerId, page);
+      } catch (err) {
+        options.onError?.(err);
+        return; // upsert failed — no history write occurred this tick, so nothing to prune
+      }
+
+      // Retention (task 031): only reached after a SUCCESSFUL history write this
+      // tick — never on a no-op tick. Reuses the `xrm`/`ownerId` already resolved
+      // above. Best-effort: a prune failure is routed through `options.onError`
+      // exactly like an upsert failure and must not stop the poll.
+      try {
+        const cutoff = new Date(Date.now() - HISTORY_RETENTION_DAYS * MS_PER_DAY);
+        await deleteHistoryItemsOlderThan(ownerId, cutoff);
       } catch (err) {
         options.onError?.(err);
       }

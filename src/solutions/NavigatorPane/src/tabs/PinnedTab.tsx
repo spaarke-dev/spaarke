@@ -9,15 +9,32 @@
  * DELETE on `sprk_navitem`, never a write to `sprk_monitor` (project HARD
  * MUST-NOT, see `pinService.ts` module docblock).
  *
- * Seams for 051 (NOT built here): this file renders the Records `<section>`
- * PLUS (task 052) the Monitored `<section>`. `PinnedTab`'s root container is a
- * plain vertical stack of `<section>` blocks — task 051 (Bookmarks) adds its
- * OWN `<section aria-label="Bookmarks">` sibling, with its own load/render
- * logic. No shared "group" abstraction is introduced pre-emptively (CLAUDE.md
- * §11 — extension is earned by the second/third real consumer, not
- * anticipated); if 051 turns out to need the identical row/chip/navigate
- * shape as these sections, THAT is the trigger to extract a shared local
- * helper at that point, not now.
+ * This file renders the Records `<section>`, the **Bookmarks** `<section>`
+ * (task 051, spec FR-08 / OQ-7), and (task 052) the Monitored `<section>`.
+ * `PinnedTab`'s root container is a plain vertical stack of `<section>`
+ * blocks.
+ *
+ * **Bookmarks group (task 051)**: two gestures, both writing a
+ * `sprk_type=pin` `sprk_navitem` via `bookmarkService.ts` (which itself
+ * reuses `pinService.ts`'s dedupe-before-create write path) —
+ * "Pin this page" (`bookmarkService.pinCurrentPage`, `sprk_source=Captured`,
+ * derived from `getPageContext()`) and "+ Add bookmark"
+ * (`bookmarkService.addBookmark`, `sprk_source=Manual`, derived from
+ * `urlParse.ts`'s MDA-URL-shape parse of a pasted/typed string). The
+ * Bookmarks group does NOT issue a second `Xrm.WebApi` query — it reuses the
+ * SAME `rows` state the Records group's `listPinItems` load populates,
+ * partitioned client-side by `sprk_pagetype`: `EntityRecord` rows render in
+ * Records (a star-pinned record and a "Pin this page"-captured record are
+ * behaviorally identical — both ARE personal pins of a Dataverse record, so
+ * they share the Records group); `EntityList`/`Custom`/`WebLink` rows (view
+ * targets, weblinks — never a "record" in the Dataverse sense) render in
+ * Bookmarks. Both groups reuse the SAME row template (`renderPinRow`, chip
+ * mapping, unstar) — this partition is the "second real consumer" CLAUDE.md
+ * §11 expects before extracting a shared local helper, so `renderPinRow` is
+ * introduced now rather than duplicated a third time. A successful
+ * pin/bookmark create re-fetches `listPinItems` (`loadPins`) rather than
+ * optimistically constructing a row client-side, since the create call only
+ * returns an id, not the full row shape.
  *
  * **Monitored group (task 052, spec FR-09 / OQ-1b, design.md §6c)**: a THIRD,
  * visually distinct `<section>` surfacing the shared record-level
@@ -53,8 +70,9 @@
  * RecentTab.tsx's own note.
  *
  * @see pinService.ts (task 050) — pin/unpin gesture semantics this tab's star wraps; NEVER writes `sprk_monitor`
+ * @see bookmarkService.ts (task 051) — "Pin this page" + "+ Add bookmark" gesture semantics the Bookmarks group calls
  * @see monitoredService.ts (task 052) — the Monitored group's SEPARATE read-only data path
- * @see navItemRepository.ts (task 030/041/050) — Xrm.WebApi CRUD + option-set maps
+ * @see navItemRepository.ts (task 030/041/050/051) — Xrm.WebApi CRUD + option-set maps
  * @see RecentTab.tsx (task 041/042) — chip/navigate pattern this file mirrors locally
  * @see NavigatorBody.tsx (task 040/050) — mounts this component in the `pinned` tab panel
  */
@@ -64,14 +82,16 @@ import {
   Badge,
   Button,
   Caption1,
+  Input,
   Spinner,
   Text,
   makeStyles,
   shorthands,
   tokens,
   type BadgeProps,
+  type InputOnChangeData,
 } from '@fluentui/react-components';
-import { Info16Regular, Star16Filled } from '@fluentui/react-icons';
+import { Add16Regular, Info16Regular, Pin16Regular, Star16Filled } from '@fluentui/react-icons';
 import { getXrm, type XrmContext } from '@spaarke/ui-components';
 import {
   NavItemPageType,
@@ -80,6 +100,7 @@ import {
 } from '@spaarke/ui-components/services/navigator/navItemRepository';
 import { unpinById } from '../services/pinService';
 import { listMonitoredByMe, type MonitoredItem } from '../services/monitoredService';
+import { addBookmark, pinCurrentPage, BookmarkError } from '../services/bookmarkService';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chip mapping (local duplicate of RecentTab.tsx's chipForRow — see module docblock)
@@ -150,19 +171,40 @@ function navigateToMonitoredItem(xrm: XrmContext, item: MonitoredItem): void {
   });
 }
 
-/** Navigate to a row's target via `Xrm.Navigation` — mirrors RecentTab.tsx's `navigateToRow`. */
+/**
+ * Navigate to a row's target — logical (Dataverse) targets go through
+ * `Xrm.Navigation` (never a raw URL — project MUST); a `WebLink` row (task
+ * 051 — a bookmarked non-Dataverse URL) is the one exception and opens via
+ * `window.open(url, '_blank', 'noopener')` instead, per the task's explicit
+ * instruction — `noopener` prevents the new tab from getting a `window.opener`
+ * reference back to this pane (reverse-tabnabbing protection for an
+ * arbitrary user-pasted URL). Mirrors RecentTab.tsx's `navigateToRow` for the
+ * logical-target cases.
+ */
 function navigateToRow(xrm: XrmContext, row: NavItemRecord): void {
+  if (row.sprk_pagetype === NavItemPageType.WebLink) {
+    if (row.sprk_url) window.open(row.sprk_url, '_blank', 'noopener');
+    return;
+  }
+
   const navigation = xrm.Navigation;
   if (!navigation) return;
 
   switch (row.sprk_pagetype) {
     case NavItemPageType.EntityList:
       if (row.sprk_targetlogicalname) {
-        void navigation.navigateTo({ pageType: 'entitylist', entityName: row.sprk_targetlogicalname });
+        void navigation.navigateTo({
+          pageType: 'entitylist',
+          entityName: row.sprk_targetlogicalname,
+          // `sprk_targetid` carries the saved view's `viewid` for a
+          // view-kind bookmark (task 051 — `bookmarkService.addBookmark`'s
+          // `view` branch stores `viewId` as `targetId`, mirroring
+          // ViewsTab.tsx's `navigateToView`). Existing 041/050 EntityList
+          // rows (if any) never set `sprk_targetid`, so this is additive —
+          // `undefined` here is a no-op for `navigateTo`.
+          viewId: row.sprk_targetid ?? undefined,
+        });
       }
-      return;
-    case NavItemPageType.WebLink:
-      if (row.sprk_url) navigation.openUrl(row.sprk_url);
       return;
     case NavItemPageType.Custom:
       return; // No safe generic target — mirrors RecentTab.tsx OQ-6 note.
@@ -251,6 +293,27 @@ const useStyles = makeStyles({
     flexShrink: 0,
     marginTop: '2px',
   },
+  // Bookmarks group (task 051) — the two-gesture entry area above the bookmark rows.
+  bookmarkActions: {
+    display: 'flex',
+    flexDirection: 'column',
+    ...shorthands.gap(tokens.spacingVerticalXS),
+  },
+  addBookmarkRow: {
+    display: 'flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXS),
+  },
+  addBookmarkInput: {
+    flexGrow: 1,
+    minWidth: 0,
+  },
+  bookmarkInlineMessage: {
+    color: tokens.colorNeutralForeground3,
+  },
+  bookmarkErrorMessage: {
+    color: tokens.colorPaletteRedForeground1,
+  },
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -267,46 +330,69 @@ export const PinnedTab: React.FC = () => {
   const [rows, setRows] = React.useState<NavItemRecord[]>([]);
   const [unpinningIds, setUnpinningIds] = React.useState<Set<string>>(new Set());
 
+  // Bookmarks group (task 051) — gesture state. Shares `rows`/`status` above
+  // (see module docblock "Bookmarks group") rather than a second data slice.
+  const [pinningCurrentPage, setPinningCurrentPage] = React.useState(false);
+  const [pinCurrentPageMessage, setPinCurrentPageMessage] = React.useState<string | null>(null);
+  const [bookmarkInput, setBookmarkInput] = React.useState('');
+  const [addingBookmark, setAddingBookmark] = React.useState(false);
+  const [bookmarkMessage, setBookmarkMessage] = React.useState<{ tone: 'error' | 'success'; text: string } | null>(
+    null
+  );
+
   // Monitored group (task 052) — SEPARATE load, SEPARATE state, from Records
   // above. Never merges with `rows`/personal pins.
   const [monitoredStatus, setMonitoredStatus] = React.useState<LoadStatus>('loading');
   const [monitoredErrorMessage, setMonitoredErrorMessage] = React.useState<string | null>(null);
   const [monitoredItems, setMonitoredItems] = React.useState<MonitoredItem[]>([]);
 
-  React.useEffect(() => {
-    let cancelled = false;
+  // Guards state updates after unmount for the manual (post-gesture) reload
+  // below — the mount-time load effect uses its own local `cancelled` flag,
+  // same shape as before task 051.
+  const mountedRef = React.useRef(true);
+  React.useEffect(
+    () => () => {
+      mountedRef.current = false;
+    },
+    []
+  );
 
-    async function load(): Promise<void> {
-      const xrm = getXrm();
-      const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
-      if (!xrm || !ownerId) {
-        if (!cancelled) {
-          setRows([]);
-          setStatus('ready');
-        }
-        return;
-      }
-
-      setStatus('loading');
-      setErrorMessage(null);
-
-      try {
-        const pinRows = await listPinItems(ownerId);
-        if (cancelled) return;
-        setRows(pinRows);
+  /**
+   * Load (or reload) the current user's `pin` `sprk_navitem` rows. Called on
+   * mount AND after a successful "Pin this page"/"+ Add bookmark" gesture
+   * (task 051) — the create call only returns an id, not the full row shape,
+   * so a reload is simpler and no less correct than optimistically
+   * constructing a row client-side.
+   */
+  const loadPins = React.useCallback(async () => {
+    const xrm = getXrm();
+    const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
+    if (!xrm || !ownerId) {
+      if (mountedRef.current) {
+        setRows([]);
         setStatus('ready');
-      } catch (err) {
-        if (cancelled) return;
-        setErrorMessage(err instanceof Error ? err.message : 'Failed to load pinned items.');
-        setStatus('error');
       }
+      return;
     }
 
-    void load();
-    return () => {
-      cancelled = true;
-    };
+    setStatus('loading');
+    setErrorMessage(null);
+
+    try {
+      const pinRows = await listPinItems(ownerId);
+      if (!mountedRef.current) return;
+      setRows(pinRows);
+      setStatus('ready');
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to load pinned items.');
+      setStatus('error');
+    }
   }, []);
+
+  React.useEffect(() => {
+    void loadPins();
+  }, [loadPins]);
 
   // Monitored group (task 052) — its own `useEffect`, independent of the
   // Records load above. `listMonitoredByMe` never throws; this handler is
@@ -369,6 +455,128 @@ export const PinnedTab: React.FC = () => {
     [unpinningIds]
   );
 
+  // ── Bookmarks group handlers (task 051) ──────────────────────────────────
+
+  const handlePinCurrentPageClick = React.useCallback(async () => {
+    const xrm = getXrm();
+    const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
+    if (!xrm || !ownerId) {
+      setPinCurrentPageMessage("Can't pin this page right now.");
+      return;
+    }
+
+    setPinningCurrentPage(true);
+    setPinCurrentPageMessage(null);
+    try {
+      await pinCurrentPage(ownerId);
+      await loadPins();
+    } catch (err) {
+      setPinCurrentPageMessage(err instanceof BookmarkError ? err.message : "Couldn't pin this page. Try again.");
+    } finally {
+      setPinningCurrentPage(false);
+    }
+  }, [loadPins]);
+
+  const handleBookmarkInputChange = React.useCallback(
+    (_event: React.ChangeEvent<HTMLInputElement>, data: InputOnChangeData) => {
+      setBookmarkInput(data.value);
+      setBookmarkMessage(null);
+    },
+    []
+  );
+
+  const handleAddBookmarkSubmit = React.useCallback(async () => {
+    const trimmed = bookmarkInput.trim();
+    if (!trimmed || addingBookmark) return;
+
+    const xrm = getXrm();
+    const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
+    if (!xrm || !ownerId) {
+      setBookmarkMessage({ tone: 'error', text: "Can't add a bookmark right now." });
+      return;
+    }
+
+    setAddingBookmark(true);
+    setBookmarkMessage(null);
+    try {
+      await addBookmark(ownerId, trimmed);
+      setBookmarkInput('');
+      setBookmarkMessage({ tone: 'success', text: 'Bookmark added.' });
+      await loadPins();
+    } catch (err) {
+      setBookmarkMessage({
+        tone: 'error',
+        text: err instanceof BookmarkError ? err.message : "Couldn't add that bookmark. Try again.",
+      });
+    } finally {
+      setAddingBookmark(false);
+    }
+  }, [bookmarkInput, addingBookmark, loadPins]);
+
+  /**
+   * Shared row template for a `sprk_type=pin` row — used by BOTH the Records
+   * group (EntityRecord-pagetype rows) and the Bookmarks group (all other
+   * pagetypes: EntityList/Custom/WebLink). `testIdPrefix` keeps each group's
+   * `data-testid`s distinct (`pinned-tab-row-*` for Records — UNCHANGED from
+   * pre-051, so the existing test suite's ids keep resolving — and
+   * `pinned-tab-bookmark-row-*` for Bookmarks).
+   */
+  const renderPinRow = React.useCallback(
+    (row: NavItemRecord, testIdPrefix: string) => {
+      const chip = chipForRow(row);
+      return (
+        <div
+          key={row.sprk_navitemid}
+          className={styles.row}
+          role="listitem"
+          tabIndex={0}
+          data-testid={`${testIdPrefix}-${row.sprk_navitemid}`}
+          onClick={() => handleRowClick(row)}
+          onKeyDown={event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              handleRowClick(row);
+            }
+          }}
+        >
+          <div className={styles.rowMain}>
+            <Text className={styles.rowName} title={row.sprk_displayname}>
+              {row.sprk_displayname}
+            </Text>
+            <Badge
+              appearance={chip.appearance}
+              color={chip.color}
+              size="small"
+              data-testid={`${testIdPrefix}-chip-${row.sprk_navitemid}`}
+            >
+              {chip.label}
+            </Badge>
+          </div>
+          <Button
+            appearance="transparent"
+            size="small"
+            icon={<Star16Filled />}
+            aria-label={`Unpin ${row.sprk_displayname}`}
+            aria-pressed={true}
+            disabled={unpinningIds.has(row.sprk_navitemid)}
+            data-testid={`${testIdPrefix}-star-${row.sprk_navitemid}`}
+            onClick={event => void handleUnpinClick(row, event)}
+          />
+        </div>
+      );
+    },
+    [handleRowClick, handleUnpinClick, styles, unpinningIds]
+  );
+
+  const recordRows = React.useMemo(
+    () => rows.filter(row => row.sprk_pagetype === NavItemPageType.EntityRecord),
+    [rows]
+  );
+  const bookmarkRows = React.useMemo(
+    () => rows.filter(row => row.sprk_pagetype !== NavItemPageType.EntityRecord),
+    [rows]
+  );
+
   let recordsContent: React.ReactElement;
   if (status === 'loading') {
     recordsContent = (
@@ -382,7 +590,7 @@ export const PinnedTab: React.FC = () => {
         <Caption1>{errorMessage}</Caption1>
       </div>
     );
-  } else if (rows.length === 0) {
+  } else if (recordRows.length === 0) {
     recordsContent = (
       <div className={styles.centeredState} data-testid="pinned-tab-empty">
         <Caption1>Pinned records will appear here.</Caption1>
@@ -391,49 +599,37 @@ export const PinnedTab: React.FC = () => {
   } else {
     recordsContent = (
       <div data-testid="pinned-tab" role="list" aria-label="Pinned records">
-        {rows.map(row => {
-          const chip = chipForRow(row);
-          return (
-            <div
-              key={row.sprk_navitemid}
-              className={styles.row}
-              role="listitem"
-              tabIndex={0}
-              data-testid={`pinned-tab-row-${row.sprk_navitemid}`}
-              onClick={() => handleRowClick(row)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  handleRowClick(row);
-                }
-              }}
-            >
-              <div className={styles.rowMain}>
-                <Text className={styles.rowName} title={row.sprk_displayname}>
-                  {row.sprk_displayname}
-                </Text>
-                <Badge
-                  appearance={chip.appearance}
-                  color={chip.color}
-                  size="small"
-                  data-testid={`pinned-tab-row-chip-${row.sprk_navitemid}`}
-                >
-                  {chip.label}
-                </Badge>
-              </div>
-              <Button
-                appearance="transparent"
-                size="small"
-                icon={<Star16Filled />}
-                aria-label={`Unpin ${row.sprk_displayname}`}
-                aria-pressed={true}
-                disabled={unpinningIds.has(row.sprk_navitemid)}
-                data-testid={`pinned-tab-row-star-${row.sprk_navitemid}`}
-                onClick={event => void handleUnpinClick(row, event)}
-              />
-            </div>
-          );
-        })}
+        {recordRows.map(row => renderPinRow(row, 'pinned-tab-row'))}
+      </div>
+    );
+  }
+
+  // ── Bookmarks group content (task 051) — shares `status`/`errorMessage`
+  // with Records above (same `listPinItems` load); only the filtered row
+  // set + empty-state copy differ. ──
+  let bookmarksContent: React.ReactElement;
+  if (status === 'loading') {
+    bookmarksContent = (
+      <div className={styles.centeredState} data-testid="pinned-tab-bookmarks-loading">
+        <Spinner size="tiny" label="Loading bookmarks…" />
+      </div>
+    );
+  } else if (status === 'error') {
+    bookmarksContent = (
+      <div className={styles.centeredState} data-testid="pinned-tab-bookmarks-error">
+        <Caption1>{errorMessage}</Caption1>
+      </div>
+    );
+  } else if (bookmarkRows.length === 0) {
+    bookmarksContent = (
+      <div className={styles.centeredState} data-testid="pinned-tab-bookmarks-empty">
+        <Caption1>Bookmarked views and links will appear here.</Caption1>
+      </div>
+    );
+  } else {
+    bookmarksContent = (
+      <div data-testid="pinned-tab-bookmarks" role="list" aria-label="Bookmarks">
+        {bookmarkRows.map(row => renderPinRow(row, 'pinned-tab-bookmark-row'))}
       </div>
     );
   }
@@ -506,8 +702,63 @@ export const PinnedTab: React.FC = () => {
         <Text className={styles.groupHeading}>Records</Text>
         {recordsContent}
       </section>
-      {/* Bookmarks group (task 051) mounts as an additional <section> sibling
-          here — see module docblock "Seams". */}
+      <section className={styles.group} aria-label="Bookmarks" data-testid="pinned-tab-group-bookmarks">
+        <Text className={styles.groupHeading}>Bookmarks</Text>
+        <div className={styles.bookmarkActions}>
+          <Button
+            appearance="secondary"
+            size="small"
+            icon={<Pin16Regular />}
+            disabled={pinningCurrentPage}
+            data-testid="pinned-tab-pin-current-page"
+            onClick={() => void handlePinCurrentPageClick()}
+          >
+            Pin this page
+          </Button>
+          {pinCurrentPageMessage && (
+            <Caption1 className={styles.bookmarkErrorMessage} data-testid="pinned-tab-pin-current-page-message">
+              {pinCurrentPageMessage}
+            </Caption1>
+          )}
+          <div className={styles.addBookmarkRow}>
+            <Input
+              className={styles.addBookmarkInput}
+              size="small"
+              placeholder="Paste or type a link to bookmark"
+              value={bookmarkInput}
+              onChange={handleBookmarkInputChange}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleAddBookmarkSubmit();
+                }
+              }}
+              disabled={addingBookmark}
+              aria-label="Bookmark URL"
+              data-testid="pinned-tab-add-bookmark-input"
+            />
+            <Button
+              appearance="primary"
+              size="small"
+              icon={<Add16Regular />}
+              disabled={addingBookmark || !bookmarkInput.trim()}
+              data-testid="pinned-tab-add-bookmark-submit"
+              onClick={() => void handleAddBookmarkSubmit()}
+            >
+              Add
+            </Button>
+          </div>
+          {bookmarkMessage && (
+            <Caption1
+              className={bookmarkMessage.tone === 'error' ? styles.bookmarkErrorMessage : styles.bookmarkInlineMessage}
+              data-testid="pinned-tab-add-bookmark-message"
+            >
+              {bookmarkMessage.text}
+            </Caption1>
+          )}
+        </div>
+        {bookmarksContent}
+      </section>
       <section className={styles.group} aria-label="Monitored" data-testid="pinned-tab-group-monitored">
         <Text className={styles.groupHeading}>Monitored</Text>
         <div className={styles.semanticsNote} data-testid="pinned-tab-monitored-semantics-note">

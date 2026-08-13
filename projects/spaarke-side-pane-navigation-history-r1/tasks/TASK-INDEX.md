@@ -14,12 +14,12 @@
 | 020 | `sprk_navitem` schema authoring (entity-schema.md + deploy script) | 2 Entity | STANDARD | sonnet/high | 001 | A | ✅ | ✅ |
 | 021 | Deploy `sprk_navitem` + security roles | 2 Entity | STANDARD | sonnet/high | 020 | B | ❌ env | ✅ deploy* |
 | 030 | Capture (Viewed) — re-adopt `contextService` poll → history upsert | 3 Capture | FULL | sonnet/high | 011,021 | C | ✅ | ✅ |
-| 031 | Retention — prune-on-write, 30-day age | 3 Capture | FULL | sonnet/high | 030 | E | ✅ | 🔲 |
+| 031 | Retention — prune-on-write, 30-day age | 3 Capture | FULL | sonnet/high | 030 | E | ✅ | ✅ |
 | 040 | `NavigatorPane` code page (Vite webresource pane + tab scaffold) | 4 Navigator | FULL | sonnet/high | 011,021 | C | ✅ | ✅ |
 | 041 | Recent (Viewed) tab | 4 Navigator | FULL | sonnet/high | 030,040 | D | ❌ shared body | ✅ |
 | 042 | Recent (Edited) toggle — N per-entity `modifiedby=me` | 4 Navigator | FULL | sonnet/high | 040 | D | ❌ shared body | ✅ |
 | 050 | Pin gesture (per-user pin; never writes `sprk_monitor`) | 5 Pinned | FULL | sonnet/high | 040 | D | ❌ shared body | ✅ |
-| 051 | Bookmarks (Pin this page + Add bookmark URL parse) | 5 Pinned | FULL | sonnet/high | 050 | E | ✅ | 🔲 |
+| 051 | Bookmarks (Pin this page + Add bookmark URL parse) | 5 Pinned | FULL | sonnet/high | 050 | E | ✅ | ✅ |
 | 052 | Monitored lens (shared `sprk_monitor`, scoped to me) | 5 Pinned | FULL | sonnet/high | 040 | D | ❌ shared body | ✅ owner-only* |
 | 060 | Views tab (reuse `ViewService.ts`; `userquery` grouped) | 6 Views | FULL | sonnet/high | 040 | D | ✅ own file | ✅ |
 | 070 | Search / quick-switcher (local fuzzy + live escalation + kbd) | 7 Search | FULL | sonnet/high | 041,050,060 | F | ✅ | 🔲 |
