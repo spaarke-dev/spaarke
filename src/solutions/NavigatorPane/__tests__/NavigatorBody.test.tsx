@@ -88,13 +88,14 @@ describe('NavigatorBody', () => {
   // Tab scaffold + search-bar placeholder
   // ───────────────────────────────────────────────────────────────────────
 
-  it('render_WithXrm_ShowsRecentPinnedViewsTabsAndSearchBarPlaceholder', async () => {
+  it('render_WithXrm_ShowsRecentPinnedViewsTabsAndQuickSwitcherSearchBox', async () => {
     renderNavigatorBody();
 
     expect(screen.getByTestId('navigator-tab-recent')).toHaveTextContent('Recent');
     expect(screen.getByTestId('navigator-tab-pinned')).toHaveTextContent('Pinned');
     expect(screen.getByTestId('navigator-tab-views')).toHaveTextContent('Views');
-    expect(screen.getByTestId('navigator-search-placeholder')).toBeInTheDocument();
+    // task 070 — the search-bar placeholder is replaced by the real QuickSwitcher.
+    expect(screen.getByTestId('navigator-quickswitcher-input')).toBeInTheDocument();
 
     // Default active tab is Recent — task 041 wires this panel to <RecentTab>
     // (replacing the task-040 placeholder text for the `recent` tab only).

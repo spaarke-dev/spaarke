@@ -2,7 +2,7 @@
 
 > Tracks the ACTIVE task only. History lives in `tasks/TASK-INDEX.md` + per-task POMLs.
 
-## Status: Wave E COMPLETE (14/21) — Recent/Pinned/Bookmarks/Views + capture + retention all done; next = Wave F
+## Status: Wave F COMPLETE (18/21) — full Navigator feature-complete; next = Deploy wave (086 env-mutating, OWNER-GATED)
 - ✅ 001 GO · ✅ 010 xrmContext · ✅ 011 host+registry · ✅ 020 schema · ✅ 021 deployed to spaarkedev1 · ✅ 030 capture engine · ✅ **040 NavigatorPane code page** (Vite singlefile, 5/5 tests, registers NavigatorBody against SprkSidePaneHost)
 - Spine: framework host → live sprk_navitem → capture engine → docked pane shell. All buildable + tested; deploy of the pane is task 086.
 
@@ -20,9 +20,18 @@ Serialized (031 modifies @spaarke/ui-components; 051 rebuilds it via NavigatorPa
 - User asked re the **membership service** (`@spaarke/ui-components/services/membership.ts`, `createMembershipResolver`): it DOES resolve "assigned to me" (ADR-034 metadata-driven, `roles` filter) BUT is **BFF-backed** (`GET /api/users/me/memberships/{entityType}`, Auth v2 OBO) → conflicts with the project's NO-BFF MUST (NFR-01/NFR-02).
 - **Awaiting user's call**: Path A (keep owner-only, strict NO-BFF) vs Path B (scoped read-only BFF exception, wire the membership resolver). Doesn't block Waves E/F/deploy.
 
-## Next waves (independent of the 052 decision)
-- ✅ Wave E DONE (031, 051).
-- Wave F (next): 070 search (deps 041/050/060✅) ‖ 080 security-trim (deps 041/050✅) ‖ 081 retention-verify (deps 031✅) ‖ 085 stub (deps 011✅). 070+080 both touch NavigatorPane body/services → serialize those two; 081 (@spaarke/ui-components capture) + 085 (framework stub) can parallelize with care re: shared-lib build.
+## Wave F COMPLETE (18/21): 085 ✅ 081 ✅ 080 ✅ 070 ✅
+Serialized (all share the @spaarke/ui-components→NavigatorPane build; NavigatorPane jest resolves the lib from dist/, so concurrent lib builds would race). Order: 085(lib stub)→081(verify)→080(security)→070(search).
+- **085 stub (FR-13)**: StubContributor + test-only registration under SidePane/__stub__/; ZERO host-code changes (SprkSidePaneHost untouched) — framework extends by registration only. 16/16 SidePane tests. notes/task-085-stub.md.
+- **081 retention-verify (FR-05 / SC-7)**: end-to-end verify test drives startNavigatorCapture through a page change → asserts >30d history pruned, pin survives, other user untouched. PASS, no defect. Corrected POML's stale ref (logic is in @spaarke/ui-components, not a NavigatorPane retentionService). notes/task-081-retention-verification.md.
+- **080 security-trim (FR-12/NFR-04, SECURITY-SENSITIVE)**: securityTrimService (accessible|denied|transient); denied rows NEVER enter React state (leak-free by construction, no flash). 403/404→trim; network/timeout/5xx→keep (fail-safe default transient). Weblink/EntityList exempt (no record-name surface). Monitored group not extra-trimmed (live sprk_monitor query already server-side trimmed). 125 tests. Gates 0-critical. ⚠️ FLAG FOR OWNER REVIEW at PR/deploy. notes/task-080-security-trimming.md.
+- **070 search (FR-11)**: QuickSwitcher + navigatorSearchIndex (module-scoped useSyncExternalStore, fed by tabs' already-trimmed rows — trim preserved) + liveSearchService. Ctrl/Cmd+K accelerator; local-first fuzzy → escalate-on-miss to Xrm.WebApi/ViewService; Enter navigates (Xrm.Navigation for logical, window.open noopener for weblink). 139 tests. Gates ran; fixed OData $filter injection-encoding + ARIA activedescendant in-task. notes/task-070-search.md.
+  - Known/documented (informational, not blocking): weblink nav inconsistency RecentTab.openUrl vs QuickSwitcher window.open; Pinned/Views locally searchable only after first visit of that tab (miss escalates to live — correct per FR-11).
+
+## Deploy wave (NEXT — OWNER-GATED, env-mutating)
+- **086 Deploy NavigatorPane + wire bootstrap** — Vite build → deploy webresource(s) to spaarkedev1; reuse the LIVE dormant `sprk.Global.SidePaneManager` ribbon hook (recreate `sprk_SidePaneManager` WR — likely NO ribbon import; see notes/task-001-spike-report.md). ALSO finalize 021 security roles (owner picks target end-user role for owner-scoped sprk_navitem CRUD) + 2-user isolation test. deps: all 040-080 ✅.
+- **087 UI-test pass** (ui-test skill, light+dark). **090 wrap** (/test-diet + lessons-learned + archive).
+- ⏳ Still-open 052 "assigned to me" A/B decision (owner) — non-blocking; 052 shipped owner-only.
 - Deploy: 086 (deploy NavigatorPane + wire bootstrap — reuse the LIVE sprk_SidePaneManager ribbon hook) → 087 UI-test. Wrap: 090.
 - ⏸ **021 follow-up** (non-blocking): owner-scoped end-user role wiring + 2-user isolation test — operator picks target role; System Admin has access now. See notes/task-021-deploy-result.md.
 

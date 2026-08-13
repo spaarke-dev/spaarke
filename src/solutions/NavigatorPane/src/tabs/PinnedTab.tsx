@@ -50,6 +50,31 @@
  * `sprk_monitor` affects everyone; last-writer-wins) so a user does not
  * mistake this group for a personal list they exclusively control.
  *
+ * **Read-time security trimming (task 080, spec FR-12/NFR-04)**: every
+ * `sprk_navitem` pin row `loadPins` fetches is re-validated via
+ * `securityTrimService.ts`'s batched `classifyTargets` BEFORE `setRows` is
+ * ever called — so a `denied` (403/404-equivalent) row's cached name can
+ * never flash on screen (the `loading` Spinner covers the whole async
+ * window; there is no interim `setRows` call). This covers BOTH the Records
+ * group AND any `EntityRecord`-pagetype Bookmarks (a "Pin this page"-
+ * captured record renders in Records per the partition above, so it is
+ * covered by the SAME trim pass — no second code path). `EntityList`/
+ * `Custom`/`WebLink` Bookmarks are exempt (no cached RECORD name at risk —
+ * see `securityTrimService.ts`'s module docblock "Exemptions", which also
+ * documents why an `EntityList` view-bookmark's `targetid` must NOT be
+ * retrieve-checked as a record id). The Monitored group is DELIBERATELY NOT
+ * additionally re-checked here: `listMonitoredByMe` is itself a LIVE query
+ * against the target entities (not a cached label) issued fresh on every
+ * mount, and Dataverse row-level security means a record the user cannot
+ * read is never returned by that query in the first place — identical
+ * reasoning to `RecentTab.tsx`'s Edited-tab exemption (see that file's
+ * module docblock). Re-checking already-live, already-security-filtered
+ * rows would be a redundant extra `retrieveRecord` per row with no
+ * confidentiality benefit (CLAUDE.md §11). See
+ * `projects/spaarke-side-pane-navigation-history-r1/notes/task-080-security-trimming.md`
+ * for the full write-up, including this as a documented, deliberate scope
+ * narrowing from the task's literal file list.
+ *
  * Host-context only (project constraint): reads via `Xrm.WebApi`
  * (`navItemRepository.listPinItems`, `monitoredService.listMonitoredByMe`),
  * navigates via `Xrm.Navigation` (never a raw URL for a logical target),
@@ -101,6 +126,12 @@ import {
 import { unpinById } from '../services/pinService';
 import { listMonitoredByMe, type MonitoredItem } from '../services/monitoredService';
 import { addBookmark, pinCurrentPage, BookmarkError } from '../services/bookmarkService';
+import { classifyTargets, trimTargetFromRow } from '../services/securityTrimService';
+import {
+  setPinnedSearchEntries,
+  type SearchEntryTarget,
+  type SearchIndexEntry,
+} from '../services/navigatorSearchIndex';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chip mapping (local duplicate of RecentTab.tsx's chipForRow — see module docblock)
@@ -219,6 +250,42 @@ function navigateToRow(xrm: XrmContext, row: NavItemRecord): void {
       }
       return;
   }
+}
+
+/**
+ * Search-index target for a pin row (task 070) — mirrors `navigateToRow`
+ * above (including its `EntityList` `viewId` handling and its `WebLink` ->
+ * `weblink`-kind mapping) but returns DATA instead of a navigation side
+ * effect, so `QuickSwitcher.tsx` can derive the same Enter/click destination.
+ */
+function targetForRow(row: NavItemRecord): SearchEntryTarget | null {
+  if (row.sprk_pagetype === NavItemPageType.WebLink) {
+    return row.sprk_url ? { type: 'weblink', url: row.sprk_url } : null;
+  }
+  switch (row.sprk_pagetype) {
+    case NavItemPageType.EntityList:
+      return row.sprk_targetlogicalname
+        ? { type: 'entitylist', entityLogicalName: row.sprk_targetlogicalname, viewId: row.sprk_targetid ?? undefined }
+        : null;
+    case NavItemPageType.Custom:
+      return null; // No safe generic target — mirrors RecentTab.tsx OQ-6 note.
+    case NavItemPageType.EntityRecord:
+    default:
+      return row.sprk_targetlogicalname && row.sprk_targetid
+        ? { type: 'entityrecord', entityLogicalName: row.sprk_targetlogicalname, entityId: row.sprk_targetid }
+        : null;
+  }
+}
+
+/** Maps an (already-080-trimmed) pin row to a `navigatorSearchIndex.ts` entry (task 070). Covers BOTH the Records and Bookmarks groups (same `rows` source — see module docblock "Bookmarks group"). */
+function rowToSearchEntry(row: NavItemRecord): SearchIndexEntry {
+  const chip = chipForRow(row);
+  return {
+    id: `pinned-${row.sprk_navitemid}`,
+    label: row.sprk_displayname,
+    chipLabel: chip.label,
+    target: targetForRow(row),
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -371,6 +438,7 @@ export const PinnedTab: React.FC = () => {
       if (mountedRef.current) {
         setRows([]);
         setStatus('ready');
+        setPinnedSearchEntries([]);
       }
       return;
     }
@@ -380,9 +448,20 @@ export const PinnedTab: React.FC = () => {
 
     try {
       const pinRows = await listPinItems(ownerId);
+
+      // Security trim (task 080, FR-12/NFR-04) — see module docblock
+      // "Read-time security trimming". Classify BEFORE `setRows` so a
+      // `denied` row's cached name is never placed in state, let alone
+      // rendered.
+      const classifications = await classifyTargets(xrm, pinRows.map(trimTargetFromRow));
+      const trimmed = pinRows.filter(row => classifications.get(row.sprk_navitemid) !== 'denied');
+
       if (!mountedRef.current) return;
-      setRows(pinRows);
+      setRows(trimmed);
       setStatus('ready');
+      // task 070 — report the SAME already-trimmed rows (Records + Bookmarks)
+      // into the shared search index; see navigatorSearchIndex.ts module docblock.
+      setPinnedSearchEntries(trimmed.map(rowToSearchEntry));
     } catch (err) {
       if (!mountedRef.current) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to load pinned items.');

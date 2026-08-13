@@ -145,8 +145,10 @@ const EDITED_PRIMARY_NAME_FIELD: Record<string, string> = {
 interface FakeXrmOptions {
   historyRows?: typeof FIVE_TYPE_ROWS;
   pinRows?: typeof FIVE_TYPE_ROWS;
-  /** Target ids that should fail `retrieveRecord` (simulates 403/404). */
+  /** Target ids that should fail `retrieveRecord` with a 403/404-shaped error (task 080 — classifies `denied`). */
   inaccessibleTargetIds?: string[];
+  /** Target ids that should fail `retrieveRecord` with a network/timeout-shaped error (task 080 — classifies `transient`, row is KEPT). */
+  transientTargetIds?: string[];
   /** Task 042 — rows returned per core-set entity for the Edited `modifiedby=me` query. */
   editedRecordsByEntity?: Partial<Record<string, FakeEditedRecord[]>>;
 }
@@ -155,6 +157,7 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
   const historyRows = options.historyRows ?? FIVE_TYPE_ROWS;
   const pinRows = options.pinRows ?? [];
   const inaccessibleTargetIds = new Set(options.inaccessibleTargetIds ?? []);
+  const transientTargetIds = new Set(options.transientTargetIds ?? []);
   const editedRecordsByEntity = options.editedRecordsByEntity ?? {};
 
   const retrieveMultipleRecords = jest.fn(async (entity: string, query?: string) => {
@@ -192,6 +195,9 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
   const retrieveRecord = jest.fn(async (_entity: string, id: string) => {
     if (inaccessibleTargetIds.has(id)) {
       throw new Error('Insufficient privileges to access this record (403)');
+    }
+    if (transientTargetIds.has(id)) {
+      throw new Error('Network error: failed to fetch');
     }
     return { sprk_name: 'ok' };
   });
@@ -388,12 +394,12 @@ describe('RecentTab', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────
-  // Inaccessible row trimmed without throwing (FR-12 minimal)
+  // Read-time security trimming (task 080, spec FR-12/NFR-04)
   // ───────────────────────────────────────────────────────────────────────
 
-  it('render_InaccessibleTarget_TrimsRowWithoutThrowing', async () => {
+  it('render_InaccessibleTarget_TrimsRowWithoutThrowingAndNeverRendersCachedName', async () => {
     installMockXrm({
-      historyRows: [FIVE_TYPE_ROWS[0], FIVE_TYPE_ROWS[1]], // Matter (accessible) + Document (inaccessible)
+      historyRows: [FIVE_TYPE_ROWS[0], FIVE_TYPE_ROWS[1]], // Matter (accessible) + Document (denied)
       inaccessibleTargetIds: [DOCUMENT_ID],
     });
 
@@ -403,7 +409,56 @@ describe('RecentTab', () => {
       expect(screen.getByTestId('recent-tab-row-nav-matter')).toBeInTheDocument();
     });
 
+    // Row hidden entirely — and the cached name never appears anywhere in
+    // the DOM (no flash, no partial render, no "(no longer available)"
+    // stand-in that could be confused with the real name).
     expect(screen.queryByTestId('recent-tab-row-nav-document')).not.toBeInTheDocument();
+    expect(screen.queryByText('Master Services Agreement.docx')).not.toBeInTheDocument();
+  });
+
+  it('render_InaccessibleTarget_TrimsRowInDarkThemeToo (ADR-021)', async () => {
+    installMockXrm({
+      historyRows: [FIVE_TYPE_ROWS[0], FIVE_TYPE_ROWS[1]],
+      inaccessibleTargetIds: [DOCUMENT_ID],
+    });
+
+    expect(() => renderRecentTab('dark')).not.toThrow();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('recent-tab-row-nav-matter')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('recent-tab-row-nav-document')).not.toBeInTheDocument();
+    expect(screen.queryByText('Master Services Agreement.docx')).not.toBeInTheDocument();
+  });
+
+  it('render_AccessibleTarget_ShowsNameNormally', async () => {
+    installMockXrm({
+      historyRows: [FIVE_TYPE_ROWS[0]],
+    });
+    renderRecentTab('light');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('recent-tab-row-nav-matter')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Acme v. Widget Co')).toBeInTheDocument();
+  });
+
+  it('render_TransientErrorOnRecheck_KeepsTheRow (does not permanently drop an accessible row on a blip)', async () => {
+    installMockXrm({
+      historyRows: [FIVE_TYPE_ROWS[0], FIVE_TYPE_ROWS[1]], // Matter (accessible) + Document (transient failure)
+      transientTargetIds: [DOCUMENT_ID],
+    });
+
+    renderRecentTab('light');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('recent-tab-row-nav-matter')).toBeInTheDocument();
+    });
+
+    // Transient (network/timeout) failure on the re-check is NOT a denial —
+    // the row is kept, not trimmed.
+    expect(screen.getByTestId('recent-tab-row-nav-document')).toBeInTheDocument();
+    expect(screen.getByText('Master Services Agreement.docx')).toBeInTheDocument();
   });
 
   // ───────────────────────────────────────────────────────────────────────

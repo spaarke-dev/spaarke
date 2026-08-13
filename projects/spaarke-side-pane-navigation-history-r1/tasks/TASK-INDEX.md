@@ -22,10 +22,10 @@
 | 051 | Bookmarks (Pin this page + Add bookmark URL parse) | 5 Pinned | FULL | sonnet/high | 050 | E | ✅ | ✅ |
 | 052 | Monitored lens (shared `sprk_monitor`, scoped to me) | 5 Pinned | FULL | sonnet/high | 040 | D | ❌ shared body | ✅ owner-only* |
 | 060 | Views tab (reuse `ViewService.ts`; `userquery` grouped) | 6 Views | FULL | sonnet/high | 040 | D | ✅ own file | ✅ |
-| 070 | Search / quick-switcher (local fuzzy + live escalation + kbd) | 7 Search | FULL | sonnet/high | 041,050,060 | F | ✅ | 🔲 |
-| 080 | Read-time security trimming | 8 Security | FULL | sonnet/high | 041,050 | F | ✅ | 🔲 |
-| 081 | Retention verification | 8 Security | STANDARD | sonnet/high | 031 | F | ✅ | 🔲 |
-| 085 | Stub contributor (framework-proof, FR-13) | 9 Proof | STANDARD | sonnet/high | 011 | F | ✅ | 🔲 |
+| 070 | Search / quick-switcher (local fuzzy + live escalation + kbd) | 7 Search | FULL | sonnet/high | 041,050,060 | F | ✅ | ✅ |
+| 080 | Read-time security trimming | 8 Security | FULL | sonnet/high | 041,050 | F | ✅ | ✅ |
+| 081 | Retention verification | 8 Security | STANDARD | sonnet/high | 031 | F | ✅ | ✅ |
+| 085 | Stub contributor (framework-proof, FR-13) | 9 Proof | STANDARD | sonnet/high | 011 | F | ✅ | ✅ |
 | 086 | Deploy `NavigatorPane` + wire bootstrap | 9 Deploy | STANDARD | sonnet/high | 040,041,042,050,051,052,060,070,080 | Deploy | ❌ env | 🔲 |
 | 087 | UI-test pass (`ui-test`, light+dark) | 9 Deploy | STANDARD | sonnet/high | 086 | Deploy | ❌ | 🔲 |
 | 090 | Project wrap-up (test-diet, lessons-learned, archive) | Wrap | MINIMAL | sonnet/high | 087 | Wrap | ❌ | 🔲 |

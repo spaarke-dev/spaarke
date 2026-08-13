@@ -53,6 +53,7 @@
 import * as React from 'react';
 import { Caption1, Spinner, Text, makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { ViewService, getXrm, type IViewDefinition, type XrmContext } from '@spaarke/ui-components';
+import { setViewSearchEntries, type SearchIndexEntry } from '../services/navigatorSearchIndex';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entity label helper (local duplicate of RecentTab.tsx's `formatEntityLabel` —
@@ -117,6 +118,16 @@ function navigateToView(xrm: XrmContext, view: IViewDefinition): void {
     entityName: view.entityLogicalName,
     viewId: view.id,
   });
+}
+
+/** Maps a loaded view to a `navigatorSearchIndex.ts` entry (task 070, FR-11). */
+function viewToSearchEntry(view: IViewDefinition): SearchIndexEntry {
+  return {
+    id: `view-${view.id}`,
+    label: view.name,
+    chipLabel: 'View',
+    target: { type: 'entitylist', entityLogicalName: view.entityLogicalName, viewId: view.id },
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -196,6 +207,7 @@ export const ViewsTab: React.FC = () => {
         if (!cancelled) {
           setViews([]);
           setStatus('ready');
+          setViewSearchEntries([]);
         }
         return;
       }
@@ -209,6 +221,8 @@ export const ViewsTab: React.FC = () => {
         if (cancelled) return;
         setViews(userQueries);
         setStatus('ready');
+        // task 070 — report the loaded views into the shared search index.
+        setViewSearchEntries(userQueries.map(viewToSearchEntry));
       } catch (err) {
         // getAllUserQueries() itself never rejects (internally try/caught) —
         // this branch is defensive only, mirroring RecentTab.tsx's loadEdited.

@@ -102,11 +102,17 @@ interface FakeXrmOptions {
   noUtility?: boolean;
   /** Monitored-source rows per entity (task 052). Defaults to none. */
   monitoredRecordsByEntity?: Partial<Record<string, MonitoredFakeRecord[]>>;
+  /** Task 080 — target ids whose `retrieveRecord` re-check fails 403/404-shaped (classifies `denied`, row trimmed). */
+  inaccessibleTargetIds?: string[];
+  /** Task 080 — target ids whose `retrieveRecord` re-check fails network/timeout-shaped (classifies `transient`, row KEPT). */
+  transientTargetIds?: string[];
 }
 
 function buildFakeXrm(options: FakeXrmOptions = {}) {
   const pinRows = options.pinRows ?? PIN_ROWS;
   const monitoredRecordsByEntity = options.monitoredRecordsByEntity ?? {};
+  const inaccessibleTargetIds = new Set(options.inaccessibleTargetIds ?? []);
+  const transientTargetIds = new Set(options.transientTargetIds ?? []);
 
   const MONITORED_NAME_FIELD: Record<string, string> = {
     sprk_matter: 'sprk_matternumber',
@@ -141,10 +147,21 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
   const deleteRecord = jest.fn(async (_entity: string, _id: string) => ({}));
   const navigateTo = jest.fn(async () => undefined);
 
+  // Task 080 — the security-trim re-check `Xrm.WebApi.retrieveRecord` call.
+  const retrieveRecord = jest.fn(async (_entity: string, id: string) => {
+    if (inaccessibleTargetIds.has(id)) {
+      throw new Error('Insufficient privileges to access this record (403)');
+    }
+    if (transientTargetIds.has(id)) {
+      throw new Error('Network error: failed to fetch');
+    }
+    return { sprk_name: 'ok' };
+  });
+
   const xrm: Record<string, unknown> = {
     WebApi: {
       retrieveMultipleRecords,
-      retrieveRecord: jest.fn(),
+      retrieveRecord,
       createRecord: jest.fn(),
       updateRecord: jest.fn(),
       deleteRecord,
@@ -303,6 +320,56 @@ describe('PinnedTab', () => {
     // pseudo-entity name and never a create/update/delete on any monitor-bearing entity.
     const readEntities = fakeXrm.WebApi.retrieveMultipleRecords.mock.calls.map(call => call[0] as string);
     expect(readEntities).not.toContain('sprk_monitor');
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Read-time security trimming (task 080, spec FR-12/NFR-04)
+  // ───────────────────────────────────────────────────────────────────────
+
+  describe('Read-time security trimming (task 080)', () => {
+    it('a denied (403) pinned record is hidden and its cached name never renders', async () => {
+      installMockXrm({ inaccessibleTargetIds: [DOCUMENT_ID] });
+      expect(() => renderPinnedTab('light')).not.toThrow();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pinned-tab-row-pin-matter')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByTestId('pinned-tab-row-pin-document')).not.toBeInTheDocument();
+      expect(screen.queryByText('Master Services Agreement.docx')).not.toBeInTheDocument();
+    });
+
+    it('a denied (404) pinned record is trimmed in dark theme too (ADR-021)', async () => {
+      installMockXrm({ inaccessibleTargetIds: [DOCUMENT_ID] });
+      expect(() => renderPinnedTab('dark')).not.toThrow();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pinned-tab-row-pin-matter')).toBeInTheDocument();
+      });
+      expect(screen.queryByTestId('pinned-tab-row-pin-document')).not.toBeInTheDocument();
+      expect(screen.queryByText('Master Services Agreement.docx')).not.toBeInTheDocument();
+    });
+
+    it('an accessible pinned record renders normally with its name', async () => {
+      installMockXrm();
+      renderPinnedTab('light');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pinned-tab-row-pin-matter')).toBeInTheDocument();
+      });
+      expect(screen.getByText('Acme v. Widget Co')).toBeInTheDocument();
+    });
+
+    it('a transient (network) error on the re-check does not permanently drop the row', async () => {
+      installMockXrm({ transientTargetIds: [DOCUMENT_ID] });
+      renderPinnedTab('light');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('pinned-tab-row-pin-matter')).toBeInTheDocument();
+      });
+      expect(screen.getByTestId('pinned-tab-row-pin-document')).toBeInTheDocument();
+      expect(screen.getByText('Master Services Agreement.docx')).toBeInTheDocument();
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────

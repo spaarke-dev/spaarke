@@ -54,14 +54,24 @@
  * labeling is deferred to task 051. Documented in
  * `projects/spaarke-side-pane-navigation-history-r1/notes/task-041-oq6-deviation.md`.
  *
- * Read-time trimming (FR-12, MINIMAL here): each Viewed row's target is
- * re-validated with a lightweight `Xrm.WebApi.retrieveRecord` before render;
- * a row whose retrieve throws (403/404/any failure) is dropped, never
- * rendered with a stale cached name. This is a per-row existence check, not
- * the full precise-status-code / batched trimming task 080 will add. Edited
- * rows are NOT separately trimmed here — they come from a live query against
- * the target entity itself (not a cached label), so an inaccessible record
- * simply never appears in the result set (standard Dataverse row security).
+ * Read-time trimming (FR-12/NFR-04, task 080 full implementation): each
+ * Viewed row's target is re-validated via `securityTrimService.ts`'s batched
+ * `classifyTargets` BEFORE `setRows` is ever called — the trimmed/final row
+ * array is the ONLY thing this component ever puts in state, so a `denied`
+ * row's cached name can never flash on screen even momentarily (the
+ * `loading` Spinner covers the entire window between "history rows fetched"
+ * and "trim resolved"; see the module's `load()` effect below and
+ * `projects/spaarke-side-pane-navigation-history-r1/notes/task-080-security-trimming.md`
+ * for the full anti-flash write-up). `denied` (403/404-equivalent) rows are
+ * dropped entirely; `transient` (network/timeout/5xx/ambiguous) rows are
+ * KEPT — a blip must never permanently hide an otherwise-accessible row.
+ * Non-`EntityRecord` rows (View/Page/Link) are exempt from the re-check by
+ * `securityTrimService.ts` itself (no cached record name at risk — see that
+ * module's docblock). Edited rows are NOT separately trimmed here — they
+ * come from a live query against the target entity itself (not a cached
+ * label), so an inaccessible record simply never appears in the result set
+ * (standard Dataverse row security) — this same reasoning is why
+ * `PinnedTab.tsx`'s Monitored group (also a live query) is likewise exempt.
  *
  * Segmented toggle (task 042): a local two-button Griffel-styled group (NOT
  * the shared `ViewToggle` component — that component is icon-only with a
@@ -112,6 +122,12 @@ import {
   type NavItemRecord,
 } from '@spaarke/ui-components/services/navigator/navItemRepository';
 import { listEditedByMe, type EditedByMeItem } from '../services/editedByMeService';
+import { classifyTargets, trimTargetFromRow } from '../services/securityTrimService';
+import {
+  setRecentSearchEntries,
+  type SearchEntryTarget,
+  type SearchIndexEntry,
+} from '../services/navigatorSearchIndex';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Chip mapping
@@ -224,6 +240,42 @@ function navigateToRow(xrm: XrmContext, row: NavItemRecord): void {
   }
 }
 
+/**
+ * Search-index target for a history row (task 070) — mirrors `navigateToRow`
+ * above but returns DATA instead of a navigation side effect, so
+ * `QuickSwitcher.tsx` can derive the same Enter/click destination without
+ * this tab needing to expose `navigateToRow` itself. `EntityList` rows here
+ * never carry a real `viewId` (see `navigateToRow`'s own `EntityList` case —
+ * unchanged from task 041) — a view-kind BOOKMARK's `viewId` only exists on
+ * `PinnedTab.tsx`'s rows (task 051).
+ */
+function targetForRow(row: NavItemRecord): SearchEntryTarget | null {
+  switch (row.sprk_pagetype) {
+    case NavItemPageType.EntityList:
+      return row.sprk_targetlogicalname ? { type: 'entitylist', entityLogicalName: row.sprk_targetlogicalname } : null;
+    case NavItemPageType.WebLink:
+      return row.sprk_url ? { type: 'weblink', url: row.sprk_url } : null;
+    case NavItemPageType.Custom:
+      return null; // No safe generic target — see OQ-6 note.
+    case NavItemPageType.EntityRecord:
+    default:
+      return row.sprk_targetlogicalname && row.sprk_targetid
+        ? { type: 'entityrecord', entityLogicalName: row.sprk_targetlogicalname, entityId: row.sprk_targetid }
+        : null;
+  }
+}
+
+/** Maps a (already-080-trimmed) history row to a `navigatorSearchIndex.ts` entry (task 070). */
+function rowToSearchEntry(row: NavItemRecord): SearchIndexEntry {
+  const chip = chipForRow(row);
+  return {
+    id: `recent-${row.sprk_navitemid}`,
+    label: row.sprk_displayname,
+    chipLabel: chip.label,
+    target: targetForRow(row),
+  };
+}
+
 /** Navigate to an Edited row's target — always `entityrecord` (task 042; see module docblock). */
 function navigateToEditedItem(xrm: XrmContext, item: EditedByMeItem): void {
   const navigation = xrm.Navigation;
@@ -233,24 +285,6 @@ function navigateToEditedItem(xrm: XrmContext, item: EditedByMeItem): void {
     entityName: item.targetLogicalName,
     entityId: item.targetId,
   });
-}
-
-/**
- * Minimal read-time trim (FR-12): re-validate a row's target is still
- * reachable before render. Only `EntityRecord` rows have a single retrievable
- * target; other pagetypes pass through untouched (nothing to re-validate at
- * this layer). Never throws — any retrieve failure (403/404/etc.) trims the
- * row silently. Full precise/batched trimming is task 080.
- */
-async function isRowAccessible(xrm: XrmContext, row: NavItemRecord): Promise<boolean> {
-  if (row.sprk_pagetype !== NavItemPageType.EntityRecord) return true;
-  if (!row.sprk_targetlogicalname || !row.sprk_targetid) return true;
-  try {
-    await xrm.WebApi.retrieveRecord(row.sprk_targetlogicalname, row.sprk_targetid);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -369,6 +403,7 @@ export const RecentTab: React.FC = () => {
         if (!cancelled) {
           setRows([]);
           setStatus('ready');
+          setRecentSearchEntries([]);
         }
         return;
       }
@@ -384,19 +419,22 @@ export const RecentTab: React.FC = () => {
           listPinItems(ownerId).catch(() => [] as NavItemRecord[]),
         ]);
 
-        const accessible: NavItemRecord[] = [];
-        for (const row of historyRows) {
-          // eslint-disable-next-line no-await-in-loop -- sequential per-row
-          // existence checks keep this a minimal FR-12 pass; batched
-          // trimming is task 080.
-          const ok = await isRowAccessible(xrm, row);
-          if (ok) accessible.push(row);
-        }
+        // Security trim (task 080, FR-12/NFR-04) — classify EVERY row's
+        // target BEFORE any of them are ever placed in `rows` state. The
+        // `loading` status (and its Spinner) covers this entire async
+        // window, so a `denied` row's cached name is never rendered even
+        // momentarily — there is no partial/interim `setRows` call anywhere
+        // in this path. `denied` rows are dropped; `transient` rows are kept.
+        const classifications = await classifyTargets(xrm, historyRows.map(trimTargetFromRow));
+        const accessible = historyRows.filter(row => classifications.get(row.sprk_navitemid) !== 'denied');
 
         if (cancelled) return;
         setRows(accessible);
         setPinnedKeys(new Set(pinRows.map(r => pinKey(r.sprk_targetlogicalname, r.sprk_targetid))));
         setStatus('ready');
+        // task 070 — report the SAME already-trimmed rows into the shared
+        // search index; see navigatorSearchIndex.ts module docblock.
+        setRecentSearchEntries(accessible.map(rowToSearchEntry));
       } catch (err) {
         if (cancelled) return;
         setErrorMessage(err instanceof Error ? err.message : 'Failed to load recent items.');

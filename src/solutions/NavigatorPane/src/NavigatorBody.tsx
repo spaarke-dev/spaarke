@@ -14,8 +14,13 @@
  * Records group (the full pin gesture — see `pinService.ts`); `PinnedTab`
  * itself has seams for 051 (Bookmarks) and 052 (Monitored) to add sibling
  * groups without this file changing again. Task 060 wires the `views` panel
- * to `ViewsTab` (userquery views grouped by entity, via `ViewService`). The
- * search box wiring lands in 070.
+ * to `ViewsTab` (userquery views grouped by entity, via `ViewService`). Task
+ * 070 replaces the search-bar placeholder with `QuickSwitcher` — local
+ * fuzzy-match over the Recent/Pinned/Views entries those three tabs report
+ * into `services/navigatorSearchIndex.ts`, escalating to a live
+ * `Xrm.WebApi`/`ViewService` lookup on no local hit (FR-11). The info-icon
+ * `Tooltip` this file owns (portal re-wrap, below) stays in place as a
+ * search-availability + keyboard-accelerator hint.
  *
  * ADR-021 compliance:
  *  - Fluent v9 tokens only (no hardcoded colors) — light/dark handled by
@@ -48,7 +53,6 @@ import * as React from 'react';
 import {
   Button,
   FluentProvider,
-  Input,
   Tab,
   TabList,
   Tooltip,
@@ -58,7 +62,7 @@ import {
   type SelectTabData,
   type SelectTabEvent,
 } from '@fluentui/react-components';
-import { Info16Regular, Search20Regular } from '@fluentui/react-icons';
+import { Info16Regular } from '@fluentui/react-icons';
 import {
   getXrm,
   resolveCodePageTheme,
@@ -66,6 +70,7 @@ import {
   setupCodePageThemeListener,
   useUiScale,
 } from '@spaarke/ui-components';
+import { QuickSwitcher } from './components/QuickSwitcher';
 import { PinnedTab } from './tabs/PinnedTab';
 import { RecentTab } from './tabs/RecentTab';
 import { ViewsTab } from './tabs/ViewsTab';
@@ -112,10 +117,6 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     ...shorthands.gap(tokens.spacingHorizontalXS),
-  },
-  searchInput: {
-    flexGrow: 1,
-    minWidth: 0,
   },
   searchInfoIcon: {
     flexShrink: 0,
@@ -175,13 +176,7 @@ export const NavigatorBody: React.FC<NavigatorBodyProps> = ({ paneId }) => {
   return (
     <div className={styles.root} data-testid="navigator-body" data-pane-id={paneId}>
       <div className={styles.searchRow}>
-        <Input
-          className={styles.searchInput}
-          contentBefore={<Search20Regular />}
-          placeholder="Search Recent, Pinned, Views…"
-          aria-label="Search Navigator"
-          data-testid="navigator-search-placeholder"
-        />
+        <QuickSwitcher />
         <Tooltip
           // "description" (not "label"): this trigger already has its own
           // aria-label ("Search availability") — relationship="label" would
@@ -194,7 +189,7 @@ export const NavigatorBody: React.FC<NavigatorBodyProps> = ({ paneId }) => {
             // SprkSidePaneHost rail-icon Tooltip precedent rather than
             // relying on an ambient applyStylesToPortals default alone.
             <FluentProvider theme={resolvedTheme} applyStylesToPortals={true}>
-              <span>Search wiring lands in a later task.</span>
+              <span>Searches Recent, Pinned, and Views instantly, then Dataverse if nothing local matches. Press Ctrl+K (Cmd+K) to jump to search from anywhere in the pane.</span>
             </FluentProvider>
           }
         >
