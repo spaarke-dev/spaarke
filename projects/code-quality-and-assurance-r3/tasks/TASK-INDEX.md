@@ -2,7 +2,8 @@
 
 > **Program**: standing quality program (single project, single worktree; surfaces = workstreams/phases).
 > **Execution**: operator-gated. All task work via `task-execute`. Assessments (010–015, 017) run via the `quality-assessment` Workflow — operator per-run opt-in ("use a workflow"); Fable adversarial-verification is non-negotiable (NFR-05).
-> **Task count**: 33 (29 initial + 4 from the 2026-08-13 deployment/config ask: 017, 060, 061, 062).
+> **Task count**: 34 (29 initial + 4 from the 2026-08-13 deployment/config ask: 017, 060, 061, 062; + 019 BFF Auth Surface Map, owner-requested to de-risk auth).
+> **Auth gate**: task **019** (BFF Auth Surface Map + secret/identity→consumer dependency graph, read-only) GATES all auth-touching tasks — **023, 060, 061, 062** consult it before changing anything, and task **011** consumes it for the #3b credential-migration decision. Run 019 before any auth remediation lands.
 > **Baseline**: BFF publish 46.89 MB compressed (ceiling 60 MB). `/conflict-check` before every remediation PR (19 worktrees touch BFF).
 
 ---
@@ -21,6 +22,7 @@
 | 014 | Assess code pages + build sprawl | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
 | 015 | Assess plugins | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
 | 017 | Assess config-deployment (#1 KV federation) | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
+| 019 | BFF Auth Surface Map + dependency graph (gates auth tasks) | 1 Full Assessment | STANDARD | fable | xhigh | none | P1 | 🔲 |
 | 016 | Re-baseline SCORECARD (aggregate) | 1 Full Assessment | STANDARD | opus | high | 010,011,012,013,014,015,017 | none | 🔲 |
 | 020 | BFF-A: delete low-contention dead code (Scopes/Retry/StubLiveFact/archives) | 2 BFF Remediation | FULL | sonnet | high | none | A | 🔲 |
 | 021 | BFF-A: fix invoice-totals cast in-place (Bug-1) + test | 2 BFF Remediation | FULL | opus | high | none | A | 🔲 |
@@ -54,7 +56,7 @@ Legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ⏸️ deferred/
 | Group | Tasks | parallel-safe | Notes |
 |-------|-------|---------------|-------|
 | **P0** | 001, 002 | true | 002 depends on 001 but both are foundation docs; 002 runs immediately after 001. |
-| **P1** | 010, 011, 012, 013, 014, 015, 017 | true | Assessments are READ-ONLY ⇒ conflict-free ⇒ may run in parallel anytime (each needs the "use a workflow" opt-in + a Fable verify pass). 017 = config-deployment (#1). |
+| **P1** | 010, 011, 012, 013, 014, 015, 017, 019 | true | Assessments are READ-ONLY ⇒ conflict-free ⇒ may run in parallel anytime (each needs the "use a workflow" opt-in + a Fable verify pass). 017 = config-deployment (#1); **019 = BFF Auth Surface Map — gates 023/060/061/062 + feeds 011's #3b; run before any auth remediation**. |
 | **P6 (Deployment & Config)** | 060, 061, 062 | **false** | 061 BFF hot-path config; 062 BFF + provisioning; 060 provisioning/docs/KV only (no BFF code — independent of 023). /conflict-check before each PR. |
 | **P3** | 030, 032, 033, 034 | true | Sweep-style horizontals. **031 is sequential (`parallel-safe:false`)** — it modifies `tests/**` and coordinates with `ci-cd-unit-test-remediation-r1`. |
 | **P4** | 040 | true | 040 (ArchTests) is parallel-safe. **041 and 042 are sequential (`parallel-safe:false`)** — 041 edits build config per-surface; 042 edits `.github/workflows` (owned by `ci-cd-unit-test-remediation-r1`) and depends on 040. |

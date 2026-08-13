@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF Auth Surface Map + secret/identity→consumer dependency graph (read-only; gates all auth tasks)</title>
+    <phase>1 Full Assessment</phase>
+    <gate>startable (read-only; run BEFORE any auth-touching task executes)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Read-only investigation producing a reference artifact; no source change. STANDARD. Its VALUE is de-risking the FULL-rigor auth tasks it gates (023/060/061/062/#3b).</rigor-reason>
+    <model-tier>fable</model-tier>
+    <model-tier-reason>Adversarial-grade completeness required — auth is high-risk and the deliverable is the shared source of truth for every auth change; Fable per NFR-05.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only ⇒ conflict-free ⇒ runnable anytime; but it MUST complete before any auth remediation task lands.</parallel-reason>
+    <deps>none</deps>
+    <tags>auth,security,assessment,quality</tags>
+  </metadata>
+
+  <prompt>Produce the authoritative BFF Auth Surface Map so every auth-touching r3 task (023 inbound closure, 060 app-reg drop, 061 config validation, 062 Graph app-role constants, and #3b shared-lib ClientSecret→MI migration via task 011) reasons from ONE verified picture instead of piecemeal slices. The centerpiece is a secret/identity→consumer DEPENDENCY GRAPH that makes "is it safe to change/remove this credential/secret/identity, and when" a lookup — because auth failures are almost always cross-slice (a secret/identity one change touches is quietly shared by another; e.g. API_CLIENT_SECRET is shared by OBO AND the shared-lib Dataverse path). Read-only; cite file:line; exclude bin/obj/_archive.</prompt>
+  <role>SPAARKE platform developer with deep Spaarke Auth v2 / ADR-028 + Entra/MSAL/Graph expertise. This is verification, not change — map the whole surface completely and adversarially; a missed shared-secret is the failure mode.</role>
+  <goal>projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md exists and is verified: (A) inbound schemes/policies/fallback/filters, (B) outbound credentials per service (Graph/Dataverse-both-stacks/Cosmos/KeyVault/ContentSafety/OpenAI/SPE), (C) identities (incl. system-vs-UAMI + which SP holds Graph roles), (D) secrets inventory, (E) the secret/identity→consumer dependency graph with safe-to-remove/remove-after-X/never-remove per secret, (F) the resolved gap areas (OBO internals, CIAM-scheme-vs-RequireAuthorization interaction, per-tenant SPE isolation, token/scope/caching), (G) per-task implications for 023/060/061/062/#3b, (H) ranked cross-slice risks + de-risking recommendations.</goal>
+
+  <context>
+    <background>Owner directive 2026-08-13: auth changes are high-risk and must reason from a complete picture. Two auth slices are already Fable-verified but with different scopes — inbound (BFF workstream Verification Addendum) and outbound-Dataverse (deployment-refactors assessment §Addendum 2026-08-13) — with no consolidated map tying them together. This task closes that gap and becomes the shared, gating reference for all auth remediation. The API_CLIENT_SECRET shared-consumer case (OBO + shared-lib Dataverse) was found only because Fable happened to look — a complete dependency graph makes that systematic.</background>
+    <relevant-files>
+      <file role="reference">.claude/adr/ADR-028-spaarke-auth-architecture.md (+ any Amendment A1/A2 for external CIAM)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/CLAUDE.md (auth section) + Program.cs (scheme + credential registration)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/** + Infrastructure/Graph/** + Infrastructure/DI/** (credential factories, GraphClientFactory, GraphModule, AuthorizationModule)</file>
+      <file role="reference">src/server/shared/Spaarke.Dataverse/** (DataverseServiceClientImpl, DataverseWebApiService, DataverseWebApiClient)</file>
+      <file role="reference">docs/architecture/auth-azure-resources.md + docs/guides/auth-deployment-setup.md</file>
+      <file role="reference">projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md + workstreams/bff-api/design.md (Verification Addendum)</file>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Read-only; no prerequisite. The map GATES 023/060/061/062 + feeds 011's #3b decision.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (read-only, complete): map inbound + outbound(all services) + identities + secrets + the dependency graph + the gap areas + per-task implications. Modify NO source or config. Cite file:line for every claim. Exclude bin/obj/_archive.</constraint>
+    <constraint source="NFR-05">Adversarial completeness is non-negotiable — the dependency graph MUST enumerate every consumer of every secret/identity; a shared-secret missed here defeats the task's purpose. Flag anything undeterminable from code (needs owner/portal confirmation) rather than guessing.</constraint>
+    <constraint source="ADR-028">Frame findings against ADR-028 §24 (MI MUST for server outbound) + its documented exceptions (SpeAdmin per-tenant; Azure OpenAI data plane) + any external-CIAM amendment — so the map states which secret paths are compliant vs violations-to-fix.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF auth surface — inbound schemes, outbound credentials, identities, secrets, dependency graph</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD read-only + why it gates the auth tasks). Load ADR-028 + the two prior verified addenda.</step>
+    <step order="1">Map INBOUND: all auth schemes (default workforce + external CIAM), fallback policy (confirm none), authorization policies + endpoint filters, and the anonymous inventory. Resolve GAP #2 (does 023's RequireAuthorization on OBO/User interact with the CIAM scheme / missing fallback?).</step>
+    <step order="2">Map OUTBOUND per service (Graph, Dataverse both stacks, Cosmos, KeyVault, ContentSafety, OpenAI, SPE): credential type + construction site + identity + app-only-vs-OBO.</step>
+    <step order="3">Map IDENTITIES (resolve GAP #4: system-assigned vs UAMI; which SP must hold the Graph app-roles) and SECRETS (KV names + config keys + read sites).</step>
+    <step order="4">Build the dependency graph (E): every secret/identity → all consumers; mark safe-to-remove-now / after-migration-X / never, with the blocking consumer named. Surface ALL shared-secret/identity cases (not just API_CLIENT_SECRET).</step>
+    <step order="5">Resolve the remaining gaps (OBO internals; per-tenant SPE isolation; token/scope/caching) and write per-task implications (G) + ranked cross-slice risks + de-risking recommendations (H).</step>
+    <step order="6">Write projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md (sections A–H).</step>
+    <step order="7">Update TASK-INDEX.md: set task 019 status to ✅; note any recommended scope/sequence change to 023/060/061/062/#3b for owner review.</step>
+    <step order="8">Document any owner/portal-confirmation items in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the dependency graph surfaces a shared secret/identity whose full consumer set cannot be verified from code (a hidden consumer risk), OR a cross-slice interaction that would change the safe scope/sequence of an already-authored auth task (023/060/061/062/#3b), STOP and surface it for owner review before those tasks execute — do not let an auth task proceed on an incomplete map.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md (the map + secret/identity→consumer dependency graph)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The map exists with sections A–H; every claim is file:line-cited; bin/obj/_archive excluded.</criterion>
+    <criterion testable="true">The dependency graph (E) enumerates every auth secret + identity with its complete consumer list and a safe-to-remove verdict per secret; the API_CLIENT_SECRET shared case (OBO + shared-lib Dataverse) is explicit and any other shared cases are surfaced.</criterion>
+    <criterion testable="true">GAP #2 (CIAM scheme vs 023's RequireAuthorization) and GAP #4 (system-vs-UAMI + which SP holds Graph roles) are resolved with file:line evidence or explicitly flagged as needing owner/portal confirmation.</criterion>
+    <criterion testable="true">Per-task implications (G) state, for each of 023/060/061/062/#3b, whether the map confirms its current scope/sequence or recommends a change (surfaced for owner review).</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner-requested 2026-08-13 to de-risk the auth work. Gates 023/060/061/062 and feeds task 011's #3b decision. Read-only, so runnable immediately (an initial pass is being produced at authoring time). If it recommends a scope/sequence change to an auth task, that is surfaced for owner decision — the map does not silently mutate those tasks.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
