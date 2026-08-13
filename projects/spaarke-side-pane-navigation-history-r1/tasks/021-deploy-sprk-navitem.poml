@@ -4,7 +4,9 @@
     <title>Deploy sprk_navitem to SpaarkeCore + per-user security roles</title>
     <phase>2 Entity</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <!-- 2026-08-13: Deploy+verify DONE (UserOwned + all fields, published; verified via metadata). Idempotent re-run recovered from transient metadata-propagation lag on first run. FOLLOW-UP (operator-gated, does NOT block 030): owner-scoped User-level CRUD role assignment to end-user role(s) + empirical 2-user isolation test — signed-in System Admin has access now; UserOwned structurally enforces isolation. See notes/task-021-deploy-result.md. -->
+
     <rigor>STANDARD</rigor>
     <rigor-reason>Deploy task — runs the authored script (020) + role config + publish; no new .ts/.tsx code. Deployment correctness is verified by describe_table, not code-review.</rigor-reason>
     <model-tier>sonnet</model-tier>

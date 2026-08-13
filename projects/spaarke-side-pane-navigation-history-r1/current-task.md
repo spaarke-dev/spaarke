@@ -2,10 +2,16 @@
 
 > Tracks the ACTIVE task only. History lives in `tasks/TASK-INDEX.md` + per-task POMLs.
 
-## Status: Wave B — code done; 021 owner-gated
-- ✅ **001** GO (spike) · ✅ **010** xrmContext typings · ✅ **011** SprkSidePaneHost + registry · ✅ **020** sprk_navitem schema (author-only)
-- ⏸ **021** deploy sprk_navitem to spaarkedev1 — **owner-gated** (first org schema mutation); script ready, I have auth
-- 011 note: `DataGridSidePaneOrchestrator` generalized IN PLACE (additive optional fields; escalation did NOT fire); DataGrid suite 64/64 green; EventsPage consumer unchanged.
+## Status: Wave C COMPLETE — project spine done (7/21)
+- ✅ 001 GO · ✅ 010 xrmContext · ✅ 011 host+registry · ✅ 020 schema · ✅ 021 deployed to spaarkedev1 · ✅ 030 capture engine · ✅ **040 NavigatorPane code page** (Vite singlefile, 5/5 tests, registers NavigatorBody against SprkSidePaneHost)
+- Spine: framework host → live sprk_navitem → capture engine → docked pane shell. All buildable + tested; deploy of the pane is task 086.
+
+## Next: Wave D (after 040) — CAUTION: shared-body serialization
+- 041 Recent(Viewed), 042 Recent(Edited), 050 Pin gesture, 052 Monitored lens all edit the SHARED NavigatorBody → **parallel-safe=false, run SEQUENTIALLY**. 060 Views owns its own file (may parallelize).
+- ⏸ **021 follow-up** (non-blocking): owner-scoped end-user role wiring + 2-user isolation test — operator picks target role; System Admin has access now. See notes/task-021-deploy-result.md.
+
+## sprk_navitem option-set integers (for capture repo, task 030)
+- sprk_type: 100000000=History, 100000001=Pin · sprk_source: 100000000=Captured, 100000001=Manual · sprk_pagetype: 100000000=entityrecord, 100000001=entitylist, 100000002=custom, 100000003=weblink
 
 ## Key carry-forward (from spike 001 + Wave A)
 - Capture (030): **never cache Xrm — re-read `window.top.Xrm` each poll**; primary signal = top-window URL (`pagetype/etn/id`), getPageContext as cross-check; poll 1.5s; WebApi `retrieveMultipleRecords`, `_modifiedby_value eq {userId}` for FR-03 Edited.

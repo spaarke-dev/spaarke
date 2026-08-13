@@ -12,10 +12,10 @@
 | 010 | Widen `xrmContext.ts` typings (getPane/select, 3-frame, webresourceName) | 1 Framework | FULL | sonnet/high | 001 | A | ✅ | ✅ |
 | 011 | `SprkSidePaneHost` + `sidePaneRegistry` (wrap shell + generalize orchestrator) | 1 Framework | FULL | sonnet/high | 010 | B | ✅ | ✅ |
 | 020 | `sprk_navitem` schema authoring (entity-schema.md + deploy script) | 2 Entity | STANDARD | sonnet/high | 001 | A | ✅ | ✅ |
-| 021 | Deploy `sprk_navitem` + security roles | 2 Entity | STANDARD | sonnet/high | 020 | B | ❌ env | 🔲 |
-| 030 | Capture (Viewed) — re-adopt `contextService` poll → history upsert | 3 Capture | FULL | sonnet/high | 011,021 | C | ✅ | 🔲 |
+| 021 | Deploy `sprk_navitem` + security roles | 2 Entity | STANDARD | sonnet/high | 020 | B | ❌ env | ✅ deploy* |
+| 030 | Capture (Viewed) — re-adopt `contextService` poll → history upsert | 3 Capture | FULL | sonnet/high | 011,021 | C | ✅ | ✅ |
 | 031 | Retention — prune-on-write, 30-day age | 3 Capture | FULL | sonnet/high | 030 | E | ✅ | 🔲 |
-| 040 | `NavigatorPane` code page (Vite webresource pane + tab scaffold) | 4 Navigator | FULL | sonnet/high | 011,021 | C | ✅ | 🔲 |
+| 040 | `NavigatorPane` code page (Vite webresource pane + tab scaffold) | 4 Navigator | FULL | sonnet/high | 011,021 | C | ✅ | ✅ |
 | 041 | Recent (Viewed) tab | 4 Navigator | FULL | sonnet/high | 030,040 | D | ❌ shared body | 🔲 |
 | 042 | Recent (Edited) toggle — N per-entity `modifiedby=me` | 4 Navigator | FULL | sonnet/high | 040 | D | ❌ shared body | 🔲 |
 | 050 | Pin gesture (per-user pin; never writes `sprk_monitor`) | 5 Pinned | FULL | sonnet/high | 040 | D | ❌ shared body | 🔲 |

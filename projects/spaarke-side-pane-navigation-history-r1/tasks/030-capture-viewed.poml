@@ -4,7 +4,7 @@
     <title>Recent (Viewed) capture — getPageContext() polling → history sprk_navitem upsert</title>
     <phase>3 Capture</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New client-side capture engine in @spaarke/ui-components (.ts); frontend/shared-lib; the passive capture path underpins the whole Recent stream and writes Dataverse rows via Xrm.WebApi.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -110,6 +110,14 @@
     <criterion testable="true">Negative: given a page with no resolvable entity, when the poll fires, then no malformed sprk_navitem row is written.</criterion>
     <criterion testable="true">All unit tests pass; shared-lib build green.</criterion>
   </acceptance-criteria>
-  <notes>Maps to spec FR-03 + plan.md Phase 3 task 030. Re-adopt contextService.ts; mirror useSprkMemoRepository. Retention prune-on-write is added in task 031 (do not add retention here). Resolve OQ-6 (custom-page label) from getPageContext() output and record the finding in notes/.</notes>
+  <notes>Maps to spec FR-03 + plan.md Phase 3 task 030. Re-adopt contextService.ts; mirror useSprkMemoRepository. Retention prune-on-write is added in task 031 (do not add retention here). Resolve OQ-6 (custom-page label) from getPageContext() output and record the finding in notes/.
+
+COMPLETED 2026-08-13 (FULL rigor, sonnet/high). Built navItemRepository.ts (Xrm.WebApi CRUD for sprk_navitem via the widened xrmContext getXrm() frame-walk; exports the deployed NavItemType/NavItemSource/NavItemPageType option-set integer maps) + navigatorCaptureService.ts (startNavigatorCapture(): re-adopts contextService.ts's poll loop, 1.5s default, re-acquires Xrm fresh every tick per the task-001 spike lesson, dedupe+bump via findHistoryItem/bumpHistoryItem, sprk_displayname resolved via Xrm.Utility.getEntityMetadata + retrieveRecord rather than a hardcoded parent map since capture spans any entity). 6 new Jest tests all pass; tsc build clean; full Spaarke.UI.Components suite (2602 tests) shows only pre-existing unrelated failures (XrmDataverseClient, surfaceLaunchRegistry, buildDynamicWorkspaceConfig — none touch navigator/ or xrmContext.ts's exported surface). No new files/exports were added to xrmContext.ts itself — getPageContext/getEntityMetadata typings are declared locally in navigatorCaptureService.ts per ADR-022 "keep the shared surface slim."
+
+Capture scope decision: history capture is scoped to pageType==='entityrecord' with a resolvable entityName+entityId only; entitylist/dashboard/custom/webresource pages are treated as "no resolvable entity" (skip write) — satisfies the negative acceptance criterion and keeps the (targetlogicalname,targetid) dedupe key well-formed. Full rationale + the OQ-6 finding in projects/spaarke-side-pane-navigation-history-r1/notes/task-030-capture-decisions.md: OQ-6 is carried forward (no live-browser custom-page observation was available in this task run); it does not block 030 since custom pages fall into the skip bucket for history, and its real consumer is the FR-08 "Pin this page" bookmark gesture (task 051), which should empirically inspect a custom page before implementing that label.
+
+Escalation trigger did NOT fire — R2 (current-user OData literal) remains resolved GO per the task-001 spike; no new blocker surfaced.
+
+Wiring startNavigatorCapture() into SprkSidePaneHost / the app-startup bootstrap is explicitly out of scope for 030 (owned by 040/086) — this task ships the capture engine as a standalone, host-agnostic module per the POML's `<outputs>` (navItemRepository.ts, navigatorCaptureService.ts, __tests__/navigatorCaptureService.test.ts only).</notes>
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
