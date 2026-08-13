@@ -21,8 +21,14 @@ function Seed-Config($id, $name, $jsonPath) {
   $filter = if ($id) { "sprk_gridconfigurationid eq $id" } else { "sprk_name eq '$nameEsc'" }
   $existing = Invoke-RestMethod -Method Get -Headers $headers -Uri "$api/sprk_gridconfigurations?`$filter=$filter&`$select=sprk_gridconfigurationid,sprk_name"
   if ($existing.value.Count -gt 0) {
-    Write-Host "SKIP (exists): $name -> $($existing.value[0].sprk_gridconfigurationid)"
-    return $existing.value[0].sprk_gridconfigurationid
+    # PATCH sprk_configjson so a re-seed always reflects the shared-lib source of
+    # truth (the config JSON is read verbatim from code → can never drift).
+    $existingId = $existing.value[0].sprk_gridconfigurationid
+    $configJson = Get-Content -Raw -Path $jsonPath
+    $patchBody = @{ sprk_configjson = $configJson } | ConvertTo-Json -Depth 5
+    Invoke-RestMethod -Method Patch -Headers $headers -Uri "$api/sprk_gridconfigurations($existingId)" -Body $patchBody | Out-Null
+    Write-Host "UPDATED (configjson): $name -> $existingId"
+    return $existingId
   }
   $configJson = Get-Content -Raw -Path $jsonPath
   $body = @{
