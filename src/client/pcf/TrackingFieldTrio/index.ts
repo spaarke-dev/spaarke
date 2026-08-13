@@ -114,6 +114,11 @@ import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes'
 // This is the ONLY email-send surface this control is allowed to open (no
 // forked dialog, no ad-hoc fetch to the send endpoint).
 import { SendEmailDialog } from '@spaarke/ui-components/dist/components/EmailComposer';
+// Shared Xrm-backed compose-lookup + upload factory (task 073 UAT v1.0.24 #10/#11).
+// Builds `onLookupRecipients` (To/Cc native people picker) + `onUploadLocalAttachment`
+// (local file → SPE → governed sprk_document, so it rides the send payload instead of
+// being dropped) from auth + BFF URL. The SAME factory EmailWorkspaceWidget uses.
+import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/components/EmailComposer';
 // Shared per-widget error boundary (task 073 UAT #1) — wraps the dialog subtree
 // so a render error inside a shared dialog degrades to a small inline card
 // instead of blanking the whole PCF (defense-in-depth alongside the
@@ -358,6 +363,95 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return this.navService;
   }
 
+  /** Cross-frame Xrm accessor (PCF runs in an iframe). */
+  private getXrm(): // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  any {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any;
+    try {
+      return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
+    } catch {
+      return w.Xrm;
+    }
+  }
+
+  /** Opens the Contact record as an OOB modal (task 073 UAT v1.0.24 #6) via
+   * `Xrm.Navigation.navigateTo` (entityrecord, `target: 2` = dialog) — per
+   * MODAL-DECISION-CRITERIA, opening a record uses the OOB navigator, not a
+   * proprietary Fluent dialog. A user with write access can then edit the Contact.
+   *
+   * v1.0.24 UAT #1: the Manage Access modal is a Fluent portal (top-window
+   * z-index) that renders ABOVE the platform Contact dialog, so the Contact
+   * dialog appeared BEHIND it. Fix: HIDE Manage Access while the Contact dialog
+   * is open (so the Contact dialog is unambiguously in front and fully covers it)
+   * and RESTORE it when the Contact dialog closes. The dialog opens large (70% ×
+   * 80%) so it covers the Manage Access footprint. */
+  private openContactRecord = (contactId: string): void => {
+    const xrm = this.getXrm();
+    const wasGrantOpen = this.isGrantModalOpen;
+    const restore = (): void => {
+      if (wasGrantOpen && !this.isGrantModalOpen) {
+        this.isGrantModalOpen = true;
+        this.renderControl();
+      }
+    };
+    try {
+      if (wasGrantOpen) {
+        this.isGrantModalOpen = false;
+        this.renderControl();
+      }
+      const p = xrm?.Navigation?.navigateTo?.(
+        { pageType: 'entityrecord', entityName: 'contact', entityId: contactId },
+        { target: 2, position: 1, width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } }
+      );
+      // navigateTo resolves/rejects when the dialog closes — restore Manage Access
+      // either way. If a host returns no thenable (legacy), restore immediately.
+      if (p && typeof p.then === 'function') {
+        p.then(restore, restore);
+      } else {
+        restore();
+      }
+    } catch (err) {
+      console.warn('[TrackingFieldTrio] open Contact record failed.', err);
+      restore();
+    }
+  };
+
+  /** The bound record's primary-name value (e.g. the matter number) for the email
+   * "Related to" chip (task 073 UAT v1.0.24 #9). Read from the form entity's
+   * primary attribute — entity-agnostic, no metadata call. Undefined outside an
+   * MDA host (harness) or when unset (chip then shows the humanized entity type). */
+  private getRecordDisplayName(): string | undefined {
+    const xrm = this.getXrm();
+    try {
+      const v = xrm?.Page?.data?.entity?.getPrimaryAttributeValue?.();
+      return typeof v === 'string' && v.length > 0 ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Lazily-built shared Xrm email compose handlers (task 073 UAT v1.0.24 #10/#11):
+   * `onLookupRecipients` (native To/Cc people picker) + `onUploadLocalAttachment`
+   * (local file → SPE → governed `sprk_document`, so it rides the send payload
+   * instead of being dropped). Rebuilt if `apiBaseUrl` changes (it is resolved
+   * asynchronously after auth init, so the first build must happen post-init —
+   * which the email dialog only ever opens after). */
+  private emailHandlers?: { baseUrl: string; handlers: ReturnType<typeof createXrmEmailComposeHandlers> };
+  private getEmailHandlers(): ReturnType<typeof createXrmEmailComposeHandlers> {
+    if (!this.emailHandlers || this.emailHandlers.baseUrl !== this.apiBaseUrl) {
+      this.emailHandlers = {
+        baseUrl: this.apiBaseUrl,
+        handlers: createXrmEmailComposeHandlers({
+          clientUrl: getClientUrl(),
+          authenticatedFetch: this.authenticatedFetchGated,
+          bffBaseUrl: this.apiBaseUrl,
+        }),
+      };
+    }
+    return this.emailHandlers.handlers;
+  }
+
   /** Real Create-privilege check on `sprk_externalrecordaccess`
    * (`PrivilegeType.Create = 1`, `PrivilegeDepth.Global = 3` per
    * `@types/powerapps-component-framework`). Fails open (returns `true`) only
@@ -516,16 +610,16 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       const contactId = (row['_sprk_contact_value'] as string) ?? '';
       const organizationId = (row['_sprk_organization_value'] as string) ?? '';
       // An ORGANIZATION grant (task 073 #7) is a row with NO contact + an organization set — it grants
-      // access to everyone at that firm, so it renders as "Everyone at {firm}" (revocable) instead of a
-      // person. A normal per-contact grant keeps the contact's name.
+      // access to all contacts at that organization, so it renders as "All contacts at {org}" (revocable)
+      // instead of a person. A normal per-contact grant keeps the contact's name.
       const isOrgGrant = !contactId && !!organizationId;
-      const orgName = (row[`_sprk_organization_value${FORMATTED}`] as string) ?? 'this firm';
+      const orgName = (row[`_sprk_organization_value${FORMATTED}`] as string) ?? 'this organization';
       return {
         accessRecordId: row.sprk_externalrecordaccessid as string,
         // Org rows have no contact — use the org id so the row still has a stable, non-empty key.
         contactId: isOrgGrant ? organizationId : contactId,
         fullName: isOrgGrant
-          ? `Everyone at ${orgName}`
+          ? `All contacts at ${orgName}`
           : ((row[`_sprk_contact_value${FORMATTED}`] as string) ?? '(unknown contact)'),
         email: undefined,
         accessLevel: row.sprk_accesslevel as number,
@@ -729,7 +823,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.19 • Built 2026-08-11',
+      versionText: 'v1.0.29 • Built 2026-08-12',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -828,11 +922,15 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     // global sprk_standinggrant flag is set, merged into Current Access.
                     fetchStandingContacts: this.fetchStandingContacts,
                     searchContacts: this.searchContacts,
-                    // In-app org search for the modal's inline org LookupField
-                    // (task 073 UAT #4) — replaces the side-pane org picker so the
-                    // modal never hides to pick. `pickContact`/`pickOrganization`
-                    // (side-pane) are intentionally no longer passed.
                     searchOrganizations: this.searchOrganizations,
+                    // NATIVE advanced-lookup pickers (task 073 UAT v1.0.24 #1/#4) —
+                    // "+ Contact"/"+ Organization" open Xrm.Utility.lookupObjects (the
+                    // same advanced-find surface the wizards use). The modal is
+                    // nonBlocking so the lookup pane isn't covered by a backdrop.
+                    pickContact: this.pickContact,
+                    pickOrganization: this.pickOrganization,
+                    // Contact-name link → open the Contact record (task 073 UAT v1.0.24 #6).
+                    onOpenContact: this.openContactRecord,
                     isInternalContact: this.isInternalContact,
                     onSetStandingGrant: this.onSetStandingGrant,
                     // Access-Permission sharing gate (task 043, FR-14 Option A) —
@@ -854,7 +952,25 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
                     authenticatedFetch: this.authenticatedFetchGated,
                     bffBaseUrl: this.apiBaseUrl,
                     titleOverride: 'Email Members',
-                    regarding: { entityType: this.getHostEntity(), id: recordId },
+                    // Non-blocking so the native To/Cc people picker + "link a record"
+                    // advanced-lookup panes render ON TOP instead of behind the modal
+                    // backdrop (owner UAT v1.0.26 — same fix as Manage Access).
+                    nonBlocking: true,
+                    // "Related to" chip shows the record's number/name, not the bare
+                    // entity type (task 073 UAT v1.0.24 #9).
+                    regarding: {
+                      entityType: this.getHostEntity(),
+                      id: recordId,
+                      name: this.getRecordDisplayName(),
+                    },
+                    // To/Cc native people picker (#10) + local-file → SPE upload so
+                    // attachments ride the send payload instead of being dropped (#11).
+                    onLookupRecipients: this.getEmailHandlers().onLookupRecipients,
+                    onUploadLocalAttachment: this.getEmailHandlers().onUploadLocalAttachment,
+                    recordLookupCatalog: this.getEmailHandlers().recordLookupCatalog,
+                    onLookupRecord: this.getEmailHandlers().onLookupRecord,
+                    onAddRelationship: this.getEmailHandlers().onAddRelationship,
+                    onResolveShareLink: this.getEmailHandlers().onResolveShareLink,
                     onSent: () => {
                       this.isSendEmailDialogOpen = false;
                       this.renderControl();

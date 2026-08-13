@@ -2,7 +2,11 @@
  * TrackingFieldTrio — entity-agnostic shared core (FR-14, task 023).
  *
  * Renders and read/writes three tracking flags: a Monitor toggle, a High
- * Priority toggle, and an access-permission segmented picker. Lifted from
+ * Priority toggle, and an access-permission PILL selector (owner UAT — was a
+ * 3-button segmented picker → a dropdown in v1.0.25 → a single colored pill in
+ * v1.0.27 that opens a menu of the options; fits any width instead of sprawling
+ * horizontally, and reads as a pill consistent with the app's badge language).
+ * Lifted from
  * the `TrackingFieldTrio` PCF's `TrackingFieldTrioApp.tsx` into
  * `@spaarke/ui-components` so both the OOB-form PCF (React 16/17) and the
  * Phase-3 reading-pane tracking view (React 19, task 035) can consume ONE
@@ -44,8 +48,13 @@ import {
   Text,
   Button,
   Tooltip,
+  Menu,
+  MenuTrigger,
+  MenuButton,
+  MenuPopover,
+  MenuList,
+  MenuItem,
   shorthands,
-  mergeClasses,
 } from '@fluentui/react-components';
 import { PersonRegular, MailRegular } from '@fluentui/react-icons';
 import type { IAccessPermissionOption, ITrackingFieldTrioProps } from './types';
@@ -130,33 +139,24 @@ const useStyles = makeStyles({
     // vertically within the row and their baselines line up.
     minHeight: '32px',
   },
-  segmentGroup: {
-    display: 'flex',
-    flexDirection: 'row',
-    ...shorthands.borderRadius(tokens.borderRadiusMedium),
-    ...shorthands.overflow('hidden'),
-  },
-  segment: {
-    ...shorthands.borderRadius(0),
-    ...shorthands.border(0),
-    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalM),
-    minWidth: '76px',
+  // Access Permission PILL selector (owner UAT v1.0.27) — a single rounded pill
+  // showing the current value in its pale semantic tint (Standard/Limited/
+  // Restricted), clicked to open a menu of the three options. Reads as a colored
+  // pill (consistent with the app's badge/chip language) rather than a form
+  // dropdown, while staying single-value + responsive (no horizontal sprawl).
+  accessPill: {
+    ...shorthands.borderRadius(tokens.borderRadiusCircular),
+    ...shorthands.border(tokens.strokeWidthThin, 'solid', 'transparent'),
+    ...shorthands.padding(tokens.spacingVerticalXXS, tokens.spacingHorizontalS),
+    minHeight: '26px',
     fontWeight: tokens.fontWeightSemibold,
     fontSize: tokens.fontSizeBase200,
-    minHeight: '28px',
-  },
-  segmentUnselected: {
-    backgroundColor: tokens.colorNeutralBackground4,
-    color: tokens.colorNeutralForeground2,
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground4Hover,
-      color: tokens.colorNeutralForeground2,
-    },
-  },
-  segmentSeparator: {
-    borderLeftWidth: '1px',
-    borderLeftStyle: 'solid',
-    borderLeftColor: tokens.colorNeutralStroke2,
+    // Fixed width + centered label so every value (Standard/Limited/Restricted)
+    // renders the SAME size regardless of text length (owner UAT v1.0.28). The
+    // menu chevron is suppressed (menuIcon={null}) so the label centers cleanly.
+    width: '116px',
+    justifyContent: 'center',
+    textAlign: 'center',
   },
   versionFooter: {
     gridColumn: '1 / -1',
@@ -176,6 +176,9 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     minHeight: '32px',
     columnGap: tokens.spacingHorizontalM,
+    // Breathing room below the header/title/toolbar row before the field row
+    // (owner UAT v1.0.20 follow-up).
+    marginBottom: tokens.spacingVerticalS,
   },
   headerTitle: {
     // 14px semibold per owner UAT #3 (fontSizeBase300 = 14px, fontWeightSemibold
@@ -192,7 +195,8 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'row',
     alignItems: 'center',
-    columnGap: tokens.spacingHorizontalXS,
+    // A little breathing room between the grant + email icons (owner UAT v1.0.26 #3).
+    columnGap: tokens.spacingHorizontalS,
     flexShrink: 0,
   },
   // Governance toolbar (person + email icons — task 040; repositioned task 073 UAT). Sits at the
@@ -280,13 +284,15 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
 
   return (
     <div className={styles.container}>
-      {/* Control header (task 073 UAT #3) — opt-in via `title`: title left
-          (14px semibold), governance icons right, in a 32px row. When no title
-          is supplied the header is skipped and the icons fall back to the
-          absolute top-right toolbar below (existing-consumer behavior). */}
-      {title && (
+      {/* Control header (task 073 UAT #3, always-on since v1.0.20) — a 32px row
+          with the optional title on the LEFT (14px semibold) and the governance
+          icons (grant/email) on the RIGHT. Renders whenever there are icons OR a
+          title, so the toolbar is ALWAYS in a proper header row rather than
+          floating (owner UAT: "toolbars not in the title row"). When no title is
+          set, an empty spacer keeps the icons right-aligned. */}
+      {(title || toolbarIcons) && (
         <div className={styles.header}>
-          <Text className={styles.headerTitle}>{title}</Text>
+          {title ? <Text className={styles.headerTitle}>{title}</Text> : <span />}
           {toolbarIcons && <div className={styles.headerActions}>{toolbarIcons}</div>}
         </div>
       )}
@@ -317,42 +323,45 @@ export const TrackingFieldTrio: React.FC<ITrackingFieldTrioProps> = ({
           labelPosition="after"
         />
       </div>
-      <div
-        className={mergeClasses(styles.controlCell, styles.segmentGroup)}
-        role="radiogroup"
-        aria-label={accessPermissionLabel}
-      >
-        {accessPermissionOptions.map((opt, idx) => {
-          const isSelected = accessPermission === opt.value;
-          const selectedColors = isSelected ? getSelectedSegmentColors(idx, opt) : null;
+      <div className={styles.controlCell}>
+        {/* Access Permission PILL selector (owner UAT v1.0.27) — a single colored
+            pill (current value; default "Standard" when unset) that opens a menu
+            of the three options. Single value + responsive; reads as a pill
+            consistent with the app's badge language. */}
+        {(() => {
+          const selIdx = accessPermissionOptions.findIndex(o => o.value === accessPermission);
+          const idx = selIdx >= 0 ? selIdx : 0;
+          const selOpt = accessPermissionOptions[idx];
+          const colors = selOpt ? getSelectedSegmentColors(idx, selOpt) : undefined;
           return (
-            <Button
-              key={opt.value}
-              appearance="subtle"
-              role="radio"
-              aria-checked={isSelected}
-              onClick={() => onAccessPermissionChange(opt.value)}
-              className={mergeClasses(
-                styles.segment,
-                !isSelected && styles.segmentUnselected,
-                idx > 0 && !isSelected && styles.segmentSeparator
-              )}
-              // Selected background/foreground come from the injected option's
-              // color (pale via rgba(alpha=0.28)) or the position-based
-              // fallback palette.
-              style={selectedColors ? { backgroundColor: selectedColors.bg, color: selectedColors.fg } : undefined}
-            >
-              {opt.label}
-            </Button>
+            <Menu positioning="below-start">
+              <MenuTrigger disableButtonEnhancement>
+                <MenuButton
+                  className={styles.accessPill}
+                  appearance="transparent"
+                  size="small"
+                  aria-label={accessPermissionLabel}
+                  // Suppress the chevron so the fixed-width pill centers its label
+                  // (owner UAT v1.0.28). The colored pill is affordance enough.
+                  menuIcon={null}
+                  style={colors ? { backgroundColor: colors.bg, color: colors.fg } : undefined}
+                >
+                  {selOpt?.label ?? ''}
+                </MenuButton>
+              </MenuTrigger>
+              <MenuPopover>
+                <MenuList>
+                  {accessPermissionOptions.map(opt => (
+                    <MenuItem key={opt.value} onClick={() => onAccessPermissionChange(opt.value)}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </MenuList>
+              </MenuPopover>
+            </Menu>
           );
-        })}
+        })()}
       </div>
-
-      {/* Governance toolbar (task 040) — absolute top-right FALLBACK, used only
-          when no `title` is supplied (the header above already hosts the icons
-          when a title is present, task 073 UAT #3). Opt-in per consumer: renders
-          only when a callback is wired, so existing consumers are unchanged. */}
-      {!title && toolbarIcons && <div className={styles.toolbar}>{toolbarIcons}</div>}
 
       {showVersion && versionText && <span className={styles.versionFooter}>{versionText}</span>}
     </div>

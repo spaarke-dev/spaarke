@@ -1,16 +1,17 @@
 /**
- * AccessGrantModal — Access-Permission sharing gate tests (task 043,
- * teams-app-r1, spec FR-14 Option A).
+ * AccessGrantModal — Access-Permission sharing gate tests (FR-14 Option A,
+ * rewritten for the v1.0.26 UI, owner UAT 2026-08-12).
  *
- * Covers the task's `<ui-tests>`:
- *  - restricted-blocks-external-grants
- *  - limited-disables-standing
- *  - standard-enables-all
- *  - adr-021-dark-mode
+ * In v1.0.26 the modal's sharing gate simplified: the standing-grant option was
+ * REMOVED (standing is now set on the Contact record), so `limited` and
+ * `standard` behave identically in this modal — both allow grants. Only
+ * `restricted` gates: it blocks all grant actions (candidate checkbox + the
+ * native "+ Contact"/"+ Organization" pickers + per-row level dropdowns + Add)
+ * behind a "Restricted Access" banner, while still allowing review + revoke of
+ * existing grants.
  *
- * Plus the `sprk_accesslevel` independence acceptance criterion: changing
- * `accessPermissionState` must never alter the access-level value a grant is
- * written with, nor the access-level badge shown for an existing grant.
+ * Also asserts the `sprk_accesslevel` independence criterion: the per-grant
+ * access level (chosen per row) is unaffected by `accessPermissionState`.
  */
 
 import * as React from 'react';
@@ -22,6 +23,7 @@ import type {
   IAccessGrantCandidate,
   IAccessGrantRecord,
   IContactSearchResult,
+  IOrganizationPick,
   AccessPermissionState,
 } from '../types';
 
@@ -40,7 +42,7 @@ const EXISTING_GRANT: IAccessGrantRecord = {
   contactId: 'contact-existing-1',
   fullName: 'Prior Grantee',
   email: 'prior@example.com',
-  accessLevel: 100000001, // Collaborate — distinct from the default ViewOnly, to prove independence.
+  accessLevel: 100000001, // Collaborate — distinct from ViewOnly, to prove independence.
   grantedByName: 'Alice Admin',
   grantedDate: '2026-07-01T00:00:00Z',
   provenance: 'named',
@@ -59,7 +61,14 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
   const fetchExistingGrants = jest.fn(async () => [EXISTING_GRANT]);
   const searchContacts = jest.fn(async (): Promise<IContactSearchResult[]> => []);
   const isInternalContact = jest.fn(async () => false);
-  const onSetStandingGrant = jest.fn(async () => undefined);
+  const pickContact = jest.fn(
+    async (): Promise<IContactSearchResult | null> => ({
+      contactId: 'contact-picked',
+      fullName: 'Picked Person',
+      email: 'picked@outsidefirm.com',
+    })
+  );
+  const pickOrganization = jest.fn(async (): Promise<IOrganizationPick | null> => ({ id: 'org-9', name: 'Acme LLP' }));
   const authenticatedFetch = jest.fn(async (url: string) => {
     if (url.includes('/invite-and-grant')) {
       return jsonResponse({ accessRecordId: 'new-1', onboardStatus: 'Provisioned', portalUrl: 'https://portal' });
@@ -79,32 +88,44 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
     fetchExistingGrants,
     searchContacts,
     isInternalContact,
-    onSetStandingGrant,
+    pickContact,
+    pickOrganization,
     ...overrides,
   };
 }
 
-describe('AccessGrantModal — Access-Permission sharing gate (task 043)', () => {
+function levelComboFor(name: string): HTMLElement {
+  let el: HTMLElement | null = screen.getByText(name);
+  while (el && !el.querySelector('[role="combobox"]')) el = el.parentElement;
+  const combo = el?.querySelector('[role="combobox"]') as HTMLElement | null;
+  if (!combo) throw new Error(`No access-level dropdown found for row "${name}"`);
+  return combo;
+}
+
+async function pickLevelFor(name: string, optionLabel: string): Promise<void> {
+  fireEvent.click(levelComboFor(name));
+  fireEvent.click(await screen.findByRole('option', { name: optionLabel }));
+}
+
+function addButton(): HTMLElement {
+  return screen.getByRole('button', { name: /^Add \(\d+\)$/ });
+}
+
+describe('AccessGrantModal — Access-Permission sharing gate (v1.0.26)', () => {
   describe('restricted-blocks-external-grants', () => {
-    it('disables the approve-candidate action and shows an explanatory message', async () => {
+    it('shows the Restricted Access banner and disables all grant actions', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'restricted' })} />);
 
       await screen.findByText('Gene Gatekeeper');
 
-      expect(screen.getByText(/external access is off for this record/i)).toBeInTheDocument();
-      expect(screen.getByText(/access permission is set to restricted/i)).toBeInTheDocument();
+      expect(screen.getByText('Restricted Access')).toBeInTheDocument();
+      expect(screen.getByText(/only system users may have access/i)).toBeInTheDocument();
 
       expect(screen.getByRole('checkbox', { name: 'Select Gene Gatekeeper' })).toBeDisabled();
-      expect(screen.getByRole('button', { name: /Approve selected/ })).toBeDisabled();
-    });
-
-    it('disables the add-named-contact action', async () => {
-      renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'restricted' })} />);
-
-      await screen.findByText('Add a named contact');
-
-      expect(screen.getByPlaceholderText('Search contacts by name or email…')).toBeDisabled();
-      expect(screen.getByRole('button', { name: 'Add' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Add contact' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Add organization' })).toBeDisabled();
+      // The "Add (N)" grant button is disabled under restricted.
+      expect(addButton()).toBeDisabled();
     });
 
     it('still allows reviewing and revoking existing access', async () => {
@@ -114,103 +135,64 @@ describe('AccessGrantModal — Access-Permission sharing gate (task 043)', () =>
       expect(screen.getByRole('button', { name: 'Revoke' })).not.toBeDisabled();
     });
 
-    it('does not render the explanatory banner for limited or standard', async () => {
+    it('does not render the Restricted banner for limited or standard', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'limited' })} />);
       await screen.findByText('Gene Gatekeeper');
-      expect(screen.queryByText(/external access is off for this record/i)).not.toBeInTheDocument();
+      expect(screen.queryByText('Restricted Access')).not.toBeInTheDocument();
     });
   });
 
-  describe('limited-disables-standing', () => {
-    it('allows approve-candidate and add-named-contact but hides the standing-grant option', async () => {
-      const props = makeProps({ accessPermissionState: 'limited' });
+  describe('limited + standard both allow grants', () => {
+    it.each(['limited', 'standard'] as AccessPermissionState[])('allows granting a candidate under %s', async state => {
+      const props = makeProps({ accessPermissionState: state });
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Gene Gatekeeper');
+      expect(screen.queryByText('Restricted Access')).not.toBeInTheDocument();
 
-      // No blocking banner, no disabled candidate checkbox.
-      expect(screen.queryByText(/external access is off for this record/i)).not.toBeInTheDocument();
-      const candidateCheckbox = screen.getByRole('checkbox', { name: 'Select Gene Gatekeeper' });
-      expect(candidateCheckbox).not.toBeDisabled();
+      const checkbox = screen.getByRole('checkbox', { name: 'Select Gene Gatekeeper' });
+      expect(checkbox).not.toBeDisabled();
+      fireEvent.click(checkbox);
+      await pickLevelFor('Gene Gatekeeper', 'View Only');
+      expect(addButton()).not.toBeDisabled();
+      fireEvent.click(addButton());
 
-      // Standing-grant option is unavailable (hidden) in both sections.
-      expect(screen.queryByRole('checkbox', { name: 'Standing grant' })).not.toBeInTheDocument();
-
-      // Approving still works (named/approved grants remain available).
-      fireEvent.click(candidateCheckbox);
-      const approveButton = screen.getByRole('button', { name: /Approve selected/ });
-      expect(approveButton).not.toBeDisabled();
-
-      fireEvent.click(approveButton);
-
-      await waitFor(() => {
+      await waitFor(() =>
         expect(props.authenticatedFetch).toHaveBeenCalledWith(
           '/api/v1/external-access/invite-and-grant',
           expect.objectContaining({ method: 'POST' })
-        );
-      });
-
-      // The standing-grant callback must never fire — the option was never
-      // offered, so there is nothing to have set.
-      expect(props.onSetStandingGrant).not.toHaveBeenCalled();
+        )
+      );
     });
 
-    it('add-named-contact search input remains enabled', async () => {
-      renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'limited' })} />);
-      await screen.findByText('Add a named contact');
-      expect(screen.getByPlaceholderText('Search contacts by name or email…')).not.toBeDisabled();
-    });
-  });
-
-  describe('standard-enables-all', () => {
-    it('offers every grant type, including the standing-grant option, matching the task-041 baseline', async () => {
-      const props = makeProps({ accessPermissionState: 'standard' });
-      renderWithTheme(<AccessGrantModal {...props} />);
-
-      await screen.findByText('Gene Gatekeeper');
-
-      expect(screen.queryByText(/external access is off for this record/i)).not.toBeInTheDocument();
-
-      const candidateCheckbox = screen.getByRole('checkbox', { name: 'Select Gene Gatekeeper' });
-      expect(candidateCheckbox).not.toBeDisabled();
-      fireEvent.click(candidateCheckbox);
-
-      // Standing-grant option IS offered (onSetStandingGrant supplied + standard state).
-      const standingCheckboxes = screen.getAllByRole('checkbox', { name: 'Standing grant' });
-      expect(standingCheckboxes.length).toBeGreaterThan(0);
-      expect(standingCheckboxes[0]).not.toBeDisabled(); // enabled once the candidate is selected.
-
-      expect(screen.getByRole('button', { name: /Approve selected/ })).not.toBeDisabled();
-      expect(screen.getByPlaceholderText('Search contacts by name or email…')).not.toBeDisabled();
-    });
-
-    it('defaults to standard behavior when accessPermissionState is omitted entirely', async () => {
-      // No accessPermissionState in overrides at all — proves the default
-      // preserves task 041's unmodified baseline for existing callers.
+    it('defaults to grant-enabled behavior when accessPermissionState is omitted', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps()} />);
       await screen.findByText('Gene Gatekeeper');
-
-      expect(screen.queryByText(/external access is off for this record/i)).not.toBeInTheDocument();
+      expect(screen.queryByText('Restricted Access')).not.toBeInTheDocument();
       expect(screen.getByRole('checkbox', { name: 'Select Gene Gatekeeper' })).not.toBeDisabled();
-      expect(screen.getAllByRole('checkbox', { name: 'Standing grant' }).length).toBeGreaterThan(0);
+    });
+
+    it('no standing-grant option is offered anywhere (removed in v1.0.24)', async () => {
+      renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: 'standard' })} />);
+      await screen.findByText('Gene Gatekeeper');
+      expect(screen.queryByRole('checkbox', { name: /standing/i })).not.toBeInTheDocument();
     });
   });
 
   describe('adr-021-dark-mode', () => {
     const states: AccessPermissionState[] = ['restricted', 'limited', 'standard'];
 
-    it.each(states)('renders the %s gating state correctly under webDarkTheme with no console errors', async state => {
+    it.each(states)('renders the %s gating state under webDarkTheme with no console errors', async state => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
       renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: state })} />, webDarkTheme);
 
       await screen.findByText('Gene Gatekeeper');
-      expect(screen.getByText('Add a named contact')).toBeInTheDocument();
+      expect(screen.getByText('Add Access Permissions')).toBeInTheDocument();
       expect(screen.getByText('Prior Grantee')).toBeInTheDocument();
-
       if (state === 'restricted') {
-        expect(screen.getByText(/external access is off for this record/i)).toBeInTheDocument();
+        expect(screen.getByText('Restricted Access')).toBeInTheDocument();
       }
 
       expect(errorSpy).not.toHaveBeenCalled();
@@ -222,46 +204,44 @@ describe('AccessGrantModal — Access-Permission sharing gate (task 043)', () =>
   });
 
   describe('sprk_accesslevel independence', () => {
-    it('the existing-grant access-level badge is identical across all three Access-Permission states', async () => {
+    it('the existing-grant access-level badge is identical across all three states', async () => {
       for (const state of ['restricted', 'limited', 'standard'] as AccessPermissionState[]) {
         const { unmount } = renderWithTheme(<AccessGrantModal {...makeProps({ accessPermissionState: state })} />);
         await screen.findByText('Prior Grantee');
-        // EXISTING_GRANT.accessLevel = 100000001 → DEFAULT_ACCESS_LEVEL_OPTIONS label "Collaborate".
+        // EXISTING_GRANT.accessLevel = 100000001 → "Collaborate".
         expect(screen.getByText('Collaborate')).toBeInTheDocument();
         unmount();
       }
     });
 
-    it('a grant written while Limited carries the same accessLevel as one written while Standard', async () => {
-      const bodiesByState: Record<string, unknown> = {};
+    it('a grant written under Limited carries the same chosen accessLevel as one under Standard', async () => {
+      const levels: Record<string, number> = {};
 
       for (const state of ['limited', 'standard'] as AccessPermissionState[]) {
-        const props = makeProps({ accessPermissionState: state, defaultAccessLevel: 100000002 });
+        const props = makeProps({ accessPermissionState: state });
         const { unmount } = renderWithTheme(<AccessGrantModal {...props} />);
 
         await screen.findByText('Gene Gatekeeper');
         fireEvent.click(screen.getByRole('checkbox', { name: 'Select Gene Gatekeeper' }));
-        fireEvent.click(screen.getByRole('button', { name: /Approve selected/ }));
+        await pickLevelFor('Gene Gatekeeper', 'Full Access');
+        fireEvent.click(addButton());
 
-        await waitFor(() => {
+        await waitFor(() =>
           expect(props.authenticatedFetch).toHaveBeenCalledWith(
             '/api/v1/external-access/invite-and-grant',
             expect.objectContaining({ method: 'POST' })
-          );
-        });
-
-        const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
+          )
+        );
+        const call = (props.authenticatedFetch as jest.Mock).mock.calls.find(
           (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
         ) as [string, RequestInit];
-        bodiesByState[state] = JSON.parse(init.body as string);
+        levels[state] = (JSON.parse(call[1].body as string) as { accessLevel: number }).accessLevel;
         unmount();
       }
 
-      expect((bodiesByState.limited as { accessLevel: number }).accessLevel).toBe(100000002);
-      expect((bodiesByState.standard as { accessLevel: number }).accessLevel).toBe(100000002);
-      expect((bodiesByState.limited as { accessLevel: number }).accessLevel).toBe(
-        (bodiesByState.standard as { accessLevel: number }).accessLevel
-      );
+      expect(levels.limited).toBe(100000002);
+      expect(levels.standard).toBe(100000002);
+      expect(levels.limited).toBe(levels.standard);
     });
   });
 });

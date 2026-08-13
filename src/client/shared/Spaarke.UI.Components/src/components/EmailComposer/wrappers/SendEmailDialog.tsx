@@ -226,10 +226,34 @@ export interface ISendEmailDialogProps {
    * (SpaarkeAi `useUiScale()` hosts). Omitted → 1 (unchanged for all callers).
    */
   uiScale?: number;
+  /**
+   * Render the composer as a NON-BLOCKING (Fluent non-modal) surface — no backdrop
+   * scrim and no focus trap — so a host-level native lookup pane opened over it
+   * (the To/Cc people picker via `onLookupRecipients`, or the "link a record" /
+   * "add a relationship" advanced lookup via `onLookupRecord`/`onAddRelationship`,
+   * both `Xrm.Utility.lookupObjects`) stays interactive instead of being covered
+   * by the modal backdrop. Default `false` (standard blocking `alert` modal —
+   * unchanged for all existing callers). When `true`, dismiss is `explicit` (still
+   * no ESC/backdrop discard of an in-progress draft) rather than `alert`. Use for
+   * MDA/PCF hosts that wire the native lookup callbacks. (owner UAT 2026-08-12.)
+   */
+  nonBlocking?: boolean;
 }
 
 export function SendEmailDialog(props: ISendEmailDialogProps) {
-  const { open, onClose, mode, onSent, onError, regarding, associations, fullBleed, uiScale, ...composerProps } = props;
+  const {
+    open,
+    onClose,
+    mode,
+    onSent,
+    onError,
+    regarding,
+    associations,
+    fullBleed,
+    uiScale,
+    nonBlocking,
+    ...composerProps
+  } = props;
 
   // Shell title: mirrors the engine's mode-derived header word (which the seam
   // suppresses), honoring the same `titleOverride` hosts already pass (e.g.
@@ -263,10 +287,32 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
     return [{ entityType: regarding.entityType, entityId: regarding.id, entityName: regarding.name }, ...base];
   }, [associations, regarding]);
 
+  // While a native lookup pane (To/Cc people picker, "link a record"/"add a
+  // relationship" advanced lookup) is open, HIDE this surface so the (higher
+  // z-index) modal doesn't cover it — same fix as AccessGrantModal (owner UAT
+  // 2026-08-12 #2A/#2B). The modal stays mounted; the draft is preserved. Only
+  // applies when `nonBlocking` (an MDA/PCF host that wired the native lookups).
+  const [lookupHidden, setLookupHidden] = React.useState(false);
+  const wrapLookup = React.useCallback(
+    function <A extends unknown[], R>(fn?: (...args: A) => Promise<R>): ((...args: A) => Promise<R>) | undefined {
+      if (!fn || !nonBlocking) return fn;
+      return async (...args: A): Promise<R> => {
+        setLookupHidden(true);
+        try {
+          return await fn(...args);
+        } finally {
+          setLookupHidden(false);
+        }
+      };
+    },
+    [nonBlocking]
+  );
+
   return (
     <SprkModal
       open={open}
       onClose={onClose}
+      hidden={lookupHidden}
       title={title}
       // fullBleed hosts (record-modal reply, dedicated compose window) start —
       // and stay — at the shell's true-takeover `full` size; everyone else gets
@@ -276,13 +322,22 @@ export function SendEmailDialog(props: ISendEmailDialogProps) {
       // `alert`: no Esc/backdrop dismiss — an accidental click outside can't
       // discard an in-progress draft (owner UAT 2026-07-30, item 12). Close is
       // the shell × or the ComposerActionBar Cancel, both routed to onClose.
-      dismiss="alert"
+      // When `nonBlocking`, use `explicit` instead (same no-ESC/backdrop-discard
+      // protection) so the SprkModal non-modal mapping actually applies — `alert`
+      // is intentionally always blocking (owner UAT 2026-08-12).
+      dismiss={nonBlocking ? 'explicit' : 'alert'}
+      nonBlocking={nonBlocking}
       // The composer owns its internal padding + single scroll region.
       padded={false}
       uiScale={uiScale}
     >
       <EmailComposer
         {...composerProps}
+        // Wrap the native-lookup callbacks so the modal auto-hides while the
+        // Xrm lookup pane is open (#2A/#2B). No-op when not nonBlocking.
+        onLookupRecipients={wrapLookup(composerProps.onLookupRecipients)}
+        onLookupRecord={wrapLookup(composerProps.onLookupRecord)}
+        onAddRelationship={wrapLookup(composerProps.onAddRelationship)}
         associations={mergedAssociations}
         mount="dialog"
         mode={effectiveMode}
