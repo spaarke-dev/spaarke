@@ -88,6 +88,28 @@ const DEFAULT_RELATED_TO_COLUMN = 'sprk_associationstatus';
  */
 export const NEEDS_REVIEW_CONFIG_ID = '00000000-0000-4000-8000-000000005001';
 
+/**
+ * UAT Fix #5 — the two additional reconciliation view configs (operator request).
+ * Authored from `email-review-all.gridconfiguration.json` / `email-review-completed.gridconfiguration.json`
+ * and seeded with these fixed GUIDs via `scripts/seed-reconciliation-gridconfig.ps1`.
+ */
+export const EMAIL_REVIEW_ALL_CONFIG_ID = '00000000-0000-4000-8000-000000005002';
+export const EMAIL_REVIEW_COMPLETED_CONFIG_ID = '00000000-0000-4000-8000-000000005003';
+
+/**
+ * The reconciliation view-switcher list (UAT Fix #5). Passed by the host to
+ * `ReconciliationWorkspace`'s `views` prop → rendered in the shared
+ * `DataGridViewSelector`; selecting a view swaps the grid's `configId`.
+ * "Needs Review" is the default (unresolved/suggested/ambiguous email);
+ * "Email Review All" drops the status filter; "Email Review Completed" shows
+ * only Resolved. Order is preserved in the menu.
+ */
+export const RECONCILIATION_VIEWS: ReadonlyArray<{ id: string; name: string; isDefault?: boolean }> = [
+  { id: NEEDS_REVIEW_CONFIG_ID, name: 'Needs Review', isDefault: true },
+  { id: EMAIL_REVIEW_ALL_CONFIG_ID, name: 'Email Review All' },
+  { id: EMAIL_REVIEW_COMPLETED_CONFIG_ID, name: 'Email Review Completed' },
+];
+
 /** `sprk_communication.sprk_associationstatus` option-set values (see docs/data-model/sprk_communication.md). */
 const ASSOCIATION_STATUS = {
   RESOLVED: 100000000,

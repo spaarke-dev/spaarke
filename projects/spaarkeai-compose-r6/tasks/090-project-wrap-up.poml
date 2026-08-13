@@ -4,7 +4,7 @@
     <title>Project wrap-up — anti-clobber deploy, ADR-049 amendment merged, /test-diet, lessons-learned, README Complete, verify 6 Success Criteria</title>
     <phase>7 Wrap-up</phase>
     <gate>dep:014,027,033,042,052,061</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>plan.md §5 Phase 7 assigns STANDARD. Note: the wrap-up reconciles `tests/**` via /test-diet, so the CLAUDE.md §8 TEST-MODIFYING override applies to the test-reconciliation step (code-review + adr-check run there); the deploy/close-out steps themselves are STANDARD close-out.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -115,7 +115,9 @@
     <criterion testable="true">Given the task ledger, when close-out completes, then every task in TASK-INDEX.md shows ✅ and current-task.md is reset to none.</criterion>
   </acceptance-criteria>
 
-  <notes>Mandatory wrap-up per task-create Step 3.7 + CLAUDE.md §7 (test-diet project-close gate BINDING). Prescriptive ordered close-out. Deploy BFF + `sprk_spaarkeai` together (anti-clobber; NFR-04). Confirm ADR-049 amendment merged. Verify all 6 spec Success Criteria. Do not skip the test-diet gate.</notes>
+  <notes>Mandatory wrap-up per task-create Step 3.7 + CLAUDE.md §7 (test-diet project-close gate BINDING). Prescriptive ordered close-out. Deploy BFF + `sprk_spaarkeai` together (anti-clobber; NFR-04). Confirm ADR-049 amendment merged. Verify all 6 spec Success Criteria. Do not skip the test-diet gate.
+
+COMPLETED 2026-08-13. Step outcomes: (1) ADR-049 R6 Path-B amendment VERIFIED on origin/master (line ~80, merged with 001's code). (2) Deploy step resolved per escalation trigger 3 as a DOCUMENTED NO-OP: the full R6 surface deployed atomically 2026-08-07 17:25/17:26Z (12 min after PR #747) and wrap-up anti-clobber verify confirmed today's live artifacts (r2 deploys, BFF 13:12Z + code page 18:04Z) are a STRICT SUPERSET carrying both R6 markers and r2's newer work — redeploying from this worktree would have clobbered r2's active session, the exact scenario the constraint forbids. (3) /test-diet: 37 files / 281 tests, ZERO scaffolding/ambiguous/path-violations; one MAINTAIN-conditional note (stamper tests retire WITH the transitional path); report at notes/test-diet-report.md. (4) Cross-slice close-out review agent + full-suite adr-check mechanical layer (arch guardrails + I-7 lexical audit green); per-task Step 9.5 records cited (9 reviews, all findings closed). (5) repo-cleanup clean (Corteva docx deliberately untracked pending sign-off). (6) All 6 Success Criteria verified with evidence (README). (7) lessons-learned.md written. (8) README Complete/100% + changelog; plan Complete. (9) devops-sync degraded to WARN — R6 has no portfolio Project Issue (never registered). (10) TASK-INDEX 30/30 ✅; current-task reset to none. Deviation record: deploy no-op rationale above; devops warn.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

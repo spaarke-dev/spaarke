@@ -1000,7 +1000,7 @@ public class DataverseWebApiService : IDataverseService
     {
         // The Spaarke communication model archives the .eml against sprk_communication (NOT the OOB
         // email activity — cf. GetDocumentByEmailLookupAsync). Filter that lookup + IsEmailArchive=true.
-        var filter = $"_sprk_communication_value eq {communicationId} and sprk_isemailarchive eq true";
+        var filter = $"_sprk_relatedcommunication_value eq {communicationId} and sprk_isemailarchive eq true";
         var url = $"{_entitySetName}?$filter={Uri.EscapeDataString(filter)}&$top=1";
 
         _logger.LogDebug("Querying email-archive document by communication: {CommunicationId}", communicationId);

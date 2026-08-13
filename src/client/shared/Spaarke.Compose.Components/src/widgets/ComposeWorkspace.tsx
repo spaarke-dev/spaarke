@@ -964,7 +964,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       });
       return;
     }
-    if (!effectiveDriveId) {
+    // 090 close-out review (HIGH): prefer the DOCUMENT'S OWN drive (documentRef.driveId — stamped
+    // by the create-on-save re-target, UAT P2) over the host/search drive, mirroring triggerSave's
+    // saveDriveId. A doc this workspace minted (born-in-editor fork, PDF-sourced) lives in the BU
+    // container's drive, which the host `driveId` prop does not identify — a remount (external-
+    // change reload / post-apply-template requestLoad) must fetch from where the doc lives.
+    const loadDriveId = state.documentRef?.driveId ?? effectiveDriveId;
+    if (!loadDriveId) {
       // Half-provisioned document (missing SPE drive pointer) — not a host
       // misconfiguration. Route back to the empty state; the informational
       // banner below explains the situation. (Normally unreachable — the
@@ -980,7 +986,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
     (async () => {
       try {
-        const qs = new URLSearchParams({ driveId: effectiveDriveId, tenantId });
+        const qs = new URLSearchParams({ driveId: loadDriveId, tenantId });
         if (docRef.sprkDocumentId) qs.set('documentRecordId', docRef.sprkDocumentId);
         if (docRef.fileName) qs.set('displayName', docRef.fileName);
         // FR-29/FR-33 (R2, tasks 060/102 gap 4.1): forward the known prior session id — and, when
@@ -1928,7 +1934,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const handleApplyTemplate = React.useCallback(
     async (templateIdOrName: string): Promise<void> => {
       const speId = state.documentRef?.speDriveItemId;
-      if (!speId || !effectiveDriveId || !bffBaseUrl) return;
+      // 090 close-out review (HIGH): the doc's own drive wins (create-on-save re-target lands the
+      // doc in the BU container's drive, not the host's) — mirrors triggerSave's saveDriveId.
+      const applyDriveId = state.documentRef?.driveId ?? effectiveDriveId;
+      if (!speId || !applyDriveId || !bffBaseUrl) return;
       // 032 Step-9.5 F3: re-check dirtiness at APPLY time, not just toolbar-render time — a
       // programmatic edit (Assistant redline via the bridge) landing while the dialog is open would
       // otherwise be silently discarded by the post-merge remount.
@@ -1944,7 +1953,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ driveId: effectiveDriveId, templateIdOrName }),
+            body: JSON.stringify({ driveId: applyDriveId, templateIdOrName }),
           }
         );
 
@@ -3528,7 +3537,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const canShowApplyTemplate =
     (state.status === 'loaded' || state.status === 'saving') &&
     !!state.documentRef?.speDriveItemId &&
-    !!effectiveDriveId &&
+    // 090 close-out review (HIGH): a doc this workspace minted carries its own driveId (create-on-
+    // save re-target) even when the host prop is empty (bare mount) — gate on either, not host-only.
+    !!(state.documentRef?.driveId ?? effectiveDriveId) &&
     bffBaseUrl.length > 0;
   const applyTemplateDisabledReason = isApplyingTemplate
     ? 'Applying template…'
