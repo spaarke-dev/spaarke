@@ -87,7 +87,8 @@ safeRegisterContext('playbook-gallery', {
 
 safeRegisterContext('get-started-cards', {
   factory: () =>
-    import('../widgets/context/GetStartedCardsWidget').then(m => ({
+    // GetStartedCardsWidget relocated to @spaarke/ui-components (task 064 Option C).
+    import('@spaarke/ui-components').then(m => ({
       // Intentional cast: prop-shape divergence documented above.
       default: m.GetStartedCardsWidget as unknown as ContextWidgetComponent,
     })),

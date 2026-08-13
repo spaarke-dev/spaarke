@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Xunit;
@@ -236,5 +237,92 @@ public class ExternalModuleRegistryTests
         var module = CollaborationModule();
 
         module.IsRecordAccessible(Ciam(Guid.NewGuid()), Guid.Empty).Should().BeFalse();
+    }
+
+    // ── task 028: polymorphic multi-dimension (OR) child scoping ──────────────────────────────────
+
+    // Documents module: a row is accessible if it rolls up to an accessible project OR matter OR
+    // work assignment (each dimension reads a typed parent lookup on the row).
+    private static ExternalModuleDescriptor DocumentsModule() => new()
+    {
+        Name = "documents",
+        RecordEntity = "sprk_document",
+        ScopeDimensions = new[]
+        {
+            new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
+            new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
+            new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
+        },
+    };
+
+    private static CallerPrincipal PolymorphicCiam(
+        IEnumerable<Guid>? projects = null, IEnumerable<Guid>? matters = null, IEnumerable<Guid>? was = null) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = Guid.NewGuid(),
+        Email = "external@test.com",
+        Oid = Guid.NewGuid().ToString(),
+        ProjectAccess = (projects ?? Array.Empty<Guid>())
+            .Select(id => new CallerProjectAccess { ProjectId = id, AccessLevel = ExternalAccessLevel.Collaborate }).ToList(),
+        AccessibleMatterIds = (matters ?? Array.Empty<Guid>()).ToHashSet(),
+        AccessibleWorkAssignmentIds = (was ?? Array.Empty<Guid>()).ToHashSet(),
+    };
+
+    // A document row projecting its typed parent lookups as EntityReference (the SDK's shape).
+    private static IReadOnlyDictionary<string, object?> DocRow(
+        Guid? project = null, Guid? matter = null, Guid? wa = null) =>
+        new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["sprk_documentid"] = Guid.NewGuid(),
+            ["@logicalName"] = "sprk_document",
+            ["sprk_project"] = project is { } pid ? new EntityReference("sprk_project", pid) : null,
+            ["sprk_matter"] = matter is { } mid ? new EntityReference("sprk_matter", mid) : null,
+            ["sprk_workassignment"] = wa is { } wid ? new EntityReference("sprk_workassignment", wid) : null,
+        };
+
+    [Fact]
+    public void ScopeRows_Documents_KeepsRowMatchingAnyAccessibleParent()
+    {
+        var project = Guid.NewGuid();
+        var matter = Guid.NewGuid();
+        var wa = Guid.NewGuid();
+        var module = DocumentsModule();
+        var principal = PolymorphicCiam(projects: new[] { project }, matters: new[] { matter }, was: new[] { wa });
+
+        var rows = new[]
+        {
+            DocRow(project: project),            // via project root
+            DocRow(matter: matter),              // via matter root
+            DocRow(wa: wa),                      // via work-assignment root
+            DocRow(project: Guid.NewGuid()),     // unrelated → excluded
+        };
+
+        var scoped = module.ScopeRows(principal, rows);
+
+        scoped.Should().HaveCount(3, "documents rolling up to ANY accessible root are kept; the unrelated one is dropped");
+    }
+
+    [Fact]
+    public void ScopeRows_Documents_MatterLinkedDoc_VisibleToMatterGrantedCaller_SupersedesProjectOnlyHide()
+    {
+        // The concrete over-hide task 028 fixes: a matter-parented document (no project link) was hidden
+        // by the R1 project-only scope. It must now appear for a caller granted its matter.
+        var matter = Guid.NewGuid();
+        var module = DocumentsModule();
+        var principal = PolymorphicCiam(matters: new[] { matter }); // matter grant only, no projects
+
+        var scoped = module.ScopeRows(principal, new[] { DocRow(matter: matter) });
+
+        scoped.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void ScopeRows_Documents_NonParticipant_ReturnsEmpty()
+    {
+        var module = DocumentsModule();
+        var principal = PolymorphicCiam(); // no accessible roots of any type
+
+        module.ScopeRows(principal, new[] { DocRow(project: Guid.NewGuid()), DocRow(matter: Guid.NewGuid()) })
+            .Should().BeEmpty("fail-closed: every dimension empty → nothing (NFR-08)");
     }
 }

@@ -71,8 +71,9 @@ public static class InviteExternalUserEndpoint
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
 
-        if (request.ProjectId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
+        // Note (task 070): ProjectId is NOT required — /invite only onboards (resolve-or-create Contact +
+        // CIAM account); it writes NO grant. The grant (and its root) is created separately by /grant or
+        // /invite-and-grant. The field is retained on the DTO for back-compat but no longer gates /invite.
 
         logger.LogInformation("[EXT-INVITE] Onboarding external user {Email}", request.Email);
 

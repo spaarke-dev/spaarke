@@ -18,8 +18,11 @@
     "./components/AttachmentList": "./src/components/AttachmentList/index.ts"
   },
   "scripts": {
+    "build:deps": "npm --prefix ../Spaarke.Auth run build && npm --prefix ../Spaarke.UI.Components run build",
+    "prebuild": "npm run build:deps",
     "build": "tsc",
     "clean": "rm -rf dist",
+    "prelint": "npm run build:deps",
     "lint": "tsc --noEmit",
     "test": "jest",
     "test:watch": "jest --watch",

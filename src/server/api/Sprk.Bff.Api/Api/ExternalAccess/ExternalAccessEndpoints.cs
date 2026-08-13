@@ -70,6 +70,23 @@ public static class ExternalAccessEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        // GET /api/v1/external/me/entitlements — Tier-1 MODULE entitlement context (task 072, Option B).
+        // Returns the module-code list the external-spa widget registry gates tab visibility on: workforce
+        // from sprk_approlemodulemap (App-Role → module); CIAM blanket outside-counsel set. Distinct from
+        // /me above (Tier-2 record access). Same group → same dual-scheme policy + CallerPrincipal filter.
+        externalGroup.MapGet("/me/entitlements", MeEntitlementsEndpoint.Handle)
+            .WithName("GetExternalUserEntitlements")
+            .WithSummary("Get the authenticated collaboration caller's Tier-1 module entitlement context")
+            .WithDescription(
+                "Returns the caller's entitled module codes (Tier-1). Workforce callers resolve from the " +
+                "App-Role→module map (sprk_approlemodulemap); CIAM outside-counsel callers are blanket- " +
+                "entitled to the outside-counsel module set. Consumed by the external-spa widget registry " +
+                "to gate tab visibility. Record visibility within a module is governed by Tier-2 grants.")
+            .Produces<MeEntitlementsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
         // Project data endpoints — list/read projects, documents, todos, contacts, organizations,
         // document download. All principal-agnostic (filter the CallerPrincipal's accessible-record set).
         externalGroup.MapExternalProjectDataEndpoints();

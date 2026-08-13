@@ -35,6 +35,29 @@ export interface SprkModalProps {
   layout?: SprkModalLayout;
   /** Dismiss semantics (default `light`). */
   dismiss?: SprkModalDismiss;
+  /**
+   * When `true`, the shell renders as a Fluent `modalType="non-modal"` surface —
+   * NO backdrop scrim and NO focus trap — so a page-level overlay opened on top
+   * of it (e.g. the native Dataverse `Xrm.Utility.lookupObjects` advanced-lookup
+   * pane) stays fully interactive instead of being covered/click-swallowed by the
+   * modal backdrop. This is the proven pattern the CommunicationActions composer
+   * uses so its record/recipient lookups work from inside a dialog. Default
+   * `false` (standard modal with backdrop). Ignored when `dismiss==='alert'`
+   * (an alert is intentionally blocking). Trade-off: a non-blocking modal does
+   * not dim the background — use only when a host-level lookup pane must overlay it.
+   */
+  nonBlocking?: boolean;
+  /**
+   * When `true`, the modal stays MOUNTED (all state preserved) but its surface is
+   * rendered `visibility: hidden` + `pointer-events: none` — invisible and
+   * non-interactive. Used together with `nonBlocking` to get a page-level native
+   * lookup pane (Xrm.Utility.lookupObjects) fully in the clear: the caller flips
+   * `hidden` on while the lookup is open, so the (higher-z-index) dialog surface
+   * doesn't cover it, then flips it off when the pick resolves — the modal
+   * reappears with the pick applied, its in-progress state intact (unlike an
+   * open→false unmount, which would reset it). Default `false`.
+   */
+  hidden?: boolean;
   /** The `--sprk-ui-scale` factor for sizing (default 1). */
   uiScale?: number;
   /** Whether the maximize/restore control is shown (default true). */

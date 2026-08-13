@@ -996,6 +996,43 @@ public class DataverseWebApiService : IDataverseService
         }
     }
 
+    public async Task<DocumentEntity?> GetEmailArchiveByCommunicationAsync(Guid communicationId, CancellationToken ct = default)
+    {
+        // The Spaarke communication model archives the .eml against sprk_communication (NOT the OOB
+        // email activity — cf. GetDocumentByEmailLookupAsync). Filter that lookup + IsEmailArchive=true.
+        var filter = $"_sprk_communication_value eq {communicationId} and sprk_isemailarchive eq true";
+        var url = $"{_entitySetName}?$filter={Uri.EscapeDataString(filter)}&$top=1";
+
+        _logger.LogDebug("Querying email-archive document by communication: {CommunicationId}", communicationId);
+
+        try
+        {
+            var response = await SendGetAsync(url, ct);
+            response.EnsureSuccessStatusCode();
+
+            var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+            if (result?.Value == null || result.Value.Count == 0)
+            {
+                _logger.LogDebug("No email-archive document found for communication {CommunicationId}", communicationId);
+                return null;
+            }
+
+            var data = result.Value[0];
+            var id = data.TryGetValue("sprk_documentid", out var idElement)
+                ? idElement.GetString() ?? string.Empty
+                : string.Empty;
+
+            var document = MapToDocumentEntity(data, id);
+            _logger.LogDebug("Found email-archive document {DocumentId} for communication {CommunicationId}", document.Id, communicationId);
+            return document;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error querying email-archive document by communication {CommunicationId}", communicationId);
+            throw;
+        }
+    }
+
     /// <summary>
     /// Get child documents (attachments) by parent document lookup.
     /// Queries: $filter=_sprk_parentdocument_value eq {parentDocumentId}

@@ -72,4 +72,42 @@ What the owner will see change between the :5176 prototype and the shipped page:
 
 ---
 
+## E. UAT round-2 (owner, 2026-08-11)
+
+Reviewed against the refined prototype (`localhost:5177`). "P" = mock in the prototype for review; "B" = production build requirement.
+
+### E.1 Related-to tab
+| # | Requirement | P | B |
+|---|---|---|---|
+| E1a | Rename the `Create new & link` button → **`New record`**. | ✅ | ✅ |
+| E1b | `New record` must have a real action: open the **Quick Start modal** → user selects a wizard → the wizard's FINAL step creates the new record → that new record is **added to the Related-to candidate list** → the user then uses the Related-to **`Confirm`** to associate it. This is **modal-on-modal**; when the record/wizard modal closes, the review (browse-shell) modal stays open. | ✅ mock the flow | ✅ real Quick Start wizard integration + add-created-record-to-candidates |
+| E1c | **Auto-load the reconciled email's `.eml` into the wizard's file-upload / AI-pre-populate step.** The `Create*Wizard`s have a step where a file is uploaded to seed the AI pre-populate; when launched from the reconciliation surface, that step must **arrive with the `.eml` already loaded** (the email being reconciled). This reuses the **existing Assistant mechanism verbatim** — `QuickStartModal` already accepts `fileCtx: { fileIds }` and threads it into `launchSurface({ consumerType, fileIds })` → `SurfaceHandoffEnvelope.fileIds` (SPE reference — **by reference, never inline binary**, hand-off invariant #4) → the wizard reads the envelope and fetches content for pre-populate. The Assistant does exactly this today when a wizard is opened from Assistant context (the file currently in context rides along; `QuickStartModal.tsx` L240–279). **Reconciliation only supplies the `.eml`'s SPE `fileId` as `fileCtx.fileIds`** — no new file-passing path. | note only (prototype needn't fetch real content) | ✅ pass the reconciled email's `.eml` SPE `fileId` as `QuickStartModal` `fileCtx.fileIds`; **open detail**: the `.eml` `fileId` must be resolvable by the wizard's content-fetch path (`GET …/documents/{fileId}/content`) — surface the `.eml` as a compatible SPE reference from the reconciliation context (the stored original `.eml`, cf. B4 "Open original") |
+
+### E.2 Fields tab
+| # | Requirement | P | B |
+|---|---|---|---|
+| E2a | Rename the `Accept & write` button → **`Accept`**. | ✅ | ✅ |
+| E2b | The editable field control must match the **field's real type** — date fields use a date picker; **lookup fields use the OOB advanced-lookup side pane**; option-sets use a dropdown; etc. | partial (date pickers; note lookups) | ✅ type-correct controls incl. OOB advanced-lookup side pane |
+| E2c | Add a full-width **`Update other fields`** button at the bottom of the Fields tab → opens the **confirmed Related-to record's form** so the user can edit other fields on that record. **Modal-on-modal**; review modal stays open on close. | ✅ mock a record-form modal | ✅ open the real record form (OOB `navigateTo` form or a record modal) for the confirmed regarding |
+
+### E.3 Tasks tab
+| # | Requirement | P | B |
+|---|---|---|---|
+| E3a | Rename the proposal `Confirm & create` button → **`Create`**. | ✅ | ✅ |
+| E3b | In the New-task modal, **`Assigned to`** uses the standard **OOB advanced-find side-pane lookup** (systemuser/team). **Build note only — do NOT mock in the prototype.** | — (note only) | ✅ OOB advanced-lookup side pane for Assigned-to |
+
+### Cross-cutting note — modal-on-modal
+E1b + E2c both stack a record/wizard modal ON the open review modal. This is an established pattern here (the browse shell already opens a `PreviewModal` overlay for "Open original", and "+ New task" now uses a `FormModal`). Production uses `SprkModal`-family surfaces; on close, the underlying review modal remains open (controlled `open` state per surface).
+
+### Production follow-up
+E1b (Quick Start integration), E2b/E3b (OOB advanced-lookup side pane), and E2c (record-form modal) are **new build work** beyond the 061/062 mount — track as follow-on tasks (063+) after prototype sign-off. Label changes (E1a/E2a/E3a) are trivial and can ship into the 055/056/052 components directly.
+
+### REUSE existing components (BINDING §11 — owner 2026-08-11)
+These behaviors MUST reuse the shipped components, not rebuild them — full table in [`pillar-e-mount-build-plan.md` §7.5](pillar-e-mount-build-plan.md). Key targets: **Quick Start** = `QuickStartModal` (`src/solutions/SpaarkeAi/src/components/conversation/QuickStartModal.tsx`); **wizards** = the `Create*Wizard` code pages launched via the Assistant surface-launch mechanism; **"Update other fields"** = OOB `navigateTo` record form / `RecordNavigationModalShell`; **modal chrome** = `SprkModal` presets (`FormModal`/`WizardModal`/`BrowseModal`/`PreviewModal`); **lookups/Assigned-to** = OOB advanced-lookup side pane. The prototype's stand-ins are for review only; carried into the 063+ POMLs as explicit reuse `<constraint>`s.
+
+### Button-label consistency (E-cross, owner 2026-08-11)
+The action buttons that open a create/add surface use the **`+ {verb}`** pattern (Add icon + text), consistent with **`+ New task`**: **`+ New record`** (Related-to) and **`+ Update other fields`** (Fields).
+
+---
+
 *Update this doc when UX requirements change. The production build (`pillar-e-mount-build-plan.md`) and any prototype refinement both trace to the items above.*

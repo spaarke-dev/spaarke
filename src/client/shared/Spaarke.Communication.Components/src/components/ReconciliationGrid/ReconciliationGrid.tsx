@@ -191,6 +191,13 @@ export interface ReconciliationGridProps {
    * see the row-open design note in the module doc comment above.
    */
   onRecordOpen?: DataGridProps['onRecordOpen'];
+  /**
+   * OPTIONAL — fires every time the framework resolves a fresh records page,
+   * with the full accumulated rows (pass-through of `<DataGrid />`'s
+   * `onRecordsLoaded` seam). `ReconciliationWorkspace` (task 061) consumes it to
+   * build the browse shell's "N of M" queue from the same rows the grid shows.
+   */
+  onRecordsLoaded?: DataGridProps['onRecordsLoaded'];
   /** OPTIONAL — per-field custom cell renderers, merged with {@link DEFAULT_COLUMN_RENDERERS} (caller entries win on a field-name collision). */
   columnRenderers?: DataGridOverrides['columnRenderers'];
   /** OPTIONAL — host-injected FetchXML conditions overlaid onto the resolved query (e.g. a host-owned filter row). */
@@ -213,6 +220,7 @@ export const ReconciliationGrid: React.FC<ReconciliationGridProps> = ({
   configId = NEEDS_REVIEW_CONFIG_ID,
   dataverseClient,
   onRecordOpen,
+  onRecordsLoaded,
   columnRenderers,
   hostFilters,
   membershipResolver,
@@ -249,6 +257,7 @@ export const ReconciliationGrid: React.FC<ReconciliationGridProps> = ({
       configId={configId}
       dataverseClient={dataverseClient}
       onRecordOpen={onRecordOpen}
+      onRecordsLoaded={onRecordsLoaded}
       overrides={overrides}
       hostFilters={hostFilters}
       membershipResolver={membershipResolver}

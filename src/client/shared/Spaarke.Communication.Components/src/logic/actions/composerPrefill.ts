@@ -58,11 +58,7 @@ export const DRAFT_QUOTE_SEPARATOR_HTML = '<p></p>';
  *   - Without a `bodyOverride`, the historical `emptyLead` (blank room for the
  *     author to type above the quote) is used unchanged.
  */
-function composeInitialBody(
-  bodyOverride: string | undefined,
-  quoted: string,
-  emptyLead: string
-): string | undefined {
+function composeInitialBody(bodyOverride: string | undefined, quoted: string, emptyLead: string): string | undefined {
   const draft = bodyOverride && bodyOverride.trim().length > 0 ? bodyOverride : undefined;
   if (draft) {
     // Draft path — authored region ABOVE, quoted thread STILL below (invariant: never dropped).
