@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>D9 — host-proof flex-chain fix for the Assistant transcript in the Open-in-Compose iframe (FR-11)</title>
+    <phase>4 — D9 viewport fix</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend Fluent-v9 change on the shared SprkChat/ConversationPane subtree (auto-FULL on .tsx) with ui-tests + live-DOM diagnosis; regressions would hit every SprkChat host</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Contained CSS/flex fix but needs live-DOM diagnosis judgment (walk the ancestor chain, name the culprit) before editing — well-scoped once the culprit is named</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave1-independent</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared SprkChat/ConversationPane subtree (D9 origin) — coordinate merge-order with spaarkeai-compose-r5/r6 + spaarkeai-assistant-enhancements-r3; run /conflict-check before the PR</parallel-reason>
+    <deps></deps>
+    <tags>pcf, frontend, fluent-ui, e2e-test, spaarkeai</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Finish the D9 viewport clip (FR-11): the Assistant transcript clips mid-row with dead whitespace when the SpaarkeAi code page mounts in the "Open in Compose" Xrm-dialog iframe. A PARTIAL fix (`SprkChat.tsx` `messageList` `min-height:0`) is ALREADY on master — so the FIRST step is a live-DOM session (via /ui-test or DevTools on the code-page iframe) to confirm D9 still reproduces after that partial fix. If it no longer reproduces, this collapses to a verification + regression-guard task (see escalation). If it still reproduces, walk the ancestor chain per the handoff diagnosis recipe and finish the remaining suspects — the `SprkChat.tsx:1432` trailing-spacer inline `minHeight = ${container.clientHeight}px` (measured before the Xrm iframe settles → dead whitespace; highest-probability), the `inputZone` (~:208–212, applied ~:2884) missing `flexShrink:0`, the `ConversationPaneChrome.tsx:50` `sprkChatFlex` wrapper — replacing any measured/fixed height with the flex chain (`flex:1; min-height:0; overflow`), tokens-only (ADR-021), with NO fixed/measured height left in the chain (that is what makes it host-proof).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React 18 + TypeScript + Fluent UI v9 makeStyles expertise on the shared SprkChat/ConversationPane subtree; disciplined about live-DOM diagnosis before editing, host-agnostic flex chains (no per-host branching), and not regressing other SprkChat consumers.</role>
+  <goal>The Assistant transcript in the "Open in Compose" Xrm-dialog iframe is bounded with internal scroll and a pinned composer — no clipped rows, no dead whitespace — host-proof (no fixed/measured heights), with the full-page + widget hosts unchanged and the dialog re-bounding correctly on resize.</goal>
+  <context>
+    <background>Defect D9 (register P4, FR-11). CRITICAL: read `projects/spaarkeai-assistant-enhancements-r4/notes/assistant-viewport-clipping-open-in-compose-handoff.md` in full — it carries the symptom, the verified-correct app/shell chain, the root-cause hypotheses in likelihood order, the diagnosis recipe (§4), the fix pattern (§5), and the §6 verification checklist. Entry path: `sprk_document` form → "Open in Compose" → SpaarkeAi code page opens in an Xrm dialog that hosts the page in an IFRAME, so `100vh` = the iframe's inner height (smaller + settles later than a full tab) — which is why a latent chain defect shows here and not on the full page. The app-level (`App.tsx`) + shell-level (`ThreePaneShell.tsx`) chain is verified sound; the break is below the shell in the `ConversationPane → SprkChat` subtree. A PARTIAL fix — `SprkChat.tsx` `messageList` `min-height:0` — is ALREADY on master, so D9 may already be resolved: the live-DOM session confirms BEFORE any further edit. Remaining suspects if it still reproduces: (1) `SprkChat.tsx:1432` trailing-spacer inline `minHeight = ${container.clientHeight}px` measured before the iframe settles → dead whitespace (highest-probability, hypothesis 2 in the handoff); (2) `inputZone` (~:208–212, applied ~:2884) missing `flexShrink:0`; (3) `ConversationPaneChrome.tsx:50` `sprkChatFlex` wrapper. Fix pattern: every intermediate wrapper `flex:1; min-height:0; overflow:hidden`; transcript scroller `flex:1; min-height:0; overflow-y:auto`; fixed elements (header, Model row, composer) `flex-shrink:0`; NO fixed/measured height anywhere in the chain. Client-only — ships with a `sprk_spaarkeai` rebuild + `Deploy-SpaarkeAi.ps1`; NO BFF involvement, no atomic-window coordination.</background>
+    <relevant-files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/notes/assistant-viewport-clipping-open-in-compose-handoff.md (READ FULLY — symptom, diagnosis recipe §4, fix pattern §5, verification checklist §6)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (:1432 trailing-spacer inline px height; inputZone ~:208–212 applied ~:2884; messageList min-height:0 partial fix already on master)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPaneChrome.tsx (:50 sprkChatFlex wrapper)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (pane wrappers between the pane boundary and SprkChat's transcript scroller)</file>
+      <file>src/solutions/SpaarkeAi/src/App.tsx + components/shell/ThreePaneShell.tsx (verified-correct upstream chain — context, not the bug)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-021" scope="the flex-chain styles">Fluent v9 makeStyles, semantic tokens only — NO hex, NO literal '1px', NO inline color; the transcript must render correctly in light AND dark theme.</constraint>
+    <constraint source="project" scope="the whole flex chain">NO fixed or measured heights anywhere in the chain — replace any measured/px height with the flex chain (`flex:1; min-height:0; overflow`). This is what makes the pane host-proof (Xrm dialog, full tab, widget) with zero per-host branching. MUST NOT reintroduce a measured height.</constraint>
+    <constraint source="ADR-012" scope="the shared SprkChat subtree">SprkChat is a host-agnostic shared component — the fix MUST NOT regress other SprkChat consumers or the full-page/widget hosts; no per-host branching.</constraint>
+    <constraint source="project" scope="deploy">Client-only change — ships with a `sprk_spaarkeai` rebuild + `Deploy-SpaarkeAi.ps1`; NO BFF change.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/notes/assistant-viewport-clipping-open-in-compose-handoff.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0">Declare rigor. Read the handoff note fully (symptom, diagnosis recipe §4, fix pattern §5, checklist §6). Note the partial fix (`messageList min-height:0`) already on master.</step>
+    <step order="1">LIVE-DOM SESSION FIRST (via /ui-test or DevTools on the code-page iframe): repro "Open in Compose" from a `sprk_document` with the Assistant rendering enough content to exceed the pane; confirm whether D9 still reproduces AFTER the partial fix. If it does NOT reproduce → go to escalation (verification-only + regression guard).</step>
+    <step order="2">If it reproduces: walk UP the ancestor chain from SprkChat's transcript scroller toward appRoot; the first ancestor whose rendered height EXCEEDS its parent's clientHeight is the culprit. Check for a missing `flex:1; min-height:0` or an inline px height (`SprkChat.tsx:1432` trailing spacer; `inputZone` missing `flexShrink:0`; `sprkChatFlex` wrapper).</step>
+    <step order="3">Apply the fix pattern: intermediate wrappers `flex:1; min-height:0; overflow:hidden`; transcript scroller `flex:1; min-height:0; overflow-y:auto`; fixed elements `flex-shrink:0`; DELETE any measured/px height (do NOT re-measure on resize — the chain makes measurement unnecessary). Fix in SprkChat if the culprit is shared; in ConversationPane/Chrome if it is a pane wrapper. Tokens-only (ADR-021).</step>
+    <step order="4">Run the ui-tests below; verify §6 checklist in light + dark; if fixed in SprkChat, spot-check one other SprkChat consumer surface.</step>
+    <step order="5">npm run build SpaarkeAi (production); update TASK-INDEX ✅.</step>
+  </steps>
+  <ui-tests>
+    <test name="Open-in-Compose modal transcript bounded"><steps><step>Navigate to a `sprk_document` record (env placeholder: https://&lt;dev-env&gt;.crm.dynamics.com → a document with SPE pointers)</step><step>Command bar → "Open in Compose"; wait for the Assistant to render suggestions so content exceeds the pane height</step></steps><expected>The Assistant transcript is BOUNDED with internal scroll, the composer is pinned at the bottom, and there are NO clipped rows and NO dead whitespace — light AND dark theme.</expected></test>
+    <test name="Full-page + widget regression"><steps><step>Open the standard full-page SpaarkeAi surface (env placeholder: https://&lt;dev-env&gt;.crm.dynamics.com → SpaarkeAi code page); then the workspace/widget presentation of the Assistant</step></steps><expected>Both hosts render UNCHANGED — bounded transcript, internal scroll, composer pinned (no regression from the D9 fix).</expected></test>
+    <test name="Dialog resize re-bounds"><steps><step>In the Open-in-Compose dialog, toggle the platform Expand/full-screen control on the dialog chrome</step></steps><expected>The Assistant pane RE-BOUNDS correctly to the new dialog size — guards against a reintroduced measured height (a frozen measurement would fail this).</expected></test>
+    <test name="Long + near-empty conversation"><steps><step>In the modal host, render a long conversation (content ≫ pane height); then a near-empty conversation</step></steps><expected>Both lay out correctly — long scrolls internally within the bounded transcript, near-empty does not create dead whitespace.</expected></test>
+    <test name="Light + dark"><steps><step>Toggle dark mode with the modal host open</step></steps><expected>The transcript + composer use Fluent v9 semantic tokens and render correctly in both themes (ADR-021).</expected></test>
+  </ui-tests>
+  <escalation>
+    <trigger>If the live-DOM session shows D9 does NOT reproduce (the merged partial `messageList min-height:0` fix already resolved it), STOP editing the flex chain speculatively — CONVERT this to a verification-only task: confirm §6 checklist passes as-is and add a regression guard (a ui-test / assertion that the transcript stays bounded and no measured height is reintroduced). Do not make speculative flex edits with no reproducing defect.</trigger>
+  </escalation>
+  <justification>
+    <existing>The `ConversationPane → SprkChat` transcript subtree exists; the partial `messageList min-height:0` fix is already on master; the remaining suspects are named in the handoff.</existing>
+    <extension>Yes — finish the existing flex chain (replace a measured/fixed height with `flex:1; min-height:0`); no new component, no new host branch.</extension>
+    <cost-of-doing-nothing>Without the fix the Assistant transcript clips mid-row with dead whitespace in the Open-in-Compose iframe host (P4/D9), so the modal Assistant is visibly broken and the P4 DoD cannot be met.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (or the ConversationPane/Chrome wrapper, wherever the live-DOM culprit lands)</output>
+    <output type="test">ui-tests / regression guard for the bounded transcript (no reintroduced measured height)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Handoff §6: modal "Open in Compose" transcript is bounded, scrolls internally, composer pinned, no clipped rows, no dead space — light AND dark.</criterion>
+    <criterion testable="true">Full-page SpaarkeAi surface unchanged (regression check).</criterion>
+    <criterion testable="true">Workspace/widget presentation of the Assistant unchanged (regression check).</criterion>
+    <criterion testable="true">Dialog resize re-bounds the pane correctly (guards a reintroduced measured height).</criterion>
+    <criterion testable="true">Long conversation (content ≫ pane height) AND near-empty conversation both lay out correctly.</criterion>
+    <criterion testable="true">Negative: NO fixed/measured height remains anywhere in the chain (host-proof, no per-host branching).</criterion>
+    <criterion testable="true">If fixed in SprkChat: one other SprkChat consumer surface spot-checked and unaffected.</criterion>
+    <criterion testable="true">If live-DOM shows D9 no longer reproduces: task converted to verification-only + a regression guard added (per escalation), not speculatively edited.</criterion>
+  </acceptance-criteria>
+  <notes>Client-only — ships with `sprk_spaarkeai` rebuild + `Deploy-SpaarkeAi.ps1`; no BFF. SprkChat/ConversationPane is a contended spine shared with compose-r5/r6 + assistant-r3 — run /conflict-check before the PR and coordinate merge order. The live-DOM confirm BEFORE editing is load-bearing (the partial fix may already have resolved D9).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

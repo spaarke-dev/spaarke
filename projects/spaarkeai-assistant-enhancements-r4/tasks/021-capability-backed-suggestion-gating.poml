@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Gate free-string SprkChatSuggestions on a backing capability (FR-04)</title>
+    <phase>2 — E2 follow-ons</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend change on the shared SprkChat surface affecting suggestion rendering across all SprkChat consumers; touches the SpaarkeAi spine; requires code-review + adr-check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped gating change with a named escalation boundary (deterministic backing signal vs heuristic); reuse the ConsumerChips bindingId discipline — no architectural invention.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave2-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SprkChat / SprkChatSuggestions (shared lib + SpaarkeAi spine) — coordinate with compose-r5/r6; run /conflict-check before the PR.</parallel-reason>
+    <deps>012, 022</deps>
+    <tags>frontend, fluent-ui, spaarkeai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Gate the free-string `SprkChatSuggestions` system so a follow-on suggestion renders ONLY when a wired Action/tool/Binding fulfills it. Free-string suggestions with no backing capability are suppressed or replaced with `bindingId`-carrying capability chips (reuse the `ConsumerChips` bindingId discipline). Do NOT rebuild `ConsumerChips` — they are already capability-backed (server-authored from the Binding's `sprk_chiptransitions`, each carrying a `bindingId`; the `parseConsumerChips` parser skips any entry without `target_binding_id`). The dead-end risk is the FREE-STRING path only: SSE `suggestions[]` clicked via `handleSuggestionSelect` (`SprkChat.tsx:1583`) just re-sends the raw string with nothing verifying a wired capability backs it. "Help me prioritize my tasks" must either map to the FR-01 advisory capability (and work) or not render.</prompt>
+  <role>SPAARKE frontend developer. Fluent UI v9 + React 18 expertise; comfortable with the SprkChat suggestion/chip subsystem, the ConsumerChips bindingId discipline, and the ASSISTANT-UI-ELEMENT-CRITERIA decision rules (bubble vs chip vs card vs tab).</role>
+  <goal>A follow-on suggestion renders ONLY when a wired Action/tool/Binding fulfills it; free-string `SprkChatSuggestions` with no backing capability are suppressed or replaced with `bindingId`-carrying capability chips; "Help me prioritize my tasks" either maps to the FR-01 advisory capability (works) or does not render — with `ConsumerChips` behavior unchanged.</goal>
+  <context>
+    <background>FR-04 — no dead-end suggestions. There are TWO chip systems. `ConsumerChips` cards are ALREADY capability-backed: the server authors them from the Binding's `sprk_chiptransitions`, each carries a `bindingId`, and the parser `parseConsumerChips` in `dispatchConsumer.ts` skips any entry without `target_binding_id` — do NOT rebuild these. The P2 dead-end risk is the FREE-STRING system `SprkChatSuggestions.tsx`: it renders SSE `suggestions[]`, and clicking one calls `handleSuggestionSelect` (`SprkChat.tsx:1583`) which just re-sends the raw string — nothing verifies that a wired capability backs it, so a suggestion can promise an unwired action (the dead-end). This task adds a backing check so an unbacked free-string suggestion is suppressed (or is replaced with a bindingId-carrying capability chip that reuses the ConsumerChips discipline). "Help me prioritize my tasks" should map to the FR-01 advisory task-agenda capability (dep 012) when wired, and otherwise not render. ASSISTANT-UI-ELEMENT-CRITERIA warns against keyword-heuristic chips that mis-fire and against code in chip labels — the backing signal must be deterministic, not a fragile keyword guess. Task 022 adds the launch-registry entries and task 023 renders the follow-on cards; this task is the suggestion-gating half.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatSuggestions.tsx (the free-string suggestion renderer to gate)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (handleSuggestionSelect ~:1583 — re-sends the raw string; add the backing check here / at the render boundary)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/dispatchConsumer.ts (parseConsumerChips — the ConsumerChips bindingId discipline to reuse; skips entries without target_binding_id)</file>
+      <file>ConsumerChips (already capability-backed via sprk_chiptransitions / bindingId — leave UNCHANGED; do NOT rebuild)</file>
+      <file>the SprkChat suggestion unit test suite (add a gate test)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="suggestions">Render a follow-on suggestion ONLY when a wired Action/tool/Binding backs it; suppress or replace unbacked free-string `SprkChatSuggestions`; MUST NOT emit a dead-end that re-sends a raw string with no backing capability.</constraint>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA" scope="chips">No keyword-heuristic that risks mis-firing; no code in chip labels; a throwaway turn-follow-on is a chip (per the four-question decision) — keep the element type correct.</constraint>
+    <constraint source="project" scope="ConsumerChips">Leave `ConsumerChips` behavior unchanged — they are already capability-backed (server `sprk_chiptransitions` → `bindingId`); do NOT rebuild them (§11 reuse-first).</constraint>
+    <constraint source="ADR-021" scope="the suggestion/chip styling">Fluent v9 tokens-only styling; host-agnostic shared component — the change MUST NOT regress other SprkChat consumers or the full-page/widget hosts.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Trace the free-string path: `SprkChatSuggestions.tsx` render → click → `handleSuggestionSelect` (`SprkChat.tsx:1583`) re-sending the raw string; confirm nothing verifies a backing capability.</step>
+    <step order="2">Study the ConsumerChips bindingId discipline (`parseConsumerChips` skips entries without `target_binding_id`) as the deterministic backing pattern to reuse.</step>
+    <step order="3">Add a backing check at the suggestion render/select boundary: map each free-string suggestion to a wired capability/Binding and either suppress it (no backing) or replace it with a `bindingId`-carrying capability chip; keep the signal deterministic (no keyword heuristic).</step>
+    <step order="4">Wire "Help me prioritize my tasks" to the FR-01 advisory capability (dep 012) so it works when backed, and does not render when not.</step>
+    <step order="5">Leave `ConsumerChips` untouched; verify no regression to other SprkChat consumers / full-page / widget hosts.</step>
+    <step order="6">Add a unit test for the gate (backed suggestion renders; unbacked is suppressed; no mis-fire on a keyword-only string).</step>
+    <step order="7">/conflict-check before the PR; update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If suppressing unbacked suggestions cannot distinguish backed vs unbacked without a heuristic that risks mis-firing (ASSISTANT-UI-ELEMENT-CRITERIA warns against keyword-heuristic chips), STOP and escalate for a deterministic backing signal (e.g. a server-authored bindingId carrier) rather than shipping a keyword guess.</trigger>
+  </escalation>
+  <justification>
+    <existing>`ConsumerChips` are already capability-backed (server `sprk_chiptransitions` → `bindingId`); `SprkChatSuggestions` free strings are NOT backed.</existing>
+    <extension>Gate/replace the free-string suggestions reusing the ConsumerChips bindingId discipline — no new chip system.</extension>
+    <cost-of-doing-nothing>A free-string suggestion promises an unwired action (the P2 dead-end): the click re-sends a raw string with nothing behind it.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatSuggestions.tsx (gated rendering)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (backing check at handleSuggestionSelect / render boundary)</output>
+    <output type="test">the SprkChat suggestion gate unit test</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">No rendered follow-on maps to an unwired action (negative case).</criterion>
+    <criterion testable="true">"Help me prioritize my tasks" either maps to the FR-01 advisory capability and works, or is absent.</criterion>
+    <criterion testable="true">`ConsumerChips` behavior is unchanged (not rebuilt).</criterion>
+    <criterion testable="true">A unit test covers the gate (backed renders, unbacked suppressed).</criterion>
+    <criterion testable="true">No mis-fire on keyword heuristics (a keyword-only string with no backing does not render) — negative case.</criterion>
+  </acceptance-criteria>
+  <notes>Two chip systems: `ConsumerChips` (already backed — leave alone) vs free-string `SprkChatSuggestions` (the dead-end risk — gate it). Reuse the ConsumerChips bindingId discipline for the deterministic backing signal; do not invent a keyword heuristic. Dep 012 supplies the FR-01 advisory capability that "prioritize my tasks" maps to; dep 022 supplies the launch-registry entries used by the sibling card task 023. /conflict-check with compose-r5/r6 before the PR.</notes>
+  <ui-tests>
+    <test name="Backed suggestion renders + acts">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open the Assistant and ask "help me prioritize my tasks"</step>
+        <step>Verify any rendered follow-on suggestion maps to a wired capability (has a backing signal / bindingId)</step>
+        <step>Click it and verify it dispatches the FR-01 advisory capability (grounded answer), not a dead-end</step>
+      </steps>
+      <expected>Only capability-backed follow-ons render; clicking produces a real grounded action — no dead-end.</expected>
+    </test>
+    <test name="Unbacked free-string suggestion suppressed">
+      <steps>
+        <step>Trigger a turn that would previously emit an unbacked free-string suggestion</step>
+        <step>Verify it does NOT render (no dead-end promise); ConsumerChips cards render unchanged</step>
+      </steps>
+      <expected>Unbacked suggestions are suppressed; ConsumerChips behavior unchanged; no keyword-heuristic mis-fire.</expected>
+    </test>
+  </ui-tests>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

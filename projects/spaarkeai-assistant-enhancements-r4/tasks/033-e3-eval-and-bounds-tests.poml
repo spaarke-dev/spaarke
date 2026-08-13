@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>E3 eval cases + preference-producer bounds unit tests (FR-09/10)</title>
+    <phase>3 — E3 feedback→memory loop</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING — adds eval + unit coverage; CLAUDE.md §8 override makes any tests/** task FULL rigor with unconditional code-review + adr-check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Adds eval/test files only over the already-implemented E3 seams (030/031/032) — well-specified coverage authoring, no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave3-E3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds eval/test files only — no production-code edits; safe alongside other test-only work once 031/032 land.</parallel-reason>
+    <deps>032, 031</deps>
+    <tags>testing, eval, ai</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Add the eval cases + preference-producer bounds unit tests that lock the E3 feedback→memory loop (FR-08/09) and the FR-09 bounds so they FAIL on regression. Eval: an explicit standing directive persists (tasks 030/031) and biases the next turn (task 032). Unit: an off-allow-list directive is inert; a preference never grants a capability nor alters a fact; the injection-defense guard (guillemet DATA-guard, ADR-039 preference-only) holds. Per FR-10, every new/changed E3 behavior lands with an eval case.</prompt>
+  <role>SPAARKE platform test engineer. Follow ADR-038 (integration-heavy pyramid; eval-case obligation) + the ADR-039 golden-utterance suite. Comfortable authoring eval cases + xUnit bounds tests over the Services/Ai preference-producer seam without loosening the seam under test.</role>
+  <goal>The P3 loop + the FR-09 bounds are covered by eval + unit cases that FAIL on regression — a boundary breach (off-allow-list steering, capability grant, fact alteration) makes them fail.</goal>
+  <context>
+    <background>FR-10 — the eval-case guardrail: every new/changed AI behavior lands with an eval case (ADR-039 golden-utterance suite + maker-guide obligation). This task adds the E3 coverage over the seams built in 030 (`Preference` fact type), 031 (feedback→memory pipeline), and 032 (governed narrow-allow-list preference-producer). The eval case exercises the full P3 loop: an explicit standing directive ("do this every time" / "always summarize my tasks") persists as a governed `Preference` item and biases the FR-01 capability's default on the next turn. The unit tests lock task 032's bounds: an off-allow-list directive has NO tool-selection effect; a preference never grants a capability nor alters a fact; the guillemet «...» DATA-guard and the ADR-039 preference-only rule (stated profile feeds `AgentToolFilterContext` only via the sanctioned bounded hint) hold. This is a TEST-MODIFYING task (CLAUDE.md §8 override → FULL rigor, unconditional code-review + adr-check). It adds coverage only — it MUST NOT loosen the seam under test to make a test pass.</background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (preference-producer bounds unit tests — off-allow-list inert; no capability grant; no fact alteration; DATA-guard holds)</file>
+      <file>the ADR-039 golden-utterance / eval-case suite location (add the P3-loop eval case: directive persists + biases next turn)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Context/ (the preference-producer seam under test — from task 032; do NOT modify)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Feedback/ + Handlers/MemoryWriteHandler.cs (the pipeline under test — from tasks 030/031; do NOT modify)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-038" scope="the added tests">Follow the integration-heavy pyramid + eval-case obligation; place tests at their KEEP path; do NOT add banned test shapes (Mock&lt;HttpMessageHandler&gt;, DI-registration, ctor null-check tests).</constraint>
+    <constraint source="ADR-039" scope="the eval + bounds tests">Assert the preference-only rule + one-decider invariant hold; the tests MUST catch off-allow-list steering, a capability grant, or a fact alteration as a failure.</constraint>
+    <constraint source="ADR-042" scope="the tests">`trustLevel` remains inert (#616) — the tests do NOT assert or require the deferred hard-governance enforcement behaviors.</constraint>
+    <constraint source="project" scope="the seam under test">Add coverage ONLY — MUST NOT modify the 030/031/032 production seams to make a test pass; a failing bounds test signals a seam regression, not a test to relax.</constraint>
+    <constraint source="NFR-08" scope="the tests">Tests live in tests/unit/Sprk.Bff.Api.Tests/ (bounds) + the eval suite (P3-loop eval case).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-042-memory-architecture-governance.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Eval: author a P3-loop eval case — an explicit standing directive ("do this every time" / "always summarize my tasks") persists as a governed `Preference` item (030/031) and biases the FR-01 capability's default on the next turn (032).</step>
+    <step order="2">Unit: an off-allow-list directive is INERT (no tool-selection effect).</step>
+    <step order="3">Unit: a preference NEVER grants a capability nor alters a fact.</step>
+    <step order="4">Unit: the injection-defense guard holds — the guillemet «...» DATA-guard is intact and the stated profile feeds `AgentToolFilterContext` only via the sanctioned bounded hint.</step>
+    <step order="5">Run the tests; confirm they PASS on the current seams and would FAIL on a boundary breach (off-allow-list steering, capability grant, fact alteration).</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If a bounds test can only be made to pass by loosening the 030/031/032 seam (rather than by fixing the test), STOP and escalate — a failing bounds test is a seam regression signal, not a test to relax.</trigger>
+  </escalation>
+  <justification>
+    <existing>No eval/unit coverage exists for the E3 P3 loop or the FR-09 preference-producer bounds (the seams are new in 030/031/032).</existing>
+    <extension>Adds test/eval files only — no new production surface; the seams under test already exist.</extension>
+    <cost-of-doing-nothing>A regression that opens the preference-steering boundary (off-allow-list steering, capability grant, fact alteration) ships undetected; FR-10's guardrail is unmet.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ preference-producer bounds unit tests</output>
+    <output type="test">the ADR-039 eval suite — P3-loop eval case (directive persists + biases next turn)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Eval + unit cases are added and PASS on the current 030/031/032 seams.</criterion>
+    <criterion testable="true">An explicit directive persists as a `Preference` item and biases the next turn (P3-loop eval case).</criterion>
+    <criterion testable="true">A boundary breach — off-allow-list steering, a capability grant, or a fact alteration — FAILS the tests (negative case).</criterion>
+    <criterion testable="true">The injection-defense guard (guillemet DATA-guard, ADR-039 preference-only) is asserted and holds.</criterion>
+    <criterion testable="true">Tests live at their KEEP path (tests/unit/Sprk.Bff.Api.Tests/ + the eval suite); no banned test shapes added (ADR-038).</criterion>
+  </acceptance-criteria>
+  <notes>Depends on 032 (bounds under test) and 031 (feedback→memory pipeline). TEST-MODIFYING (CLAUDE.md §8) → FULL rigor with unconditional code-review + adr-check. Do NOT modify the 030/031/032 production seams to make a test pass — a failing bounds test is a regression signal.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

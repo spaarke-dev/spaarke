@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>OBO-identity wording on user-scoped tool descriptions (FR-05 / QW1)</title>
+    <phase>2 — E2 follow-ons</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits a BFF AI tool handler description + its byte-equal seed row guarded by the D-4 parity test; touches shared Services/Ai; BFF-touching change requires code-review + adr-check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Contained wording edit mirrored across a C# handler description and its byte-equal JSON seed row; the only subtlety is preserving byte-equality (D-4 parity) — well-specified, no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave1-independent</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Ai GridOverviewHandler + its byte-equal seed row (shared BFF) — coordinate with compose-r5/r6 + assistant-r3; run /conflict-check before the PR.</parallel-reason>
+    <deps></deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add an OBO-identity assertion to every user-scoped grounded tool description so no flow ever asks the user for their identity (the P2 dead-end). The assertion states that the tool "returns the calling user's own records over OBO; never ask the user for their identity." Apply it to `GridOverviewHandler.Metadata.Description` AND its byte-equal JSON seed row (`infra/dataverse/sprk_analysistool-grid-overview-row.json`) keeping the two byte-equal (the D-4 parity test enforces byte-equality against the handler Metadata.Description), AND to the other user-scoped tools (grep for OBO / user-scoped handlers). Re-seed and verify the D-4 parity test stays green.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI tool-catalog expertise; comfortable with the Services/Ai grounded-tool handlers, the byte-equal seed-row convention, and the D-4 parity test that guards handler-description ⇄ seed-row equality.</role>
+  <goal>Every user-scoped tool description asserts "returns the calling user's own records over OBO; never ask the user for their identity", so a prioritize/today flow never asks for the user's id or name — with the GridOverviewHandler description and its byte-equal seed row kept byte-equal (D-4 parity green).</goal>
+  <context>
+    <background>FR-05 / QW1 — the OBO-identity wording quick win. User-scoped grounded tools already read the caller's own records over OBO (ADR-028), but their descriptions do not tell the model this, so the model can ask the user "what is your id/name?" — a dead-end (P2). The fix is pure description wording: assert the OBO identity contract in each user-scoped tool's description. `GridOverviewHandler` (the My-Tasks grid overview tool) carries a `Metadata.Description` that MUST stay byte-equal with its JSON seed row `infra/dataverse/sprk_analysistool-grid-overview-row.json` — the D-4 parity test guards this byte-for-byte, so the same assertion string MUST be added identically to both. Other user-scoped handlers (e.g. DailyBriefingOverviewHandler and any other OBO user-scoped tool) get the same assertion; grep the Services/Ai handlers for OBO / user-scoped tools to find the full set. This is a description/data change only — no query logic, no dispatch change. redesign-r2 is CLOSED so Services/Ai is R4-editable; keep AI-facade discipline (ADR-013) and /conflict-check for shared-file overlap with compose-r5/r6 + assistant-r3.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GridOverviewHandler.cs (Metadata.Description — add the OBO-identity assertion; keep byte-equal with the seed row)</file>
+      <file>infra/dataverse/sprk_analysistool-grid-overview-row.json (the byte-equal seed row guarded by the D-4 parity test — add the identical assertion string)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DailyBriefingOverviewHandler.cs (+ its seed row, if present — another user-scoped OBO tool to apply the assertion to)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (grep for OBO / user-scoped handlers to find the complete set of user-scoped tool descriptions)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (the D-4 parity test guarding handler-description ⇄ seed-row byte-equality)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="the tool descriptions">Add the OBO-identity assertion ("returns the calling user's own records over OBO; never ask the user for their identity") to every user-scoped tool description; MUST NOT change query logic or dispatch — description/data only.</constraint>
+    <constraint source="project" scope="GridOverviewHandler description ⇄ seed row">Keep the C# `Metadata.Description` byte-equal with the JSON seed row — the D-4 parity test enforces byte-for-byte equality; add the identical assertion string to both and re-seed.</constraint>
+    <constraint source="ADR-013" scope="Services/Ai placement">Preserve the Services/Ai/PublicContracts/ facade discipline; do NOT inject AI-internal types into CRUD code even though Services/Ai is now R4-editable (redesign-r2 closed).</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report absolute + delta; no new HIGH CVE from `dotnet list package --vulnerable --include-transitive`.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Identify the full set of user-scoped grounded tools: read GridOverviewHandler + DailyBriefingOverviewHandler and grep the Services/Ai handlers for OBO / user-scoped (caller's own records) tools.</step>
+    <step order="2">Add the OBO-identity assertion string to each user-scoped handler's `Metadata.Description`.</step>
+    <step order="3">For GridOverviewHandler (and any handler with a byte-equal seed row), add the identical assertion string to the JSON seed row `infra/dataverse/sprk_analysistool-grid-overview-row.json` so it stays byte-equal with the handler description.</step>
+    <step order="4">Re-seed the affected rows.</step>
+    <step order="5">Run the D-4 parity test and confirm it is green (byte-equality preserved).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute size + delta; run the vulnerable-package scan.</step>
+    <step order="7">/conflict-check before the PR; update TASK-INDEX ✅.</step>
+  </steps>
+  <justification>
+    <existing>User-scoped tool descriptions (GridOverviewHandler, DailyBriefingOverviewHandler) already exist; they read over OBO but the description does not assert the identity contract.</existing>
+    <extension>Amend the existing descriptions (+ byte-equal seed rows) with one assertion sentence — no new surface, description/data only.</extension>
+    <cost-of-doing-nothing>The model asks the user for their id/name on today/prioritize flows (the P2 dead-end); OBO already knows the identity, so the ask is a defect.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GridOverviewHandler.cs (Metadata.Description with the OBO-identity assertion)</output>
+    <output type="code">infra/dataverse/sprk_analysistool-grid-overview-row.json (byte-equal seed row with the identical assertion)</output>
+    <output type="code">the other user-scoped tool descriptions (+ any byte-equal seed rows) carrying the assertion</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The OBO-identity assertion is present in `GridOverviewHandler.Metadata.Description`.</criterion>
+    <criterion testable="true">The identical assertion is present in the byte-equal seed row and the D-4 parity test is green (byte-equality preserved).</criterion>
+    <criterion testable="true">The assertion is applied to the other user-scoped tool descriptions.</criterion>
+    <criterion testable="true">A prioritize/today flow never asks for the user's id or name (manual UAT) — negative case.</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta).</criterion>
+    <criterion testable="true">No new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>Description/data change only — do NOT touch query logic or the pre-filter. The D-4 parity test is the guard: the handler `Metadata.Description` and its seed row MUST stay byte-for-byte equal, so add the exact same assertion string to both. redesign-r2 is closed (Services/Ai R4-editable) but keep AI-facade discipline; /conflict-check with compose-r5/r6 + assistant-r3 before the PR.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

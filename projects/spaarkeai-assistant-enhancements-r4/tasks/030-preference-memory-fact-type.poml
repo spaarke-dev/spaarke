@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Preference MemoryFactType + MemoryWriteHandler wire map (FR-07)</title>
+    <phase>3 — E3 feedback→memory loop</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends the memory fact-type enum + write handler on the governed memory path; a memory-governance boundary change on Services/Ai/Memory.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Memory governance boundary — must add the type without touching ADR-042 deferred hard-governance and keep the MemoryItem v1 contract bound for CRUD consumers.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave1-independent</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Ai/Memory (BFF) — R4-owned now that redesign-r2 is closed, but coordinate BFF PRs via /conflict-check before the PR.</parallel-reason>
+    <deps>(none)</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a `Preference` member to `Services/Ai/Memory/MemoryFactType.cs` (currently 4 members: Party/KeyDate/PriorAnalysis/KeyFact — NO Preference) and extend the `Handlers/MemoryWriteHandler.cs` wire map (~:97–104, which maps party|keyDate|priorAnalysis|keyFact) to map the new preference fact type. Ensure a preference memory item written at User scope is recalled into `userFragment` each turn via the existing recall path (`ContextBinder.ResolveUserMemoryFragmentAsync` → `ToUserPromptFragmentAsync`). Bind any CRUD-side consumer to the `PublicContracts/MemoryItem.cs` v1 contract; keep `trustLevel` carried inert (ADR-042 deferred hard-governance stays deferred to security project #616). R4 owns these `Services/Ai/Memory` changes directly (redesign-r2 is closed) — no cross-team gating.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI memory-governance expertise; comfortable with the ADR-042 two-scope memory model, the ADR-013 AI facade boundary (PublicContracts), and the User-scope Cosmos `memory-items` store partitioned by /subjectId.</role>
+  <goal>A `Preference` memory item can be written (User scope) and is recalled into `userFragment` each turn — giving standing directives a governed preference channel instead of landing as a generic `KeyFact`.</goal>
+  <context>
+    <background>FR-07 — the first E3 step. `MemoryFactType.cs` (~:12–33) has exactly 4 members (Party/KeyDate/PriorAnalysis/KeyFact) — there is NO Preference type today, so standing directives land as generic `KeyFact` with no governed preference channel and FR-09's producer has nothing to gate. `MemoryWriteHandler.cs` (~:97–104) wires party|keyDate|priorAnalysis|keyFact into the write path; `IMemoryItemStore`/`MemoryItemStore` persist User-scope items to Cosmos `memory-items` partitioned by /subjectId. Recall assembles the userFragment in `ContextBinder.ResolveUserFragmentAsync` (~:553–583) = stated-profile + org + user-memory, reaching user memory via `ResolveUserMemoryFragmentAsync` (~:644) → `ToUserPromptFragmentAsync`. This task adds `Preference` + its wire map and confirms recall includes it. E3 memory work is owned entirely in R4 (redesign-r2 closed); still bind CRUD-side consumers to `PublicContracts/MemoryItem.cs` v1 (MemoryScope/MemoryOrigin) and hold ADR-042's deferred hard-governance (untrusted-origin ban, trustLevel enforcement, memory-poisoning evals) deferred to #616 with `trustLevel` carried inert.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFactType.cs (~:12–33, add `Preference` — 4 members today, no Preference)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/MemoryWriteHandler.cs (~:97–104, wire map party|keyDate|priorAnalysis|keyFact)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/ (IMemoryItemStore / MemoryItemStore — User scope, Cosmos `memory-items` partitioned by /subjectId)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Context/ContextBinder.cs (ResolveUserFragmentAsync ~:553–583; ResolveUserMemoryFragmentAsync ~:644 → ToUserPromptFragmentAsync — recall path)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/MemoryItem.cs (v1 contract — MemoryScope/MemoryOrigin — bind CRUD consumers here)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (add/update unit tests — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-042" scope="the Preference fact type and memory write path">Preserve the deferred hard-governance (untrusted-origin ban, trustLevel enforcement, memory-poisoning evals) deferred to security project #616 — `trustLevel` stays carried INERT; do NOT implement or claim those enforcement behaviors.</constraint>
+    <constraint source="ADR-013" scope="Services/Ai/Memory placement and CRUD interaction">Bind CRUD-side memory consumers to `PublicContracts/MemoryItem.cs` v1; do NOT inject AI-internal types (`MemoryFactType`, store types) into CRUD code. R4 owns the `Services/Ai/Memory` internals directly (redesign-r2 closed) but the facade discipline holds.</constraint>
+    <constraint source="project" scope="the enum + wire map">Add `Preference` as an EXTENSION of the existing 4-member `MemoryFactType` enum + the `MemoryWriteHandler` wire map — reuse-first (§11); do NOT introduce a parallel preference store or a second write path.</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report absolute + delta; no new HIGH CVE.</constraint>
+    <constraint source="NFR-08" scope="the enum + handler change">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-042-memory-architecture-governance.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add a `Preference` member to `MemoryFactType.cs` (~:12–33) alongside the existing Party/KeyDate/PriorAnalysis/KeyFact.</step>
+    <step order="2">Extend the `MemoryWriteHandler.cs` wire map (~:97–104) so the wire token (e.g. `preference`) maps to `MemoryFactType.Preference`.</step>
+    <step order="3">Confirm recall: a User-scope preference item flows through `ResolveUserMemoryFragmentAsync` (~:644) → `ToUserPromptFragmentAsync` and appears in the `userFragment` assembled at `ResolveUserFragmentAsync` (~:553–583); add coverage if the render path needs the new type.</step>
+    <step order="4">Verify CRUD-side consumers bind to `PublicContracts/MemoryItem.cs` v1 (MemoryScope/MemoryOrigin); do NOT leak AI-internal types into CRUD code.</step>
+    <step order="5">Keep `trustLevel` carried INERT — do NOT implement ADR-042's deferred hard-governance (#616).</step>
+    <step order="6">Add/extend unit tests in tests/unit/Sprk.Bff.Api.Tests/ (Preference writes at User scope; wire map maps it; recall includes it; trustLevel inert).</step>
+    <step order="7">dotnet build + dotnet publish size check; record absolute size + delta; run the vulnerable-package scan.</step>
+    <step order="8">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If adding `Preference` cannot be done without touching ADR-042's deferred hard-governance (untrusted-origin ban / trustLevel enforcement / memory-poisoning evals owned by #616), STOP and escalate (ADR-042 boundary) rather than implementing governance R4 does not own.</trigger>
+  </escalation>
+  <justification>
+    <existing>`MemoryFactType` enum has 4 members (Party/KeyDate/PriorAnalysis/KeyFact) — NO Preference; `MemoryWriteHandler` wire map maps only those four.</existing>
+    <extension>Extend the existing enum + wire map with `Preference` — R4-owned (redesign-r2 closed); no new store, no second write path.</extension>
+    <cost-of-doing-nothing>Standing directives land as generic `KeyFact` — there is no governed preference channel, and FR-09's narrow-allow-list producer has no fact type to gate on.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFactType.cs (add `Preference`)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/MemoryWriteHandler.cs (wire map extension)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ preference fact-type + recall unit tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">`Preference` is added to `MemoryFactType` and the `MemoryWriteHandler` wire map maps it.</criterion>
+    <criterion testable="true">A preference memory item can be written at User scope and is recalled into `userFragment` each turn (via `ToUserPromptFragmentAsync`).</criterion>
+    <criterion testable="true">ADR-042's deferred hard-governance is untouched — `trustLevel` is carried INERT; no untrusted-origin ban / trustLevel enforcement / memory-poisoning eval is implemented or claimed (negative case).</criterion>
+    <criterion testable="true">CRUD-side consumers bind to `PublicContracts/MemoryItem.cs` v1; no AI-internal types leak into CRUD code (ADR-013).</criterion>
+    <criterion testable="true">Unit tests added/updated in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>Code-trace anchors: MemoryFactType.cs ~:12–33 (4 members today); MemoryWriteHandler.cs wire map ~:97–104; ContextBinder ResolveUserFragmentAsync ~:553–583 / ResolveUserMemoryFragmentAsync ~:644. Blocks 031 and 032 (both dep on 030). Run /conflict-check before the BFF PR — memory files are R4-owned now that redesign-r2 is closed, but ConversationPane/SprkChat/Services/Ai overlap remains with active worktrees.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>
