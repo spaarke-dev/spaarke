@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-12 (by task-execute — 014 ✅ FR-06 telemetry done; **P0+P1+P2 ALL COMPLETE**; P3 opens at 030)
+> **Last Updated**: 2026-08-12 (by task-execute — 030 IN PROGRESS: net10-caused test failures FIXED (522→0 on BFF); 2 PRE-EXISTING clusters awaiting owner decision)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Project phase** | **P0 ✅ · P1 ✅ (010–014 all ✅) · P2 ✅ (020/021)**. → **P3 open** (030→033→031/032). BFF build GREEN net10 (0 err, 21 warn = post-012 baseline); graph vulnerable-clean; DI graph adversarially verified; classic App Insights SDK removed (OTel sole path). |
-| **Active task** | none active — **014 FR-06 telemetry ✅ COMPLETE**. Next: **030** (P3 — full net10 test suite green). |
-| **Status** | between-tasks (uncommitted: 014 artifacts — commit+push pending this turn) |
-| **Next Action** | Run `task-execute` on **030** (`tasks/030-*.poml`): full `dotnet test` green on net10 (unit + integration + arch, incl. `Spaarke.ArchTests`); no test excluded to force green without logged rationale (ADR-038). Gates (013/014/020/021) ALL ✅ satisfied. Serial (heavy build/test). **After 030 → 033** (Graph 5→6 / Kiota 1→2; retire 7 Kiota pins + NoWarn) **→ 031** (publish re-baseline 🔒 main-session) **/ 032** (transitive CVE audit). Then P4 (040/041/042 CI+deploy) → P5 (050/051 dev deploy = completion gate) → P7 (090 wrap-up). 060/061 deferred. |
+| **Active task** | **030 IN PROGRESS** — net10-caused test failures fixed + verified; **BLOCKED on owner decision** for 2 pre-existing (non-net10) clusters. |
+| **Status** | in-progress (fixes committed; awaiting owner call on ArchTests-4 + Plugins-orphan before marking 030 ✅) |
+| **Next Action** | **AWAIT owner decision** (see `notes/test-green.md` §Escalation): (1) ArchTests ADR-007/010 ×4 pre-existing arch drift → recommend **document + defer to master-sync** (branch is 44 behind master); (2) `Spaarke.Plugins.Tests` dead orphan (references deleted project) → recommend **flag for /test-diet deletion at task 090**. Also remaining: run the FR-03 **Dataverse seam** integration test (`tests/integration/seam/**`) + confirm ADR-002 arch tests pass (they do). On decision → finalize 030, then **033** (Graph6/Kiota2) → **031/032**. |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; exists on origin) |
 | **Git** | ✅ **CLEAN — tip `d9eb30305`, 0 unpushed, 44 behind origin/master.** Session commits: P0 001 `8077e33f5`·002 `3f6027aa5`·003 `9b7e9b1ea`·004 `d39de8665`·005 `cdb31e0b0` · 010 `969e15471` · 011+012 `5191efb6a` · **020 `d9eb30305`**. **NOT merged to master — deferred per owner sequencing.** Safe to `/compact`. |
 
@@ -25,6 +25,13 @@
 ### H2 ADVERSARIAL VERIFY (021) — PASS, do NOT re-derive
 - **Non-author opus subagent (isolated worktree) → PASS.** Independently re-ran `dotnet test ... --filter DiGraphValidationTests` on net10 = `Passed: 1, Failed: 0` (clean boot confirmed without trusting author). **All 10 roots R1–R10 CONFIRMED behavior-preserving; 0 REFUTED → task 020 stands.**
 - Stream-scope lifetimes (R1/R9) CONFIRMED: every SPE stream materialized to memory before scope disposal (no use-after-dispose); rests on `SpeFileStore` stateless ADR-007 facade. R5 demote + NullActionResolver symmetry CONFIRMED (stateless resolver, no singleton consumer, guard-pass dispositive, null-object throw unaffected by lifetime). ValidateOnBuild/ValidateScopes NOT disabled in production. Guard test truly asserts (KEEP). No §6.5. Full report: `notes/h2-verification.md`.
+
+### 030 test-suite state (IN PROGRESS) — do NOT re-derive
+- **net10 retarget introduced exactly 2 test-infra regressions, BOTH FIXED** (cleared 521+): (1) `Microsoft.AspNetCore.Mvc.Testing` 8.0.23→**10.0.1** in all 3 test projects — net10 STJ needs `PipeWriter.UnflushedBytes`, old TestHost lacks it → 1928 exceptions → Sprk.Bff.Api.Tests **522 fail → 0**; (2) ArchTests `System.Net.Http` NU1510-as-error pin removed (task-005 miss). Both = task-005 gaps (ArchTests + Plugins.Tests are NOT in Spaarke.sln, so 005's solution build missed them).
+- **Also fixed (retarget-caused)**: `AttachmentActionEvalTests` source-string `_createTaskAi`→`createTaskAi` (H2 R3 field→scoped-local rename; behavior-preserving; master still has field form). Verified 7/7.
+- **PRE-EXISTING (not net10) — FIXED**: `DesktopUrlBuilderTests` ×10 — stale test (production intentionally abbreviated `ms-{app}:{url}` per FileViewer bb63d9818; test lagged; proven red on master). Verified Core 45/45.
+- **PRE-EXISTING (not net10) — AWAITING OWNER DECISION** (`notes/test-green.md` §Escalation): ArchTests ADR-007/010 ×4 (whole-codebase arch drift, incl. 76→153 interface ceiling; ADR-002 tests PASS) + `Spaarke.Plugins.Tests` dead orphan (references deleted `src/server/plugins/Spaarke.Plugins.csproj`; NU1015; not in sln). Branch is **44 behind master** → some may resolve on master-sync.
+- **Green now**: Core 45/45 · Scheduling 47/57(10skip) · RecordSyncJob 12/12 · **Sprk.Bff.Api.Tests 10348 pass/0 fail/101 skip**. Full triage: `notes/test-green.md`.
 
 ### FR-06 result (014) — do NOT re-derive
 - **Classic App Insights SDK removed; OTel→Azure Monitor is sole telemetry path.** 2 files: BFF csproj (dropped `Microsoft.ApplicationInsights.AspNetCore 2.23.0`) + `Api/Agent/AgentTelemetry.cs` (dropped classic usings + `TelemetryClient?` field/ctor-param + all dead `_telemetryClient?.` calls; kept all `_logger.Log*` + all public method signatures). BFF net10 GREEN (0 err, 21 warn = unchanged).
