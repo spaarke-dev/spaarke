@@ -39,7 +39,9 @@ if ($Provision) {
     Write-Host "[provision] creating slot (clone config), attaching MI, setting net10 runtime..." -ForegroundColor Yellow
     az webapp deployment slot create -g $ResourceGroup -n $AppName --slot $SlotName --configuration-source $AppName | Out-Null
     az webapp identity assign  -g $ResourceGroup -n $AppName --slot $SlotName --identities $UamiResourceId | Out-Null
-    az webapp config set       -g $ResourceGroup -n $AppName --slot $SlotName --linux-fx-version "DOTNETCORE|10.0" | Out-Null
+    # NOTE: the '|' in DOTNETCORE|10.0 is re-parsed as a pipe by cmd.exe when PowerShell calls az.cmd.
+    # The escaped-quote wrapper '"..."' makes cmd.exe treat it as one literal token. Do NOT use a plain "..." here.
+    az webapp config set       -g $ResourceGroup -n $AppName --slot $SlotName --linux-fx-version '"DOTNETCORE|10.0"' | Out-Null
 
     $mainRt = az webapp config show -g $ResourceGroup -n $AppName --query linuxFxVersion -o tsv
     $slotRt = az webapp config show -g $ResourceGroup -n $AppName --slot $SlotName --query linuxFxVersion -o tsv

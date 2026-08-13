@@ -38,10 +38,15 @@ Expect: the slot now lists `mi-bff-api-dev`. This is what makes MI→Dataverse /
 ### Step 3 — set the slot runtime to net10 (pipe form, slot ONLY)
 
 ```bash
+# bash / az CLI:
 az webapp config set \
   -g rg-spaarke-dev -n spaarke-bff-dev --slot staging \
   --linux-fx-version "DOTNETCORE|10.0"
 ```
+> **⚠️ PowerShell gotcha**: from `pwsh`, the `|` gets re-parsed as a pipe by cmd.exe when calling `az.cmd`, and the command silently fails (`'10.0' is not recognized...`). Use the **escaped-quote** wrapper in PowerShell:
+> ```powershell
+> az webapp config set -g rg-spaarke-dev -n spaarke-bff-dev --slot staging --linux-fx-version '"DOTNETCORE|10.0"'
+> ```
 Verify main is untouched (must still say `DOTNETCORE|8.0`):
 ```bash
 az webapp config show -g rg-spaarke-dev -n spaarke-bff-dev            --query linuxFxVersion -o tsv   # DOTNETCORE|8.0  (main — unchanged)
