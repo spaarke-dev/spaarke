@@ -145,6 +145,17 @@ const useStyles = makeStyles({
   },
   messageList: {
     flexGrow: 1,
+    // D9/QW2 (spaarkeai-assistant-enhancements-r3, 2026-08-13): explicit
+    // `minHeight: 0` on the transcript scroll region. Flex items default to
+    // `min-height: auto`, which — in some embedding hosts (notably the
+    // "Open in Compose" Xrm dialog iframe, shorter than a full tab) —
+    // refuses to shrink this item below its content height even though
+    // `overflowY: 'auto'` is set, so the transcript falls back to
+    // content-height instead of bounding itself to the pane and scrolling
+    // internally (clipped rows + dead whitespace before the composer). See
+    // projects/spaarkeai-assistant-enhancements-r4/notes/
+    // assistant-viewport-clipping-open-in-compose-handoff.md.
+    minHeight: 0,
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
