@@ -101,6 +101,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Required for GitVersion and better diff analysis
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers (else ~200 Compose corpus seam tests fail on pointer files; mirrors compose-fidelity-gate job)
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4

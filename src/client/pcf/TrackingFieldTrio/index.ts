@@ -887,6 +887,13 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
           // blanking the entire control. Defense-in-depth: the root cause (a
           // duplicate React 19 bundled via Lexical's react/jsx-runtime subpath)
           // is fixed at the build layer in ../webpack.config.js.
+          //
+          // no-children-prop is intentionally suppressed here: WidgetErrorBoundaryProps
+          // types `children` as REQUIRED, which the createElement rest-args overload does
+          // not satisfy (verified: TS2769). Casting the props to bypass the requirement
+          // would erase type-checking, so the fully-typed `children` prop is the type-safe
+          // form. See the inline note on the `children:` line below.
+          // eslint-disable-next-line react/no-children-prop
           React.createElement(WidgetErrorBoundary, {
             widgetType: 'tracking-field-trio-dialogs',
             displayName: 'Access & Email',
@@ -983,6 +990,12 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
               // Empty-state alert (task 042) — shown INSTEAD of SendEmailDialog
               // when the record has no membership contacts with a populated
               // email, so the dialog never opens with zero recipients.
+              //
+              // no-children-prop is intentionally suppressed here: Fluent v9 `DialogProps`
+              // types `children` as REQUIRED, which the createElement rest-args overload
+              // does not satisfy (verified: TS2769) and casting to bypass it would erase
+              // type-checking of the props, so the fully-typed `children` prop is retained.
+              // eslint-disable-next-line react/no-children-prop
               React.createElement(Dialog, {
                 open: this.isEmailEmptyStateOpen,
                 onOpenChange: (_event: unknown, data: { open: boolean }) => {

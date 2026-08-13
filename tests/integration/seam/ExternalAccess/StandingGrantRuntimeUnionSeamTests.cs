@@ -33,9 +33,11 @@ public sealed class StandingGrantRuntimeUnionSeamTests
     private const string ProjectEntity = "sprk_project";
     private const string ContactEntity = "contact";
     private const string StandingGrantAttribute = "sprk_standinggrant";
-    private const string ExternalAccessResource = "external-access-grant";
-    // Mirrors ExternalParticipationService.CacheVersion — bumped 1→2 by task 028 (grant-set cache shape).
-    private const int CacheVersion = 2;
+    // Reference the SINGLE SOURCE OF TRUTH consts directly (public by design) so a version bump propagates
+    // here automatically instead of drifting. (Previously hardcoded 2, which went stale when task 073 #7
+    // bumped the stored/invalidated key to v3 for the org-grant shape.)
+    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
+    private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     private static readonly Guid ContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private const string Tenant = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
