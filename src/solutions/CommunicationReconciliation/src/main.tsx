@@ -244,10 +244,6 @@ function Root() {
   const [ready, setReady] = React.useState(false);
   const [bootstrapError, setBootstrapError] = React.useState<unknown>(null);
   const [attempt, setAttempt] = React.useState(0);
-  // Bumped after an association is confirmed so the grid re-loads and
-  // `resolveRegarding` reflects the new association (the prop's documented
-  // "host refreshes the grid" contract). Used as a React `key` remount signal.
-  const [refreshKey, setRefreshKey] = React.useState(0);
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
@@ -276,7 +272,11 @@ function Root() {
   // resolves the concrete implementations).
   const dataverseClient = React.useMemo(() => new XrmDataverseClient(), []);
   const webApi = React.useMemo(() => buildXrmWebApi(), []);
-  const handleAssociationsChanged = React.useCallback(() => setRefreshKey(n => n + 1), []);
+  // UAT Fix #3: association-confirm no longer remounts the workspace (which closed the
+  // browse shell). ReconciliationWorkspace now refreshes the confirmed row in-place
+  // (targeted re-fetch via `dataverseClient`), so the host callback is a no-op — kept only
+  // to satisfy the review/workspace `onAssociationsChanged` contract.
+  const handleAssociationsChanged = React.useCallback(() => {}, []);
   const resolveReview = React.useMemo(
     () => buildResolveReview(webApi, handleAssociationsChanged),
     [webApi, handleAssociationsChanged]
@@ -374,7 +374,6 @@ function Root() {
       // placeholder (task 059 seeds the real gridconfiguration record + sets it).
       <>
         <ReconciliationWorkspace
-          key={refreshKey}
           dataverseClient={dataverseClient}
           authenticatedFetch={authenticatedFetch}
           resolveReview={resolveReview}

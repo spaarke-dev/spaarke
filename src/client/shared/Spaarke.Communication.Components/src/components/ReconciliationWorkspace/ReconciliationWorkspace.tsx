@@ -53,6 +53,9 @@ import type { EmailCitation } from '../../logic/citations';
 /** `sprk_communication` primary id — the browse-shell key + queue index anchor. */
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
 
+/** The reconciled entity — used for the UAT-Fix#3 targeted single-row re-fetch on confirm. */
+const COMMUNICATION_ENTITY = 'sprk_communication';
+
 type TabValue = 'related' | 'fields' | 'tasks';
 
 export interface ReconciliationWorkspaceProps {
@@ -238,13 +241,32 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
   // A Related-to confirm (grid cell OR browse tab) → notify the host (refresh) and
   // re-derive the gate/scope; jump the reviewer to Fields next.
+  //
+  // UAT Fix #3 (in-session enable, no remount): instead of the host remounting the whole
+  // workspace via a `key` bump (which closed the browse shell and lost the reviewer's
+  // place), refresh ONLY the confirmed row in-place — re-fetch it and merge into `rows`,
+  // so `resolveRegarding` sees the now-Resolved status + regarding denorm and un-gates
+  // Fields/Tasks WHILE the shell stays open. Best-effort (NFR-04): `forceRescope` re-derives
+  // whether or not the re-fetch resolves; a failed re-fetch just leaves the row gated.
   const handleConfirmed = React.useCallback(
     (record: Record<string, unknown>) => {
       onAssociationsChanged?.(record);
-      forceRescope();
       setSelectedTab('fields');
+      const id = str(record, PRIMARY_ID_FIELD);
+      if (id && dataverseClient) {
+        void dataverseClient
+          .retrieveRecord(COMMUNICATION_ENTITY, id)
+          .then(fresh => {
+            const freshRow = fresh as Record<string, unknown>;
+            setRows(prev => prev.map(r => (str(r, PRIMARY_ID_FIELD) === id ? { ...r, ...freshRow } : r)));
+            forceRescope();
+          })
+          .catch(() => forceRescope());
+      } else {
+        forceRescope();
+      }
     },
-    [onAssociationsChanged]
+    [onAssociationsChanged, dataverseClient]
   );
 
   // Task 064 (E1b): wrap the host's per-row review props to inject a zero-arg
