@@ -241,7 +241,7 @@ describe('ReconciliationWorkspace', () => {
     expect(mark).toHaveTextContent('quarterly filing draft');
   });
 
-  it('reuses the shipped RelatedToCell (052) in the Related-to tab when configured', async () => {
+  it('renders the full EmailConnectionsReview INLINE in the Related-to tab (UAT Fix #2 — not the RelatedToCell modal)', async () => {
     const resolveReview = () =>
       ({
         communicationId: COMM_ID,
@@ -251,9 +251,13 @@ describe('ReconciliationWorkspace', () => {
     renderWorkspace({ resolveReview, resolveRegarding: () => null });
     await openFirstRow();
 
-    // The Related-to tab hosts the reused picker cell (unconfirmed → its open-picker
-    // button). Scoped to the tab body — the grid's own Related-to cell also renders one.
+    // The browse tab renders the FULL review surface inline — same as the email form —
+    // NOT the compact RelatedToCell hidden behind a "Requires review" + open-picker modal.
     const tabBody = await screen.findByTestId('reconcile-tab-body');
-    expect(within(tabBody).getByTestId('related-to-open-picker')).toBeInTheDocument();
+    expect(within(tabBody).getByTestId('email-connections-review')).toBeInTheDocument();
+    // The manual "Lookup Records" pane is present inline (the side-pane the email page shows).
+    expect(within(tabBody).getByTestId('link-another-record')).toBeInTheDocument();
+    // And the old modal-behind-a-picker affordance is gone from the tab body.
+    expect(within(tabBody).queryByTestId('related-to-open-picker')).not.toBeInTheDocument();
   });
 });

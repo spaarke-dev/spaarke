@@ -34,7 +34,7 @@ import * as React from 'react';
 import { Tab, TabList, Text, makeStyles, tokens } from '@fluentui/react-components';
 import type { DataGridProps, IDataverseClient, MembershipResolver } from '@spaarke/ui-components';
 import { ReconciliationGrid } from '../ReconciliationGrid';
-import { RelatedToCell } from '../ReconciliationGrid';
+import { EmailConnectionsReview } from '../EmailAssociationsAndTracking';
 import { ReconciliationBrowseShell } from '../ReconciliationBrowseShell';
 import type {
   ReconciliationBrowseRecord,
@@ -278,6 +278,12 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       const liveRow = rows.find(r => str(r, PRIMARY_ID_FIELD) === browseRecord.id);
       const regarding = liveRow && resolveRegarding ? resolveRegarding(liveRow) : null;
       const gated = !regarding;
+      // Task UAT-Fix#2 (FR-E3): the browse tab renders the FULL EmailConnectionsReview
+      // INLINE (candidate cards + manual "Lookup Records" pane + Create-new intent) — the
+      // SAME surface the email form renders inline (EmailWorkspace.tsx). The compact
+      // `RelatedToCell` (which hides the review behind a "Requires review" + picker modal)
+      // stays only as the GRID cell renderer, never the browse-tab body.
+      const review = liveRow && resolveReview ? wrapReview(liveRow) : null;
       // While gated, the reviewer can only be on the Related-to tab.
       const effectiveTab: TabValue = gated && selectedTab !== 'related' ? 'related' : selectedTab;
 
@@ -301,8 +307,16 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
           <div className={s.tabBody} data-testid="reconcile-tab-body">
             {effectiveTab === 'related' &&
-              (resolveReview && liveRow ? (
-                <RelatedToCell review={wrapReview(liveRow)} onConfirmed={() => handleConfirmed(liveRow)} />
+              (review && liveRow ? (
+                <EmailConnectionsReview
+                  {...review}
+                  onAssociationsChanged={() => {
+                    // Preserve RelatedToCell's confirm handshake (minus the modal-close):
+                    // fire the host's per-row refresh, then the NFR-10 re-gate/jump-to-Fields.
+                    review.onAssociationsChanged?.();
+                    handleConfirmed(liveRow);
+                  }}
+                />
               ) : (
                 <div className={s.relatedNote} role="note" data-testid="reconcile-related-note">
                   <Text>Related-to review is not configured for this host.</Text>
