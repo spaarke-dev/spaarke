@@ -12,7 +12,16 @@
 | **Phase** | R2 UAT round 1 fixes **MERGED (PR #765) + deployed**. UAT round 2 fixes committed → **PR #768 open, CI running**. |
 | **Branch** | `work/email-communication-intelligence-r2` · clean · **0 behind / 4 ahead** master. |
 | **Status** | Round 1: all 6 UAT fixes (#1-#6) + `.eml` archive (#7) + a real compound-OFF host-boot BFF bug (ADR-032 §F.1) — merged (`1825a3047`) + deployed. Round 2 (this UAT): reconciliation newest-first ordering + received/sent date-time display — **PR #768**. |
-| **Next Action** | **Merge PR #768** once Tier-1 green (`gh pr merge 768 --merge`) → **Deploy SpaarkeAi** auto-fires (carries the email-view date/time + spacing). Grid fixes already live. Then **#9 cleanup** UAT seed data. |
+| **Next Action** | **Merge PR #768** (Tier-1 gate satisfied — frontend-only, BFF jobs skip) → **Deploy SpaarkeAi** auto-fires (email-view date/time + spacing). THEN **UAT round 3** (form-vs-prototype parity, below). Then **#9 cleanup** UAT seed data. |
+
+### UAT round 3 (2026-08-13) — reconciliation FORM vs prototype (OPEN, not started)
+Operator comparing the deployed reconciliation browse/detail form to the prototype. Gaps observed:
+- **Lazy-load**: grid shows only 25 rows, doesn't scroll to load more (DataGrid `useLazyLoad` pageSize 25 + IntersectionObserver sentinel — check the scroll container height/sentinel in the reconciliation host isn't blocking `fetchNextPage`).
+- **Thread**: prototype shows the email thread; deployed browse detail does not.
+- **Attachments**: prototype shows attachments; deployed does not.
+- **Right-side matching**: the deployed `EmailConnectionsReview` candidate cards look different from the prototype's matching layout.
+- **Prototype (reference design)**: `c:/code_files/spaarke-prototype/projects/email-communication-intelligence-r2-uat/src/App.tsx`. **RUN IT**: `cd` there → `SPAARKE_REPO_ROOT="c:/code_files/spaarke-wt-email-communication-intelligence-r2" npm run dev` (the default `spaarke-wt-smart-todo-r4` root is DELETED; the main `c:/code_files/spaarke` repo has stale co-located `.js` in `Spaarke.UI.Components/src/components/DataGrid/` that shadow the `.ts` → dep-scan "No matching export" errors, so point at a worktree with a clean src). Was running at http://localhost:5175/.
+- Deployed detail view = `ReconciliationWorkspace.tsx` browse tab (renders inline `EmailConnectionsReview` per Fix #2) + `ReconciliationBrowseShell` (reader). Compare against App.tsx to close the thread/attachments/matching gaps.
 
 ### UAT round 2 (2026-08-13) — what & where
 Operator UAT found: (Q1) a captured email didn't appear in Needs Review; (Q2) no received/sent date-time shown; (Q3) "add space below the From: row".
