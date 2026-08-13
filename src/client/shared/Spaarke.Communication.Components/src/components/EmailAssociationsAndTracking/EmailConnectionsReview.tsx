@@ -38,7 +38,7 @@ import {
   MenuList,
   MenuItem,
 } from '@fluentui/react-components';
-import { Search20Regular } from '@fluentui/react-icons';
+import { Search20Regular, DocumentAdd20Regular } from '@fluentui/react-icons';
 import { getXrmForPicker } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
@@ -67,6 +67,8 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     linkAnotherCatalog,
     readOnly = false,
     onAssociationsChanged,
+    onCreateNewRecord,
+    onLaunchCreateRecord,
   } = props;
   const s = useConnectionsReviewStyles();
 
@@ -147,6 +149,32 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     },
     [confirmCandidate]
   );
+
+  // "New record" (task 064, E1b) → the host opens Quick Start / a Create*Wizard and
+  // resolves with the created record's ref (or null when cancelled). A created ref is
+  // filed as the confirmed regarding via the SAME additive `confirmCandidate` →
+  // `applyRegardingSelection` path a picked record uses (no second write path; NFR-10).
+  // The subsequent `onAssociationsChanged` (inside confirmCandidate) re-scopes Fields/Tasks.
+  // Falls back to the fire-and-forget `onCreateNewRecord` when no launcher is wired.
+  const handleCreateNew = React.useCallback(async (): Promise<void> => {
+    if (!onLaunchCreateRecord) {
+      onCreateNewRecord?.();
+      return;
+    }
+    setError(null);
+    try {
+      const ref = await onLaunchCreateRecord();
+      if (!ref) return; // user cancelled the wizard — no write
+      await confirmCandidate({
+        entity: ref.entityType,
+        targetId: ref.id,
+        targetName: ref.name ?? '',
+        confidence: 1,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create and file the new record.');
+    }
+  }, [onLaunchCreateRecord, onCreateNewRecord, confirmCandidate]);
 
   // "Link another record" → SINGLE click opens the record-type dropdown directly
   // (owner UAT #6). Picking a type opens the host's polymorphic lookup dialog
@@ -246,6 +274,30 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
                 </MenuList>
               </MenuPopover>
             </Menu>
+          </div>
+        )}
+
+        {/* Create new record — the "Create-new-and-link" new-vs-related intent
+            (email-communication-intelligence-r2 task 052, FR-E3). Rendered ONLY
+            when the host wires `onCreateNewRecord` (the reconciliation Related-to
+            cell does; existing consumers like EmailWorkspace omit it → this tile
+            never appears there — additive + backward-compatible). A single click
+            fires the host's create-new intent; the created record is then filed
+            via the SAME additive regarding path (no second write path). */}
+        {(onLaunchCreateRecord || onCreateNewRecord) && !readOnly && (
+          <div className={s.cardCell}>
+            <button
+              type="button"
+              className={s.linkCard}
+              disabled={busy}
+              onClick={() => void handleCreateNew()}
+              data-testid="create-new-record"
+            >
+              <span className={s.linkCardLabel}>New record</span>
+              <span className={s.linkCardIconRow}>
+                <DocumentAdd20Regular className={s.linkCardIcon} aria-hidden="true" />
+              </span>
+            </button>
           </div>
         )}
       </div>

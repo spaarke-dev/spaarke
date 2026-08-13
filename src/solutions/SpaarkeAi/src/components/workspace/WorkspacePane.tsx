@@ -65,9 +65,14 @@ import { usePaneCollapseContext, useComposeLaunch, useAnalysisLaunch } from '../
 // `@spaarke/compose-components` barrel) so this workspace-pane module does NOT transitively pull the
 // TipTap editor widgets — mirrors ConversationPane's deep-import rationale. Resolves in Vite + jest.
 import { useComposeVisibility } from '@spaarke/compose-components/context/composeActionBridge';
+// spaarkeai-assistant-enhancements-r3 task 001 — the widget-agnostic active-item conduit. The tab-focus
+// feed below publishes the active single-item tab's thin handle (id/type/label; NEVER bytes — ADR-015)
+// and clears it for multi-item / dashboard / no tab. Additive to the existing composeVisibility flow.
+import { usePublishActiveItem, type ActiveItemHandle } from './activeItemConduit';
 import { WorkspaceTabManager } from './WorkspaceTabManager';
 import type {
   ActiveTabSnapshot,
+  WorkspaceTab,
   WorkspaceTabManagerState,
   WorkspaceTabPersistenceSnapshot,
 } from './WorkspaceTabManager';
@@ -275,6 +280,101 @@ function composeTabInstanceKey(tab: { widgetData?: unknown }): string | undefine
   return deriveComposeInstanceKey(tab.widgetData);
 }
 
+/**
+ * Derive the widget-agnostic ACTIVE-ITEM handle for a workspace tab (spaarkeai-assistant-enhancements-r3
+ * task 001). Returns `null` for a multi-item / dashboard / non-single-item tab (or no tab) so the conduit
+ * is CLEARED for those — the single-active-item invariant. `compose` (task 001) and `document-viewer`
+ * (task 026, FR-11) are the two TAB-FOCUS single-item types wired here; email (task 012) instead uses
+ * the sibling IN-WIDGET-SELECTION feed (`deriveEmailActiveItemFromPatch` below), because choosing a
+ * different email inside the SAME open Email tab does not change `activeTabId`. The handle is a THIN
+ * identity slice ONLY — id/type/label, NEVER document bytes/content (ADR-015); each branch prefers its
+ * widget's own stable id and falls back to the tab id.
+ */
+export function deriveActiveItemHandle(tab: WorkspaceTab | null): ActiveItemHandle | null {
+  if (!tab) return null;
+  if (tab.widgetType === 'compose') {
+    const compose = (tab.widgetData as { compose?: unknown } | null | undefined)?.compose as
+      | {
+          composeSessionId?: string;
+          upload?: { sessionId?: string; fileName?: string | null };
+          draft?: { sessionId?: string; fileName?: string | null };
+          fileName?: string | null;
+        }
+      | undefined;
+    const id =
+      compose?.composeSessionId ??
+      compose?.upload?.sessionId ??
+      compose?.draft?.sessionId ??
+      tab.id;
+    const label =
+      compose?.fileName ?? compose?.upload?.fileName ?? compose?.draft?.fileName ?? tab.displayName;
+    return { id, type: 'compose', label: label ?? tab.displayName };
+  }
+  if (tab.widgetType === 'document-viewer') {
+    // task 026 (FR-11) — the document-viewer's active item IS the focused tab's document
+    // (tab-focus pattern, FR-04b), generalizing this SAME effect condition from Compose-only.
+    // `documentId` rides on `DocumentViewerWidgetData` (`DocumentViewerWidget.tsx:99-112`) and, at
+    // every current dispatch site that populates it (`WorkspacePane`'s own read-only-preview
+    // fallback, `CreateAnalysisWizardWidget`'s created-file fallback), is set SYNCHRONOUSLY in the
+    // SAME `widget_load` payload that creates the tab — i.e. BEFORE the tab exists, unlike Compose's
+    // `composeSessionId` (which back-fills ASYNCHRONOUSLY after the editor mounts and registers,
+    // the D-3 defer-issue this task verified does NOT recur here: there is no `onDataChange` /
+    // `handleTabDataChange` write-back path for `documentId` on this widget, so the value present
+    // at tab-creation is final for the tab's lifetime — no need to re-run this effect on a
+    // widgetData mutation). A small minority of legacy dispatch sites (the upload wizard's
+    // `documentIds[]` plural payload, the file-preview "toggle workspace" `fileId` payload) never
+    // populate `documentId` at all; those fall back to the tab id, mirroring the Compose branch's
+    // own `?? tab.id` fallback — never a null/undefined active-item id.
+    const doc = (tab.widgetData as { documentId?: string; filename?: string } | null | undefined) ?? undefined;
+    const id = doc?.documentId ?? tab.id;
+    const label = doc?.filename ?? tab.displayName;
+    return { id, type: 'document', label: label ?? tab.displayName };
+  }
+  // Multi-item widgets (grids), dashboards, and every not-yet-wired single-item type → no single handle.
+  return null;
+}
+
+/**
+ * spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — the email widget's IN-WIDGET SELECTION
+ * feed into the active-item conduit. The `activeItemConduit.tsx` docblock reserves TWO feed
+ * patterns: tab-focus (above, `deriveActiveItemHandle` — fires only on tab SWITCH) and in-widget
+ * selection (this helper) — email needs the latter because choosing a different email while the
+ * SAME Email tab stays active does not change `activeTabId`, so the tab-focus effect never re-fires.
+ *
+ * `EmailWorkspaceWidget` (shared `Spaarke.AI.Widgets` package — CANNOT import this
+ * SpaarkeAi-solution conduit per ADR-012's shared-library dependency direction) rides the EXISTING
+ * `onDataChange` widget self-update seam with an extra transient `communicationId` field on the
+ * patch (§11 — redirects the existing emit rather than adding a new selection model). This PURE
+ * helper reads + strips that field so the persisted `widgetData` / BFF `EmailTabWidgetData`
+ * contract never sees it:
+ *   - `communicationId` a non-empty string → the widget selected an email; returns the id handle
+ *     to publish (`{ id, type: 'email', label: subject }` — id/label ONLY, ADR-015) + the patch
+ *     MINUS `communicationId` (safe to persist as-is).
+ *   - `communicationId === null`           → deselect; returns a `null` handle (clears the
+ *     conduit) + an EMPTY persistable patch (nothing to merge — leaves the last persisted Email
+ *     carrier intact, mirroring `EmailWorkspaceWidget`'s own "don't clobber on deselect" contract).
+ *   - `communicationId` absent / not an 'email' widget → not an email active-item signal; returns
+ *     `null` so the caller persists the patch unchanged.
+ */
+export function deriveEmailActiveItemFromPatch(
+  widgetType: string,
+  patch: unknown
+): { handle: ActiveItemHandle | null; persistablePatch: Record<string, unknown> } | null {
+  if (widgetType !== 'email') return null;
+  if (patch === null || typeof patch !== 'object') return null;
+  const raw = patch as Record<string, unknown>;
+  if (!('communicationId' in raw)) return null;
+
+  const communicationId = raw.communicationId;
+  const persistablePatch = Object.fromEntries(Object.entries(raw).filter(([key]) => key !== 'communicationId'));
+
+  if (typeof communicationId === 'string' && communicationId.length > 0) {
+    const subject = typeof raw.subject === 'string' ? raw.subject : '';
+    return { handle: { id: communicationId, type: 'email', label: subject }, persistablePatch };
+  }
+  return { handle: null, persistablePatch };
+}
+
 // ---------------------------------------------------------------------------
 // WorkspacePane
 // ---------------------------------------------------------------------------
@@ -295,6 +395,10 @@ export function WorkspacePane(): React.JSX.Element {
   // Driven from the tab-activation effect below (visible=true when the Compose tab is active,
   // visible=false when a non-compose tab is active) — replacing the removed manual toggle.
   const composeVisibility = useComposeVisibility();
+
+  // spaarkeai-assistant-enhancements-r3 task 001 — the tab-focus feed's stable publisher into the
+  // widget-agnostic active-item conduit. Inert no-op off-shell (no ActiveItemConduitProvider mounted).
+  const publishActiveItem = usePublishActiveItem();
 
   // ---------------------------------------------------------------------------
   // Auth surface — NFR-09 tab persistence (task 065)
@@ -2283,10 +2387,19 @@ export function WorkspacePane(): React.JSX.Element {
   React.useEffect(() => {
     const activeTab = managerRef.current.getActiveTab();
     composeVisibility?.(activeTab?.widgetType === 'compose');
+    // spaarkeai-assistant-enhancements-r3 task 001 — ADDITIVELY publish the active single-item tab's
+    // widget-agnostic handle (id/type/label; NEVER bytes — ADR-015). `deriveActiveItemHandle` returns
+    // null for multi-item / dashboard / non-single-item tabs (and no tab), which CLEARS the conduit —
+    // the single-active-item invariant + clear-on-tab-switch. Does NOT alter the composeVisibility
+    // bytes flow above (a different layer). 'compose' (task 001) and 'document-viewer' (task 026,
+    // FR-11) are both TAB-FOCUS feeds handled here; 'email' (task 012) instead publishes from the
+    // IN-WIDGET-SELECTION feed in `handleTabDataChange` below (a same-tab selection change doesn't
+    // change `activeTabId`, so this effect alone would miss it).
+    publishActiveItem(deriveActiveItemHandle(activeTab));
     // tabState.activeTabId drives every activation path (click, compose reuse,
     // close-restore, restore-from-persistence, auto-install); composeVisibility
     // re-runs the sync when the editor's handler registers/unregisters.
-  }, [tabState.activeTabId, composeVisibility]);
+  }, [tabState.activeTabId, composeVisibility, publishActiveItem]);
 
   const handleTabClose = React.useCallback(
     (tabId: string): void => {
@@ -2353,6 +2466,21 @@ export function WorkspacePane(): React.JSX.Element {
       const current = manager.getSnapshot().tabs.find(t => t.id === tabId);
       if (!current) return;
 
+      // spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — the email widget's in-widget
+      // selection feed into the active-item conduit. See `deriveEmailActiveItemFromPatch` docblock.
+      const emailActiveItem = deriveEmailActiveItemFromPatch(current.widgetType, patch);
+      if (emailActiveItem) {
+        publishActiveItem(emailActiveItem.handle);
+        if (Object.keys(emailActiveItem.persistablePatch).length === 0) return; // pure clear-signal — nothing to persist
+        const currentData =
+          current.widgetData !== null && typeof current.widgetData === 'object'
+            ? (current.widgetData as Record<string, unknown>)
+            : {};
+        manager.updateTab(tabId, { ...currentData, ...emailActiveItem.persistablePatch });
+        syncState();
+        return;
+      }
+
       const currentData =
         current.widgetData !== null && typeof current.widgetData === 'object'
           ? (current.widgetData as Record<string, unknown>)
@@ -2362,7 +2490,7 @@ export function WorkspacePane(): React.JSX.Element {
       manager.updateTab(tabId, { ...currentData, ...patchData });
       syncState();
     },
-    [syncState]
+    [publishActiveItem, syncState]
   );
 
   // ---------------------------------------------------------------------------

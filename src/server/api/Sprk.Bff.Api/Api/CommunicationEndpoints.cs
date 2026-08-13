@@ -280,8 +280,26 @@ public static class CommunicationEndpoints
         group.MapPost("/proposals/{reviewLogId:guid}/apply", ApplyProposalAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("ApplyCommunicationProposal")
-            .WithDescription("Job B apply (FR-10): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .WithDescription("Job B apply (FR-10 / FR-E4): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only audit row. An optional body {\"overrideValue\":\"…\"} (FR-E4) applies the reviewer's EDITED value instead of the AI's — through the same allow-list + citation + coercion guards, recorded as an Overriden audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .Accepts<ApplyProposalRequest>("application/json")
             .Produces<ApplyProposalResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/proposals/{reviewLogId}/dismiss — Job B REJECT (task 055b / FR-E4). The Fields
+        // reconcile tab (task 055) POSTs a proposal's ReviewLogId here on Reject. The service resolves the rejecting
+        // caller server-side (fail-closed 403), re-confirms the proposal is the OPEN pending row (409 if already
+        // resolved), and writes ONE append-only Dismissed sprk_emailreviewlog audit row — NO record change, NO
+        // allow-list/citation re-validation (a rejection is safe regardless of drift). The proposal then no longer
+        // surfaces as OPEN in the queue-feed. Contrast Hold ("leave Proposed") which is a client-only no-op. Takes no
+        // request body. Registered unconditionally (ADR-010/ADR-032). r1 builds no UI.
+        group.MapPost("/proposals/{reviewLogId:guid}/dismiss", DismissProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("DismissCommunicationProposal")
+            .WithDescription("Job B reject (FR-E4): terminally dismiss a pending field-update proposal — write one append-only Dismissed audit row attributed to the rejecting user and make NO record change. Caller resolved server-side (403 fail-closed); a missing proposal (404), malformed proposal (422), or non-pending/already-resolved proposal (409) are refused.")
+            .Produces<DismissProposalResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
@@ -304,6 +322,24 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/{communicationId}/create-task — Job C AD-HOC create (task 056b / FR-E5). The Tasks
+        // reconcile tab's "+ New task" (a task the reviewer AUTHORED, not proposed by the engine) POSTs here with the
+        // task form + the confirmed record as the regarding. Reuses the SAME create-task path as an applied proposal —
+        // IActionSeam.CreateTaskAsync + the caller-impersonated FR-E5 PATCH + ONE append-only Applied audit row — with
+        // NO proposal row / NO citation / NO open-walk (there is nothing extracted to verify). Association gating is the
+        // UI's (NFR-10): the caller supplies the confirmed record, matching the applied-proposal sibling's posture.
+        // Caller resolved server-side (403 fail-closed); a blank subject / missing regarding (422) or a failed
+        // create/patch (422) are refused. Registered unconditionally (ADR-010/032). r1 builds no UI.
+        group.MapPost("/{communicationId:guid}/create-task", CreateAdHocTaskAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("CreateCommunicationAdHocTask")
+            .WithDescription("Job C ad-hoc create (FR-E5 \"+ New task\"): create a reviewer-authored sprk_event (type=task) regarding the confirmed record via IActionSeam.CreateTaskAsync, PATCH the FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row — the SAME create-task path as an applied proposal, minus the proposal/citation. Caller resolved server-side (403 fail-closed); blank subject / missing regarding (422), or failed create/patch (422) are refused.")
+            .Accepts<CreateAdHocTaskRequest>("application/json")
+            .Produces<CreateAdHocTaskResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
 
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
@@ -945,11 +981,26 @@ public static class CommunicationEndpoints
     // via SdapProblemException (403/404/409/422/500).
     private static async Task<IResult> ApplyProposalAsync(
         Guid reviewLogId,
+        [FromBody] ApplyProposalRequest? request,
         ICommunicationProposalApplyService applyService,
         HttpContext context,
         CancellationToken ct)
     {
-        var result = await applyService.ApplyAsync(reviewLogId, context.User, ct);
+        // Optional body carries the reviewer's edited value (FR-E4); absent/blank ⇒ apply the stored proposed value.
+        var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job B reject / dismiss (task 055b / FR-E4). The caller is resolved server-side inside the service (fail-closed
+    // 403); the proposal is terminally dismissed by writing ONE append-only Dismissed audit row with no record change.
+    // Failures surface as RFC 7807 ProblemDetails via SdapProblemException (403/404/409/422). No request body.
+    private static async Task<IResult> DismissProposalAsync(
+        Guid reviewLogId,
+        ICommunicationProposalApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.DismissAsync(reviewLogId, context.User, ct);
         return TypedResults.Ok(result);
     }
 
@@ -965,6 +1016,29 @@ public static class CommunicationEndpoints
         CancellationToken ct)
     {
         var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job C ad-hoc create (task 056b / FR-E5 "+ New task"). Creates a reviewer-authored sprk_event regarding the
+    // confirmed record via the same audited create-task path as an applied proposal (no proposal / no citation). The
+    // caller is resolved server-side (fail-closed 403); failures surface as RFC 7807 ProblemDetails
+    // (403/422/500). The body carries the task form + the confirmed record as the regarding.
+    private static async Task<IResult> CreateAdHocTaskAsync(
+        Guid communicationId,
+        [FromBody] CreateAdHocTaskRequest? request,
+        ICommunicationCreateTaskApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return Results.Problem(
+                title: "Bad Request",
+                detail: "A request body with at least a task subject and the regarding record is required.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var result = await applyService.CreateAdHocAsync(communicationId, request, context.User, ct);
         return TypedResults.Ok(result);
     }
 

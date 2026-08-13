@@ -31,6 +31,7 @@ public static class ExternalAccessModule
         Guid.Parse("3ff4102c-1092-f111-b8dc-7ced8ddc4a05"), // Invoices
         Guid.Parse("42f4102c-1092-f111-b8dc-7ced8ddc4a05"), // Work Assignments
         Guid.Parse("583a2a33-1092-f111-b8dc-7ced8ddc4a05"), // Matters
+        Guid.Parse("403e5d37-cb94-f111-b8db-00224835447a"), // Service Requests (internal-only, task 028)
     };
 
     /// <summary>
@@ -56,6 +57,25 @@ public static class ExternalAccessModule
         // Data service — queries project data (projects, documents, events, contacts, organizations)
         // for external SPA users using managed identity app-only access.
         services.AddHttpClient<ExternalDataService>((sp, client) =>
+        {
+            var config = sp.GetRequiredService<IConfiguration>();
+            var dataverseUrl = config["Dataverse:ServiceUrl"];
+            if (!string.IsNullOrEmpty(dataverseUrl))
+            {
+                client.BaseAddress = new Uri($"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/");
+                client.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+                client.DefaultRequestHeaders.Add("OData-Version", "4.0");
+            }
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+
+        // Module entitlement resolver (task 072, owner Option B) — resolves the Tier-1 module-code set
+        // the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements): workforce
+        // from sprk_approlemodulemap (App-Role → module), CIAM blanket outside-counsel set. Typed
+        // HttpClient (app-only Dataverse read, broker-only NFR-02) with a 60s Redis map cache (ADR-009 —
+        // caches the small GLOBAL config map as DATA, never an authorization decision). Concrete
+        // registration (ADR-010) — single implementation, mirroring ExternalParticipationService.
+        services.AddHttpClient<ModuleEntitlementResolver>((sp, client) =>
         {
             var config = sp.GetRequiredService<IConfiguration>();
             var dataverseUrl = config["Dataverse:ServiceUrl"];
@@ -131,61 +151,82 @@ public static class ExternalAccessModule
             AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
         });
 
-        // Task 016 (2026-08-06) — outside-counsel widget modules (Documents / Invoices / Work
-        // Assignments / Matters / grid-configuration schema reads), registered the same way as
-        // "collaboration" above — one AddExternalModule call each, no framework/route/filter change.
-        //
-        // Documents / Invoices / Work Assignments are PROJECT-DERIVED: each child entity carries a
-        // typed lookup back to sprk_project (sprk_document.sprk_project, sprk_invoice.sprk_project,
-        // sprk_workassignment.sprk_regardingproject — all confirmed in docs/data-model). Their Tier-2
-        // predicate reuses the SAME accessible-project-id set the collaboration module already
-        // exposes on CallerPrincipal (no extra Dataverse round-trip — the predicate stays a pure,
-        // synchronous read of the principal, matching the descriptor's delegate contract) —
-        // RecordIdAttribute is pointed at the child's project-lookup attribute rather than the
-        // child's own primary id (see ExternalModuleRegistry.cs TryGetRecordId's EntityReference
-        // case, added by this task). Each widget's inline FetchXML projects that lookup attribute
-        // (hidden from the grid's visible columns via layoutXml) so ScopeRows can evaluate it.
+        // Task 028 (2026-08-10) — POLYMORPHIC Tier-2 scoping. Supersedes task 016's single-parent
+        // (project-only) wiring. Access is held at ROOT records (Project / Matter / Work Assignment);
+        // a child (Document / Invoice) rolls up to ANY accessible root, so each child module declares a
+        // LIST of OR'd scope dimensions — one per typed parent lookup (all verified live: sprk_document
+        // has sprk_project/sprk_matter/sprk_workassignment; sprk_invoice has sprk_matter/sprk_project).
+        // The accessible-root id sets (P/M/W) are already composed onto CallerPrincipal by both plane
+        // strategies (CIAM → grants-only; workforce → membership ∪ grants), so every predicate stays a
+        // pure synchronous read of the principal (no extra Dataverse round-trip). Each widget's inline
+        // FetchXML projects the parent-lookup attributes (hidden columns) so ScopeRows can evaluate
+        // them; the server-side injector emits <filter type='or'> across the non-empty dimensions.
+
+        // Documents — visible when attached to an accessible project OR matter OR work assignment.
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "documents",
             RecordEntity = "sprk_document",
-            RecordIdAttribute = "sprk_project",
-            AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+            ScopeDimensions = new[]
+            {
+                new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
+                new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
+                new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
+            },
         });
+
+        // Invoices — visible when attached to an accessible matter OR project (invoices carry both
+        // sprk_matter and sprk_project lookups; R1's project-only scope silently hid matter-parented
+        // invoices — the concrete over-hide task 028 fixes).
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "invoices",
             RecordEntity = "sprk_invoice",
-            RecordIdAttribute = "sprk_project",
-            AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+            ScopeDimensions = new[]
+            {
+                new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
+                new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
+            },
         });
+
+        // Work Assignments — a FIRST-CLASS ROOT (task 028): a standalone WA (no project/matter) can be
+        // granted to outside counsel and carry its own documents. Scoped by the WA's OWN id ∈ the
+        // caller's accessible work-assignment set (was: scoped by sprk_regardingproject, which hid any
+        // WA not tied to an accessible project — including grant-only standalone WAs).
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "work-assignments",
             RecordEntity = "sprk_workassignment",
-            RecordIdAttribute = "sprk_regardingproject",
-            AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+            RecordIdAttribute = "sprk_workassignmentid",
+            AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
         });
 
-        // Matters (D-016-1, documented Path-A exception — see notes/task-016-deviations.md):
-        // sprk_matter has NO lookup back to sprk_project in the current schema (confirmed against
-        // docs/data-model/sprk_matter-related-tables.md + entity-relationship-model.md — Matter and
-        // Project are PEER top-level parents, not nested). The only candidate scope source
-        // (sprk_matter.sprk_assignedoutsidecounsel → sprk_organization) cannot be evaluated because
-        // CallerPrincipal carries no organization affiliation for the calling Contact (no such
-        // resolution exists anywhere in this codebase today — building one is a new capability, out
-        // of this task's minimal-BFF-touch scope). Registering the module with an ALWAYS-EMPTY
-        // accessible set is the fail-closed (NFR-08-safe — never over-exposes) choice; combined with
-        // the grid config's emptyStateMessage ("Matter-level workspace access is coming soon" — the
-        // VERBATIM R1 OutsideCounselDashboard stub copy), this is R1-parity-preserving, not a
-        // regression. Follow-up: a real Matter Tier-2 predicate needs Contact→Organization
-        // affiliation resolution as a new capability.
+        // Matters — a first-class ROOT (task 028; supersedes the D-016-1 always-empty stub). Scoped by
+        // the matter's own id ∈ the caller's accessible matter set (CIAM → matter grants; workforce →
+        // membership ∪ matter grants). No Contact→Organization resolution needed: matter access is an
+        // explicit sprk_externalrecordaccess grant of recordtype=Matter, exactly like project access.
         services.AddExternalModule(new ExternalModuleDescriptor
         {
             Name = "matters",
             RecordEntity = "sprk_matter",
             RecordIdAttribute = "sprk_matterid",
-            AccessibleRecordIds = _ => EmptyRecordIds,
+            AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
+        });
+
+        // Service Requests (task 028) — INTERNAL-ONLY. Shows the caller's OWN submitted requests
+        // (sprk_requestedby == caller contact). Fail-closed for the CIAM partner plane: the accessible
+        // set is empty for a non-workforce caller, so a partner sees 0 rows even if the tab were somehow
+        // requested — server-side enforcement of "internal-only" that does not rely on the client hiding
+        // the tab (the external-spa also entitlement-gates the tab off the partner surface).
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "service-requests",
+            RecordEntity = "sprk_servicerequest",
+            RecordIdAttribute = "sprk_requestedby",
+            AccessibleRecordIds = p =>
+                p.Plane == CallerPrincipalPlane.Workforce && p.ContactId != Guid.Empty
+                    ? new HashSet<Guid> { p.ContactId }
+                    : EmptyRecordIds,
         });
 
         // grid-configuration (D-016-2): every <DataGrid configId=…/> widget fetches its own

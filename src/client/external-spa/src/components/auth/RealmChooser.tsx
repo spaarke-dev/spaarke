@@ -1,19 +1,21 @@
 /**
- * RealmChooser — the browser home-realm discovery gate (spec FR-03, ux-brief §3).
+ * RealmChooser — the browser sign-in landing (spec FR-03, ux-brief §3; reworked per owner UAT
+ * 2026-08-12 #5B).
  *
- * Presents the explicit "My organization / Partner" choice that selects the sign-in PLANE before any
- * authority is contacted. Shown ONLY in a browser and ONLY when the tab has no stored realm yet; it
- * NEVER appears inside Teams (the Teams host does silent workforce SSO — criterion 2 / ADR-021
- * constraint). Once chosen, the plane is invisible everywhere else (ux-brief §4).
+ * This is the EXTERNAL partner portal, so the sign-in is now **Partner-primary** rather than a
+ * symmetric "My organization / Partner" choice (which UAT found confusing — a partner shouldn't have
+ * to reason about planes). The primary action signs in as a Partner (CIAM); a subtle secondary link
+ * covers the minority internal/workforce browser case. It is shown ONLY in a browser and ONLY when
+ * the tab has no stored realm yet; it NEVER appears inside Teams (the Teams host does silent
+ * workforce SSO). The workforce link is kept BEFORE any authority redirect so an employee is never
+ * stranded on the partner IdP (which a full auto-redirect-to-CIAM would risk).
  *
- * Shared-library mandate (CLAUDE.md §11 + ADR-050): built on the canonical `ChoiceModal` preset —
- * the exact "force a conscious choice between 2-4 rich, described options" surface — rather than a
- * hand-rolled dialog. Fluent v9 semantic tokens only, so it renders correctly in light, dark, and
- * (defensively) Teams themes (ADR-021) with zero hardcoded hex.
+ * Shared-library mandate (CLAUDE.md §11 + ADR-050): built on Fluent v9 primitives with semantic
+ * tokens only (light/dark/Teams correct, zero hardcoded hex).
  */
 import * as React from 'react';
-import { Building24Regular, PeopleTeam24Regular } from '@fluentui/react-icons';
-import { ChoiceModal } from '@spaarke/ui-components/components/SprkModal';
+import { Button, Link, Text, Title2, makeStyles, tokens } from '@fluentui/react-components';
+import { PeopleTeam24Regular } from '@fluentui/react-icons';
 import type { Realm } from '../../auth/realm';
 
 export interface RealmChooserProps {
@@ -21,36 +23,60 @@ export interface RealmChooserProps {
   onChoose: (realm: Realm) => void;
 }
 
+const useStyles = makeStyles({
+  root: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '100%',
+    width: '100%',
+    padding: tokens.spacingHorizontalXXL,
+    boxSizing: 'border-box',
+  },
+  card: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: tokens.spacingVerticalL,
+    maxWidth: '26rem',
+    textAlign: 'center',
+  },
+  lead: {
+    color: tokens.colorNeutralForeground3,
+  },
+  primaryBtn: {
+    minWidth: '16rem',
+  },
+  workforceRow: {
+    marginTop: tokens.spacingVerticalM,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
+});
+
 export const RealmChooser: React.FC<RealmChooserProps> = ({ onChoose }) => {
+  const s = useStyles();
   return (
-    <ChoiceModal
-      open
-      // Mandatory sign-in gate: there is no surface behind it to dismiss TO, so Cancel/× is a
-      // deliberate no-op — the user must pick a plane to proceed. `dismiss="explicit"` (ChoiceModal
-      // default) already blocks ESC/backdrop dismissal, reinforcing the "conscious choice required"
-      // model; this no-op simply neutralizes the always-present Cancel affordance for this one gate.
-      onClose={() => {
-        /* no dismiss target — see comment above */
-      }}
-      title="Sign in to Spaarke"
-      message="Choose how you'd like to sign in. We'll take you to the right sign-in for your account."
-      choices={[
-        {
-          id: 'workforce',
-          label: 'My organization',
-          description: 'Sign in with your work or school account (Microsoft Entra).',
-          icon: <Building24Regular />,
-        },
-        {
-          id: 'ciam',
-          label: 'Partner',
-          description: 'Sign in as an external collaborator with your Spaarke partner account.',
-          icon: <PeopleTeam24Regular />,
-        },
-      ]}
-      onSelect={(choiceId) => onChoose(choiceId as Realm)}
-      cancelLabel="Cancel"
-    />
+    <div className={s.root}>
+      <div className={s.card}>
+        <Title2>Sign in to Spaarke</Title2>
+        <Text className={s.lead} block>
+          Access the records, documents, and requests shared with you.
+        </Text>
+        <Button
+          className={s.primaryBtn}
+          appearance="primary"
+          size="large"
+          icon={<PeopleTeam24Regular />}
+          onClick={() => onChoose('ciam')}
+        >
+          Continue as Partner
+        </Button>
+        <Text className={s.workforceRow} block>
+          Spaarke employee? <Link onClick={() => onChoose('workforce')}>Sign in with your work account</Link>
+        </Text>
+      </div>
+    </div>
   );
 };
 

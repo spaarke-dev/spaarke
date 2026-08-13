@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Deploy BFF + SpaarkeAi code page and verify dual-mount email parity — owner-gated; re-sync master first (FR success criteria §9)</title>
+    <phase>Deploy + verify</phase>
+    <gate>blocked until all code tasks (010,011,012,020,021,022,023,024,025,026,030,040,041,050)</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment + post-deploy verification via bff-deploy + code-page-deploy skills (no new code implementation)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deploy + verification orchestrating the bff-deploy and code-page-deploy skills; owner-gated confirmation before each deploy</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Deploy</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment — must run after all code tasks land; owner-gated; re-sync master first.</parallel-reason>
+    <deps>010,011,012,020,021,022,023,024,025,026,030,040,041,050</deps>
+    <tags>deploy, bff-api, spaarkeai</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Owner-gated deploy. FIRST re-sync `origin/master` into the branch (5 behind at init). Deploy the BFF (bff-deploy skill; measure compressed publish size ≤60 MB + report delta vs ~49.63 MB baseline; run `dotnet list package --vulnerable --include-transitive` — no new HIGH CVE) and the SpaarkeAi code page (code-page-deploy skill). Verify the deployed env passes the overview DoD + per-item DoD and that dual-mount email parity is intact (the standalone sprk_emailpage code page is unaffected). Confirm with the owner BEFORE deploying.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF App Service + code-page deployment expertise; post-deploy regression verification; disciplined about the owner deploy gate + publish-size/CVE checks.</role>
+  <goal>BFF deployed with compressed publish size ≤60 MB and no new HIGH CVE; SpaarkeAi code page deployed; both DoDs pass in the deployed env; dual-mount email parity intact.</goal>
+  <context>
+    <background>Deploy + verify the whole R3 surface. Branch was 5 commits behind origin/master at init — re-sync master into the branch BEFORE deploying (owner "re-sync master before deploy"). BFF touches the ADR-039 projection + parity tools; publish-size ceiling ≤60 MB (baseline ~49.63 MB incl. PDBs, 2026-07-08). Deploys are OWNER-GATED — confirm before each deploy. Verify the overview DoD ("how many overdue tasks") and the per-item DoD (email Reply auto-draft + preserved quoted thread) in the deployed env, and that shared email-component changes did NOT break the standalone sprk_emailpage code-page mount (dual-mount parity, NFR-05).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/ (dotnet publish -c Release -o deploy/api-publish/ — measure compressed size)</file>
+      <file>src/solutions/SpaarkeAi/ (build + deploy the code page)</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="deploy gate">Deploys are OWNER-GATED — confirm with the owner BEFORE deploying the BFF and BEFORE deploying the code page.</constraint>
+    <constraint source="project" scope="branch sync">Re-sync origin/master into the branch FIRST (5 behind at init) before building/deploying.</constraint>
+    <constraint source="BFF §10" scope="the BFF deploy">Compressed publish size ≤60 MB — measure and report absolute + delta vs ~49.63 MB baseline (incl. PDBs); ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP.</constraint>
+    <constraint source="NFR-02" scope="the BFF deploy">`dotnet list package --vulnerable --include-transitive` shows no new HIGH-severity finding.</constraint>
+    <constraint source="NFR-05" scope="email dual-mount">Verify the standalone sprk_emailpage code page is unaffected — EmailWorkspace renders unchanged across both mounts.</constraint>
+    <constraint source="project" scope="deploy skills">Use the bff-deploy + code-page-deploy skills; do NOT hand-roll deployment.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Confirm owner go-ahead to deploy. Re-sync origin/master into the branch (5 behind at init); resolve any conflicts.</step>
+    <step order="2">Build the BFF (dotnet build); dotnet publish -c Release -o deploy/api-publish/; measure compressed size; report absolute + delta vs ~49.63 MB baseline. HARD STOP if ≥60 MB.</step>
+    <step order="3">Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH CVE.</step>
+    <step order="4">Deploy the BFF via the bff-deploy skill (owner-confirmed).</step>
+    <step order="5">Build the SpaarkeAi code page for production; deploy via the code-page-deploy skill (owner-confirmed); retry publish on transient 0x80071151.</step>
+    <step order="6">Verify in the deployed env: overview DoD ("how many overdue tasks" → correct count, no query error, no date prompt, no duplicate tab) + per-item DoD (email Reply card → auto-draft + preserved quoted thread).</step>
+    <step order="7">Verify dual-mount email parity: the standalone sprk_emailpage code page still renders/works.</step>
+    <step order="8">Record results in notes/; update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If compressed publish size reaches ≥60 MB, or a new HIGH CVE appears, or the owner has not confirmed the deploy, STOP and escalate rather than deploying.</trigger>
+  </escalation>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r3/notes/deploy-verify.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">origin/master re-synced into the branch before deploy.</criterion>
+    <criterion testable="true">BFF deployed; compressed publish size ≤60 MB reported (absolute + delta vs baseline).</criterion>
+    <criterion testable="true">No new HIGH CVE from `dotnet list package --vulnerable --include-transitive`.</criterion>
+    <criterion testable="true">SpaarkeAi code page deployed.</criterion>
+    <criterion testable="true">Overview DoD + per-item DoD both pass in the deployed env.</criterion>
+    <criterion testable="true">Dual-mount email parity intact — standalone sprk_emailpage unaffected.</criterion>
+    <criterion testable="true">Deploy was owner-confirmed before each deploy (negative: no deploy without confirmation).</criterion>
+  </acceptance-criteria>
+  <notes>DEPLOYS ARE OWNER-GATED — confirm before deploying. The husky pre-commit hook env is broken in this worktree; `--no-verify` is owner-approved for commits here. Retry the code-page publish on transient 0x80071151. /conflict-check before the BFF PR (Services/Ai + ConversationPane heavily contended).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

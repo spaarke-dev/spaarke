@@ -11,6 +11,7 @@ import {
   hasWorkspaceWidget,
   getWorkspaceWidgetMetadata,
   resolveWorkspaceWidget,
+  getWidgetInteractionPattern,
 } from '../../../registry/WorkspaceWidgetRegistry';
 import { DOCUMENT_VIEWER_WIDGET_TYPE } from '../register-document-viewer-widget';
 
@@ -46,5 +47,38 @@ describe('register-document-viewer-widget', () => {
     // (e.g. ConversationPane in SpaarkeAi). Changing the value would break
     // the Assistant → Workspace `widget_load` demo wiring.
     expect(DOCUMENT_VIEWER_WIDGET_TYPE).toBe('document-viewer');
+  });
+
+  // -------------------------------------------------------------------------
+  // assistantContract — FR-11 per-item cards (task 022, FR-08 + FR-15 SHAPE)
+  // -------------------------------------------------------------------------
+
+  it("declares the 'document' contextType (task 020)", () => {
+    const meta = getWorkspaceWidgetMetadata(DOCUMENT_VIEWER_WIDGET_TYPE);
+    expect(meta!.contextType).toBe('document');
+  });
+
+  it('declares per-item cards Summarize/Draft response/Draft memo and no overview tool (FR-11)', () => {
+    const meta = getWorkspaceWidgetMetadata(DOCUMENT_VIEWER_WIDGET_TYPE);
+    const contract = meta!.assistantContract;
+    expect(contract).toBeDefined();
+    expect(contract!.overviewTools).toEqual([]);
+    expect(contract!.perItemCards.map(c => c.label)).toEqual(['Summarize', 'Draft response', 'Draft memo']);
+    // task 040 (FR-13 finalization, D-8): corrected from task 022's placeholder 'hybrid' to
+    // 'respond' — every perItemCards entry lands 'chat' (task 026), so 'respond' is the
+    // authoritative value per the AssistantInteractionPattern contract (types/shared.ts).
+    expect(contract!.interactionPattern).toBe('respond');
+  });
+
+  it('all three cards land in chat (task 026 finalization — no composer/Compose surface exists for documents; see register-document-viewer-widget.ts landing NOTE)', () => {
+    const contract = getWorkspaceWidgetMetadata(DOCUMENT_VIEWER_WIDGET_TYPE)!.assistantContract!;
+    const byLabel = new Map(contract.perItemCards.map(c => [c.label, c.landing]));
+    expect(byLabel.get('Summarize')).toBe('chat');
+    expect(byLabel.get('Draft response')).toBe('chat');
+    expect(byLabel.get('Draft memo')).toBe('chat');
+  });
+
+  it("getWidgetInteractionPattern('document-viewer') reads the SAME 'respond' value from the live registry (task 040 single-sourced accessor)", () => {
+    expect(getWidgetInteractionPattern(DOCUMENT_VIEWER_WIDGET_TYPE)).toBe('respond');
   });
 });

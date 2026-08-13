@@ -4,7 +4,8 @@
     <title>Design + create module-entitlement Dataverse schema</title>
     <phase>P2 Access-control + entitlement</phase>
     <gate>blocked-until:015</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <status-note>Resolved to Option B (single Contact-free table) + owner-created the schema on 2026-08-10: sprk_approlemodulemap (sprk_approlename + sprk_modulecode + composite key) + seed rows. See notes/module-entitlement-schema-decision.md. The resolver/widgetRegistry wiring is task 072 (Option-B). No sprk_moduleentitlement external table (Option B drops it — CIAM blanket-entitled in code).</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Tag `dataverse`; creates NEW schema surface that blocks tasks 021/022/023/026; irreversible-ish (schema changes) — FULL per CLAUDE.md §8 (new file surface + downstream deps).</rigor-reason>
     <model-tier>sonnet</model-tier>

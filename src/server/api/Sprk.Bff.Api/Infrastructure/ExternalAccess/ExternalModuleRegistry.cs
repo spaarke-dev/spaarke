@@ -25,12 +25,37 @@
 // (sprk_document.sprk_project, sprk_invoice.sprk_project, sprk_workassignment.sprk_regardingproject)
 // instead of the child's own primary id. A FetchXML lookup attribute is projected by the Dataverse
 // SDK as an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> (not a raw Guid/string), so
-// TryGetRecordId gained an EntityReference case below — purely additive, the existing Guid/string
-// cases (used by the collaboration/sprk_project module's own-primary-id scoping) are unchanged.
+// TryGetAttributeId (task 028; formerly TryGetRecordId) handles an EntityReference case below,
+// alongside the Guid/string cases used by a root module's own-primary-id scoping.
+//
+// spaarke-SPA-external-access-platform-r2 Task 028 (2026-08-10) — polymorphic multi-root scoping.
+// A module now declares a LIST of OR'd ScopeDimensions (one per typed parent lookup) instead of a
+// single RecordIdAttribute, so a child (document/invoice) rolls up to ANY accessible root
+// (project OR matter OR work assignment). The single-attribute RecordIdAttribute + AccessibleRecordIds
+// pair is retained as a one-dimension shorthand for root/config modules.
 
 using Microsoft.Xrm.Sdk;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
+
+/// <summary>
+/// One Tier-2 scope dimension of a module (spaarke-SPA-external-access-platform-r2 task 028 — polymorphic
+/// scoping): a row is accessible if, for ANY of the module's dimensions, the row's <see cref="Attribute"/>
+/// value is in that dimension's accessible-id set. A ROOT module has one dimension whose attribute is the
+/// entity's own primary id (e.g. <c>sprk_projectid</c>); a CHILD module (documents/invoices) has one
+/// dimension per typed parent lookup (<c>sprk_project</c> / <c>sprk_matter</c> / <c>sprk_workassignment</c>),
+/// OR'd, so a child rolls up to ANY accessible root.
+/// </summary>
+public sealed class ScopeDimension
+{
+    /// <summary>The row attribute checked for membership — a root's own primary id, or a child's typed
+    /// lookup back to a root.</summary>
+    public required string Attribute { get; init; }
+
+    /// <summary>The accessible root ids for this dimension, read from the resolved (plane-agnostic)
+    /// principal. A principal with no accessible roots of this type yields an empty set.</summary>
+    public required Func<CallerPrincipal, IReadOnlySet<Guid>> AccessibleIds { get; init; }
+}
 
 /// <summary>
 /// A registered module (widget) on the dual-plane external module-host platform (ADR-028 A3 / FR-22).
@@ -38,6 +63,12 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// over the shared, plane-agnostic <see cref="CallerPrincipal"/>. Registering a module is purely
 /// additive: it does NOT touch the resolver, the strategies, the group filter, or any handler.
 /// </summary>
+/// <remarks>
+/// Task 028 generalized the single-attribute predicate to a LIST of OR'd <see cref="ScopeDimension"/>s
+/// (a child can roll up to a project OR matter OR work-assignment root). The single-attribute shorthand
+/// (<see cref="RecordIdAttribute"/> + <see cref="AccessibleRecordIds"/>) is retained for root/config
+/// modules whose scope is one dimension — it materializes as a one-element <see cref="EffectiveDimensions"/>.
+/// </remarks>
 public sealed class ExternalModuleDescriptor
 {
     /// <summary>Stable module/widget key (e.g. <c>collaboration</c>, <c>assigned-work</c>).</summary>
@@ -46,33 +77,78 @@ public sealed class ExternalModuleDescriptor
     /// <summary>The Dataverse entity logical name whose records this module reads (Tier-2 entity).</summary>
     public required string RecordEntity { get; init; }
 
-    /// <summary>The primary-id attribute of <see cref="RecordEntity"/> (e.g. <c>sprk_projectid</c>) —
-    /// used to read each row's record id when Tier-2-scoping a fetch result.</summary>
-    public required string RecordIdAttribute { get; init; }
+    /// <summary>Single-dimension shorthand: the attribute whose value is checked for membership in
+    /// <see cref="AccessibleRecordIds"/> (a root's own primary id, or one child lookup). Set this +
+    /// <see cref="AccessibleRecordIds"/> for a one-dimension module, OR set <see cref="ScopeDimensions"/>
+    /// for a multi-parent (OR) module — not both.</summary>
+    public string? RecordIdAttribute { get; init; }
 
     /// <summary>
-    /// The per-module Tier-2 predicate (R2 NFR-08): the set of <see cref="RecordEntity"/> record ids the
-    /// resolved principal may access. Plane-agnostic — it reads ONLY the <see cref="CallerPrincipal"/>
-    /// (whose record scope both plane strategies already composed). Being entitled to the module does NOT
-    /// imply access to all records; a principal with no accessible records yields an empty set.
+    /// Single-dimension shorthand: the set of accessible ids for <see cref="RecordIdAttribute"/>, read
+    /// from the plane-agnostic <see cref="CallerPrincipal"/>. Being entitled to the module does NOT imply
+    /// access to all records; a principal with no accessible records yields an empty set.
     /// </summary>
-    public required Func<CallerPrincipal, IReadOnlySet<Guid>> AccessibleRecordIds { get; init; }
+    public Func<CallerPrincipal, IReadOnlySet<Guid>>? AccessibleRecordIds { get; init; }
+
+    /// <summary>Multi-dimension form (task 028): the OR'd scope dimensions. A row is accessible if ANY
+    /// dimension matches. Use for child modules that roll up to more than one kind of root.</summary>
+    public IReadOnlyList<ScopeDimension>? ScopeDimensions { get; init; }
 
     /// <summary>
-    /// The Tier-2 enforcement check for a record-scoped read: is <paramref name="recordId"/> in the
-    /// principal's accessible set? A <c>false</c> result MUST be enforced as a DENY by the caller.
+    /// The module's resolved scope dimensions — either the explicit <see cref="ScopeDimensions"/> list,
+    /// or a one-element list built from the <see cref="RecordIdAttribute"/> + <see cref="AccessibleRecordIds"/>
+    /// shorthand. Throws if neither is configured (a wiring bug — fail fast).
+    /// </summary>
+    public IReadOnlyList<ScopeDimension> EffectiveDimensions
+    {
+        get
+        {
+            if (ScopeDimensions is { Count: > 0 })
+            {
+                return ScopeDimensions;
+            }
+            if (!string.IsNullOrWhiteSpace(RecordIdAttribute) && AccessibleRecordIds is not null)
+            {
+                return new[]
+                {
+                    new ScopeDimension { Attribute = RecordIdAttribute, AccessibleIds = AccessibleRecordIds }
+                };
+            }
+            throw new InvalidOperationException(
+                $"External module '{Name}' must declare either ScopeDimensions or RecordIdAttribute + AccessibleRecordIds.");
+        }
+    }
+
+    /// <summary>
+    /// The Tier-2 enforcement check for a record-scoped read: is <paramref name="recordId"/> in ANY of
+    /// the principal's accessible dimension sets? A <c>false</c> result MUST be enforced as a DENY by the
+    /// caller. (For a root/config module the single dimension's attribute is the entity's own id, so this
+    /// is the direct record∈set check; child single-record reads — not used by the read-only grids — fail
+    /// closed because a child's own id is never in a parent-id set.)
     /// </summary>
     public bool IsRecordAccessible(CallerPrincipal principal, Guid recordId)
     {
         ArgumentNullException.ThrowIfNull(principal);
-        return recordId != Guid.Empty && AccessibleRecordIds(principal).Contains(recordId);
+        if (recordId == Guid.Empty)
+        {
+            return false;
+        }
+        foreach (var dim in EffectiveDimensions)
+        {
+            if (dim.AccessibleIds(principal).Contains(recordId))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>
-    /// Tier-2-scopes a fetch result: keeps ONLY the rows whose primary id is in the principal's
-    /// accessible set AND whose entity matches <see cref="RecordEntity"/> (defense-in-depth against a
-    /// FetchXML that queries a different primary entity than the module claims). A non-participant
-    /// principal (empty accessible set) receives an empty result — never the unscoped rows.
+    /// Tier-2-scopes a fetch result: keeps ONLY the rows whose entity matches <see cref="RecordEntity"/>
+    /// (defense-in-depth against a FetchXML that queries a different primary entity than the module claims)
+    /// AND for which SOME dimension's attribute value is in that dimension's accessible set. A principal
+    /// with an empty accessible set across ALL dimensions receives an empty result — never the unscoped
+    /// rows (NFR-08 negative case).
     /// </summary>
     public IReadOnlyList<IReadOnlyDictionary<string, object?>> ScopeRows(
         CallerPrincipal principal, IEnumerable<IReadOnlyDictionary<string, object?>> rows)
@@ -80,18 +156,30 @@ public sealed class ExternalModuleDescriptor
         ArgumentNullException.ThrowIfNull(principal);
         ArgumentNullException.ThrowIfNull(rows);
 
-        var accessible = AccessibleRecordIds(principal);
+        // Materialize each dimension's accessible set once. Fail-closed: if EVERY dimension is empty the
+        // caller can see nothing in this module — return nothing.
+        var resolved = EffectiveDimensions
+            .Select(d => (d.Attribute, Ids: d.AccessibleIds(principal)))
+            .ToList();
         var scoped = new List<IReadOnlyDictionary<string, object?>>();
-        if (accessible.Count == 0)
+        if (resolved.All(d => d.Ids.Count == 0))
         {
-            return scoped; // Fail-closed: an unscoped principal sees nothing (NFR-08 negative case).
+            return scoped;
         }
 
         foreach (var row in rows)
         {
-            if (RowMatchesEntity(row) && TryGetRecordId(row, out var id) && accessible.Contains(id))
+            if (!RowMatchesEntity(row))
             {
-                scoped.Add(row);
+                continue;
+            }
+            foreach (var (attribute, ids) in resolved)
+            {
+                if (ids.Count > 0 && TryGetAttributeId(row, attribute, out var id) && ids.Contains(id))
+                {
+                    scoped.Add(row);
+                    break; // OR across dimensions — one match is enough.
+                }
             }
         }
 
@@ -116,13 +204,16 @@ public sealed class ExternalModuleDescriptor
     }
 
     /// <summary>
-    /// Reads the row's primary id from <see cref="RecordIdAttribute"/>, tolerating the Guid / string
-    /// shapes the fetch projection can carry. Returns <c>false</c> for a missing/empty/unparseable id.
+    /// Reads a Guid id from the row's <paramref name="attribute"/>, tolerating the Guid / EntityReference
+    /// / string shapes the fetch projection can carry. Returns <c>false</c> for a missing/empty/unparseable
+    /// value. (A root module reads its own primary id; a child module reads a typed parent lookup — which
+    /// the SDK projects as an <see cref="EntityReference"/>.)
     /// </summary>
-    internal bool TryGetRecordId(IReadOnlyDictionary<string, object?> row, out Guid id)
+    internal static bool TryGetAttributeId(IReadOnlyDictionary<string, object?> row, string attribute, out Guid id)
     {
         id = Guid.Empty;
-        if (row is null || !row.TryGetValue(RecordIdAttribute, out var raw) || raw is null)
+        if (row is null || string.IsNullOrWhiteSpace(attribute) ||
+            !row.TryGetValue(attribute, out var raw) || raw is null)
         {
             return false;
         }
@@ -183,10 +274,9 @@ public sealed class ExternalModuleRegistry
         {
             throw new ArgumentException("Module RecordEntity is required.", nameof(descriptor));
         }
-        if (string.IsNullOrWhiteSpace(descriptor.RecordIdAttribute))
-        {
-            throw new ArgumentException("Module RecordIdAttribute is required.", nameof(descriptor));
-        }
+        // Validate the scope model resolves (either ScopeDimensions or the single-attribute shorthand) —
+        // EffectiveDimensions throws a descriptive InvalidOperationException if neither is configured.
+        _ = descriptor.EffectiveDimensions;
         if (!_byName.TryAdd(descriptor.Name, descriptor))
         {
             throw new InvalidOperationException(

@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Email per-item tools — extend EmailDraftToolHandler: draft_reply/draft_forward (auto-draft) + summarize_thread (reuse file-summarize over .eml) (FR-09)</title>
+    <phase>2 — Capability parity</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New AI per-item tools on the ADR-039 catalog + ADR-015 governance boundary; extends an existing email draft handler and reuses the file-summarize path over .eml; AI facade (ADR-013)</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Judgment-sensitive: auto-generate authored bodies for reply/forward, and match summarize_thread output EXACTLY to the existing file/document-summarize shape (not a bespoke format); sits on Services/Ai + email-handler surface owned by redesign-r2 + email-r5</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave2-BFF</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Ai/** + the email draft handler — coordinate with spaarke-ai-architecture-redesign-r2 (Services/Ai internals, PublicContracts no fork) and email-communication-solution-r5 (email handler). /conflict-check before the PR.</parallel-reason>
+    <deps>011</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>5-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Implement email per-item tools by EXTENDING `EmailDraftToolHandler` (not a new handler family): `draft_reply(communicationId, mode)` and `draft_forward(communicationId)` auto-generate the authored body; `summarize_thread(communicationId)` loads the `.eml` via eml-render (FileAccessEndpoints.cs:901) / document-context and answers IN CHAT. The summarize_thread output shape MUST be a plain narrative summary IDENTICAL to the existing file/document-summarize handler — reuse that prompt/response path over the `.eml`; do NOT author a bespoke thread-summary format. Register as ADR-039 catalog rows; consume Services/Ai/PublicContracts/ — do NOT fork Services/Ai internals or inject AI-internal types into CRUD code.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI tool-handler expertise; comfortable extending an existing draft handler, wiring auto-draft generation, and reusing the file-summarize prompt/response path over an .eml.</role>
+  <goal>The per-item Email tools exist and are catalog-registered: draft_reply/draft_forward auto-generate an authored body (consumed by task 024's bodyOverride), and summarize_thread answers in chat with a plain narrative identical in form to a file summary — no composer opened.</goal>
+  <context>
+    <background>FR-09 — email per-item parity. Extend the EXISTING EmailDraftToolHandler (not a new handler family): draft_reply(communicationId, mode) and draft_forward(communicationId) auto-generate the authored body region that task 024's `bodyOverride` injects — the draft composes ABOVE the reducer-derived quoted thread (the thread-preservation invariant, FR-10). summarize_thread(communicationId) loads the .eml via eml-render (FileAccessEndpoints.cs:901) / DocumentContextService and answers in chat. Output shape (resolved): plain narrative summary IDENTICAL to the existing file/document-summarize handler — reuse that handler's prompt/response path over the .eml; NOT a bespoke structured/JSON thread format. Reuse: IRagService / DocumentContextService / eml-render. Consume Services/Ai/PublicContracts/; redesign-r2 owns Services/Ai internals (no fork); coordinate with email-r5 on the email handler.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/** EmailDraftToolHandler (EXTEND — add draft_reply/draft_forward/summarize_thread; NOT a new handler family)</file>
+      <file>src/server/api/Sprk.Bff.Api/.../FileAccessEndpoints.cs (~:901 eml-render — load the .eml for summarize_thread)</file>
+      <file>the existing file/document-summarize handler (reuse its prompt/response path for summarize_thread — identical plain-narrative output)</file>
+      <file>DocumentContextService / IRagService (document-context backing for the .eml)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (facade seam — NO fork of internals)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (add/update unit tests — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the three new email tools">Register as catalog rows consumed by the deterministic PreFilter; NO classifier, NO second dispatch surface.</constraint>
+    <constraint source="ADR-015" scope="tool inputs and outputs">Tools fetch by communicationId over OBO; no email content enters the prompt — content is tool-fetched by id.</constraint>
+    <constraint source="ADR-013" scope="Services/Ai placement and email-handler extension">Consume the Services/Ai/PublicContracts/ facade; do NOT fork Services/Ai internals (redesign-r2 sole owner); do NOT inject IOpenAiClient/IPlaybookService or other AI-internal types into CRUD code.</constraint>
+    <constraint source="project" scope="the email tool family">EXTEND EmailDraftToolHandler — MUST NOT create a new handler family (§11 reuse-first / NFR-06).</constraint>
+    <constraint source="project" scope="summarize_thread output">Reuse the existing file/document-summarize prompt/response path over the .eml; output = plain narrative IDENTICAL to a file summary — MUST NOT author a bespoke structured/JSON thread-summary format (FR-09 resolved).</constraint>
+    <constraint source="project" scope="draft_reply/draft_forward output">Auto-generate ONLY the authored-message body region (consumed by 024's bodyOverride, composed above the quoted thread) — MUST NOT produce a whole-body replacement that drops the quoted thread (FR-10 invariant boundary).</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed — measure and report absolute + delta; no new HIGH CVE.</constraint>
+    <constraint source="NFR-08" scope="the tool handler extensions">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Extend EmailDraftToolHandler with draft_reply(communicationId, mode) and draft_forward(communicationId) that auto-generate the authored body region (the part 024's bodyOverride injects above the quoted thread).</step>
+    <step order="2">Add summarize_thread(communicationId): load the .eml via eml-render (FileAccessEndpoints.cs:901) / document-context, then reuse the existing file/document-summarize prompt/response path to answer in chat with a plain narrative.</step>
+    <step order="3">Register the three tools as ADR-039 catalog rows via the Services/Ai/PublicContracts/ facade — no fork.</step>
+    <step order="4">Verify summarize_thread output matches the file-summarize shape (plain narrative, no bespoke format) and opens no composer.</step>
+    <step order="5">Add/extend unit tests in tests/unit/Sprk.Bff.Api.Tests/ (auto-draft body produced; summarize_thread narrative shape; OBO/id-fetch; no prompt content).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute + delta; run the vulnerable-package scan.</step>
+    <step order="7">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If reaching parity with the file/document-summarize output requires anything beyond reusing that handler's prompt/response path over the .eml (i.e. a bespoke thread-summary format seems necessary), STOP and escalate (FR-09 resolved: identical to file summarize) rather than inventing a format.</trigger>
+  </escalation>
+  <justification>
+    <existing>EmailDraftToolHandler exists; IRagService/DocumentContextService + eml-render (FileAccessEndpoints.cs:901) and the file/document-summarize path exist.</existing>
+    <extension>Extend EmailDraftToolHandler with three tools; reuse the file-summarize path over the .eml — no new handler family, no new summarize format.</extension>
+    <cost-of-doing-nothing>Reply/Forward cards cannot auto-draft and "Summarize the thread" has no backing — the per-item Email DoD (FR-09/FR-10) fails.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/** EmailDraftToolHandler (extended with draft_reply/draft_forward/summarize_thread)</output>
+    <output type="code">the ADR-039 catalog rows registering the three tools</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ email per-item tool unit tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">draft_reply(communicationId, mode) and draft_forward(communicationId) auto-generate an authored body region (the input 024's bodyOverride injects).</criterion>
+    <criterion testable="true">summarize_thread(communicationId) loads the .eml via eml-render/document-context and answers in chat.</criterion>
+    <criterion testable="true">summarize_thread output is a plain narrative IDENTICAL in form to the existing file/document-summarize handler — not a bespoke structured format (negative case).</criterion>
+    <criterion testable="true">summarize_thread opens NO composer.</criterion>
+    <criterion testable="true">The tools live on an EXTENSION of EmailDraftToolHandler — no new handler family (negative case).</criterion>
+    <criterion testable="true">Content is fetched by communicationId over OBO; no email content enters the prompt (ADR-015).</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+    <criterion testable="true">Unit tests added/updated in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
+  </acceptance-criteria>
+  <notes>The draft_* tools produce the body that task 024's `bodyOverride` injects (composes above the quoted thread — the thread-preservation invariant, FR-10). Coordinate with redesign-r2 (Services/Ai internals, PublicContracts no fork) and email-r5 (email handler); /conflict-check before the PR.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

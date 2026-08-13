@@ -22,11 +22,31 @@ import { captureReturnTo, consumeReturnTo, getActiveLoginScope } from '../auth/m
 
 interface AuthGuardProps {
   children: React.ReactNode;
+  /**
+   * True when running inside the Teams host. In Teams, authentication is completed during bootstrap
+   * (TeamsHostAdapter.selectAuthStrategy acquires a BFF-valid workforce token — via NAA or the Teams
+   * SSO getAuthToken fallback — BEFORE <App> is rendered), so this guard must NOT run the MSAL
+   * account gate below. See the early return for the full rationale.
+   */
+  teamsHost?: boolean;
 }
 
-export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
+export const AuthGuard: React.FC<AuthGuardProps> = ({ children, teamsHost = false }) => {
   // In mock mode, skip MSAL entirely — render children as if authenticated.
   if (import.meta.env.VITE_DEV_MOCK === 'true') {
+    return <>{children}</>;
+  }
+
+  // Inside the Teams host, the caller is already authenticated by the time this guard mounts:
+  // main.tsx only renders <App> after TeamsHostAdapter.initialize() resolves, which means a
+  // BFF-valid workforce token was acquired and the active BFF token acquirer is wired. The Teams
+  // SSO fallback (authentication.getAuthToken) that desktop relies on returns a RAW bearer token
+  // that never lands in the MSAL account cache — so useIsAuthenticated() would be false here even
+  // though the user is fully authenticated. Running the MSAL gate below would then fire
+  // instance.loginRedirect(), and a full-page redirect inside the Teams iframe is blocked
+  // (NFR-04 — never redirect inside Teams), leaving a blank tab. So in Teams, render children
+  // directly. (On web, NAA populates the account and the standard gate below applies.)
+  if (teamsHost) {
     return <>{children}</>;
   }
 

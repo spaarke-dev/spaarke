@@ -154,6 +154,38 @@ describe('initialState — per-mode seeding', () => {
     expect(state.subject).toBe('');
     expect(state.to).toEqual([]);
   });
+
+  // D-5 fix (spaarkeai-assistant-enhancements-r3 task 025, hand-off from task 024
+  // Step 9.5): the PROPS-ONLY path (no `sourceRecord` — `useEmailComposeActions`)
+  // must seed `state.quotedThread` from `props.initialQuotedThread` so the
+  // in-dialog AI sparkle's re-append (`runAiDraft`) does not drop an already-
+  // seeded quoted thread on the first re-draft.
+  it('D-5: reply/forward WITHOUT sourceRecord seeds quotedThread from initialQuotedThread', () => {
+    const quoted = '<p>On Jul 1, sender@example.com wrote:</p><hr/><p>Original body</p>';
+    const state = initialState(
+      baseProps({
+        mode: 'reply',
+        sourceRecord: undefined,
+        initialBody: `<p>AI draft</p><p></p>${quoted}`,
+        initialQuotedThread: quoted,
+      })
+    );
+    expect(state.quotedThread).toBe(quoted);
+    expect(state.body).toContain(quoted);
+  });
+
+  it('D-5: quotedThread stays undefined when initialQuotedThread is omitted (no regression for existing callers)', () => {
+    const state = initialState(baseProps({ mode: 'compose', initialBody: '<p>Hi</p>' }));
+    expect(state.quotedThread).toBeUndefined();
+  });
+
+  it('D-5: when sourceRecord IS present, its derived quotedThread wins over initialQuotedThread (unchanged sourceRecord-path behavior)', () => {
+    const state = initialState(
+      baseProps({ mode: 'reply', sourceRecord, initialQuotedThread: '<p>should be ignored</p>' })
+    );
+    expect(state.quotedThread).not.toBe('<p>should be ignored</p>');
+    expect(state.quotedThread).toContain('Original body');
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -4,7 +4,7 @@
     <title>Related-to card-picker — reuse EmailConnectionsReview for association + new-vs-related intent (no second write path)</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
     <gate>deps 050 complete (grid + row cell seam)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>User-facing association-write surface (.tsx) on shared lib; regarding writes are correctness-critical (ADR-024 single write path); §8 FULL (frontend + write-path + shared-lib blast radius).</rigor-reason>
     <model-tier>sonnet</model-tier>

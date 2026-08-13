@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Tier-1 entitlement Option-B wiring — resolver reads sprk_approlemodulemap (internal App-Role→module) + blanket-entitle CIAM plane + widgetRegistry tab sets (amends 021/022)</title>
+    <phase>P2b Polymorphic access-write (grant authoring)</phase>
+    <gate>blocked-until:020 (schema owner-created)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Defines Tier-1 module entitlement (which tabs each plane sees) — an authorization surface; bff-api + auth + frontend; /me contract + client gating.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Auth/entitlement contract (dual-plane) feeding the client gate; same tier as the resolver tasks it amends (021 O/h).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared external-access BFF surface (/me resolver) + widgetRegistry; auth-sensitive; serialize.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff-api, auth, frontend</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Implement Tier-1 module entitlement per owner-chosen Option B (single Contact-free table). The entitlement
+    resolver + /me endpoint (tasks 021/022) resolve module entitlement as: INTERNAL (workforce) = the caller's
+    Entra App-Role claims mapped via the owner-created sprk_approlemodulemap (approlename → modulecode) to a set
+    of entitlement codes; EXTERNAL (CIAM outside counsel) = blanket-entitled to the outside-counsel tab set (no
+    per-Contact external entitlement table). Then set widgetRegistry.ts default/entitlement tab sets to the owner
+    tab lists. This AMENDS tasks 021 (resolver) + 022 (/me) with the Option-B decision. Binding design:
+    notes/polymorphic-grant-authoring-enhancement.md + notes/module-entitlement-schema-decision.md.
+  </prompt>
+
+  <role>SPAARKE platform engineer (BFF auth + client entitlement). Precise about dual-plane entitlement resolution and the /me contract the client gates on. Follows ADR-008/009/010/028 strictly.</role>
+
+  <goal>
+    /me.entitlements returns the correct module codes per plane: internal from sprk_approlemodulemap (App-Role→module),
+    external blanket outside-counsel set. widgetRegistry renders exactly the owner tab sets: internal = Quick Start
+    (pinned) + Service Requests + Policy Library; external = Work Assignments + Projects + Matters + Invoices +
+    Documents. Adding an internal role→module mapping is a data row in sprk_approlemodulemap (no code change).
+  </prompt>
+
+  <context>
+    <background>
+      Owner created + seeded sprk_approlemodulemap (Contact-free: sprk_approlename + sprk_modulecode + composite key).
+      Option B: external CIAM contacts do NOT need per-Contact Tier-1 — they are blanket-entitled to the outside-counsel
+      tabs, and record access is controlled purely by Tier-2 grants (tasks 028 read / 070+071 write). Module codes are
+      the exact strings widgetRegistry gates on: legal-front-door, policy-library, admin. Current widgetRegistry ciam
+      widgets carry requiredEntitlement:'assigned-work' (drop under Option B — entitle all ciam). Owner tab sets:
+      internal defaults = service-requests + policy-library (+ Quick Start pinned); external defaults = projects,
+      matters, work-assignments, documents, invoices.
+    </background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/021-entitlement-resolver.poml (AMENDS — Option B resolver)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/022-me-entitlement-endpoint.poml (AMENDS — /me returns Option-B entitlements)</file>
+      <file>src/server/api/Sprk.Bff.Api/ (entitlement resolver + /me endpoint — read sprk_approlemodulemap for internal; blanket ciam)</file>
+      <file>src/client/external-spa/src/registry/widgetRegistry.ts (tab sets per owner lists; drop requiredEntitlement:'assigned-work' on ciam widgets; internal defaults = service-requests + policy-library)</file>
+      <file>src/client/external-spa/src/api/me-client.ts (entitlement shape, if changed)</file>
+    </relevant-files>
+    <dependencies>020 (sprk_approlemodulemap, owner-created). Amends 021/022. Independent of 070/071 (Tier-1 vs Tier-2), same wave.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Option B: NO per-Contact external module-entitlement table; external CIAM contacts are blanket-entitled to the outside-counsel tabs. Internal entitlement = App-Role claims → sprk_approlemodulemap → module codes, resolved WITHOUT any Contact record.</constraint>
+    <constraint source="owner">Tab sets (defaults): internal = Quick Start (pinned) + Service Requests + Policy Library; external = Work Assignments + Projects + Matters + Invoices + Documents. Non-listed internal widgets (my-requests/inventions/nda/messages) are NOT internal defaults in R2 (leave registered, defaultForRoles empty, or per owner).</constraint>
+    <constraint source="spec-FR08">Adding a role→module mapping later MUST be a data row in sprk_approlemodulemap — no code/schema change. The resolver reads the table live (respecting statecode Active).</constraint>
+    <constraint source="ADR-009">Cache /me entitlement (Redis) + invalidate on change per the existing pattern; do NOT cache an authorization decision, only the entitlement data.</constraint>
+    <constraint source="NFR-06">Client gating is UX-honest only; server-side Tier-1 (this) + Tier-2 (028/070/071) are the security boundary. /me must never over-report entitlements.</constraint>
+    <constraint source="project">§10 BFF Hygiene: Placement Justification; /conflict-check before the BFF PR; publish ≤60 MB; no new HIGH CVE; tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/polymorphic-grant-authoring-enhancement.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/module-entitlement-schema-decision.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/021-entitlement-resolver.poml</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/tasks/022-me-entitlement-endpoint.poml</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-009-caching-redis-first.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check (BFF /me surface + external-spa widgetRegistry).</step>
+    <step order="2">Implement the internal resolver term: read the caller's Entra App-Role claims (token roles), map via active sprk_approlemodulemap rows (approlename → modulecode) to a de-duplicated set of module codes. No Contact record involved.</step>
+    <step order="3">Implement the external term: for a CIAM (outside-counsel) principal, blanket-entitle the outside-counsel module set (the codes the ciam tabs require) — no per-Contact table lookup.</step>
+    <step order="4">/me returns entitlements[] per plane; cache + invalidate per ADR-009.</step>
+    <step order="5">widgetRegistry.ts: set defaultForRoles + requiredEntitlement to the owner tab sets — internal defaults = service-requests + policy-library (Quick Start pinned); ciam widgets entitled to all ciam (drop requiredEntitlement:'assigned-work'); non-listed internal widgets non-default.</step>
+    <step order="6">Tests: internal caller with FrontDoorUser sees exactly {service-requests, policy-library} (+ pinned QS); a second seeded role→module row changes entitlements with NO code change (FR-08); external caller sees the 5 outside-counsel tabs; negative — an unmapped internal role yields no internal modules.</step>
+    <step order="7">dotnet build + test; publish size; deploy BFF from worktree; external-spa build. Verify /me on both planes.</step>
+    <step order="8">Quality gates (code-review + adr-check). Mark 072 ✅ and annotate 021/022 as amended by 072 in TASK-INDEX.md. Document deviations.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish the BFF</tool>
+    <tool name="npm">Build the external-spa</tool>
+    <tool name="mcp__dataverse">Verify sprk_approlemodulemap rows</tool>
+    <tool name="terminal">Deploy script / shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Option-B entitlement resolver (internal App-Role→sprk_approlemodulemap; external blanket) + /me</output>
+    <output type="code">widgetRegistry tab sets per owner lists</output>
+    <output type="test">Per-plane entitlement + data-row-only role-add (FR-08) + negative unmapped-role</output>
+  </outputs>
+
+  <ui-tests>
+    <test name="internal-tab-set">Load the SPA as an internal (workforce) caller with FrontDoorUser; assert the tab set = Quick Start (pinned) + Service Requests + Policy Library, and non-listed internal widgets are not default.</test>
+    <test name="external-tab-set">Load the SPA as an external (CIAM) caller; assert the tab set = Work Assignments + Projects + Matters + Invoices + Documents (no Service Requests).</test>
+    <test name="adr-021-dark-mode">Render the tab set in dark mode; no hardcoded colors; no console errors.</test>
+  </ui-tests>
+
+  <acceptance-criteria>
+    <criterion testable="true">Internal caller with the FrontDoorUser App-Role gets exactly the module codes its sprk_approlemodulemap rows grant; /me.entitlements reflects them; the SPA shows Quick Start + Service Requests + Policy Library.</criterion>
+    <criterion testable="true">Adding a new active sprk_approlemodulemap row changes a role's entitlements with NO code/schema change (FR-08).</criterion>
+    <criterion testable="true">External (CIAM) caller is blanket-entitled to the outside-counsel tabs (Work Assignments/Projects/Matters/Invoices/Documents) with no per-Contact entitlement row; record visibility still governed by Tier-2 grants (028/070/071).</criterion>
+    <criterion testable="true">Negative: an internal caller whose App-Roles map to nothing gets no internal modules (no over-entitlement); /me never reports a module the caller isn't entitled to.</criterion>
+  </acceptance-criteria>
+
+  <justification>
+    <existing>Tasks 021/022 scaffold the resolver + /me; sprk_approlemodulemap exists (owner-created). widgetRegistry already gates on entitlement codes.</existing>
+    <extension>Yes — amends 021/022 with the Option-B decision + wires the owner tab lists; no new table (Option B is the single owner-created table), no new endpoint.</extension>
+    <cost-of-doing-nothing>Without it, /me has no data source deciding which tabs to show, internal entitlement would require a fabricated Contact grant, and the client can't render the owner's tab sets.</cost-of-doing-nothing>
+  </justification>
+
+  <notes>
+    Option B chosen by owner (module-entitlement-schema-decision.md). This is the Tier-1 "which tabs" layer — orthogonal to the Tier-2 record-grant work (028 read / 070+071 write). Amends 021/022 rather than duplicating them.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge/files first. /conflict-check before the BFF + widgetRegistry changes. Deploy BFF from worktree. FULL-rigor gates at Step 9.5.</protocol>
+  </execution>
+</task>

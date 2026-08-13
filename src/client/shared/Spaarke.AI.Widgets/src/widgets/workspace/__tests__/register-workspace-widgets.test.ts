@@ -502,3 +502,185 @@ describe('contextType — closed set (task 020, FR-B1 + FR-C3)', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tests: assistantContract — Assistant-contract metadata SHAPE
+// (FR-08 + FR-15 SHAPE, R3 task 022)
+// ---------------------------------------------------------------------------
+//
+// Covers task 022's acceptance criteria:
+//   - Every overview-only surface (grids + 'workspace' dashboard, hosting
+//     Daily Briefing/Calendar) declares an overview tool and NO per-item
+//     cards.
+//   - The 'email' widget declares per-item cards Reply/Reply All/Forward/
+//     Summarize the thread.
+//   - A widget with no declared contract resolves deterministically to
+//     `undefined` (the default/none case) — never a partial/garbage value.
+//   - No card label/tool/landing carries item content (a static string set,
+//     never data pulled from a live record).
+
+describe('assistantContract — Assistant-contract metadata SHAPE (task 022, FR-08 + FR-15)', () => {
+  beforeEach(() => {
+    loadRegistrations();
+  });
+
+  const OVERVIEW_ONLY_WIDGETS = [
+    'workspace',
+    'documents-list',
+    'matters-list',
+    'projects-list',
+    'invoices-list',
+    'work-assignments-list',
+    'my-tasks-list',
+    'communications-list',
+  ] as const;
+
+  it.each(OVERVIEW_ONLY_WIDGETS)('%s declares ONE overview tool and NO per-item cards (respond pattern)', type => {
+    const meta = registry.getWorkspaceWidgetMetadata(type);
+    expect(meta).toBeDefined();
+    const contract = meta!.assistantContract;
+    expect(contract).toBeDefined();
+    expect(contract!.overviewTools).toEqual(['overview_query']);
+    expect(contract!.perItemCards).toEqual([]);
+    expect(contract!.interactionPattern).toBe('respond');
+  });
+
+  it('every overview-only widget references the SAME overview tool name (NFR-06 — one parameterized tool, not N handlers)', () => {
+    const toolNames = new Set(
+      OVERVIEW_ONLY_WIDGETS.map(type => registry.getWorkspaceWidgetMetadata(type)!.assistantContract!.overviewTools[0])
+    );
+    expect(toolNames.size).toBe(1);
+  });
+
+  it("the 'email' widget declares per-item cards Reply/Reply All/Forward/Summarize the thread (FR-09/FR-10)", () => {
+    const meta = registry.getWorkspaceWidgetMetadata('email');
+    expect(meta).toBeDefined();
+    const contract = meta!.assistantContract;
+    expect(contract).toBeDefined();
+    expect(contract!.overviewTools).toEqual([]);
+    expect(contract!.perItemCards.map(c => c.label)).toEqual(['Reply', 'Reply All', 'Forward', 'Summarize the thread']);
+    expect(contract!.interactionPattern).toBe('hybrid');
+  });
+
+  it("email's Reply/Reply All/Forward cards land on the composer; Summarize lands in chat", () => {
+    const contract = registry.getWorkspaceWidgetMetadata('email')!.assistantContract!;
+    const byLabel = new Map(contract.perItemCards.map(c => [c.label, c]));
+    expect(byLabel.get('Reply')!.landing).toBe('composer');
+    expect(byLabel.get('Reply All')!.landing).toBe('composer');
+    expect(byLabel.get('Forward')!.landing).toBe('composer');
+    expect(byLabel.get('Summarize the thread')!.landing).toBe('chat');
+  });
+
+  it('Reply and Reply All invoke the SAME catalog tool (draft_reply — mode is a call-time argument, not a separate tool)', () => {
+    const contract = registry.getWorkspaceWidgetMetadata('email')!.assistantContract!;
+    const byLabel = new Map(contract.perItemCards.map(c => [c.label, c.tool]));
+    expect(byLabel.get('Reply')).toBe('draft_reply');
+    expect(byLabel.get('Reply All')).toBe('draft_reply');
+    expect(byLabel.get('Forward')).toBe('draft_forward');
+    expect(byLabel.get('Summarize the thread')).toBe('summarize_thread');
+  });
+
+  it('a widget with no Assistant contract declares an EXPLICIT opt-out marker (FR-15/task 050) and getWidgetAssistantContract() still resolves it to undefined — e.g. BudgetDashboard', () => {
+    const meta = registry.getWorkspaceWidgetMetadata('BudgetDashboard');
+    expect(meta).toBeDefined();
+    // Post-050 the field is REQUIRED: instead of silent absence it now carries
+    // an explicit opt-out marker with a documented reason.
+    const declared = meta!.assistantContract as { optOut?: boolean; reason?: string };
+    expect(declared).toBeDefined();
+    expect(declared.optOut).toBe(true);
+    expect(typeof declared.reason).toBe('string');
+    expect(declared.reason!.length).toBeGreaterThan(0);
+    // The opt-out is transparent to every downstream consumer: the accessor
+    // still reports "no contract" (undefined), exactly as it did pre-050 for an
+    // omitted field.
+    expect(registry.getWidgetAssistantContract('BudgetDashboard')).toBeUndefined();
+    expect(registry.getWidgetInteractionPattern('BudgetDashboard')).toBeUndefined();
+  });
+
+  it('no per-item card label, tool name, or landing tag carries item content (ADR-015) — every value is a static, non-empty string from a small closed set', () => {
+    for (const type of registry.getAllWorkspaceWidgetTypes()) {
+      // Read via the accessor (FR-15/task 050): it returns `undefined` for
+      // opt-out widgets, so this loop only walks REAL contracts' per-item cards.
+      const contract = registry.getWidgetAssistantContract(type);
+      if (!contract) continue;
+      for (const card of contract.perItemCards) {
+        // Labels/tool names are short, static UI strings — never a GUID,
+        // email subject, or free-text snippet (which would indicate live
+        // record content leaking into registration metadata).
+        expect(card.label.length).toBeGreaterThan(0);
+        expect(card.label.length).toBeLessThan(60);
+        expect(card.tool).toMatch(/^[a-z_]+$/);
+        expect(['chat', 'composer', 'compose']).toContain(card.landing);
+      }
+    }
+  });
+
+  it('the shape is type-safe: a WidgetAssistantContract object literal missing a required field fails to typecheck', () => {
+    // Compile-time proof (not a runtime assertion) — this function body is
+    // never called; it exists so `tsc`/ts-jest fails the FILE if the
+    // @ts-expect-error directives below stop being errors (i.e. if the
+    // fields they annotate ever become optional by accident).
+    function _typeSafetyFixture(): void {
+      // @ts-expect-error — overviewTools is a required member.
+      const _missingOverviewTools: import('../../../types/shared').WidgetAssistantContract = {
+        perItemCards: [],
+        interactionPattern: 'respond',
+      };
+      // @ts-expect-error — perItemCards is a required member.
+      const _missingPerItemCards: import('../../../types/shared').WidgetAssistantContract = {
+        overviewTools: [],
+        interactionPattern: 'respond',
+      };
+      // @ts-expect-error — interactionPattern is a required member.
+      const _missingInteractionPattern: import('../../../types/shared').WidgetAssistantContract = {
+        overviewTools: [],
+        perItemCards: [],
+      };
+      // @ts-expect-error — interactionPattern must be one of the closed set.
+      const _invalidPattern: import('../../../types/shared').WidgetAssistantContract = {
+        overviewTools: [],
+        perItemCards: [],
+        interactionPattern: 'not-a-real-pattern',
+      };
+      void _missingOverviewTools;
+      void _missingPerItemCards;
+      void _missingInteractionPattern;
+      void _invalidPattern;
+    }
+    expect(typeof _typeSafetyFixture).toBe('function');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tests: getWidgetContextTypeMap / getWidgetAssistantContract — derived
+// registry accessors (FR-08, task 022)
+// ---------------------------------------------------------------------------
+
+describe('getWidgetContextTypeMap / getWidgetAssistantContract (task 022 registry accessors)', () => {
+  beforeEach(() => {
+    loadRegistrations();
+  });
+
+  it('getWidgetContextTypeMap() is derived from the live registry — matches getWorkspaceWidgetMetadata() per type', () => {
+    const map = registry.getWidgetContextTypeMap();
+    for (const type of registry.getAllWorkspaceWidgetTypes()) {
+      expect(map[type]).toBe(registry.getWorkspaceWidgetMetadata(type)?.contextType);
+    }
+  });
+
+  it("getWidgetContextTypeMap() reports 'email' → 'email' and 'matters-list' → 'matter-grid'", () => {
+    const map = registry.getWidgetContextTypeMap();
+    expect(map['email']).toBe('email');
+    expect(map['matters-list']).toBe('matter-grid');
+  });
+
+  it('getWidgetAssistantContract() returns the same object as metadata.assistantContract', () => {
+    expect(registry.getWidgetAssistantContract('email')).toBe(
+      registry.getWorkspaceWidgetMetadata('email')?.assistantContract
+    );
+  });
+
+  it('getWidgetAssistantContract() returns undefined for an unregistered type', () => {
+    expect(registry.getWidgetAssistantContract('__not_a_real_widget__')).toBeUndefined();
+  });
+});

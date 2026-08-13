@@ -21,6 +21,9 @@
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
 import { summaryWidgetVisibility } from './pillar9-visibility';
+// FR-15 (task 050): assistantContract is a REQUIRED registration member — this
+// widget declares an EXPLICIT opt-out (see the registration below).
+import { assistantContractOptOut } from '../../types/shared';
 
 /**
  * The widget type ID under which StructuredOutputStreamWidget is registered.
@@ -58,6 +61,19 @@ registerWorkspaceWidget(
      * default only matters for batch-mount scenarios.
      */
     defaultOrder: 160,
+    // FR-08 enumeration (task 022): `contextType` deliberately OMITTED. A
+    // streamed structured-AI-output tab (Summarize streaming / Insights
+    // envelope) has no honest fit among the six WidgetContextType values — per
+    // `WidgetMetadata.contextType`'s own contract, omission here means "none",
+    // not an authoring gap.
+    // FR-15 (task 050): `assistantContract` is now REQUIRED, so the task-022
+    // "also omitted" intent is expressed EXPLICITLY as a documented opt-out —
+    // this widget is outside R3's overview (FR-06/07) and per-item (FR-09/11)
+    // scope.
+    assistantContract: assistantContractOptOut(
+      'Streamed structured-AI-output tab (Summarize streaming / Insights envelope) — a render ' +
+        'destination, not an Assistant overview or per-item data surface (outside R3 FR-06/07 + FR-09/11 scope).'
+    ),
   },
   () =>
     import('./StructuredOutputStreamWidget') as Promise<{

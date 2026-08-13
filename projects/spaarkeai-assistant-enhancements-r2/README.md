@@ -1,5 +1,7 @@
 # SpaarkeAI Assistant Enhancements R2
 
+> **Portfolio**: [Project Issue #753](https://github.com/spaarke-dev/spaarke/issues/753) · Parent [Epic #421 (SPAARKE AI)](https://github.com/spaarke-dev/spaarke/issues/421) · Board [Project #2](https://github.com/users/spaarke-dev/projects/2)
+>
 > **Last Updated**: 2026-08-10
 >
 > **Status**: ✅ Complete

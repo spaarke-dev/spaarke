@@ -171,16 +171,20 @@ public static class ExternalModuleDataEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "DV_FETCHXML_ENTITY_MISMATCH" });
         }
 
-        // Compute the caller's Tier-2 accessible set for this module ONCE (a pure read of the already-
-        // resolved principal). An empty set means the caller can see nothing in this module: return 0
-        // rows WITHOUT querying Dataverse (matches ScopeRows' fail-closed contract, and avoids emitting
-        // an invalid empty `IN ()` condition). This is the intended state for the "matters" module today
-        // (D-016-1: always-empty predicate → clean "coming soon" empty state instead of a 500).
-        var accessibleIds = module.AccessibleRecordIds(principal);
-        if (accessibleIds.Count == 0)
+        // Compute the caller's Tier-2 accessible sets for this module's scope dimensions ONCE (a pure
+        // read of the already-resolved principal — task 028 polymorphic OR scoping). A child module has
+        // one dimension per typed parent lookup (project/matter/work-assignment); a root/config module
+        // has one. Keep only the non-empty dimensions. If EVERY dimension is empty the caller can see
+        // nothing in this module: return 0 rows WITHOUT querying Dataverse (matches ScopeRows' fail-closed
+        // contract, and avoids emitting an invalid empty `IN ()` condition).
+        var scopeDimensions = module.EffectiveDimensions
+            .Select(d => new Tier2ScopeFilterInjector.ScopeFilterDimension(d.Attribute, d.AccessibleIds(principal)))
+            .Where(d => d.AccessibleIds.Count > 0)
+            .ToList();
+        if (scopeDimensions.Count == 0)
         {
             logger.LogInformation(
-                "[EXT-MODULE] Fetch module={Module} entity={Entity}: caller has empty accessible set — 0 rows (no query).",
+                "[EXT-MODULE] Fetch module={Module} entity={Entity}: caller has empty accessible set (all dimensions) — 0 rows (no query).",
                 module.Name, module.RecordEntity);
             return Results.Ok(new FetchResponseDto(
                 Array.Empty<IReadOnlyDictionary<string, object?>>(), MoreRecords: false, PagingCookie: null));
@@ -188,14 +192,14 @@ public static class ExternalModuleDataEndpoints
 
         try
         {
-            // Push the Tier-2 record scope INTO the FetchXML as a server-side <filter> on the module's
-            // RecordIdAttribute (IN the accessible ids) BEFORE execution, so Dataverse returns ONLY
-            // accessible rows. This replaces the prior "fetch one unfiltered page, then drop non-matching
-            // rows in memory" approach, which silently returned 0 rows whenever the accessible records
-            // fell outside the first page of a large/sparse table (e.g. sprk_document: 49 project-linked
-            // of 828 total → page 1 was almost all null-project rows). See
+            // Push the Tier-2 record scope INTO the FetchXML as a server-side <filter type='or'> across
+            // the non-empty scope dimensions BEFORE execution, so Dataverse returns ONLY rows that roll
+            // up to an accessible root. This replaces the prior "fetch one unfiltered page, then drop
+            // non-matching rows in memory" approach, which silently returned 0 rows whenever the
+            // accessible records fell outside the first page of a large/sparse table (e.g. sprk_document:
+            // 49 project-linked of 828 total → page 1 was almost all null-project rows). See
             // notes/grid-widget-empty-diagnosis.md. ScopeRows below is retained as defense-in-depth.
-            var scopedFetchXml = Tier2ScopeFilterInjector.Inject(request.FetchXml, module.RecordIdAttribute, accessibleIds);
+            var scopedFetchXml = Tier2ScopeFilterInjector.Inject(request.FetchXml, scopeDimensions);
             var scopedRequest = request with { FetchXml = scopedFetchXml };
 
             // App-only execution (broker-only, no OBO), then Tier-2 scope the rows to the caller's set

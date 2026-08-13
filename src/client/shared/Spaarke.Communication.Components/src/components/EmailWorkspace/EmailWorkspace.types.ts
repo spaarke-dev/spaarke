@@ -172,6 +172,14 @@ export interface EmailWorkspaceProps {
    * `WorkspaceWidgetProps.onDataChange` so the compact shape persists into the
    * tab's `WorkspaceTab.widgetData` (Path 1 persisted-Email carrier). The
    * standalone code-page mount omits it → zero behavior change (NFR-06).
+   *
+   * spaarkeai-assistant-enhancements-r3 task 012 (FR-05): the surfaced state now
+   * also carries `communicationId` (the selected `sprk_communicationid`) — the
+   * identity anchor the SpaarkeAi `email` widget wrapper redirects to the
+   * widget-agnostic active-item conduit as `{ id, type: 'email', label: subject }`
+   * (id/label only, NEVER the email body/content — ADR-015). `EmailWorkspace`
+   * itself stays host-agnostic: it only emits the compact shape via this prop —
+   * it does NOT know about the conduit (ADR-012).
    */
   onVisibleEmailChange?: (state: EmailWorkspaceVisibleState | null) => void;
 }

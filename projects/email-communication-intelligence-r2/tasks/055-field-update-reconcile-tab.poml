@@ -4,7 +4,7 @@
     <title>Field-update reconcile tab (Job B) — FormModal current→matched, editable-before-Accept, apply under audit (NFR-10 gated)</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
     <gate>deps 052,053 complete (confirmed association + reader/citation shell)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>User-facing write surface (.tsx) that POSTs an apply-under-audit; correctness-critical (writes a proposed value onto a record — NFR-10 gating); §8 FULL.</rigor-reason>
     <model-tier>sonnet</model-tier>

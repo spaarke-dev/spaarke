@@ -287,7 +287,11 @@ describe('composeWorkspaceReducer — sourceFormat lifecycle (task 042 / FR-06 P
   function pdfLoadedState(fileName: string | null = 'Corteva NDA.pdf'): ComposeWorkspaceState {
     let state = composeWorkspaceReducer(INITIAL_STATE, {
       kind: 'requestLoad',
-      documentRef: { speDriveItemId: 'spe-pdf-1', sprkDocumentId: 'source-pdf-record', fileName: fileName ?? undefined },
+      documentRef: {
+        speDriveItemId: 'spe-pdf-1',
+        sprkDocumentId: 'source-pdf-record',
+        fileName: fileName ?? undefined,
+      },
       sessionId: 'session-pdf',
     });
     state = composeWorkspaceReducer(state, {
@@ -338,20 +342,26 @@ describe('composeWorkspaceReducer — sourceFormat lifecycle (task 042 / FR-06 P
   it('fileName swap handles the uppercase .PDF extension and the undefined-name fallback (B-LOW-4 mirror)', () => {
     let upper = pdfLoadedState('SIGNED AGREEMENT.PDF');
     upper = composeWorkspaceReducer(upper, {
-      kind: 'saveSucceeded', documentSpeId: 'spe-x', etag: null,
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-x',
+      etag: null,
     });
     expect(upper.documentRef?.fileName).toBe('SIGNED AGREEMENT.docx');
 
     // 042-review LOW-3: a fileName with NO extension — the .pdf-strip regex no-ops and .docx appends.
     let bare = pdfLoadedState('Corteva NDA');
     bare = composeWorkspaceReducer(bare, {
-      kind: 'saveSucceeded', documentSpeId: 'spe-z', etag: null,
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-z',
+      etag: null,
     });
     expect(bare.documentRef?.fileName).toBe('Corteva NDA.docx');
 
     let noName = pdfLoadedState(null);
     noName = composeWorkspaceReducer(noName, {
-      kind: 'saveSucceeded', documentSpeId: 'spe-y', etag: null,
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-y',
+      etag: null,
     });
     // Mirrors triggerSave's ('document.pdf' → 'document.docx') fallback so local state never
     // diverges from the server record.
@@ -377,7 +387,10 @@ describe('composeWorkspaceReducer — sourceFormat lifecycle (task 042 / FR-06 P
     ).toBeNull();
     expect(
       composeWorkspaceReducer(base, {
-        kind: 'mountTransient', docxBytes: bytes(), fileName: 'local.docx', sessionId: 'b1',
+        kind: 'mountTransient',
+        docxBytes: bytes(),
+        fileName: 'local.docx',
+        sessionId: 'b1',
       }).sourceFormat
     ).toBeNull();
     expect(
@@ -389,7 +402,10 @@ describe('composeWorkspaceReducer — sourceFormat lifecycle (task 042 / FR-06 P
   it('a NON-pdf save keeps the pre-041 versionId adopt-only-when-null semantics (no regression)', () => {
     let state = loadedState(); // versionId 'v-load' retained from load
     state = composeWorkspaceReducer(state, {
-      kind: 'saveSucceeded', documentSpeId: 'spe-1', etag: 'e2', versionId: 'v-new',
+      kind: 'saveSucceeded',
+      documentSpeId: 'spe-1',
+      etag: 'e2',
+      versionId: 'v-new',
     });
     // A stored doc's versionId stays FIXED across saves (delta-vs-load-time-original contract).
     expect(state.versionId).toBe('v-load');

@@ -75,13 +75,14 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   // per-render result object), keeping useCallback memoization effective.
   const { widgetTabs, activeTabId, selectTab, openTab, closeTab } = useWorkspaceTabs();
 
-  // /me entitlements (task 012) — real `teamsHost` signal + mocked entitlements pending task 022.
+  // /me entitlements — live BFF call (task 073) to GET /api/v1/external/me/entitlements, with a
+  // plane-derived fallback on failure (see me-client.ts). `teamsHost` seeds the fallback plane.
   const [me, setMe] = React.useState<MeEntitlementsResponse | null>(null);
   const [meError, setMeError] = React.useState<string | null>(null);
   React.useEffect(() => {
     let cancelled = false;
     fetchMeEntitlements(teamsHost)
-      .then((res) => {
+      .then(res => {
         if (!cancelled) setMe(res);
       })
       .catch((err: unknown) => {
@@ -142,30 +143,33 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
     [onEntitledOpenWidget]
   );
 
-  const renderWidget = React.useCallback((widgetId: string) => {
-    const def = getWidgetDefinition(widgetId);
-    if (!def) {
-      // Unknown/unregistered id — degrade gracefully instead of crashing (FR-01).
+  const renderWidget = React.useCallback(
+    (widgetId: string) => {
+      const def = getWidgetDefinition(widgetId);
+      if (!def) {
+        // Unknown/unregistered id — degrade gracefully instead of crashing (FR-01).
+        return (
+          <PlaceholderWidgetBody
+            title="Widget unavailable"
+            description="This widget isn't recognized. It may have been removed, or you may not have access."
+          />
+        );
+      }
+      const Comp = getWidgetLazyComponent(def);
       return (
-        <PlaceholderWidgetBody
-          title="Widget unavailable"
-          description="This widget isn't recognized. It may have been removed, or you may not have access."
-        />
+        <React.Suspense
+          fallback={
+            <div className={s.widgetFallback}>
+              <Spinner label="Loading…" />
+            </div>
+          }
+        >
+          <Comp title={def.title} description={def.description} />
+        </React.Suspense>
       );
-    }
-    const Comp = getWidgetLazyComponent(def);
-    return (
-      <React.Suspense
-        fallback={
-          <div className={s.widgetFallback}>
-            <Spinner label="Loading…" />
-          </div>
-        }
-      >
-        <Comp title={def.title} description={def.description} />
-      </React.Suspense>
-    );
-  }, [s.widgetFallback]);
+    },
+    [s.widgetFallback]
+  );
 
   if (meError) {
     return (
@@ -198,15 +202,15 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
         assistant={<AssistantPane />}
         renderWidget={renderWidget}
         assistantCollapsed={assistantCollapsed}
-        onToggleAssistant={() => setAssistantCollapsed((v) => !v)}
+        onToggleAssistant={() => setAssistantCollapsed(v => !v)}
         assistantDock={assistantDock}
-        onMoveAssistant={() => setAssistantDock((d) => (d === 'left' ? 'right' : 'left'))}
+        onMoveAssistant={() => setAssistantDock(d => (d === 'left' ? 'right' : 'left'))}
       />
       <WidgetLibraryModal
         open={libraryOpen}
         onClose={() => setLibraryOpen(false)}
         me={me}
-        openWidgetIds={widgetTabs.map((t) => t.id)}
+        openWidgetIds={widgetTabs.map(t => t.id)}
         onAdd={onAddFromLibrary}
       />
     </div>

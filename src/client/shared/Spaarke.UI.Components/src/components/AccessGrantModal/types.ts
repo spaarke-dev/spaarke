@@ -19,6 +19,7 @@
  */
 
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import type { ILookupItem } from '../../types/LookupTypes';
 
 /** A single access-conferring membership candidate for the current record —
  * sourced from the contact-anchored role-allowlist (task 021's convention-based
@@ -38,8 +39,12 @@ export interface IAccessGrantCandidate {
  * as read by the caller (Xrm.WebApi, host-context, single-entity — per
  * `docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`). */
 export interface IAccessGrantRecord {
-  /** `sprk_externalrecordaccessid` — required by `/revoke`. */
-  accessRecordId: string;
+  /** `sprk_externalrecordaccessid` — required by `/revoke`. ABSENT for a
+   * standing-grant row (`provenance: 'standing'`), which confers ongoing
+   * membership via the contact's `sprk_standinggrant` flag and has NO
+   * per-record `sprk_externalrecordaccess` row to revoke here (task 073 UAT
+   * #2). Rows without it render as non-revocable in Current Access. */
+  accessRecordId?: string;
   contactId: string;
   fullName: string;
   email?: string;
@@ -50,7 +55,7 @@ export interface IAccessGrantRecord {
   /** Display-only provenance label — NOT sent to the BFF (the endpoint has no
    * provenance field; this is a client-side annotation of HOW the grant was
    * created, inferred by the caller or defaulted by this modal's own writes). */
-  provenance?: 'membership-approved' | 'named' | 'standing' | 'unknown';
+  provenance?: 'membership-approved' | 'named' | 'standing' | 'organization' | 'unknown';
 }
 
 /** A single Dataverse Contact search result (named-contact person-picker). */
@@ -59,6 +64,25 @@ export interface IContactSearchResult {
   fullName: string;
   email?: string;
 }
+
+/** A grantee firm/organization picked via the side-pane Advanced Lookup
+ * (task 071) — a `sprk_organization` record. `id` is the `sprk_organizationid`
+ * GUID (already `cleanGuid`-normalized by the navigation adapter). Sent to the
+ * BFF as `organizationId` (the grant's `sprk_Organization` firm-scoping lookup,
+ * task 070). The shared modal never reads `sprk_organization` itself — the host
+ * supplies this via the injected {@link IAccessGrantModalProps.pickOrganization}
+ * callback, keeping the modal Xrm-free (ADR-012). */
+export interface IOrganizationPick {
+  id: string;
+  name: string;
+}
+
+/** The polymorphic root type a grant is held at (task 070/071). Mirrors the
+ * BFF's `ExternalGrantRoot` types; the caller (the PCF host) derives it from the
+ * bound record's entity and passes it as {@link IAccessGrantModalProps.recordType}
+ * so the modal sends `{recordType, recordId}` grant bodies without knowing any
+ * Dataverse entity name itself (ADR-012). */
+export type ExternalGrantRootType = 'project' | 'matter' | 'workassignment';
 
 /**
  * The record-level Access-Permission sharing-gate state (spec FR-14, Option
@@ -105,8 +129,17 @@ export interface IAccessGrantModalProps {
   open: boolean;
   /** Close callback — wired to the × and the footer Close button. */
   onClose: () => void;
-  /** The current record's id (`sprk_projectid` — R1 scope per design.md §5). */
+  /** The current record's id — the GUID of the polymorphic root identified by
+   * {@link recordType} (a `sprk_project`, `sprk_matter`, or `sprk_workassignment`
+   * id). Sent to the BFF as `recordId`. */
   recordId: string;
+  /** The polymorphic root type this grant is held at (task 070/071). The modal
+   * sends `{recordType, recordId}` in every grant/invite-and-grant body so the
+   * BFF binds the correct typed root lookup. Defaults to `'project'` — the
+   * pre-071 baseline — so a caller that has not yet wired the host entity keeps
+   * writing project grants unchanged (the BFF also accepts the legacy `projectId`
+   * shorthand, but this modal always sends the explicit `recordType`). */
+  recordType?: ExternalGrantRootType;
   /** Gates the modal's functional UI. Mirrors `TrackingFieldTrio`'s
    * `canGrantAccess` gate on the person icon (task 040) — this is a SECOND,
    * defense-in-depth check inside the modal itself, so a direct component
@@ -126,10 +159,53 @@ export interface IAccessGrantModalProps {
   /** Loads the record's existing active grants. Called when the modal opens
    * and re-called after every successful grant/revoke to refresh the list. */
   fetchExistingGrants: () => Promise<IAccessGrantRecord[]>;
+  /** Loads the record's STANDING-grant members — contacts whose global
+   * `sprk_standinggrant` flag is set AND who hold an access-conferring role on
+   * THIS record (the host intersects the standing flag with the record's
+   * role-members so the list mirrors the server-side union in
+   * `AccessibleRecordSetService` — a standing contact with no role on this
+   * record confers no access to it, task 073 UAT #2). Each returned row MUST
+   * carry `provenance: 'standing'` and NO `accessRecordId` (there is no
+   * per-record grant to revoke here). Merged into "Current Access", deduped by
+   * `contactId` against {@link fetchExistingGrants} (an explicit per-record
+   * grant wins). Omit → no standing rows (a host that hasn't wired the
+   * `sprk_standinggrant` field yet). NOTE: `sprk_standinggrant` is
+   * field-level-secured — a caller without FLS read silently gets none. */
+  fetchStandingContacts?: () => Promise<IAccessGrantRecord[]>;
   /** Searches Dataverse Contacts by free-text query (named-contact picker).
    * Debounced by the modal; the host implements the actual Contact query
-   * (Xrm.WebApi, host-context). */
+   * (Xrm.WebApi, host-context). Used ONLY as the fallback inline picker when
+   * {@link pickContact} is not supplied (e.g. an SPA host with no side-pane
+   * lookup); when `pickContact` is provided the modal uses the side-pane
+   * Advanced Lookup instead and this is not called. */
   searchContacts: (query: string) => Promise<IContactSearchResult[]>;
+  /** Searches `sprk_organization` firms/orgs by free-text query for the in-app
+   * "Add organization" inline picker (task 073 UAT #4). Host implements the
+   * actual query (Xrm.WebApi, host-context) and returns `{ id, name }[]`.
+   * When supplied, section 2 shows an inline org `LookupField` that stacks
+   * inside the modal (no side-pane, no modal-hide). Omit → no org picker. */
+  searchOrganizations?: (query: string) => Promise<ILookupItem[]>;
+  /** Opens the host's NATIVE Dataverse advanced-lookup side pane for a single
+   * Contact (task 073 UAT v1.0.24 — `Xrm.Utility.lookupObjects`), returning the
+   * pick (or `null` on cancel). This is the PRIMARY "+ Contact" mechanism — same
+   * advanced-find surface the wizards use (search/views/filters/recent). Works
+   * because the modal renders `nonBlocking` (no backdrop covering the lookup
+   * pane). When supplied, the "+ Contact" button opens this; {@link searchContacts}
+   * is only the fallback for hosts (e.g. an SPA) that can't open the native pane.
+   * (Earlier v1.0.23 deprecated this in favor of an in-modal box; v1.0.24
+   * restored it per owner UAT — the native lookup is preferred.) */
+  pickContact?: () => Promise<IContactSearchResult | null>;
+  /** Opens the host's NATIVE advanced-lookup side pane for a single
+   * `sprk_organization` (task 073 UAT v1.0.24) — the PRIMARY "+ Organization"
+   * mechanism, mirroring {@link pickContact}. Omit → the "+ Organization" button
+   * is hidden. */
+  pickOrganization?: () => Promise<IOrganizationPick | null>;
+  /** Opens the Contact record (task 073 UAT v1.0.24 #6) — wired by the host to
+   * `Xrm.Navigation.navigateTo` (entityrecord, modal target) so a user with write
+   * access to the Contact can view/edit it. When supplied, each contact name in
+   * the Available + Current Access lists renders as a link. Omit → names render
+   * as plain text. */
+  onOpenContact?: (contactId: string) => void;
   /** Classifies a contact as internal-workforce (has a linked `systemuser`)
    * vs external. Drives the notify branch: an external contact with a known
    * email is granted via the built `/invite-and-grant` (onboard + grant + CIAM

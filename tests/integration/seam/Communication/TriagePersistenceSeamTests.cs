@@ -92,6 +92,7 @@ public sealed class TriagePersistenceSeamTests
             new NullCommunicationProposeAi(),
             new NullCommunicationCreateTaskAi(),
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
+            TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

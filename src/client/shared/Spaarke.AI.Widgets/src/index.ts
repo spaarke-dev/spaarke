@@ -64,6 +64,24 @@ export type {
 // WidgetContextType — closed contextType union (FR-B1 + FR-C3, task 020).
 export type { WidgetMetadata, WidgetContextType } from './types/shared';
 
+// Assistant-contract metadata SHAPE (FR-08 + FR-15 SHAPE, R3 task 022) —
+// context-type (above) · overview tool(s) · per-item cards + landing target
+// · interaction pattern. Additive to WidgetMetadata via the optional
+// `assistantContract` field. Task 050 makes it required + enforced.
+export type {
+  WidgetAssistantContract,
+  AssistantContractCard,
+  AssistantInteractionPattern,
+  AssistantCardLanding,
+  // FR-15 (task 050) — the explicit "no Assistant contract" opt-out marker.
+  WidgetAssistantContractOptOut,
+} from './types/shared';
+export { OVERVIEW_QUERY_TOOL_NAME } from './types/shared';
+// FR-15 (task 050) — required-contract enforcement helpers. Registration sites
+// declare a documented opt-out via assistantContractOptOut(); the registry
+// guard + accessors use isAssistantContractOptOut().
+export { assistantContractOptOut, isAssistantContractOptOut } from './types/shared';
+
 // ---------------------------------------------------------------------------
 // Types — Canonical WorkspaceTab (R6 Pillar 6a gate; FR-31)
 //
@@ -130,6 +148,14 @@ export {
   getAllWorkspaceWidgetTypes,
   hasWorkspaceWidget,
   clearWorkspaceRegistry,
+  // FR-08 + FR-15 SHAPE (R3 task 022) — derived widget-type ↔ context-type
+  // map + the Assistant-contract accessor. Consumed by the pre-filter (030)
+  // and the registry guard (050).
+  getWidgetContextTypeMap,
+  getWidgetAssistantContract,
+  // FR-13 (R3 task 040) — the single-sourced interactionPattern accessor.
+  // Consumed by the follow-on derivation (task 041).
+  getWidgetInteractionPattern,
 } from './registry/WorkspaceWidgetRegistry';
 
 // Task 072 (D-C-27) — Pillar 9 visibility extension.
@@ -166,6 +192,13 @@ export { default as GenericTextWidget } from './widgets/GenericTextWidget';
 export { default as DocumentViewerWidget } from './widgets/workspace/DocumentViewerWidget';
 export type { DocumentViewerWidgetData } from './widgets/workspace/DocumentViewerWidget';
 export { DOCUMENT_VIEWER_WIDGET_TYPE } from './widgets/workspace/register-document-viewer-widget';
+
+// email-communication-intelligence-r2 task 064 (E1b/E1c): the SHARED full-menu
+// "create a record" chooser. RELOCATED to @spaarke/ui-components (task 064 Option C)
+// so any surface can present the full create menu without the heavy ai-widgets dep;
+// re-exported here for back-compat with existing ai-widgets consumers.
+export { CreateRecordChooserModal } from '@spaarke/ui-components';
+export type { CreateRecordChooserModalProps, ChooserCreatedRecordRef, ChooserFileArgs } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Widgets: SearchCriteriaResultWidget — Context pane mount-source demo (R4 task 043)
@@ -414,8 +447,9 @@ export type { PlaybookGalleryData, PlaybookSummary } from './widgets/context/Pla
 // for "what can render in the Context pane".
 // ---------------------------------------------------------------------------
 
-export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
-export type { GetStartedCardId, GetStartedCardsWidgetProps } from './widgets/context/GetStartedCardsWidget';
+// RELOCATED to @spaarke/ui-components (task 064 Option C); re-exported for back-compat.
+export { GetStartedCardsWidget } from '@spaarke/ui-components';
+export type { GetStartedCardId, GetStartedCardsWidgetProps } from '@spaarke/ui-components';
 
 // Widgets: AnalysisCardsWidget — the 3 analysis work-type launch cards for the
 // tabbed Quick Start modal's "Analysis" tab (ai-advanced-capabilities-analysis-hub-r1).

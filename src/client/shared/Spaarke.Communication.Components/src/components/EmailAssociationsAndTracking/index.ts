@@ -9,4 +9,9 @@ export { EmailConnectionsReview } from './EmailConnectionsReview';
 export { EmailTrackingPanel } from './EmailTrackingPanel';
 export { ConfirmedChip } from './EmailConnectionsReviewRows';
 export { useConnectionsReviewStyles } from './EmailConnectionsReview.styles';
-export type { EmailConnectionsReviewProps, EmailTrackingPanelProps } from './EmailAssociationsAndTracking.types';
+export type {
+  EmailConnectionsReviewProps,
+  EmailTrackingPanelProps,
+  CreatedRecordRef,
+  EmlSource,
+} from './EmailAssociationsAndTracking.types';

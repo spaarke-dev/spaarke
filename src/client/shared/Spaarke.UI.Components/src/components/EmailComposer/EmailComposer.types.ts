@@ -387,6 +387,22 @@ export interface IEmailComposerProps {
   initialSubject?: string;
   initialBody?: string;
   initialBodyFormat?: EmailComposerBodyFormat;
+  /**
+   * D-5 fix (spaarkeai-assistant-enhancements-r3 task 025, hand-off from task 024
+   * Step 9.5): the quoted-thread block for a reply/forward opened via the
+   * PROPS-ONLY path (no `sourceRecord` — e.g. `useEmailComposeActions.openComposer`,
+   * which composes `initialBody` itself via the Layer-1 `deriveComposerFields` /
+   * `buildQuotedThread`). Without this, `state.quotedThread` stays empty on that
+   * path (only `deriveReplyState`/`deriveForwardState` — the `sourceRecord` path —
+   * populate it), so the in-dialog AI sparkle's re-append (`runAiDraft`, which reads
+   * `state.quotedThread`) silently DROPS an already-seeded quoted thread on the
+   * first re-draft. Seed it here so the props-only path reaches the SAME parity as
+   * the `sourceRecord` path. Ignored when `sourceRecord` is present (the derived
+   * `patch.quotedThread` from `deriveReplyState`/`deriveForwardState` wins, per
+   * `initialState`'s `{...base, ...patch}` merge) — purely additive, no behavior
+   * change for hosts that pass `sourceRecord`.
+   */
+  initialQuotedThread?: string;
 
   // — Associations —
   associations?: ICommunicationAssociation[];

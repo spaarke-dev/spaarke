@@ -104,6 +104,7 @@ public sealed class EmailCreateTaskSeamTests
             proposeAi.Object,
             createTaskAi,
             actionSeam,
+            TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 
