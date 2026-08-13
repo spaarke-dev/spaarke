@@ -93,7 +93,11 @@ async function resolveAttachments(
     );
     return filterFileAttachments((res.entities ?? []).map(r => projectAttachmentRecord(r as IAttachmentRecord)))
       .filter(f => f.attachmentId)
-      .map(f => ({ attachmentId: f.attachmentId, name: f.name || f.documentName || 'Attachment', documentId: f.documentId }));
+      .map(f => ({
+        attachmentId: f.attachmentId,
+        name: f.name || f.documentName || 'Attachment',
+        documentId: f.documentId,
+      }));
   } catch {
     return [];
   }
