@@ -652,15 +652,19 @@ public static class FileAccessEndpoints
                     documentId, context.TraceIdentifier);
                 return TypedResults.Ok(new ShareLinkResponse(url));
             }
-            catch (Microsoft.Graph.Models.ODataErrors.ODataError ex)
+            // ADR-007: endpoints must NOT reference Microsoft.Graph SDK types directly (the Graph
+            // request/response + error types stay isolated in Infrastructure.Graph). We still want the
+            // clean 502 mapping for a Graph OData error (most commonly: tenant policy forbids anonymous
+            // links), so match it by type NAME via an exception filter — no `Microsoft.Graph.*` type
+            // reference in this endpoint. Non-Graph exceptions propagate unchanged (behavior preserved).
+            catch (Exception ex) when (ex.GetType().FullName?.Contains("ODataError", StringComparison.Ordinal) == true)
             {
-                // Most commonly: tenant policy forbids anonymous links. Surface a clean 502 (not a 500).
                 logger.LogWarning(ex,
-                    "CreateShareLink Graph error | DocumentId: {DocumentId} | Code: {Code} | TraceId: {TraceId}",
-                    documentId, ex.Error?.Code, context.TraceIdentifier);
+                    "CreateShareLink Graph error | DocumentId: {DocumentId} | TraceId: {TraceId}",
+                    documentId, context.TraceIdentifier);
                 throw new SdapProblemException(
                     "share_link_failed", "Share Link Failed",
-                    $"Could not create a sharing link (Graph): {ex.Error?.Message ?? ex.Message}", 502);
+                    $"Could not create a sharing link (Graph): {ex.Message}", 502);
             }
         }
 
