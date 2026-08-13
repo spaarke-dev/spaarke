@@ -34,8 +34,10 @@ public sealed class StandingGrantRuntimeUnionSeamTests
     private const string ContactEntity = "contact";
     private const string StandingGrantAttribute = "sprk_standinggrant";
     private const string ExternalAccessResource = "external-access-grant";
-    // Mirrors ExternalParticipationService.CacheVersion — bumped 1→2 by task 028 (grant-set cache shape).
-    private const int CacheVersion = 2;
+    // Mirrors ExternalParticipationService.CacheVersion — history 1→2 (task 028, grant-set cache shape),
+    // 2→3 (task 073 #7). Realigned to 3 (2026-08-13, dotnet-10-upgrade-r1 task 030): this test was stale
+    // at 2 because task-073's production bump didn't update it, so the seeded v2 key was never invalidated.
+    private const int CacheVersion = 3;
 
     private static readonly Guid ContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private const string Tenant = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
