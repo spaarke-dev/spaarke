@@ -32,9 +32,15 @@
  */
 import * as React from 'react';
 import { Tab, TabList, Text, makeStyles, tokens } from '@fluentui/react-components';
-import type { DataGridProps, IDataverseClient, MembershipResolver } from '@spaarke/ui-components';
+import {
+  DataGridViewSelector,
+  type DataGridProps,
+  type IDataverseClient,
+  type MembershipResolver,
+  type SavedView,
+} from '@spaarke/ui-components';
 import { ReconciliationGrid } from '../ReconciliationGrid';
-import { RelatedToCell } from '../ReconciliationGrid';
+import { EmailConnectionsReview } from '../EmailAssociationsAndTracking';
 import { ReconciliationBrowseShell } from '../ReconciliationBrowseShell';
 import type {
   ReconciliationBrowseRecord,
@@ -53,11 +59,22 @@ import type { EmailCitation } from '../../logic/citations';
 /** `sprk_communication` primary id — the browse-shell key + queue index anchor. */
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
 
+/** The reconciled entity — used for the UAT-Fix#3 targeted single-row re-fetch on confirm. */
+const COMMUNICATION_ENTITY = 'sprk_communication';
+
 type TabValue = 'related' | 'fields' | 'tasks';
 
 export interface ReconciliationWorkspaceProps {
   /** GUID of the "Needs-review" `sprk_gridconfiguration` record (forwarded to the grid). */
   configId?: string;
+  /**
+   * UAT Fix #5 — optional view-switcher list. When supplied with ≥2 entries, a
+   * `DataGridViewSelector` renders above the grid; selecting a view swaps the grid's
+   * `configId` to that view's id (each id is a `sprk_gridconfiguration` GUID). The
+   * default view (or the first) is active initially. Omitted ⇒ no switcher; the grid
+   * uses `configId`. Reconciliation hosts pass `RECONCILIATION_VIEWS`.
+   */
+  views?: ReadonlyArray<SavedView>;
   /**
    * Dataverse access implementation (ADR-012). Non-MDA hosts (Code Pages,
    * SpaarkeAi widgets) MUST pass an explicit client (`BffDataverseClient`); MDA
@@ -160,6 +177,13 @@ function defaultToBrowseRecord(record: Record<string, unknown>): ReconciliationB
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%', width: '100%' },
+  viewBar: {
+    display: 'flex',
+    alignItems: 'center',
+    paddingInline: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    flexShrink: 0,
+  },
   grid: { flex: '1 1 auto', minHeight: 0 },
   tabRoot: { display: 'flex', flexDirection: 'column', minHeight: 0, minWidth: 0, height: '100%' },
   tabList: {
@@ -188,6 +212,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   membershipResolver,
   uiScale,
   className,
+  views,
   toBrowseRecord = defaultToBrowseRecord,
   resolveRegarding,
   resolveReview,
@@ -199,6 +224,15 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   resolveEmlSource,
 }) => {
   const s = useStyles();
+
+  // UAT Fix #5 — view-switcher. When `views` is supplied, the active view's id is the
+  // grid's effective configId; selecting a view swaps the grid query. Default = the
+  // flagged default view, else the first, else the `configId` prop.
+  const hasViews = !!views && views.length > 0;
+  const [activeViewId, setActiveViewId] = React.useState<string>(
+    () => views?.find(v => v.isDefault)?.id ?? views?.[0]?.id ?? configId ?? ''
+  );
+  const effectiveConfigId = hasViews ? activeViewId : configId;
 
   // The rows the grid loaded (page 1 ∪ page 2 ∪ …) — the browse queue source.
   const [rows, setRows] = React.useState<ReadonlyArray<Record<string, unknown>>>([]);
@@ -229,6 +263,13 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
   const handleClose = React.useCallback(() => setOpenIndex(null), []);
 
+  // UAT Fix #5 — switch the active view: swap the grid's configId AND close the browse
+  // shell (the row set changes, so the open index no longer maps to the same record).
+  const handleViewChange = React.useCallback((viewId: string) => {
+    setActiveViewId(viewId);
+    setOpenIndex(null);
+  }, []);
+
   // Live browse queue — re-maps on every rows refresh so "N of M" tracks the grid.
   const queue = React.useMemo<ReconciliationBrowseRecord[]>(() => rows.map(toBrowseRecord), [rows, toBrowseRecord]);
 
@@ -238,13 +279,32 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
   // A Related-to confirm (grid cell OR browse tab) → notify the host (refresh) and
   // re-derive the gate/scope; jump the reviewer to Fields next.
+  //
+  // UAT Fix #3 (in-session enable, no remount): instead of the host remounting the whole
+  // workspace via a `key` bump (which closed the browse shell and lost the reviewer's
+  // place), refresh ONLY the confirmed row in-place — re-fetch it and merge into `rows`,
+  // so `resolveRegarding` sees the now-Resolved status + regarding denorm and un-gates
+  // Fields/Tasks WHILE the shell stays open. Best-effort (NFR-04): `forceRescope` re-derives
+  // whether or not the re-fetch resolves; a failed re-fetch just leaves the row gated.
   const handleConfirmed = React.useCallback(
     (record: Record<string, unknown>) => {
       onAssociationsChanged?.(record);
-      forceRescope();
       setSelectedTab('fields');
+      const id = str(record, PRIMARY_ID_FIELD);
+      if (id && dataverseClient) {
+        void dataverseClient
+          .retrieveRecord(COMMUNICATION_ENTITY, id)
+          .then(fresh => {
+            const freshRow = fresh as Record<string, unknown>;
+            setRows(prev => prev.map(r => (str(r, PRIMARY_ID_FIELD) === id ? { ...r, ...freshRow } : r)));
+            forceRescope();
+          })
+          .catch(() => forceRescope());
+      } else {
+        forceRescope();
+      }
     },
-    [onAssociationsChanged]
+    [onAssociationsChanged, dataverseClient]
   );
 
   // Task 064 (E1b): wrap the host's per-row review props to inject a zero-arg
@@ -278,6 +338,12 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       const liveRow = rows.find(r => str(r, PRIMARY_ID_FIELD) === browseRecord.id);
       const regarding = liveRow && resolveRegarding ? resolveRegarding(liveRow) : null;
       const gated = !regarding;
+      // Task UAT-Fix#2 (FR-E3): the browse tab renders the FULL EmailConnectionsReview
+      // INLINE (candidate cards + manual "Lookup Records" pane + Create-new intent) — the
+      // SAME surface the email form renders inline (EmailWorkspace.tsx). The compact
+      // `RelatedToCell` (which hides the review behind a "Requires review" + picker modal)
+      // stays only as the GRID cell renderer, never the browse-tab body.
+      const review = liveRow && resolveReview ? wrapReview(liveRow) : null;
       // While gated, the reviewer can only be on the Related-to tab.
       const effectiveTab: TabValue = gated && selectedTab !== 'related' ? 'related' : selectedTab;
 
@@ -301,8 +367,16 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
           <div className={s.tabBody} data-testid="reconcile-tab-body">
             {effectiveTab === 'related' &&
-              (resolveReview && liveRow ? (
-                <RelatedToCell review={wrapReview(liveRow)} onConfirmed={() => handleConfirmed(liveRow)} />
+              (review && liveRow ? (
+                <EmailConnectionsReview
+                  {...review}
+                  onAssociationsChanged={() => {
+                    // Preserve RelatedToCell's confirm handshake (minus the modal-close):
+                    // fire the host's per-row refresh, then the NFR-10 re-gate/jump-to-Fields.
+                    review.onAssociationsChanged?.();
+                    handleConfirmed(liveRow);
+                  }}
+                />
               ) : (
                 <div className={s.relatedNote} role="note" data-testid="reconcile-related-note">
                   <Text>Related-to review is not configured for this host.</Text>
@@ -348,9 +422,14 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
   return (
     <div className={className ? `${s.root} ${className}` : s.root} data-testid="reconciliation-workspace">
+      {hasViews && views!.length > 1 && (
+        <div className={s.viewBar} data-testid="reconciliation-view-switcher">
+          <DataGridViewSelector views={views!} activeViewId={activeViewId} onViewChange={handleViewChange} />
+        </div>
+      )}
       <div className={s.grid}>
         <ReconciliationGrid
-          configId={configId}
+          configId={effectiveConfigId}
           dataverseClient={dataverseClient}
           membershipResolver={membershipResolver}
           relatedTo={relatedTo}

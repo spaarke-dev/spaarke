@@ -693,6 +693,11 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
         // Per sdap-bff.api-test-suite-repair task 027 (sibling-fixture absorption).
         // Mirrors IntegrationTestFixture.cs line 81 (canonical fix in task 062).
         builder.UseSetting("CosmosPersistence:Endpoint", "https://test.documents.azure.com:443/");
+        // email-communication-intelligence-r2 UAT: SessionPersistenceService.ctor requires
+        // CosmosPersistence:DatabaseName (throws "not configured" → 500 on every /api/ai/chat/sessions
+        // request). Surfaced once the asymmetric-registration host-boot crash was fixed (same PR).
+        // Mirrors the 10+ other Api.Ai/Compose/Communication fixtures that set "spaarke-ai-test".
+        builder.UseSetting("CosmosPersistence:DatabaseName", "spaarke-ai-test");
 
         builder.ConfigureTestServices(services =>
         {

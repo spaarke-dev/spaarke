@@ -242,6 +242,37 @@ public class CommunicationServiceArchiveEmbedTests
         embeddedNames.Should().BeEquivalentTo(new[] { "contract.pdf", "summary.txt" });
     }
 
+    // Regression (2026-08-13): the .eml archive Document links to its communication via the
+    // sprk_relatedcommunication lookup on sprk_document — NOT a sprk_communication lookup, which does
+    // NOT exist on sprk_document (task 029 consolidated onto sprk_relatedcommunication). Writing the
+    // non-existent field made every archive create fail in dev; a real end-to-end send surfaced it,
+    // and the prior mocked tests never asserted the link field. See
+    // projects/email-communication-intelligence-r2/notes/DEFECT-eml-archive-communication-lookup.md.
+    [Fact]
+    public async Task ArchiveExistingAsync_LinksArchiveDocument_ViaRelatedCommunicationLookupNotSprkCommunication()
+    {
+        // Arrange — no attachments; focus on the archive Document's communication link.
+        var communicationId = Guid.NewGuid();
+        var created = new List<(Entity, Guid)>();
+        var entityService = BuildEntityService(communicationId, Array.Empty<Entity>(), created);
+        var speMock = BuildSpeMock(
+            downloadBytesForItemId: itemId => Encoding.UTF8.GetBytes($"bytes-of-{itemId}"),
+            captureUploadedEml: _ => { });
+        var jobMock = BuildJobMock(new List<JobContract>());
+        var sut = BuildSut(entityService.Object, speMock.Object, jobMock.Object);
+
+        // Act
+        await sut.ArchiveExistingAsync(communicationId, CancellationToken.None);
+
+        // Assert — links via the real schema lookup, never the non-existent sprk_communication.
+        var archive = ArchiveDocument(created);
+        archive.Contains("sprk_relatedcommunication").Should()
+            .BeTrue("the archive .eml Document must link its communication via sprk_relatedcommunication");
+        archive.GetAttributeValue<EntityReference>("sprk_relatedcommunication").Id.Should().Be(communicationId);
+        archive.Contains("sprk_communication").Should()
+            .BeFalse("sprk_document has no sprk_communication lookup — writing it fails the create in Dataverse");
+    }
+
     [Fact]
     public async Task ArchiveExistingAsync_WhenOneAttachmentDownloadFails_StillArchivesWithRemaining()
     {
