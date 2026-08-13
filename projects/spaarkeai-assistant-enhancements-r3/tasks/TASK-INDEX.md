@@ -25,8 +25,8 @@
 | 040 | Interaction pattern as registration field | 4 Interaction | FR-13 | sonnet / high | FULL | ❌ | 022,025,026 | ✅ |
 | 041 | Deterministic follow-ons + card/chip type | 4 Interaction | FR-14 | sonnet / high | FULL | ❌ | 040 | ✅ |
 | 050 | Registration contract enforcement (4 sites) | Cross-cutting | FR-15 | opus / high | FULL | ❌ | 022,040 | ✅ |
-| 080 | Deploy + verify (owner-gated; re-sync master) | Deploy | — | sonnet / high | STANDARD | ❌ | all code | 🔄 deployed 2026-08-11 (BFF+code page); runtime DoD = owner UAT (notes/deploy-verify.md) |
-| 090 | Project wrap-up (`/test-diet` gate) | Wrap-up | — | sonnet / med | MINIMAL | ❌ | 080 | 🔲 |
+| 080 | Deploy + verify (owner-gated; re-sync master) | Deploy | — | sonnet / high | STANDARD | ❌ | all code | ✅ deployed 2026-08-11 (BFF+code page); QW1/QW2 on master, live deploy via successor project; runtime DoD = owner UAT (notes/deploy-verify.md) |
+| 090 | Project wrap-up (`/test-diet` gate) | Wrap-up | — | sonnet / med | MINIMAL | ❌ | 080 | ✅ 2026-08-13 — code-review SHIP, test-diet 33/33 MAINTAIN (notes/test-diet-report.md), portfolio Issue #766 archived |
 
 ---
 
