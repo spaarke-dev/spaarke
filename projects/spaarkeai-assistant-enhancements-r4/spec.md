@@ -20,7 +20,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 ### In Scope
 - **E1 — grounded-recommend tier + task-agenda capability**: `advisory`-mode Action + Binding on the Text-path; a per-Action bounded grounded-tool allow-list (opt-in mirroring `sprk_allowsknowledge`) enforced via the deterministic pre-filter; the capability chains `spaarke.grid_overview` (My Tasks configId, OBO `today`) + `spaarke.daily_briefing_overview`, narrates a grounded, cited summary + a recommendation, and launches Tasks.
 - **E2 — capability-backed follow-ons + OBO wording**: suppress/replace free-string `SprkChatSuggestions` that no wired capability backs; extend the R3 deterministic-from-registration chip discipline to *query* chips; add capability-backed follow-on cards to open Daily Briefing + Smart To Do (single-surface registry entries, gated on not-already-open); add the OBO-identity assertion to every user-scoped tool description (QW1).
-- **E3 — feedback→memory loop**: new `preference` MemoryFactType (coordinated with redesign-r2 via PublicContracts); a feedback→memory pipeline (thumbs-down+comment / explicit "do this every time" → governed `preference` item); a governed **narrow-allow-list** preference-producer (named directives → pre-turn tool hints only); an eval-case guardrail on every behavior change.
+- **E3 — feedback→memory loop**: new `preference` MemoryFactType (**owned directly in R4** — redesign-r2 closed); a feedback→memory pipeline (thumbs-down+comment / explicit "do this every time" → governed `preference` item); a governed **narrow-allow-list** preference-producer (named directives → pre-turn tool hints only); an eval-case guardrail on every behavior change.
 - **E4 — D9 viewport fix**: client-only flex-chain correction in the `ConversationPane → SprkChat` subtree; ships with `sprk_spaarkeai` rebuild + `Deploy-SpaarkeAi.ps1`.
 - **P5 — behavior-gap process**: a lightweight standing *project-artifact* register (markdown), NOT a system surface; capture → triage-to-destination → author+eval → measure. P1–P4 are its first four records.
 
@@ -29,7 +29,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 - **Multi-surface launch fan-out** — Briefing/Smart To Do open as individual follow-on cards, not a one-launch fan-out; no `surfaceLaunchRegistry` shape change.
 - **A new grounded-recommend executor / second dispatch surface** (owner Q1 — reuse the one decider).
 - **Broad free-text preference steering** (owner Q2 — narrow allow-list only).
-- Free-roaming agent outside the closed catalog; auto-mutation of the global catalog (stays HITL); memory trust/provenance enforcement (deferred to security project #616 / redesign-r2); net-new grounded tools beyond what E1 chains (the two E1 tools already exist).
+- Free-roaming agent outside the closed catalog; auto-mutation of the global catalog (stays HITL); memory trust/provenance enforcement (deferred to security project #616); net-new grounded tools beyond what E1 chains (the two E1 tools already exist).
 
 ### Affected Areas (file:line, from code trace)
 - `infra/dataverse/actions/list-tasks.action.json` — upgrade/author the advisory task-agenda Action (or a sibling), replacing the ack-only `allowstools=false` framing.
@@ -40,7 +40,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 - `src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/surfaceLaunchRegistry.ts` (~:84) — add Daily Briefing + Smart To Do single-surface entries (`kind:'workspace-tab'`, `list-tasks` precedent :147).
 - `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatSuggestions.tsx` + `SprkChat.tsx` (`handleSuggestionSelect` ~:1583) — gate free-string suggestions on a backing capability.
 - `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` (`transcriptFooter` ~:2889–2910; `handleSurfaceLaunch` ~:1245–1312) + `useConsumerChips.tsx` — follow-on cards for Briefing/Smart To Do.
-- **E3 (coordinate with redesign-r2)**: `Services/Ai/Memory/MemoryFactType.cs` (:12–33, add `Preference`); `Handlers/MemoryWriteHandler.cs` (wire map :97–104); `Services/Ai/Feedback/*` (feedback→memory pipeline); `Services/Ai/Context/ContextBinder.cs` (userFragment :553–583) + a governed preference-producer seam; consume `Services/Ai/PublicContracts/MemoryItem.cs` — **no fork of `Services/Ai/` internals**.
+- **E3 (owned in R4 — redesign-r2 closed)**: `Services/Ai/Memory/MemoryFactType.cs` (:12–33, add `Preference`); `Handlers/MemoryWriteHandler.cs` (wire map :97–104); `Services/Ai/Feedback/*` (feedback→memory pipeline); `Services/Ai/Context/ContextBinder.cs` (userFragment :553–583) + a governed preference-producer seam; bind to `Services/Ai/PublicContracts/MemoryItem.cs` v1; keep the AI-facade discipline (ADR-013 — no AI-internal types into CRUD code).
 - **E4**: `SprkChat.tsx:1432` (trailing-spacer inline px), `SprkChat.tsx` `inputZone` (~:208–212 / applied 2884), `ConversationPaneChrome.tsx:50` (`sprkChatFlex`) — the D9 suspects.
 
 ---
@@ -52,7 +52,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 **E1 — Proactive grounded assistance (fixes P1)**
 
 1. **FR-01 (task-agenda advisory capability)**: for the "what do I need to do today"/task-agenda intent, the Assistant calls the allow-listed grounded tools (`spaarke.grid_overview` My-Tasks configId with OBO `today` + `spaarke.daily_briefing_overview`), reasons over **only** the returned data, narrates a grounded summary (counts + top items) **with record-id citations**, offers a recommendation, and opens the Tasks surface. — **Acceptance**: "what do I need to do today" → a grounded summary (real counts/top items, each cited), a recommendation ("I'd start with the 2 due today"), Tasks tab opens, **no** fabricated data, **no** thin ack, **no** duplicate tab.
-2. **FR-02 (advisory mode + bounded allow-list on the one decider)**: the capability is authored with `output_determinism: advisory` (catalog data) and a **per-Action bounded grounded-tool allow-list**; the allow-list is enforced by the **deterministic pre-filter** (context scoping), and the single Text-path agent turn remains the sole decider. — **Acceptance**: the Action row carries `advisory`; only the allow-listed grounded tools mount for that capability's turn; **no** second intent-detection/classifier/dispatch surface is added (verified against ADR-039 MUST-NOTs).
+2. **FR-02 (advisory mode + bounded allow-list on the one decider)**: the capability is authored with `output_determinism: advisory` (catalog data) and a **per-Action bounded grounded-tool allow-list**; the allow-list is enforced by the **deterministic pre-filter** (context scoping), and the single Text-path agent turn remains the sole decider. The Action runs on the **ADR-016 Reasoning tier at temperature ~0.2–0.3** (advisory-mode default — enough latitude to prioritize/recommend, low enough that the grounded summary stays faithful). — **Acceptance**: the Action row carries `advisory`; only the allow-listed grounded tools mount for that capability's turn; **no** second intent-detection/classifier/dispatch surface is added (verified against ADR-039 MUST-NOTs).
 3. **FR-03 (per-Action bounded-tool opt-in field)**: introduce the per-Action capability opt-in **mirroring `sprk_allowsknowledge`** — read in `AnalysisActionService` `$select`, materialized on `AnalysisAction`, and honored on the agent path. — **Acceptance**: an Action without the opt-in cannot mount grounded tools (stays ack-tier); an Action with it mounts exactly its declared allow-list.
 
 **E2 — Follow-ons that actually work (fixes P2)**
@@ -63,7 +63,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 
 **E3 — Learning / feedback loop (fixes P3)**
 
-7. **FR-07 (`preference` fact type)**: add a `Preference` `MemoryFactType` (+ `MemoryWriteHandler` wire map), **coordinated with `spaarke-ai-architecture-redesign-r2`** (memory owner), consumed via `PublicContracts/MemoryItem.cs`. — **Acceptance**: a preference memory item can be written (User scope) and is recalled into `userFragment` each turn.
+7. **FR-07 (`preference` fact type)**: add a `Preference` `MemoryFactType` (+ `MemoryWriteHandler` wire map), **owned directly in R4** (redesign-r2 is closed — see Owner Clarifications), binding to the `PublicContracts/MemoryItem.cs` v1 contract; ADR-042's deferred hard-governance stays deferred to #616 (trustLevel carried inert). — **Acceptance**: a preference memory item can be written (User scope) and is recalled into `userFragment` each turn.
 8. **FR-08 (feedback→memory pipeline)**: a thumbs-down+comment or an explicit "do this every time" directive writes a **governed** `preference` memory item (correct `MemoryOrigin` / `ConfirmedByUser` semantics). — **Acceptance**: an explicit standing directive from the user persists as a `preference` item tied to that user.
 9. **FR-09 (governed narrow-allow-list preference-producer)**: a **closed** allow-list of named standing directives (e.g. "always summarize my tasks", "always open my briefing") maps **only to pre-turn tool hints**; a preference may bias or trigger an allow-listed grounded capability, **never** grant a capability or alter a fact; injection-defense (the guillemet DATA-guard, ADR-039 preference-only) preserved. — **Acceptance**: "always summarize my tasks" biases the FR-01 capability's default behavior; an off-allow-list directive has **no** tool-selection effect; the stated profile still never feeds `AgentToolFilterContext` except through the sanctioned bounded hint.
 10. **FR-10 (eval-case guardrail)**: every new/changed AI behavior lands with an eval case (ADR-039 golden-utterance suite + maker-guide obligation). — **Acceptance**: FR-01/04/06/09 each ship with an eval case that fails if the behavior regresses.
@@ -81,7 +81,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 - **NFR-02 (no new HIGH CVE)**: `dotnet list package --vulnerable --include-transitive` shows no new HIGH.
 - **NFR-03 (ADR-039 fidelity — the defining constraint)**: exactly ONE probabilistic decider (the Text-path agent turn); the grounded-recommend tier adds **no** classifier / second intent-detection / routing surface; the bounded tool allow-list is deterministic pre-filtering only; every advisory factual claim is cited.
 - **NFR-04 (preference bounds — ADR-039/ADR-042)**: preferences influence tool selection ONLY through the FR-09 narrow allow-list; the stated profile stays advisory (never grants capabilities/alters facts); memory hard-governance remains deferred to #616 (trustLevel carried inert).
-- **NFR-05 (consume, don't fork)**: E3 binds to `Services/Ai/PublicContracts/` (`MemoryItem` v1); memory/AI internals stay owned by redesign-r2; the `Preference` type + producer land via coordinated seams, not a fork.
+- **NFR-05 (memory ownership + governance)**: redesign-r2 is closed, so R4 owns its E3 memory changes directly; still bind to the `PublicContracts/MemoryItem.cs` v1 contract, keep the AI-facade discipline (ADR-013 — no AI-internal types into CRUD code), and hold ADR-042's deferred hard-governance (trustLevel inert, #616) unchanged.
 - **NFR-06 (reuse-first / §11)**: reuse the two shipped grounded tools + the one agent-turn decider + the existing chip/registration machinery; no net-new tools, no new executor, no registry fan-out.
 - **NFR-07 (reactive ≠ proactive)**: proactive task-agenda suggestions stay reactive/local; the reactive card surface stays distinct from the ADR-047 notification spine (no new push channel).
 - **NFR-08 (test obligation)**: PRs modifying `Sprk.Bff.Api/Services/**` add/update tests in `tests/unit/Sprk.Bff.Api.Tests/`; advisory-capability projection + preference-producer bounds unit-tested; eval cases per FR-10.
@@ -93,7 +93,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 
 ### Applicable ADRs
 - **ADR-039** (grounded execution, closed catalogs; **2026-07-25 `fact`/`advisory` amendment**) — the tier's foundation; one decider, advisory-mode reasoning, pre-filter as the only aid.
-- **ADR-042** (memory two-scope governance; hard-governance deferred to #616; internals owned by redesign-r2).
+- **ADR-042** (memory two-scope governance; hard-governance deferred to #616; memory changes owned in R4 now that redesign-r2 is closed).
 - **ADR-013 / BFF §10** (`Services/Ai/PublicContracts/` facade — no AI-internal types into CRUD; consume, no fork).
 - **ADR-015** (data governance / Tier-3 storage — memory + feedback containers).
 - **ADR-047** (notification spine kept distinct from the reactive card surface).
@@ -109,7 +109,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 - ✅ MUST author the per-Action bounded-tool opt-in as catalog data mirroring `sprk_allowsknowledge`; MUST NOT gate tools by hardcoded tool-name lists.
 - ✅ MUST render a follow-on suggestion ONLY when a wired capability backs it; MUST NOT emit dead-end promises.
 - ✅ MUST keep preference steering within the FR-09 closed allow-list (hints only); MUST NOT let a preference grant a capability or alter a fact.
-- ✅ MUST consume memory via `PublicContracts/MemoryItem.cs`; MUST NOT fork `Services/Ai/` internals (redesign-r2).
+- ✅ MUST bind CRUD-side memory consumers to `PublicContracts/MemoryItem.cs` v1 and keep AI-internal types out of CRUD code (ADR-013); R4 owns the `Services/Ai/Memory` changes directly (redesign-r2 closed) but MUST preserve ADR-042's deferred hard-governance (trustLevel inert, #616).
 - ✅ MUST make the D9 fix host-proof (no fixed/measured heights); MUST NOT reintroduce a measured height.
 
 ### Existing Patterns to Follow
@@ -135,14 +135,14 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 </hot-path-declaration>
 ```
 
-**Placement Justification (BFF=Y)**: all new BFF surface extends the *existing* ADR-039 projection + Action catalog — no new dispatch mechanism, no new store. The advisory capability reuses the two shipped grounded tools over OBO; the one new per-Action field mirrors `sprk_allowsknowledge`; the preference-producer + fact type land via redesign-r2 `PublicContracts/` seams. Publish ≤60 MB per BFF task. Run `/conflict-check` before every `Services/Ai`/`ConversationPane`/`SprkChat` PR (active worktrees: redesign-r2, compose-r5/r6, notification-spine).
+**Placement Justification (BFF=Y)**: all new BFF surface extends the *existing* ADR-039 projection + Action catalog — no new dispatch mechanism, no new store. The advisory capability reuses the two shipped grounded tools over OBO; the one new per-Action field mirrors `sprk_allowsknowledge`; the preference-producer + `Preference` fact type are owned in R4 (redesign-r2 closed), bound to the published `MemoryItem` v1 contract. Publish ≤60 MB per BFF task. Run `/conflict-check` before every `Services/Ai`/`ConversationPane`/`SprkChat` PR (live overlap remains with active worktrees compose-r5/r6 + assistant-r3 on `ConversationPane`/`SprkChat`/`SprkChatAgentFactory`; the memory files have no live contender now that redesign-r2 is closed).
 
 ### New Components (§11 three-question gate)
 | New component | Existing overlap (grep) | Can extend instead? | Cost-of-doing-nothing (concrete failure) |
 |---|---|---|---|
 | Advisory task-agenda capability (Action+Binding) | `list-tasks` (ack-only) Action+Binding | **Yes — upgrade** `list-tasks` to advisory + bounded tools | "what do I need to do today" stays a thin ack with no summary (the P1 defect) |
 | Per-Action bounded-tool opt-in field | `sprk_allowsknowledge` (per-Action RAG opt-in) | **Yes — mirror** its shape | Any Action either has zero tools or the whole catalog; no bounded grounded-recommend tier possible |
-| `Preference` MemoryFactType | `MemoryFactType` enum (Party/KeyDate/PriorAnalysis/KeyFact) | **Extend** the enum (coordinate w/ redesign-r2) | Standing directives land as generic `KeyFact`; no governed preference channel; FR-09 can't gate |
+| `Preference` MemoryFactType | `MemoryFactType` enum (Party/KeyDate/PriorAnalysis/KeyFact) | **Extend** the enum (owned in R4; redesign-r2 closed) | Standing directives land as generic `KeyFact`; no governed preference channel; FR-09 can't gate |
 | Governed preference-producer (narrow allow-list) | `StatedProfileReader` (advisory-only, never steers) | **No — new seam** (steering crosses the advisory line by design; bounded) | "always summarize my tasks" can never act automatically (the P3 loop stays open) |
 | Feedback→memory pipeline | `FeedbackService` (one-way sink, API-only) | **No — new wiring** (nothing consumes feedback today) | Thumbs/feedback never improves behavior; the loop never closes |
 | Daily Briefing / Smart To Do launch entries | `surfaceLaunchRegistry` (`list-tasks` precedent) | **Yes — add 2 single-surface entries** | FR-06 follow-on cards have no launch target |
@@ -156,7 +156,7 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 | ADR | Rule challenged | Conflict | Path | Rationale |
 |---|---|---|---|---|
 | **ADR-039** | closed catalog / one decider / no second dispatch surface | the grounded-recommend tier lets the model chain grounded tools + recommend | **C (comply) for the reasoning + A (project-scoped exception) for the per-Action bounded-tool opt-in** | The 2026-07-25 `advisory` amendment already sanctions grounded reasoning + recommendations; R4 adds NO new decider (reuses the Text-path turn) and expresses the bounded tool set as deterministic pre-filter narrowing (the one sanctioned aid). The only genuinely-new element is the per-Action bounded-tool opt-in field, documented as a scoped exception mirroring `sprk_allowsknowledge`. No amendment required. |
-| **ADR-042 / ADR-039** | preferences advisory; never feed `AgentToolFilterContext`; hard-governance deferred to #616 | the FR-09 producer lets an allow-listed directive bias/trigger a bounded grounded capability | **A (project-scoped exception)** | Allow-listed named directives only → pre-turn tool **hints**; never grants a capability or alters a fact; injection-defense guard preserved; coordinated with redesign-r2 + the #616 deferral. |
+| **ADR-042 / ADR-039** | preferences advisory; never feed `AgentToolFilterContext`; hard-governance deferred to #616 | the FR-09 producer lets an allow-listed directive bias/trigger a bounded grounded capability | **A (project-scoped exception)** | Allow-listed named directives only → pre-turn tool **hints**; never grants a capability or alters a fact; injection-defense guard preserved; owned in R4 (redesign-r2 closed); ADR-042's deferred hard-governance (#616) unchanged. |
 | **ADR-047** | notification spine is the push channel | proactive task-agenda suggestions | **C (comply)** | Reactive/local surface kept distinct; no spine change, no push channel. |
 
 ---
@@ -180,8 +180,9 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 - The D9 partial fix already on master (`messageList` `min-height:0`).
 
 ### External / Coordination
-- **`spaarke-ai-architecture-redesign-r2`** — owns `Services/Ai/` internals + memory; the `Preference` fact type + preference-producer land via coordinated `PublicContracts/` seams (no fork).
-- **`spaarkeai-compose-r5/r6`** — shares `ConversationPane`/`ThreePaneShell`/`SprkChat` (D9 origin); merge-order coordination.
+- **`spaarke-ai-architecture-redesign-r2`** — **closed** (worktree open but not active); R4 owns its E3 memory changes (`MemoryFactType`, `MemoryWriteHandler`, `ContextBinder`, preference-producer) directly. Still bind to the published `PublicContracts/MemoryItem.cs` v1 contract + ADR-042 governance; no live cross-team gating.
+- **`spaarkeai-compose-r5/r6`** — shares `ConversationPane`/`ThreePaneShell`/`SprkChat` (D9 origin); still active — merge-order coordination + `/conflict-check` before those PRs.
+- **`spaarkeai-assistant-enhancements-r3`** — predecessor; shares `SprkChatAgentFactory`/`ConversationPane`/`AgentToolProjection`; re-base on it and `/conflict-check` those PRs.
 - **`spaarke-notification-spine-r1`** — ADR-047 spine kept distinct.
 - Azure OpenAI (advisory reasoning tier) + OBO auth path.
 
@@ -194,17 +195,21 @@ R4 turns the Assistant from a deterministic launcher into a **grounded proactive
 | Preference steering | How far may a preference steer behavior? | **Narrow closed allow-list → tool hints only** | FR-09 bounded producer; never grants capability/alters fact (NFR-04). |
 | Agenda surfaces | Which surfaces does the today-capability open? | **Tasks only + inline summary + Briefing/Smart-To-Do follow-on cards if not open** | Single-surface launch (no registry fan-out); FR-06 cards. |
 | Operator queue | New surface, or extend reporting? | **Out of system scope — CX/product-owner exercise** | No operator UI/promotion queue; E3 = feedback→memory + preference type + producer only. |
+| E3 memory ownership | Coordinate the `Preference` type/producer with redesign-r2, or own it? | **redesign-r2 is closed — all work contained in R4** | R4 owns the memory changes directly (no cross-team gating); E3 is a normal phase, not sequenced-last-and-gated. ADR-042 deferred governance (#616) unchanged; still bind to `MemoryItem` v1. |
+| Advisory tier | Reasoning tier/temp for FR-01, or defer? | **ADR-016 Reasoning tier, temp ~0.2–0.3** | Baked into FR-02; enough latitude to prioritize/recommend, faithful grounded summary; every fact cited. |
 
 ---
 
 ## Assumptions
 - **Task-agenda authoring**: R4 upgrades the existing `list-tasks` Action/Binding to the advisory grounded-recommend tier (vs authoring a net-new sibling) — the P1 defect is specifically on that path; final choice is a task-authoring detail under FR-01/03.
 - **D9 may already be resolved** by the merged partial fix; FR-11's live-DOM session confirms before further edits — if it no longer reproduces, FR-11 collapses to a verification + regression-guard task.
-- **Preference-producer seam ownership**: redesign-r2 provides/agrees the `PublicContracts` seam for the `Preference` type + producer; if unavailable in R4's window, FR-07/09 are gated on that coordination (flagged).
+- **E3 is fully R4-owned**: redesign-r2 being closed, R4 authors the `Preference` type + producer + feedback→memory pipeline directly. The only remaining discipline is contract-binding (`MemoryItem` v1) + ADR-042 deferred-governance preservation — not cross-team gating.
 
 ## Unresolved Questions
-- [ ] **redesign-r2 coordination window** for the `Preference` fact type + producer seam — blocks FR-07/FR-09 if the memory-owner seam isn't ready in R4's window. (Coordinate before Phase E3 starts.)
-- [ ] **Exact advisory reasoning tier / temperature** for the task-agenda Action — task-authoring detail under FR-01 (ADR-016 reasoning-tier alignment).
+- ✅ **RESOLVED (owner 2026-08-13)** — E3 memory ownership: redesign-r2 is closed; all work contained in R4. FR-07/FR-09 owned directly here, no coordination-window gating.
+- ✅ **RESOLVED (owner 2026-08-13)** — Advisory reasoning tier/temperature for FR-01: ADR-016 Reasoning tier, temp ~0.2–0.3 (folded into FR-02).
+
+*(No open blocking questions remain.)*
 
 ---
 
