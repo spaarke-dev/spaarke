@@ -4,7 +4,8 @@
     <title>FR-13 — CI setup-dotnet → 10.x / @v6 across all workflows</title>
     <phase>P4 CI/CD + deploy plumbing</phase>
     <gate>032 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>2026-08-13: bumped all setup-dotnet@v4 → @v6 and 8.x/8.0.x → 10.x/10.0.x across all 7 workflows (adr-audit, ci-tier1-blocking ×4, ci-tier2-advisory ×4, deploy-bff-api env+×2, deploy-promote env, nightly-health ×5, sdap-ci ×5). No dotnet-quality:preview existed (nothing to remove). Framework 4.8 targeting-pack + net462/net48 plugin steps intact. global.json stays 10.0.100. Applied task-032 reconciliation: emptied sdap-ci.yml $acceptedRiskPackages (all 3 stale — Kiota fixed via 033, OpenMcdf/OTel.Api cleared via 004); nightly-health has no allow-list to prune. Verified CI-forced BFF deploys stay removed (deploy-bff-api push:master + deploy-promote workflow_run both already workflow_dispatch-only). CI-green confirmable at P5 merge (branch doesn't auto-run CI); local build parity green from 030/033.</completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies CI workflows (hot path); a wrong pin breaks every gate; ci tag.</rigor-reason>
     <model-tier>sonnet</model-tier>
