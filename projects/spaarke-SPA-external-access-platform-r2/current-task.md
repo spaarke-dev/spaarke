@@ -16,6 +16,14 @@
 | **PCF version history** | …v1.0.22 wording; v1.0.23 = OverlayDrawer side-pane redesign (SUPERSEDED); **v1.0.24 = native advanced lookup + Manage Access polish (#2/#3/#5/#6/#7) + email fixes (#9 regarding-name, #10 recipient lookup, #11 attachment upload) + SprkModal `nonBlocking`**. Rebuild recipe: bump 5 files → **build shared lib first (`npm run build` in Spaarke.UI.Components — REQUIRED when shared .tsx changed)** → `npm run build:prod` in TrackingFieldTrio → `cp out/controls/bundle.js Solution/Controls/.../bundle.js` → `cd Solution; ./pack.ps1` → `pac solution import --path bin/…zip --force-overwrite --publish-changes`. Packed ControlManifest.xml is hand-maintained — keep in sync. |
 | **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — clean, 0 unpushed (last commit **8c1ac557b**), **7 ahead / 1 behind** origin/master. |
 
+## ✅ Merged to master (2026-08-12) — PR #761
+All post-#758 external-access-r2 work (PCF TrackingFieldTrio v1.0.20→v1.0.29, shared-lib SprkModal/
+AccessGrantModal/TrackingFieldTrio/SendEmailDialog changes, external-spa 5B Partner-primary login,
+test-suite rewrites, docs) merged to master via **PR #761** (`3107c679d`). Master Tier-1 blocking CI =
+GREEN. Master merge auto-triggered **Deploy SpaarkeAi**. Other projects can now conflict-check against
+master + build/deploy bff.api + spaarke.ai from latest shared code. Working tree clean; branch fully
+pushed. (Branch protection was OFF this session.)
+
 ## 🔥 Master-red hotfix (2026-08-12) — RESOLVED
 Master CI was red (blocking email-communication-intelligence-r2 PR #755): (1) our stale
 `ExternalAccessIntegrationTests.cs` passed removed `AccountId` param (11 sites) → broke the whole

@@ -73,8 +73,7 @@ export const RealmChooser: React.FC<RealmChooserProps> = ({ onChoose }) => {
           Continue as Partner
         </Button>
         <Text className={s.workforceRow} block>
-          Spaarke employee?{' '}
-          <Link onClick={() => onChoose('workforce')}>Sign in with your work account</Link>
+          Spaarke employee? <Link onClick={() => onChoose('workforce')}>Sign in with your work account</Link>
         </Text>
       </div>
     </div>
