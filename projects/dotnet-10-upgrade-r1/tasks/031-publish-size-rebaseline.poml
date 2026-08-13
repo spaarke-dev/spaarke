@@ -4,7 +4,8 @@
     <title>FR-12 — publish-size re-baseline on net10 + governance-doc updates</title>
     <phase>P3 Test green + re-baseline</phase>
     <gate>033 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>2026-08-13: net10 compressed publish = 44.96 MB incl. PDBs (44.05 excl.), 215 files, framework-dependent (no runtimes/ tree). Delta vs 49.63 net8 baseline = −4.67 MB (SHRANK). ≤60 MB confirmed, negative delta → no escalation. Updated root CLAUDE.md §10 + .claude/constraints/azure-deployment.md (both locations) to 44.96 MB; measurement in notes/publish-size-rebaseline.md.</completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Writes to root CLAUDE.md §10 + .claude/ constraint (main-session-only); binding publish-size governance number.</rigor-reason>
     <model-tier>sonnet</model-tier>
