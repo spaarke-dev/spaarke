@@ -1,5 +1,27 @@
 # Current Task State
 
+> **Last Updated**: 2026-08-12 (context-handoff). **Recovery: read this block first.**
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Where** | Branch `work/email-communication-intelligence-r2` @ `14a2acd96` · **0 uncommitted · 0 unpushed · 33 ahead / 0 behind master** · everything on **PR #755** (OPEN). |
+| **064 (E1b + E1c)** | ✅ **COMPLETE + verified clean.** E1b (New record→confirmable candidate) + E1c (`.eml` auto-load) + **Option C** (relocated `GetStartedCardsWidget`+`CreateRecordChooserModal` → `@spaarke/ui-components`; both hosts full menu) + **robust #2** (endpoint resolves `communicationId`→archive `.eml` server-side via new `GetEmailArchiveByCommunicationAsync`; no grid change) + **Step 9.5 authz fix** (CRITICAL per-document authz gap on the ingest endpoint — now `IAuthorizationService.AuthorizeAsync(read)` → 403 before download). BFF 6/6 ingest seam tests; client 27/27 + 15/15; ui-components/comm-components build clean; ai-widgets + code-page typecheck clean. |
+| **033** | ✅ **SEEDED** in `spaarkedev1` (operator-approved): 4 `sprk_emailupdatefield` rows — matter/project × (description Memo + nextreviewdate DateTime), all enabled + require-confirm. Verified the `sprk_targetentity`→`sprk_recordtype_ref` join resolves to matter/project. TASK-INDEX 033→✅. Note: `notes/033-emailupdatefield-starter-set-proposal.md`. |
+| **⛔ BLOCKER — merge #755** | **Master is currently RED — NOT our fault.** `external-access-r2` broke master's test build: stale `tests/integration/Spe.Integration.Tests/ExternalAccess/ExternalAccessIntegrationTests.cs` uses removed `AccountId` param (CS1739) + Tier-1 arch-test violations in `FileAccessEndpoints`/Graph types. **NONE of the failing types are ours** (our surface is CI-clean). PR #755 CI is red only because our branch merged the broken master. |
+| **Next Action** | **WAIT for `external-access-r2` to fix + green master** (operator said "soon"), AND for `assistant-r3`. When master is green: (1) re-sync worktree, (2) confirm #755 CI green, (3) **merge #755**, (4) run deploy sequence with a fresh cross-check. |
+| **Deploys** | ⏸ ALL HELD. BFF (017/026/035/045) + SpaarkeAi/code-page/DataGrid (059) + add-in (044). **Reason:** deploying the shared BFF/SpaarkeAi from master would push `external-access-r2` (mid-UAT) + `assistant-r3` merged-undeployed work live. Also can't deploy from a red/broken build. 059's gridconfig seed is the only isolated piece but is premature (unused until code deploys). |
+| **Optional** | Offered to file a GitHub issue flagging `external-access-r2`'s stale `ExternalAccessIntegrationTests.cs` (blocking everyone's merges) — awaiting operator y/n. |
+| **090 wrap-up** | HELD until all deploys + UAT complete (operator instruction). |
+
+### Cross-project coordination (deploy-time)
+The BFF is ONE shared artifact — deploying it publishes every project's merged-to-master work. Master carries merged-undeployed BFF/SpaarkeAi work from **`external-access-r2`** (org grants, `/me/entitlements`, module entitlement — appears mid-UAT) and **`assistant-r3`** (email/doc per-item cards, overview tools, active-item handle — completed). Coordinate with both before the shared BFF/SpaarkeAi deploy.
+
+---
+
+## Full State (Detailed — historical)
+
 > **064 IN PROGRESS (2026-08-11).** Operator decision: **r2 builds BOTH E1b + E1c** (r3 is COMPLETED/merged — not a work destination). **Full re-investigation done** (2 deep Explore agents vs master incl. r3's merged active-item work): CONFIRMED **no reuse** — r3's active-item is a pointer-only handle; Compose active-document registers a pointer; r1 file-leg only re-fetches already-session-uploaded bytes. A new BFF ingest path IS required.
 >
 > **E1b SHIPPED ✅** (`55590c25e`, on PR #755): "New record" → confirmable candidate. Shared lib `onLaunchCreateRecord`→`confirmCandidate` (EmailConnectionsReview + ReconciliationWorkspace wrapReview) + QuickStartModal additive `onRecordCreated` (awaits launchSurface outcome). All additive/back-compat. Tests: EmailConnectionsReview 21/21, QuickStartModal 15/15, ReconciliationWorkspace 6/6; tsc 0-err. **SpaarkeAi deps now installed** (jest runnable).
