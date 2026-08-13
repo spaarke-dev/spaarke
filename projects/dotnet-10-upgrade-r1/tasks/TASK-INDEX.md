@@ -21,7 +21,7 @@
 | 011 | **H1 adversarial verification** (non-author) | P1 | NFR-07 | opus/xhigh | 010 | false (V1) | ✅ |
 | 012 | **H3** X509Certificate2 → X509CertificateLoader.LoadPkcs12 | P1 | FR-09 | sonnet/high | 005 | false | ✅ |
 | 013 | **H6 + secondary sweep** (grep + per-item verdict) | P1 | FR-10 | sonnet/xhigh | 005 | false | ✅ |
-| 014 | **FR-06** telemetry consolidation (drop classic App Insights SDK) | P1 | FR-06 | sonnet/high | 004 | false | 🔲 |
+| 014 | **FR-06** telemetry consolidation (drop classic App Insights SDK) | P1 | FR-06 | sonnet/high | 004 | false | ✅ |
 | 020 | **H2** dev-boot DI validation (fix ValidateOnBuild/ValidateScopes) | P2 | FR-08 | **opus**/xhigh | 010 | false | ✅ |
 | 021 | **H2 adversarial verification** (non-author) | P2 | NFR-07 | opus/xhigh | 020 | false (V2) | ✅ |
 | 030 | Full test suite green on net10 (unit + integration + arch) | P3 | FR-11 | sonnet/xhigh | 021 | false | 🔲 |

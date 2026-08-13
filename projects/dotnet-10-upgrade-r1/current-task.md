@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-12 (by task-execute — 013 ✅ ‖ 021 ✅ parallel wave done; P2 COMPLETE; only 014 left in P1 before P3)
+> **Last Updated**: 2026-08-12 (by task-execute — 014 ✅ FR-06 telemetry done; **P0+P1+P2 ALL COMPLETE**; P3 opens at 030)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | P0 (001–005 ✅) · P1: **010 ✅ 011 ✅ 012 ✅ 013 ✅** (only **014** remains) · P2: **020 ✅ 021 ✅ COMPLETE**. BFF build GREEN net10 (0 err, 21 warn = post-012 baseline); graph vulnerable-clean; DI graph passes ValidateOnBuild/ValidateScopes (adversarially verified). |
-| **Active task** | none active — **013 H6 sweep ✅ + 021 H2 verify ✅ (parallel wave complete)**. Next: **014** (FR-06 telemetry consolidation) — the LAST P1 blocker for P3/030. |
-| **Status** | between-tasks (uncommitted: 013+021 artifacts — commit+push pending this turn) |
-| **Next Action** | Run `task-execute` on **014** (`tasks/014-fr06-telemetry-consolidation.poml`): remove classic `Microsoft.ApplicationInsights.AspNetCore` SDK; verify OpenTelemetry→Azure Monitor is the sole telemetry path (12 Meters + Redis instrumentation intact). Touches Program.cs + BFF csproj → serial (no overlap with a build-bearing task). Deps 004 ✅. **After 014 → P3 opens: 030** (full test suite green; gates on 013✅/014/020✅/021✅) **→ 033** (Graph6/Kiota2) **→ 031/032** (publish re-baseline + CVE). |
+| **Project phase** | **P0 ✅ · P1 ✅ (010–014 all ✅) · P2 ✅ (020/021)**. → **P3 open** (030→033→031/032). BFF build GREEN net10 (0 err, 21 warn = post-012 baseline); graph vulnerable-clean; DI graph adversarially verified; classic App Insights SDK removed (OTel sole path). |
+| **Active task** | none active — **014 FR-06 telemetry ✅ COMPLETE**. Next: **030** (P3 — full net10 test suite green). |
+| **Status** | between-tasks (uncommitted: 014 artifacts — commit+push pending this turn) |
+| **Next Action** | Run `task-execute` on **030** (`tasks/030-*.poml`): full `dotnet test` green on net10 (unit + integration + arch, incl. `Spaarke.ArchTests`); no test excluded to force green without logged rationale (ADR-038). Gates (013/014/020/021) ALL ✅ satisfied. Serial (heavy build/test). **After 030 → 033** (Graph 5→6 / Kiota 1→2; retire 7 Kiota pins + NoWarn) **→ 031** (publish re-baseline 🔒 main-session) **/ 032** (transitive CVE audit). Then P4 (040/041/042 CI+deploy) → P5 (050/051 dev deploy = completion gate) → P7 (090 wrap-up). 060/061 deferred. |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; exists on origin) |
 | **Git** | ✅ **CLEAN — tip `d9eb30305`, 0 unpushed, 44 behind origin/master.** Session commits: P0 001 `8077e33f5`·002 `3f6027aa5`·003 `9b7e9b1ea`·004 `d39de8665`·005 `cdb31e0b0` · 010 `969e15471` · 011+012 `5191efb6a` · **020 `d9eb30305`**. **NOT merged to master — deferred per owner sequencing.** Safe to `/compact`. |
 
@@ -25,6 +25,11 @@
 ### H2 ADVERSARIAL VERIFY (021) — PASS, do NOT re-derive
 - **Non-author opus subagent (isolated worktree) → PASS.** Independently re-ran `dotnet test ... --filter DiGraphValidationTests` on net10 = `Passed: 1, Failed: 0` (clean boot confirmed without trusting author). **All 10 roots R1–R10 CONFIRMED behavior-preserving; 0 REFUTED → task 020 stands.**
 - Stream-scope lifetimes (R1/R9) CONFIRMED: every SPE stream materialized to memory before scope disposal (no use-after-dispose); rests on `SpeFileStore` stateless ADR-007 facade. R5 demote + NullActionResolver symmetry CONFIRMED (stateless resolver, no singleton consumer, guard-pass dispositive, null-object throw unaffected by lifetime). ValidateOnBuild/ValidateScopes NOT disabled in production. Guard test truly asserts (KEEP). No §6.5. Full report: `notes/h2-verification.md`.
+
+### FR-06 result (014) — do NOT re-derive
+- **Classic App Insights SDK removed; OTel→Azure Monitor is sole telemetry path.** 2 files: BFF csproj (dropped `Microsoft.ApplicationInsights.AspNetCore 2.23.0`) + `Api/Agent/AgentTelemetry.cs` (dropped classic usings + `TelemetryClient?` field/ctor-param + all dead `_telemetryClient?.` calls; kept all `_logger.Log*` + all public method signatures). BFF net10 GREEN (0 err, 21 warn = unchanged).
+- **Gap-free proof (why escalation did NOT fire)**: `AddApplicationInsightsTelemetry()` never called (only `UseAzureMonitor`, since R7-S7) + `TelemetryClient` registered NOWHERE → optional ctor param bound `null` (why task-020 DI guard passed clean) → classic emissions were ALREADY inert no-ops. Removing them drops NO live signal.
+- OTel pipeline `TelemetryModule.cs` UNTOUCHED: 10 custom `Sprk.Bff.Api.*` AddMeter + AddRedisInstrumentation + 3 AddSource intact ("12 Meters" in comment/task = historical nominal; code has 10 custom — material point holds). Package removal = strict publish/CVE-surface reduction (formal re-baseline = task 031). NFR-01 carve-out (the ONLY one). Step 9.5 PASS. Carve-out doc (cite in PR ADR Tensions): `notes/fr06-telemetry-carveout.md`.
 
 ### H6 result (013) — do NOT re-derive
 - **Closed 10-item secondary sweep → ALL n/a → ZERO code changes.** (8 design-§5/FR-10 items + 2 re-scrape follow-up items.) BFF net10 Release build GREEN (0 err, 21 warn = unchanged post-012 baseline; **0× CS9258/CS9259** = definitive `field`-keyword clearance).
