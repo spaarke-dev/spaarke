@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-13 (by context-handoff — P0+P1+P2 ✅; P3: 030 ✅ 033 ✅, 031/032 next. Clean tree, all pushed. Safe to /compact.)
+> **Last Updated**: 2026-08-13 (P0+P1+P2+P3+P4 ✅ — 031/032/040/041/042 done this session. Clean tree, all pushed. Next = P5 050/051 OPERATOR-DRIVEN. Safe to /compact.)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -9,12 +9,31 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **P0 ✅ · P1 ✅ (010–014 all ✅) · P2 ✅ (020/021)**. → **P3 open** (030→033→031/032). BFF build GREEN net10 (0 err, 21 warn = post-012 baseline); graph vulnerable-clean; DI graph adversarially verified; classic App Insights SDK removed (OTel sole path). |
-| **Active task** | none active — **033 ✅ COMPLETE** (Graph 6.5/Kiota 2.0; mechanical; suite still 10408 green). Next: **031 / 032**. |
-| **Status** | between-tasks (all pushed; branch was current with master at sync — master has since advanced ~39+). |
-| **Next Action** | Run `task-execute` on **031** (publish-size re-baseline 🔒 main-session — writes root `CLAUDE.md` §10 + `.claude/constraints/azure-deployment.md`) and **032** (transitive CVE audit — no HIGH regression). Both gate on 033 ✅ and measure the FINAL Graph-6 package graph. **033 already recorded publish ~44.06 MB compressed (decrease) + `dotnet list --vulnerable`=none** — 031/032 formalize these. Then P4 (040/041/042 CI+deploy) → P5 (050/051 dev deploy = completion gate) → P7 (090 wrap-up). 060/061 deferred. **NOTE**: branch→master publish stays deferred to P5 (no cascade). |
+| **Project phase** | **P0 ✅ · P1 ✅ · P2 ✅ · P3 ✅ (030/033/031/032) · P4 ✅ (040/041/042)**. → **P5 next: 050/051 🛠️ OPERATOR-DRIVEN** (Azure + recorded go/no-go — NOT autonomous). Only 050/051 (dev deploy = completion gate) + 090 (wrap-up) remain active; 060/061 deferred (no prod env). |
+| **Active task** | none active — **042 ✅ COMPLETE**. All non-operator tasks done. |
+| **Status** | between-tasks; **blocked on operator** for P5 (live dev deploy + go/no-go). az IS authenticated to "Spaarke Devlopment Environment" as ralph.schroeder@spaarke.com. |
+| **Next Action** | **P5 050/051 need the operator.** 050 = confirm `spaarke-bff-dev` runtime + staging-slot evidence (read-only `az`; resolves region/slot unresolved questions) — Claude can run the read-only queries ON REQUEST. 051 = **deploy net10 to `spaarke-bff-dev` + full smoke + recorded go/no-go** (outward-facing; operator must drive per charter). Use **[`notes/slot-swap-runbook.md`](notes/slot-swap-runbook.md)** Section A (dev direct deploy, NOT via CI). On "go" → 090 wrap-up (`/test-diet` + doc-drift + INDEX + r3 handoff). **branch→master publish stays deferred to P5 (no cascade).** |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; exists on origin) |
-| **Git** | ✅ **CLEAN — tip `d9eb30305`, 0 unpushed, 44 behind origin/master.** Session commits: P0 001 `8077e33f5`·002 `3f6027aa5`·003 `9b7e9b1ea`·004 `d39de8665`·005 `cdb31e0b0` · 010 `969e15471` · 011+012 `5191efb6a` · **020 `d9eb30305`**. **NOT merged to master — deferred per owner sequencing.** Safe to `/compact`. |
+| **Git** | ✅ **CLEAN — tip `c040409b1`, 0 unpushed.** P3/P4 session commits: 031+032 `0e6f4f355` · 040 `35ec10c1f` · 041 `721045c07` · 042 `c040409b1`. **NOT merged to master — deferred per owner sequencing.** Safe to `/compact`. |
+
+### ⚠️ TWO decisions flagged to owner (from 041) — awaiting review, non-blocking
+1. **platform.json recompile scope**: `az bicep build` regenerated `platform.json` with a ~611-line diff because it was **already stale** (last compiled 2026-03-13; source modules edited to 2026-07-16 — apiVersion bumps in openai/content-safety/cosmos never recompiled). Kept the honest full recompile per the prescriptive POML constraint. **Surgical 2-line alternative available** if you prefer a minimal .NET-10 diff (leaves platform.json stale vs source). See `notes/bicep-runtime-bump.md`.
+2. **Core Tools v4.7.0 caveat** (runbook note, not a gate): if any deploy uses `func publish` for the insights Functions app, pin Core Tools ≠ v4.7.0 (core-tools#4794 regresses net10 Flex publish). ARM/Bicep provisioning unaffected.
+
+### 031 result (COMPLETE) — do NOT re-derive
+- **net10 compressed publish = 44.96 MB incl. PDBs (44.05 excl.), 215 files, framework-dependent (no runtimes/ tree).** Delta vs 49.63 net8 baseline = **−4.67 MB (SHRANK)** via FR-04 pin removals + FR-06 AppInsights-SDK removal + net10 fx pruning. ≤60 MB confirmed, negative delta → no escalation. Updated root `CLAUDE.md` §10 + `.claude/constraints/azure-deployment.md` (both locations). Detail: `notes/publish-size-rebaseline.md`.
+
+### 032 result (COMPLETE) — do NOT re-derive
+- **`dotnet list --vulnerable --include-transitive` on net10 (sln + Core/Dataverse direct) = ZERO vulnerable packages** (no HIGH/Moderate/Low). NFR-03 satisfied with margin. Kiota transitive **2.0.0** (>1.22.0 floor) via Graph 6.5/Graph.Core 4.0.1 → Kiota HIGH CLOSED. S.S.C.Xml carry-forward CLOSED (10.0.11 pin). **All 3 CI allow-list entries emptied** in sdap-ci.yml (Kiota fixed / OpenMcdf 3.2.0 / OTel.Api 1.17.0 — all stale); nightly-health had none. Detail: `notes/cve-audit.md`.
+
+### 040 result (COMPLETE) — do NOT re-derive
+- **setup-dotnet@v4→@v6 + 8.x/8.0.x→10.x/10.0.x across all 7 workflows** (adr-audit, ci-tier1-blocking, ci-tier2-advisory, deploy-bff-api env+steps, deploy-promote env, nightly-health, sdap-ci). No `dotnet-quality:preview` existed. **Framework 4.8 targeting-pack + net462 plugin steps intact; global.json stays 10.0.100.** Emptied sdap-ci.yml `$acceptedRiskPackages` (032 reconciliation). Verified deploy-bff-api (push:master) + deploy-promote (workflow_run) stay `workflow_dispatch`-only — no CI-forced deploy re-armed. CI-green confirmable at P5 merge (branch doesn't auto-run CI); local build parity green (030/033).
+
+### 041 result (COMPLETE) — do NOT re-derive
+- **All 5 App Service runtime strings DOTNETCORE|8.0→10.0 (pipe)** — app-service.bicep, app-service-slot.bicep, deployment-slot.bicep, byok/main.bicep + regenerated platform.json (`az bicep build`, see decision #1 above). **Functions dotnet-isolated 8.0→10.0** (insights function-app.bicep) — Flex Consumption net10 support CONFIRMED (researcher; bare `'10.0'`; escalation valve did NOT fire). All bicep builds clean. IaC source only — no live runtime flipped. Detail: `notes/bicep-runtime-bump.md`.
+
+### 042 result (COMPLETE) — do NOT re-derive
+- **De-net8'd `.claude/skills/bff-deploy/SKILL.md`** (net10 runtime banner: DOTNETCORE|10.0 pipe / :10.0 colon, mismatch=503, ~45 MB net10 publish, no ASPNETCORE_URLS/RuntimeFrameworkVersion pin; corrected stale net8 sizes ~61→~45/55-65→40-50/<40→<30) + **authored `notes/slot-swap-runbook.md`**: Section A (near-term ACTIVE — dev direct deploy to spaarke-bff-dev, NOT via CI) + Section B (future deferred prod/demo zero-downtime slot swap: deploy→validate→atomic swap→rollback-by-swap; pipe/colon, port-8080, Linux-no-auto-swap). Main-session write succeeded. Escalation valve did NOT fire (dev, not prod).
 
 ### H2 result (020) — VERIFIED, do NOT re-derive
 - **45 captive-dependency (singleton→scoped) errors → 10 root singletons → ALL FIXED → probe CLEAN.** Method: in-process probe reused `CustomWebAppFactory` neutralization (mocked IDataverseService + fake IGraphClientFactory + removed hosted services) with ValidateOnBuild+ValidateScopes RE-ENABLED; iterated 45→19→2→0.
