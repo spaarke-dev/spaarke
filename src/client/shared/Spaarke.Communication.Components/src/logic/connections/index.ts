@@ -20,3 +20,7 @@
 
 export * from './provenance';
 export * from './ConnectionsWriteHandler';
+// UAT Fix #6 — shared resolveReview/resolveRegarding wiring for every
+// ReconciliationWorkspace mount (code page, SpaarkeAi widget, LegalWorkspace section).
+// Type-only imports of component prop types keep this Layer-1 module React-free at runtime.
+export * from './reconciliationResolvers';
