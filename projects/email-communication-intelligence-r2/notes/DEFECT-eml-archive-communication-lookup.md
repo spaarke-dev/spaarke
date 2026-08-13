@@ -1,6 +1,8 @@
-# DEFECT — `.eml` archive + email-attachment documents fail to create (wrong lookup name)
+# DEFECT — `.eml` archive + email-attachment documents fail to create (wrong lookup name) — ✅ RESOLVED 2026-08-13
 
-> Found 2026-08-13 by the **Mode C end-to-end UAT** (real send → real capture). A seeded corpus could not have surfaced this. **Severity: High** — every captured email currently fails to archive its `.eml`, so the reconciliation "open email as sent" reading pane has no document to render.
+> Found 2026-08-13 by the **Mode C end-to-end UAT** (real send → real capture). A seeded corpus could not have surfaced this. **Severity: High** — every captured email failed to archive its `.eml`, so the reconciliation "open email as sent" reading pane had no document to render.
+>
+> **RESOLVED** (commit `0026af5e1`): fixed 9 sites (6 writes + 3 queries) `sprk_communication` → `sprk_relatedcommunication`, added a regression test, redeployed. **Verified live**: post-fix sends return `archivedDocumentId` with no `archivalWarning`; inbound webhook captures now create archive docs linked via `sprk_relatedcommunication` (3 confirmed today vs the prior NULL-linked orphans).
 
 ## Symptom (observed live)
 `POST /api/communications/send` returned HTTP 200 but with:
