@@ -124,8 +124,12 @@ const useStyles = makeStyles({
   },
   tabPanel: {
     flexGrow: 1,
+    minWidth: 0,
     minHeight: 0,
     overflowY: 'auto',
+    // Rows ellipsis their own labels; clip any residual horizontal overflow so
+    // the pane never shows a horizontal scrollbar (task 086 UAT polish).
+    overflowX: 'hidden',
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
     ...shorthands.padding(tokens.spacingVerticalM, '0'),

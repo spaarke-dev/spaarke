@@ -359,11 +359,21 @@ const useStyles = makeStyles({
     ...shorthands.gap(tokens.spacingHorizontalS),
   },
   rowName: {
+    // flexGrow + minWidth:0 lets the label take the available width and
+    // ellipsis instead of pushing the row (and pane) wider (task 086 UAT).
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground1,
+  },
+  // The type chip must never shrink or wrap — it stays pinned at its intrinsic
+  // width while the label ellipsises (task 086 UAT).
+  rowChip: {
+    flexShrink: 0,
   },
 });
 
@@ -591,6 +601,7 @@ export const RecentTab: React.FC = () => {
                   appearance={chip.appearance}
                   color={chip.color}
                   size="small"
+                  className={styles.rowChip}
                   data-testid={`recent-tab-row-chip-${row.sprk_navitemid}`}
                 >
                   {chip.label}
@@ -664,6 +675,7 @@ export const RecentTab: React.FC = () => {
                   appearance={chip.appearance}
                   color={chip.color}
                   size="small"
+                  className={styles.rowChip}
                   data-testid={`recent-tab-edited-row-chip-${rowKey}`}
                 >
                   {chip.label}
