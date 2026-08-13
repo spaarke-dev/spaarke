@@ -2,7 +2,10 @@
 
 > Tracks the ACTIVE task only. History lives in `tasks/TASK-INDEX.md` + per-task POMLs.
 
-## Status: Wave F COMPLETE (18/21) — full Navigator feature-complete; next = Deploy wave (086 env-mutating, OWNER-GATED)
+## Status: 086 DEPLOYED to spaarkedev1 (19/21) — awaiting owner UAT browser confirm of app-load auto-launch; then 087 UI-test + 090 wrap
+- Branch synced to master (worktree-sync Update Only 2026-08-13 → `883dbc578`, 0 behind, clean merge no conflicts; NOT merged to master — holding until post-UAT).
+- **086 deploy DONE + verified server-side**: `sprk_NavigatorPane.html` (HTML, id 6cebb920-…) + `sprk_SidePaneManager` (JScript, id c5ae4b21-…) created + published to spaarkedev1. Bootstrap `src/solutions/NavigatorPane/bootstrap/sprk_SidePaneManager.js` exposes `Spaarke.SidePaneManager.initialize` to reactivate the dormant app-ribbon rule (recreating the deleted WR under the exact name). Deploy script: `src/solutions/NavigatorPane/Deploy-NavigatorPane.ps1`. Evidence + UAT runbook + fallback: notes/086-deploy-evidence.md.
+- **PENDING (owner, in-browser)**: reload Matter Management (app 729afe6d-…) → confirm Navigator pane auto-appears at app load. If not, dormant rule needs a pinned control → ribbon-edit fallback (no code change; bootstrap already supports openPane()). This is also task 087's first check.
 - ✅ 001 GO · ✅ 010 xrmContext · ✅ 011 host+registry · ✅ 020 schema · ✅ 021 deployed to spaarkedev1 · ✅ 030 capture engine · ✅ **040 NavigatorPane code page** (Vite singlefile, 5/5 tests, registers NavigatorBody against SprkSidePaneHost)
 - Spine: framework host → live sprk_navitem → capture engine → docked pane shell. All buildable + tested; deploy of the pane is task 086.
 
