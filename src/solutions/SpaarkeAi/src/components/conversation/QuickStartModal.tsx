@@ -77,6 +77,7 @@ import { Button, TabList, Tab, makeStyles, tokens } from '@fluentui/react-compon
 import type { SelectTabEvent, SelectTabData, TabValue } from '@fluentui/react-components';
 import { GetStartedCardsWidget, AnalysisCardsWidget } from '@spaarke/ai-widgets';
 import type { GetStartedCardId, AnalysisCardId } from '@spaarke/ai-widgets';
+import type { LaunchSurfaceOutcome } from '@spaarke/ui-components';
 import {
   launchSurface,
   launchPlaybookIntent,
@@ -151,6 +152,50 @@ export interface QuickStartModalProps {
    * Omitted → the analysis cards render but selecting one is a no-op (test override).
    */
   onCreateAnalysis?: (workTypeValue: number, workTypeLabel: string) => void;
+  /**
+   * email-communication-intelligence-r2 task 064 (E1b): fired AFTER a
+   * record-creation card's wizard COMMITS a real record, with the created
+   * record's id + entity logical name. Lets a host (e.g. the reconciliation
+   * Related-to "New record" flow) file the created record as the email's
+   * confirmed regarding. Gated on the surface-launch outcome's
+   * `result.committed` — it structurally cannot fire on a cancelled wizard.
+   * Omitted (the Assistant menu's normal use) → no-op. Only the three
+   * record-creation cards that commit a known entity fire it (matter / project /
+   * work-assignment); the file-only cards (summarize / find-similar) never do.
+   */
+  onRecordCreated?: (ref: { id: string; entityType: string }) => void;
+}
+
+/**
+ * Task 064 (E1b): the create-record cards whose committed record is a valid
+ * regarding target, mapped to their entity logical name. Only these fire
+ * `onRecordCreated`. Keyed by `GetStartedCardId`.
+ */
+const RECORD_CARD_ENTITY: Partial<Record<GetStartedCardId, string>> = {
+  'create-matter-wizard': 'sprk_matter',
+  'create-project-wizard': 'sprk_project',
+  'assign-work': 'sprk_workassignment',
+};
+
+/**
+ * Task 064 (E1b): await a surface-launch outcome and, ONLY when the wizard
+ * committed a real record, report it to the host. Fire-and-forget-safe — the
+ * caller `void`s this so Quick Start still closes immediately while the wizard is
+ * open; the report lands when the wizard modal closes committed. Never throws.
+ */
+async function reportRecordCreated(
+  outcomePromise: Promise<LaunchSurfaceOutcome>,
+  entityType: string,
+  onRecordCreated?: (ref: { id: string; entityType: string }) => void
+): Promise<void> {
+  try {
+    const outcome = await outcomePromise;
+    if (outcome.launched && outcome.result?.committed && outcome.result.recordId) {
+      onRecordCreated?.({ id: outcome.result.recordId, entityType });
+    }
+  } catch {
+    /* non-fatal — a failed launch simply reports no created record */
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +246,7 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
   onCardLaunched,
   initialTab = 'create',
   onCreateAnalysis,
+  onRecordCreated,
 }) => {
   const styles = useStyles();
   const { uiScale } = useUiScale();
@@ -250,20 +296,33 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
           // The one Get-Started card with a SURFACE_LAUNCH_REGISTRY entry —
           // launch through the shipped 012 hand-off envelope, now carrying the
           // session's attached files (R4-12) so the wizard opens pre-attached.
-          void launchSurface({ consumerType: 'create-matter', bffBaseUrl, ...surfaceFileArgs });
+          // Task 064 (E1b): report the committed record to the host (no-op when unwired).
+          void reportRecordCreated(
+            launchSurface({ consumerType: 'create-matter', bffBaseUrl, ...surfaceFileArgs }),
+            RECORD_CARD_ENTITY[cardId]!,
+            onRecordCreated
+          );
           break;
 
         case 'create-project-wizard':
           // R4-12: create-project also reads the handoff envelope (CreateProjectWizard main.tsx
           // wires initialFileRefs) and has a SURFACE_LAUNCH_REGISTRY entry — route it through the
           // SAME launchSurface envelope (not the file-less Path-B launcher) so files flow in too.
-          void launchSurface({ consumerType: 'create-project', bffBaseUrl, ...surfaceFileArgs });
+          void reportRecordCreated(
+            launchSurface({ consumerType: 'create-project', bffBaseUrl, ...surfaceFileArgs }),
+            RECORD_CARD_ENTITY[cardId]!,
+            onRecordCreated
+          );
           break;
 
         case 'assign-work':
           // R5-8: route through the hand-off envelope so the session's attached file(s) reach the
           // Create Work Assignment wizard's Add Files step (registry entry: create-work-assignment).
-          void launchSurface({ consumerType: 'create-work-assignment', bffBaseUrl, ...surfaceFileArgs });
+          void reportRecordCreated(
+            launchSurface({ consumerType: 'create-work-assignment', bffBaseUrl, ...surfaceFileArgs }),
+            RECORD_CARD_ENTITY[cardId]!,
+            onRecordCreated
+          );
           break;
 
         case 'document-upload-wizard':
@@ -311,7 +370,7 @@ export const QuickStartModal: React.FC<QuickStartModalProps> = ({
       // pattern #5: don't nest modals from different chrome families).
       onClose();
     },
-    [onClose, getFileContext, onSendEmail, onCardLaunched],
+    [onClose, getFileContext, onSendEmail, onCardLaunched, onRecordCreated],
   );
 
   return (

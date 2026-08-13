@@ -214,6 +214,53 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
     expect(recordAffinity).not.toHaveBeenCalled();
   });
 
+  // ── Task 064 (E1b): "New record" launcher → confirmable candidate ──────────
+  it('E1b: "New record" launcher resolving a ref FILES it via the additive applyRegardingSelection path (no second write path)', async () => {
+    const onLaunchCreateRecord = jest
+      .fn()
+      .mockResolvedValue({ id: 'mtr-new', entityType: 'sprk_matter', name: 'New Matter 42' });
+    const props = baseProps({ onLaunchCreateRecord });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('create-new-record'));
+
+    await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
+    // The created record flows through the SAME confirm → applyRegardingSelection write.
+    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+    const call = (props.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0];
+    expect(call[0]).toBe('sprk_communication');
+    expect(call[1]).toBe(HOST_ID);
+    const payload = call[2] as Record<string, unknown>;
+    // The matter regarding lookup is bound to the newly-created record (additive; no nulled siblings).
+    const bind = Object.entries(payload).find(([k]) => k.endsWith('@odata.bind'));
+    expect(bind?.[1]).toEqual(expect.stringContaining('mtr-new'));
+    const nulled = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
+    expect(nulled).toHaveLength(0);
+  });
+
+  it('E1b: "New record" launcher resolving null (wizard cancelled) writes NOTHING', async () => {
+    const onLaunchCreateRecord = jest.fn().mockResolvedValue(null);
+    const props = baseProps({ onLaunchCreateRecord });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('create-new-record'));
+
+    await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
+    // No confirm write on a cancelled create.
+    expect(props.writeContext.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  it('E1b: with NO launcher, the tile falls back to the fire-and-forget onCreateNewRecord (existing consumers unchanged)', () => {
+    const onCreateNewRecord = jest.fn();
+    const props = baseProps({ onCreateNewRecord });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('create-new-record'));
+
+    expect(onCreateNewRecord).toHaveBeenCalledTimes(1);
+    expect(props.writeContext.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
   it('NEEDS CONFIRMATION: an auto-matched (autoFiled) top candidate is pre-selected with a Confirm', () => {
     renderWithProvider(
       <EmailConnectionsReview

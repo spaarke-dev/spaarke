@@ -25,3 +25,8 @@ export * from './ReconciliationGrid';
 // ReconcileTabs - Pillar E reconcile tabs (Fields = task 055 / FR-E4; Tasks =
 // task 056 / FR-E5) mounted in the browse-shell right pane + email record form.
 export * from './ReconcileTabs';
+
+// ReconciliationWorkspace - Pillar E composition (task 061): renders the grid,
+// opens the browse shell on row-open, and supplies its renderTabs slot with the
+// Related-to / Fields / Tasks TabList (NFR-10 gate + NFR-11 citation wiring).
+export * from './ReconciliationWorkspace';

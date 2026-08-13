@@ -23,12 +23,13 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 
 public class ExternalParticipationServiceInvalidationTests
 {
-    // Must match the public const in ExternalParticipationService (the documented cache-key contract).
-    // CacheVersion history: 1→2 (task 028, cached shape widened to the full polymorphic grant set),
-    // 2→3 (task 073 #7). Kept at 3 to match ExternalParticipationService.CacheVersion; this test was
-    // stale at 2 (task-073's bump didn't update it) — realigned 2026-08-13 (dotnet-10-upgrade-r1 task 030).
-    private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 3;
+    // Reference the SINGLE SOURCE OF TRUTH consts on ExternalParticipationService directly (they are
+    // public by design — see the service's const comment) so a version bump propagates here automatically
+    // instead of drifting. (Previously hardcoded CacheVersion = 2, which went stale when task 073 #7
+    // bumped the stored/invalidated key to v3 for the org-grant shape — the exact drift the shared const
+    // exists to prevent.)
+    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
+    private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     private static readonly Guid ContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private const string Tenant = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";

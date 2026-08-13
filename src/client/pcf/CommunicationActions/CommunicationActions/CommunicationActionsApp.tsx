@@ -404,9 +404,9 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // entity types (RegardingResolver pattern). A Document pick attaches; any other record is
   // linked in the body. Runs the OOB Xrm.Utility.lookupObjects picker for the chosen type.
   const handleLookupRecord = React.useCallback(async (entityType: string): Promise<IPickedRecord | null> => {
-    type XrmLike = {
+    interface XrmLike {
       Utility?: { lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string }>> };
-    };
+    }
     const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
     const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
     if (!xrm?.Utility?.lookupObjects) return null;
@@ -432,11 +432,11 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // (contact → emailaddress1, user → internalemailaddress) into a chip. Multi-select supported.
   const handleLookupRecipients = React.useCallback(
     async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
-      type XrmLike = {
+      interface XrmLike {
         Utility?: {
           lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>;
         };
-      };
+      }
       const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
       const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
       if (!xrm?.Utility?.lookupObjects) return null;
@@ -477,11 +477,11 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // and returns the picked record; the composer shows it in "Related to" and it is written onto
   // the communication when the email is SENT (the send payload carries `associations`).
   const handleAddRelationship = React.useCallback(async (): Promise<IPickedRecord | null> => {
-    type XrmLike = {
+    interface XrmLike {
       Utility?: {
         lookupObjects?: (o: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>;
       };
-    };
+    }
     const scope = window as unknown as { Xrm?: XrmLike; parent?: { Xrm?: XrmLike }; top?: { Xrm?: XrmLike } };
     const xrm = scope.Xrm ?? scope.parent?.Xrm ?? scope.top?.Xrm;
     if (!xrm?.Utility?.lookupObjects) return null;

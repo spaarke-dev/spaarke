@@ -808,6 +808,43 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return MapToDocumentEntityWithEmailFields(results.Entities[0]);
     }
 
+    public async Task<DocumentEntity?> GetEmailArchiveByCommunicationAsync(Guid communicationId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Querying email-archive document by communication: {CommunicationId}", communicationId);
+
+        // The Spaarke communication model archives the .eml against sprk_communication (NOT the OOB
+        // email activity — cf. GetDocumentByEmailLookupAsync). Filter that lookup + IsEmailArchive=true.
+        var query = new QueryExpression("sprk_document")
+        {
+            ColumnSet = new ColumnSet(
+                "sprk_documentname", "sprk_documentdescription", "sprk_containerid",
+                "sprk_hasfile", "sprk_filename", "sprk_filesize", "sprk_mimetype",
+                "sprk_graphitemid", "sprk_graphdriveid", "sprk_filepath",
+                "sprk_emailsubject", "sprk_emailfrom", "sprk_emailto", "sprk_emailcc",
+                "sprk_emaildate", "sprk_emailbody", "sprk_isemailarchive",
+                "statuscode", "statecode", "createdon", "modifiedon"),
+            Criteria = new FilterExpression
+            {
+                Conditions =
+                {
+                    new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId),
+                    new ConditionExpression("sprk_isemailarchive", ConditionOperator.Equal, true)
+                }
+            },
+            TopCount = 1
+        };
+
+        var results = await _serviceClient.RetrieveMultipleAsync(query, ct);
+
+        if (results.Entities.Count == 0)
+        {
+            _logger.LogDebug("No email-archive document found for communication {CommunicationId}", communicationId);
+            return null;
+        }
+
+        return MapToDocumentEntityWithEmailFields(results.Entities[0]);
+    }
+
     public async Task<IEnumerable<DocumentEntity>> GetDocumentsByParentAsync(Guid parentDocumentId, CancellationToken ct = default)
     {
         _logger.LogDebug("Querying child documents for parent: {ParentDocumentId}", parentDocumentId);

@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>ReconciliationWorkspace composition + apply UX A4/A5/A6 to ReconciliationBrowseShell — wire grid → shell(renderTabs) → reconcile tabs</title>
+    <phase>5 Pillar E — Reconciliation UI (mount build)</phase>
+    <gate>startable — deps 050–058 complete (grid + shell + tabs exist + exported)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in the shared lib (new composition + shell layout changes); "implement/create component"; wires gate + citation across components.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive composition + a bounded layout change to an existing shell, with a complete spec (prototype App.tsx + UX doc + the shell's own renderTabs contract as explicit references); no architectural novelty or security surface.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared lib @spaarke/communication-components (also edits the 053 shell); /conflict-check before PR (contended with r5).</parallel-reason>
+    <deps>050,051,052,053,054,055,056,057</deps>
+    <tags>react, typescript, frontend, fluent-ui</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build a new presentational `ReconciliationWorkspace` in @spaarke/communication-components that renders the EXISTING
+    `ReconciliationGrid` and, on row-open, the EXISTING `ReconciliationBrowseShell` (the task-053 SprkModal + "N of M"
+    two-pane shell) — feeding its `renderTabs` slot a TabList → Related-to (052) / FieldUpdateReconcileTab (055) /
+    TaskReconcileTab (056). ALSO apply the owner UX layout items to the shell's two-pane body: A4 larger modal size,
+    A5 thin scrollbars, A6 50/50 split with a manual horizontal drag-resize (PanelSplitter). Compose + enhance the
+    shipped components — do NOT re-implement the grid, shell, reader, or tabs; do NOT introduce a BrowseModal wrapper
+    (the shell already IS the modal).
+  </prompt>
+  <role>SPAARKE platform developer. Expert in React + Fluent UI v9 + the Spaarke shared component libraries. Follow ADRs strictly; compose + enhance, do not fork.</role>
+  <goal>
+    (1) `ReconciliationWorkspace` is exported from @spaarke/communication-components: renders ReconciliationGrid, opens
+    ReconciliationBrowseShell on row-open with the queue + initialIndex, and supplies `renderTabs` = Related-to / Fields /
+    Tasks (mounting the 052/055/056 tabs) with the NFR-10 gate + citation wiring. (2) ReconciliationBrowseShell's
+    two-pane body honors A4 (SprkModal size xl/full), A5 (thin scroll via ModalScrollArea), and A6 (PanelSplitter 50/50,
+    drag-resizable). Package build + jest green.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 050–058 built + exported the grid, the SprkModal-based `ReconciliationBrowseShell` (with a `renderTabs` right
+      slot already designed for the 052/055/056 tabs), and the reconcile tabs — but nothing composes them into a mounted
+      surface, and the shell's two-pane body predates the owner's A4/A5/A6 layout requirements. The prototype's mock
+      App.tsx is the UX reference. This task creates the production composition + applies A4/A5/A6 so task 062 can mount
+      ONE component in two hosts.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationWorkspace/ReconciliationWorkspace.tsx</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationWorkspace/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationWorkspace/__tests__/ReconciliationWorkspace.test.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/ReconciliationBrowseShell.tsx</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/index.ts</file>
+      <file role="reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/ReconciliationBrowseShell.types.ts</file>
+      <file role="reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/ReconciliationGrid.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/ModalScrollArea.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/sizes.ts</file>
+      <file role="reference">spaarke-prototype/projects/email-communication-intelligence-r2-uat/src/App.tsx</file>
+      <file role="reference">projects/email-communication-intelligence-r2/notes/pillar-e-reconciliation-ux-requirements.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="done">ReconciliationGrid + needs-review config + onRecordOpen override.</dependency>
+      <dependency task="052" status="done">Related-to (RelatedToCell / EmailConnectionsReview) — the Related-to tab.</dependency>
+      <dependency task="053" status="done">ReconciliationBrowseShell (SprkModal two-pane, renderTabs slot) — the shell to compose + enhance.</dependency>
+      <dependency task="054" status="done">Citation navigation (activeCitation into the reader).</dependency>
+      <dependency task="055" status="done">FieldUpdateReconcileTab.</dependency>
+      <dependency task="056" status="done">TaskReconcileTab.</dependency>
+      <dependency task="057" status="done">Per-team routing / membershipFilter.</dependency>
+    </dependencies>
+  </context>
+
+  <justification>
+    <existing>No component composes grid + shell + tabs; the shell EXISTS with a `renderTabs` slot but nothing supplies the tabs or the grid→shell wiring. Closest neighbor is the prototype mock App.tsx (not production). `grep -rln ReconciliationGrid src/solutions` → zero external mounts.</existing>
+    <extension>The shell (053) is extended for A4/A5/A6 (in-place layout change — no new component). The grid→shell→tabs orchestration is genuinely new glue that no existing single component provides; hence a new ReconciliationWorkspace, not an extension of any one component.</extension>
+    <cost-of-doing-nothing>Without it, each host (code page + SpaarkeAi widget, task 062) must independently wire the grid to the shell + supply renderTabs + the gate + citation state — guaranteed drift between the two surfaces and doubled test surface. And without A4/A5/A6 on the shell, the owner-approved layout requirements ship unmet.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="project">SCOPE: compose + enhance EXISTING components. Do NOT re-implement ReconciliationGrid, ReconciliationBrowseShell, its reader, or the reconcile tabs. Do NOT add a BrowseModal wrapper — ReconciliationBrowseShell already is the SprkModal-based shell (A1 satisfied; see its types header + notes/053).</constraint>
+    <constraint source="ADR-050">SCOPE: A4 larger modal. Bump the ReconciliationBrowseShell SprkModal size to "xl" (or "full") per docs/standards/MODAL-DESIGN-SYSTEM.md sizes.ts — more real estate for the email + attachment reader.</constraint>
+    <constraint source="project">SCOPE: A6 50/50 drag-resize. Replace the shell's fixed two-pane grid with a `PanelSplitter` defaulting to 50/50 with manual horizontal drag-resize (reader | renderTabs). SCOPE: A5 thin scroll — wrap the reader + tab-slot scroll regions in ModalScrollArea (the shared thin-scroll convention).</constraint>
+    <constraint source="ADR-021">SCOPE: styling. Fluent v9 semantic tokens only; light/dark; no hard-coded colors.</constraint>
+    <constraint source="ADR-012">SCOPE: shared lib. ReconciliationWorkspace is context-agnostic — accept IDataverseClient + authenticatedFetch + theme (+ uiScale) via props; no host coupling, no direct Xrm.</constraint>
+    <constraint source="project">SCOPE: behavior. NFR-10 — the Fields/Tasks tabs in renderTabs are gated until a Related-to record is confirmed; re-scope on override. NFR-11 — use the shell's existing reader + activeCitation (task 054); no second reader/citation mechanism. Apply-routing per the UX doc §C (Accept→apply{overrideValue}, Reject→dismiss, task edited-identity→ad-hoc+dismiss, +New→ad-hoc) is already inside the tabs — wire their callbacks through.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>projects/email-communication-intelligence-r2/notes/pillar-e-reconciliation-ux-requirements.md</file>
+      <file>projects/email-communication-intelligence-r2/notes/053-browse-shell-and-reader-complete.md</file>
+    </files>
+    <patterns>
+      <pattern name="renderTabs slot" location="src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/ReconciliationBrowseShell.types.ts">The shell's right-pane `renderTabs(record, index)` contract — this is where the Related-to/Fields/Tasks TabList mounts.</pattern>
+      <pattern name="prototype-composition" location="spaarke-prototype/projects/email-communication-intelligence-r2-uat/src/App.tsx">The UX-reference orchestration (grid overrides, browse open, 50/50 split, tabs, save/undo, gate) to mirror with production components + real data.</pattern>
+      <pattern name="PanelSplitter" location="src/client/shared/Spaarke.UI.Components/src/components/PanelSplitter/PanelSplitter.tsx">The 50/50 drag-resize splitter (A6) for the shell's two-pane body.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load this POML + the UX doc + notes/053. Read ReconciliationBrowseShell.tsx/.types.ts (renderTabs, queue, initialIndex, activeCitation, uiScale), ReconciliationGrid (onRecordOpen, membershipResolver), the two tab contracts, PanelSplitter, ModalScrollArea, sizes.ts. Confirm the tabs mount cleanly into renderTabs + the grid onRecordOpen supplies the row. If a contract does not compose, FIRE the escalation trigger.</step>
+    <step order="1">Apply A4/A5/A6 to ReconciliationBrowseShell.tsx: SprkModal size → xl/full (A4); two-pane body → PanelSplitter 50/50 drag-resize (A6); reader + tab-slot scroll regions → ModalScrollArea thin scroll (A5). Keep the shell's existing reader, nav, citation, and renderTabs contract intact.</step>
+    <step order="2">Create ReconciliationWorkspace.tsx: render ReconciliationGrid (configId, dataverseClient, membershipResolver, authenticatedFetch, theme). onRecordOpen(row) → build the queue (from grid data) + initialIndex → open ReconciliationBrowseShell.</step>
+    <step order="3">Supply the shell's renderTabs = a TabList → Related-to (052) / Fields (FieldUpdateReconcileTab, 055) / Tasks (TaskReconcileTab, 056), passing regarding/onProposalResolved/onCitationClick. Wire the NFR-10 gate (Fields/Tasks disabled until Related-to confirmed; re-scope on override) and citation click → the shell's activeCitation.</step>
+    <step order="4">Export ReconciliationWorkspace from the component barrel (components/index.ts).</step>
+    <step order="5">Write RTL tests: grid renders; row-open opens the shell; splitter present at 50/50; gate blocks Fields/Tasks until Related-to confirmed; citation click sets activeCitation; a Fields Accept calls the apply path. Reuse existing test mocks (authenticatedFetch mock, injected client, FluentProvider wrapper). Add/adjust ReconciliationBrowseShell tests for the A4/A5/A6 layout changes.</step>
+    <step order="6">Run the package build + jest; fix to green.</step>
+    <step order="7">Update TASK-INDEX.md: set 061 status to ✅.</step>
+    <step order="8">Document the composition + the shell A4/A5/A6 change in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a production component's contract does NOT compose as expected (e.g., the reconcile tabs cannot mount into the shell's renderTabs slot, a tab's regarding/onProposalResolved contract is incompatible, or PanelSplitter cannot replace the shell's two-pane grid without breaking the reader/nav), STOP and escalate per CLAUDE.md §6 — do NOT fork or re-implement a component to force the composition.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build + test the shared lib (jest).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationWorkspace/ReconciliationWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationWorkspace/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationWorkspace/__tests__/ReconciliationWorkspace.test.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationBrowseShell/ReconciliationBrowseShell.tsx (A4/A5/A6 layout)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ReconciliationWorkspace is exported from @spaarke/communication-components and renders ReconciliationGrid given configId + dataverseClient.</criterion>
+    <criterion testable="true">Opening a grid row opens ReconciliationBrowseShell (SprkModal, NOT a new BrowseModal) at size xl/full, with its renderTabs slot mounting a TabList → Related-to / Fields / Tasks.</criterion>
+    <criterion testable="true">The shell's two-pane body uses a PanelSplitter defaulting to 50/50 with a working drag handle; reader + tab scroll regions use the thin-scroll convention.</criterion>
+    <criterion testable="true">NFR-10: Fields/Tasks tabs are gated until a Related-to record is confirmed; re-scope on override.</criterion>
+    <criterion testable="true">A Fields "Accept" invokes the apply path with the (possibly overridden) value; a citation click sets the shell's activeCitation and the reader jumps/highlights.</criterion>
+    <criterion testable="true">Negative: ReconciliationWorkspace takes IDataverseClient + authenticatedFetch via props and does NOT reference Xrm directly (ADR-012); no grid/shell/reader/tab code is re-implemented.</criterion>
+    <criterion testable="true">Package build succeeds and all jest tests pass (incl. updated ReconciliationBrowseShell layout tests).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    ReconciliationBrowseShell already IS the modal + reader + renderTabs slot (task 053, SprkModal + nav; its types header explicitly documents the renderTabs right-pane for 052/055/056/057). So 061 is mostly wiring (grid→shell, tabs→renderTabs, gate + citation) plus a bounded in-place layout change to the shell for A4/A5/A6. The prototype App.tsx is the interaction reference; production swaps its raw Dialog/mock-reader/local-decisions for the shell + real tabs + real apply endpoints (already deployed).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all <knowledge><files> and read the referenced component contracts before implementing. Follow task-execute; run Step 9.5 gates.</protocol>
+  </execution>
+</task>
