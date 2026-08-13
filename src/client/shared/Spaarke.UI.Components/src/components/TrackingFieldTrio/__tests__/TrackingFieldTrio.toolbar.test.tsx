@@ -96,7 +96,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
       expect(screen.queryByRole('button', { name: 'Email members' })).not.toBeInTheDocument();
       // Existing controls are unaffected.
       expect(screen.getAllByRole('switch')).toHaveLength(2);
-      expect(screen.getAllByRole('radio')).toHaveLength(3);
+      expect(screen.getByText('Standard')).toBeInTheDocument(); // Access Permission is a single pill (v1.0.27)
     });
   });
 
@@ -142,7 +142,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
       fireEvent.click(monitorSwitch);
       expect(onMonitorChange).toHaveBeenCalledWith(true);
 
-      expect(screen.getAllByRole('radio')).toHaveLength(3);
+      expect(screen.getByText('Standard')).toBeInTheDocument(); // Access Permission is a single pill (v1.0.27)
     });
   });
 
@@ -156,7 +156,7 @@ describe('TrackingFieldTrio — governance toolbar (task 040)', () => {
       expect(screen.getByRole('button', { name: 'Grant access' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Email members' })).toBeInTheDocument();
       expect(screen.getAllByRole('switch')).toHaveLength(2);
-      expect(screen.getAllByRole('radio')).toHaveLength(3);
+      expect(screen.getByText('Standard')).toBeInTheDocument(); // Access Permission is a single pill (v1.0.27)
     });
   });
 

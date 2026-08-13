@@ -24,8 +24,9 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess;
 public class ExternalParticipationServiceInvalidationTests
 {
     // Must match the private consts in ExternalParticipationService (the documented cache-key contract).
+    // CacheVersion bumped 1→2 by task 028 when the cached shape widened to the full polymorphic grant set.
     private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 1;
+    private const int CacheVersion = 2;
 
     private static readonly Guid ContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private const string Tenant = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";

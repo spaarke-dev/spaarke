@@ -223,11 +223,7 @@ function assertAssistantContractDeclared(type: string, metadata: WidgetMetadata)
   // already enforces the full shape for typed callers; this catches dynamic /
   // JS / cast callers passing a partial object).
   const c = contract as Partial<WidgetAssistantContract>;
-  if (
-    !Array.isArray(c.overviewTools) ||
-    !Array.isArray(c.perItemCards) ||
-    typeof c.interactionPattern !== 'string'
-  ) {
+  if (!Array.isArray(c.overviewTools) || !Array.isArray(c.perItemCards) || typeof c.interactionPattern !== 'string') {
     throw new Error(
       `[ai-widgets] WorkspaceWidgetRegistry: widget "${type}" declared a MALFORMED ` +
         `assistantContract (FR-15). A contract needs overviewTools[], perItemCards[], and a ` +

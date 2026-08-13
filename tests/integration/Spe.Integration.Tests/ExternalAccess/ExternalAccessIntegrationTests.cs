@@ -77,7 +77,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(GrantEndpoint, validRequest);
@@ -116,7 +116,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             FirstName: null,
             LastName: null,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(InviteEndpoint, validRequest);
@@ -221,7 +221,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(GrantEndpoint, request);
@@ -242,7 +242,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             ProjectId: Guid.Empty,
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(GrantEndpoint, request);
@@ -387,7 +387,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             FirstName: null,
             LastName: null,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(InviteEndpoint, request);
@@ -410,7 +410,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             FirstName: null,
             LastName: null,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(InviteEndpoint, request);
@@ -435,7 +435,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             FirstName: null,
             LastName: null,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(InviteEndpoint, request);
@@ -508,7 +508,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(GrantEndpoint, request);
@@ -570,7 +570,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(GrantEndpoint, request);
@@ -707,7 +707,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         // Act
         var response = await _authenticatedClient.PostAsJsonAsync(GrantEndpoint, request);
@@ -834,7 +834,7 @@ public class ExternalAccessIntegrationTests : IClassFixture<IntegrationTestFixtu
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.Collaborate,
             ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)),
-            AccountId: null);
+            OrganizationId: null);
 
         var response = await _authenticatedClient.PostAsJsonAsync(GrantEndpoint, request);
 

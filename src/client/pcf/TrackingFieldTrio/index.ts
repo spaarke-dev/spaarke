@@ -99,14 +99,36 @@ import {
   type IAccessGrantCandidate,
   type IAccessGrantRecord,
   type IContactSearchResult,
+  type IOrganizationPick,
+  type ExternalGrantRootType,
   type AccessPermissionState,
 } from '@spaarke/ui-components/dist/components/AccessGrantModal';
+// Shared side-pane Advanced Lookup (task 071) — adopted as-is per §11: the PCF
+// host wires INavigationService.openLookup (→ Xrm.Utility.lookupObjects) and
+// passes plain pickContact/pickOrganization callbacks into the Xrm-free modal.
+import { createXrmNavigationService } from '@spaarke/ui-components/dist/utils/adapters';
+import type { INavigationService } from '@spaarke/ui-components/dist/types/serviceInterfaces';
+import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 // Canonical `SendEmailDialog` (task 042, ADR-045) — the `EmailComposer`
 // wrapper that owns the Dialog chrome + `sendCommunication()` send flow.
 // This is the ONLY email-send surface this control is allowed to open (no
 // forked dialog, no ad-hoc fetch to the send endpoint).
 import { SendEmailDialog } from '@spaarke/ui-components/dist/components/EmailComposer';
+// Shared Xrm-backed compose-lookup + upload factory (task 073 UAT v1.0.24 #10/#11).
+// Builds `onLookupRecipients` (To/Cc native people picker) + `onUploadLocalAttachment`
+// (local file → SPE → governed sprk_document, so it rides the send payload instead of
+// being dropped) from auth + BFF URL. The SAME factory EmailWorkspaceWidget uses.
+import { createXrmEmailComposeHandlers } from '@spaarke/ui-components/dist/components/EmailComposer';
+// Shared per-widget error boundary (task 073 UAT #1) — wraps the dialog subtree
+// so a render error inside a shared dialog degrades to a small inline card
+// instead of blanking the whole PCF (defense-in-depth alongside the
+// react/jsx-runtime dedupe in ../webpack.config.js).
+import { WidgetErrorBoundary } from '@spaarke/ui-components/dist/components/WidgetErrorBoundary';
 import { initializeAuth } from './authInit';
+// Dataverse Environment Variable resolution (task 073 UAT fix) — the SAME mechanism
+// SemanticSearchControl uses so the grant modal's BFF auth needs NO per-control form config: the MSAL
+// client id / BFF app id / BFF base url come from sprk_MsalClientId / sprk_BffApiAppId / sprk_BffApiBaseUrl.
+import { getEnvironmentVariable, getApiBaseUrl } from '../shared/utils/environmentVariables';
 
 // sprk_communication Access Permission choice values — MUST match the
 // Dataverse OptionSet values. Entity-specific: lives ONLY here (the PCF
@@ -125,25 +147,50 @@ const FALLBACK_ACCESS_PERMISSION_OPTIONS: IAccessPermissionOption[] = [
   { value: ACCESS_PERMISSION_RESTRICTED, label: 'Restricted' },
 ];
 
-// task 041 (teams-app-r1) — the ONLY entity this control's access-grant
-// modal supports in R1: `sprk_externalrecordaccess` is `sprk_project`-scoped
-// per design.md §5 ("known gap #2" — extending to matters/other entities is
-// R2). This constant + the role-field map below are entity-specific
-// knowledge that lives ONLY in this file (FR-14 discipline), never in the
-// shared `AccessGrantModal` core.
-const GRANT_RECORD_ENTITY = 'sprk_project';
+// v1.0.12 (task 071, external-access-r2) — the access-grant surface is now
+// POLYMORPHIC across the three external-grant roots (Project / Matter / Work
+// Assignment), the UI companion to tasks 028 (read) + 070 (write). The host
+// entity is derived from the bound record at runtime (`context.page.entityTypeName`)
+// instead of the R1 `sprk_project` hardcode, and the modal's contact picker is
+// the SHARED side-pane Advanced Lookup (INavigationService.openLookup) rather
+// than the inline Combobox. This file remains the ONLY place that knows the
+// concrete Dataverse entity names + their `sprk_assigned*` role fields — the
+// shared `AccessGrantModal` stays entity-agnostic (ADR-012 / FR-14).
 const EXTERNAL_ACCESS_ENTITY = 'sprk_externalrecordaccess';
 
-// The R1-verified access-conferring role-field set on `sprk_project`
-// (task 021's convention-based discovery, mirrored client-side per
-// `notes/pipeline-run-guidance.md`). A newly-added `sprk_assigned*` field
+// The polymorphic external-grant root config, keyed by the host form's entity
+// (task 070/071). `recordType` is the semantic root type the modal sends as
+// `{recordType, recordId}`; `rootValueField` is the `sprk_externalrecordaccess`
+// lookup filter for reading the record's active grants (fixes the R1
+// `_sprk_projectid_value` bug — the verified lookup name is `_sprk_project_value`,
+// per task 070's live $metadata verification). Matter + Work Assignment carry
+// the SAME `sprk_assigned*` role fields as Project (verified), so a single
+// shared CANDIDATE_ROLE_FIELDS set below serves all three.
+interface IGrantRootConfig {
+  recordType: ExternalGrantRootType;
+  rootValueField: string;
+}
+const GRANT_ROOT_BY_ENTITY: Readonly<Record<string, IGrantRootConfig>> = {
+  sprk_project: { recordType: 'project', rootValueField: '_sprk_project_value' },
+  sprk_matter: { recordType: 'matter', rootValueField: '_sprk_matter_value' },
+  sprk_workassignment: { recordType: 'workassignment', rootValueField: '_sprk_workassignment_value' },
+};
+// Back-compat default when the host entity is unknown/unavailable (e.g. a
+// harness environment where `context.page` isn't populated) — preserves the
+// R1 project behavior.
+const DEFAULT_GRANT_ROOT: IGrantRootConfig = GRANT_ROOT_BY_ENTITY['sprk_project'];
+
+// The access-conferring role-field set shared by all three grant roots
+// (Project / Matter / Work Assignment carry the SAME `sprk_assigned*` lookups —
+// verified in notes/polymorphic-grant-authoring-enhancement.md; task 021's
+// convention-based discovery, mirrored client-side). A newly-added `sprk_assigned*` field
 // does NOT auto-qualify here the way it does in the server-side metadata
 // discovery (task 021/022) — this client-side list is a UI convenience for
 // the candidate section, not the security enforcement path (enforcement is
 // entirely server-side per design.md §5). If the role-field set changes,
 // update this list; nothing security-load-bearing depends on it being
 // exhaustive.
-const CANDIDATE_ROLE_FIELDS: ReadonlyArray<{ attr: string; role: string }> = [
+const CANDIDATE_ROLE_FIELDS: readonly { attr: string; role: string }[] = [
   { attr: 'sprk_assignedattorney1', role: 'Assigned Attorney 1' },
   { attr: 'sprk_assignedattorney2', role: 'Assigned Attorney 2' },
   { attr: 'sprk_assignedparalegal1', role: 'Assigned Paralegal 1' },
@@ -209,14 +256,23 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const params = context.parameters as any;
-    this.apiBaseUrl = params.apiBaseUrl?.raw ?? '';
-    this.authInitPromise = initializeAuth(
-      params.clientAppId?.raw ?? '',
-      params.bffAppId?.raw ?? '',
-      this.apiBaseUrl,
-      getClientUrl()
-    ).catch(err => {
-      // eslint-disable-next-line no-console
+    const webApi = context.webAPI;
+    // task 073 UAT fix: resolve MSAL config from the manifest input properties FIRST, then fall back to
+    // the Dataverse ENVIRONMENT VARIABLES (sprk_MsalClientId / sprk_BffApiAppId / sprk_BffApiBaseUrl) —
+    // the SAME mechanism SemanticSearchControl uses. The prior code only read the (empty) manifest props,
+    // so on an environment configured purely via env vars it threw "MSAL Client ID not configured".
+    // getApiBaseUrl() normalizes the URL (strips any trailing /api) so the modal's `/api/...` paths resolve.
+    this.authInitPromise = (async () => {
+      const clientAppId =
+        (params.clientAppId?.raw as string) || (await getEnvironmentVariable(webApi, 'sprk_MsalClientId')) || '';
+      const bffAppId =
+        (params.bffAppId?.raw as string) || (await getEnvironmentVariable(webApi, 'sprk_BffApiAppId')) || '';
+      this.apiBaseUrl = (params.apiBaseUrl?.raw as string) || (await getApiBaseUrl(webApi));
+      await initializeAuth(clientAppId, bffAppId, this.apiBaseUrl, getClientUrl());
+      // Re-render so surfaces that read this.apiBaseUrl directly (e.g. SendEmailDialog's bffBaseUrl) pick
+      // up the resolved value now that auth init has completed.
+      this.renderControl();
+    })().catch(err => {
       console.error(
         "[TrackingFieldTrio] Auth initialization failed — the access-grant modal's BFF calls will fail until the page is reloaded.",
         err
@@ -283,6 +339,119 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     return page?.entityId || null;
   }
 
+  /** The bound record's entity logical name, via `context.page.entityTypeName`
+   * (task 071 — replaces the R1 `sprk_project` hardcode). Falls back to
+   * `sprk_project` in a harness/test host where `page` isn't populated. */
+  private getHostEntity(): string {
+    const page = (this.context as unknown as { page?: { entityTypeName?: string } }).page;
+    return page?.entityTypeName || 'sprk_project';
+  }
+
+  /** Resolves the polymorphic external-grant root config for the bound host
+   * entity (task 070/071). Unknown entities fall back to the project root. */
+  private resolveGrantRoot(): IGrantRootConfig {
+    return GRANT_ROOT_BY_ENTITY[this.getHostEntity()] ?? DEFAULT_GRANT_ROOT;
+  }
+
+  /** Lazily-constructed shared navigation service backing the side-pane Advanced
+   * Lookup (task 071). Cached so the contact + org pickers reuse one instance. */
+  private navService?: INavigationService;
+  private getNavService(): INavigationService {
+    if (!this.navService) {
+      this.navService = createXrmNavigationService();
+    }
+    return this.navService;
+  }
+
+  /** Cross-frame Xrm accessor (PCF runs in an iframe). */
+  private getXrm(): // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  any {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any;
+    try {
+      return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
+    } catch {
+      return w.Xrm;
+    }
+  }
+
+  /** Opens the Contact record as an OOB modal (task 073 UAT v1.0.24 #6) via
+   * `Xrm.Navigation.navigateTo` (entityrecord, `target: 2` = dialog) — per
+   * MODAL-DECISION-CRITERIA, opening a record uses the OOB navigator, not a
+   * proprietary Fluent dialog. A user with write access can then edit the Contact.
+   *
+   * v1.0.24 UAT #1: the Manage Access modal is a Fluent portal (top-window
+   * z-index) that renders ABOVE the platform Contact dialog, so the Contact
+   * dialog appeared BEHIND it. Fix: HIDE Manage Access while the Contact dialog
+   * is open (so the Contact dialog is unambiguously in front and fully covers it)
+   * and RESTORE it when the Contact dialog closes. The dialog opens large (70% ×
+   * 80%) so it covers the Manage Access footprint. */
+  private openContactRecord = (contactId: string): void => {
+    const xrm = this.getXrm();
+    const wasGrantOpen = this.isGrantModalOpen;
+    const restore = (): void => {
+      if (wasGrantOpen && !this.isGrantModalOpen) {
+        this.isGrantModalOpen = true;
+        this.renderControl();
+      }
+    };
+    try {
+      if (wasGrantOpen) {
+        this.isGrantModalOpen = false;
+        this.renderControl();
+      }
+      const p = xrm?.Navigation?.navigateTo?.(
+        { pageType: 'entityrecord', entityName: 'contact', entityId: contactId },
+        { target: 2, position: 1, width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } }
+      );
+      // navigateTo resolves/rejects when the dialog closes — restore Manage Access
+      // either way. If a host returns no thenable (legacy), restore immediately.
+      if (p && typeof p.then === 'function') {
+        p.then(restore, restore);
+      } else {
+        restore();
+      }
+    } catch (err) {
+      console.warn('[TrackingFieldTrio] open Contact record failed.', err);
+      restore();
+    }
+  };
+
+  /** The bound record's primary-name value (e.g. the matter number) for the email
+   * "Related to" chip (task 073 UAT v1.0.24 #9). Read from the form entity's
+   * primary attribute — entity-agnostic, no metadata call. Undefined outside an
+   * MDA host (harness) or when unset (chip then shows the humanized entity type). */
+  private getRecordDisplayName(): string | undefined {
+    const xrm = this.getXrm();
+    try {
+      const v = xrm?.Page?.data?.entity?.getPrimaryAttributeValue?.();
+      return typeof v === 'string' && v.length > 0 ? v : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Lazily-built shared Xrm email compose handlers (task 073 UAT v1.0.24 #10/#11):
+   * `onLookupRecipients` (native To/Cc people picker) + `onUploadLocalAttachment`
+   * (local file → SPE → governed `sprk_document`, so it rides the send payload
+   * instead of being dropped). Rebuilt if `apiBaseUrl` changes (it is resolved
+   * asynchronously after auth init, so the first build must happen post-init —
+   * which the email dialog only ever opens after). */
+  private emailHandlers?: { baseUrl: string; handlers: ReturnType<typeof createXrmEmailComposeHandlers> };
+  private getEmailHandlers(): ReturnType<typeof createXrmEmailComposeHandlers> {
+    if (!this.emailHandlers || this.emailHandlers.baseUrl !== this.apiBaseUrl) {
+      this.emailHandlers = {
+        baseUrl: this.apiBaseUrl,
+        handlers: createXrmEmailComposeHandlers({
+          clientUrl: getClientUrl(),
+          authenticatedFetch: this.authenticatedFetchGated,
+          bffBaseUrl: this.apiBaseUrl,
+        }),
+      };
+    }
+    return this.emailHandlers.handlers;
+  }
+
   /** Real Create-privilege check on `sprk_externalrecordaccess`
    * (`PrivilegeType.Create = 1`, `PrivilegeDepth.Global = 3` per
    * `@types/powerapps-component-framework`). Fails open (returns `true`) only
@@ -342,32 +511,70 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const recordId = this.getRecordId();
     if (!recordId) return [];
 
-    const select = CANDIDATE_ROLE_FIELDS.map(f => f.attr).join(',');
-    const expand = CANDIDATE_ROLE_FIELDS.map(f => `${f.attr}($select=fullname,emailaddress1)`).join(',');
-    const record = (await this.context.webAPI.retrieveRecord(
-      GRANT_RECORD_ENTITY,
-      recordId,
-      `?$select=${select}&$expand=${expand}`
-    )) as unknown as Record<
-      string,
-      { contactid?: string; fullname?: string; emailaddress1?: string } | null | undefined
-    >;
+    // task 073 UAT fix: read the role lookups by their FK VALUE fields (`_sprk_X_value`), NOT by the
+    // lookup logical name. You cannot `$select` a lookup by its logical name (Dataverse 400 "Could not
+    // find a property named 'sprk_assignedattorney1'"), and `$expand` would depend on the PascalCase
+    // navigation-property name. The `_X_value` form is stable and carries the contact's display name via
+    // the FormattedValue annotation — no nav-property-casing dependency. Emails (which drive the
+    // external-vs-internal grant routing) are batch-fetched separately below.
+    const valueFields = CANDIDATE_ROLE_FIELDS.map(f => `_${f.attr}_value`).join(',');
+    let record: Record<string, unknown>;
+    try {
+      record = (await this.context.webAPI.retrieveRecord(
+        this.getHostEntity(),
+        recordId,
+        `?$select=${valueFields}`
+      )) as unknown as Record<string, unknown>;
+    } catch {
+      // A host entity may not carry every role field — candidates are a convenience (the named-contact
+      // picker still works), so fail SOFT to an empty list rather than breaking the whole modal load.
+      return [];
+    }
 
+    const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
     const seen = new Set<string>();
-    const candidates: IAccessGrantCandidate[] = [];
+    const byId = new Map<string, { role: string; fullName: string }>();
     for (const field of CANDIDATE_ROLE_FIELDS) {
-      const nav = record[field.attr];
-      if (nav?.contactid && !seen.has(nav.contactid)) {
-        seen.add(nav.contactid);
-        candidates.push({
-          contactId: nav.contactid,
-          fullName: nav.fullname ?? '(no name)',
-          email: nav.emailaddress1 ?? undefined,
+      const contactId = record[`_${field.attr}_value`] as string | undefined;
+      if (contactId && !seen.has(contactId)) {
+        seen.add(contactId);
+        byId.set(contactId, {
           role: field.role,
+          fullName: (record[`_${field.attr}_value${FORMATTED}`] as string) ?? '(no name)',
         });
       }
     }
-    return candidates;
+    if (byId.size === 0) return [];
+
+    const emailById = await this.fetchContactEmails([...byId.keys()]);
+    return [...byId.entries()].map(([contactId, meta]) => ({
+      contactId,
+      fullName: meta.fullName,
+      email: emailById.get(contactId),
+      role: meta.role,
+    }));
+  };
+
+  /** Batch-fetches emails for a set of contacts (host-context). Email is best-effort — it drives the
+   * modal's external-vs-internal grant routing but a miss simply routes as grant-only. */
+  private fetchContactEmails = async (contactIds: string[]): Promise<Map<string, string>> => {
+    const map = new Map<string, string>();
+    if (contactIds.length === 0) return map;
+    const filter = contactIds.map(id => `contactid eq ${id}`).join(' or ');
+    try {
+      const res = await this.context.webAPI.retrieveMultipleRecords(
+        'contact',
+        `?$select=contactid,emailaddress1&$filter=${filter}`
+      );
+      for (const e of res.entities) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const row = e as any;
+        if (row.contactid && row.emailaddress1) map.set(row.contactid as string, row.emailaddress1 as string);
+      }
+    } catch {
+      /* email is best-effort — routing falls back to grant-only when unknown */
+    }
+    return map;
   };
 
   /** Reads the current record's active `sprk_externalrecordaccess` grants
@@ -376,27 +583,49 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     const recordId = this.getRecordId();
     if (!recordId) return [];
 
+    // Filter by the bound root's lookup value field (task 070/071 polymorphic
+    // read) — e.g. `_sprk_matter_value` on a Matter form. Replaces the R1
+    // `_sprk_projectid_value` (invalid field name → matched zero rows).
+    // task 073 UAT fix: read the contact + grantedby by their FK VALUE fields + FormattedValue
+    // annotations (the contact/systemuser display names) instead of `$expand=sprk_contactid,sprk_grantedby`
+    // — those lowercase names are NOT the navigation properties (Dataverse 400 "Could not find a property
+    // named 'sprk_contactid'"; the real nav props are PascalCase per task 070). The `_X_value` form is
+    // stable and needs no nav-property-casing.
+    const FORMATTED = '@OData.Community.Display.V1.FormattedValue';
+    const rootValueField = this.resolveGrantRoot().rootValueField;
     const options =
-      `?$filter=_sprk_projectid_value eq ${recordId} and statecode eq 0` +
-      `&$select=sprk_accesslevel,sprk_granteddate` +
-      `&$expand=sprk_contactid($select=fullname,emailaddress1),sprk_grantedby($select=fullname)`;
-    const result = await this.context.webAPI.retrieveMultipleRecords(EXTERNAL_ACCESS_ENTITY, options);
+      `?$filter=${rootValueField} eq ${recordId} and statecode eq 0` +
+      `&$select=_sprk_contact_value,_sprk_organization_value,_sprk_grantedby_value,sprk_accesslevel,sprk_granteddate`;
+
+    let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
+    try {
+      result = await this.context.webAPI.retrieveMultipleRecords(EXTERNAL_ACCESS_ENTITY, options);
+    } catch {
+      return [];
+    }
 
     return result.entities.map(e => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const row = e as any;
-      const contact = row.sprk_contactid as
-        | { contactid?: string; fullname?: string; emailaddress1?: string }
-        | undefined;
-      const grantedBy = row.sprk_grantedby as { fullname?: string } | undefined;
+      const contactId = (row['_sprk_contact_value'] as string) ?? '';
+      const organizationId = (row['_sprk_organization_value'] as string) ?? '';
+      // An ORGANIZATION grant (task 073 #7) is a row with NO contact + an organization set — it grants
+      // access to all contacts at that organization, so it renders as "All contacts at {org}" (revocable)
+      // instead of a person. A normal per-contact grant keeps the contact's name.
+      const isOrgGrant = !contactId && !!organizationId;
+      const orgName = (row[`_sprk_organization_value${FORMATTED}`] as string) ?? 'this organization';
       return {
         accessRecordId: row.sprk_externalrecordaccessid as string,
-        contactId: contact?.contactid ?? '',
-        fullName: contact?.fullname ?? '(unknown contact)',
-        email: contact?.emailaddress1 ?? undefined,
+        // Org rows have no contact — use the org id so the row still has a stable, non-empty key.
+        contactId: isOrgGrant ? organizationId : contactId,
+        fullName: isOrgGrant
+          ? `All contacts at ${orgName}`
+          : ((row[`_sprk_contact_value${FORMATTED}`] as string) ?? '(unknown contact)'),
+        email: undefined,
         accessLevel: row.sprk_accesslevel as number,
-        grantedByName: grantedBy?.fullname ?? undefined,
+        grantedByName: (row[`_sprk_grantedby_value${FORMATTED}`] as string) ?? undefined,
         grantedDate: row.sprk_granteddate ?? undefined,
+        provenance: isOrgGrant ? ('organization' as const) : undefined,
       };
     });
   };
@@ -417,6 +646,68 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     }));
   };
 
+  /** In-app `sprk_organization` search for the modal's inline org LookupField
+   * (task 073 UAT #4) — host-context, single-entity, capped at 10 — returns
+   * `{ id, name }` items. Replaces the side-pane org Advanced Lookup so the
+   * modal never has to hide to pick a firm/org. */
+  private searchOrganizations = async (query: string): Promise<ILookupItem[]> => {
+    const escaped = query.replace(/'/g, "''");
+    const options =
+      `?$filter=contains(sprk_organizationname,'${escaped}')` +
+      `&$select=sprk_organizationid,sprk_organizationname&$top=10`;
+    const result = await this.context.webAPI.retrieveMultipleRecords('sprk_organization', options);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return result.entities.map((e: any) => ({
+      id: e.sprk_organizationid as string,
+      name: (e.sprk_organizationname as string) ?? '(no name)',
+    }));
+  };
+
+  /** Opens the SHARED side-pane Advanced Lookup for a single Contact (task 071 —
+   * INavigationService.openLookup → Xrm.Utility.lookupObjects) and enriches the
+   * pick with the contact's email via a host-context read, so the modal's
+   * external-vs-internal grant routing (which keys off email) stays correct.
+   * Returns `null` when the user cancels. The GUID is already `cleanGuid`-
+   * normalized by the adapter, so it is safe to send in an `@odata.bind`. */
+  private pickContact = async (): Promise<IContactSearchResult | null> => {
+    const results = await this.getNavService().openLookup({
+      entityType: 'contact',
+      entityTypes: ['contact'],
+      allowMultiSelect: false,
+    });
+    const picked = results[0];
+    if (!picked) return null;
+    try {
+      const rec = (await this.context.webAPI.retrieveRecord(
+        'contact',
+        picked.id,
+        '?$select=fullname,emailaddress1'
+      )) as unknown as { fullname?: string; emailaddress1?: string };
+      return {
+        contactId: picked.id,
+        fullName: rec?.fullname ?? picked.name,
+        email: rec?.emailaddress1 ?? undefined,
+      };
+    } catch {
+      // Email enrichment failed — still return the pick (routes as grant-only).
+      return { contactId: picked.id, fullName: picked.name };
+    }
+  };
+
+  /** Opens the SHARED side-pane Advanced Lookup for a single `sprk_organization`
+   * (task 071) — the optional grantee firm/org sent to the BFF as
+   * `organizationId` (the grant's `sprk_Organization` firm-scoping lookup,
+   * task 070). Returns `null` when the user cancels. */
+  private pickOrganization = async (): Promise<IOrganizationPick | null> => {
+    const results = await this.getNavService().openLookup({
+      entityType: 'sprk_organization',
+      entityTypes: ['sprk_organization'],
+      allowMultiSelect: false,
+    });
+    const picked = results[0];
+    return picked ? { id: picked.id, name: picked.name } : null;
+  };
+
   /** Classifies a contact internal-workforce (has a linked `systemuser` via
    * `sprk_primarycontact`) vs external — drives `AccessGrantModal`'s
    * invite-and-grant vs grant-only routing decision. */
@@ -432,6 +723,54 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * constraint). */
   private onSetStandingGrant = async (contactId: string, standingGrant: boolean): Promise<void> => {
     await this.context.webAPI.updateRecord('contact', contactId, { sprk_standinggrant: standingGrant });
+  };
+
+  /** Reads the record's STANDING-grant members (task 073 UAT #2): the record's
+   * role-member candidates (`fetchCandidates()`) whose global
+   * `contact.sprk_standinggrant` flag is set. The intersection with THIS
+   * record's role-members mirrors the server-side union in
+   * `AccessibleRecordSetService.ComposeForContactAsync` — a standing contact
+   * with no access-conferring role on this record confers no access TO it, so
+   * it is intentionally NOT listed here (Eyal Iffergan shows only if he holds a
+   * `sprk_assigned*` role on the bound record). Returned rows carry
+   * `provenance: 'standing'` and NO `accessRecordId` (there is no per-record
+   * `sprk_externalrecordaccess` row to revoke) — the modal renders them
+   * non-revocable. `sprk_standinggrant` is field-level-secured: a signed-in user
+   * without FLS read on it silently gets an empty list (the query returns no
+   * matches), same fail-soft as the server-side reader. */
+  private fetchStandingContacts = async (): Promise<IAccessGrantRecord[]> => {
+    const candidates = await this.fetchCandidates();
+    if (candidates.length === 0) return [];
+    const filter = candidates.map(c => `contactid eq ${c.contactId}`).join(' or ');
+    let result: ComponentFramework.WebApi.RetrieveMultipleResponse;
+    try {
+      result = await this.context.webAPI.retrieveMultipleRecords(
+        'contact',
+        `?$select=contactid&$filter=sprk_standinggrant eq true and (${filter})`
+      );
+    } catch {
+      // FLS denial or query error — standing rows are additive; fail soft so the
+      // rest of the Current Access list still loads.
+      return [];
+    }
+    const standingIds = new Set<string>();
+    for (const e of result.entities) {
+      const row = e as unknown as { contactid?: string };
+      if (row.contactid) standingIds.add(row.contactid);
+    }
+    return candidates
+      .filter(c => standingIds.has(c.contactId))
+      .map(c => ({
+        // No accessRecordId — a standing grant has no per-record row to revoke.
+        contactId: c.contactId,
+        fullName: c.fullName,
+        email: c.email,
+        // Placeholder — standing rows render a "Standing" badge, not an
+        // access level (the effective level is role-derived server-side). Value
+        // is unused by the standing-row render path; 100000000 = ViewOnly.
+        accessLevel: 100000000,
+        provenance: 'standing' as const,
+      }));
   };
 
   // =========================================================================
@@ -479,9 +818,12 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
       monitor: this.monitorValue,
       highPriority: this.highPriorityValue,
       accessPermission: this.accessPermissionValue,
+      // Optional control header title (task 073 UAT #3) — when set, the shared
+      // core renders a 32px header row (title left, grant/email icons right).
+      title: (this.context.parameters.title?.raw as string) || undefined,
       showTitle,
       showVersion,
-      versionText: 'v1.0.11 • Built 2026-08-04',
+      versionText: 'v1.0.29 • Built 2026-08-12',
       accessPermissionOptions: this.getAccessPermissionOptions(),
       // Labels pulled from each bound field's Dataverse metadata so they
       // reflect the actual field display name (localizable, and stays in
@@ -539,85 +881,137 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
           React.Fragment,
           null,
           React.createElement(SharedTrackingFieldTrio, props),
-          // Access-grant modal (task 041) — always mounted so AccessGrantModal's
-          // own `open`-driven effect controls data loading; `recordId` is only
-          // resolvable once the control is bound to a real record (harness
-          // environments render the toolbar but the modal has nothing to open).
-          recordId
-            ? React.createElement(AccessGrantModal, {
-                open: this.isGrantModalOpen,
-                onClose: () => {
-                  this.isGrantModalOpen = false;
-                  this.renderControl();
-                },
-                recordId,
-                canGrantAccess: this.canGrantAccessValue,
-                authenticatedFetch: this.authenticatedFetchGated,
-                fetchCandidates: this.fetchCandidates,
-                fetchExistingGrants: this.fetchExistingGrants,
-                searchContacts: this.searchContacts,
-                isInternalContact: this.isInternalContact,
-                onSetStandingGrant: this.onSetStandingGrant,
-                // Access-Permission sharing gate (task 043, FR-14 Option A) —
-                // mapped from the bound field's raw OptionSet value; see
-                // mapAccessPermissionToState()'s doc comment.
-                accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
-              })
-            : null,
-          // Canonical SendEmailDialog (task 042) — pre-populated with the
-          // record's membership-contact emails (resolveEmailMembersRecipients()
-          // above). Send flows through the engine's OWN sendCommunication()
-          // call (ADR-045) — no custom send logic here. Gated on `recordId`
-          // for the same reason as the grant modal above.
-          recordId
-            ? React.createElement(SendEmailDialog, {
-                open: this.isSendEmailDialogOpen,
-                onClose: this.closeSendEmailDialog,
-                initialTo: this.emailRecipients,
-                authenticatedFetch: this.authenticatedFetchGated,
-                bffBaseUrl: this.apiBaseUrl,
-                titleOverride: 'Email Members',
-                regarding: { entityType: GRANT_RECORD_ENTITY, id: recordId },
-                onSent: () => {
-                  this.isSendEmailDialogOpen = false;
-                  this.renderControl();
-                },
-                onError: (err: Error) => {
-                  // eslint-disable-next-line no-console
-                  console.error('[TrackingFieldTrio] Email-members send failed.', err);
-                },
-              })
-            : null,
-          // Empty-state alert (task 042) — shown INSTEAD of SendEmailDialog
-          // when the record has no membership contacts with a populated
-          // email, so the dialog never opens with zero recipients.
-          React.createElement(Dialog, {
-            open: this.isEmailEmptyStateOpen,
-            onOpenChange: (_event: unknown, data: { open: boolean }) => {
-              if (!data.open) this.closeEmailEmptyState();
-            },
-            // Passed via the `children` prop (not createElement rest-args) —
-            // Fluent v9's `Dialog` types `children` as required on `DialogProps`,
-            // which the rest-args overload of `React.createElement` does not
-            // satisfy.
+          // task 073 UAT #1 — wrap the dialog subtree in the shared
+          // WidgetErrorBoundary so a render error inside a shared dialog (e.g.
+          // the EmailComposer engine) degrades to a small inline card instead of
+          // blanking the entire control. Defense-in-depth: the root cause (a
+          // duplicate React 19 bundled via Lexical's react/jsx-runtime subpath)
+          // is fixed at the build layer in ../webpack.config.js.
+          React.createElement(WidgetErrorBoundary, {
+            widgetType: 'tracking-field-trio-dialogs',
+            displayName: 'Access & Email',
+            surface: 'TrackingFieldTrio',
+            // Children via the `children` prop (not createElement rest-args):
+            // WidgetErrorBoundaryProps types `children` as required, which the
+            // rest-args overload of React.createElement does not satisfy (same
+            // reason as the empty-state Dialog below). React.Fragment DOES
+            // accept rest-args, so wrap the dialog subtree in one.
             children: React.createElement(
-              DialogSurface,
+              React.Fragment,
               null,
-              React.createElement(
-                DialogBody,
-                null,
-                React.createElement(DialogTitle, null, 'Email members'),
-                React.createElement(
-                  DialogContent,
+              // Access-grant modal (task 041) — always mounted so AccessGrantModal's
+              // own `open`-driven effect controls data loading; `recordId` is only
+              // resolvable once the control is bound to a real record (harness
+              // environments render the toolbar but the modal has nothing to open).
+              recordId
+                ? React.createElement(AccessGrantModal, {
+                    open: this.isGrantModalOpen,
+                    onClose: () => {
+                      this.isGrantModalOpen = false;
+                      this.renderControl();
+                    },
+                    recordId,
+                    // Polymorphic root type derived from the bound host entity
+                    // (task 071) — the modal sends {recordType, recordId}.
+                    recordType: this.resolveGrantRoot().recordType,
+                    canGrantAccess: this.canGrantAccessValue,
+                    authenticatedFetch: this.authenticatedFetchGated,
+                    fetchCandidates: this.fetchCandidates,
+                    fetchExistingGrants: this.fetchExistingGrants,
+                    // Standing-grant members (task 073 UAT #2) — role-members whose
+                    // global sprk_standinggrant flag is set, merged into Current Access.
+                    fetchStandingContacts: this.fetchStandingContacts,
+                    searchContacts: this.searchContacts,
+                    searchOrganizations: this.searchOrganizations,
+                    // NATIVE advanced-lookup pickers (task 073 UAT v1.0.24 #1/#4) —
+                    // "+ Contact"/"+ Organization" open Xrm.Utility.lookupObjects (the
+                    // same advanced-find surface the wizards use). The modal is
+                    // nonBlocking so the lookup pane isn't covered by a backdrop.
+                    pickContact: this.pickContact,
+                    pickOrganization: this.pickOrganization,
+                    // Contact-name link → open the Contact record (task 073 UAT v1.0.24 #6).
+                    onOpenContact: this.openContactRecord,
+                    isInternalContact: this.isInternalContact,
+                    onSetStandingGrant: this.onSetStandingGrant,
+                    // Access-Permission sharing gate (task 043, FR-14 Option A) —
+                    // mapped from the bound field's raw OptionSet value; see
+                    // mapAccessPermissionToState()'s doc comment.
+                    accessPermissionState: this.mapAccessPermissionToState(this.accessPermissionValue),
+                  })
+                : null,
+              // Canonical SendEmailDialog (task 042) — pre-populated with the
+              // record's membership-contact emails (resolveEmailMembersRecipients()
+              // above). Send flows through the engine's OWN sendCommunication()
+              // call (ADR-045) — no custom send logic here. Gated on `recordId`
+              // for the same reason as the grant modal above.
+              recordId
+                ? React.createElement(SendEmailDialog, {
+                    open: this.isSendEmailDialogOpen,
+                    onClose: this.closeSendEmailDialog,
+                    initialTo: this.emailRecipients,
+                    authenticatedFetch: this.authenticatedFetchGated,
+                    bffBaseUrl: this.apiBaseUrl,
+                    titleOverride: 'Email Members',
+                    // Non-blocking so the native To/Cc people picker + "link a record"
+                    // advanced-lookup panes render ON TOP instead of behind the modal
+                    // backdrop (owner UAT v1.0.26 — same fix as Manage Access).
+                    nonBlocking: true,
+                    // "Related to" chip shows the record's number/name, not the bare
+                    // entity type (task 073 UAT v1.0.24 #9).
+                    regarding: {
+                      entityType: this.getHostEntity(),
+                      id: recordId,
+                      name: this.getRecordDisplayName(),
+                    },
+                    // To/Cc native people picker (#10) + local-file → SPE upload so
+                    // attachments ride the send payload instead of being dropped (#11).
+                    onLookupRecipients: this.getEmailHandlers().onLookupRecipients,
+                    onUploadLocalAttachment: this.getEmailHandlers().onUploadLocalAttachment,
+                    recordLookupCatalog: this.getEmailHandlers().recordLookupCatalog,
+                    onLookupRecord: this.getEmailHandlers().onLookupRecord,
+                    onAddRelationship: this.getEmailHandlers().onAddRelationship,
+                    onResolveShareLink: this.getEmailHandlers().onResolveShareLink,
+                    onSent: () => {
+                      this.isSendEmailDialogOpen = false;
+                      this.renderControl();
+                    },
+                    onError: (err: Error) => {
+                      console.error('[TrackingFieldTrio] Email-members send failed.', err);
+                    },
+                  })
+                : null,
+              // Empty-state alert (task 042) — shown INSTEAD of SendEmailDialog
+              // when the record has no membership contacts with a populated
+              // email, so the dialog never opens with zero recipients.
+              React.createElement(Dialog, {
+                open: this.isEmailEmptyStateOpen,
+                onOpenChange: (_event: unknown, data: { open: boolean }) => {
+                  if (!data.open) this.closeEmailEmptyState();
+                },
+                // Passed via the `children` prop (not createElement rest-args) —
+                // Fluent v9's `Dialog` types `children` as required on `DialogProps`,
+                // which the rest-args overload of `React.createElement` does not
+                // satisfy.
+                children: React.createElement(
+                  DialogSurface,
                   null,
-                  'This record has no membership contacts with an email address yet. Grant access or assign a role first.'
+                  React.createElement(
+                    DialogBody,
+                    null,
+                    React.createElement(DialogTitle, null, 'Email members'),
+                    React.createElement(
+                      DialogContent,
+                      null,
+                      'This record has no membership contacts with an email address yet. Grant access or assign a role first.'
+                    ),
+                    React.createElement(
+                      DialogActions,
+                      null,
+                      React.createElement(Button, { appearance: 'primary', onClick: this.closeEmailEmptyState }, 'OK')
+                    )
+                  )
                 ),
-                React.createElement(
-                  DialogActions,
-                  null,
-                  React.createElement(Button, { appearance: 'primary', onClick: this.closeEmailEmptyState }, 'OK')
-                )
-              )
+              })
             ),
           })
         )

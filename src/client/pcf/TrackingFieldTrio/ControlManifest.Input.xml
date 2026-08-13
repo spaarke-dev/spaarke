@@ -2,9 +2,9 @@
 <manifest>
   <control namespace="Spaarke.Controls"
            constructor="TrackingFieldTrio"
-           version="1.0.11"
+           version="1.0.29"
            display-name-key="Tracking Field Trio"
-           description-key="Compact 3-field control for tracking flags (v1.0.11). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission), plus an opt-in governance toolbar (grant-access modal + email-members icons). Designed to fit inside a 33% form column."
+           description-key="Compact 3-field control for tracking flags (v1.0.29). Combines two Yes/No toggles (Monitor, High Priority) with a single-value Access Permission pill selector (Standard/Limited/Restricted — responsive, no horizontal sprawl), plus an opt-in governance toolbar (grant-access modal + email-members icons) and an optional header title. The grant modal is polymorphic across Project/Matter/Work Assignment and uses the native advanced-lookup pane for the contact + organization pickers. Designed to fit inside a 33% form column."
            control-type="standard">
     <!-- task 041 — the grant modal calls the BFF external-access endpoints via
          @spaarke/auth's authenticatedFetch (MSAL), so this control now needs
@@ -35,6 +35,17 @@
               of-type="OptionSet"
               usage="bound"
               required="true" />
+
+    <!-- v1.0.23 (task 073 UAT #3) — optional control header title. When set, the
+         control renders a 32px header row with this title (14px semibold) on the
+         left and the governance icons (grant/email) on the right. Ordered first
+         (owner UAT v1.0.23 follow-up): Header Title, then Show Title, then Show Version. -->
+    <property name="title"
+              display-name-key="Header Title"
+              description-key="Optional header title shown on the left of the control header row (14px semibold). The grant/email icons always sit at the right of that row. Leave blank for an icons-only header."
+              of-type="SingleLine.Text"
+              usage="input"
+              required="false" />
 
     <!-- v1.0.1 — display toggles. v1.0.3 — showTitle default flipped to true
          so captions render out of the box (matches the visual rhythm of the
@@ -89,5 +100,16 @@
       <platform-library name="React" version="16.14.0" />
       <platform-library name="Fluent" version="9.46.2" />
     </resources>
+
+    <!-- v1.0.13 (external-access-r2 task 073 UAT fix) — the access-grant modal + email-members
+         read the record's role fields / existing grants via context.webAPI.retrieveRecord /
+         retrieveMultipleRecords (host-context, per DATA-ACCESS-DECISION-CRITERIA.md). That API is
+         only available when the WebAPI feature is declared here; without it every read throws
+         "Feature 'WebAPI.retrieveRecord' is required ... in the <uses-feature> section", surfacing as
+         the modal's "Failed to load access data" error. Latent since teams-app-r1 (task 041/042 wired
+         the webAPI reads but never added this declaration — the modal was never opened live). -->
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+    </feature-usage>
   </control>
 </manifest>

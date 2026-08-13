@@ -7,6 +7,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -28,10 +29,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class RevokeExternalAccessEndpoint
 {
     private const string AccessEntitySet = "sprk_externalrecordaccesses";
-    // Resource identifier for ITenantCache (FR-05). Per-Contact participation cache —
-    // not an authz decision. Tenant scope is derived from the caller's 'tid' claim.
-    private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 1;
+    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
+    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
+    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so revoke
+    // invalidation relied on the 60s TTL. Per-Contact participation cache — not an authz decision
+    // (ADR-009); tenant scope is derived from the caller's 'tid' claim.
+    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
+    private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     /// <summary>
     /// Registers the revoke endpoint on the external-access group.
@@ -72,15 +76,19 @@ public static class RevokeExternalAccessEndpoint
         if (request.AccessRecordId == Guid.Empty)
             return ProblemDetailsHelper.ValidationError("AccessRecordId is required and must be a valid GUID.");
 
-        if (request.ContactId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ContactId is required and must be a valid GUID.");
-
-        if (request.ProjectId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
+        // ContactId is OPTIONAL (task 073 #7): revoke is authoritative by AccessRecordId (root- AND
+        // grantee-agnostic). A per-contact revoke SHOULD still pass ContactId so its participation cache
+        // is invalidated immediately (Step 3); an ORGANIZATION-grant revoke has no single grantee contact
+        // — it passes an empty ContactId, the org row is deactivated by AccessRecordId, and affected
+        // members refresh within the 60s participation TTL.
+        //
+        // Note (task 070): ProjectId is NOT required — revoke deactivates by AccessRecordId and is
+        // root-agnostic (works for a project/matter/work-assignment grant alike). The field is retained
+        // on the DTO for back-compat but no longer gates the request.
 
         logger.LogInformation(
-            "[EXT-REVOKE] Revoking access record {AccessRecordId} for Contact {ContactId} / Project {ProjectId}",
-            request.AccessRecordId, request.ContactId, request.ProjectId);
+            "[EXT-REVOKE] Revoking access record {AccessRecordId} for Contact {ContactId}",
+            request.AccessRecordId, request.ContactId);
 
         // ── Step 1: Deactivate the sprk_externalrecordaccess record ──────────
         try
@@ -142,7 +150,15 @@ public static class RevokeExternalAccessEndpoint
         try
         {
             var tenantId = ExtractTenantId(httpContext);
-            if (!string.IsNullOrEmpty(tenantId))
+            if (request.ContactId == Guid.Empty)
+            {
+                // Organization-grant revoke (task 073 #7): no single grantee contact to invalidate — every
+                // active member's participation set changes. Members refresh within the 60s TTL (an
+                // org-scoped fan-out invalidation is a possible future optimization).
+                logger.LogDebug(
+                    "[EXT-REVOKE] Organization-grant revoke — no per-contact cache to invalidate; members refresh within the participation TTL.");
+            }
+            else if (!string.IsNullOrEmpty(tenantId))
             {
                 await cache.RemoveAsync(
                     tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion,

@@ -105,4 +105,68 @@ public sealed class Tier2ScopeFilterInjectorTests
 
         act.Should().Throw<FetchXmlParseException>();
     }
+
+    // ── task 028: polymorphic OR injection across parent-lookup dimensions ──────────────────────────
+
+    private static readonly Guid IdC = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+    private const string DocFetchXml =
+        "<fetch><entity name=\"sprk_document\">" +
+        "<attribute name=\"sprk_documentid\"/><attribute name=\"sprk_project\"/>" +
+        "<attribute name=\"sprk_matter\"/><attribute name=\"sprk_workassignment\"/>" +
+        "<order attribute=\"createdon\" descending=\"true\"/>" +
+        "</entity></fetch>";
+
+    [Fact]
+    public void Inject_MultipleDimensions_EmitsOrFilterWithOneConditionPerNonEmptyDimension()
+    {
+        var dims = new[]
+        {
+            new Tier2ScopeFilterInjector.ScopeFilterDimension("sprk_project", new HashSet<Guid> { IdA }),
+            new Tier2ScopeFilterInjector.ScopeFilterDimension("sprk_matter", new HashSet<Guid> { IdB }),
+            new Tier2ScopeFilterInjector.ScopeFilterDimension("sprk_workassignment", new HashSet<Guid> { IdC }),
+        };
+
+        var filter = XDocument.Parse(Tier2ScopeFilterInjector.Inject(DocFetchXml, dims))
+            .Root!.Element("entity")!.Element("filter")!;
+
+        filter.Attribute("type")!.Value.Should().Be("or");
+        var conditions = filter.Elements("condition").ToList();
+        conditions.Select(c => c.Attribute("attribute")!.Value)
+            .Should().BeEquivalentTo(new[] { "sprk_project", "sprk_matter", "sprk_workassignment" });
+        conditions.Should().OnlyContain(c => c.Attribute("operator")!.Value == "in");
+    }
+
+    [Fact]
+    public void Inject_MultipleDimensions_OmitsEmptyDimensions()
+    {
+        // A child whose caller has project + WA roots but NO accessible matters: the matter dimension
+        // (empty) is omitted so no invalid `IN ()` is emitted; project + WA conditions remain.
+        var dims = new[]
+        {
+            new Tier2ScopeFilterInjector.ScopeFilterDimension("sprk_project", new HashSet<Guid> { IdA }),
+            new Tier2ScopeFilterInjector.ScopeFilterDimension("sprk_matter", new HashSet<Guid>()),
+            new Tier2ScopeFilterInjector.ScopeFilterDimension("sprk_workassignment", new HashSet<Guid> { IdC }),
+        };
+
+        var filter = XDocument.Parse(Tier2ScopeFilterInjector.Inject(DocFetchXml, dims))
+            .Root!.Element("entity")!.Element("filter")!;
+
+        filter.Elements("condition").Select(c => c.Attribute("attribute")!.Value)
+            .Should().BeEquivalentTo(new[] { "sprk_project", "sprk_workassignment" });
+    }
+
+    [Fact]
+    public void Inject_WhenAllDimensionsEmpty_Throws()
+    {
+        var dims = new[]
+        {
+            new Tier2ScopeFilterInjector.ScopeFilterDimension("sprk_project", new HashSet<Guid>()),
+            new Tier2ScopeFilterInjector.ScopeFilterDimension("sprk_matter", new HashSet<Guid>()),
+        };
+
+        var act = () => Tier2ScopeFilterInjector.Inject(DocFetchXml, dims);
+
+        act.Should().Throw<ArgumentException>();
+    }
 }
