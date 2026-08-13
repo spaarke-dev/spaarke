@@ -314,3 +314,16 @@ Beyond the addendum's grounding (`deployment-refactors-assessment-2026-08-12.md:
 4. Which service principal `PowerBi:ClientId` refers to (dedicated Power BI SP vs BFF app-reg) — §B.9.
 5. Whether any Dataverse Service Endpoint still posts to the retired `/api/v1/emails/webhook-trigger` route (E.6 removal precondition).
 6. Whether the separate KV secret `Dataverse-ClientSecret` still exists with a distinct value in any env (template-conformant envs point the config key at `BFF-API-ClientSecret` instead — §D row 2).
+
+---
+
+## Portal verification — dev vault `spaarke-spekvcert` (owner-provided secret list, 2026-08-13)
+
+Confirmation items resolved + KV drift surfaced by inspecting the live dev vault secret list:
+
+- **Item B RESOLVED — no separate `Dataverse-ClientSecret` secret exists** in dev; the `Dataverse:ClientSecret` config key points at `BFF-API-ClientSecret` (template). Task 060's KV cleanup has no distinct `Dataverse-ClientSecret` to remove in dev. (`Dataverse-S2S-*` also absent from dev — 060's target may already be dev-absent; check prod.)
+- **⚠️ HYGIENE-1 (live rotation hazard) — duplicate BFF secret across casing**: BOTH `BFF-API-ClientSecret` (PascalCase; the main BFF path, 15 refs) AND `bff-api-client-secret` (lowercase; the **Office add-in** deploy maps `AzureAd:ClientSecret` → `…/secrets/bff-api-client-secret/` — `projects/sdap-office-integration/DEPLOYMENT-PLAN.md:143,239`) exist as separate KV secrets, presumably same value/identity (`1e40baad`). Rotating one leaves the other stale → the Office-addin OR the BFF path breaks. This is a 10th consumer path missed by §E's graph (via the lowercase alias). **De-risk: consolidate to one canonical secret + one casing before any rotation automation.**
+- **HYGIENE-2 (orphaned) — `Graph-API-ClientSecret`**: exists in KV but has ZERO code/config consumers (only a redis-project baseline NOTE lists it); the `Graph__ClientSecret` config key resolves to `BFF-API-ClientSecret`. Orphaned/legacy — cleanup candidate; confusion risk.
+- **HYGIENE-3 (orphaned) — MI-clientid duplicates**: `MANAGED-IDENTITY-CLIENT-ID` is LIVE (32 refs); `SPRK-MANAGED-IDENTITY-CLIENT-ID` and `UAMI-ClientId` have **0 refs** (orphaned duplicate naming). Consolidate.
+
+**Routing**: HYGIENE-1/2/3 are KV-secret-drift findings for the **config-deployment assessment (task 017 / #1)** — its secrets baseline must include this vault census + a consolidation recommendation. HYGIENE-1 (duplicate BFF secret) is the most consequential and should be flagged in task 060's operator note + the #3b (task 011) plan, since any secret-touching step must account for the lowercase Office-addin alias. Item A (BFF-API-ClientSecret = `1e40baad`, not `170c98e1`) already resolved via config/environments.json.
