@@ -42,6 +42,18 @@ var s=document.createElement('script'); s.src='/WebResources/sprk_SidePaneManage
 ```
 If the rule genuinely doesn't evaluate at app load, land a pinned global button via `/ribbon-edit` using `spike/sprk_application_ribbon_sidepanespike.xml` (adapted to the SidePaneManager command), or reuse the still-live SprkChat global-button slot pattern. No code change needed — bootstrap already supports `openPane()` for a button Command.
 
+## Blank-render root cause + fix (2026-08-13 UAT)
+The pane deployed correctly but rendered BLANK in the live app while rendering fine headlessly. Root cause: the deployed pane mounted the full multi-contributor `SprkSidePaneHost` (pane-lifecycle orchestrator + async lazy contributor resolution + rail) inside the pane webresource. The proven-working CalendarSidePane mounts its body directly under a root `FluentProvider`. Fix (commit `cd86c1323`): new `App.tsx` mirrors CalendarSidePane — root `FluentProvider` (theme + `--sprk-ui-scale`) wrapping `NavigatorBody` directly; `main.tsx` renders `<App/>`. The framework host + registry stay in `@spaarke/ui-components` (unit-proven by 011 + 085) but are NOT used to host a single contributor. **Lesson: a single-contributor side-pane code page mounts its body directly under a root FluentProvider — not `SprkSidePaneHost`.** Also removed temp diagnostic scripts that had diverged the HTML from the working template, and fixed a row horizontal-overflow (ellipsis label + pinned chip + `overflow-x:hidden`).
+
+## Auto-launch wiring (Application Ribbon) — DONE 2026-08-13
+The dormant `sprk.Global.SidePaneManager.Command` had a control but it was a BLANK button (`LabelText=""`, no icon/Alt) at `ApplicationCommon.Controls` that never rendered → its enable rule never evaluated; the rule was also `Default="false"` and the command had empty `<Actions/>`.
+Fix via `/ribbon-edit` (exported `ApplicationRibbon` unmanaged solution → edited `customizations.xml` → `pac solution import --publish-changes`):
+- Moved the button to `Mscrm.GlobalTab.MainTab.Actions.Controls._children` (Sequence 501, next to the live SprkChat button) with `LabelText`/`Alt`/`ToolTip`/`ModernImage="ViewList"` so it renders.
+- Enable rule `Default="false"` → `Default="true"` (matches working SprkChat).
+- Command `<Actions/>` → `JavaScriptFunction Spaarke.SidePaneManager.openPane`.
+- Added `sprk.SidePaneManager.Button.*` LocLabels.
+Result: the button's enable rule fires `Spaarke.SidePaneManager.initialize` at app load → the Navigator pane auto-registers (no console). Modified ribbon saved at `deploy/ribbon/ApplicationRibbon.customizations.xml`; original export backed up under the ribbon-edit temp dir.
+
 ## Deferred (do NOT block UAT)
 - **021 end-user security role**: UAT runs as System Administrator (already has `sprk_navitem` access). Owner-scoped User-level CRUD for a named end-user role + 2-user isolation test still pending a role choice.
 - **052 Monitored "assigned to me"**: ships owner-only (Path A); the A/B (BFF membership resolver) decision remains open, non-blocking.
