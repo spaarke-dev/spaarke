@@ -207,7 +207,8 @@ export function useEmailComposeActions(deps: EmailComposeActionsDeps): UseEmailC
   // uses internally to build `composerFields.initialBody`, so the seeded
   // `quotedThread` state is byte-identical to what is already in the body.
   // Empty string (compose mode, `dialogState.prefill === null`) → `undefined`.
-  const initialQuotedThread = dialogState && isRecordScoped ? buildQuotedThread(dialogState.prefill) || undefined : undefined;
+  const initialQuotedThread =
+    dialogState && isRecordScoped ? buildQuotedThread(dialogState.prefill) || undefined : undefined;
 
   // Header title override — "Reply: <subject>" / "Reply All: <subject>" /
   // "Forward: <subject>" for the record-scoped modes (New keeps the engine's
