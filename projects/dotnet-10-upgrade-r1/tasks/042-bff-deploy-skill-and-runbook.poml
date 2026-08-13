@@ -4,7 +4,8 @@
     <title>FR-14 — adapt /bff-deploy for net10 + author the slot-swap runbook</title>
     <phase>P4 CI/CD + deploy plumbing</phase>
     <gate>041 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>2026-08-13: (1) De-net8'd .claude/skills/bff-deploy/SKILL.md — added net10 runtime banner (DOTNETCORE|10.0 pipe / DOTNETCORE:10.0 colon, mismatch=503, ~45 MB net10 publish, no ASPNETCORE_URLS/RuntimeFrameworkVersion pin, runbook pointer); corrected stale net8 package sizes (~61→~45 MB, 55-65→40-50, <40→<30). (2) Authored notes/slot-swap-runbook.md with Section A (NEAR-TERM active: direct worktree deploy to spaarke-bff-dev via Deploy-BffApi.ps1 + az, explicitly NOT via CI since push:master removed) + Section B (FUTURE deferred prod/demo: create slot → set net10 on slot only → deploy → validate in isolation → atomic swap → rollback-by-swap). Baked in pipe/colon forms, port-8080, no-RuntimeFrameworkVersion, Linux-no-auto-swap. Escalation valve did NOT fire — skill deploys to dev (Section A), not prod. Main-session write succeeded (.claude/skills/). Includes task-041 Core Tools v4.7.0 caveat + task-040 pipeline cross-check.</completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Writes .claude/skills/ (main-session-only) + the deploy runbook that governs the production cutover.</rigor-reason>
     <model-tier>sonnet</model-tier>
