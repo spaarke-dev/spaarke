@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Recent (Edited) toggle — Viewed/Edited segmented control via modifiedby=me per-entity queries</title>
+    <phase>4 Navigator core</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared Recent tab (.tsx) in the code page; frontend; user-facing derivation across multiple entity queries.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified N per-entity query + client-side merge with a closed acceptance set; reuses existing ViewService/useSprkMemoRepository query shapes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shared Recent tab component (with 041).</parallel-reason>
+    <deps>040</deps>
+    <tags>frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a Viewed/Edited segmented toggle to the Recent tab. Edited runs N per-entity queries (modifiedby eq me order by modifiedon desc) over the fixed core set (sprk_matter, sprk_project, sprk_document, sprk_todo, sprk_event, sprk_communication), merged and sorted client-side by modifiedon desc. No audit entity, no OnSave hook, no plugin.</prompt>
+  <role>SPAARKE platform developer with Xrm.WebApi multi-entity query + client-side merge and Fluent v9 segmented-control expertise. Follow ADRs strictly.</role>
+  <goal>The Recent tab gains a Viewed/Edited segmented toggle; selecting Edited issues one modifiedby=me order by modifiedon desc query per entity in the fixed core set and renders the merged, modifiedon-desc-sorted result. A record edited via a flow still appears. No audit entity is used.</goal>
+  <context>
+    <background>Per spec FR-04 (OQ-5 resolved: N per-entity queries over a fixed core set) and plan.md Phase 4 task 042. Extends the Recent tab shell from task 040 (alongside the Viewed rendering in 041). Query shapes mirror ViewService/useSprkMemoRepository. Deriving from modifiedon (not audit, not an OnSave hook) means flow-driven edits are captured for free.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/src/tabs/RecentTab.tsx</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/editedByMeService.ts</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/__tests__/editedByMeService.test.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts</file>
+      <file role="canonical-reference">src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">NavigatorPane code page + Recent tab shell — the surface the Viewed/Edited toggle mounts into.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">MODIFY-ONLY: extend the existing Recent tab with a segmented toggle; do not build a parallel Recent surface.</constraint>
+    <constraint source="project">Edited derivation is N per-entity Xrm.WebApi queries (modifiedby eq me order by modifiedon desc) over the fixed core set only; merge + sort client-side. MUST NOT use the audit entity, an OnSave hook, or a plugin.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; the segmented control + rows honor light/dark + --sprk-ui-scale (NFR-07).</constraint>
+    <constraint source="project">Host-context only — Xrm.WebApi under the signed-in user; no BFF, no per-form web resource.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Xrm.WebApi per-entity modifiedby=me queries + client-side merge; Fluent v9 segmented control</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Per-entity retrieveMultiple + owner filter" location="src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts">Reuse the retrieveMultipleRecords query shape; filter modifiedby to the current user and order by modifiedon desc per entity.</pattern>
+      <pattern name="Frame-walk Xrm.WebApi" location="src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts">Mirror the frame-walk getXrm + retrieveMultiple call convention.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and confirm the fixed core entity set with the current schema.</step>
+    <step order="1">Build editedByMeService.ts: for each entity in the fixed core set, issue an Xrm.WebApi retrieveMultiple with modifiedby eq (current user) order by modifiedon desc.</step>
+    <step order="2">Merge the per-entity results client-side and sort by modifiedon desc into a single Edited list.</step>
+    <step order="3">Add a Viewed/Edited segmented control to RecentTab.tsx; Viewed shows the 041 history list, Edited shows the merged modifiedby=me list.</step>
+    <step order="4">Handle an entity in the set returning no results: it contributes nothing to the merge with no error.</step>
+    <step order="5">Author service + tab tests: toggling to Edited shows merged modifiedon-desc records; a flow-edited record still appears (modifiedon-based); NO audit entity is queried; an empty-result entity contributes nothing without error.</step>
+    <step order="6">Recompile @spaarke/ui-components + run tests; confirm green.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set task 042 status to completed.</step>
+    <step order="8">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the modifiedby=me OData current-user literal (@me binding) does not resolve reliably on the current UCI build (plan.md R2), STOP and escalate rather than hardcoding a user id or falling back to the audit entity.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Viewed/Edited toggle switches lists (light + dark)">
+      <steps>
+        <step>Mount the Recent tab in light theme; toggle from Viewed to Edited.</step>
+        <step>Re-mount in dark theme and toggle again.</step>
+      </steps>
+      <expected>Edited shows the merged modifiedby=me list sorted by modifiedon desc; the segmented control honors light and dark Fluent v9 tokens.</expected>
+    </test>
+    <test name="Flow-edited record appears; empty-result entity is harmless">
+      <steps>
+        <step>Seed one core-set record modified via a flow (not the UI) and one core-set entity with no matching records.</step>
+        <step>Toggle to Edited.</step>
+      </steps>
+      <expected>The flow-edited record appears (derived from modifiedon); the empty-result entity contributes nothing and raises no error; no audit entity is queried.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/src/services/editedByMeService.ts</output>
+    <output type="test">src/solutions/NavigatorPane/src/services/__tests__/editedByMeService.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the Recent tab, when the user toggles to Edited, then it shows the user's recently-modified records across the fixed core set merged by modifiedon desc.</criterion>
+    <criterion testable="true">Given a record edited via a flow (not the UI), when Edited is shown, then that record still appears (modifiedon-derived).</criterion>
+    <criterion testable="true">Given the Edited derivation, when it runs, then NO audit entity is queried (only per-entity modifiedby=me retrieveMultiple over the core set).</criterion>
+    <criterion testable="true">Negative: given an entity in the core set with no matching results, when Edited is shown, then it contributes nothing and no error is raised.</criterion>
+    <criterion testable="true">All tests pass; code-page build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-04 (OQ-5 resolved) and plan.md Phase 4 task 042. Fixed core set: sprk_matter, sprk_project, sprk_document, sprk_todo, sprk_event, sprk_communication (confirm final logical names against schema). parallel-safe:false — shares the Recent tab component with 041 (plan.md §5). Watch the @me OData literal on the current build (R2).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

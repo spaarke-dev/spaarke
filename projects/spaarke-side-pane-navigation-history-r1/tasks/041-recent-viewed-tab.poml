@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Recent (Viewed) tab — render history sprk_navitem rows with type chips + navigate + promote-to-pin</title>
+    <phase>4 Navigator core</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared Navigator body (.tsx) in the code page; frontend/fluent-ui; user-facing history rendering + navigation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified rendering of capture rows with a closed acceptance set; reuses the capture service (030) and useSprkMemoRepository read pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shared NavigatorPane body / Recent tab file also touched by 042/050/052 — sequence (plan.md §5).</parallel-reason>
+    <deps>030,040</deps>
+    <tags>frontend,fluent-ui</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Build the Recent (Viewed) tab in the Navigator body: render history sprk_navitem rows produced by the capture service (030) — newest-first — showing the display name, a type chip (Matter / Document / View / Page / Link), click-to-navigate, and an inline promote-to-pin control. Read rows via the useSprkMemoRepository-style Xrm.WebApi read pattern.</prompt>
+  <role>SPAARKE platform developer with Fluent UI v9 list/chip rendering and Xrm.WebApi + Xrm.Navigation expertise. Follow ADRs strictly.</role>
+  <goal>The Recent (Viewed) tab renders the user's history sprk_navitem rows newest-first with a correct type chip per pagetype, each row navigates on click via Xrm.Navigation, and an inline star promotes a history row to a per-user pin. Inaccessible rows are trimmed without crashing (full read-time trimming lands in 080).</goal>
+  <context>
+    <background>Per spec FR-03 UI and plan.md Phase 4 task 041. Consumes the capture service from task 030 (history upserts) and renders inside the NavigatorPane shell from task 040. Reuses the useSprkMemoRepository-style Xrm.WebApi read pattern and the contextService history-row shape. Promote-to-pin reuses the pin-write path (finalized in 050) to create a sprk_type=pin row.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/src/NavigatorBody.tsx</file>
+      <file role="new">src/solutions/NavigatorPane/src/tabs/RecentTab.tsx</file>
+      <file role="new">src/solutions/NavigatorPane/src/tabs/__tests__/RecentTab.test.tsx</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts</file>
+      <file role="canonical-reference">src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Recent (Viewed) capture service — produces the history sprk_navitem rows this tab renders.</dependency>
+      <dependency task="040" status="pending">NavigatorPane code page + tab scaffold — the shell the Recent tab renders into.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Host-context only — read history rows via Xrm.WebApi (useSprkMemoRepository pattern); no BFF, no plugin, no per-form web resource.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; type chips + rows honor light/dark + --sprk-ui-scale; portal FluentProvider re-wrap where portalled (NFR-07).</constraint>
+    <constraint source="ADR-022">Any shared-lib code consumed MUST stay React-16/17-safe (no createRoot; JSXElement not JSX.Element).</constraint>
+    <constraint source="project">Navigation is host-context via Xrm.Navigation; do not construct raw URLs for logical targets.</constraint>
+    <constraint source="project">Defer full read-time security trimming to task 080, but an inaccessible row MUST be trimmed here without crashing the tab.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Fluent v9 list + type chips; Xrm.WebApi history read; Xrm.Navigation navigate</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="History read + row shape" location="projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts">Reuse the history-row shape (target logical name/id, pagetype, display name, lastvisited) the capture loop produces.</pattern>
+      <pattern name="Xrm.WebApi read" location="src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts">Mirror retrieveMultipleRecords with owner scope + frame-walk getXrm for reading the user's history rows.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read the capture service (030) row shape + useSprkMemoRepository.</step>
+    <step order="1">Read the user's history sprk_navitem rows via Xrm.WebApi (owner-scoped) sorted by sprk_lastvisited desc (newest-first).</step>
+    <step order="2">Render each row with display name + a type chip mapped from sprk_pagetype/target logical name (Matter / Document / View / Page / Link).</step>
+    <step order="3">Wire click-to-navigate via Xrm.Navigation (navigateTo for entityrecord/entitylist; new tab for weblink) using the row's logical target.</step>
+    <step order="4">Add an inline promote-to-pin star that creates a per-user sprk_type=pin row (reuse the 050 pin-write path); reflect the pinned state.</step>
+    <step order="5">Trim rows whose target retrieve indicates no access (403/404) so the tab does not crash; leave full trimming to 080.</step>
+    <step order="6">Author tabs/__tests__/RecentTab.test.tsx: rows render newest-first; correct chip per pagetype; click navigates; promote-to-pin creates a pin; light AND dark render; an inaccessible row is trimmed without throwing.</step>
+    <step order="7">Recompile @spaarke/ui-components + run render tests; confirm green.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 041 status to completed.</step>
+    <step order="9">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the capture service (030) row shape cannot supply a clean label/target for a pagetype (e.g., custom-page OQ-6), STOP and escalate the labeling gap (root §6.5) rather than silently rendering a misleading or empty chip.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="History rows render newest-first with correct chips (light + dark)">
+      <steps>
+        <step>Seed history rows for Matter, Document, View, Page, Link; mount the Recent tab in light theme.</step>
+        <step>Re-mount in dark theme (data-theme=dark / prefers-color-scheme dark).</step>
+      </steps>
+      <expected>Rows appear newest-first, each with the correct type chip; Fluent v9 tokens honor light and dark correctly.</expected>
+    </test>
+    <test name="Click navigates and promote-to-pin creates a pin">
+      <steps>
+        <step>Click a Matter row; assert Xrm.Navigation is invoked for that logical target.</step>
+        <step>Click the inline star on a row; assert a per-user sprk_type=pin row is created.</step>
+      </steps>
+      <expected>Clicking navigates via Xrm.Navigation; the star creates a pin and the row reflects the pinned state.</expected>
+    </test>
+    <test name="Inaccessible row is trimmed without crashing">
+      <steps>
+        <step>Include a row whose target retrieve returns 403/404; mount the tab.</step>
+      </steps>
+      <expected>The inaccessible row is trimmed and the tab renders the remaining rows without throwing.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest render tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/src/tabs/RecentTab.tsx</output>
+    <output type="test">src/solutions/NavigatorPane/src/tabs/__tests__/RecentTab.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given captured history rows, when the Recent (Viewed) tab renders, then rows appear newest-first by sprk_lastvisited.</criterion>
+    <criterion testable="true">Given a history row, when it renders, then its type chip matches the row's pagetype/logical target (Matter/Document/View/Page/Link).</criterion>
+    <criterion testable="true">Given a history row, when clicked, then the tab navigates via Xrm.Navigation to the row's logical target.</criterion>
+    <criterion testable="true">Given the inline star, when clicked on a history row, then a per-user sprk_type=pin sprk_navitem is created.</criterion>
+    <criterion testable="true">Negative: given a row whose target the user cannot access, when the tab renders, then that row is trimmed and the tab does not crash (full trimming deferred to 080).</criterion>
+    <criterion testable="true">All render tests pass; shared-lib/code-page build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-03 (UI) and plan.md Phase 4 task 041. parallel-safe:false — coordinate with 042 (Edited toggle on this tab) and 050/052 (Pinned) which touch shared NavigatorPane body files (plan.md §5). Promote-to-pin shares the 050 pin-write path. Custom-page labeling is OQ-6 (best-effort, resolve during impl).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

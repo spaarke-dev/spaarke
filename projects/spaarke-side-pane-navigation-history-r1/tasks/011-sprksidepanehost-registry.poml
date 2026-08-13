@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>SprkSidePaneHost + sidePaneRegistry — reusable docked side-pane framework</title>
+    <phase>1 Framework</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New shared-lib component + registry in @spaarke/ui-components (.tsx); frontend/fluent-ui; architecture surface every future quick-access feature contributes to.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuse is high (wrap SidePaneShell + generalize DataGridSidePaneOrchestrator + follow registry precedents); the new registry seam is well-specified with a closed acceptance set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group B runs alongside task 021 (entity deploy, human-gated) — different surfaces (shared-lib host build vs Dataverse deploy), no shared files.</parallel-reason>
+    <deps>010</deps>
+    <tags>shared-lib,frontend,fluent-ui</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Create the reusable docked side-pane framework in @spaarke/ui-components: SprkSidePaneHost (wraps SidePaneShell for chrome, generalizes DataGridSidePaneOrchestrator's lifecycle for createPane / mutual-exclusion / close-on-navigate / unload cleanup) plus a static sidePaneRegistry ({ id, icon, title, order, component }) that drives right-rail icons. One registry entry = one rail icon = one contributor. Host and registry live in src/client/shared/Spaarke.UI.Components/src/components/SidePane/.</prompt>
+  <role>SPAARKE platform developer with Fluent UI v9 + React shared-component and Xrm.App.sidePanes lifecycle expertise. Follow ADRs strictly.</role>
+  <goal>New SprkSidePaneHost component + sidePaneRegistry module + right-rail icon rendering under src/client/shared/Spaarke.UI.Components/src/components/SidePane/, wired to the widened xrmContext typings (010), with unit + render tests. The host renders the active contributor selected from the registry; adding/removing a registry entry adds/removes exactly one rail icon.</goal>
+  <context>
+    <background>Per spec FR-01 + plan.md Phase 1 task 011 (and OQ-9 resolved: SidePaneShell is presentational-only → wrap, don't extend). The host generalizes the de-facto pane host DataGridSidePaneOrchestrator (idempotent createPane, mutuallyExclusiveWith, attachVisibilityLifecycle IntersectionObserver close-on-navigate, unload cleanup) into an app-wide, multi-contributor seam so future spaarke-side-pane-* features register rather than re-implement pane plumbing. Registry ergonomics follow WorkspaceWidgetRegistry + surfaceLaunchRegistry.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SidePane/SprkSidePaneHost.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SidePane/sidePaneRegistry.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SidePane/__tests__/SprkSidePaneHost.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SidePane/SidePaneShell.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/sidePane/DataGridSidePaneOrchestrator.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/src/registry/WorkspaceWidgetRegistry.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/surfaceLaunchRegistry.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Widened xrmContext typings (getPane/pane.select, webresourceName, 3-frame getXrm) the host uses for createPane/select/frame-walk.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Wrap SidePaneShell for chrome (presentational-only); generalize DataGridSidePaneOrchestrator lifecycle — do NOT reinvent createPane / close-on-navigate / unload cleanup (NFR-08 reuse, OQ-9 resolved).</constraint>
+    <constraint source="project">The pane MUST be created via Xrm.App.sidePanes.createPane with canClose:false + alwaysRender:true (spec MUST rule / NFR-05).</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; portal FluentProvider re-wrap for any portalled surface; honor light/dark via code-page theme detection and --sprk-ui-scale via scaledTheme/useUiScale (NFR-07).</constraint>
+    <constraint source="ADR-022">@spaarke/ui-components code MUST stay React-16/17-safe: no createRoot; use JSXElement not JSX.Element.</constraint>
+    <constraint source="project">Host-context only — no BFF, no plugin, no per-form web resource.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Fluent v9 shared side-pane host + static contributor registry + Xrm.App.sidePanes lifecycle</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Generalize the orchestrator" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/sidePane/DataGridSidePaneOrchestrator.ts">Lift idempotent createPane, mutuallyExclusiveWith, attachVisibilityLifecycle (IntersectionObserver close-on-navigate), and unload cleanup into the pane-agnostic SprkSidePaneHost lifecycle.</pattern>
+      <pattern name="Wrap the shell" location="src/client/shared/Spaarke.UI.Components/src/components/SidePane/SidePaneShell.tsx">Compose SidePaneShell for chrome; do not add host logic to it.</pattern>
+      <pattern name="Static code-owned registry" location="src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/surfaceLaunchRegistry.ts">Model sidePaneRegistry as a code-owned static table ({ id, icon, title, order, component }); WorkspaceWidgetRegistry adds the Map + lazy-factory + metadata ergonomics.</pattern>
+      <pattern name="--sprk-ui-scale" location="src/client/shared/Spaarke.UI.Components/src/components/SprkModal/scaledTheme.ts">Apply the scaled Fluent theme + useUiScale wiring for NFR-07.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read the four canonical-reference files.</step>
+    <step order="1">Define sidePaneRegistry.ts: a code-owned static table entry shape { id, icon, title, order, component } (component lazy-loadable), with register/get/list helpers modeled on surfaceLaunchRegistry + WorkspaceWidgetRegistry.</step>
+    <step order="2">Generalize DataGridSidePaneOrchestrator's lifecycle (idempotent createPane with canClose:false + alwaysRender:true, mutuallyExclusiveWith, attachVisibilityLifecycle close-on-navigate, unload cleanup) into a pane-agnostic core used by SprkSidePaneHost — via the widened xrmContext getPane/pane.select/getXrm.</step>
+    <step order="3">Build SprkSidePaneHost.tsx: wrap SidePaneShell for chrome; render right-rail icons from the registry (sorted by order); render the active contributor's component; theme via scaledTheme/useUiScale + portal FluentProvider re-wrap (ADR-021).</step>
+    <step order="4">Handle the unknown-id case: selecting/looking up a registry id that is not registered degrades gracefully (renders nothing / a benign empty state; never throws).</step>
+    <step order="5">Author tests in __tests__/SprkSidePaneHost.test.tsx: host renders the active contributor from the registry; registry add/remove maps to exactly one rail-icon add/remove; render in light AND dark; portal re-wrap present (ADR-021); unknown id does not throw.</step>
+    <step order="6">Recompile @spaarke/ui-components and run unit + render tests; confirm green.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set task 011 status to completed.</step>
+    <step order="8">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If DataGridSidePaneOrchestrator cannot be generalized without breaking its existing DataGrid consumers, STOP and escalate (root §6.5 — reuse-vs-fork decision): propose either a shared extracted core both consume, or a documented project-scoped fork, rather than silently duplicating pane plumbing.</trigger>
+  </escalation>
+  <justification>
+    <existing>SidePaneShell.tsx (presentational chrome only, OQ-9 confirmed); DataGridSidePaneOrchestrator.ts (de-facto pane host: createPane + mutuallyExclusiveWith + attachVisibilityLifecycle close-on-navigate + unload cleanup); WorkspaceWidgetRegistry.ts + surfaceLaunchRegistry.ts (registry precedents).</existing>
+    <extension>Yes for the parts that exist — wrap SidePaneShell, generalize DataGridSidePaneOrchestrator, follow the registry precedents. No for the genuinely new part: an app-wide, multi-contributor registry seam that binds contributors to right-rail icons for the whole MDA shell (neither the shell nor the DataGrid-scoped orchestrator provides this).</extension>
+    <cost-of-doing-nothing>Without the shared host + registry, every future quick-access feature re-implements createPane / close-on-navigate / unload plumbing → divergent, drifting panes (the retired SidePaneManager is the cautionary example), and Navigator (the first tenant) has no host to register against.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Host renders active contributor in light and dark">
+      <steps>
+        <step>Register one contributor in sidePaneRegistry and mount SprkSidePaneHost in light theme.</step>
+        <step>Re-mount in dark theme (data-theme=dark / prefers-color-scheme dark).</step>
+      </steps>
+      <expected>The active contributor renders with Fluent v9 tokens honoring light and dark correctly (no hardcoded colors); layout unchanged across themes.</expected>
+    </test>
+    <test name="One registry entry = one rail icon (ADR-021 portal check)">
+      <steps>
+        <step>Render the host with N registry entries; count right-rail icons.</step>
+        <step>Add one entry and remove one entry; re-count.</step>
+        <step>Inspect any portalled surface for a FluentProvider re-wrap.</step>
+      </steps>
+      <expected>Rail icon count equals registry entry count; adding/removing an entry changes the count by exactly one; portalled content is wrapped in its own FluentProvider (ADR-021 portal gotcha).</expected>
+    </test>
+    <test name="Unknown registry id degrades gracefully">
+      <steps>
+        <step>Select/look up a registry id that is not registered.</step>
+      </steps>
+      <expected>The host renders a benign empty state and does not throw.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest unit/render tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SidePane/SprkSidePaneHost.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SidePane/sidePaneRegistry.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SidePane/__tests__/SprkSidePaneHost.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a populated sidePaneRegistry, when SprkSidePaneHost renders, then it renders the active contributor's component selected from the registry.</criterion>
+    <criterion testable="true">Given the host is rendered, when a registry entry is added or removed, then exactly one right-rail icon is added or removed.</criterion>
+    <criterion testable="true">Given the host creates the app pane, when createPane is called, then it uses canClose:false + alwaysRender:true.</criterion>
+    <criterion testable="true">Given light and dark themes, when the host renders, then Fluent v9 tokens honor both correctly with a portal FluentProvider re-wrap (ADR-021).</criterion>
+    <criterion testable="true">Negative: given an unknown registry id, when the host looks it up/selects it, then it degrades gracefully (no throw).</criterion>
+    <criterion testable="true">All unit + render tests pass; shared-lib build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-01 (+ FR-13 framework-proof, exercised later by stub task 085) and plan.md Phase 1 task 011. NFR-08 reuse is mandatory: wrap SidePaneShell, generalize DataGridSidePaneOrchestrator, follow WorkspaceWidgetRegistry/surfaceLaunchRegistry. Run /conflict-check before the @spaarke/ui-components PR (shared lib touched by other worktrees; SidePane/ subfolder currently untouched).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

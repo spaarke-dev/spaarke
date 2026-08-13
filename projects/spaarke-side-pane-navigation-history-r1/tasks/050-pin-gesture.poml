@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Pin gesture — inline star creates/removes a per-user sprk_type=pin sprk_navitem (never writes sprk_monitor)</title>
+    <phase>5 Pinned</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared Navigator body / Pinned tab (.tsx) + writes sprk_navitem via Xrm.WebApi; frontend; per-user data mutation with a strict MUST-NOT (sprk_monitor).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified create/remove against sprk_navitem with a closed acceptance set; reuses the useSprkMemoRepository/eventService CRUD pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared NavigatorPane body / Pinned tab (with 051/052) — sequence (plan.md §5).</parallel-reason>
+    <deps>040</deps>
+    <tags>frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Implement the inline star pin/unpin gesture: starring any pane row creates a per-user sprk_type=pin sprk_navitem; unstarring removes it. Pinned records appear in the Pinned tab's Records group. The gesture MUST NOT write sprk_monitor — personal pins live only in sprk_navitem, per-user.</prompt>
+  <role>SPAARKE platform developer with Xrm.WebApi create/delete + Fluent v9 toggle-affordance expertise. Follow ADRs strictly.</role>
+  <goal>An inline star that creates a per-user sprk_type=pin sprk_navitem on star and deletes it on unstar, surfacing the pinned record in Pinned→Records. It never writes sprk_monitor, and double-starring never creates a duplicate pin.</goal>
+  <context>
+    <background>Per spec FR-07 and plan.md Phase 5 task 050. The pin write path is reused by the Recent-tab promote-to-pin (041). Personal pins are per-user sprk_navitem rows and are decoupled from the shared record-level sprk_monitor flag (which the Monitored lens, task 052, reads separately). CRUD mirrors useSprkMemoRepository / eventService.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/src/tabs/PinnedTab.tsx</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/pinService.ts</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/__tests__/pinService.test.ts</file>
+      <file role="canonical-reference">src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts</file>
+      <file role="canonical-reference">src/solutions/EventDetailSidePane/src/services/eventService.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">NavigatorPane code page + Pinned tab shell + shared row rendering the star attaches to.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">The pin/star gesture MUST NOT write sprk_monitor — personal pins are sprk_navitem only, per-user (spec MUST rule / FR-07).</constraint>
+    <constraint source="project">Host-context only — create/delete sprk_navitem via Xrm.WebApi under the signed-in user (owner-scoped); no BFF, no plugin, no per-form web resource.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; the star affordance + Records group honor light/dark + --sprk-ui-scale (NFR-07).</constraint>
+    <constraint source="ADR-022">Any shared-lib code consumed MUST stay React-16/17-safe (no createRoot; JSXElement not JSX.Element).</constraint>
+    <constraint source="project">Idempotent: starring an already-pinned target MUST NOT create a duplicate sprk_navitem (dedupe by target before create).</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Xrm.WebApi create/delete of per-user sprk_navitem pins; Fluent v9 star toggle</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Xrm.WebApi create/delete" location="src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts">Mirror create + delete with owner scope + frame-walk getXrm for writing/removing pin rows.</pattern>
+      <pattern name="Side-pane CRUD" location="src/solutions/EventDetailSidePane/src/services/eventService.ts">Follow the scalar-vs-@odata.bind split + error parse when writing sprk_navitem.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read the CRUD reference services.</step>
+    <step order="1">Build pinService.ts: create a per-user sprk_type=pin sprk_navitem for a target (logical name/id/pagetype/display name); delete the pin on unstar. Never touch sprk_monitor.</step>
+    <step order="2">Before create, dedupe by target (query existing pin for the same target) so double-star does not create a duplicate.</step>
+    <step order="3">Wire the inline star affordance on pane rows; toggle reflects pinned/unpinned state; a starred record surfaces in Pinned→Records.</step>
+    <step order="4">Author service + tab tests: star creates a per-user pin in Records; unstar removes it; the gesture writes only sprk_navitem (asserts sprk_monitor is never written); another user's sprk_monitor toggle does not add/remove the pin; double-star creates no duplicate.</step>
+    <step order="5">Recompile @spaarke/ui-components + run tests; confirm green.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set task 050 status to completed.</step>
+    <step order="7">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If deduping by target cannot reliably prevent duplicate pins under concurrent stars (race), STOP and escalate the idempotency approach (root §6.5) rather than shipping a gesture that can create duplicate per-user rows.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Star creates a pin in Records; unstar removes it (light + dark)">
+      <steps>
+        <step>Mount a pane row in light theme; click the star; inspect Pinned→Records.</step>
+        <step>Click the star again to unstar; re-check Records. Repeat mount in dark theme.</step>
+      </steps>
+      <expected>Starring adds a per-user pin to Records; unstarring removes it; the star affordance honors light and dark Fluent v9 tokens.</expected>
+    </test>
+    <test name="Gesture never writes sprk_monitor and is duplicate-safe">
+      <steps>
+        <step>Star a record and assert only a sprk_navitem write occurs (no sprk_monitor write).</step>
+        <step>Simulate another user toggling sprk_monitor on the same record; re-check the pin.</step>
+        <step>Double-click the star rapidly.</step>
+      </steps>
+      <expected>No sprk_monitor write occurs; the other user's sprk_monitor toggle does not add/remove the pin; double-star creates no duplicate.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/src/services/pinService.ts</output>
+    <output type="test">src/solutions/NavigatorPane/src/services/__tests__/pinService.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given any pane row, when the user stars it, then a per-user sprk_type=pin sprk_navitem is created and appears in Pinned→Records.</criterion>
+    <criterion testable="true">Given a pinned row, when the user unstars it, then the pin sprk_navitem is removed from Records.</criterion>
+    <criterion testable="true">Given another user toggling sprk_monitor on the same record, when they toggle it, then the current user's pin is NOT added or removed.</criterion>
+    <criterion testable="true">Given the pin gesture, when it runs, then it never writes sprk_monitor (only sprk_navitem).</criterion>
+    <criterion testable="true">Negative: given an already-pinned target, when the user stars it again, then no duplicate sprk_navitem is created.</criterion>
+    <criterion testable="true">All tests pass; code-page build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-07 and plan.md Phase 5 task 050. parallel-safe:false — shares the Pinned tab / Navigator body with 051 (bookmarks) and 052 (Monitored) (plan.md §5). The pin-write path is reused by 041 promote-to-pin. sprk_monitor decoupling is a hard MUST-NOT.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Views tab — reuse ViewService to list userquery grouped by entity, click-to-open</title>
+    <phase>6 Views</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies frontend .tsx in the NavigatorPane surface; interactive Fluent v9 UI with navigation side-effects.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified feature reusing an existing ViewService with a closed acceptance set; no architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns its own Views tab file, not the shared Recent/Pinned body — no shared-file contention with the other Phase D tasks.</parallel-reason>
+    <deps>040</deps>
+    <tags>frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Build the Navigator Views tab: reuse src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts to list the signed-in user's saved userquery views grouped by returnedtypecode. Clicking a view opens the entity grid with that view selected via Xrm.Navigation.navigateTo({pageType:'entitylist', entityName, viewId}). System savedquery views are opt-in / pin-only — not shown by default.</prompt>
+  <role>SPAARKE platform developer with Fluent UI v9 + Power Apps Xrm client-API expertise. Follow ADRs strictly.</role>
+  <goal>A Views tab rendered inside the NavigatorPane (040) that lists the user's userquery views grouped by entity (via ViewService), where clicking a view navigates to that entity's list with the view selected, and system savedquery views are excluded unless pinned. Includes render tests.</goal>
+  <context>
+    <background>Per spec FR-10 + plan.md Phase 6 task 060. The Views tab is a live aggregation of the user's saved views — no new query storage. It reuses the existing ViewService.ts (NFR-08) rather than re-querying userquery/savedquery, and hangs off the NavigatorPane tab scaffold created in task 040.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/src/tabs/ViewsTab.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts</file>
+      <file role="canonical-reference">src/solutions/CalendarSidePane/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">NavigatorPane code page + tab scaffold (Recent/Pinned/Views) + theme wiring the Views tab renders inside.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">MODIFY-ONLY: reuse ViewService.ts to query userquery — do NOT add a parallel view-querying service or new query storage (NFR-08 reuse, FR-10).</constraint>
+    <constraint source="project">Host-context only — all data access via Xrm.WebApi / ViewService under the signed-in user; no BFF, no plugin, no per-form web resource.</constraint>
+    <constraint source="project">System savedquery views MUST NOT be shown unless explicitly pinned (opt-in / pin-only per FR-10); the default listing is the user's userquery views only.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; honor light/dark via code-page theme detection and --sprk-ui-scale via scaledTheme/useUiScale; portal FluentProvider re-wrap for any portalled surface.</constraint>
+    <constraint source="ADR-022">Any @spaarke/ui-components code touched MUST stay React-16/17-safe: no createRoot; use JSXElement not JSX.Element.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Fluent v9 tab UI + userquery/savedquery aggregation via ViewService + Xrm.Navigation.navigateTo entitylist</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reuse ViewService" location="src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts">Call the existing service to retrieve the user's userquery views; group the results by returnedtypecode for display. Do not re-query userquery directly.</pattern>
+      <pattern name="Navigate to entitylist" location="src/solutions/CalendarSidePane/">Use Xrm.Navigation.navigateTo({pageType:'entitylist', entityName, viewId}) to open the entity grid with the selected view.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read ViewService.ts + the NavigatorPane tab scaffold.</step>
+    <step order="1">Wire the Views tab to ViewService to retrieve the signed-in user's userquery views; group results by returnedtypecode (entity) for display.</step>
+    <step order="2">Render each group as an entity heading with its views listed underneath, using Fluent v9 tokens + the scaled theme (NFR-07).</step>
+    <step order="3">On click, call Xrm.Navigation.navigateTo({pageType:'entitylist', entityName, viewId}) to open the entity grid with that view selected.</step>
+    <step order="4">Exclude system savedquery views from the default listing (opt-in / pin-only); render an empty-state when the user has zero userqueries — never an error.</step>
+    <step order="5">Author render tests: tab lists the user's views grouped by entity; click triggers navigateTo with the correct entityName + viewId; system views absent by default; zero-userquery shows the empty-state; render in light AND dark with portal re-wrap (ADR-021).</step>
+    <step order="6">Recompile @spaarke/ui-components (if touched) + build the NavigatorPane; run tests; confirm green.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set task 060 status to completed.</step>
+    <step order="8">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If ViewService cannot supply the userquery data grouped as FR-10 requires without a change to its public contract, STOP and escalate (root §6.5 — reuse-vs-extend decision) rather than adding a parallel view-querying service.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Views tab lists user's saved views grouped by entity (light and dark)">
+      <steps>
+        <step>Mount the Views tab for a user with userquery views across two entities, in light theme.</step>
+        <step>Re-mount in dark theme (data-theme=dark / prefers-color-scheme dark).</step>
+      </steps>
+      <expected>The user's saved views appear grouped by entity, with Fluent v9 tokens honoring light and dark; portalled content wrapped in its own FluentProvider (ADR-021).</expected>
+    </test>
+    <test name="Click opens the entity grid with the view selected">
+      <steps>
+        <step>Click a listed userquery view.</step>
+      </steps>
+      <expected>Xrm.Navigation.navigateTo is called with pageType:'entitylist' and the correct entityName + viewId.</expected>
+    </test>
+    <test name="System views hidden; empty-state on zero userqueries">
+      <steps>
+        <step>Mount the tab for a user with zero userquery views.</step>
+      </steps>
+      <expected>System savedquery views are not shown; the tab renders an empty-state, not an error.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components (if touched) + build the NavigatorPane code page + run Jest render tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/src/tabs/ViewsTab.tsx</output>
+    <output type="test">src/solutions/NavigatorPane/src/tabs/__tests__/ViewsTab.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a user with saved userquery views, when the Views tab renders, then the views are listed grouped by entity (returnedtypecode).</criterion>
+    <criterion testable="true">Given a listed view, when the user clicks it, then the entity grid opens with that view selected via navigateTo({pageType:'entitylist', entityName, viewId}).</criterion>
+    <criterion testable="true">Given system savedquery views exist, when the tab renders by default, then they are not shown (opt-in / pin-only).</criterion>
+    <criterion testable="true">Negative: given a user with zero userqueries, when the tab renders, then an empty-state is shown, not an error.</criterion>
+    <criterion testable="true">All render tests pass; build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-10 + plan.md Phase 6 task 060. Reuse ViewService.ts (NFR-08) — no new view-querying service and no new query storage.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

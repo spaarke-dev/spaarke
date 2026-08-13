@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Project wrap-up — README Complete, lessons-learned, /test-diet, success-criteria verification, archive</title>
+    <phase>Wrap-up</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation + reconciliation wrap-up; no production code authored.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive close-out checklist with a closed acceptance set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wrap</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial project close-out — must run last, after all non-deferred tasks are complete.</parallel-reason>
+    <deps>087</deps>
+    <tags>wrap-up</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Close out the project: set the README status to Complete, write notes/lessons-learned.md, invoke /test-diet to reconcile the Jest tests added/modified during the project against the ADR-038 build-vs-maintain philosophy (writing notes/test-diet-report.md), write notes/success-criteria-verification.md mapping each spec Success Criterion to evidence, mark all tasks ✅ in TASK-INDEX, and archive. Do NOT run wrap-up if any non-deferred task is incomplete — report instead.</prompt>
+  <role>SPAARKE platform developer performing project close-out per root CLAUDE.md §7 + the project-close test-diet gate. Follow ADRs strictly.</role>
+  <goal>A closed-out project: README status = Complete; notes/lessons-learned.md + notes/test-diet-report.md + notes/success-criteria-verification.md written; TASK-INDEX all ✅; archived — with wrap-up refused (report instead) if any non-deferred task is still incomplete.</goal>
+  <context>
+    <background>Per root CLAUDE.md §7 (task completion &amp; transition) + the project-close test-diet gate (task-execute Step 11 invokes /test-diet before marking the project complete) + plan.md Wrap-up task 090. This project's tests are Jest (frontend); /test-diet applies the ADR-038 build-vs-maintain philosophy to them.</background>
+    <relevant-files>
+      <file role="modify">projects/spaarke-side-pane-navigation-history-r1/README.md</file>
+      <file role="new">projects/spaarke-side-pane-navigation-history-r1/notes/lessons-learned.md</file>
+      <file role="new">projects/spaarke-side-pane-navigation-history-r1/notes/test-diet-report.md</file>
+      <file role="new">projects/spaarke-side-pane-navigation-history-r1/notes/success-criteria-verification.md</file>
+      <file role="modify">projects/spaarke-side-pane-navigation-history-r1/tasks/TASK-INDEX.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="087" status="pending">UI test pass complete — the last verification gate before close-out (and all prior tasks complete).</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Wrap-up MUST NOT run if any non-deferred task is incomplete — report the incomplete task(s) instead of closing out (root CLAUDE.md §7).</constraint>
+    <constraint source="project">/test-diet is read-only: it emits git rm / git mv suggestions for the reviewer and writes notes/test-diet-report.md; it does not auto-delete tests (ADR-038 build-vs-maintain).</constraint>
+    <constraint source="project">Every spec Success Criterion MUST be mapped to concrete evidence in success-criteria-verification.md.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Project close-out (README status, lessons-learned, test-diet reconciliation, success-criteria evidence, archive)</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Project-close test-diet gate" location=".claude/skills/test-diet/SKILL.md">Reconcile tests added/modified during the project as scaffolding (delete) vs maintain (keep) per ADR-038; write notes/test-diet-report.md; the reviewer executes the suggested git rm / git mv.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor (MINIMAL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; confirm ALL non-deferred tasks are ✅ in TASK-INDEX — if any is incomplete, STOP and report (do not close out).</step>
+    <step order="1">Set the project README status to Complete.</step>
+    <step order="2">Write notes/lessons-learned.md (what worked, what surprised, Path B outcome, reuse wins/gaps).</step>
+    <step order="3">Invoke /test-diet to reconcile the Jest tests added/modified during the project against the ADR-038 build-vs-maintain philosophy; write notes/test-diet-report.md (git rm / git mv suggestions for the reviewer — read-only).</step>
+    <step order="4">Write notes/success-criteria-verification.md mapping each spec Success Criterion (1-12) to concrete evidence.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: all tasks ✅ (this task 090 set to completed last).</step>
+    <step order="6">Archive the project per the standard close-out procedure.</step>
+    <step order="7">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If any non-deferred task is incomplete (not ✅ in TASK-INDEX and not an owner-approved deferral), STOP and report the incomplete task(s) instead of closing out (root CLAUDE.md §7).</trigger>
+  </escalation>
+  <tools>
+    <tool name="test-diet">Reconcile project Jest tests vs ADR-038 build-vs-maintain; write notes/test-diet-report.md.</tool>
+  </tools>
+  <outputs>
+    <output type="doc">projects/spaarke-side-pane-navigation-history-r1/notes/lessons-learned.md</output>
+    <output type="doc">projects/spaarke-side-pane-navigation-history-r1/notes/test-diet-report.md</output>
+    <output type="doc">projects/spaarke-side-pane-navigation-history-r1/notes/success-criteria-verification.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given close-out runs, when it completes, then the README status is Complete.</criterion>
+    <criterion testable="true">Given close-out runs, when it completes, then lessons-learned.md, test-diet-report.md, and success-criteria-verification.md all exist.</criterion>
+    <criterion testable="true">Given close-out runs, when TASK-INDEX is inspected, then all tasks are ✅.</criterion>
+    <criterion testable="true">Negative: given any non-deferred task is incomplete, when wrap-up is attempted, then it does NOT run and the incomplete task(s) are reported.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to root CLAUDE.md §7 + the project-close test-diet gate + plan.md Wrap-up task 090. Serial (parallel-safe:false); /test-diet is read-only.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

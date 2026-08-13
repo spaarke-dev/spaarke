@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Monitored lens — distinct Pinned-tab group from shared sprk_monitor flag scoped to me</title>
+    <phase>5 Pinned</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the shared Pinned tab (.tsx) + reads a shared record-level flag via Xrm.WebApi; frontend; user-facing group with shared-flag semantics.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified read-only lens over an existing shared flag with a closed acceptance set; no new write path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits shared Pinned tab (with 050) — sequence (plan.md §5).</parallel-reason>
+    <deps>040</deps>
+    <tags>frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add a distinct Monitored group to the Pinned tab that surfaces the shared record-level sprk_monitor flag scoped to the user (monitor=true AND owned-by/assigned-to me). It is visually separate from personal pins, and the UI surfaces the shared-flag semantics: setting/clearing monitor affects everyone (last-writer-wins).</prompt>
+  <role>SPAARKE platform developer with Xrm.WebApi filtered reads + Fluent v9 grouping/messaging expertise. Follow ADRs strictly.</role>
+  <goal>A Monitored group in the Pinned tab that lists the user's monitor-flagged records (monitor=true AND owned/assigned to me), rendered separately from personal pins, with UI copy explaining the shared semantics. It reflects changes when monitor is toggled elsewhere and never merges with personal pins.</goal>
+  <context>
+    <background>Per spec FR-09 + OQ-1b (owner: include in r1) and plan.md Phase 5 task 052. The Monitored lens is read-only over the existing shared record-level sprk_monitor flag — decoupled from the personal pin gesture (050), which never writes sprk_monitor. Query mirrors the existing Xrm.WebApi filtered-read pattern. This adds one query + a distinct Pinned-tab group.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/src/tabs/PinnedTab.tsx</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/monitoredService.ts</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/__tests__/monitoredService.test.ts</file>
+      <file role="canonical-reference">src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts</file>
+      <file role="canonical-reference">src/solutions/NavigatorPane/src/services/pinService.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">NavigatorPane code page + Pinned tab shell the Monitored group renders into.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">MODIFY-ONLY: add a distinct Monitored group to the existing Pinned tab; do not build a parallel Pinned surface.</constraint>
+    <constraint source="project">The Monitored lens READS the shared record-level sprk_monitor flag (monitor=true AND owned-by/assigned-to me); it MUST NOT be merged with personal pins and its rendering path stays separate from the personal-pin path.</constraint>
+    <constraint source="project">Surface the shared-flag semantics in the UI: setting/clearing sprk_monitor affects everyone (last-writer-wins). If the group offers any monitor toggle, it writes the shared flag knowingly (distinct from the personal pin gesture, which never writes sprk_monitor).</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; the Monitored group + semantics messaging honor light/dark + --sprk-ui-scale (NFR-07).</constraint>
+    <constraint source="project">Host-context only — Xrm.WebApi under the signed-in user; no BFF, no plugin, no per-form web resource.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Xrm.WebApi filtered read of a shared record-level flag scoped to the user; Fluent v9 grouped list + inline messaging</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Filtered Xrm.WebApi read" location="src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts">Mirror retrieveMultiple with a filter for sprk_monitor eq true AND ownership/assignment to the current user.</pattern>
+      <pattern name="Keep separate from personal pins" location="src/solutions/NavigatorPane/src/services/pinService.ts">The Monitored path reads the shared flag only; it does not create/read personal sprk_navitem pins and never conflates the two groups.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and confirm the sprk_monitor flag + ownership/assignment fields against the schema.</step>
+    <step order="1">Build monitoredService.ts: Xrm.WebApi retrieveMultiple filtering sprk_monitor eq true AND (owned-by OR assigned-to) the current user, across the monitored record source.</step>
+    <step order="2">Render a distinct Monitored group in the Pinned tab, visually separate from the personal-pin Records/Bookmarks groups; never merge the two.</step>
+    <step order="3">Surface the shared-flag semantics in the UI (copy: setting/clearing monitor affects everyone; last-writer-wins).</step>
+    <step order="4">Ensure a record not owned/assigned to the user does not appear even when monitor=true.</step>
+    <step order="5">Author service + tab tests: Monitored lists the user's monitor-flagged records; never merged with personal pins; toggling monitor elsewhere changes the group; the UI explains shared semantics; a not-owned/assigned monitor=true record does not appear.</step>
+    <step order="6">Recompile @spaarke/ui-components + run tests; confirm green.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set task 052 status to completed.</step>
+    <step order="8">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the ownership/assignment scoping for sprk_monitor cannot be expressed as a single reliable OData filter on the current build (e.g., assigned-to-me semantics ambiguous), STOP and escalate the scoping definition (root §6.5) rather than over- or under-scoping the shared Monitored group.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Monitored group is distinct and reflects the shared flag (light + dark)">
+      <steps>
+        <step>Flag a record the user owns with sprk_monitor=true; mount the Pinned tab in light theme.</step>
+        <step>Re-mount in dark theme; confirm the Monitored group is visually separate from personal pins.</step>
+      </steps>
+      <expected>The flagged record appears in a distinct Monitored group (never merged with personal pins); the group honors light and dark Fluent v9 tokens.</expected>
+    </test>
+    <test name="Shared semantics surfaced; toggling elsewhere updates the group">
+      <steps>
+        <step>Read the group's semantics copy; confirm it states the flag is shared / last-writer-wins.</step>
+        <step>Clear sprk_monitor on the record elsewhere and refresh the tab.</step>
+      </steps>
+      <expected>The UI explains the shared semantics; clearing monitor elsewhere removes the record from the group.</expected>
+    </test>
+    <test name="Not-owned/assigned record is excluded">
+      <steps>
+        <step>Set sprk_monitor=true on a record NOT owned/assigned to the user; refresh the tab.</step>
+      </steps>
+      <expected>The record does not appear in the user's Monitored group.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/src/services/monitoredService.ts</output>
+    <output type="test">src/solutions/NavigatorPane/src/services/__tests__/monitoredService.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given records flagged sprk_monitor=true owned/assigned to the user, when the Pinned tab renders, then the Monitored group lists exactly those records.</criterion>
+    <criterion testable="true">Given the Monitored group and personal pins, when the tab renders, then the Monitored group is never merged with personal pins.</criterion>
+    <criterion testable="true">Given sprk_monitor is toggled elsewhere, when the tab refreshes, then the Monitored group changes accordingly.</criterion>
+    <criterion testable="true">Given the Monitored group, when it renders, then the UI explains the shared-flag semantics (affects everyone; last-writer-wins).</criterion>
+    <criterion testable="true">Negative: given a record with sprk_monitor=true not owned/assigned to the user, when the tab renders, then it does not appear in the group.</criterion>
+    <criterion testable="true">All tests pass; code-page build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-09 + OQ-1b (owner: include in r1) and plan.md Phase 5 task 052. Read-only lens over the shared record-level sprk_monitor flag — decoupled from the personal pin gesture (050, which never writes sprk_monitor). parallel-safe:false — shares the Pinned tab with 050 (plan.md §5).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

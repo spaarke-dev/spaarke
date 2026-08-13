@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>sprk_navitem schema authoring — entity-schema.md + Deploy-SprkNavItemEntity.ps1</title>
+    <phase>2 Entity</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New-file authoring (Dataverse entity-schema doc + PowerShell deploy script); no .ts/.tsx code, no BFF/pcf/plugin. The actual environment mutation is a separate task (021).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified schema authoring mirroring an existing exemplar (sprk_todo) with a closed acceptance set; no root-cause/brownfield judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group A runs alongside task 010 (widen xrmContext.ts) — different surfaces (Dataverse schema authoring vs shared-lib TS typings), no shared files.</parallel-reason>
+    <deps>001</deps>
+    <tags>dataverse,schema</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Author the sprk_navitem entity schema document and its idempotent PowerShell deploy script, mirroring the shipping sprk_todo exemplar but overriding ownership to UserOwned. This produces the per-user store for Navigator history rows, pins, and bookmarks (FR-06); it does NOT run against any environment — the deploy is task 021.</prompt>
+  <role>SPAARKE platform developer with Dataverse schema authoring expertise (Web API + PowerShell metadata operations; global option sets; UserOwned entities). Follow ADRs strictly.</role>
+  <goal>Two new files exist: src/solutions/SpaarkeCore/entities/sprk_navitem/entity-schema.md (documents every field + UserOwned ownership, mirroring the sprk_todo doc) and scripts/Deploy-SprkNavItemEntity.ps1 (idempotent Web API + PowerShell script that creates three global option sets FIRST, then the UserOwned entity, then all data-model fields). Re-running the script does not error or duplicate.</goal>
+  <context>
+    <background>Per spec FR-06 + the "Data Model — sprk_navitem (per-user)" section + plan.md Phase 2 task 020. sprk_navitem is the new per-user (owner-scoped, private) store for history/pin/bookmark/weblink shapes. It cannot be satisfied by native MDA MRU (client-side, not queryable, not cross-device) nor by sprk_monitor (record-scoped, records-only, shared). The schema mirrors sprk_todo but ownership is UserOwned (not User-or-Team). The three choice fields (sprk_type, sprk_source, sprk_pagetype) are global option sets that MUST be created before the picklist attributes that reference them.</background>
+    <relevant-files>
+      <file role="new">src/solutions/SpaarkeCore/entities/sprk_navitem/entity-schema.md</file>
+      <file role="new">scripts/Deploy-SprkNavItemEntity.ps1</file>
+      <file role="canonical-reference">src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md</file>
+      <file role="canonical-reference">scripts/Deploy-SprkTodoEntity.ps1</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Spike gate confirms Path B viability; entity work proceeds once the framework direction is confirmed (no code dependency, ordering only).</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Entity MUST be UserOwned (owner-scoped, private) — override the sprk_todo "User or Team" ownership; per-user isolation (NFR-03).</constraint>
+    <constraint source="project">Author schema via Web API + PowerShell (NOT PAC CLI — PAC has no `pac table create` / `pac column create`); target the SpaarkeCore (unmanaged) solution.</constraint>
+    <constraint source="project">The three global option sets (sprk_type = history/pin; sprk_source = captured/manual; sprk_pagetype = entityrecord/entitylist/custom/weblink) MUST be created BEFORE the picklist attributes that reference them (schema order is load-bearing).</constraint>
+    <constraint source="project">Deploy script MUST be idempotent — guard every metadata create with existence checks (Test-EntityExists / Test-AttributeExists pattern from Deploy-SprkTodoEntity.ps1) so re-running neither errors nor duplicates.</constraint>
+    <constraint source="project">Do NOT run this against any environment — this task only authors the doc + script; deployment is task 021.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Dataverse schema authoring — UserOwned entity + global option sets via Web API + PowerShell</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Entity-schema doc exemplar" location="src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md">Mirror the section structure (Entity Definition table, Fields, Choice Values, System Fields, Notes) but set Ownership Type = User (UserOwned) and document the sprk_navitem data-model fields.</pattern>
+      <pattern name="Idempotent deploy script" location="scripts/Deploy-SprkTodoEntity.ps1">Reuse Test-EntityExists / Test-AttributeExists / Add-AttributeIfMissing guards; create global option sets before picklist attributes; publish at the end.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor (STANDARD) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read both canonical-reference exemplars (sprk_todo entity-schema.md + Deploy-SprkTodoEntity.ps1).</step>
+    <step order="1">Author src/solutions/SpaarkeCore/entities/sprk_navitem/entity-schema.md mirroring the sprk_todo doc structure: Entity Definition (Logical Name sprk_navitem, primary name field, Ownership Type = User/UserOwned, SpaarkeCore unmanaged), Fields table for every data-model field, Choice Values for the three option sets, System Fields, Notes.</step>
+    <step order="2">In Deploy-SprkNavItemEntity.ps1, define the three GLOBAL option sets FIRST (idempotent): sprk_type {history, pin}; sprk_source {captured, manual}; sprk_pagetype {entityrecord, entitylist, custom, weblink}.</step>
+    <step order="3">Create the sprk_navitem entity as UserOwned (guarded by Test-EntityExists) with its primary name attribute.</step>
+    <step order="4">Add all remaining fields (guarded by Test-AttributeExists / Add-AttributeIfMissing): sprk_type, sprk_source, sprk_pagetype (picklists bound to the global option sets from step 2), sprk_targetlogicalname (Text), sprk_targetid (Text/GUID), sprk_url (Text), sprk_displayname (Text), sprk_lastvisited (DateTime), sprk_visitcount (Whole Number).</step>
+    <step order="5">Verify idempotency by inspection: every create is behind an existence guard and re-running is a no-op; add the publish step at the end. Do NOT execute against an environment.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set task 020 status to completed.</step>
+    <step order="7">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the sprk_todo exemplar's field patterns cannot represent a data-model field (e.g. sprk_targetid as GUID vs Text), STOP and escalate the type choice rather than guessing (root §6).</trigger>
+  </escalation>
+  <justification>
+    <existing>Native MDA MRU (client-side, not server-queryable, not cross-device) and sprk_monitor (record-scoped, records-only, shared record-level flag). Closest schema exemplar: src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md.</existing>
+    <extension>No — neither existing store can be extended: sprk_monitor cannot hold pages/views/history and is not per-user; native MRU is not server-side. sprk_navitem is a genuinely new per-user, cross-device store. (The exemplar is copied as structure, not extended as a table.)</extension>
+    <cost-of-doing-nothing>Without sprk_navitem there is no cross-device history and no page/view/bookmark pins — the core Navigator user need (spec §1) fails; capture (030) and pins (050) have nothing to write to.</cost-of-doing-nothing>
+  </justification>
+  <tools>
+    <tool name="powershell">Author (do not execute) the Web API + PowerShell deploy script.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeCore/entities/sprk_navitem/entity-schema.md</output>
+    <output type="code">scripts/Deploy-SprkNavItemEntity.ps1</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the authored doc, when reviewed, then entity-schema.md documents every data-model field (sprk_type, sprk_source, sprk_pagetype, sprk_targetlogicalname, sprk_targetid, sprk_url, sprk_displayname, sprk_lastvisited, sprk_visitcount, ownerid, PK) and states Ownership Type = UserOwned.</criterion>
+    <criterion testable="true">Given Deploy-SprkNavItemEntity.ps1, when inspected, then the three global option sets are defined BEFORE any picklist attribute that references them.</criterion>
+    <criterion testable="true">Given the deploy script, when inspected, then every metadata create is guarded by an existence check (Test-EntityExists / Test-AttributeExists) so it is idempotent.</criterion>
+    <criterion testable="true">Negative: given the script is re-run against an already-provisioned entity, then it neither errors nor creates duplicate entities/attributes/option-set values.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-06 + the "Data Model — sprk_navitem" section + plan.md Phase 2 task 020. The actual deploy against the target environment is task 021 (do not deploy here). Mirror sprk_todo but override to UserOwned. Web API + PowerShell only — no PAC table/column create.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Deploy sprk_navitem to SpaarkeCore + per-user security roles</title>
+    <phase>2 Entity</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deploy task — runs the authored script (020) + role config + publish; no new .ts/.tsx code. Deployment correctness is verified by describe_table, not code-review.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Executes a well-specified idempotent script against a known environment with a closed verification set; no brownfield root-cause.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Dataverse environment mutation — human/environment gate. Runs in group B alongside the host build (011) but must not be interleaved with other environment mutations; requires operator confirmation of the target environment.</parallel-reason>
+    <deps>020</deps>
+    <tags>dataverse,deploy</tags>
+    <estimated-effort>1-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Run the idempotent Deploy-SprkNavItemEntity.ps1 (authored in 020) against the target Dataverse environment, add the per-user security roles so users can CRUD only their own sprk_navitem rows, and publish. Verify the result via describe_table before declaring done.</prompt>
+  <role>SPAARKE platform developer with Dataverse deployment expertise (PowerShell metadata deploy, security roles, solution publish, describe_table verification). Follow ADRs strictly.</role>
+  <goal>sprk_navitem exists in the SpaarkeCore (unmanaged) solution as a UserOwned entity with all data-model fields present (verified by describe_table); per-user security roles grant user-level (owner-scoped) CRUD; a non-owner cannot read another user's rows. The entity is published.</goal>
+  <context>
+    <background>Per spec FR-06 + plan.md Phase 2 task 021. This is the environment-mutating half of the entity work: task 020 authored the schema doc + idempotent deploy script; this task executes it, wires per-user (owner-scoped) security roles, publishes, and verifies. Capture (030) and pins (050) depend on sprk_navitem existing and being per-user isolated (NFR-03).</background>
+    <relevant-files>
+      <file role="modify">scripts/Deploy-SprkNavItemEntity.ps1</file>
+      <file role="canonical-reference">src/solutions/SpaarkeCore/entities/sprk_navitem/entity-schema.md</file>
+      <file role="canonical-reference">scripts/Deploy-SprkTodoEntity.ps1</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The authored entity-schema.md + idempotent Deploy-SprkNavItemEntity.ps1 this task executes.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Deploy into the SpaarkeCore (unmanaged) solution; entity remains UserOwned; publish after deploy (per project build/deploy notes).</constraint>
+    <constraint source="project">Security roles MUST grant user-level (owner-scoped) access only — no organization-level read that would expose another user's rows (NFR-03 per-user isolation).</constraint>
+    <constraint source="project">Verify the deployed schema via describe_table before marking complete — confirm UserOwned + all data-model fields present.</constraint>
+    <constraint source="project">Confirm the target environment with the operator before mutating it (human/environment gate).</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Dataverse deploy — run metadata script, wire security roles, publish, verify</topic>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent deploy + publish" location="scripts/Deploy-SprkTodoEntity.ps1">Follow the same deploy + publish flow used for sprk_todo; the sprk_navitem script (020) is the same shape.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor (STANDARD) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the dataverse-deploy skill; confirm the target environment with the operator.</step>
+    <step order="1">Run Deploy-SprkNavItemEntity.ps1 against the confirmed target environment (Web API + PowerShell); observe it complete without error (idempotent — safe to re-run).</step>
+    <step order="2">Add/assign per-user (owner-scoped, user-level) security roles granting CRUD on sprk_navitem to the relevant user roles; do NOT grant organization-level read.</step>
+    <step order="3">Publish the SpaarkeCore customizations.</step>
+    <step order="4">Verify via describe_table: sprk_navitem exists in SpaarkeCore, is UserOwned, and has all data-model fields (sprk_type, sprk_source, sprk_pagetype, sprk_targetlogicalname, sprk_targetid, sprk_url, sprk_displayname, sprk_lastvisited, sprk_visitcount, ownerid).</step>
+    <step order="5">Verify per-user isolation: confirm a non-owner user cannot see another user's rows (owner-scoped roles enforce this).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set task 021 status to completed.</step>
+    <step order="7">Document the deploy result (or any failure/deviation) in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the deploy or publish fails, or describe_table shows the entity is missing fields / not UserOwned, STOP and report — do NOT proceed to the capture tasks (030/031) against a broken or half-provisioned entity. A deploy failure must be surfaced, never silently skipped (root §6).</trigger>
+  </escalation>
+  <tools>
+    <tool name="powershell">Execute Deploy-SprkNavItemEntity.ps1 and publish.</tool>
+  </tools>
+  <outputs>
+    <output type="code">scripts/Deploy-SprkNavItemEntity.ps1</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the deploy runs, when describe_table is queried, then sprk_navitem exists in the SpaarkeCore solution and is UserOwned.</criterion>
+    <criterion testable="true">Given the deploy runs, when describe_table is queried, then all data-model fields are present (sprk_type, sprk_source, sprk_pagetype, sprk_targetlogicalname, sprk_targetid, sprk_url, sprk_displayname, sprk_lastvisited, sprk_visitcount).</criterion>
+    <criterion testable="true">Given two users, when user B queries user A's rows, then user B cannot see them (owner-scoped, user-level roles).</criterion>
+    <criterion testable="true">Negative: given the deploy or publish fails, then the failure is reported and the task stops — it is not silently skipped and downstream capture tasks are not started.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-06 + plan.md Phase 2 task 021. Human/environment gate (parallel-safe:false). Depends on the authored artifacts from task 020. On failure, escalate per the trigger and do not start 030/031.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

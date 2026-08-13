@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>SPIKE / GATE — Re-validate + productionize the Path B Code Page-injection bootstrap on current UCI</title>
+    <phase>0 Spike / Gate</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Spike / brownfield root-cause on current UCI; go/no-go gate whose outcome re-baselines FR-02/FR-03; touches shell-level global JS behavior.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brownfield UCI investigation with high blast radius (whole framework depends on the verdict); requires architectural judgment about shell persistence behavior and a documented Path A fallback decision.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>Gate</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial go/no-go gate. No framework code (010/011) or capture code (030+) may be committed until this spike returns a verdict; the outcome may re-baseline FR-02/FR-03 to Path A.</parallel-reason>
+    <deps>none</deps>
+    <tags>spike</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Re-validate and productionize the recovered Path B Code Page-injection bootstrap (notes/retired-sidepane-code/SidePaneManager.ts) on the CURRENT UCI build, so an app-level side pane auto-creates at app load and a getPageContext() polling loop reliably observes each record visit. This is the go/no-go gate for the whole framework: if the injection bootstrap cannot be made reliable, STOP and fall back to Path A (launch-on-open) per spec FR-00 and CLAUDE.md §6.5.</prompt>
+  <role>SPAARKE platform developer with deep Power Apps UCI / model-driven app shell and Xrm.App.sidePanes expertise. Follow ADRs strictly.</role>
+  <goal>A written spike report at projects/spaarke-side-pane-navigation-history-r1/notes/task-001-spike-report.md recording an explicit go/no-go verdict on Path B bootstrap reliability on the current UCI build, the productionized bootstrap approach (or the Path A fallback plan if no-go), and evidence for each acceptance criterion below.</goal>
+  <context>
+    <background>Per spec FR-00 (SPIKE — gate) and plan.md Phase 0, Path B (Code Page-injection global bootstrap) was owner-approved 2026-08-12 (ADR Tensions: superseded side-pane platform → Path A project-scoped exception). Its retirement was product-driven, not a technical failure, and the reliable path was Code Page injection (recovered in notes/retired-sidepane-code/). This spike re-confirms that mechanism on the current UCI build before any framework code is committed. Everything is host-context; no BFF, no plugin, no per-form web resource (spec NFR-01/NFR-02).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/SidePaneManager.ts</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</file>
+      <file role="canonical-reference">src/solutions/CalendarSidePane/</file>
+      <file role="new">projects/spaarke-side-pane-navigation-history-r1/notes/task-001-spike-report.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="pending">First task; no upstream dependency.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Spike scope only: verify + document the bootstrap mechanism and productionization approach. Do NOT commit framework code (SprkSidePaneHost, registry, capture service) in this task — those are 010/011/030+.</constraint>
+    <constraint source="project">The app pane MUST be created via Xrm.App.sidePanes.createPane with canClose:false + alwaysRender:true (spec MUST rule / NFR-05); alwaysRender:true is the mechanism that keeps JS running while collapsed.</constraint>
+    <constraint source="project">Host-context only — no code added to Sprk.Bff.Api; no per-form web resource; no Dataverse plugin (spec NFR-01/NFR-02). The single app-startup bootstrap is the ONLY global JS.</constraint>
+    <constraint source="ADR-006">Bootstrap ships as a Code Page-injection path (not a classic HTML per-form web resource); confirm the pane body is a pageType:'webresource' code page like CalendarSidePane (Path C comply, per spec ADR Tensions).</constraint>
+    <constraint source="ADR-022">Any code exercised in @spaarke/ui-components during the spike must stay React-16/17-safe (no createRoot; JSXElement not JSX.Element).</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Model-driven app shell side-pane persistence + getPageContext polling on current UCI</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Path B injection bootstrap" location="projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/SidePaneManager.ts">Adopt the PANE_REGISTRY + app-load bootstrap shape; singleton guard so re-entry does not create duplicate panes.</pattern>
+      <pattern name="getPageContext polling capture" location="projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts">Re-adopt the ~2s poll loop that reads Xrm.Utility.getPageContext(); recompute current page each poll (never cache authoritative); leaving records → current = null.</pattern>
+      <pattern name="webresource pane code page" location="src/solutions/CalendarSidePane/">Reference impl of a Vite code page hosted as a pageType:'webresource' side pane.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (opus) + effort (xhigh) per task-execute Step 0.5; load the knowledge files above and the two recovered files in notes/retired-sidepane-code/.</step>
+    <step order="1">Study the recovered SidePaneManager.ts bootstrap + PANE_REGISTRY shape and contextService.ts polling loop; note what each assumed about the UCI shell (createPane timing, frame context, getPageContext output shape).</step>
+    <step order="2">Stand up a minimal harness bootstrap that, at app load, calls Xrm.App.sidePanes.createPane({ canClose:false, alwaysRender:true }) with a singleton guard, hosting a placeholder pageType:'webresource' code page (CalendarSidePane-style). Use a frame-walk getXrm() to locate Xrm.</step>
+    <step order="3">On the target/current UCI build, verify the pane auto-creates at app load with no user action and that re-entry (reload / re-navigation) does NOT create duplicate panes.</step>
+    <step order="4">Navigate ≥5 records and perform ≥1 collapse/expand cycle; confirm the pane persists and JS keeps running while collapsed (alwaysRender:true), and that the getPageContext() poll observes each record visit (log/record each observed context).</step>
+    <step order="5">Investigate OQ-6 (custom-page name resolution) opportunistically by inspecting getPageContext() output shape for custom pages; and R2 (getPageContext current-user / @me literal behavior) — record findings, do not block the gate on them.</step>
+    <step order="6">Form the go/no-go verdict. If GO: document the productionized bootstrap approach (singleton guard, injection point, poll interval) for tasks 010/011/086. If NO-GO: STOP and invoke the escalation trigger — document the Path A (launch-on-open) fallback and how FR-02/FR-03 re-baseline.</step>
+    <step order="7">Write projects/spaarke-side-pane-navigation-history-r1/notes/task-001-spike-report.md with the verdict, per-criterion evidence, productionization approach (or Path A plan), and OQ-6/R2 findings.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 001 status to completed.</step>
+    <step order="9">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the injection bootstrap cannot be made reliable on the current UCI (pane fails to auto-create, does not persist across navigation/collapse, or getPageContext polling misses visits), STOP and fall back to Path A (launch-on-open; capture starts at first open) per spec FR-00 + CLAUDE.md §6.5. Do NOT silently ship an unreliable global bootstrap. Emit the §6.5 "ADR Conflict / Resolution Required" format and re-baseline FR-02/FR-03 in the spike report.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build the placeholder Vite code page for the harness pane (npm run build; cache-clear dist/ + node_modules/.vite/ first).</tool>
+  </tools>
+  <outputs>
+    <output type="doc">projects/spaarke-side-pane-navigation-history-r1/notes/task-001-spike-report.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the current UCI build, when the app loads, then an app-level side pane auto-creates via Xrm.App.sidePanes.createPane (canClose:false, alwaysRender:true) with no user action, and re-entry creates no duplicate pane.</criterion>
+    <criterion testable="true">Given the pane is created, when the user performs ≥5 record navigations AND ≥1 collapse/expand cycle, then the pane persists and its JS keeps running while collapsed (alwaysRender:true).</criterion>
+    <criterion testable="true">Given the polling loop is running, when the user visits each record, then getPageContext() polling reliably observes every visit (each visit recorded in the report).</criterion>
+    <criterion testable="true">Given the spike concludes, when the report is written, then projects/spaarke-side-pane-navigation-history-r1/notes/task-001-spike-report.md exists and states an explicit GO or NO-GO verdict with per-criterion evidence.</criterion>
+    <criterion testable="true">Negative: if the bootstrap is unreliable, then the report documents the Path A (launch-on-open) fallback and re-baselines FR-02/FR-03, and the escalation trigger is raised (no unreliable global bootstrap is shipped).</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-00 and plan.md Phase 0 (go/no-go gate). Canonical references: notes/retired-sidepane-code/SidePaneManager.ts (bootstrap + PANE_REGISTRY) and contextService.ts (poll loop). Watch R1 (Path B on current UCI), R2 (getPageContext @me literal by build), R3/OQ-6 (custom-page name resolution). Assumed poll interval ~0.5–2s (spec Assumptions).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

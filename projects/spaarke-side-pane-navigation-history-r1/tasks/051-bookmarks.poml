@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Bookmarks — "Pin this page" (captured) + "+ Add bookmark" (manual, URL-parsing) both writing sprk_type=pin</title>
+    <phase>5 Pinned</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend feature writing sprk_navitem via Xrm.WebApi with non-trivial URL-parsing branch logic; frontend/fluent-ui; user-facing bookmark creation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified two-gesture bookmark flow with a closed acceptance set incl. URL-parse branches; reuses the 050 pin-write path + getPageContext.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group E runs alongside task 031 (retention) — different surfaces; bookmarks own a distinct bookmark component/service and build on the completed 050 pin-write path.</parallel-reason>
+    <deps>050</deps>
+    <tags>frontend</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Add two bookmark gestures, both writing a sprk_type=pin sprk_navitem: "Pin this page" (one click, captured from getPageContext, sprk_source=captured, as a logical target) and "+ Add bookmark" (manual, sprk_source=manual). Manual parses MDA record and entitylist/view URLs (etn/id/pagetype/viewid) into a labeled logical target; anything that does not parse is stored raw as sprk_url with sprk_pagetype=weblink and opens in a new tab.</prompt>
+  <role>SPAARKE platform developer with getPageContext + MDA URL parsing and Xrm.WebApi write expertise. Follow ADRs strictly.</role>
+  <goal>Two bookmark entry points in the Pinned tab. "Pin this page" bookmarks the current page with no typing (captured logical target). "+ Add bookmark" parses a pasted MDA record URL to a labeled record target, an MDA entitylist/view URL to a viewid target, and stores any non-parseable URL raw as a weblink that opens in a new tab; an unparseable non-URL string is rejected with a friendly message.</goal>
+  <context>
+    <background>Per spec FR-08 + OQ-7 (parse MDA record + entitylist/view URLs; raw-weblink otherwise) and plan.md Phase 5 task 051. Both gestures reuse the 050 sprk_type=pin write path. "Pin this page" reads getPageContext (like the capture loop, contextService). Manual parsing extracts etn/id/pagetype/viewid to build a labeled, security-trimmable logical target; non-Dataverse URLs are stored raw.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/src/tabs/PinnedTab.tsx</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/bookmarkService.ts</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/urlParse.ts</file>
+      <file role="new">src/solutions/NavigatorPane/src/services/__tests__/urlParse.test.ts</file>
+      <file role="canonical-reference">src/solutions/NavigatorPane/src/services/pinService.ts</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Pin gesture / pinService — the sprk_type=pin write path both bookmark gestures reuse.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Both gestures write sprk_type=pin sprk_navitem via Xrm.WebApi (per-user, owner-scoped); "Pin this page" sets sprk_source=captured, "+ Add bookmark" sets sprk_source=manual. Never write sprk_monitor.</constraint>
+    <constraint source="project">Manual parsing MUST parse MDA record URLs (etn/id/pagetype) and entitylist/view URLs (viewid) into logical targets; anything that does not parse is stored raw as sprk_url with sprk_pagetype=weblink and opens in a new tab (OQ-7).</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; the bookmark buttons/input honor light/dark + --sprk-ui-scale; portal FluentProvider re-wrap where portalled (NFR-07).</constraint>
+    <constraint source="project">Host-context only — getPageContext + Xrm.WebApi; no BFF, no plugin, no per-form web resource. Do not construct raw URLs for logical (Dataverse) targets — navigate those via Xrm.Navigation.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>getPageContext capture + MDA URL parsing (etn/id/pagetype/viewid) + weblink fallback</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reuse the pin-write path" location="src/solutions/NavigatorPane/src/services/pinService.ts">Both gestures create sprk_type=pin rows via the 050 service; differ only in sprk_source + how the target is derived.</pattern>
+      <pattern name="Current-page capture" location="projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts">Reuse the getPageContext read to build the "Pin this page" captured logical target.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read pinService (050) + contextService.</step>
+    <step order="1">Build urlParse.ts: parse an MDA record URL (etn/id/pagetype) → record logical target; parse an MDA entitylist/view URL (viewid) → view logical target; return a weblink descriptor for non-Dataverse URLs; reject a non-URL string.</step>
+    <step order="2">Build bookmarkService.ts: "Pin this page" reads getPageContext → captured logical target → sprk_type=pin (sprk_source=captured) via the 050 pin-write path.</step>
+    <step order="3">"+ Add bookmark": take pasted/typed input → urlParse → sprk_type=pin (sprk_source=manual); logical targets store etn/id/pagetype/viewid, non-parseable URLs store raw sprk_url with sprk_pagetype=weblink.</step>
+    <step order="4">Wire weblink rows to open in a new tab on click; logical targets navigate via Xrm.Navigation.</step>
+    <step order="5">Reject an unparseable non-URL string with a friendly, non-crashing message (no row created).</step>
+    <step order="6">Author urlParse + service tests: Pin this page needs no typing; MDA record URL → labeled record target; MDA entitylist/view URL → viewid target; external/non-Dataverse URL → raw weblink opening new tab; non-URL string → friendly rejection; light AND dark render of the bookmark UI.</step>
+    <step order="7">Recompile @spaarke/ui-components + run tests; confirm green.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 051 status to completed.</step>
+    <step order="9">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If MDA URL shapes on the current UCI build do not expose etn/id/pagetype/viewid parseably (build-specific URL format), STOP and escalate the parse strategy (root §6.5) rather than silently storing parseable Dataverse targets as raw weblinks.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Pin this page bookmarks current page with no typing (light + dark)">
+      <steps>
+        <step>On an MDA record page, click "Pin this page" in light theme; inspect Pinned→Bookmarks.</step>
+        <step>Repeat in dark theme.</step>
+      </steps>
+      <expected>A captured sprk_type=pin bookmark for the current page is created with no typing; the bookmark UI honors light and dark Fluent v9 tokens.</expected>
+    </test>
+    <test name="+ Add bookmark parses Dataverse URLs and falls back to weblink">
+      <steps>
+        <step>Paste an MDA record URL; then an MDA entitylist/view URL; then an external/non-Dataverse URL.</step>
+        <step>Click the resulting external bookmark.</step>
+      </steps>
+      <expected>The record URL becomes a labeled record logical target; the view URL becomes a viewid logical target; the external URL is stored raw as a weblink and opens in a new tab.</expected>
+    </test>
+    <test name="Unparseable non-URL string is rejected gracefully">
+      <steps>
+        <step>Enter a non-URL string (e.g. "notes for later") in + Add bookmark.</step>
+      </steps>
+      <expected>A friendly rejection message is shown, no sprk_navitem is created, and the UI does not crash.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/src/services/bookmarkService.ts</output>
+    <output type="code">src/solutions/NavigatorPane/src/services/urlParse.ts</output>
+    <output type="test">src/solutions/NavigatorPane/src/services/__tests__/urlParse.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given an MDA page, when the user clicks "Pin this page", then a captured sprk_type=pin bookmark for the current page is created with no typing.</criterion>
+    <criterion testable="true">Given a pasted MDA record URL in "+ Add bookmark", when parsed, then it becomes a labeled record logical target (etn/id/pagetype).</criterion>
+    <criterion testable="true">Given a pasted MDA entitylist/view URL, when parsed, then it becomes a viewid logical target.</criterion>
+    <criterion testable="true">Given a pasted external/non-Dataverse URL, when saved, then it is stored raw as sprk_url with sprk_pagetype=weblink and opens in a new tab on click.</criterion>
+    <criterion testable="true">Negative: given an unparseable non-URL string, when submitted, then it is rejected with a friendly message and no sprk_navitem is created.</criterion>
+    <criterion testable="true">All tests pass; code-page build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-08 + OQ-7 and plan.md Phase 5 task 051. Both gestures reuse the 050 pin-write path (differ by sprk_source + target derivation). Logical targets are security-trimmable (080); weblinks open new tabs. parallel-safe:true (Group E) — owns distinct bookmark files, builds on completed 050.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
