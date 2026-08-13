@@ -11,7 +11,7 @@ param appServicePlanId string
 param location string = resourceGroup().location
 
 @description('Runtime stack')
-param runtimeStack string = 'DOTNETCORE|8.0'
+param runtimeStack string = 'DOTNETCORE|10.0'
 
 @description('App settings as key-value object')
 param appSettings object = {}

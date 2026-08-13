@@ -4,7 +4,8 @@
     <title>FR-14 — App Service Bicep runtime DOTNETCORE|10.0 (+ platform.json) + Functions runtime bump</title>
     <phase>P4 CI/CD + deploy plumbing</phase>
     <gate>032 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>2026-08-13: all 5 App Service runtime strings DOTNETCORE|8.0 → DOTNETCORE|10.0 (pipe) across app-service.bicep, app-service-slot.bicep, deployment-slot.bicep, byok/main.bicep + platform.json (regenerated via `az bicep build`). Functions runtime dotnet-isolated 8.0 → 10.0 (function-app.bicep) — Flex Consumption net10 support CONFIRMED by researcher (escalation valve did NOT fire); version string is bare '10.0'. All bicep builds clean. TWO items flagged to owner: (1) platform.json regen carried ~611 lines of PRE-EXISTING infra drift (last compiled 2026-03-13, source edited through 2026-07-16) — kept the honest full recompile per prescriptive constraint; surgical 2-line alternative available. (2) Core Tools v4.7.0 func-publish regression for net10 Flex (core-tools#4794) — runbook note for task 042, not an ARM gate. See notes/bicep-runtime-bump.md.</completion-note>
     <rigor>FULL</rigor>
     <rigor-reason>Infra-as-code runtime string change; a mismatch = hard startup 503; deployment-critical.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -29,7 +29,7 @@
 | 031 | Publish-size re-baseline + governance updates 🔒 | P3 | FR-12 | sonnet/high | 033 | false | ✅ |
 | 032 | Transitive CVE audit (no HIGH regression) | P3 | NFR-03 | sonnet/high | 033 | false | ✅ |
 | 040 | CI setup-dotnet → 10.x / @v6 across 7 workflows | P4 | FR-13 | sonnet/xhigh | 032 | false | ✅ |
-| 041 | App Service Bicep DOTNETCORE\|10.0 (+ platform.json) + Functions | P4 | FR-14 | sonnet/xhigh | 032 | false | 🔲 |
+| 041 | App Service Bicep DOTNETCORE\|10.0 (+ platform.json) + Functions | P4 | FR-14 | sonnet/xhigh | 032 | false | ✅ |
 | 042 | Adapt /bff-deploy + slot-swap runbook 🔒 | P4 | FR-14 | sonnet/high | 041 | false | 🔲 |
 | 050 | Confirm `spaarke-dev` runs net10 (runtime + slot evidence) 🛠️ | P5 | FR-15 | sonnet/high | 042 | false | 🔲 |
 | 051 | **Deploy net10 to `spaarke-bff-dev`** + full smoke + **go/no-go** (completion gate) 🛠️ | P5 | FR-15 | sonnet/high | 050 | false | 🔲 |
