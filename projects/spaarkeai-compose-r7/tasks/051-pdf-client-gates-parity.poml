@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Client PDF intake-door gates + env verify + PDF parity acceptance (FR-06)</title>
+    <phase>5 PDF Import Parity (UC-7)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx client gates; end-to-end parity verification across two intake doors.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded client-gate change with explicit anchors (accept filter @3596, NON_DOCX_EXTENSION@267 / isEditableDocx@278) + a defined parity acceptance path.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeEditor.tsx + ComposeWorkspace.tsx intake gates (shared Compose spine); depends on 050 async server fork.</parallel-reason>
+    <deps>050</deps>
+    <tags>frontend, react, typescript, e2e-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Admit .pdf at the intake doors only: add .pdf to the Browse accept filter (@3596) and the NON_DOCX_EXTENSION / reference-only
+    gate (@267 / @278) FOR THE INTAKE DOORS ONLY — still route un-intakeable content to reference-only. Verify the compound DI
+    gate is ON in the target env. Then prove parity: a PDF opened via Browse or Assistant-upload becomes an editable Compose doc,
+    runs analysis, creates a response, and saves as a docx version — same as a .docx.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Compose intake doors (Browse + Assistant-upload), the reference-only gate, and end-to-end Compose flows. Follow ADRs strictly.</role>
+
+  <goal>
+    The Browse accept filter and the intake-door gates admit .pdf; un-intakeable content still routes to reference-only; a PDF
+    via Browse or Assistant-upload opens editable, runs NDA analysis, creates a response, and saves as a docx version — verified
+    end-to-end in a DI-enabled env.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-06 (UC-7) client half + env verify + the parity acceptance. Depends on task 050 (async ProjectForMount PDF fork).
+      Loud projector degradation warnings are expected + acceptable.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">ComposeEditor.tsx NON_DOCX_EXTENSION@267 + isEditableDocx@278 (admit .pdf at the intake door only)</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx Browse accept=".docx"@3596 (add .pdf)</file>
+      <file role="canonical-reference">AnalysisServicesModule.cs:154 compound DI gate (env verify — from task 001) + NullComposePdfIntakeSource@472–473 typed degradation</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Async ProjectForMount PDF fork — the server side of parity.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Admit .pdf ONLY at the intake doors (Browse accept@3596 + NON_DOCX_EXTENSION@267 / isEditableDocx@278). Un-intakeable browsed/uploaded content MUST still route to reference-only — do not make every .pdf editable unconditionally.</constraint>
+    <constraint source="ADR-032">If the compound DI gate is OFF, the flow degrades to NullComposePdfIntakeSource typed "PDF intake unavailable" — do not attempt to bypass the gate; verify it is ON in the target env before claiming parity.</constraint>
+    <constraint source="project">Reuse R6's projection path; MUST NOT add a parallel intake mechanism (root §11). MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose intake doors, pdf parity</topic>
+    <files>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/coordination-baseline.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load spec FR-06 + task-050 output + the 001 env-gate finding.</step>
+    <step order="1">Add .pdf to the Browse accept filter (@3596) and the intake-door gate (NON_DOCX_EXTENSION@267 / isEditableDocx@278) — intake doors only.</step>
+    <step order="2">Confirm un-intakeable content still routes to reference-only (regression guard).</step>
+    <step order="3">Verify the compound DI gate is ON in the target env (per task 001); if OFF, record the NullObject typed-degradation and mark parity blocked in that env.</step>
+    <step order="4">Run the parity path end-to-end: PDF (Browse + Assistant-upload) → editable → NDA analysis → response → save-as-docx-version.</step>
+    <step order="5">Add/adjust unit + ui-tests for the intake-door admission + reference-only routing.</step>
+    <step order="6">Run jest + ui-tests; verify green.</step>
+    <step order="7">Update TASK-INDEX.md: set 051 status to ✅.</step>
+    <step order="8">Document the parity result (and env-gate state) in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the target env's compound DI gate is OFF and cannot be enabled, STOP and escalate (root §6): parity acceptance (FR-06) cannot be demonstrated; record the NullObject typed-degradation rather than faking a pass.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="PDF via Browse opens editable">
+      <steps>
+        <step>Use Browse to select a real .pdf.</step>
+        <step>Verify it opens as an editable Compose doc (not reference-only).</step>
+        <step>Run NDA analysis, create a response, and save; verify a docx version is created.</step>
+      </steps>
+      <expected>PDF parity with .docx via Browse; loud degradation warnings acceptable.</expected>
+    </test>
+    <test name="PDF via Assistant-upload opens editable">
+      <steps>
+        <step>Upload a .pdf through the Assistant door.</step>
+        <step>Verify editable open + analysis + response + save-as-docx-version.</step>
+      </steps>
+      <expected>Parity across both intake doors.</expected>
+    </test>
+    <test name="Un-intakeable content routes reference-only">
+      <steps>
+        <step>Provide content that cannot be intaken.</step>
+        <step>Verify it routes to reference-only, not editable.</step>
+      </steps>
+      <expected>Reference-only routing preserved for un-intakeable content.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">Unit + ui-tests for .pdf intake-door admission + reference-only routing</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a PDF via Browse or Assistant-upload in a DI-enabled env, when opened, then it becomes an editable Compose doc, runs analysis, creates a response, and saves as a docx version — parity with .docx.</criterion>
+    <criterion testable="true">Negative: un-intakeable browsed/uploaded content still routes to reference-only.</criterion>
+    <criterion testable="true">If the DI gate is OFF, the flow surfaces the NullObject typed "PDF intake unavailable" degradation (no crash).</criterion>
+    <criterion testable="true">.pdf admission is limited to the intake doors (Browse accept + NON_DOCX_EXTENSION/isEditableDocx); no parallel intake path added.</criterion>
+    <criterion testable="true">jest + ui-tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-06 (Success Criteria #5). Requires an env with Analysis:Enabled &amp;&amp; DocumentIntelligence:Enabled ON (task 001 finding).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

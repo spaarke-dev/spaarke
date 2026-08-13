@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Name / file-name modal on first create-on-save and Save As (FR-02)</title>
+    <phase>3 Name Modal (UC-3)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx client code + BFF name threading; frontend modal implementation with dark-mode requirements.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard modal wiring using the canonical FormModal/SprkModal (ADR-050) with an explicit reference; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx create-on-save path + BFF create-on-save name threading (shared Compose spine).</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, react, typescript, fluent-ui, bff-api</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    On the first save of a new document (create-on-save) AND on Save As, show a small FormModal/SprkModal (ADR-050) to capture
+    the document name + file name, and thread the entered name to the BFF create-on-save endpoint (DisplayName → ResolveFileName@1346).
+    This removes the silent 'Untitled document.docx' fallback.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the canonical SprkModal/FormModal shell (ADR-050) and the Compose create-on-save path. Follow ADRs strictly.</role>
+
+  <goal>
+    A FormModal collects document name + file name on first create-on-save and on Save As; the name is threaded through the BFF
+    create-on-save endpoint so the SPE record uses the entered name; no path lands 'Untitled document.docx'.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-02 (UC-3). Today create-on-save mints 'Untitled document.docx'@3018/3022. The name modal must use the canonical
+      modal shell (ADR-050 / MODAL-DESIGN-SYSTEM), not a parallel modal.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx mountBornInEditor@3002 + 'Untitled document.docx'@3018/3022 (the fallback being replaced)</file>
+      <file role="canonical-reference">FormModal / SprkModal in @spaarke/ui-components (ADR-050) — reuse, do not build a parallel modal</file>
+      <file role="canonical-reference">ComposeService.cs create-on-save name @1346 (DisplayName → ResolveFileName), ComposeEndpoints.cs create-on-save@137</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">The name modal MUST use FormModal/SprkModal from @spaarke/ui-components; MUST NOT add a parallel modal component (ADR-050 canonical modal shell).</constraint>
+    <constraint source="ADR-021">The modal fields/buttons MUST use Fluent v9 semantic tokens; verify dark mode adapts (ADR-021).</constraint>
+    <constraint source="project">Show the modal on BOTH first create-on-save AND Save As; thread the entered name to the BFF create-on-save (DisplayName → ResolveFileName@1346). No path may fall back to 'Untitled document.docx'.</constraint>
+    <constraint source="project">BFF change (name threading) — state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); work stays in Services/Compose/ + ComposeEndpoints.cs. Verify publish ≤60 MB (delta vs 001 baseline); no new HIGH CVE; /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>modal shell, compose create-on-save naming</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="FormModal usage" location="docs/standards/MODAL-DESIGN-SYSTEM.md">Use the FormModal preset (Cancel always left; light/explicit dismiss per the shell contract).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load ADR-050 + MODAL-DESIGN-SYSTEM + spec FR-02.</step>
+    <step order="1">Add a FormModal (document name + file name) triggered on first create-on-save and on Save As.</step>
+    <step order="2">Thread the entered name to the BFF create-on-save endpoint (DisplayName → ResolveFileName@1346); remove the 'Untitled document.docx' fallback.</step>
+    <step order="3">Add unit tests (client: modal opens on create-on-save + Save As; server: name threading maps to the SPE record name).</step>
+    <step order="4">Run publish-size + CVE checks (BFF touched); record delta vs 001 baseline in notes/.</step>
+    <step order="5">Run jest + xUnit + ui-tests; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: set 030 status to ✅.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Name modal on first save">
+      <steps>
+        <step>Create a new Compose doc and trigger the first Save.</step>
+        <step>Verify a FormModal prompts for document name + file name.</step>
+        <step>Enter a name and confirm; verify the SPE record uses the entered name (not 'Untitled document.docx').</step>
+      </steps>
+      <expected>Modal appears; entered name is used end-to-end.</expected>
+    </test>
+    <test name="Name modal on Save As">
+      <steps>
+        <step>On a saved doc, choose Save As.</step>
+        <step>Verify the name modal appears and the fork uses the entered name.</step>
+      </steps>
+      <expected>Save As prompts for a name; the forked doc uses it.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode.</step>
+        <step>Verify the modal fields/buttons adapt (Fluent v9 semantic tokens).</step>
+      </steps>
+      <expected>No white-on-white / black-on-black; tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+    <tool name="dotnet">Build/test + publish-size measure for the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="test">Client + server unit tests for name capture + threading</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a new document, when the user triggers the first Save, then a FormModal captures document name + file name and the SPE record uses that name.</criterion>
+    <criterion testable="true">Given a Save As, when it forks, then the modal captures a name and the forked doc uses it.</criterion>
+    <criterion testable="true">Negative: no code path lands 'Untitled document.docx'.</criterion>
+    <criterion testable="true">The modal is FormModal/SprkModal from @spaarke/ui-components (no parallel modal); dark mode adapts (ADR-021).</criterion>
+    <criterion testable="true">Publish size ≤60 MB (delta vs 001 baseline); no new HIGH CVE; jest + xUnit green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-02. Precedes Phase 4 (040): new docs are named-first before any explicit server save; the local draft still protects pre-name work.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

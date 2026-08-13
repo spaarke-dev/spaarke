@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Ctrl+Shift+Space focuses the Assistant chat input — focusInput() + PaneEventBus (FR-05)</title>
+    <phase>6 Hotkeys (UC-6)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts across editor + chat panes; extends a handle interface + adds a cross-pane event; hot-path coordination.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded extension of ISprkChatInputHandle + one PaneEventBus event with explicit anchors; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ConversationPane.tsx + SprkChatInput.tsx — active shared files with spaarkeai-assistant-enhancements-r3 (cross-worktree contention); requires /conflict-check.</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, react, typescript</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add Ctrl+Shift+Space to move focus from the editor into the Assistant chat input. Extend ISprkChatInputHandle@1513 +
+    SprkChatInput useImperativeHandle@257–263 (today only triggerSlashMode()) with a focusInput() API, and bridge editor→chat
+    across panes via PaneEventBus through ConversationPane (host→send bridge @745–747). Add a tooltip/shortcut hint. Run
+    /conflict-check on ConversationPane.tsx + SprkChatInput.tsx before the PR (shared with assistant-enhancements-r3).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React imperative handles, PaneEventBus cross-pane signalling (ADR-030), and the SprkChat component. Follow ADRs strictly.</role>
+
+  <goal>
+    From the editor, Ctrl+Shift+Space focuses the Assistant chat input across panes: SprkChatInput exposes focusInput(),
+    ConversationPane relays a PaneEventBus focus event to call it, and a shortcut hint is shown.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-05 (UC-6) + §11 New-Components table (focusInput + PaneEventBus event are extensions, not new components). The
+      editor and chat live in different panes, so the signal crosses via PaneEventBus. This file set overlaps active
+      spaarkeai-assistant-enhancements-r3 — coordinate.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</file>
+      <file role="modify">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file role="canonical-reference">SprkChatInput.tsx useImperativeHandle@257–263 (add focusInput next to triggerSlashMode) + types.ts ISprkChatInputHandle@1513</file>
+      <file role="canonical-reference">ConversationPane.tsx host→send bridge @745–747 (PaneEventBus relay point)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate + /conflict-check on ConversationPane/SprkChatInput.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-030">The editor→chat focus signal MUST use the existing PaneEventBus (ADR-030) via ConversationPane's host→send bridge @745–747 — add ONE event type; MUST NOT add a parallel cross-pane transport.</constraint>
+    <constraint source="project">Extend the existing ISprkChatInputHandle@1513 + useImperativeHandle@257–263 with focusInput() — do NOT add a parallel handle/interface (root §11).</constraint>
+    <constraint source="project">Run /conflict-check on ConversationPane.tsx + SprkChatInput.tsx before the PR (shared with spaarkeai-assistant-enhancements-r3); sequence to avoid clobber. MUST NOT delete docxBridge.ts.</constraint>
+    <constraint source="project">Ctrl+Shift+Space registration MUST guard IME/composition the same way as task 060 to avoid input hijack.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>imperative handle, PaneEventBus, cross-pane focus</topic>
+    <files>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="PaneEventBus host→send bridge" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx">Mirror the existing @745–747 bridge to relay the new focus event.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; run /conflict-check on ConversationPane/SprkChatInput; load ADR-030 + spec FR-05.</step>
+    <step order="1">Add focusInput() to ISprkChatInputHandle@1513 + SprkChatInput useImperativeHandle@257–263.</step>
+    <step order="2">Add one PaneEventBus event type + relay it through ConversationPane's host→send bridge @745–747 to call focusInput().</step>
+    <step order="3">Register Ctrl+Shift+Space in ComposeEditor (IME-guarded) to emit the focus event; add a tooltip/shortcut hint.</step>
+    <step order="4">Add unit tests: focusInput() focuses the input; the event round-trips editor→ConversationPane→chat.</step>
+    <step order="5">Run jest + ui-tests; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: set 061 status to ✅.</step>
+    <step order="7">Document the coordination outcome + any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /conflict-check shows spaarkeai-assistant-enhancements-r3 has an in-flight change to SprkChatInput useImperativeHandle or ConversationPane's bridge, STOP and coordinate/sequence (root §6) before editing those files to avoid a clobber.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SprkChat/types.ts:1513 ISprkChatInputHandle exposes only triggerSlashMode; SprkChatInput.tsx:257–263 has no programmatic focus API. PaneEventBus already exists (ConversationPane:745–747).</existing>
+    <extension>Extend the existing interface/handle (add focusInput) and add ONE event type to the existing PaneEventBus — not new components.</extension>
+    <cost-of-doing-nothing>Ctrl+Shift+Space (UC-6) cannot move focus into chat: no programmatic focus API exists and editor→chat focus cannot cross the pane boundary without a transport event.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Ctrl+Shift+Space focuses chat input">
+      <steps>
+        <step>Place focus in the editor.</step>
+        <step>Press Ctrl+Shift+Space.</step>
+        <step>Verify the Assistant chat input receives focus (across panes).</step>
+      </steps>
+      <expected>Focus moves from editor to chat input.</expected>
+    </test>
+    <test name="Shortcut hint present">
+      <steps>
+        <step>Hover the relevant affordance; verify a tooltip/shortcut hint is shown.</step>
+      </steps>
+      <expected>Discoverability hint present.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.UI.Components + Spaarke.Compose.Components + SpaarkeAi</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="test">Unit tests for focusInput() + the cross-pane focus event</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given focus in the editor, when Ctrl+Shift+Space is pressed, then the Assistant chat input receives focus across panes.</criterion>
+    <criterion testable="true">focusInput() is added to the existing ISprkChatInputHandle (no parallel handle); the signal uses the existing PaneEventBus (one new event type).</criterion>
+    <criterion testable="true">A tooltip/shortcut hint is shown.</criterion>
+    <criterion testable="true">Negative: IME composition is not hijacked by the hotkey.</criterion>
+    <criterion testable="true">/conflict-check was run on ConversationPane/SprkChatInput before the PR; jest green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-05, §11 table rows "focusInput()" + "PaneEventBus chat-focus event". Coordinate with spaarkeai-assistant-enhancements-r3 (R1 risk).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

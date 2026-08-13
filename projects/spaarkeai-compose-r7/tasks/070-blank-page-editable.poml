@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Blank page mounts editable (R6 D8 / FR-08)</title>
+    <phase>7 Accepted Defers + Hardening</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx mount/seed path; frontend behavior fix.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Narrow empty-seed path fix with explicit anchors (@2252→2276, @3018); low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx / ComposeEditor.tsx mount seed path (shared Compose spine).</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, react, typescript</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Fix the Compose "Blank page" so it mounts editable. Today Blank page (handleBlankRequested, empty '&lt;p&gt;&lt;/p&gt;' seed @3018)
+    mounts non-editable while "Open template" is editable via the same mountBornInEditor path — the empty initialHtml skips the
+    @2252 guard and falls through to isEditableDocx @2276 → reference-only. Make the empty-seed path editable.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Compose mount/editability path. Follow ADRs strictly.</role>
+
+  <goal>
+    Compose tab → Blank page mounts an editable document (parity with "Open template"), by fixing the empty-seed branch so an
+    empty initialHtml does not fall through to reference-only.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-08 (R6 D8). Empty-seed-specific: empty initialHtml skips the @2252 guard and lands isEditableDocx@2276 → reference-only.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx handleBlankRequested + empty '&lt;p&gt;&lt;/p&gt;' seed @3018, mountBornInEditor@3002</file>
+      <file role="canonical-reference">ComposeEditor.tsx empty-seed path @2252→2276 (@2252 guard skipped, isEditableDocx@2276 → reference-only)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Make the empty-seed Blank-page path (@2252→2276) editable via the same mountBornInEditor path "Open template" uses; MUST NOT add a parallel mount path (root §11).</constraint>
+    <constraint source="project">MUST NOT regress the isEditableDocx@2276 reference-only routing for genuinely non-editable content — only the empty-seed Blank-page case changes. MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose mount editability, blank page</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/r6-defer-register-consolidated.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load spec FR-08 + the empty-seed path.</step>
+    <step order="1">Trace handleBlankRequested → mountBornInEditor@3002 → empty-seed @2252→2276; confirm why empty initialHtml reference-onlys.</step>
+    <step order="2">Fix the empty-seed branch so Blank page mounts editable (parity with Open template).</step>
+    <step order="3">Add unit tests: Blank page → editable; non-editable content still reference-only (regression guard).</step>
+    <step order="4">Run jest + ui-tests; verify green.</step>
+    <step order="5">Update TASK-INDEX.md: set 070 status to ✅.</step>
+    <step order="6">Document any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Blank page mounts editable">
+      <steps>
+        <step>Open the Compose tab and choose Blank page.</step>
+        <step>Verify the document is editable (can type immediately), not reference-only.</step>
+      </steps>
+      <expected>Blank page is editable, matching Open template.</expected>
+    </test>
+    <test name="Reference-only preserved for non-editable">
+      <steps>
+        <step>Mount genuinely non-editable content; verify it stays reference-only.</step>
+      </steps>
+      <expected>No regression to reference-only routing.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="test">Unit tests for Blank-page editability + reference-only regression guard</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Compose tab, when the user chooses Blank page, then an editable document mounts.</criterion>
+    <criterion testable="true">Negative: genuinely non-editable content still routes to reference-only (no regression).</criterion>
+    <criterion testable="true">No parallel mount path was added; jest green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-08.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

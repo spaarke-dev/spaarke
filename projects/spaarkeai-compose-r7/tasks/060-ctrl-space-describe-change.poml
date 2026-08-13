@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Ctrl+Space opens "Describe a change" at the caret, IME-guarded (FR-04)</title>
+    <phase>6 Hotkeys (UC-5)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx keydown handling with an IME edge case; frontend behavior with a known failure mode.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded hotkey wiring reusing promptForInstruction + forceVisible with explicit anchors; the IME risk is handled by an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeEditor.tsx handleKeyDown + ComposeAiToolbar forceVisible path (shared Compose spine).</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, react, typescript</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Register a Compose hotkey so Ctrl+Space opens the "Describe a change" instruction dialog WITHOUT a selection (using the current
+    caret/paragraph). Reuse promptForInstruction@2568 and the collapsed-cursor forceVisible@877 path. Guard event.isComposing/IME
+    (Ctrl+Space is an IME toggle on some stacks); if testing shows conflicts, fall back to Ctrl+/.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in TipTap/ProseMirror keydown handling, IME composition, and the Compose AI instruction dialog. Follow ADRs strictly.</role>
+
+  <goal>
+    With a collapsed cursor (no selection), Ctrl+Space opens "Describe a change" (via promptForInstruction + the forceVisible
+    collapsed-cursor path); IME composition is not hijacked; Ctrl+/ is wired as the confirmed fallback if conflicts surface.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-04 (UC-5). Today "Describe a change" requires a selection; the owner wants a caret-only hotkey. IME caveat is
+      documented (CLAUDE.md Implementation Notes).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</file>
+      <file role="canonical-reference">ComposeEditor.tsx handleKeyDown@2218–2229 (register the hotkey) + promptForInstruction@2568 + dialog ~3491–3556</file>
+      <file role="canonical-reference">ComposeAiToolbar.tsx collapsed guard @748 + forceVisible@877 (collapsed-cursor path to reuse)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Ctrl+Space in ComposeEditor.handleKeyDown@2218–2229 MUST open "Describe a change" with a collapsed cursor (no selection) via the existing promptForInstruction + forceVisible path — reuse, do NOT build a parallel instruction dialog (root §11).</constraint>
+    <constraint source="project">The handler MUST guard event.isComposing / IME composition so Ctrl+Space does not hijack an IME toggle; Ctrl+/ is the confirmed fallback binding if conflicts surface in testing.</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose hotkeys, IME, instruction dialog</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load spec FR-04 + promptForInstruction/forceVisible references.</step>
+    <step order="1">Register Ctrl+Space in handleKeyDown@2218–2229 with an event.isComposing/IME guard.</step>
+    <step order="2">Open "Describe a change" with a collapsed cursor via promptForInstruction@2568 + forceVisible@877.</step>
+    <step order="3">If testing shows an IME conflict, switch the binding to Ctrl+/ (fallback) — see escalation trigger.</step>
+    <step order="4">Add unit tests: collapsed-cursor Ctrl+Space opens the dialog; isComposing suppresses the handler.</step>
+    <step order="5">Run jest + ui-tests; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: set 060 status to ✅.</step>
+    <step order="7">Document the binding decision (Ctrl+Space vs Ctrl+/) in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If IME testing shows Ctrl+Space is hijacked/unsuppressable on the target stacks, fall back to Ctrl+/ (the confirmed fallback) and record the decision; if NEITHER binding works cleanly, STOP and escalate (root §6) rather than shipping a hotkey that breaks IME input.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Ctrl+Space opens Describe a change (no selection)">
+      <steps>
+        <step>Place a collapsed cursor in a paragraph (no selection).</step>
+        <step>Press Ctrl+Space.</step>
+        <step>Verify "Describe a change" opens for the current caret/paragraph.</step>
+      </steps>
+      <expected>Dialog opens with a collapsed cursor.</expected>
+    </test>
+    <test name="IME not hijacked">
+      <steps>
+        <step>Begin an IME composition; verify event.isComposing suppresses the Ctrl+Space handler.</step>
+      </steps>
+      <expected>IME composition proceeds; the hotkey does not fire mid-composition.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</output>
+    <output type="test">Unit tests for collapsed-cursor open + IME guard</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a collapsed cursor (no selection), when Ctrl+Space is pressed, then "Describe a change" opens for the current caret/paragraph.</criterion>
+    <criterion testable="true">Negative: during IME composition (event.isComposing), the handler does not fire.</criterion>
+    <criterion testable="true">If Ctrl+Space conflicts on the target stacks, Ctrl+/ is wired as the fallback and the decision is recorded.</criterion>
+    <criterion testable="true">The existing promptForInstruction + forceVisible path is reused (no parallel dialog).</criterion>
+    <criterion testable="true">jest suite green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-04. IME caveat per CLAUDE.md Implementation Notes.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

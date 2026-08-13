@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Test-hygiene batch — FakeTimeProvider flake, pre-existing jest suites, nda fixture paraIds (FR-13)</title>
+    <phase>7 Accepted Defers + Hardening</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING task (modifies tests/** + fixtures) — CLAUDE.md §8 override row forces FULL rigor + Step 9.5 gates unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified test repairs with named root causes; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only test files + the nda fixture — file-independent from every other R7 task (source code). Watch PR #690 (ci-lfs, "fixes 5 Compose seam tests") for overlap.</parallel-reason>
+    <deps>001</deps>
+    <tags>testing, unit-test, integration-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Repair the Compose test suites: fix the FakeTimeProvider flake in ComposeServiceCreateOnSaveTests (it pollutes every Compose
+    suite run); repair the pre-existing failing jest suites (4× ComposeWorkspace "Element type is invalid" + stepOperationInterceptor,
+    proven pre-existing via stash bisect — R7 is the next owning project); and regenerate the spec-invalid paraIds (≥0x80000000)
+    in the nda-interrupted-clauses.docx fixture. Watch PR #690 which claims to fix 5 Compose seam tests — coordinate to avoid double-fixing.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in xUnit FakeTimeProvider/TimeProvider, jest React test failures, and Compose test fixtures. Follow ADR-038 strictly.</role>
+
+  <goal>
+    Compose jest + xUnit suites run green and non-flaky locally + CI: the FakeTimeProvider flake is fixed, the pre-existing jest
+    suites pass, and the nda fixture paraIds are spec-valid.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-13. Three independent repairs. The pre-existing jest failures were proven pre-existing via stash bisect; R7 is the
+      next owning project. PR #690 (ci-lfs) claims to fix 5 Compose seam tests — coordinate.
+    </background>
+    <relevant-files>
+      <file role="modify">ComposeServiceCreateOnSaveTests (xUnit — FakeTimeProvider flake)</file>
+      <file role="modify">ComposeWorkspace jest suites (4× "Element type is invalid") + stepOperationInterceptor test</file>
+      <file role="modify">nda-interrupted-clauses.docx fixture (regenerate paraIds ≥0x80000000 to spec-valid)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate — includes PR #690 status.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Fixes MUST follow ADR-038: prefer TimeProvider over Stopwatch for the FakeTimeProvider flake; keep tests at their KEEP-path category; do NOT add banned test classes (Mock&lt;HttpMessageHandler&gt;, DI-registration, ctor null-check).</constraint>
+    <constraint source="project">Regenerate the nda fixture paraIds to spec-valid (&lt;0x80000000); do not hand-edit invalid values that will re-drift.</constraint>
+    <constraint source="project">Coordinate with PR #690 (claims to fix 5 Compose seam tests) — do not double-fix the same seam tests; note the outcome. MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>test hygiene, faketimeprovider, jest, fixtures</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL (TEST-MODIFYING override); check PR #690 status; load ADR-038.</step>
+    <step order="1">Fix the FakeTimeProvider flake in ComposeServiceCreateOnSaveTests (TimeProvider per ADR-038).</step>
+    <step order="2">Repair the 4× ComposeWorkspace "Element type is invalid" jest suites + stepOperationInterceptor.</step>
+    <step order="3">Regenerate the nda-interrupted-clauses.docx fixture paraIds to spec-valid.</step>
+    <step order="4">Run the full Compose jest + xUnit suites repeatedly; confirm green + non-flaky.</step>
+    <step order="5">Update TASK-INDEX.md: set 075 status to ✅.</step>
+    <step order="6">Document the PR #690 coordination outcome in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If PR #690 has already merged fixes for the same seam tests, do NOT re-fix them — record the overlap; if a repair reveals a genuine product bug (not a test bug), STOP and escalate (root §6) rather than mutating the test to pass.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Run jest for Compose suites</tool>
+    <tool name="dotnet">Run xUnit for Compose suites</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">ComposeServiceCreateOnSaveTests (FakeTimeProvider fix)</output>
+    <output type="test">ComposeWorkspace jest suites + stepOperationInterceptor</output>
+    <output type="test">nda-interrupted-clauses.docx fixture (regenerated paraIds)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The FakeTimeProvider flake is fixed; running the Compose suite repeatedly does not intermittently fail.</criterion>
+    <criterion testable="true">The 4× ComposeWorkspace "Element type is invalid" jest suites + stepOperationInterceptor pass.</criterion>
+    <criterion testable="true">The nda fixture paraIds are spec-valid (&lt;0x80000000).</criterion>
+    <criterion testable="true">Compose jest + xUnit suites are green + non-flaky locally and in CI.</criterion>
+    <criterion testable="true">No banned test class was added (ADR-038); PR #690 overlap recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-13. R6 risk R6: overlap with PR #690.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

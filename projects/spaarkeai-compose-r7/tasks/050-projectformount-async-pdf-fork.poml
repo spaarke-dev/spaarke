@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Async ProjectForMount with PDF fork — server parity with LoadAsync (FR-06)</title>
+    <phase>5 PDF Import Parity (UC-7)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs; a documented contract change (sync→async) with an Azure DI call on the mount path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>BFF contract change — ProjectForMount was deliberately synchronous/no-I/O per ADR-007/013; making it async is architectural and touches every caller. High blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeService.cs ProjectForMount + all its callers (shared Compose spine / BFF; cross-worktree contention).</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api, backend, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Give ProjectForMount@305–323 the same IsPdfSource → ProjectPdfToDocxAsync fork that LoadAsync already has (@502–508). This
+    makes ProjectForMount async (an Azure Document-Intelligence DI call). Copy the LoadAsync PDF fork; keep the docx path
+    synchronous-fast. Update all callers to await. Document the sync→async contract change in code + PR (NFR-04).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Compose projection path, async refactoring, and Azure Document Intelligence. Follow ADRs strictly.</role>
+
+  <goal>
+    ProjectForMount is async and forks a PDF source to ProjectPdfToDocxAsync (mirroring LoadAsync@502–508), while the docx path
+    stays synchronous-fast; all callers await; the contract change is documented in code + PR.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-06 (UC-7) server half + NFR-04. LoadAsync already has the PDF fork; ProjectForMount does not, so a PDF cannot
+      become an editable Compose doc via the mount path. Reuse R6's ComposePdfModelProjector / ProjectPdfToDocxAsync — do not re-build.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="canonical-reference">ComposeService.cs LoadAsync PDF branch @502–508 (IsPdfSource → ProjectPdfToDocxAsync) — copy this fork into ProjectForMount</file>
+      <file role="canonical-reference">ComposeService.cs ProjectForMount@305–323 (the sync method to make async) + ComposeEndpoints.cs project@76</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate + publish-size baseline + DI-gate env confirmation.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">ProjectForMount was deliberately synchronous / no-I/O per ADR-007/ADR-013 (NFR-04 tension). This task takes ADR Tensions path A: making it async for the PDF fork is a documented, project-scoped exception — the docx path MUST stay synchronous-fast (no added I/O).</constraint>
+    <constraint source="ADR-013">Reuse R6's ProjectPdfToDocxAsync / ComposePdfModelProjector; MUST NOT re-build the PDF projector or add a new AI capability/playbook.</constraint>
+    <constraint source="ADR-032">The PDF fork rides the existing compound-gated intake (NullComposePdfIntakeSource fallback); this task does not change the gate, only consumes it.</constraint>
+    <constraint source="project">BFF change — state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); work stays in Services/Compose/. Verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~46.94 MB) — flag if ≥+5 MB; confirm no new HIGH CVE; run /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">Add a seam test (tests/integration/seam/**) for async ProjectForMount PDF projection (ADR-038). MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose projection, async contract, pdf fork</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier opus; load ADR-007/013 + spec FR-06 + LoadAsync fork reference.</step>
+    <step order="1">Copy the LoadAsync PDF fork (@502–508) into ProjectForMount@305–323; make the method async; keep the docx path synchronous-fast.</step>
+    <step order="2">Update all callers (ComposeEndpoints.cs project@76 and any others) to await.</step>
+    <step order="3">Add a seam test proving PDF projection via ProjectForMount; verify docx path unchanged.</step>
+    <step order="4">Document the sync→async contract change in code comments + PR (NFR-04, ADR Tensions path A).</step>
+    <step order="5">Run publish-size + CVE checks; record delta vs 001 baseline in notes/.</step>
+    <step order="6">Run xUnit + seam suites; verify green.</step>
+    <step order="7">Update TASK-INDEX.md: set 050 status to ✅.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the ProjectPdfToDocxAsync contract or the DI gate differs from the LoadAsync fork (e.g., a different projector signature), STOP and escalate (root §6 / §6.5) rather than adapting the async contract on the fly — the sync→async change is already a documented exception and further deviation needs sign-off.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test + publish-size measure for the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="test">tests/integration/seam/** async ProjectForMount PDF projection</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a PDF source, when ProjectForMount runs, then it forks to ProjectPdfToDocxAsync (mirroring LoadAsync@502–508) and returns an editable projection.</criterion>
+    <criterion testable="true">The docx path remains synchronous-fast (no added I/O); all callers await the now-async method.</criterion>
+    <criterion testable="true">The sync→async contract change is documented in code + PR (NFR-04).</criterion>
+    <criterion testable="true">Compressed publish size ≤60 MB with delta reported vs the 001 baseline; no new HIGH CVE.</criterion>
+    <criterion testable="true">The seam test for async ProjectForMount PDF projection passes; xUnit green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-06 server half, NFR-04, ADR Tensions row 2 (path A). Client gates + env verify + parity acceptance is task 051.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

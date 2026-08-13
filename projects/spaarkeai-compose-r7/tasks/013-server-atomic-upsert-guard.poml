@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Atomic server upsert on sprk_graphitemid_uk in PromoteIfEphemeralAsync (FR-07d)</title>
+    <phase>1 Save-Identity Fix (UC-8)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs data-write path; data-integrity fix closing a read-then-create race.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Data-integrity / concurrency correctness — replacing read-then-create with an atomic upsert on an alternate key must be race-safe across concurrent first-saves; blast radius is duplicate-row prevention for every door.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeService.cs promote/create path (shared Compose spine / BFF; cross-worktree contention).</parallel-reason>
+    <deps>010</deps>
+    <tags>bff-api, api, dataverse, backend</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make PromoteIfEphemeralAsync idempotent: today it does read-then-CreateAsync (no atomic upsert) on sprk_graphitemid_uk, so
+    two concurrent first-saves — or the same door retried — can each create a duplicate sprk_document row. Replace the
+    read-then-create with an atomic upsert keyed on the sprk_graphitemid_uk alternate key so no door and no concurrent first-save
+    creates a duplicate row.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse alternate-key upserts, concurrency, and the Compose promote path. Follow ADRs strictly.</role>
+
+  <goal>
+    PromoteIfEphemeralAsync uses an atomic upsert on sprk_graphitemid_uk (not read-then-CreateAsync), so repeated and concurrent
+    first-saves for the same drive-item produce exactly one sprk_document row.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-07(d) — the fourth D1 duplicate-record vector, and the only server-side one. The read-then-CreateAsync@2717
+      pattern in PromoteIfEphemeralAsync@2505 has a TOCTOU window: two callers both read "absent" and both create.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="canonical-reference">ComposeService.cs PromoteIfEphemeralAsync@2505 (read-then-CreateAsync@2717 — the race to close)</file>
+      <file role="canonical-reference">ComposeService.cs transient-key dedup @3381–3413 (existing dedup semantics to mirror)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Client stable id complements the server upsert — client dedup identity + server atomic upsert together close all four vectors.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">PromoteIfEphemeralAsync MUST be made idempotent via an atomic upsert on the sprk_graphitemid_uk alternate key — replace the read-then-CreateAsync@2717 sequence entirely; do not merely add a re-read.</constraint>
+    <constraint source="ADR-044">Canonicalize the sprk_graphitemid value used as the alternate-key match per Dataverse GUID canonicalization (ADR-044) so the upsert matches reliably.</constraint>
+    <constraint source="project">BFF change — state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); all work stays in Services/Compose/. Verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~46.94 MB); confirm no new HIGH CVE; run /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">Add/adjust a seam test under tests/integration/seam/** proving dedup across doors (ADR-038 DoD for dispatch-spine changes). MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse upsert, compose promote, concurrency</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier opus; load spec FR-07d + ADR-044 + promote path.</step>
+    <step order="1">Trace PromoteIfEphemeralAsync@2505 → CreateAsync@2717; identify the TOCTOU window on sprk_graphitemid_uk.</step>
+    <step order="2">Replace read-then-create with an atomic upsert keyed on sprk_graphitemid_uk (canonicalize the GUID per ADR-044).</step>
+    <step order="3">Add a seam test (tests/integration/seam/**) proving concurrent/repeated first-saves across doors yield one row.</step>
+    <step order="4">Run publish-size + CVE checks; record delta vs 001 baseline in notes/.</step>
+    <step order="5">Run xUnit + the seam suite; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: set 013 status to ✅.</step>
+    <step order="7">Document Placement Justification + any deviation in projects/spaarkeai-compose-r7/notes/ and the PR.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Dataverse client cannot perform a true atomic upsert on the sprk_graphitemid_uk alternate key (e.g., key not queryable as an upsert target), STOP and escalate (root §6.5) rather than shipping a narrowed-window read-then-create that still races.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>PromoteIfEphemeralAsync@2505 with read-then-CreateAsync@2717 in ComposeService.cs — an existing promote path, not a new service.</existing>
+    <extension>Modify the existing promote path (swap read-then-create for an atomic upsert). No new service/endpoint is introduced.</extension>
+    <cost-of-doing-nothing>Concurrent or retried first-saves each create a duplicate sprk_document row (the live D1 bug) — the server-side vector no client change can close.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build/test + publish-size measure for the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="test">tests/integration/seam/** dedup-across-doors seam test</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given two concurrent first-saves for the same drive-item, when both hit PromoteIfEphemeralAsync, then exactly one sprk_document row exists (atomic upsert on sprk_graphitemid_uk).</criterion>
+    <criterion testable="true">Given a retried first-save from the same door, when it re-enters promote, then no second row is created.</criterion>
+    <criterion testable="true">The sprk_graphitemid value is canonicalized per ADR-044 for the alternate-key match.</criterion>
+    <criterion testable="true">Compressed publish size ≤60 MB with delta reported vs the 001 baseline; no new HIGH CVE.</criterion>
+    <criterion testable="true">The seam test under tests/integration/seam/** passes; xUnit suite green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-07(d), §11 table row "Atomic upsert on sprk_graphitemid_uk". Completes the four-vector D1 fix (client vectors: 010/011/012; server vector: this task).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

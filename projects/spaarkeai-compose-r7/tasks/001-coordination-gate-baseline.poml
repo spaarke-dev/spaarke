@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Coordination gate + publish-size baseline + env verification</title>
+    <phase>0 Coordination Gate + Baseline</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>No source code modified — runs /conflict-check, records a publish-size baseline, and verifies the PDF DI env gate; produces a coordination note only.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical verification + note authoring; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Gate task — must complete before any implementation task starts; establishes the shared baseline the whole project cites.</parallel-reason>
+    <deps>none</deps>
+    <tags>devops, ci-cd, bff-api, deploy</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Open the R7 coordination gate: run /conflict-check against the hot-path files, record the current BFF compressed
+    publish-size baseline, and confirm the PDF Document-Intelligence compound DI gate state in the target env. Write
+    the findings to a coordination note. Do NOT modify any source code in this task.
+  </prompt>
+
+  <role>SPAARKE platform developer. Familiar with the BFF publish pipeline, /conflict-check, and Azure Document Intelligence configuration. Follow ADRs strictly.</role>
+
+  <goal>
+    A coordination note exists at projects/spaarkeai-compose-r7/notes/coordination-baseline.md recording: (1) /conflict-check
+    result for the R7 hot-path files, (2) measured compressed BFF publish size (absolute), (3) confirmed on/off state of the
+    PDF intake compound DI gate in the target env, (4) status of watched PRs (#690 ci-lfs, #266 OpenXml).
+  </goal>
+
+  <context>
+    <background>
+      Phase 0 of plan.md. R7 touches shared spine files that overlap active sibling worktrees (spaarkeai-assistant-enhancements-r3
+      on ConversationPane.tsx/SprkChatInput.tsx; spaarke-ai-architecture-redesign-r2 sole-owner of Services/Ai/). Every BFF-touching
+      task must report publish size vs the ~46.94 MB R6 baseline (NFR-01), so we capture the true current baseline once, here.
+      FR-06 requires the compound gate Analysis:Enabled &amp;&amp; DocumentIntelligence:Enabled to be ON in the target env.
+    </background>
+    <relevant-files>
+      <file role="doc-output">projects/spaarkeai-compose-r7/notes/coordination-baseline.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisServicesModule.cs</file>
+      <file role="canonical-reference">projects/INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task MUST NOT modify any .cs/.ts/.tsx source; it is read-only + note authoring.</constraint>
+    <constraint source="project">Publish-size measurement MUST use the repo-standard command: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/, then measure compressed output; state the PDB convention (incl. or excl. PDBs) when reporting, per root §10.</constraint>
+    <constraint source="project">The env DI gate is at AnalysisServicesModule.cs:154 (compound Analysis:Enabled &amp;&amp; DocumentIntelligence:Enabled). Record whether the target env has both ON; if OFF, note that PDF intake will degrade to NullComposePdfIntakeSource typed "PDF intake unavailable" (FR-06 acceptance would then fail in that env).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>coordination, publish-size, env verification</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/INDEX.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor MINIMAL; load spec.md + CLAUDE.md + bff-extensions.md.</step>
+    <step order="1">Run /conflict-check focused on ConversationPane.tsx, SprkChatInput.tsx, Services/Ai/**, Services/Compose/**. Record the result.</step>
+    <step order="2">Run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; measure the compressed size; record absolute MB + the PDB convention.</step>
+    <step order="3">Inspect AnalysisServicesModule.cs:154 and the target-env config to confirm the compound PDF DI gate state; record ON/OFF.</step>
+    <step order="4">Check the status of watched PRs #690 (ci-lfs) and #266 (OpenXml bump); note any relevance to FR-13 / dependency bumps.</step>
+    <step order="5">Write projects/spaarkeai-compose-r7/notes/coordination-baseline.md with all four findings.</step>
+    <step order="6">Update TASK-INDEX.md: set 001 status to ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /conflict-check reports an active conflicting PR on ConversationPane.tsx / SprkChatInput.tsx / Services/Ai files, STOP and escalate (root CLAUDE.md §6) with the conflicting PR before any Phase 1/6/7 task that touches those files proceeds.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/publish the BFF for size measurement</tool>
+    <tool name="terminal">Run /conflict-check, gh PR status</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-compose-r7/notes/coordination-baseline.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The coordination note records a /conflict-check result for the four hot-path file groups.</criterion>
+    <criterion testable="true">The note records the measured compressed BFF publish size in MB and states the PDB convention.</criterion>
+    <criterion testable="true">The note records the on/off state of the compound PDF DI gate in the target env, with the NullObject-degradation consequence if OFF.</criterion>
+    <criterion testable="true">The note records the status of PRs #690 and #266.</criterion>
+    <criterion testable="true">No source file (.cs/.ts/.tsx) was modified by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md Phase 0 / plan.md §Phase 0. This baseline is cited by every downstream BFF task (010/013/050/073/074) for NFR-01 delta reporting.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

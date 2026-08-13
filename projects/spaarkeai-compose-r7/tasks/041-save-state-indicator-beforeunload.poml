@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Toolbar save-state indicator + beforeunload/modal-close guard + invariant/test update (FR-03)</title>
+    <phase>4 Draft-Safe Autosave (UC-4)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx UI + updates a load-bearing invariant comment and an existing test to the new intended behavior.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New small UI element + a documented invariant/test flip; fully specified, low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeFormatToolbar.tsx (also 020/072) + ComposeWorkspace.tsx invariant + the unmountFlush test (shared Compose spine).</parallel-reason>
+    <deps>040</deps>
+    <tags>frontend, react, typescript, fluent-ui, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add a toolbar save-state indicator (Saving… / Saved / Unsaved + Auto Save On/Off — absorbs R6 D6), a beforeunload/modal-close
+    guard that warns on unsaved work, and update the now-stale "no autosave" invariant comment (@34, @2789–2791) plus the
+    unmountFlush test (which asserts "no POST without explicit save") to reflect the NEW intended behavior — a deliberate change,
+    not a regression.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent v9 status UI, browser beforeunload semantics, and updating load-bearing invariants/tests. Follow ADRs strictly.</role>
+
+  <goal>
+    The Compose toolbar shows a save-state indicator reflecting Saving/Saved/Unsaved + Auto Save On/Off; beforeunload and
+    modal-close on unsaved work warn the user; the "no autosave" invariant comment and the unmountFlush test are updated to the
+    new client-only-draft behavior.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-03 (UC-4) + ADR Tensions path A (the "no autosave" invariant is being deliberately reversed). D6 (no saved
+      indicator) is folded into this task. Depends on task 040's draft store + dirty state.
+    </background>
+    <relevant-files>
+      <file role="new">Save-state indicator element in ComposeFormatToolbar.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx "no autosave" invariant @34 + @2789–2791 (update the comment) and window Ctrl+S @2029–2034</file>
+      <file role="modify">The unmountFlush test asserting "no POST without explicit save" — update to the new intended behavior</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Draft store + dirty state — the indicator + guard reflect its state.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">The indicator element in ComposeFormatToolbar MUST use Fluent v9 semantic tokens; verify dark mode (ADR-021).</constraint>
+    <constraint source="project">The beforeunload/modal-close guard MUST warn ONLY when there is genuinely unsaved work; it MUST NOT block on a clean/saved doc.</constraint>
+    <constraint source="project">Update the "no autosave" invariant comment (@34, @2789–2791) and the unmountFlush test to the new client-only-draft behavior, documented as a deliberate reversal (ADR Tensions path A) — NOT a regression. The invariant flip MUST still hold that no POST/SPE-version occurs without explicit Save (only the local-draft behavior changes).</constraint>
+    <constraint source="project">Reuse task-040's draft/dirty state; MUST NOT add a parallel indicator or a second autosave loop. MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>save-state UI, beforeunload guard, invariant update</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load spec FR-03 + task-040 draft state.</step>
+    <step order="1">Add the save-state indicator (Saving/Saved/Unsaved + Auto Save On/Off) to ComposeFormatToolbar.tsx, driven by task-040 state.</step>
+    <step order="2">Add a beforeunload + modal-close guard that warns only on unsaved work.</step>
+    <step order="3">Update the "no autosave" invariant comment (@34, @2789–2791) to the new intended behavior (client-only draft; no POST without explicit Save).</step>
+    <step order="4">Update the unmountFlush test to assert the new behavior (local draft written; still no POST/SPE version without explicit Save).</step>
+    <step order="5">Add unit tests for the indicator states + the guard fires/does-not-fire correctly.</step>
+    <step order="6">Run jest + ui-tests; verify green.</step>
+    <step order="7">Update TASK-INDEX.md: set 041 status to ✅.</step>
+    <step order="8">Document the invariant reversal in projects/spaarkeai-compose-r7/notes/ + PR (cite ADR Tensions path A).</step>
+  </steps>
+
+  <justification>
+    <existing>No save-state indicator exists (R6 D6: "no saved indicator").</existing>
+    <extension>New small UI element inside the existing ComposeFormatToolbar; it consumes task-040's dirty/draft state rather than owning new state.</extension>
+    <cost-of-doing-nothing>The user has no feedback whether work is saved — this blocks UC-4 UAT and undermines the never-lose-work guarantee.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Save-state indicator reflects state">
+      <steps>
+        <step>Edit a doc; verify the indicator shows Unsaved then Saving… then Saved after an explicit Save.</step>
+        <step>Toggle Auto Save; verify the indicator shows Auto Save On/Off.</step>
+      </steps>
+      <expected>The indicator tracks Saving/Saved/Unsaved + Auto Save state.</expected>
+    </test>
+    <test name="Beforeunload warns on unsaved">
+      <steps>
+        <step>Make a dirty edit; attempt to close/navigate away.</step>
+        <step>Verify a warning appears.</step>
+        <step>Save, then close; verify NO warning on a clean doc.</step>
+      </steps>
+      <expected>Guard warns only on unsaved work.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode; verify the indicator colors adapt (Fluent v9 tokens).</step>
+      </steps>
+      <expected>No hard-coded colors; tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">Updated unmountFlush test + new indicator/guard tests</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The toolbar shows Saving…/Saved/Unsaved + Auto Save On/Off, reflecting task-040 state.</criterion>
+    <criterion testable="true">Given unsaved work, when the user closes/navigates/closes-the-modal, then a warning appears; on a clean doc, no warning fires.</criterion>
+    <criterion testable="true">The "no autosave" invariant comment (@34, @2789–2791) is updated to the new intended behavior; the invariant still holds no POST/SPE version without explicit Save.</criterion>
+    <criterion testable="true">The unmountFlush test asserts the new behavior (local draft written; no POST without explicit Save) and passes.</criterion>
+    <criterion testable="true">Dark mode adapts (ADR-021); jest suite green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-03 (absorbs D6). ADR Tensions path A: the invariant reversal is deliberate — document it in the PR.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

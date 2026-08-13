@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Always carry a dedup identity on mount — close the id-less/key-less mount vector (FR-07c)</title>
+    <phase>1 Save-Identity Fix (UC-8)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx client mount lifecycle; brownfield root-cause of identity-reset across multiple mint sites.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded to the ComposeWorkspace mount doors with an explicit reference impl (010's identity accessor); brownfield but well-specified.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx mount lifecycle (shared Compose spine); depends on and edits the same identity plumbing as 010.</parallel-reason>
+    <deps>010</deps>
+    <tags>frontend, react, typescript, refactoring</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close the id-less mount dedup vector: the assistant-insert door mounts with `{ speDriveItemId: '' }`@199 and skips dedup
+    entirely. Root-cause the transient/draft mount doors that drop or reset identity (mint sites @2962/3011/3289/3347/3420/1113)
+    and make EVERY mount carry the stable logical id from task 010, so the client always presents a dedup identity to the save path.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Compose workspace mount state machine and its transient/draft/assistant-insert doors. Follow ADRs strictly.</role>
+
+  <goal>
+    No mount path enters the save/dedup path without a dedup identity: the id-less assistant-insert mount (@199) and every
+    transient/draft mint site resolves to the task-010 logical id (`sprkDocumentId ?? speDriveItemId ?? persistedLogicalId`),
+    so repeated/concurrent saves from any door coalesce onto one identity.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-07(c). The id-less/key-less assistant-insert `{ speDriveItemId: '' }`@199 currently skips dedup, and transient
+      mounts reset speDriveItemId to ''. This is one of the four D1 duplicate-record vectors. Same mount lifecycle root cause as FR-09 (071).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx id-less fallback @199 ({ speDriveItemId: '' } assistant-insert)</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx mint sites @2962/3011/3289/3347/3420/1113 + mintTransientKey@240</file>
+      <file role="canonical-reference">Task 010 identity accessor `sprkDocumentId ?? speDriveItemId ?? persistedLogicalId` (reuse verbatim)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Provides the non-rotating logical id + identity accessor this task attaches to every mount.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every mount door in ComposeWorkspace.tsx (transient, draft, assistant-insert @199) MUST resolve and carry the task-010 logical id before entering the save/dedup path — none may pass `{ speDriveItemId: '' }` with no dedup identity.</constraint>
+    <constraint source="project">Reuse the task-010 identity accessor verbatim; do NOT introduce a second identity derivation.</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts. MUST NOT add a parallel dedup mechanism (root §11) — this is a modification of the existing mount plumbing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose mount identity, client dedup</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, effort xhigh; load spec FR-07 + task-010 output.</step>
+    <step order="1">Enumerate every mount door and confirm which ones drop/reset identity (esp. @199 assistant-insert and transient mint sites).</step>
+    <step order="2">Attach the task-010 identity accessor to each door so the mount always carries a dedup id.</step>
+    <step order="3">Verify the id-less assistant-insert path @199 now presents a dedup identity to the save path.</step>
+    <step order="4">Add unit tests: id-less mount + repeated save resolves to one identity; each transient mint site preserves identity.</step>
+    <step order="5">Run the Compose widget jest suite; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: set 011 status to ✅.</step>
+    <step order="7">Record any newly-found mount vector in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a mount door cannot resolve a task-010 logical id without server round-trip (breaking the client-only decision), STOP and escalate (root §6.5) rather than adding a server call on the mount path.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Id-less assistant-insert dedups">
+      <steps>
+        <step>Trigger the assistant-insert door that historically mounted with speDriveItemId: ''.</step>
+        <step>Save, re-mount, save again.</step>
+        <step>Verify a single dedup identity is carried and no second sprk_document is created client-side.</step>
+      </steps>
+      <expected>The id-less door now carries the task-010 logical id; repeated saves coalesce onto one identity.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test the Spaarke.Compose.Components package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">Compose widget unit tests for id-less mount dedup</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the id-less assistant-insert mount (@199), when it enters the save path, then it carries the task-010 logical id (never an empty dedup identity).</criterion>
+    <criterion testable="true">Every transient/draft mint site (@2962/3011/3289/3347/3420/1113) preserves the logical id across mount.</criterion>
+    <criterion testable="true">Negative: repeated saves from the id-less door + a re-mount produce exactly one client-side dedup identity, not two.</criterion>
+    <criterion testable="true">No second identity derivation was introduced; the task-010 accessor is reused.</criterion>
+    <criterion testable="true">Compose widget jest suite passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-07(c). Shares the mount-lifecycle root cause with FR-09 (071 Restore-from-Source). This is client-side dedup; the server-side atomic upsert is 013.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

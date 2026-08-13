@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Restore from Source no longer blanks the page (R6 D4 / FR-09)</title>
+    <phase>7 Accepted Defers + Hardening</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx mount lifecycle; brownfield root-cause not solved in R6.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield mount-state root-cause; shares lifecycle with FR-07(c) but was not root-caused in R6 — needs sustained depth.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx transient/upload mount lifecycle (shared Compose spine); same lifecycle as 011.</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend, react, typescript, refactoring</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Root-cause and fix the mount-state reset on the transient/upload path so "Restore from Source" restores content instead of
+    blanking the page and asking for re-upload. This is the same lifecycle as the FR-07(c) mount-identity vector (task 011).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Compose transient/upload mount state machine. Follow ADRs strictly.</role>
+
+  <goal>
+    "Restore from Source" restores the document content without blanking the page or requiring re-upload.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-09 (R6 D4). Not root-caused in R6. Same mount-state reset lifecycle as FR-07 vector b/c (task 011 output informs this).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">ComposeWorkspace.types.ts mountTransient@559 / mountDraftHtml@613 (speDriveItemId/mount-state reset) — the lifecycle to root-cause</file>
+      <file role="canonical-reference">Task 011 mount-identity fixes (reuse findings on which mount doors reset state)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Mount-identity root-cause — 011 maps the transient mount doors that reset state; reuse that analysis.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Root-cause the mount-state reset on the transient/upload path (the FR-07 vector-b/c lifecycle); the fix MUST restore content without re-upload. Reuse task-011's mount-door analysis; MUST NOT add a parallel restore path (root §11).</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts. MUST NOT regress the transient/draft mount behaviors fixed in 010/011.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose mount lifecycle, restore from source</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/r6-defer-register-consolidated.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, effort xhigh; load spec FR-09 + task-011 mount-door analysis.</step>
+    <step order="1">Reproduce the blank-on-restore; trace the transient/upload mount-state reset (mountTransient@559 / mountDraftHtml@613).</step>
+    <step order="2">Root-cause the reset and fix so Restore from Source restores content without re-upload.</step>
+    <step order="3">Add unit tests: Restore from Source restores content; no re-upload prompt; no blank.</step>
+    <step order="4">Run jest + ui-tests; verify green + no regression to 010/011 behaviors.</step>
+    <step order="5">Update TASK-INDEX.md: set 071 status to ✅.</step>
+    <step order="6">Document the root cause in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the root cause turns out to require a server round-trip to restore source content (not a client mount-state fix), STOP and escalate (root §6.5) — this would change the mount contract and needs sign-off.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Restore from Source restores content">
+      <steps>
+        <step>Open a transient/uploaded doc and edit it.</step>
+        <step>Invoke Restore from Source.</step>
+        <step>Verify content is restored without blanking or a re-upload prompt.</step>
+      </steps>
+      <expected>Restore from Source restores content in place.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">Unit tests for Restore-from-Source no-blank</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a transient/uploaded doc, when Restore from Source is invoked, then content is restored without blanking or re-upload.</criterion>
+    <criterion testable="true">Negative: the transient/draft mount behaviors from 010/011 are not regressed.</criterion>
+    <criterion testable="true">jest green; the root cause is documented.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-09. Shares the mount-lifecycle root cause with FR-07(c) (task 011).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
