@@ -12,6 +12,7 @@
 > **Companion docs (v3 authoritative supplements)**:
 > - [`PROJECT-UPDATE-2026-08-12.md`](PROJECT-UPDATE-2026-08-12.md) — 2026-08-12 six-workstream assessment + design-refresh rationale + fast-follow list
 > - [`COMPONENT-INVENTORY.md`](COMPONENT-INVENTORY.md) — machine-hardened bill-of-materials for one customer environment (386 solution components, 87+ entities, 33-PCF/7-in-use gap, Azure stamp, config/seed layer)
+> - [`notes/pricing-research-2026-08-12.md`](notes/pricing-research-2026-08-12.md) — sourced Azure + M365 list pricing (Aug 2026) + Model 2 baseline + Model 1 shareable-vs-dedicated segregation and shared-platform-floor breakdown
 >
 > Sections 7 / 8 / 11 of this design SUMMARIZE what those docs enumerate authoritatively; when they disagree, the companion docs win.
 
@@ -51,7 +52,7 @@ These are inputs, not proposals. The design conforms to them. D1-D11 from `disco
 |---|----------|--------------------|
 | D1 | **Managed solutions** for customer environments. Unmanaged stays dev-only. | Solution export/fix pipeline must produce managed packages. |
 | D2 | **One deployment package, two targets.** Variable = target tenant (Spaarke vs customer). Per-customer app registrations in both models. | Tenant is a run parameter, not a code fork. |
-| D3 | **No shared resources between customers.** One BFF per customer env. Dedicated per-customer: OpenAI, AI Search, Doc Intelligence, Service Bus, Redis, Key Vault, App Insights. | Control plane is a separate Spaarke-internal service. Bicep deploys a full per-customer stack. |
+| D3 (v3 rewritten) | **Two deployment tiers, isolation posture per tier**:<br>• **Model 2 (dedicated stamp, default for regulated/enterprise)**: no shared resources between customers. One BFF per customer env. Dedicated per-customer: OpenAI, AI Search, Doc Intelligence, Service Bus, Redis, Key Vault, App Insights, Cosmos DB.<br>• **Model 1 (shared trial/SMB tier)**: fixed-floor resources shared across trials with per-tenant logical isolation — App Service Plan, Azure OpenAI (metered per D19), AI Search (per-tenant `tenantId` filter on every query); everything else remains per-customer dedicated (Dataverse, SPE, Key Vault, Storage, Managed Identity, Entra app config).<br>Rationale + economic analysis: §3A. | Control plane is a separate Spaarke-internal service. Bicep composition selects the stack per tier: `model2-full.bicep` (dedicated) or `model1-shared.bicep` (shared platform + per-customer dedicated). |
 | D4 | **Azure subscription per customer** = isolation + billing unit. `SpaarkeOwned` (default) or `CustomerOwned` (Lighthouse delegation). | Preflight + gate verify subscription access before infra steps. |
 | D5 | **No bring-your-own-license.** Spaarke purchases user licenses. | Builds on r1 FR-11 per-env license resolution. |
 | D6 | **Two identity presets**: `B2BGuest` (cross-tenant access) or `NativeAccount` (low-IT-friction). | Identity handler branches at user-creation only; gates differ (B2B needs consent verification). |
@@ -71,21 +72,26 @@ These are inputs, not proposals. The design conforms to them. D1-D11 from `disco
 
 ---
 
-## 3A. ADR-Tensions — D3 Path A Amendment (added v3, 2026-08-12 per CLAUDE.md §6.5)
+## 3A. D3 Two-Tier Rationale (added v3, 2026-08-12)
 
-**Tension surfaced by 2026-08-12 assessment.** D3 (no shared resources between customers) is correct for regulated legal customers requiring physical isolation, and it dissolves cost-allocation (Azure Cost Management + tags = native per-customer bill = zero metering infra + honest usage-passthrough pricing). But three resources carry a **fixed monthly floor regardless of usage** — App Service Plan, Azure OpenAI (provisioned TPM), Azure AI Search (fixed tier) — that is brutal for trial/SMB prospects.
+**Why D3 (v3) has two tiers rather than one dedicated model.** The v2 formulation of D3 was "no shared resources between customers, ever." That's correct for regulated legal customers requiring physical isolation, and it dissolves cost-allocation (Azure Cost Management + tags = native per-customer bill = zero metering infra + honest usage-passthrough pricing). But the 2026-08-12 assessment identified three resources that carry a **fixed monthly floor regardless of usage** — App Service Plan, Azure OpenAI (provisioned TPM), Azure AI Search (fixed tier) — that make a strict per-customer stamp uneconomic for trial/SMB prospects. Rather than force every prospect through the dedicated-stamp cost floor (or refuse to serve them), D3 (v3) explicitly covers both:
 
-**Resolution path (Path A — project-scoped amendment, not a full ADR change).** Keep D3 dedicated as the **default** for real/regulated customers **and** add:
+- **Model 2 (dedicated stamp)** — default for regulated/enterprise. Honest usage-passthrough pricing; regulated-legal-grade isolation; Azure Cost Management + tags for per-customer billing without additional metering infra.
+- **Model 1 (shared trial/SMB tier)** — for prospects where the fixed floor is uneconomic. Shares the three fixed-floor resources; keeps everything else per-customer dedicated; adds per-tenant token metering (D19) so allocation is fair.
 
-| Amendment | Rationale | Scope in r1 |
+**Three supporting decisions that pair with D3 (v3):**
+
+| # | Decision | Purpose |
 |---|---|---|
-| **A1.** Shared, metered **trial/SMB tier** (Model 1 vertically-partitioned) with logical tenant isolation. | Fixed per-prospect floor is uneconomic; regulated-legal-grade isolation is over-engineered for trials. | **In r1**: control-plane supports "shared-tenant profile"; Bicep stack composition (`model1-shared.bicep`) treated as first-class alongside `model2-full.bicep`. |
-| **A2.** Per-tenant **token-metering layer** (see D19) — no-regret. | Powers pricing under any tenancy choice; enforces per-tenant token budgets/quotas as runaway-loop guardrail; provides telemetry for eventual PTU decisions. | **In r1** as an engineering deliverable; not a handler, but ships. |
-| **A3.** **Architectural cost controls** are documented as pipeline outputs to ensure cost-efficient defaults. | Prompt caching (~50–90% off cached input), model tiering, retrieval + context compression, per-tenant budgets, batch API, PAYG-first-then-PTU. | Documented in the deployment guide (Gap 4); no r1 code required — these are runtime BFF concerns tracked elsewhere. |
+| A1 (Bicep composition) | `model1-shared.bicep` first-class alongside `model2-full.bicep`; control plane selects stack per tier | Materializes both models in IaC without a code fork |
+| A2 (metering layer, ties to D19) | Per-tenant token-metering layer — APIM gateway or app-level custom metric keyed on `tenantId` | Fair allocation for Model 1 shared tier; runaway-loop guardrail for Model 2; powers usage-passthrough pricing for either |
+| A3 (architectural cost controls) | Prompt caching (~50–90% off cached input), model tiering (route simple tasks to `gpt-4o-mini`), retrieval + context compression, per-tenant budgets, batch API, PAYG-first-then-PTU | Cost-efficient defaults; documented in the deployment guide (Gap 4); runtime BFF concerns |
 
-**Reference**: full economic analysis in [`PROJECT-UPDATE-2026-08-12.md`](PROJECT-UPDATE-2026-08-12.md) §4–5.
+**Reference**:
+- Economic analysis: [`PROJECT-UPDATE-2026-08-12.md`](PROJECT-UPDATE-2026-08-12.md) §4–5
+- Sourced pricing (Aug 2026): [`notes/pricing-research-2026-08-12.md`](notes/pricing-research-2026-08-12.md)
 
-**Owner-signed exception**: this amendment is approved for the r1 scope. Path A is chosen over Path B (full ADR-013 amendment) because D3 as written remains correct for the dedicated default; the amendment adds a second first-class tier rather than reversing the default.
+**Note on CLAUDE.md §6.5 protocol.** The v2→v3 evolution of D3 was originally documented as a "Path A ADR-tensions amendment" per CLAUDE.md §6.5, but v3 rewrites D3 in place to describe both tiers directly — this eliminates the "the rule says X but there's a footnote in another section that says X plus Y" reader-confusion pattern. §3A is now the *why* (economic rationale), not the *what* (the what lives in D3 itself). No CLAUDE.md §6.5 escalation required because r1 is the first project to encode D3 in code — v2 was a design draft, not a shipped constraint.
 
 ---
 
@@ -1099,8 +1105,9 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 10. All **7** AI Search indexes (v3 corrected) created per customer with standardized naming and verified field alignment (Phase A audit item cleared)
 11. All **7** per-customer Dataverse environment variables set and validated (no hardcoded URL fallbacks); reconciled with INVENTORY §9
 12. **Model 2** (dedicated per D3): per-customer AI resources (OpenAI, AI Search, Doc Intelligence, Cosmos) deployed isolated
-13. **Model 1** (trial per §3A A1): shared fixed-floor tier deployed; per-tenant token-metering layer (D19) enforces `tokenBudgetMonthlyUSD`
-14. **BFF publish size** ≤60 MB compressed (CLAUDE.md §10 NFR-01); Phase E DemoExpirationService migration verifies ~0 MB delta
+13. **Model 1** (trial/SMB per D3 v3): shared fixed-floor tier deployed via `model1-shared.bicep`; per-tenant token-metering layer (D19/A2) enforces `tokenBudgetMonthlyUSD` and blocks pipeline calls when exceeded; per-tenant AI Search filter on every query verified in H13
+14. **Cost envelope conforms to pricing model** ([`notes/pricing-research-2026-08-12.md`](notes/pricing-research-2026-08-12.md)): Model 2 empty-environment Azure floor ≤$400/mo (dev-Redis) or ≤$800/mo (prod-P1); Model 1 marginal per-customer ≤$430/mo (5–10 users, capped tokens); shared platform floor for Model 1 ≤$400/mo — deviations >20% flagged in H13 as cost drift
+15. **BFF publish size** ≤60 MB compressed (CLAUDE.md §10 NFR-01); Phase E DemoExpirationService migration verifies ~0 MB delta
 
 ---
 
@@ -1177,6 +1184,7 @@ These items require detailed verification during Phase A (doc consolidation + au
 **Companion docs** (authoritative supplements, updated more frequently than this design):
 - [`PROJECT-UPDATE-2026-08-12.md`](PROJECT-UPDATE-2026-08-12.md) — 2026-08-12 six-workstream assessment, cost economics, D3 tension analysis, gap analysis, fast-follow list
 - [`COMPONENT-INVENTORY.md`](COMPONENT-INVENTORY.md) — machine-hardened bill-of-materials (386 solution components, 87+ entities, Azure stamp, config/seed layer, verification backlog)
+- [`notes/pricing-research-2026-08-12.md`](notes/pricing-research-2026-08-12.md) — sourced Azure + M365 pricing (Aug 2026); Model 2 baseline + Model 1 shareable-vs-dedicated segregation; per-tenant allocation math for shared platform floor
 - [`discovery/phase-0-discovery-report.md`](discovery/phase-0-discovery-report.md) — original Phase 0 findings
 
 **Load-bearing spine assets** (in-repo):
@@ -1217,7 +1225,8 @@ These items require detailed verification during Phase A (doc consolidation + au
 **Changes**:
 - **Header**: Draft v3, companion-doc references, revision line for 2026-08-12
 - **§3**: D14 rewritten (TF Power Platform provider replaces PPAC semi-auto fallback); D18 added (BFF as consent-capture onboarding client); D19 added (per-tenant token-metering as no-regret investment)
-- **§3A NEW**: ADR-Tensions — D3 Path A amendment (shared trial tier + metering layer + architectural cost controls) per CLAUDE.md §6.5
+- **§3 D3 rewritten in place** (v3): now describes both Model 2 (dedicated) and Model 1 (shared trial/SMB) tiers directly, rather than v2's "no shared resources ever" formulation
+- **§3A NEW**: D3 Two-Tier Rationale — the *why* behind the two-tier design (economic analysis, three supporting decisions A1/A2/A3, references to pricing research). Deliberately not framed as an "amendment" to avoid the reader-confusion pattern of "the rule says X but a footnote elsewhere adds Y"
 - **§4A NEW**: Tooling stack table — Bicep + TF + PS + Package Deployer + confidential-client SPE, with rejected alternatives
 - **§4.1**: Handler catalog rewritten — H0.5 added (consent-capture); H2 split into H2a/H2b (infra + AI Search indexes); H5 + H10 TF-driven; H8 confidential-client fix (T6); H9 hardened (`spaarkedev1`); H12 split into H12a/H12b/H12c (AI seed + app config + runtime refs); H14 enumerated (2× Exchange + webhooks + S2S). Handler DAG added. I3 idempotency `{schemaVer}` semantics defined.
 - **§4B NEW**: Silent-failure trap catalog (T1–T6) with owning handler + verification command
@@ -1237,7 +1246,7 @@ These items require detailed verification during Phase A (doc consolidation + au
 - **§12**: R10–R16 added (SPE 403, Cosmos absence, `keyVaultReferenceIdentity`, config-seed decouple, AI seed drift, TF maturity, `spaarkedev1` hardcode)
 - **§13**: Scope re-stated as 21 in-scope items grouped by concern; out-of-scope confirmed (data migration, per-customer SWA/portal/agent, decommission, fleet UI)
 - **§14**: Phasing refreshed with new B' (TF adoption) + C' (H12a/b/c config-seed) sub-phases
-- **§15**: 14 success criteria (added trap-verified, 7-index/env-var reconciliation, Model 1 + Model 2 both verified, publish-size compliance, north-star framing)
+- **§15**: 15 success criteria (added trap-verified, 7-index/env-var reconciliation, Model 1 + Model 2 both verified, **cost-envelope conformance to pricing model with drift detection**, publish-size compliance, north-star framing)
 - **§16**: v3 resolutions table (B1–B5, I1–I3, I5–I6, D3-tension, Tooling, Self-service)
 - **§17**: Two BFF changes now (consent-callback endpoint added); 9-column registry (was 6); Model 1 stack + TF + metering layer placement
 - **§18**: Open items 6–10 added (INVENTORY §12 verification backlog + TF maturity + trap verification)
@@ -1248,7 +1257,8 @@ These items require detailed verification during Phase A (doc consolidation + au
 - 3-layer architecture shape (L1 handlers + L2 control plane + L3 skill)
 - ADR-004 resolution (§5.1) — individual handlers are IJobHandler; L2 orchestrates
 - ADR-010/017 posture (§5.2/5.3) — control plane's DI is separate from BFF's; ProvisioningRun ≠ per-handler job status
-- D1 (managed solutions), D2 (two targets), D3 (dedicated default — with §3A amendment), D4 (subscription per customer), D5 (Spaarke buys licenses), D6 (B2B vs Native identity), D7 (consumption SKUs), D8 (build L1→L2→L3), D9 (Claude Code as authorized MCP client), D10 (gates verified not inferred), D11 (idempotent + resumable), D12 (control plane placement), D13 (Cosmos as run store), D15 (hybrid profiles), D17 (decommission out of scope)
+- D1 (managed solutions), D2 (two targets), D4 (subscription per customer), D5 (Spaarke buys licenses), D6 (B2B vs Native identity), D7 (consumption SKUs), D8 (build L1→L2→L3), D9 (Claude Code as authorized MCP client), D10 (gates verified not inferred), D11 (idempotent + resumable), D12 (control plane placement), D13 (Cosmos as run store), D15 (hybrid profiles), D17 (decommission out of scope)
+- **D3 changed shape**: v2 = "no shared resources ever"; v3 = "two tiers, Model 2 dedicated / Model 1 shared floors + logical isolation" — see §3A rationale
 
 ### v2 — 2026-06-16 (feedback round 1)
 Resource inventory, identity spec, config capture, Q1–Q6 resolved → D12–D17 locked.
