@@ -164,6 +164,7 @@ Task-created after each Phase-1 assessment design exists. Not decomposed in this
 - [ ] **#3a drop the vestigial Dataverse S2S app-reg (task 060)** — scripts/docs/KV only (zero code consumers); delivers r1's "2 app-regs → 1". OBO + SPE per-tenant + the BFF's own (still-secret) Dataverse path untouched. **#3b** (the shared-lib `ClientSecret`→MI migration — the substantive, identity-attribution piece) is folded into the NG1/task-011 track (see NG1 note); flagged report-only by task 040 rule (c) until then.
 - [ ] **#2 uniform fail-fast config validation (task 061)** — `[Required]` + `IValidateOptions<T>` + `ValidateOnStart` uniform; startup crash on missing required settings.
 - [ ] **#4 Graph app-role single-source constant (task 062)** — `GraphAppRoles.cs` + verifier; provisioning script + r1 H10 become consumers.
+- [ ] **Resource/secret naming standard + conformance gate (task 063; owner directive 2026-08-13, productization)** — refresh `AZURE-RESOURCE-NAMING-CONVENTION.md` (env-agnostic KV/resource names; no env-token-in-name; canonical casing) + a naming-conformance CI gate; assessed by task 017. r3 owns standard+gate; **r1 owns applying names in provisioning + remediating live-env drift** (same seam as #4).
 - [ ] Forcing-functions (in tasks 040/042): IOptions-validated-on-start, GraphAppRoles single-source, no secret-based Dataverse credential path.
 
 **Inputs**: BFF auth code (Phase C already landed); r1 ask + r3 assessment. **Outputs**: consolidated auth/provisioning; config-validation discipline; role-parity forcing-functions.

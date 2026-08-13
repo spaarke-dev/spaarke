@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="063" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Resource/secret naming standard refresh + naming-conformance CI gate (productization; r3 owns standard+gate, r1 applies/remediates)</title>
+    <phase>6 Deployment &amp; Configuration Hygiene</phase>
+    <gate>after 017 (needs the naming-drift census + target-name map)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Standard doc refresh + a CI conformance check (scripts/CI); touches skill-directives/CI hot path but no product source. STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical standard-doc canonicalization + a regex/list conformance check against a produced target-name map; Sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits `.github/workflows` (CI gate) — coordinate with ci-cd-unit-test-remediation-r1 (owns existing-workflow edits); touches docs/architecture. /conflict-check before PR.</parallel-reason>
+    <deps>017</deps>
+    <tags>deployment,naming,standards,ci,quality</tags>
+  </metadata>
+
+  <prompt>Own the r3 side of resource/secret naming standardization for productization (owner directive 2026-08-13): (1) REFRESH `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` so it is accurate + complete for Key Vault secrets and Azure resources — the **env-agnostic invariant** (name stable across environments, value per-environment; NO env token like dev/demo/prod in a replicated name), ONE canonical casing per resource class, and the prefix rule — building on the target-name map task 017 produced; (2) add a **naming-conformance CI gate** (a validation check that FAILS a PR/deploy when a resource or KV-secret name violates the convention — especially an env token baked into a replicated name, or casing/prefix drift). r3 owns the STANDARD + the GATE; the deployment project customer-provisioning-orchestration-r1 owns APPLYING the names in provisioning + REMEDIATING live-environment drift (renames/consolidations). Do NOT rename live Azure resources here.</prompt>
+  <role>SPAARKE platform developer with Azure resource-naming + CI expertise. Make the existing convention accurate + enforced; do not invent a new scheme — the convention already states the env-agnostic principle (AZURE-RESOURCE-NAMING-CONVENTION.md:329).</role>
+  <goal>`AZURE-RESOURCE-NAMING-CONVENTION.md` is refreshed with an explicit KV-secret + resource naming standard (env-agnostic names, no env token, canonical casing, prefix rule, orphan/duplicate policy); a naming-conformance CI gate exists that fails on a seeded env-token-in-name / casing-drift violation and passes on conformant names; and a coordination handoff to r1 (apply + live-env remediation) is recorded.</goal>
+
+  <context>
+    <background>Owner directive (2026-08-13, product­ization): as deployments are replicated to more environments, resource + secret names must be standard, accurate, env-agnostic so they make sense everywhere. The convention EXISTS (375 lines) and already mandates "same secret names across all environments" (:329), but it is UNENFORCED and DRIFTED — the dev vault `spaarke-spekvcert` shows env-token-in-name (`SPRK-DEV-DATAVERSE-URL`), casing drift (`BFF-API-ClientSecret` vs `bff-api-client-secret` — the latter used by the Office add-in deploy), prefix drift (3 MI-clientid names), and an orphan (`Graph-API-ClientSecret`, 0 consumers). Grounding: `notes/bff-auth-surface-map.md` §"Portal verification 2026-08-13"; task 017's naming-conformance audit produces the current→canonical target-name map this task consumes. Ownership seam (same as #4 GraphAppRoles): r3 owns standard + guardrail; r1 owns apply + live remediation.</background>
+    <relevant-files>
+      <file role="modify">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md (refresh: KV-secret + resource env-agnostic naming section; also fix the stale identity content the auth map flagged at :153,:186,:274-284,:349)</file>
+      <file role="new">a naming-conformance check (script under scripts/ + a job wired into .github/workflows) — flags env-token-in-name + casing/prefix drift + orphan/duplicate KV names</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md (task 017 output — the target-name map + drift census)</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md (§Portal verification — seed evidence)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="017" status="pending">017's config-deployment assessment produces the naming-drift census + current→canonical target-name map this task turns into the standard + gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (r3 = standard + gate ONLY): refresh the convention doc + add the conformance CI gate. Do NOT rename live Azure resources, KV secrets, or App Service KV references — that is r1's live-environment remediation. Build on the existing convention (:329 env-agnostic rule); do not invent a competing scheme.</constraint>
+    <constraint source="naming-invariant">The load-bearing rule the gate enforces: a name meant to be replicated across environments MUST be env-agnostic (no dev/demo/prod token in the NAME; env-specific value only). `DATAVERSE-URL` is correct; `SPRK-DEV-DATAVERSE-URL` is a violation. Plus one canonical casing + prefix per resource class; no orphan/duplicate secrets.</constraint>
+    <constraint source="coordination">Coordinate with customer-provisioning-orchestration-r1 (paused pending r3): r1 consumes this standard to name resources at provisioning time AND owns remediating existing environments (renames/consolidations during maintenance windows — updating KV refs + rotation). Record the handoff (which names change current→canonical) so r1 can execute it. Coordinate the `.github/workflows` edit with ci-cd-unit-test-remediation-r1; /conflict-check before PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure resource + KV-secret naming standardization for multi-env productization</topic>
+    <files>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md</file>
+      <file>projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD). Load 017's design (target-name map) + the convention + the auth-map portal census.</step>
+    <step order="1">Refresh AZURE-RESOURCE-NAMING-CONVENTION.md: add/clarify the KV-secret + resource naming standard — env-agnostic names (no env token), canonical casing, prefix rule, orphan/duplicate policy; fix the stale identity content (:153,:186,:274-284,:349 — UAMI not system-assigned/56ae2188; drop S2S).</step>
+    <step order="2">Build the naming-conformance check (a script under scripts/): given the convention rules, scan resource/KV-secret names (and the config/*.json + template token names) and FLAG env-token-in-name, casing/prefix drift, and orphan/duplicate KV names. Fail non-zero on violations.</step>
+    <step order="3">Wire the check into .github/workflows as a PR gate (coordinate with ci-cd-unit-test-remediation-r1). Reference it from task 042's CI-gates set.</step>
+    <step order="4">Record the r1 handoff: the current→canonical rename map (from 017) + the note that r1 owns applying it in provisioning + remediating live envs. Append to the deployment assessment coordination section.</step>
+    <step order="5">Update TASK-INDEX.md: set task 063 status to ✅.</step>
+    <step order="6">Document deviations in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>`AZURE-RESOURCE-NAMING-CONVENTION.md` exists (375 lines) and states the env-agnostic KV rule (:329), but there is NO conformance check anywhere (grep found only prose references in provisioning scripts) — the convention is doc-only + drifted.</existing>
+    <extension>Refreshes the EXISTING convention (not a new scheme) + adds the missing forcing-function. The CI gate is new surface but is the minimal guardrail that makes the existing standard hold.</extension>
+    <cost-of-doing-nothing>Concrete failure: replicating to a new customer/environment carries env-token-baked names (`SPRK-DEV-*` in a demo/prod env), casing-split secrets (rotate one, break the other — the live Office-addin vs BFF hazard), and orphans — so productized deployments are wrong-by-construction and each new env re-drifts.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md (refreshed standard)</output>
+    <output type="code">scripts/ naming-conformance check + .github/workflows gate</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/ (r1 handoff: current→canonical rename map)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">AZURE-RESOURCE-NAMING-CONVENTION.md has an explicit KV-secret + resource naming standard: env-agnostic names (no dev/demo/prod token in a replicated name), one canonical casing, prefix rule, orphan/duplicate policy; the stale identity content (system-assigned/56ae2188/S2S) is corrected.</criterion>
+    <criterion testable="true">The naming-conformance check fails on a seeded violation (an env-token-in-name like `SPRK-DEV-*`, and a casing-drift duplicate) and passes on conformant names; it is wired as a PR gate.</criterion>
+    <criterion testable="true">Negative: the task renames NO live Azure resource/secret/KV-ref (r1 owns that); it only edits the standard + the check.</criterion>
+    <criterion testable="true">The r1 handoff (current→canonical rename map + apply/remediate ownership) is recorded for customer-provisioning-orchestration-r1.</criterion>
+  </acceptance-criteria>
+
+  <notes>Owner directive 2026-08-13 (productization). r3 owns the standard + forcing-function; r1 owns apply-in-provisioning + live-environment remediation (same seam as #4 GraphAppRoles). Gated on task 017's naming-drift census + target-name map. Seed evidence: dev-vault census in notes/bff-auth-surface-map.md §Portal verification.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

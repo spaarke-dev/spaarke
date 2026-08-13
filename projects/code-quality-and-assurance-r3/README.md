@@ -63,6 +63,7 @@ R1 built the quality *system*; R2 did the first *structural* remediation. The pr
 - [ ] Portfolio: registered under Epic #427; `projects/INDEX.md` row added; NG1 filed as an Idea.
 - [ ] Deployment & config hygiene (from r1 ask): #3a vestigial Dataverse S2S app-reg dropped (task 060; #3b shared-lib MI migration is on the NG1/011 track), #2 uniform fail-fast config validation, #4 Graph app-role single-source constant — each with its ArchTest/CI forcing-function; #1 KV-federation assessed (`workstreams/config-deployment/design.md`).
 - [ ] NG1 (Dataverse access-stack unification + #3b credential migration) on the assess-then-decide track: task 011 verified design + re-estimate published; #3a app-reg drop landed; remediation decision recorded.
+- [ ] Productization naming (owner directive): resource/secret naming standard refreshed (env-agnostic names) + conformance CI gate live (tasks 017/063); r1 handoff (apply + live-env remediation) recorded.
 - [ ] Aggregate grade reaches **A+ (senior-panel standard)** with forcing-functions preventing re-drift.
 
 ---

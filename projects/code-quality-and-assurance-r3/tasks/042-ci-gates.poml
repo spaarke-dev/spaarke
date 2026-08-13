@@ -37,6 +37,7 @@
     <constraint source="project">Scope (2026-08-13 additions): the config-validation gate is the ArchTests run itself (task 040 rules a-c execute with the suite in the PR layer — no separate script duplicating the rule); the Graph app-role parity check invokes the task-062 verifier against the target env's SP in the NIGHTLY layer only (needs Graph credentials; a per-PR live-Graph call would be flaky + slow, violating CLAUDE.md §16 fast/low-false-positive). Neither gate is enabled before its owning task (061/062, plus 040 for the rules) has landed.</constraint>
     <constraint source="project">Scope: ci-cd-unit-test-remediation-r1 owns existing-workflow edits — every .github/workflows change MUST be coordinated via /conflict-check before the PR.</constraint>
     <constraint source="CLAUDE.md-§16">Scope: keep gates fast + low-false-positive; publish-size budget is ≤60 MB compressed (BFF).</constraint>
+    <constraint source="naming-productization-2026-08-13">The CI-gate set INCLUDES the naming-conformance gate authored by task 063 (fails a PR when a resource/KV-secret name bakes in an env token or drifts in casing/prefix). Reference/compose it here; task 063 owns the check + the standard. Coordinate the `.github/workflows` edit with ci-cd-unit-test-remediation-r1.</constraint>
   </constraints>
 
   <knowledge>

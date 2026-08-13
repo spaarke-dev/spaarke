@@ -120,3 +120,13 @@ Still secret-based in prod (the migration scope for 011's NG1 design):
 - **DO NOT TOUCH**: OBO (`BFF-API-ClientSecret` for OBO), SpeAdmin per-tenant container secrets (`SpeAdminGraphService.cs:4054,4177-4184`, ADR-028:24 exception 1), `DataverseAccessDataSource.cs:49-76` (user-context/OBO path Phase C preserved).
 - **Tracking**: task 040 rule (c) FLAGS this remaining secret path (report-only / `[Skip]`) until 011's NG1 design lands the migration, then it becomes enforcing.
 - **Stale doc to fix when (b) lands**: `docs/guides/DATAVERSE-AUTHENTICATION-GUIDE.md:1007` ("Managed Identity: Rejected — doesn't work for Dataverse S2S") contradicts ADR-028:24 + the live §9c smoke test.
+
+---
+
+## Addendum 2026-08-13(b) — Resource/secret naming standardization (owner directive; r3↔r1 split)
+
+New productization consideration raised by the owner: as deployments replicate to more environments, resource + KV-secret names must be **standard, accurate, env-agnostic** so they make sense everywhere. The dev-vault census (`notes/bff-auth-surface-map.md` §Portal verification) proves live drift: `SPRK-DEV-DATAVERSE-URL` (env token baked into the NAME), `BFF-API-ClientSecret` vs `bff-api-client-secret` (casing; the latter used by the Office add-in deploy), 3 MI-clientid names, orphaned `Graph-API-ClientSecret`. The convention `docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` already states the env-agnostic rule (:329) but is unenforced + drifted.
+
+**Ownership split (owner decision — same seam as #4 GraphAppRoles):**
+- **r3 owns (this project):** the STANDARD (refresh the convention: env-agnostic KV/resource names, no env-token-in-name, canonical casing, orphan/duplicate policy) + the FORCING-FUNCTION (a naming-conformance CI gate). Assessed by **task 017** (drift census → current→canonical target-name map); standard+gate by **task 063**.
+- **➡️ r1 owns (customer-provisioning-orchestration-r1) — HANDBACK:** (a) **applying** the canonical names when provisioning/replicating environments; (b) **remediating existing environments** — renaming/consolidating the drifted secrets (`SPRK-DEV-DATAVERSE-URL`→`DATAVERSE-URL`, consolidate `bff-api-client-secret`/`BFF-API-ClientSecret`, drop orphans) + updating the App Service KV references + coordinating rotation, during maintenance windows. This touches LIVE Azure resources and rotation → it is a deployment op, not r3 code cleanup. r1 executes it from task 063's current→canonical rename map. **⚠️ The `bff-api-client-secret` (Office add-in) vs `BFF-API-ClientSecret` (BFF) consolidation must be done carefully — both are live; migrate the add-in reference before removing either.**
