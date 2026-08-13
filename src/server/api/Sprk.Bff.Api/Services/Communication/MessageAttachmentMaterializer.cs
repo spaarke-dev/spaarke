@@ -144,7 +144,7 @@ public sealed class MessageAttachmentMaterializer
         {
             ["sprk_documentname"] = TruncateTo(request.FileName, 200),
             ["sprk_filename"] = request.FileName, // AI analyzer reads this for file-type detection
-            ["sprk_communication"] = new EntityReference("sprk_communication", request.CommunicationId),
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", request.CommunicationId),
             ["sprk_graphitemid"] = fileHandle.Id,
             ["sprk_graphdriveid"] = driveId,
         };
