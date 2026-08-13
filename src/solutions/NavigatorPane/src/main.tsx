@@ -7,13 +7,21 @@
  * NOT a per-form handler).
  *
  * This bundle's root component is `SprkSidePaneHost` (task 011) — the
- * reusable, multi-contributor docked side-pane host that owns the
- * `Xrm.App.sidePanes` pane lifecycle, right-rail icon strip, and theme +
- * `--sprk-ui-scale` resolution for its own FluentProvider. `NavigatorBody`
- * (this bundle's actual UI) is registered as a `sidePaneRegistry` contributor
- * BEFORE render so `SprkSidePaneHost` renders it behind exactly one rail
- * icon (spec FR-01 + FR-13 framework-proof — one entry = one rail icon;
- * NavigatorPane is the framework's first tenant).
+ * reusable, multi-contributor docked side-pane host that owns the right-rail
+ * icon strip and theme + `--sprk-ui-scale` resolution for its own
+ * FluentProvider. `NavigatorBody` (this bundle's actual UI) is registered as a
+ * `sidePaneRegistry` contributor BEFORE render so `SprkSidePaneHost` renders
+ * it behind exactly one rail icon (spec FR-01 + FR-13 framework-proof — one
+ * entry = one rail icon; NavigatorPane is the framework's first tenant).
+ *
+ * EMBEDDED (`managePane={false}`): the docked Navigator pane is created by the
+ * Path B app-startup bootstrap (`sprk_SidePaneManager`, task 086), which
+ * `createPane`s pane id `sprk-navigator` and `navigate`s it to THIS bundle's
+ * webresource. So this host must NOT also create a pane — it renders as the
+ * pane's CONTENT. `paneId="sprk-navigator"` matches the bootstrap so the
+ * contributor receives the correct pane id. (Mounting the host in its default
+ * self-hosting mode here spawned a rival empty pane and caused a load/unload
+ * loop — task 086 UAT fix.)
  *
  * Note: this is a standalone web resource (not a PCF control), so it uses
  * React 19's `createRoot` (ADR-006 / ADR-021 Code Page rules).
@@ -50,7 +58,7 @@ if (rootElement) {
   const root = createRoot(rootElement);
   root.render(
     <React.StrictMode>
-      <SprkSidePaneHost />
+      <SprkSidePaneHost managePane={false} paneId="sprk-navigator" paneTitle="Navigator" />
     </React.StrictMode>
   );
 } else {

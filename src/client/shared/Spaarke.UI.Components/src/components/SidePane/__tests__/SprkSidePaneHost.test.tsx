@@ -226,6 +226,24 @@ describe('SprkSidePaneHost', () => {
     );
   });
 
+  it('mount_ManagePaneFalse_DoesNotCreateAPane_ButStillRendersContributor', async () => {
+    // Embedded mode (task 086 loop fix): when the pane was already created by
+    // the Path B bootstrap and this host is merely its CONTENT, the host MUST
+    // NOT create a second pane (that rival pane caused the load/unload loop).
+    // It must still render the full UI (rail + active contributor).
+    registerContributor('navigator', 'Navigator', 1);
+    const { createPane } = installMockXrm();
+
+    render(<SprkSidePaneHost managePane={false} paneId="sprk-navigator" paneTitle="Navigator" />);
+
+    // Contributor renders with the passed-through pane id...
+    expect(await screen.findByTestId('contributor-navigator')).toBeInTheDocument();
+    expect(screen.getByTestId('contributor-navigator')).toHaveTextContent('pane: sprk-navigator');
+    // ...but NO Xrm pane was created by the host.
+    await waitFor(() => expect(screen.getByTestId('sprk-sidepane-host')).toBeInTheDocument());
+    expect(createPane).not.toHaveBeenCalled();
+  });
+
   it('mount_NoXrmAvailable_DoesNotThrow', async () => {
     delete (window as unknown as { Xrm?: unknown }).Xrm;
     registerContributor('recent', 'Recent', 1);

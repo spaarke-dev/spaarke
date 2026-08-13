@@ -71,6 +71,22 @@ export interface SprkSidePaneHostProps {
    * empty state (never throws) — useful for exercising the negative path.
    */
   defaultActiveId?: string;
+  /**
+   * Whether this host owns the `Xrm.App.sidePanes` pane LIFECYCLE (create +
+   * close-on-navigate + visibility). Default `true` (self-hosted: the host
+   * creates and manages its own pane).
+   *
+   * Set `false` when the host is rendered as the CONTENT of a pane that some
+   * OTHER agent already created — e.g. the Path B app-startup bootstrap
+   * (`sprk_SidePaneManager`) that `createPane`s the docked Navigator pane and
+   * `navigate`s it to this bundle's webresource. In that EMBEDDED case the
+   * host must NOT create a second pane: doing so spawns a rival empty pane and
+   * the two contend for selection, producing a load/unload loop
+   * (spaarke-side-pane-navigation-history-r1 task 086 UAT). Embedded mode still
+   * renders the full host UI (FluentProvider root, rail, contributor) — it only
+   * skips the pane-creation side effect.
+   */
+  managePane?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -131,6 +147,7 @@ export const SprkSidePaneHost: React.FC<SprkSidePaneHostProps> = ({
   paneTitle = DEFAULT_PANE_TITLE,
   width = DEFAULT_WIDTH,
   defaultActiveId,
+  managePane = true,
 }) => {
   const styles = useStyles();
   const layoutRef = React.useRef<HTMLDivElement>(null);
@@ -178,6 +195,13 @@ export const SprkSidePaneHost: React.FC<SprkSidePaneHostProps> = ({
   const orchestrator = React.useMemo(() => new DataGridSidePaneOrchestrator(), []);
 
   React.useEffect(() => {
+    // EMBEDDED mode (managePane === false): this host is the CONTENT of a pane
+    // some other agent already created (the Path B bootstrap). It must NOT
+    // create a second pane — doing so spawns a rival empty pane that contends
+    // for selection and produces a load/unload loop (task 086 UAT). Skip the
+    // entire pane-lifecycle side effect; the host still renders its UI below.
+    if (!managePane) return undefined;
+
     // Self-hosted pane: no webResourceName (this component IS the content).
     // MUST rule / NFR-05: canClose:false + alwaysRender:true.
     void orchestrator.registerPane({
@@ -194,7 +218,7 @@ export const SprkSidePaneHost: React.FC<SprkSidePaneHostProps> = ({
     return () => {
       detach?.();
     };
-  }, [orchestrator, paneId, paneTitle, width]);
+  }, [orchestrator, paneId, paneTitle, width, managePane]);
 
   // ── Active contributor resolution (lazy; unknown id -> undefined, never throws) ──
   const [ActiveComponent, setActiveComponent] = React.useState<SidePaneContributorComponent | null>(null);
