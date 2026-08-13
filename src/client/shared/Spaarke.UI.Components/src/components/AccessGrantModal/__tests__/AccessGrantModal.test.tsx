@@ -1,29 +1,34 @@
 /**
- * AccessGrantModal — unit tests (task 041, teams-app-r1).
+ * AccessGrantModal — unit tests (rewritten for the v1.0.26 UI, owner UAT 2026-08-12).
  *
- * Covers the task's `<ui-tests>`:
- *  - modal-opens-from-person-icon
- *  - approve-writes-grant (external branch → /invite-and-grant, the literal
- *    endpoint named by task 041 step 4; provenance is a display-only concept —
- *    see AccessGrantModal.tsx's module doc comment and the task's final report
- *    for why the built `sprk_externalrecordaccess` table has no provenance
- *    column to write to)
- *  - grant-revocable
- *  - adr-021-dark-mode
- *  - console-error-check
+ * The v1.0.23→v1.0.26 redesign replaced the task-041 "Approve selected" +
+ * inline-Combobox + standing-checkbox flow with:
+ *  - a single "Add Access Permissions" list (role candidates + looked-up rows),
+ *  - a per-row "Pick access level" Dropdown (NO default — a row can't be granted
+ *    until a level is chosen),
+ *  - an "Add (N)" button (N = checked rows),
+ *  - icon-only "+" (aria "Add contact"/"Add organization") that open the host's
+ *    NATIVE advanced lookup via pickContact/pickOrganization,
+ *  - contact names as links (onOpenContact) opening the Contact record,
+ *  - NO standing-grant checkbox (standing is set on the Contact record),
+ *  - a "Current Access" list with per-row level badge + Revoke.
  *
- * Plus coverage for: the internal-workforce-contact branch (routes to /grant,
- * not /invite-and-grant, and surfaces the escalated notify-pending notice);
- * the `canGrantAccess=false` defense-in-depth gate; and the named-contact
- * picker add flow.
+ * These tests cover: open/closed, external→/invite-and-grant, internal→/grant +
+ * notify-pending, missing-level guard, revoke, canGrantAccess gate, dark mode,
+ * polymorphic root, the native pickers (contact + organization), and onOpenContact.
  */
 
 import * as React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import { AccessGrantModal } from '../AccessGrantModal';
-import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IContactSearchResult } from '../types';
-import { createMockNavigationService } from '../../../__mocks__/mockNavigationService';
+import type {
+  IAccessGrantModalProps,
+  IAccessGrantCandidate,
+  IAccessGrantRecord,
+  IContactSearchResult,
+  IOrganizationPick,
+} from '../types';
 
 const renderWithTheme = (ui: React.ReactElement, theme = webLightTheme) =>
   render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
@@ -97,15 +102,42 @@ function makeProps(overrides?: Partial<IAccessGrantModalProps>): IAccessGrantMod
   };
 }
 
-describe('AccessGrantModal (task 041)', () => {
-  describe('modal-opens-from-person-icon', () => {
-    it('renders the candidate list, named-contact picker, and existing-grants list when opened', async () => {
+/** Finds the per-row "Pick access level" Dropdown trigger for a named row by
+ * walking up from the name text to the row that contains a combobox. Robust to
+ * Fluent's hashed class names. */
+function levelComboFor(name: string): HTMLElement {
+  let el: HTMLElement | null = screen.getByText(name);
+  while (el && !el.querySelector('[role="combobox"]')) el = el.parentElement;
+  const combo = el?.querySelector('[role="combobox"]') as HTMLElement | null;
+  if (!combo) throw new Error(`No access-level dropdown found for row "${name}"`);
+  return combo;
+}
+
+/** Opens a row's level dropdown and picks the given option label. */
+async function pickLevelFor(name: string, optionLabel: string): Promise<void> {
+  fireEvent.click(levelComboFor(name));
+  fireEvent.click(await screen.findByRole('option', { name: optionLabel }));
+}
+
+/** The "Add (N)" grant button. */
+function addButton(): HTMLElement {
+  return screen.getByRole('button', { name: /^Add \(\d+\)$/ });
+}
+
+async function findGrantInit(fetchMock: jest.Mock, path: string): Promise<RequestInit> {
+  const call = fetchMock.mock.calls.find((c: [string, RequestInit]) => c[0] === path) as [string, RequestInit];
+  return call[1];
+}
+
+describe('AccessGrantModal (v1.0.26)', () => {
+  describe('open / closed', () => {
+    it('renders the "Add Access Permissions" list, candidates, and Current Access when opened', async () => {
       renderWithTheme(<AccessGrantModal {...makeProps()} />);
 
       expect(await screen.findByText('Jane Outside')).toBeInTheDocument();
       expect(screen.getByText('Ralph Internal')).toBeInTheDocument();
-      expect(screen.getByText('Add a named contact')).toBeInTheDocument();
-      expect(screen.getByPlaceholderText('Search contacts by name or email…')).toBeInTheDocument();
+      expect(screen.getByText('Add Access Permissions')).toBeInTheDocument();
+      expect(screen.getByText('Current Access')).toBeInTheDocument();
       expect(screen.getByText('Prior Grantee')).toBeInTheDocument();
     });
 
@@ -115,35 +147,15 @@ describe('AccessGrantModal (task 041)', () => {
     });
   });
 
-  describe('approve-writes-grant', () => {
-    it('approving an external candidate calls /invite-and-grant and the refreshed grant list reflects it', async () => {
+  describe('grant writes', () => {
+    it('granting an external candidate (with a chosen level) calls /invite-and-grant with {recordType, recordId, accessLevel, email}', async () => {
       const props = makeProps();
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Jane Outside');
-
-      // Select the external candidate and approve.
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Jane Outside' }));
-
-      // After approval, fetchExistingGrants is called again — mock it to now
-      // include the newly-approved contact with provenance 'membership-approved'
-      // (display-only; the built endpoint has no provenance column — see the
-      // module doc comment).
-      (props.fetchExistingGrants as jest.Mock).mockResolvedValueOnce([EXISTING_GRANT]).mockResolvedValueOnce([
-        EXISTING_GRANT,
-        {
-          accessRecordId: 'new-1',
-          contactId: CANDIDATE_EXTERNAL.contactId,
-          fullName: CANDIDATE_EXTERNAL.fullName,
-          email: CANDIDATE_EXTERNAL.email,
-          accessLevel: 100000000,
-          grantedByName: 'Current User',
-          grantedDate: new Date().toISOString(),
-          provenance: 'membership-approved',
-        },
-      ]);
-
-      fireEvent.click(screen.getByRole('button', { name: /Approve selected/ }));
+      await pickLevelFor('Jane Outside', 'Collaborate');
+      fireEvent.click(addButton());
 
       await waitFor(() => {
         expect(props.authenticatedFetch).toHaveBeenCalledWith(
@@ -151,27 +163,26 @@ describe('AccessGrantModal (task 041)', () => {
           expect.objectContaining({ method: 'POST' })
         );
       });
-
-      const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
-        (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
-      ) as [string, RequestInit];
-      const body = JSON.parse(init.body as string);
-      expect(body).toMatchObject({
+      const init = await findGrantInit(
+        props.authenticatedFetch as jest.Mock,
+        '/api/v1/external-access/invite-and-grant'
+      );
+      expect(JSON.parse(init.body as string)).toMatchObject({
         email: CANDIDATE_EXTERNAL.email,
         recordType: 'project',
         recordId: 'project-1',
+        accessLevel: 100000001,
       });
-
-      expect(await screen.findByText(/membership-approved/)).toBeInTheDocument();
     });
 
-    it('approving an internal candidate calls /grant (not /invite-and-grant) and surfaces a notify-pending notice', async () => {
+    it('granting an internal candidate calls /grant (not /invite-and-grant) and surfaces a notify-pending notice', async () => {
       const props = makeProps();
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Ralph Internal');
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Ralph Internal' }));
-      fireEvent.click(screen.getByRole('button', { name: /Approve selected/ }));
+      await pickLevelFor('Ralph Internal', 'View Only');
+      fireEvent.click(addButton());
 
       await waitFor(() => {
         expect(props.authenticatedFetch).toHaveBeenCalledWith(
@@ -183,50 +194,180 @@ describe('AccessGrantModal (task 041)', () => {
         '/api/v1/external-access/invite-and-grant',
         expect.anything()
       );
-
       expect(await screen.findByText(/Internal notify \(deep-link\) is not yet available/)).toBeInTheDocument();
+    });
+
+    it('warns and does not write when a selected row has no access level chosen', async () => {
+      const props = makeProps();
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Jane Outside');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Jane Outside' }));
+      // No level picked → Add must warn, not write.
+      fireEvent.click(addButton());
+
+      expect(await screen.findByText(/Pick an access level for: Jane Outside/)).toBeInTheDocument();
+      expect(props.authenticatedFetch).not.toHaveBeenCalled();
+    });
+
+    it('sends {recordType, recordId} for a Matter root', async () => {
+      const props = makeProps({ recordType: 'matter', recordId: 'matter-9' });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Jane Outside');
+      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Jane Outside' }));
+      await pickLevelFor('Jane Outside', 'Full Access');
+      fireEvent.click(addButton());
+
+      await waitFor(() =>
+        expect(props.authenticatedFetch).toHaveBeenCalledWith(
+          '/api/v1/external-access/invite-and-grant',
+          expect.objectContaining({ method: 'POST' })
+        )
+      );
+      const init = await findGrantInit(
+        props.authenticatedFetch as jest.Mock,
+        '/api/v1/external-access/invite-and-grant'
+      );
+      const body = JSON.parse(init.body as string);
+      expect(body).toMatchObject({ recordType: 'matter', recordId: 'matter-9', accessLevel: 100000002 });
+      expect(body.projectId).toBeUndefined();
     });
   });
 
-  describe('grant-revocable', () => {
-    it('revoking an existing grant calls /revoke and removes it from the list after confirm', async () => {
+  describe('native advanced-lookup pickers', () => {
+    it('"+ Contact" opens the native lookup (pickContact), stages + auto-selects the pick, and grants it', async () => {
+      const pickContact = jest.fn(
+        async (): Promise<IContactSearchResult | null> => ({
+          contactId: 'contact-picked-1',
+          fullName: 'Picked Person',
+          email: 'picked@outsidefirm.com',
+        })
+      );
+      const props = makeProps({
+        recordType: 'workassignment',
+        recordId: 'wa-3',
+        fetchCandidates: jest.fn(async () => []),
+        pickContact,
+        isInternalContact: jest.fn(async () => false),
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      // No inline search box exists anymore.
+      expect(screen.queryByPlaceholderText('Search contacts by name or email…')).not.toBeInTheDocument();
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Add contact' }));
+      await waitFor(() => expect(pickContact).toHaveBeenCalled());
+      expect(await screen.findByText('Picked Person')).toBeInTheDocument();
+
+      await pickLevelFor('Picked Person', 'View Only');
+      fireEvent.click(addButton());
+
+      await waitFor(() =>
+        expect(props.authenticatedFetch).toHaveBeenCalledWith(
+          '/api/v1/external-access/invite-and-grant',
+          expect.objectContaining({ method: 'POST' })
+        )
+      );
+      const init = await findGrantInit(
+        props.authenticatedFetch as jest.Mock,
+        '/api/v1/external-access/invite-and-grant'
+      );
+      expect(JSON.parse(init.body as string)).toMatchObject({
+        recordType: 'workassignment',
+        recordId: 'wa-3',
+        email: 'picked@outsidefirm.com',
+      });
+    });
+
+    it('"+ Organization" opens the native org lookup and grants an organization (organizationId, no contact bind)', async () => {
+      const pickOrganization = jest.fn(
+        async (): Promise<IOrganizationPick | null> => ({ id: 'org-42', name: 'Acme LLP' })
+      );
+      const props = makeProps({
+        recordType: 'matter',
+        recordId: 'matter-7',
+        fetchCandidates: jest.fn(async () => []),
+        pickOrganization,
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Add organization' }));
+      await waitFor(() => expect(pickOrganization).toHaveBeenCalled());
+      expect(await screen.findByText('Acme LLP')).toBeInTheDocument();
+
+      await pickLevelFor('Acme LLP', 'Collaborate');
+      fireEvent.click(addButton());
+
+      await waitFor(() =>
+        expect(props.authenticatedFetch).toHaveBeenCalledWith(
+          '/api/v1/external-access/grant',
+          expect.objectContaining({ method: 'POST' })
+        )
+      );
+      const init = await findGrantInit(props.authenticatedFetch as jest.Mock, '/api/v1/external-access/grant');
+      const body = JSON.parse(init.body as string);
+      expect(body).toMatchObject({
+        recordType: 'matter',
+        recordId: 'matter-7',
+        organizationId: 'org-42',
+        accessLevel: 100000001,
+      });
+      expect(body.contactId).toBeUndefined();
+    });
+
+    it('does not render the "+ Contact"/"+ Organization" buttons when the pickers are not supplied', async () => {
+      renderWithTheme(<AccessGrantModal {...makeProps()} />);
+      await screen.findByText('Jane Outside');
+      expect(screen.queryByRole('button', { name: 'Add contact' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Add organization' })).not.toBeInTheDocument();
+    });
+  });
+
+  describe('onOpenContact', () => {
+    it('renders contact names as links that call onOpenContact with the contactId', async () => {
+      const onOpenContact = jest.fn();
+      renderWithTheme(<AccessGrantModal {...makeProps({ onOpenContact })} />);
+
+      // Current Access row: Prior Grantee → link.
+      fireEvent.click(await screen.findByText('Prior Grantee'));
+      expect(onOpenContact).toHaveBeenCalledWith('contact-existing-1');
+    });
+  });
+
+  describe('revoke', () => {
+    it('revoking an existing grant calls /revoke and removes it after confirm — with zero console errors/warnings', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
       const props = makeProps();
       renderWithTheme(<AccessGrantModal {...props} />);
 
       await screen.findByText('Prior Grantee');
       fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
 
-      // Confirm dialog appears (dismiss="alert" -> Fluent renders role="alertdialog",
-      // not "dialog" — query by the (now duplicated) "Revoke" button label instead of
-      // a role-container lookup; the LAST match is the confirm dialog's primary button).
       expect(await screen.findByText('Revoke access?')).toBeInTheDocument();
-
       (props.fetchExistingGrants as jest.Mock).mockResolvedValueOnce([]);
 
       const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
       fireEvent.click(revokeButtons[revokeButtons.length - 1]);
 
-      await waitFor(() => {
+      await waitFor(() =>
         expect(props.authenticatedFetch).toHaveBeenCalledWith(
           '/api/v1/external-access/revoke',
           expect.objectContaining({ method: 'POST' })
-        );
-      });
-
-      const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
-        (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/revoke'
-      ) as [string, RequestInit];
+        )
+      );
+      const init = await findGrantInit(props.authenticatedFetch as jest.Mock, '/api/v1/external-access/revoke');
       const body = JSON.parse(init.body as string);
-      // Revoke is root-agnostic (task 070) — no projectId/recordType sent.
-      expect(body).toMatchObject({
-        accessRecordId: 'grant-1',
-        contactId: 'contact-existing-1',
-      });
+      expect(body).toMatchObject({ accessRecordId: 'grant-1', contactId: 'contact-existing-1' });
       expect(body.projectId).toBeUndefined();
 
-      await waitFor(() => {
-        expect(screen.queryByText('Prior Grantee')).not.toBeInTheDocument();
-      });
+      await waitFor(() => expect(screen.queryByText('Prior Grantee')).not.toBeInTheDocument());
+
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
     });
   });
 
@@ -246,14 +387,14 @@ describe('AccessGrantModal (task 041)', () => {
       renderWithTheme(<AccessGrantModal {...makeProps()} />, webDarkTheme);
 
       expect(await screen.findByText('Jane Outside')).toBeInTheDocument();
-      expect(screen.getByText('Add a named contact')).toBeInTheDocument();
+      expect(screen.getByText('Add Access Permissions')).toBeInTheDocument();
+      expect(screen.getByText('Current Access')).toBeInTheDocument();
       expect(screen.getByText('Prior Grantee')).toBeInTheDocument();
-      expect(screen.getByText('Current access')).toBeInTheDocument();
     });
   });
 
   describe('console-error-check', () => {
-    it('opens, approves, and revokes with zero console errors/warnings', async () => {
+    it('opens and grants with zero console errors/warnings', async () => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -262,168 +403,18 @@ describe('AccessGrantModal (task 041)', () => {
 
       await screen.findByText('Jane Outside');
       fireEvent.click(screen.getByRole('checkbox', { name: 'Select Jane Outside' }));
-      fireEvent.click(screen.getByRole('button', { name: /Approve selected/ }));
-      await waitFor(() => expect(props.authenticatedFetch).toHaveBeenCalled());
+      await pickLevelFor('Jane Outside', 'View Only');
+      fireEvent.click(addButton());
+      await screen.findByText(/Granted access to 1 item/);
 
-      await screen.findByText('Prior Grantee');
-      fireEvent.click(screen.getByRole('button', { name: 'Revoke' }));
-      await screen.findByText('Revoke access?');
-      const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
-      fireEvent.click(revokeButtons[revokeButtons.length - 1]);
-      await waitFor(() =>
-        expect(props.authenticatedFetch).toHaveBeenCalledWith('/api/v1/external-access/revoke', expect.anything())
-      );
-
+      // Revoke's console-cleanliness is asserted in the dedicated revoke test —
+      // combining grant+revoke here races the grant's trailing loadData() in the
+      // full-suite run (flaky), so this check stays scoped to the grant path.
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();
 
       errorSpy.mockRestore();
       warnSpy.mockRestore();
-    });
-  });
-
-  describe('task 071 — polymorphic root + side-pane Advanced Lookup', () => {
-    it('sends {recordType, recordId} for a Matter root when approving an external candidate', async () => {
-      const props = makeProps({ recordType: 'matter', recordId: 'matter-9' });
-      renderWithTheme(<AccessGrantModal {...props} />);
-
-      await screen.findByText('Jane Outside');
-      fireEvent.click(screen.getByRole('checkbox', { name: 'Select Jane Outside' }));
-      fireEvent.click(screen.getByRole('button', { name: /Approve selected/ }));
-
-      await waitFor(() => {
-        expect(props.authenticatedFetch).toHaveBeenCalledWith(
-          '/api/v1/external-access/invite-and-grant',
-          expect.objectContaining({ method: 'POST' })
-        );
-      });
-      const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
-        (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
-      ) as [string, RequestInit];
-      const body = JSON.parse(init.body as string);
-      expect(body).toMatchObject({ recordType: 'matter', recordId: 'matter-9' });
-      expect(body.projectId).toBeUndefined();
-    });
-
-    it('picks a contact via the side-pane Advanced Lookup (openLookup) and grants it', async () => {
-      // Build pickContact from the shared mock navigation service — the same
-      // INavigationService.openLookup the PCF host wires via createXrmNavigationService.
-      const nav = createMockNavigationService();
-      nav.openLookup.mockResolvedValue([{ id: 'contact-picked-1', name: 'Picked Person', entityType: 'contact' }]);
-      const pickContact = jest.fn(async (): Promise<IContactSearchResult | null> => {
-        const [r] = await nav.openLookup({ entityType: 'contact', entityTypes: ['contact'], allowMultiSelect: false });
-        return r ? { contactId: r.id, fullName: r.name, email: 'picked@outsidefirm.com' } : null;
-      });
-      const props = makeProps({
-        recordType: 'workassignment',
-        recordId: 'wa-3',
-        pickContact,
-        isInternalContact: jest.fn(async () => false),
-      });
-      renderWithTheme(<AccessGrantModal {...props} />);
-
-      await screen.findByText('Jane Outside');
-      // The inline Combobox is replaced by the side-pane "Select contact" button.
-      expect(screen.queryByPlaceholderText('Search contacts by name or email…')).not.toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole('button', { name: /Select contact/ }));
-      await waitFor(() => expect(nav.openLookup).toHaveBeenCalled());
-      expect(await screen.findByText('Picked Person')).toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-      await waitFor(() => {
-        expect(props.authenticatedFetch).toHaveBeenCalledWith(
-          '/api/v1/external-access/invite-and-grant',
-          expect.objectContaining({ method: 'POST' })
-        );
-      });
-      const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
-        (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
-      ) as [string, RequestInit];
-      const body = JSON.parse(init.body as string);
-      expect(body).toMatchObject({ recordType: 'workassignment', recordId: 'wa-3', email: 'picked@outsidefirm.com' });
-    });
-
-    it('sends organizationId when a firm/org is picked via the side-pane lookup', async () => {
-      const contactNav = createMockNavigationService();
-      contactNav.openLookup.mockResolvedValue([
-        { id: 'contact-picked-2', name: 'Firm Attorney', entityType: 'contact' },
-      ]);
-      const orgNav = createMockNavigationService();
-      orgNav.openLookup.mockResolvedValue([{ id: 'org-42', name: 'Acme LLP', entityType: 'sprk_organization' }]);
-
-      const pickContact = jest.fn(async (): Promise<IContactSearchResult | null> => {
-        const [r] = await contactNav.openLookup({ entityType: 'contact', allowMultiSelect: false });
-        return r ? { contactId: r.id, fullName: r.name, email: 'attorney@acme.com' } : null;
-      });
-      const pickOrganization = jest.fn(async () => {
-        const [r] = await orgNav.openLookup({ entityType: 'sprk_organization', allowMultiSelect: false });
-        return r ? { id: r.id, name: r.name } : null;
-      });
-
-      const props = makeProps({
-        recordType: 'matter',
-        recordId: 'matter-7',
-        pickContact,
-        pickOrganization,
-        isInternalContact: jest.fn(async () => false),
-      });
-      renderWithTheme(<AccessGrantModal {...props} />);
-
-      await screen.findByText('Jane Outside');
-      fireEvent.click(screen.getByRole('button', { name: /Select contact/ }));
-      await screen.findByText('Firm Attorney');
-      fireEvent.click(screen.getByRole('button', { name: /Select organization/ }));
-      expect(await screen.findByText('Acme LLP')).toBeInTheDocument();
-
-      fireEvent.click(screen.getByRole('button', { name: 'Add' }));
-      await waitFor(() => {
-        expect(props.authenticatedFetch).toHaveBeenCalledWith(
-          '/api/v1/external-access/invite-and-grant',
-          expect.objectContaining({ method: 'POST' })
-        );
-      });
-      const [, init] = (props.authenticatedFetch as jest.Mock).mock.calls.find(
-        (c: [string, RequestInit]) => c[0] === '/api/v1/external-access/invite-and-grant'
-      ) as [string, RequestInit];
-      const body = JSON.parse(init.body as string);
-      expect(body).toMatchObject({ recordType: 'matter', recordId: 'matter-7', organizationId: 'org-42' });
-    });
-  });
-
-  describe('named-contact picker', () => {
-    it('searching and selecting a contact enables Add, and Add grants access', async () => {
-      const namedResult: IContactSearchResult = {
-        contactId: 'contact-named-1',
-        fullName: 'Nora Named',
-        email: 'nora@example.com',
-      };
-      const props = makeProps({
-        searchContacts: jest.fn(async () => [namedResult]),
-        isInternalContact: jest.fn(async () => false),
-      });
-      renderWithTheme(<AccessGrantModal {...props} />);
-
-      await screen.findByText('Jane Outside');
-
-      const input = screen.getByPlaceholderText('Search contacts by name or email…');
-      fireEvent.focus(input);
-      fireEvent.click(input);
-      fireEvent.input(input, { target: { value: 'Nora' } });
-
-      const option = await screen.findByRole('option', { name: /Nora Named/ });
-      fireEvent.click(option);
-
-      const addButton = screen.getByRole('button', { name: 'Add' });
-      expect(addButton).not.toBeDisabled();
-      fireEvent.click(addButton);
-
-      await waitFor(() => {
-        expect(props.authenticatedFetch).toHaveBeenCalledWith(
-          '/api/v1/external-access/invite-and-grant',
-          expect.objectContaining({ method: 'POST' })
-        );
-      });
     });
   });
 });
