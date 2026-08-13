@@ -248,6 +248,28 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     setRows(next);
   }, []);
 
+  // Enrich ONE row in-place with the full `sprk_communication` record. The grid
+  // query is deliberately lightweight (no `sprk_body`, no typed `sprk_regarding*`
+  // lookups) so the reader body + the NFR-10 gate would otherwise be empty until a
+  // confirm. Fetching the full record on open populates BOTH: `sprk_body` (the
+  // email thread the reader renders) AND the `_sprk_regarding*_value` lookups
+  // `resolveRegarding` reads to un-gate Fields/Tasks for an already-Resolved row.
+  // Best-effort (NFR-04): a failed fetch just leaves the lightweight row as-is.
+  const enrichRow = React.useCallback(
+    (id: string) => {
+      if (!id || !dataverseClient) return;
+      void dataverseClient
+        .retrieveRecord(COMMUNICATION_ENTITY, id)
+        .then(fresh => {
+          const freshRow = fresh as Record<string, unknown>;
+          setRows(prev => prev.map(r => (str(r, PRIMARY_ID_FIELD) === id ? { ...r, ...freshRow } : r)));
+          forceRescope();
+        })
+        .catch(() => forceRescope());
+    },
+    [dataverseClient]
+  );
+
   const handleRecordOpen = React.useCallback<NonNullable<DataGridProps['onRecordOpen']>>(
     (recordId, record) => {
       const idx = rows.findIndex(r => str(r, PRIMARY_ID_FIELD) === recordId);
@@ -257,8 +279,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       // A row could be opened before `onRecordsLoaded` seeded `rows` (defensive):
       // seed a single-record queue from the opened record so the shell still opens.
       if (idx < 0 && record) setRows(prev => (prev.length ? prev : [record]));
+      // Pull the full record so the reader shows the thread + the tabs un-gate
+      // immediately (not only after a confirm).
+      enrichRow(recordId);
     },
-    [rows]
+    [rows, enrichRow]
   );
 
   const handleClose = React.useCallback(() => setOpenIndex(null), []);
@@ -291,20 +316,10 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       onAssociationsChanged?.(record);
       setSelectedTab('fields');
       const id = str(record, PRIMARY_ID_FIELD);
-      if (id && dataverseClient) {
-        void dataverseClient
-          .retrieveRecord(COMMUNICATION_ENTITY, id)
-          .then(fresh => {
-            const freshRow = fresh as Record<string, unknown>;
-            setRows(prev => prev.map(r => (str(r, PRIMARY_ID_FIELD) === id ? { ...r, ...freshRow } : r)));
-            forceRescope();
-          })
-          .catch(() => forceRescope());
-      } else {
-        forceRescope();
-      }
+      if (id) enrichRow(id);
+      else forceRescope();
     },
-    [onAssociationsChanged, dataverseClient]
+    [onAssociationsChanged, enrichRow]
   );
 
   // Task 064 (E1b): wrap the host's per-row review props to inject a zero-arg
@@ -370,6 +385,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
               (review && liveRow ? (
                 <EmailConnectionsReview
                   {...review}
+                  variant="reconcile"
                   onAssociationsChanged={() => {
                     // Preserve RelatedToCell's confirm handshake (minus the modal-close):
                     // fire the host's per-row refresh, then the NFR-10 re-gate/jump-to-Fields.
@@ -443,6 +459,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
         onClose={handleClose}
         queue={queue}
         initialIndex={openIndex ?? 0}
+        onIndexChange={(_i, record) => enrichRow(record.id)}
         renderTabs={renderTabs}
         authenticatedFetch={authenticatedFetch}
         activeCitation={activeCitation}

@@ -35,6 +35,7 @@ export function CandidateCard({
   selected,
   tone,
   showConfirm,
+  confirmLabel = 'Confirm',
   busy,
   readOnly,
   onSelect,
@@ -46,6 +47,8 @@ export function CandidateCard({
   /** `'primary'` → green auto-matched card; `'select'` → brand-blue when picked. */
   tone: 'select' | 'primary';
   showConfirm: boolean;
+  /** Label for the per-card commit button. Default `'Confirm'`; the reconcile variant passes `'Select'`. */
+  confirmLabel?: string;
   busy: boolean;
   readOnly: boolean;
   onSelect: () => void;
@@ -88,7 +91,7 @@ export function CandidateCard({
       {showConfirm && !readOnly ? (
         <div className={s.confirmSlot}>
           <Button appearance="primary" size="small" icon={<Checkmark16Filled />} disabled={busy} onClick={onConfirm}>
-            Confirm
+            {confirmLabel}
           </Button>
         </div>
       ) : null}

@@ -15,7 +15,7 @@
  * - `resolveRegarding` maps a grid row → its CONFIRMED `ReconcileRegarding | null`
  *   (NFR-10 gate) via the shipped pure `derivePrimaryReview` reducer.
  */
-import { derivePrimaryReview } from './provenance';
+import { ASSOCIATION_STATUS_RESOLVED_VALUE, COMMUNICATION_REGARDING_FIELDS } from './provenance';
 import type { EmailWorkspaceWebApi } from '../../components/EmailWorkspace/EmailWorkspace.types';
 import type { EmailConnectionsReviewProps } from '../../components/EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
 import type { ReconcileRegarding } from '../../components/ReconcileTabs/FieldUpdateReconcileTab';
@@ -67,26 +67,51 @@ export function buildResolveReview(
   };
 }
 
+/** Bare, lowercased GUID (braces stripped) or null. */
+function normGuid(value: string | null): string | null {
+  if (!value) return null;
+  const bare = value.replace(/[{}]/g, '').trim().toLowerCase();
+  return bare.length === 36 ? bare : null;
+}
+
 /**
- * Row → CONFIRMED `ReconcileRegarding | null` (NFR-10 gate). Only a green
- * (Resolved) primary with a resolvable typed entity + id enables the
- * Fields/Tasks tabs; anything else stays gated.
+ * Read a typed regarding lookup's target GUID off a full `retrieveRecord` row.
+ * Xrm.WebApi (and the BFF client) surface single-valued lookups as the OData
+ * annotation `_<field>_value` (e.g. `_sprk_regardingmatter_value`). The grid
+ * query does NOT select these — the workspace's on-open enrichment fetch merges
+ * the full record so they are present by the time the gate is evaluated.
+ */
+function regardingLookupValue(record: Record<string, unknown>, field: string): string | null {
+  return normGuid(str(record, `_${field}_value`));
+}
+
+/**
+ * Row → CONFIRMED `ReconcileRegarding | null` (NFR-10 gate). The tabs un-gate
+ * only when the record is Resolved AND a typed regarding lookup with a real
+ * entity + GUID can be reconstructed from the row.
+ *
+ * Why not `derivePrimaryReview` here: a manually-confirmed primary is carried in
+ * the DENORM fields (`sprk_regardingrecordname/number/typename`), which have NO
+ * entity logical name or target GUID — so the reducer's confirmed primary comes
+ * back with `entity: ''`, `targetId: ''` and the gate could never open (the
+ * bug behind Fields/Tasks staying disabled after a confirm). Instead we read the
+ * actual typed regarding lookups the engine/UI wrote (`sprk_regardingmatter`,
+ * `sprk_regardingperson`, …) — the field name yields the entity deterministically
+ * (`COMMUNICATION_REGARDING_FIELDS`) and the `_value` annotation yields the GUID.
+ * The lookup matching the denorm primary id is preferred; otherwise the first
+ * populated regarding lookup scopes the tabs.
  */
 export function resolveRegarding(record: Record<string, unknown>): ReconcileRegarding | null {
-  const model = derivePrimaryReview(
-    str(record, 'sprk_associationprovenance'),
-    num(record, 'sprk_associationstatus'),
-    undefined,
-    {
-      recordName: str(record, 'sprk_regardingrecordname'),
-      recordNumber: str(record, 'sprk_regardingrecordnumber'),
-      entityType: null,
-      recordTypeLabel: str(record, 'sprk_regardingrecordtypename'),
-    }
-  );
-  const primary = model.state === 'confirmed' ? model.primary : undefined;
-  if (primary && primary.entity && primary.targetId) {
-    return { entityType: primary.entity, recordId: primary.targetId };
+  if (num(record, 'sprk_associationstatus') !== ASSOCIATION_STATUS_RESOLVED_VALUE) return null;
+
+  const primaryId = normGuid(str(record, 'sprk_regardingrecordid'));
+  let firstFiled: ReconcileRegarding | null = null;
+  for (const { field, entityType } of COMMUNICATION_REGARDING_FIELDS) {
+    const recordId = regardingLookupValue(record, field);
+    if (!recordId) continue;
+    if (!firstFiled) firstFiled = { entityType, recordId };
+    // Prefer the typed lookup that IS the denorm primary (owns the display fields).
+    if (primaryId && recordId === primaryId) return { entityType, recordId };
   }
-  return null;
+  return firstFiled;
 }
