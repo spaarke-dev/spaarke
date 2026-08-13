@@ -16,6 +16,18 @@
 | **PCF version history** | …v1.0.22 wording; v1.0.23 = OverlayDrawer side-pane redesign (SUPERSEDED); **v1.0.24 = native advanced lookup + Manage Access polish (#2/#3/#5/#6/#7) + email fixes (#9 regarding-name, #10 recipient lookup, #11 attachment upload) + SprkModal `nonBlocking`**. Rebuild recipe: bump 5 files → **build shared lib first (`npm run build` in Spaarke.UI.Components — REQUIRED when shared .tsx changed)** → `npm run build:prod` in TrackingFieldTrio → `cp out/controls/bundle.js Solution/Controls/.../bundle.js` → `cd Solution; ./pack.ps1` → `pac solution import --path bin/…zip --force-overwrite --publish-changes`. Packed ControlManifest.xml is hand-maintained — keep in sync. |
 | **Branch/sync** | `work/spaarke-SPA-external-access-platform-r2` — clean, 0 unpushed (last commit **8c1ac557b**), **7 ahead / 1 behind** origin/master. |
 
+## 🔥 Master-red hotfix (2026-08-12) — RESOLVED
+Master CI was red (blocking email-communication-intelligence-r2 PR #755): (1) our stale
+`ExternalAccessIntegrationTests.cs` passed removed `AccountId` param (11 sites) → broke the whole
+test build — fixed `AccountId`→`OrganizationId` (**PR #759**, merged to master); (2) Tier-1 blocking
+arch check `ADR007 EndpointsShouldNotReferenceGraphSdk` red — `FileAccessEndpoints.CreateShareLink`
+caught `Microsoft.Graph...ODataError` directly (from **email-r5** #63a339336, NOT our project) →
+replaced the typed catch with an exception FILTER on the type name (behavior preserved) (**PR #760**,
+merged). Client Quality (Prettier+ESLint) failure is `continue-on-error: true` (informational — NOT a
+blocker). Branch protection was OFF during the incident. Arch fix cherry-picked onto our work branch
+too (commit 7251f085a). Local verify: arch 7/7 blocking-subset pass, BFF 0 errors. Master CI re-running
+to confirm green.
+
 ## ✅ 070 / 071 / 072 — done (reference)
 `notes/task-070-deviations.md` (polymorphic grant-write + repaired path + sprk_organization),
 `notes/task-071-deviations.md` (polymorphic grant UI + side-pane lookup), `notes/task-072-deviations.md`
