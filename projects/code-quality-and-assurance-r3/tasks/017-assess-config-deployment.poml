@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="017" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Assess configuration/deployment architecture (KV federation — refactor ask #1)</title>
+    <phase>1 Full Assessment</phase>
+    <gate>blocked until 001,003</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Read-only Fable-verified assessment producing a design.md; no src/ or tests/ modification — STANDARD per task-create Step 3.5.5.</rigor-reason>
+    <model-tier>fable</model-tier>
+    <model-tier-reason>Runs the quality-assessment workflow whose mandatory adversarial-verification stage is Fable (NFR-05); cross-surface config inventory is exactly the class of claim Fable verification has refuted before.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001,003</deps>
+    <tags>assessment,config,deployment,quality</tags>
+  </metadata>
+
+  <prompt>Run the quality-assessment Workflow READ-ONLY across Spaarke's configuration/deployment architecture (refactor ask #1 — KV federation / single source of truth for config, accepted 2026-08-13). Produce a Fable-verified projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md that inventories every config source and consumer surface and sizes the KV-federation remediation. Modify NO source. Remediation is DEFERRED until this design exists (same rule as surfaces 2-6).</prompt>
+  <role>SPAARKE platform developer running the standing quality-assessment method, with deployment/configuration architecture expertise. The r1 ask's premises already drifted once (94-token claim vs 20+ claimed; /api/config/client already exists) — verify everything against live code. Read-only.</role>
+  <goal>projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md exists — a Fable-verified inventory + prioritized remediation design for the configuration/deployment surface (the #1 KV-federation refactor), with per-item severity/effort/risk and an explicit migration/coexistence plan — and notes/SCORECARD.md carries a Deployment &amp; Config row (or a documented fold into D10).</goal>
+
+  <context>
+    <background>Accepted from the customer-provisioning-orchestration-r1 ask (notes/deployment-complexity-refactors-ask-2026-08-12.md #1) via the r3 assessment (notes/deployment-refactors-assessment-2026-08-12.md §2). Configuration lives in 5+ places with drift risk: Bicep outputs, Key Vault secrets, Dataverse environment variables, App Service settings, and appsettings.template.json deploy-time tokens (grounded 2026-08-13: 93 #{TOKEN}# occurrences / 51 unique tokens in src/server/api/Sprk.Bff.Api/appsettings.template.json — the assessment note said 94; reconcile the count during inventory). Existing building blocks the design must account for: the anonymous /api/config/client endpoint already exists (src/server/api/Sprk.Bff.Api/Api/ConfigEndpoints.cs:38-45, MSAL bootstrap config, rate-limited per AUTHV2-049); a shared KV SecretClient is already registered (Infrastructure/DI/SpeAdminModule.cs:44). Cross-surface reach: BFF startup/config layer, PCF environmentVariables.ts client env-var utility, ~28 code-page SPAs' config utilities, external-spa + Office add-ins (baked-at-build-time BFF host), Deploy-Release.ps1 token substitution, and the client-side cache ceremony (5-min in-memory + 60-min localStorage). This surface has NOT been assessed by r3 before, and code-pages build sprawl (task 014) + external-spa are adjacent unassessed surfaces — committing r1's 2-4-week estimate without this assessment would violate r3's assessment-first principle.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/appsettings.template.json (93 token occurrences / 51 unique)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ConfigEndpoints.cs (existing /api/config/client at :38-45)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ConfigurationModule.cs (options-validation home)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/SpeAdminModule.cs (existing KV SecretClient at :44)</file>
+      <file role="canonical-reference">src/client/shared/ (PCF environmentVariables.ts client env-var utility — locate exact path during inventory)</file>
+      <file role="canonical-reference">scripts/ (Deploy-Release.ps1 token substitution + provisioning scripts)</file>
+      <file role="canonical-reference">docs/guides/auth-deployment-setup.md + docs/guides/CONFIGURATION-MATRIX.md</file>
+      <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/quality-assessment.workflow.js</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/deployment-complexity-refactors-ask-2026-08-12.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/SCORECARD.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Rubric D1-D11.</dependency>
+      <dependency task="003" status="pending">The quality-assessment workflow.</dependency>
+      <dependency task="061" status="pending">SOFT (not blocking): the config-validation hardening (#2) is a stated prerequisite preference for KV-federation remediation ("validate KV-sourced config before dropping tokens") — the design must sequence remediation after 061, but this assessment can run before/alongside it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope: READ-ONLY (NFR-03) — no src/, scripts/, or .github/ modification; only outputs are the workstream design.md + SCORECARD row.</constraint>
+    <constraint source="spec">Scope: the Fable adversarial-verification pass is non-negotiable (NFR-05) — every config-source and token-count claim carries file:line evidence and survives verification.</constraint>
+    <constraint source="project">Scope (inventory closed set): the design MUST inventory (1) the 5 config sources (Bicep outputs, KV secrets, Dataverse env-vars, App Service settings incl. #{TOKEN}# substitution, appsettings.template.json), (2) the deploy-time token census (reconcile 93-occurrence/51-unique vs the 94 claim), (3) the existing /api/config/client endpoint + its contract, (4) the client-side cache ceremony (5-min/60-min), (5) KV-provider wiring already present (SecretClient, KV references in App Settings), and (6) the cross-surface consumer reach: BFF + PCF environmentVariables.ts + ~28 code-page SPAs + external-spa + Office add-ins + Deploy-Release.ps1.</constraint>
+    <constraint source="project">Scope: remediation is DEFERRED — this task produces the design only; remediation tasks are created from the verified design (assessment-first, same as surfaces 2-6). The design MUST size remediation tranches and state the migration/coexistence plan (additive KV reader, per-customer cutover, token-pattern removal last).</constraint>
+    <constraint source="project">Scope: coordinate framing with task 014 (code-pages build sprawl assessment) — the ~28-SPA config-utility inventory overlaps; cross-reference rather than duplicate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Configuration/deployment architecture assessment</topic>
+    <files>
+      <file>docs/standards/CODE-QUALITY-RUBRIC.md</file>
+      <file>projects/code-quality-and-assurance-r3/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/notes/deployment-complexity-refactors-ask-2026-08-12.md</file>
+      <file>projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md</file>
+      <file>docs/guides/CONFIGURATION-MATRIX.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Confirm "use a workflow" opt-in; load rubric + workflow + the two 2026-08-12 notes.</step>
+    <step order="1">Fan-out: read-only finders across the six inventory areas (config sources, token census, /api/config/client, cache ceremony, KV wiring, cross-surface consumers), file:line evidence for every claim.</step>
+    <step order="2">Mandatory Fable adversarial-verification stage: re-verify the token census, confirm each claimed config source actually feeds runtime behavior, and refute any "unused config source" or "dead token" claims against src/ AND tests/ AND deploy scripts.</step>
+    <step order="3">If verification refutes &gt;30% of findings or cannot confirm the config-source inventory, invoke the escalation trigger.</step>
+    <step order="4">Synthesize projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md: verified inventory, drift-risk map (the one-URL-five-places class), prioritized remediation tranches with effort/risk, migration/coexistence plan, and explicit sequencing note that config-validation hardening (task 061) lands before token-pattern removal.</step>
+    <step order="5">Append the Deployment &amp; Config row to notes/SCORECARD.md (or document folding into D10 per the r3 assessment §3).</step>
+    <step order="6">Update TASK-INDEX.md: set task 017 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Fable verification pass cannot confirm the config-source inventory (which sources actually feed runtime config, with file:line evidence), or refutes &gt;30% of first-pass findings, STOP and report per CLAUDE.md §6 — do NOT synthesize a remediation design from unverified findings (NFR-05). A KV-federation design built on a wrong inventory would mis-scope a cross-surface refactor touching every customer deployment.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No config-deployment assessment exists: projects/code-quality-and-assurance-r3/workstreams/ has bff-api only (Glob workstreams/*/design.md → bff-api/design.md); r1's ask (notes/deployment-complexity-refactors-ask-2026-08-12.md #1) is an unverified estimate whose premises already drifted (claimed 20+ tokens, live count 93 occurrences/51 unique; claimed /api/config/client needs building, it exists at Api/ConfigEndpoints.cs:38-45).</existing>
+    <extension>No — no existing r3 task covers config architecture (task 014 covers code-pages build sprawl only; the overlap is cross-referenced, not duplicated). This is the standard per-surface assessment artifact, extending the established workstream pattern rather than a new mechanism.</extension>
+    <cost-of-doing-nothing>Without a verified design, r3 either commits a 2-4-week cross-surface refactor on drifted premises (mis-scoped, touching BFF + PCF + ~28 SPAs + external-spa + deploy scripts) or leaves the one-URL-five-places drift class (sprk_BffApiBaseUrl must match App Service URL, redirect URIs, CORS AllowedOrigins, PowerPages BaseUrl) unmanaged per-customer — the exact silent-fail class (T1/T5) r1 catalogued.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/SCORECARD.md (Deployment &amp; Config row appended, or documented D10 fold)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the run, projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md exists, Fable-verified, covering all six inventory areas with file:line evidence and a reconciled token census.</criterion>
+    <criterion testable="true">Given the design, remediation is sized in tranches with a migration/coexistence plan, and NO remediation was executed by this task.</criterion>
+    <criterion testable="true">Given the design, the sequencing dependency on task 061 (fail-fast validation before token-pattern removal) is explicit.</criterion>
+    <criterion testable="true">Given the run, notes/SCORECARD.md carries the surface's row (or a documented fold into D10).</criterion>
+    <criterion testable="true">Negative: no file under src/, scripts/, or .github/ was modified (read-only assessment).</criterion>
+    <criterion testable="true">Negative: if Fable verification could not confirm the inventory, no design.md was synthesized (escalation fired instead).</criterion>
+  </acceptance-criteria>
+
+  <notes>Refactor ask #1 (KV federation) — accepted 2026-08-13 into r3 as assess-first (project CLAUDE.md decision 2026-08-13). Read-only ⇒ conflict-free ⇒ can run anytime P1 capacity allows. Remediation tasks created only after this design exists. Adjacent: task 014 (code-pages), task 061 (#2 fail-fast validation — soft prerequisite for remediation, not for this assessment).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

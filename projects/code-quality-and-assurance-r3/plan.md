@@ -17,7 +17,7 @@
 - Forcing-functions (ArchTests, analyzers, CI gates) — per-surface activation
 - Horizontal sweeps (security, test quality, CVE, observability, doc-drift)
 
-**Timeline**: Multi-wave standing program (assessments run anytime; remediation sequenced into quiet windows) | **Estimated Effort**: initial task set ~30 tasks; surfaces 2–6 remediation task-created after their assessments.
+**Timeline**: Multi-wave standing program (assessments run anytime; remediation sequenced into quiet windows) | **Estimated Effort**: initial task set ~33 tasks (29 + 4 from the 2026-08-13 deployment/config ask); surfaces 2–6 + #1-KV-federation remediation task-created after their assessments.
 
 ---
 
@@ -84,6 +84,7 @@ Phase 2: BFF surface remediation (already assessed — 8 tasks)
 Phase 3: Horizontal sweeps (security / test / CVE / observability / doc-drift)
 Phase 4: Forcing-functions authoring (ArchTests, mechanical baseline, CI gates) — per-surface activation
 Phase 5: (DEFERRED) surfaces 2–6 remediation — task-created after each assessment design
+Phase 6: Deployment & Configuration Hygiene (from r1 ask — #3 Phase-C finish, #2 config validation, #4 Graph app-role constants; #1 assessed in Phase 1)
 Phase 9: Wrap-up (reconciliation, /test-diet, final SCORECARD aggregate)
 ```
 
@@ -124,7 +125,7 @@ Phase 9: Wrap-up (reconciliation, /test-diet, final SCORECARD aggregate)
 **Objectives:** Run the Fable-verified read-only assessment across all remaining surfaces; publish the honest re-baseline.
 
 **Deliverables:**
-- [ ] Assessment `design.md` for: shared client libs, shared server libs, PCF controls, Dataverse model + ALM, code pages + build sprawl, plugins
+- [ ] Assessment `design.md` for: shared client libs, shared server libs (owns the verified NG1 design), PCF controls, Dataverse model + ALM, code pages + build sprawl, plugins, **config-deployment (task 017 → `workstreams/config-deployment/design.md`, #1 KV federation)**
 - [ ] Re-baseline consolidation → honest aggregate published in `SCORECARD.md`
 
 **Inputs**: rubric + `quality-assessment` Workflow (Phase 0). **Outputs**: per-surface designs + re-baseline.
@@ -154,6 +155,22 @@ Phase 9: Wrap-up (reconciliation, /test-diet, final SCORECARD aggregate)
 ### Phase 5: Surface Remediation (DEFERRED)
 
 Task-created after each Phase-1 assessment design exists. Not decomposed in this pipeline run.
+
+### Phase 6: Deployment & Configuration Hygiene (accepted 2026-08-13 from the `customer-provisioning-orchestration-r1` ask)
+
+**Objectives:** Reduce deployment/config complexity — the structural root of r1's six silent-fail traps — as BFF quality work. See `notes/deployment-refactors-assessment-2026-08-12.md` for the grounded assessment.
+
+**Deliverables:**
+- [ ] **#3a drop the vestigial Dataverse S2S app-reg (task 060)** — scripts/docs/KV only (zero code consumers); delivers r1's "2 app-regs → 1". OBO + SPE per-tenant + the BFF's own (still-secret) Dataverse path untouched. **#3b** (the shared-lib `ClientSecret`→MI migration — the substantive, identity-attribution piece) is folded into the NG1/task-011 track (see NG1 note); flagged report-only by task 040 rule (c) until then.
+- [ ] **#2 uniform fail-fast config validation (task 061)** — `[Required]` + `IValidateOptions<T>` + `ValidateOnStart` uniform; startup crash on missing required settings.
+- [ ] **#4 Graph app-role single-source constant (task 062)** — `GraphAppRoles.cs` + verifier; provisioning script + r1 H10 become consumers.
+- [ ] Forcing-functions (in tasks 040/042): IOptions-validated-on-start, GraphAppRoles single-source, no secret-based Dataverse credential path.
+
+**Inputs**: BFF auth code (Phase C already landed); r1 ask + r3 assessment. **Outputs**: consolidated auth/provisioning; config-validation discipline; role-parity forcing-functions.
+
+**Coordination**: r1 is **paused** pending these; it resumes on r3's landed state (removes its D20/Phase E absorption). #1 (KV federation) is assessed in Phase 1 (task 017 → `workstreams/config-deployment/design.md`); its remediation is task-created from that verified design (assessment-first).
+
+**NG1 note**: task 011 (shared-server assessment) owns the verified NG1 design + re-estimate — now covering **both** the *access-stack* unification (`ServiceClient` vs raw-HTTP) **and** the #3b shared-lib `ClientSecret`→MI credential migration (they touch the same 2 files + share the identity-attribution question). Task 060 lands only the vestigial-app-reg drop (#3a). NG1 remediation is decided on 011's verified design — no longer deferred-out-of-scope.
 
 ### Phase 9: Wrap-up
 

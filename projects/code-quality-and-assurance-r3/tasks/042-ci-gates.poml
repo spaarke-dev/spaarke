@@ -17,7 +17,7 @@
     <tags>ci,cve,doc-drift</tags>
   </metadata>
 
-  <prompt>Wire CVE scan + publish/bundle-size budgets + doc-drift into the existing R1 PR/nightly CI layers, activated PER-SURFACE (no repo-wide big-bang). Coordinate every .github/workflows edit with ci-cd-unit-test-remediation-r1 (which owns existing-workflow edits) via /conflict-check before the PR.</prompt>
+  <prompt>Wire CVE scan + publish/bundle-size budgets + doc-drift into the existing R1 PR/nightly CI layers, activated PER-SURFACE (no repo-wide big-bang). ALSO (added 2026-08-13, deployment-refactor ask): wire CI-gate checks for (a) config-validation coverage — the task-040 rule-(a) ArchTest (customer-critical IOptions validated-on-start, per task 061) runs in the PR layer for BFF-touching PRs, and (b) Graph app-role parity — the task-062 GraphAppRoleVerifier drift check (constant vs SP grants) runs in the nightly layer (live-Graph — NOT per-PR). Coordinate every .github/workflows edit with ci-cd-unit-test-remediation-r1 (which owns existing-workflow edits) via /conflict-check before the PR.</prompt>
   <role>SPAARKE platform developer with GitHub Actions CI expertise. Follow root CLAUDE.md §16 + design.md §9 + §4A. Coordinate with ci-cd-unit-test-remediation-r1.</role>
   <goal>CVE scan, publish/bundle-size budgets, and doc-drift are wired into the existing R1 PR/nightly layers and activated per-surface; the ArchTests fitness functions (task 040) run in CI; every workflow edit is coordinated with ci-cd-unit-test-remediation-r1.</goal>
 
@@ -34,6 +34,7 @@
 
   <constraints>
     <constraint source="project">Scope: wire CVE + publish/bundle-size + doc-drift into the EXISTING R1 layers (no parallel workflows); PER-SURFACE activation only (design §4A) — no gate enabled repo-wide while a surface is dirty.</constraint>
+    <constraint source="project">Scope (2026-08-13 additions): the config-validation gate is the ArchTests run itself (task 040 rules a-c execute with the suite in the PR layer — no separate script duplicating the rule); the Graph app-role parity check invokes the task-062 verifier against the target env's SP in the NIGHTLY layer only (needs Graph credentials; a per-PR live-Graph call would be flaky + slow, violating CLAUDE.md §16 fast/low-false-positive). Neither gate is enabled before its owning task (061/062, plus 040 for the rules) has landed.</constraint>
     <constraint source="project">Scope: ci-cd-unit-test-remediation-r1 owns existing-workflow edits — every .github/workflows change MUST be coordinated via /conflict-check before the PR.</constraint>
     <constraint source="CLAUDE.md-§16">Scope: keep gates fast + low-false-positive; publish-size budget is ≤60 MB compressed (BFF).</constraint>
   </constraints>
@@ -51,8 +52,9 @@
     <step order="1">Run /conflict-check against projects/INDEX.md AND coordinate with ci-cd-unit-test-remediation-r1 before touching any .github/workflows file (invoke the escalation trigger).</step>
     <step order="2">Wire the CVE scan into the existing PR/nightly layer.</step>
     <step order="3">Wire the publish-size (≤60 MB compressed BFF) + bundle-size budgets.</step>
-    <step order="4">Wire the doc-drift gate + ensure the task-040 ArchTests fitness functions run in CI.</step>
-    <step order="5">Activate per-surface only; confirm no gate is on repo-wide while a surface is dirty.</step>
+    <step order="4">Wire the doc-drift gate + ensure the task-040 ArchTests fitness functions run in CI (this carries the config-validation coverage rule (a) + no-secret-Dataverse rule (c) into the PR layer).</step>
+    <step order="4a">Wire the Graph app-role parity check (task-062 GraphAppRoleVerifier vs the target env SP) into the NIGHTLY layer; skip/no-op cleanly when 062 has not landed or Graph credentials are absent.</step>
+    <step order="5">Activate per-surface only; confirm no gate is on repo-wide while a surface is dirty, and no 2026-08-13 gate is active before its owning task (040/061/062) landed.</step>
     <step order="6">Update TASK-INDEX.md: set task 042 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -70,9 +72,11 @@
     <criterion testable="true">Given task 040, the ArchTests fitness functions run in CI.</criterion>
     <criterion testable="true">Negative: no gate is enabled repo-wide while a surface is still dirty (per-surface activation).</criterion>
     <criterion testable="true">Every .github/workflows edit was coordinated with ci-cd-unit-test-remediation-r1 via /conflict-check.</criterion>
+    <criterion testable="true">Given a BFF-touching PR, the ArchTests suite (incl. task-040 rules a/c: config-validation coverage + no-secret-Dataverse) runs and gates in the PR layer; given the nightly layer, the Graph app-role parity check (task-062 verifier) runs against the target env SP and reports drift.</criterion>
+    <criterion testable="true">Negative: the app-role parity check does NOT run per-PR (nightly only), and no 2026-08-13 gate is enabled before its owning task (040/061/062) has landed (each skips/no-ops cleanly, not red).</criterion>
   </acceptance-criteria>
 
-  <notes>Maps spec.md FR-16 / design.md §9 + §4A. Depends on task 040.</notes>
+  <notes>Maps spec.md FR-16 / design.md §9 + §4A. Depends on task 040. EXPANDED 2026-08-13 (deployment-refactor ask #2/#4, notes/deployment-refactors-assessment-2026-08-12.md §3): config-validation coverage gate (via ArchTests rule a) + Graph app-role parity gate (via task-062 verifier, nightly). Coordinate with ci-cd-unit-test-remediation-r1 as already noted.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

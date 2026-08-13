@@ -1,7 +1,8 @@
 # TASK-INDEX — code-quality-and-assurance-r3
 
 > **Program**: standing quality program (single project, single worktree; surfaces = workstreams/phases).
-> **Execution**: operator-gated. All task work via `task-execute`. Assessments (010–015) run via the `quality-assessment` Workflow — operator per-run opt-in ("use a workflow"); Fable adversarial-verification is non-negotiable (NFR-05).
+> **Execution**: operator-gated. All task work via `task-execute`. Assessments (010–015, 017) run via the `quality-assessment` Workflow — operator per-run opt-in ("use a workflow"); Fable adversarial-verification is non-negotiable (NFR-05).
+> **Task count**: 33 (29 initial + 4 from the 2026-08-13 deployment/config ask: 017, 060, 061, 062).
 > **Baseline**: BFF publish 46.89 MB compressed (ceiling 60 MB). `/conflict-check` before every remediation PR (19 worktrees touch BFF).
 
 ---
@@ -19,7 +20,8 @@
 | 013 | Assess Dataverse model + ALM | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
 | 014 | Assess code pages + build sprawl | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
 | 015 | Assess plugins | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
-| 016 | Re-baseline SCORECARD (aggregate) | 1 Full Assessment | STANDARD | opus | high | 010,011,012,013,014,015 | none | 🔲 |
+| 017 | Assess config-deployment (#1 KV federation) | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
+| 016 | Re-baseline SCORECARD (aggregate) | 1 Full Assessment | STANDARD | opus | high | 010,011,012,013,014,015,017 | none | 🔲 |
 | 020 | BFF-A: delete low-contention dead code (Scopes/Retry/StubLiveFact/archives) | 2 BFF Remediation | FULL | sonnet | high | none | A | 🔲 |
 | 021 | BFF-A: fix invoice-totals cast in-place (Bug-1) + test | 2 BFF Remediation | FULL | opus | high | none | A | 🔲 |
 | 022 | BFF-A: .eml builder cleanup (Bug-2) | 2 BFF Remediation | FULL | sonnet | high | none | A | 🔲 |
@@ -38,6 +40,9 @@
 | 040 | Forcing-function: expand ArchTests | 4 Forcing-Functions | FULL | opus | high | none | P4 | 🔲 |
 | 041 | Forcing-function: mechanical baseline | 4 Forcing-Functions | STANDARD | sonnet | high | none | P4 | 🔲 |
 | 042 | Forcing-function: CI gates | 4 Forcing-Functions | STANDARD | sonnet | high | 040 | none | 🔲 |
+| 060 | Drop vestigial Dataverse S2S app-reg (#3a, scripts/docs/KV) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | 🔲 |
+| 061 | Uniform fail-fast config validation (#2) | 6 Deployment & Config | FULL | opus | high | none | none | 🔲 |
+| 062 | Graph app-role single-source constants (#4) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | 🔲 |
 | 090 | Project wrap-up | 9 Wrap-up | STANDARD | sonnet | medium | prior | none | 🔲 |
 
 Legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ⏸️ deferred/blocked.
@@ -49,7 +54,8 @@ Legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ⏸️ deferred/
 | Group | Tasks | parallel-safe | Notes |
 |-------|-------|---------------|-------|
 | **P0** | 001, 002 | true | 002 depends on 001 but both are foundation docs; 002 runs immediately after 001. |
-| **P1** | 010, 011, 012, 013, 014, 015 | true | Assessments are READ-ONLY ⇒ conflict-free ⇒ may run in parallel anytime (each needs the "use a workflow" opt-in + a Fable verify pass). |
+| **P1** | 010, 011, 012, 013, 014, 015, 017 | true | Assessments are READ-ONLY ⇒ conflict-free ⇒ may run in parallel anytime (each needs the "use a workflow" opt-in + a Fable verify pass). 017 = config-deployment (#1). |
+| **P6 (Deployment & Config)** | 060, 061, 062 | **false** | 061 BFF hot-path config; 062 BFF + provisioning; 060 provisioning/docs/KV only (no BFF code — independent of 023). /conflict-check before each PR. |
 | **P3** | 030, 032, 033, 034 | true | Sweep-style horizontals. **031 is sequential (`parallel-safe:false`)** — it modifies `tests/**` and coordinates with `ci-cd-unit-test-remediation-r1`. |
 | **P4** | 040 | true | 040 (ArchTests) is parallel-safe. **041 and 042 are sequential (`parallel-safe:false`)** — 041 edits build config per-surface; 042 edits `.github/workflows` (owned by `ci-cd-unit-test-remediation-r1`) and depends on 040. |
 | **BFF (020–029)** | 020–029 | **false** | BFF hot-path contention (19 worktrees). Small sequential PRs; `/conflict-check` before each PR. Split into A/B tranches (below). |
@@ -88,11 +94,12 @@ The BFF workstream lands as small PRs in two tranches off the one branch:
 ## Deferred
 
 - **Phase 5 — surfaces 2–6 remediation**: remediation tasks for shared client libs, shared server libs, PCF, Dataverse model+ALM, code pages, and plugins are **task-created only AFTER** each surface's Fable-verified assessment `design.md` exists (tasks 010–015 outputs). They are NOT enumerated here yet — this is the assessment-first owner decision (spec.md Owner Clarifications; CLAUDE.md Decisions Made).
-- **NG1 — two-Dataverse-stacks unification**: out of scope; filed as a backlog **Idea** (FR-23) via `/devops-idea-create`. Characterized by task 011; not remediated in R3.
+- **NG1 — two Dataverse *access-stack* unification** (updated 2026-08-13): on an **assess-then-decide track**, NOT deferred-out-of-scope. Task **011** produces the verified NG1 design + fresh re-estimate; task **060** (#3) lands the credential-model slice first (lowering the remaining risk); remediation of the access-stack merge is decided on 011's verified design. Idea #742 tracks the remaining work.
+- **#1 KV federation remediation** — deferred until task **017** produces `workstreams/config-deployment/design.md`; then task-created (assessment-first, cross-surface incl. external-spa/code-pages).
 
 ---
 
 ## Goal-eligibility
 
 - **Candidate goal-eligible waves**: the **assessment wave (010–015)** (read-only, machine-verifiable end-state = design.md + SCORECARD row exists, ≥3 low-ambiguity tasks) and the **BFF behavior-neutral subset (020, 025, 027)** (dead-code deletion / namespace-only migration / repo hygiene — closed acceptance criteria) MAY be run under `/goal`. The Haiku evaluator is a transcript-only stopping-condition check — Step 9.5 + orchestrator authority are unchanged; tasks are never auto-completed on goal achievement.
-- **NOT goal-eligible**: **bug-fix/correctness** (021, 028), **auth/security** (023 auth, 030 security), **CI** (042), **test-modifying / contested** (029 deletes tests in Services/Ai, 031, 040), **data-driven rename** (026) — these carry judgment boundaries / irreversibility / security sensitivity and require per-task operator gating.
+- **NOT goal-eligible**: **bug-fix/correctness** (021, 028), **auth/security** (023 auth, 030 security, **061 config validation**), **CI** (042), **test-modifying / contested** (029 deletes tests in Services/Ai, 031, 040), **data-driven rename** (026) — these carry judgment boundaries / irreversibility / security sensitivity and require per-task operator gating. (062 Graph-role constants + **060 vestigial-app-reg drop** are candidate goal-eligible items — bounded, closed acceptance, safety-gated; 060 is auth-adjacent so still operator-reviewed at Step 9.5.)

@@ -21,6 +21,7 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 | Dataverse model + ALM | — | — | — | — | — | — | — | — | — | — | — | pending (task 013) | — |
 | Code pages + build sprawl | — | — | — | — | — | — | — | — | — | — | — | pending (task 014) | — |
 | Plugins | — | — | — | — | — | — | — | — | — | — | — | pending (task 015) | — |
+| Config-deployment (#1 KV federation) | — | — | — | — | — | — | — | — | — | — | — | pending (task 017) | — |
 | **AGGREGATE** | — | — | — | — | — | — | — | — | — | — | — | pending (task 016 — after all surfaces) | — |
 
 ## BFF row evidence (verified 2026-08-06)
