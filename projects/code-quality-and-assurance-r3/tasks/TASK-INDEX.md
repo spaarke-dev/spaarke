@@ -21,7 +21,7 @@
 | 013 | Assess Dataverse model + ALM | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
 | 014 | Assess code pages + build sprawl | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
 | 015 | Assess plugins | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
-| 017 | Assess config-deployment (#1 KV federation) | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
+| 017 | Assess config-deployment (#1 KV federation) | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | ✅ |
 | 019 | BFF Auth Surface Map + dependency graph (gates auth tasks) | 1 Full Assessment | STANDARD | fable | xhigh | none | P1 | ✅ |
 | 016 | Re-baseline SCORECARD (aggregate) | 1 Full Assessment | STANDARD | opus | high | 010,011,012,013,014,015,017 | none | 🔲 |
 | 020 | BFF-A: delete low-contention dead code (Scopes/Retry/StubLiveFact/archives) | 2 BFF Remediation | FULL | sonnet | high | none | A | 🔲 |

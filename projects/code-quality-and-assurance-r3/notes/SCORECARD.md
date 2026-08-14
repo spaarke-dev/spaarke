@@ -21,10 +21,12 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 | Dataverse model + ALM | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 013) | — |
 | Code pages + build sprawl | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 014) | — |
 | Plugins | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 015) | — |
-| Config-deployment (#1 KV federation) | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 017) | — |
+| **Config-deployment (#1 KV federation)** | B– | D+ | **F** | A– | C | C+ | C+ | A | B+ | D+ | C | **F** | 2026-08-14 (Fable-verified) | [`workstreams/config-deployment/design.md`](../workstreams/config-deployment/design.md) |
 | **AGGREGATE** | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 016 — after all surfaces) | — |
 
 > **BFF Overall = C+ (provisional).** Per rubric §4.2: the equal-weighted mean of the 11 dimension points is ≈ 2.70 (**B–**), but the gating cap `min(B–, D2=C+, D3=B–)` = **C+** — the correctness dimension (D2, the broken invoice-totals path) gates the surface below its mean, exactly as the rubric intends. This is a **re-baseline input, not a final grade**; it improves as tasks 020–029 land (Bug-1 fix lifts D2, dead-code deletion lifts D5, tarball removal lifts D10). Re-score at wrap-up (task 090).
+
+> **⚠️ Cross-surface reconciliation for task 016 (aggregate re-baseline).** The config-deployment row scores the live anonymous Finance Dataverse-write endpoint as **D3 = F** (rubric §3's named F exemplar). The **BFF row scores the *same* defect as D3 B–** — because it was assessed 2026-08-06, *before* the rubric was published (task 001, 2026-08-14). Under the standing ruler this defect is an **F wherever scored**. Task 016 MUST reconcile: re-score BFF D3 → F (dropping BFF Overall from C+ to **F** until BFF task **023** lands the `@spaarke/auth` closure), OR document the exception. Fastest grade-recovery for BOTH surfaces = land task 023.
 
 ## BFF row evidence (verified 2026-08-06)
 
