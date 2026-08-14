@@ -2,10 +2,10 @@
 
 > **Project**: `spaarkeai-compose-templates-r8`
 > **Created**: 2026-08-13 · **Author**: Ralph Schroeder + Claude (Opus 4.8)
-> **Status**: DESIGN — **first draft** (split out of `spaarkeai-compose-r7` on 2026-08-13; hand-authored input to `/design-to-spec` → `/project-pipeline`)
+> **Status**: DESIGN — **second draft** (split out of `spaarkeai-compose-r7` on 2026-08-13; §2 open questions + §7-step-0 decisions now CLOSED per the best-practice investigation 2026-08-13; hand-authored input to `/design-to-spec` → `/project-pipeline`)
 > **Split rationale**: what began as R7's "Templates tab" use case (UC-1) is really a **cross-surface template subsystem** — storage, merge model, a picker, *and* it should also cover **email templates**. That is bigger than R7's editor-UX scope, so it is its own project. R7 keeps the editor UX (save/autosave/hotkeys/PDF-import); R8 owns templates end-to-end.
 > **Governing constraints**: root CLAUDE.md §10 (BFF Hygiene), §11 (Component Justification), ADR-050 (modal shell), [ASSISTANT-SURFACE-LAUNCH-MECHANISM.md](../../docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md) (template → Compose tab).
-> **Research grounding**: [`notes/dataverse-template-storage-findings.md`](notes/dataverse-template-storage-findings.md).
+> **Research grounding**: [`notes/dataverse-template-storage-findings.md`](notes/dataverse-template-storage-findings.md) (storage) · [`notes/merge-field-and-unified-template-best-practice.md`](notes/merge-field-and-unified-template-best-practice.md) (merge model, token representation, entity shape, **authoring UX**).
 
 ---
 
@@ -40,12 +40,25 @@ sources: [`notes/dataverse-template-storage-findings.md`](notes/dataverse-templa
 - **Reject**: native `documenttemplate` (env-locked, desktop-Word content controls, no TipTap round-trip),
   the email `template` entity's memo-only body for Word, and R6's Note-attachment storage.
 
-### Open design question — one entity or two?
-Should Word + email templates share **one** entity (e.g. `sprk_template` with a `type` = Word | Email and a
-File column that holds either payload) or **two** (`sprk_composetemplate` + keep email on the OOB `template`
-entity)? **Recommendation to validate in `/design-to-spec`:** **one unified `sprk_template` entity** — a
-single catalog, one picker component, one merge seam, matching §11 "one component that works exceptionally
-well." Migrating email off the OOB `template` entity is the cost; weigh it.
+### RESOLVED design decisions (2026-08-13 investigation — do not re-litigate)
+
+**(a) One entity or two? → ONE unified `sprk_template`.** Single catalog, one picker, one merge seam (§11).
+`sprk_type` optionset (Word | Email). **File column** (`sprk_payload`) holds the Word `.dotx`; **memo**
+columns (`sprk_subject` / `sprk_body`, HTML) hold the email payload — memo (not File) for email makes the OOB
+`template` migration a trivial `body→sprk_body` copy and keeps email body editable in a form. Full column
+table: [`notes/merge-field-and-unified-template-best-practice.md`](notes/merge-field-and-unified-template-best-practice.md) §7.
+
+**(b) Merge model → Model A (resolve-at-open) for v1, everywhere.** Tokens resolve to text **server-side**
+before either editor mounts — exactly what the shipped code does (`ComposeTemplateSource` merges OOXML before
+projection; `EmailTemplateService` renders HTML in the BFF). **No live editable `{{token}}` text in any
+editor.** Live merge-field "pills" (Model B) are a **deferred, Lexical-first** enhancement — NOT a Word/TipTap
+feature, because an inline atom node desyncs the Compose `(paraId,runIndex,offset)` offset table (ADR-049;
+`composeNumberAtomExtension.ts` documents why Compose uses a decoration, not a node). `{{token}}` stays the
+single canonical wire syntax across both surfaces.
+
+**(c) Token vocabulary → one shared framework-agnostic `TokenRegistry`** (`{id,label,category,sampleValue}`)
+— the one new abstraction (§11-justified: no registry exists; vocabulary otherwise drifts between the Word
+and email merge contexts). Feeds the server merge context, validation, and the future picker.
 
 ---
 
@@ -81,10 +94,22 @@ Unify the email composer's template picker onto the `sprk_template` catalog (typ
 keeps **Lexical** (per R7 decision — no TipTap for email); only the template **source** changes. Decide
 whether to migrate existing OOB email `template` records or dual-read during transition.
 
-### UC-6 — Maker authoring / management (scope TBD)
-How templates get created/curated: a light admin surface, or just makers creating `sprk_template` records +
-uploading the File column via a model-driven form. **Recommendation**: start with the model-driven form
-(no custom admin UI); revisit if curation needs grow (§11 default-to-reuse).
+### UC-6 — Template authoring / management *(RESOLVED — the confusing part)*
+**Users never see a separate "template builder" — they promote something they already authored, in the
+editor they already use.** (Full rationale: [`notes/merge-field-and-unified-template-best-practice.md`](notes/merge-field-and-unified-template-best-practice.md) §7.5.)
+
+- **Primary — "Save as template" in-context.** Compose doc → **"Save as Word template"** (new thin BFF action:
+  current resolved OOXML bytes → `sprk_template.sprk_payload`, reusing the `documents/{id}/save` path).
+  EmailComposer draft → **"Save as email template"** (composer HTML → `sprk_body`/`sprk_subject`). For v1
+  (boilerplate-only, no tokens) this is write-it-and-name-it — zero syntax, zero upload.
+- **Who authors** (owner decision 2026-08-13): **any user** saves **personal** templates freely
+  (`sprk_scope=Personal`); **firm/org-shared** (`sprk_scope=Org`) is **role-gated**. A "Save as template ▾"
+  split offers "Save as my template" (always) / "Save as firm template" (role-gated).
+- **Secondary — "Import Word file"** (power path for pre-built firm `.dotx`): a small Import button on the
+  Templates tab uploads a file into a new record. **Accept `.docx` too** (resolver already does) — no
+  "Save As Template" ceremony.
+- **Management** (rename / recategorize / delete / toggle personal↔org): a plain list — "manage" mode on the
+  Quick Start Templates tab OR the model-driven grid. No custom admin app (§11 default-to-reuse).
 
 ---
 
@@ -140,21 +165,30 @@ Client:
 - `.../ComposeWorkspace.tsx` — `mountBornInEditor` (born-in mount for new-from-template).
 - `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/*` — template picker source swap.
 
+- `.../ComposeWorkspace.tsx` / `EmailComposer/*` — **"Save as template"** affordance (new authoring path, UC-6).
+- `.../` shared `TokenRegistry` module — closed field-set vocabulary (deferred token layer, §2(c)).
+
 Dataverse:
-- New `sprk_template` entity (File column + metadata) — schema via `dataverse-create-schema`.
+- New `sprk_template` entity: `sprk_type` (Word|Email), `sprk_payload` (**File**, Word `.dotx`), `sprk_subject`/
+  `sprk_body` (**memo** HTML, email), `sprk_name`/`sprk_category`/`sprk_description`, `sprk_scope`
+  (Personal|Org) — schema via `dataverse-create-schema`.
 
 ---
 
 ## 7. Phasing sketch (to be refined by `/project-pipeline`)
 
-0. Decisions: one-vs-two entities (§2); token schema/source; email migration vs dual-read; maker authoring.
-1. **`sprk_template` entity** (File column + metadata) + seed starter templates.
-2. **Storage swap**: `ComposeTemplateSource` reads the File column (retire the Note-attachment path).
+0. ~~Decisions~~ — **CLOSED** (§2 a/b/c + UC-6): one unified entity, Model A merge, shared `TokenRegistry`,
+   in-context "Save as template" authoring (personal free / org role-gated). Remaining spike carried to §8:
+   `MERGEFIELD` field codes vs literal `{{token}}` runs in the `.dotx`.
+1. **`sprk_template` entity** (columns per §6) + seed starter templates.
+2. **Storage swap**: `ComposeTemplateSource` reads the `sprk_payload` File column (retire the Note path).
 3. **Resolve-only endpoint** (template → projected TipTap HTML) + **list endpoint** (cards).
 4. **Templates tab** in Quick Start + re-point empty-state "Open template" → surface-launch a Compose tab.
-5. **Token merge** (closed set) — tier-2.
-6. **Email templates** onto `sprk_template` (Lexical composer picker source swap).
-7. Wrap-up: anti-clobber deploy (BFF + `sprk_spaarkeai`), tests, docs (template system architecture).
+5. **Authoring (UC-6)**: "Save as template" — Compose (new save-as-template BFF action) + EmailComposer;
+   personal/org scope + role gate; "Import Word file" secondary path.
+6. **Token merge** (closed set, Model A) — tier-2; boilerplate-only acceptable for v1.
+7. **Email templates** onto `sprk_template` (Lexical composer picker source swap; dual-read → copy migration).
+8. Wrap-up: anti-clobber deploy (BFF + `sprk_spaarkeai`), tests, docs (template system architecture).
 
 ---
 
@@ -165,7 +199,11 @@ Dataverse:
   mounted, from anywhere Quick Start opens; empty-state "Open template" opens the same surface.
 - New-from-template produces an **editable** Compose document (docx→TipTap projection), named on first save.
 - The **email composer** lists/renders templates from the same `sprk_template` catalog (still Lexical).
-- `{{token}}` merge fills the closed field set (or boilerplate-only if v1 defers merge).
+- A user can **"Save as template"** from a Compose doc AND from the EmailComposer without leaving the editor;
+  the result is a `sprk_template` record. **Personal** save works for any user; **org-shared** save is
+  role-gated. An existing Word `.docx`/`.dotx` can be **imported** into a record.
+- `{{token}}` merge fills the closed field set (or boilerplate-only if v1 defers merge); the `.dotx` `MERGEFIELD`
+  vs literal-`{{token}}` fidelity spike is resolved before the maker authoring convention is documented.
 - Publish size ≤60 MB; no new HIGH CVE; placement + component justifications recorded.
 
 ---
