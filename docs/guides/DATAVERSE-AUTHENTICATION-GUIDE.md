@@ -1004,7 +1004,7 @@ Multiple approaches exist for Dataverse authentication. We tried custom HttpClie
 #### Alternatives Considered
 
 1. **Custom HttpClient**: Rejected - unreliable, returns 500 errors
-2. **Managed Identity**: Rejected - doesn't work for Dataverse S2S
+2. **Managed Identity**: ~~Rejected - doesn't work for Dataverse S2S~~ — **CORRECTED 2026-08-14 (code-quality-and-assurance-r3 task 060).** This claim is stale and contradicts [ADR-028 §24](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), which **mandates `DefaultAzureCredential` (managed identity) for the Dataverse service identity**, and the live `auth-deployment-setup.md` §9c MI Dataverse smoke test. Managed identity does work for Dataverse app-only (server-to-server) access — the `Services/Ai` Dataverse camp already runs on the UAMI. The BFF's own shared-lib Dataverse path (`DataverseServiceClientImpl` / `DataverseWebApiService`) is still `ClientSecret`-based; migrating it to MI is the **#3(b) shared-lib ClientSecret→MI migration**, tracked on the **NG1 / task-011** assess-then-decide track (see `projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md` §Addendum 2026-08-13). This task (060) does not perform that migration.
 3. **CrmServiceClient (.NET Framework)**: Rejected - not .NET 8 compatible
 
 #### Review Date

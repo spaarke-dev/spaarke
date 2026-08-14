@@ -4,7 +4,7 @@
     <title>Drop the vestigial separate Dataverse S2S app-registration + KV secrets from provisioning (refactor ask #3a — clean, scripts/docs/KV only)</title>
     <phase>6 Deployment &amp; Configuration Hygiene</phase>
     <gate>startable (independent of BFF code; coordinate with r1 provisioning)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Auth-provisioning + docs/KV hygiene; removes a vestigial app-reg with ZERO code consumers — no BFF source change. STANDARD (not FULL): no tests/** touch, no BFF publish surface. Care warranted because it is auth-adjacent.</rigor-reason>
     <model-tier>sonnet</model-tier>

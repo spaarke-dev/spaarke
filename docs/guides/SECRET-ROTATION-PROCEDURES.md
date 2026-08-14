@@ -55,7 +55,6 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 | Azure-managed SSL certificates | App Service (api.spaarke.com) | Auto-renewed by Azure |
 | Managed identity credentials | App Service system-assigned identity | Auto-rotated by Azure (no manual action) |
 | GitHub Actions secrets | GitHub repository settings | Manual — see [Manual Procedures](#manual-procedures) |
-| Dataverse S2S app secret | sprk-platform-{env}-kv (`Dataverse-S2S-ClientSecret`) | Automated (`Rotate-Secrets.ps1 -SecretType EntraId` after adding to platform orchestration) |
 
 ---
 
@@ -236,26 +235,12 @@ GitHub Actions secrets are used in CI/CD workflows and cannot be rotated by `Rot
    ```
 6. Monitor the workflow run for success.
 
-### Rotate Dataverse S2S Client Secret
-
-If the Dataverse S2S app registration (`spaarke-dataverse-s2s-prod`) is not included in the platform Entra ID rotation, rotate manually:
-
-1. Go to **Azure Portal > Entra ID > App registrations > spaarke-dataverse-s2s-prod**.
-2. Navigate to **Certificates & secrets > Client secrets**.
-3. Click **New client secret**, set expiry to 12 months.
-4. Copy the new secret value immediately (it will not be shown again).
-5. Update Key Vault:
-   ```powershell
-   az keyvault secret set `
-       --vault-name sprk-platform-prod-kv `
-       --name "Dataverse-S2S-ClientSecret" `
-       --value "<new-secret-value>"
-   ```
-6. Restart the App Service:
-   ```powershell
-   az webapp restart --name spaarke-bff-prod --resource-group rg-spaarke-platform-prod
-   ```
-7. Verify health: `curl https://api.spaarke.com/healthz`
+<!-- The "Rotate Dataverse S2S Client Secret" procedure was removed 2026-08-14
+     (code-quality-and-assurance-r3 task 060). The separate spaarke-dataverse-s2s-*
+     app registration + its Dataverse-S2S-* Key Vault secrets had zero code consumers
+     and were dropped; Dataverse S2S access consolidated onto the BFF app registration
+     credential (BFF-API-ClientSecret) on 2026-01-07. Rotating BFF-API-ClientSecret
+     (see the BFF API section above) now covers the Dataverse service path. -->
 
 ---
 

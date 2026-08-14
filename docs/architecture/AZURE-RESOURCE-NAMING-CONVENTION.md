@@ -150,7 +150,6 @@ Each environment gets its **own app registrations** to ensure credential and sco
 | Registration | Pattern | Dev | Demo |
 |-------------|---------|-----|------|
 | BFF API | `Spaarke BFF API - {Env}` | `spe-bff-api` (legacy) | `Spaarke BFF API - Demo` |
-| Dataverse S2S | `Spaarke Dataverse S2S - {Env}` | _(shared)_ | `Spaarke Dataverse S2S - Demo` |
 | UI SPA (MSAL) | `Spaarke UI - {Env}` | _(existing)_ | `Spaarke UI - Demo` |
 | API Scope URI | `api://{appId}/user_impersonation` | `api://spe-bff-api/...` (legacy) | `api://{guid}/user_impersonation` |
 
@@ -183,7 +182,6 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 | AI Foundry Project | 63 | `sprk-{env}-aif-proj` | `sprk-demo-aif-proj` | `sprk-prod-aif-proj` |
 | AI Foundry Storage | 24 | `sprk{env}aifsa` | `sprkdemoaifsa` | `sprkprodaifsa` |
 | App Registration (BFF) | 120 | `Spaarke BFF API - {Env}` | `Spaarke BFF API - Demo` | `Spaarke BFF API - Production` |
-| App Registration (DV) | 120 | `Spaarke Dataverse S2S - {Env}` | `Spaarke Dataverse S2S - Demo` | `Spaarke Dataverse S2S - Production` |
 | App Registration (UI) | 120 | `Spaarke UI - {Env}` | `Spaarke UI - Demo` | `Spaarke UI - Production` |
 | API Scope URI | N/A | `api://{appId}/user_impersonation` | Use Application ID GUID | Use Application ID GUID |
 | Managed Identity (User-Assigned) | 128 | `mi-{purpose}-{env}` | `mi-bff-api-demo` | `mi-bff-api-prod` |
@@ -346,7 +344,7 @@ For fully automated provisioning (CI/CD, `Provision-Customer.ps1`), these servic
 | `Spaarke Provisioning SP` | Entra ID | Application Administrator (app registrations) |
 | `Spaarke BFF API - {Env}` | Microsoft Graph | `FileStorageContainer.Selected` (Application) |
 | `Spaarke BFF API - {Env}` | SharePoint | `Container.Selected` (Application) |
-| `Spaarke Dataverse S2S - {Env}` | Dataverse | System Administrator security role |
+| `Spaarke BFF API - {Env}` | Dataverse | System Administrator security role (single Dataverse Application User; the separate Dataverse S2S app was removed 2026-08-14 — task 060) |
 | PAC CLI auth | Dataverse | System Administrator (for solution import) |
 
 **For manual provisioning** (current approach): Azure CLI interactive login (`az login`) + PAC CLI interactive login (`pac auth create`) are sufficient.

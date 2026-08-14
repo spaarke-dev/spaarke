@@ -5,7 +5,7 @@
     <phase>2 BFF Remediation</phase>
     <tranche>A</tranche>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Repo hygiene (git untrack + working-tree cleanup + .gitignore verification); no source behavior change — STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -24,11 +24,11 @@
 | 017 | Assess config-deployment (#1 KV federation) | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | ✅ |
 | 019 | BFF Auth Surface Map + dependency graph (gates auth tasks) | 1 Full Assessment | STANDARD | fable | xhigh | none | P1 | ✅ |
 | 016 | Re-baseline SCORECARD (aggregate) | 1 Full Assessment | STANDARD | opus | high | 010,011,012,013,014,015,017 | none | ✅ |
-| 020 | BFF-A: delete low-contention dead code (Scopes/Retry/StubLiveFact/archives) | 2 BFF Remediation | FULL | sonnet | high | none | A | 🔲 |
+| 020 | BFF-A: delete low-contention dead code (Scopes/Retry/StubLiveFact/archives) | 2 BFF Remediation | FULL | sonnet | high | none | A | ✅ |
 | 021 | BFF-A: fix invoice-totals cast in-place (Bug-1) + test | 2 BFF Remediation | FULL | opus | high | none | A | 🔲 |
 | 022 | BFF-A: .eml builder cleanup (Bug-2) | 2 BFF Remediation | FULL | sonnet | high | none | A | 🔲 |
 | 023 | BFF-A: auth closure via @spaarke/auth (§6 RESOLVED) | 2 BFF Remediation | FULL | opus | xhigh | none | A | 🔲 |
-| 027 | BFF-A: repo hygiene (tarballs/artifacts) | 2 BFF Remediation | STANDARD | sonnet | low | none | A | 🔲 |
+| 027 | BFF-A: repo hygiene (tarballs/artifacts) | 2 BFF Remediation | STANDARD | sonnet | low | none | A | ✅ |
 | 024 | BFF-B: AI-facade compliance | 2 BFF Remediation | FULL | opus | high | none | B | 🔲 |
 | 025 | BFF-B: Endpoints/→Api/ migration | 2 BFF Remediation | STANDARD | sonnet | medium | none | B | 🔲 |
 | 026 | BFF-B: DI decompose + Finance rename | 2 BFF Remediation | STANDARD | sonnet | high | none | B | 🔲 |
@@ -42,7 +42,7 @@
 | 040 | Forcing-function: expand ArchTests | 4 Forcing-Functions | FULL | opus | high | none | P4 | 🔲 |
 | 041 | Forcing-function: mechanical baseline | 4 Forcing-Functions | STANDARD | sonnet | high | none | P4 | 🔲 |
 | 042 | Forcing-function: CI gates | 4 Forcing-Functions | STANDARD | sonnet | high | 040 | none | 🔲 |
-| 060 | Drop vestigial Dataverse S2S app-reg (#3a, scripts/docs/KV) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | 🔲 |
+| 060 | Drop vestigial Dataverse S2S app-reg (#3a, scripts/docs/KV) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | ✅ |
 | 061 | Uniform fail-fast config validation (#2) | 6 Deployment & Config | FULL | opus | high | none | none | 🔲 |
 | 062 | Graph app-role single-source constants (#4) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | 🔲 |
 | 063 | Resource/secret naming standard + conformance CI gate | 6 Deployment & Config | STANDARD | sonnet | high | 017 | none | 🔲 |
