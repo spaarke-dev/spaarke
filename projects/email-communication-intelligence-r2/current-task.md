@@ -1,7 +1,7 @@
 # Current Task State — email-communication-intelligence-r2
 
 > **Last Updated**: 2026-08-13 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first, then "Fix Plan (TO-DO)".
+> **Recovery**: Read "Quick Recovery" first.
 
 ---
 
@@ -9,10 +9,35 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | R2 **deployed to dev + UAT in progress**. Reconciliation UI has real gaps (below). |
-| **Branch** | `work/email-communication-intelligence-r2` @ `b94ad4a61` · clean · **5 ahead / 8 behind `origin/master`** |
-| **Status** | in-progress — UAT fix plan. **#1,#2,#3,#5,#6 DONE**; **#4 DONE + wired** (live e2e pending inbound email). Commits: `7807c02a1`,`6757a55ae`,`a0e58c9ee`,`97e97e1b9`,`4d166fc28`,`d9ff4df82`. |
-| **Next Action** | **#8 deploy all** — (a) rebuild+redeploy CommunicationReconciliation code page (carries #2/#3/#5); (b) redeploy SpaarkeAi/LegalWorkspace bundle (carries #6 section). Then **#7** (merge `.eml` archive fix `0026af5e1` to master) + **#9** (cleanup). **Operator TODO:** send a test email to `mailbox-central@spaarke.com` to confirm #4 triage populates. |
+| **Phase** | R2 UAT round 1 fixes **MERGED (PR #765) + deployed**. UAT round 2 fixes committed → **PR #768 open, CI running**. |
+| **Branch** | `work/email-communication-intelligence-r2` · clean · **0 behind / 4 ahead** master. |
+| **Status** | Round 1: all 6 UAT fixes (#1-#6) + `.eml` archive (#7) + a real compound-OFF host-boot BFF bug (ADR-032 §F.1) — merged (`1825a3047`) + deployed. Round 2 (this UAT): reconciliation newest-first ordering + received/sent date-time display — **PR #768**. |
+| **Next Action** | **Merge PR #768** (Tier-1 gate satisfied — frontend-only, BFF jobs skip) → **Deploy SpaarkeAi** auto-fires (email-view date/time + spacing). THEN **UAT round 3** (form-vs-prototype parity, below). Then **#9 cleanup** UAT seed data. |
+
+### UAT round 3 (2026-08-13) — reconciliation FORM vs prototype (OPEN, not started)
+Operator comparing the deployed reconciliation browse/detail form to the prototype. Gaps observed:
+- **Lazy-load**: grid shows only 25 rows, doesn't scroll to load more (DataGrid `useLazyLoad` pageSize 25 + IntersectionObserver sentinel — check the scroll container height/sentinel in the reconciliation host isn't blocking `fetchNextPage`).
+- **Thread**: prototype shows the email thread; deployed browse detail does not.
+- **Attachments**: prototype shows attachments; deployed does not.
+- **Right-side matching**: the deployed `EmailConnectionsReview` candidate cards look different from the prototype's matching layout.
+- **Prototype (reference design)**: `c:/code_files/spaarke-prototype/projects/email-communication-intelligence-r2-uat/src/App.tsx`. **RUN IT**: `cd` there → `SPAARKE_REPO_ROOT="c:/code_files/spaarke-wt-email-communication-intelligence-r2" npm run dev` (the default `spaarke-wt-smart-todo-r4` root is DELETED; the main `c:/code_files/spaarke` repo has stale co-located `.js` in `Spaarke.UI.Components/src/components/DataGrid/` that shadow the `.ts` → dep-scan "No matching export" errors, so point at a worktree with a clean src). Was running at http://localhost:5175/.
+- Deployed detail view = `ReconciliationWorkspace.tsx` browse tab (renders inline `EmailConnectionsReview` per Fix #2) + `ReconciliationBrowseShell` (reader). Compare against App.tsx to close the thread/attachments/matching gaps.
+
+### UAT round 2 (2026-08-13) — what & where
+Operator UAT found: (Q1) a captured email didn't appear in Needs Review; (Q2) no received/sent date-time shown; (Q3) "add space below the From: row".
+- **Q1 root cause**: grid ordered by `sprk_triagepriority asc` first; triage null on real captures → newest email sank to pos 185/197 (25-row page never reached it). **Fixed**: all 4 grid configs → `sprk_receiveddate desc` primary. **LIVE in dev** (data-driven, re-seeded; commit `4bba0d8bd`).
+- **Q2 grid**: Date column → `datetime` renderer (time WAS in data, `19:02:49`), relabeled "Received". **LIVE in dev** (`4bba0d8bd`).
+- **Q2 email view + Q3**: `EmailCardList` time-aware card date (today→time, hover=full); `EmailRecipients` right-aligned "Received/Sent: {datetime}" in From row + extra paddingBottom below the block. Shared lib → **pending PR #768 merge → Deploy SpaarkeAi** (`34bbed52e`).
+
+### Round-1 deploy status (dev)
+- **#1 grid config / #4 triage catalog / #7 archive** — live (data / BFF, earlier).
+- **#2/#3/#5 code page** `sprk_communicationreconciliation` (`1e191e05-...`) redeployed. **#2/#3/#6** via Deploy SpaarkeAi (auto). **BFF host-boot fix** on master, NOT redeployed (dev compound-ON, never crashed).
+
+### Key IDs / mechanisms
+- Grid configs: needs-review `00000000-0000-4000-8000-000000005001`, per-team `d68c8b50-...5001`→`d68c8b50-ca96-f111-b8dc-7ced8ddc4a05`, email-review-all `...5002`, email-review-completed `...5003`. Re-seed: `pwsh scripts/seed-reconciliation-gridconfig.ps1`.
+- Code page deploy: build `src/solutions/CommunicationReconciliation` (`npm run build`) → `pwsh scripts/Deploy-WebResourceInline.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -WebResourceName sprk_communicationreconciliation -FilePath .../dist/sprk_communicationreconciliation.html`.
+- Email view surface = SpaarkeAi `email` widget + LegalWorkspace `email` section (both via Deploy SpaarkeAi on master merge). `EmailWorkspace`/`EmailCardList`/`EmailRecipients` in `Spaarke.Communication.Components`.
+- **Operator TODO**: send a test email to `mailbox-central@spaarke.com` (matter # e.g. PAT-545148) → confirm #4 triage columns populate on the new capture (triage catalog seeded but not yet e2e-verified on a fresh capture).
 
 ### Critical context (3 sentences)
 R2 is deployed to **dev** (spaarke-bff-dev + spaarkedev1); the reconciliation code page works but is **substantially incomplete vs the prototype** — the Related-to pane is collapsed to "Requires review" text, Fields/Tasks tabs are always disabled, no suggestions render, and triage columns are blank because **triage AI never populates real captures**. Root causes are known + file-referenced (below). The **`.eml` archive bug is fixed on this branch but NOT yet merged to master** (commit `0026af5e1`).

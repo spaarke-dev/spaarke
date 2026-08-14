@@ -43,8 +43,8 @@
       "label": "Status"
     },
     "sprk_receiveddate": {
-      "label": "Date",
-      "renderer": "date"
+      "label": "Received",
+      "renderer": "datetime"
     },
     "sprk_from": {
       "label": "From"

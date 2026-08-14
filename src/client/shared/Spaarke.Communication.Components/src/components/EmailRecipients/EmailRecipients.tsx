@@ -25,7 +25,10 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
-    padding: tokens.spacingVerticalM,
+    paddingTop: tokens.spacingVerticalM,
+    // Extra breathing room below the recipients block (owner UAT 2026-08-13 — "add some space
+    // below the From: row") so From/To don't crowd the Attachments section beneath.
+    paddingBottom: tokens.spacingVerticalXL,
     paddingInline: tokens.spacingHorizontalXL,
     borderBottomWidth: tokens.strokeWidthThin,
     borderBottomStyle: 'solid',
@@ -77,7 +80,32 @@ const useStyles = makeStyles({
     fontFamily: '"Segoe UI", system-ui, sans-serif',
     fontSize: tokens.fontSizeBase300,
   },
+  // UAT 2026-08-13 ("the email record itself does not show the date/time — should be in the
+  // From address row, right aligned"): received/sent date+time, pushed to the right edge of the
+  // From row. Muted secondary foreground so it reads as metadata next to the sender address.
+  dateTime: {
+    flexShrink: 0,
+    marginLeft: 'auto',
+    paddingLeft: tokens.spacingHorizontalM,
+    whiteSpace: 'nowrap',
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
 });
+
+/** Format an ISO/Dataverse datetime into a compact "Aug 13, 2026, 7:02 PM". Empty on parse failure. */
+function formatReceivedDateTime(value: string | null | undefined): string {
+  if (!value) return '';
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(parsed);
+}
 
 export interface EmailRecipientsProps {
   /** `EmailWorkspaceRecordState.from` — rendered even when empty (always-visible row, mirrors the compose composer). */
@@ -88,16 +116,36 @@ export interface EmailRecipientsProps {
   cc?: string | null;
   /** `EmailWorkspaceRecordState.bcc` — row hidden entirely when falsy/empty. */
   bcc?: string | null;
+  /**
+   * Received (inbound) / sent (outbound) date+time — raw ISO/Dataverse string. Rendered
+   * right-aligned in the From row (UAT 2026-08-13). Omitted/empty → no date shown.
+   */
+  receivedDate?: string | null;
+  /** Label for the date — "Received" (inbound, default) or "Sent" (outbound). */
+  dateLabel?: string;
 }
 
-export const EmailRecipients: React.FC<EmailRecipientsProps> = ({ from, to, cc, bcc }) => {
+export const EmailRecipients: React.FC<EmailRecipientsProps> = ({
+  from,
+  to,
+  cc,
+  bcc,
+  receivedDate,
+  dateLabel = 'Received',
+}) => {
   const s = useStyles();
+  const when = formatReceivedDateTime(receivedDate);
 
   return (
     <div className={s.root} data-testid="email-recipients">
       <div className={s.row}>
         <Text className={s.fromLabel}>From:</Text>
         <Text className={s.value}>{from || ''}</Text>
+        {when && (
+          <Text className={s.dateTime} data-testid="email-received-datetime">
+            {dateLabel}: {when}
+          </Text>
+        )}
       </div>
       <div className={s.row}>
         <Text className={s.label}>To</Text>

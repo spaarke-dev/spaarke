@@ -53,7 +53,8 @@ import type {
   CreatedRecordRef,
   EmlSource,
 } from '../EmailAssociationsAndTracking/EmailAssociationsAndTracking.types';
-import type { AuthenticatedFetchFn } from '../EmailBody/EmailBodyView.types';
+import type { AuthenticatedFetchFn, ReconciliationAttachmentContent } from '../EmailBody/EmailBodyView.types';
+import { projectAttachmentRecord, filterFileAttachments, type IAttachmentRecord } from '../../logic/attachments';
 import type { EmailCitation } from '../../logic/citations';
 
 /** `sprk_communication` primary id — the browse-shell key + queue index anchor. */
@@ -61,6 +62,80 @@ const PRIMARY_ID_FIELD = 'sprk_communicationid';
 
 /** The reconciled entity — used for the UAT-Fix#3 targeted single-row re-fetch on confirm. */
 const COMMUNICATION_ENTITY = 'sprk_communication';
+/** Intersection entity carrying a communication's file attachments (owner UAT round-3 item 2). */
+const ATTACHMENT_ENTITY = 'sprk_communicationattachment';
+/** Document entity — the archived `.eml` is a related `sprk_document` flagged `sprk_isemailarchive`. */
+const DOCUMENT_ENTITY = 'sprk_document';
+
+/** Per-record reader detail resolved asynchronously on open (grid query omits both). */
+interface BrowseDetail {
+  attachments: ReconciliationAttachmentContent[];
+  emlDocumentId: string | null;
+}
+
+/**
+ * Resolve a communication's file attachments → reader folds (owner UAT round-3 item 2).
+ * Reuses the shared `projectAttachmentRecord`/`filterFileAttachments` (§11 — the same
+ * projection the CommunicationAttachments surface uses) over a `_sprk_communication_value`
+ * filtered read. Extracted attachment TEXT is a server-side pipeline artifact not exposed
+ * as a readable column, so `text`/`extractable` stay unset — the fold renders the file
+ * name + an "Open original" link (documentId present), which is what the reviewer needs.
+ * Best-effort: any failure → no attachments (the reader simply shows none).
+ */
+async function resolveAttachments(
+  client: IDataverseClient,
+  communicationId: string
+): Promise<ReconciliationAttachmentContent[]> {
+  try {
+    const res = await client.retrieveMultipleRecords(
+      ATTACHMENT_ENTITY,
+      `?$select=sprk_name,sprk_attachmenttype,_sprk_document_value&$filter=_sprk_communication_value eq ${communicationId}&$orderby=createdon asc`
+    );
+    return filterFileAttachments((res.entities ?? []).map(r => projectAttachmentRecord(r as IAttachmentRecord)))
+      .filter(f => f.attachmentId)
+      .map(f => ({
+        attachmentId: f.attachmentId,
+        name: f.name || f.documentName || 'Attachment',
+        documentId: f.documentId,
+      }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Resolve the `.eml` archive document id for a communication — the related `sprk_document`
+ * flagged `sprk_isemailarchive = true` (mirrors `resolveEmlArchiveDocumentId` /
+ * `CommunicationService.FindExistingArchiveDocumentAsync`). Present ⇒ the reader renders
+ * the server-sanitized `.eml` (best "as sent" fidelity); absent/failure ⇒ it degrades to
+ * `sprk_body` (a normal state, not an error).
+ */
+async function resolveEmlArchive(client: IDataverseClient, communicationId: string): Promise<string | null> {
+  try {
+    // The `.eml` archive is linked to the communication via `sprk_document.sprk_relatedcommunication`
+    // — NOT `sprk_communication` (that lookup does not exist on `sprk_document`). This is the SAME
+    // filter the BFF's `GetEmailArchiveByCommunicationAsync` (DataverseWebApiService/ServiceClientImpl)
+    // uses; the email-form `resolveEmlArchiveDocumentId` filters the wrong field and never resolves.
+    const res = await client.retrieveMultipleRecords(
+      DOCUMENT_ENTITY,
+      `?$select=sprk_documentid&$filter=_sprk_relatedcommunication_value eq ${communicationId} and sprk_isemailarchive eq true&$top=1`
+    );
+    const docId = res.entities?.[0]?.['sprk_documentid'];
+    return typeof docId === 'string' && docId.length > 0 ? docId : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Resolve both reader-detail pieces (attachments + `.eml` archive) for one record. */
+async function resolveBrowseDetail(client: IDataverseClient, communicationId: string): Promise<BrowseDetail> {
+  const cleanId = communicationId.replace(/[{}]/g, '');
+  const [attachments, emlDocumentId] = await Promise.all([
+    resolveAttachments(client, cleanId),
+    resolveEmlArchive(client, cleanId),
+  ]);
+  return { attachments, emlDocumentId };
+}
 
 type TabValue = 'related' | 'fields' | 'tasks';
 
@@ -236,6 +311,9 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
   // The rows the grid loaded (page 1 ∪ page 2 ∪ …) — the browse queue source.
   const [rows, setRows] = React.useState<ReadonlyArray<Record<string, unknown>>>([]);
+  // Per-record reader detail (attachments + `.eml` archive id) resolved on open — the grid
+  // query carries neither, so this is overlaid onto the browse record (owner UAT round-3 item 2).
+  const [detailById, setDetailById] = React.useState<Record<string, BrowseDetail>>({});
   // 0-based index of the opened row, or null when the shell is closed.
   const [openIndex, setOpenIndex] = React.useState<number | null>(null);
   const [selectedTab, setSelectedTab] = React.useState<TabValue>('related');
@@ -248,6 +326,35 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     setRows(next);
   }, []);
 
+  // Enrich ONE row in-place with the full `sprk_communication` record. The grid
+  // query is deliberately lightweight (no `sprk_body`, no typed `sprk_regarding*`
+  // lookups) so the reader body + the NFR-10 gate would otherwise be empty until a
+  // confirm. Fetching the full record on open populates BOTH: `sprk_body` (the
+  // email thread the reader renders) AND the `_sprk_regarding*_value` lookups
+  // `resolveRegarding` reads to un-gate Fields/Tasks for an already-Resolved row.
+  // Best-effort (NFR-04): a failed fetch just leaves the lightweight row as-is.
+  const enrichRow = React.useCallback(
+    (id: string) => {
+      if (!id || !dataverseClient) return;
+      void dataverseClient
+        .retrieveRecord(COMMUNICATION_ENTITY, id)
+        .then(fresh => {
+          const freshRow = fresh as Record<string, unknown>;
+          setRows(prev => prev.map(r => (str(r, PRIMARY_ID_FIELD) === id ? { ...r, ...freshRow } : r)));
+          forceRescope();
+        })
+        .catch(() => forceRescope());
+      // Reader detail (attachments + `.eml` archive) — resolved once per record and cached
+      // (owner UAT round-3 item 2). Best-effort: a miss just leaves the reader body-only.
+      if (!detailById[id]) {
+        void resolveBrowseDetail(dataverseClient, id)
+          .then(detail => setDetailById(prev => ({ ...prev, [id]: detail })))
+          .catch(() => {});
+      }
+    },
+    [dataverseClient, detailById]
+  );
+
   const handleRecordOpen = React.useCallback<NonNullable<DataGridProps['onRecordOpen']>>(
     (recordId, record) => {
       const idx = rows.findIndex(r => str(r, PRIMARY_ID_FIELD) === recordId);
@@ -257,8 +364,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       // A row could be opened before `onRecordsLoaded` seeded `rows` (defensive):
       // seed a single-record queue from the opened record so the shell still opens.
       if (idx < 0 && record) setRows(prev => (prev.length ? prev : [record]));
+      // Pull the full record so the reader shows the thread + the tabs un-gate
+      // immediately (not only after a confirm).
+      enrichRow(recordId);
     },
-    [rows]
+    [rows, enrichRow]
   );
 
   const handleClose = React.useCallback(() => setOpenIndex(null), []);
@@ -270,8 +380,18 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
     setOpenIndex(null);
   }, []);
 
-  // Live browse queue — re-maps on every rows refresh so "N of M" tracks the grid.
-  const queue = React.useMemo<ReconciliationBrowseRecord[]>(() => rows.map(toBrowseRecord), [rows, toBrowseRecord]);
+  // Live browse queue — re-maps on every rows refresh so "N of M" tracks the grid. The
+  // per-record reader detail (attachments + `.eml` archive id), resolved async on open, is
+  // overlaid onto the mapped record so the reader shows attachments + the archived email.
+  const queue = React.useMemo<ReconciliationBrowseRecord[]>(
+    () =>
+      rows.map(r => {
+        const base = toBrowseRecord(r);
+        const detail = detailById[base.id];
+        return detail ? { ...base, attachments: detail.attachments, emlDocumentId: detail.emlDocumentId } : base;
+      }),
+    [rows, toBrowseRecord, detailById]
+  );
 
   const handleCitationClick = React.useCallback((citation: EmailCitation) => {
     setActiveCitation(citation);
@@ -291,20 +411,10 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
       onAssociationsChanged?.(record);
       setSelectedTab('fields');
       const id = str(record, PRIMARY_ID_FIELD);
-      if (id && dataverseClient) {
-        void dataverseClient
-          .retrieveRecord(COMMUNICATION_ENTITY, id)
-          .then(fresh => {
-            const freshRow = fresh as Record<string, unknown>;
-            setRows(prev => prev.map(r => (str(r, PRIMARY_ID_FIELD) === id ? { ...r, ...freshRow } : r)));
-            forceRescope();
-          })
-          .catch(() => forceRescope());
-      } else {
-        forceRescope();
-      }
+      if (id) enrichRow(id);
+      else forceRescope();
     },
-    [onAssociationsChanged, dataverseClient]
+    [onAssociationsChanged, enrichRow]
   );
 
   // Task 064 (E1b): wrap the host's per-row review props to inject a zero-arg
@@ -370,6 +480,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
               (review && liveRow ? (
                 <EmailConnectionsReview
                   {...review}
+                  variant="reconcile"
                   onAssociationsChanged={() => {
                     // Preserve RelatedToCell's confirm handshake (minus the modal-close):
                     // fire the host's per-row refresh, then the NFR-10 re-gate/jump-to-Fields.
@@ -443,6 +554,7 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
         onClose={handleClose}
         queue={queue}
         initialIndex={openIndex ?? 0}
+        onIndexChange={(_i, record) => enrichRow(record.id)}
         renderTabs={renderTabs}
         authenticatedFetch={authenticatedFetch}
         activeCitation={activeCitation}
