@@ -4,7 +4,7 @@
     <title>Re-baseline SCORECARD — consolidate all surface assessments into the honest aggregate</title>
     <phase>1 Full Assessment</phase>
     <gate>blocked until 010,011,012,013,014,015</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Consolidation of verified assessment rows into the aggregate re-baseline doc; no src/ or tests/ modification — STANDARD per task-create Step 3.5.5.</rigor-reason>
     <model-tier>opus</model-tier>

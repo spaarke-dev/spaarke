@@ -2,7 +2,7 @@
 
 > **Deliverable**: spec.md FR-03 / FR-04 (Phase-0 re-baseline). **Rubric**: [`docs/standards/CODE-QUALITY-RUBRIC.md`](../../../docs/standards/CODE-QUALITY-RUBRIC.md) (D1–D11 + A–F scale) — **PUBLISHED** by task 001 (2026-08-14).
 > **Convention**: append ONE row per surface at assessment/wrap-up. The **Overall** column is the rubric §4.2 composition — the weighted-mean grade **capped by the gating dimensions D2 (Correctness) and D3 (Security)** (`min(mean, D2, D3)`); it is provisional until the surface's remediation completes (re-score at wrap-up). **No program aggregate grade is published until every surface is scored** (FR-04, task 016) — the March "A (95/100)" is superseded and treated as stale/unverified.
-> **Status**: seeded 2026-08-06 with the BFF row (workstream #1, Fable-verified). Remaining surfaces scored by tasks 010–015; aggregate by task 016.
+> **Status**: ✅ **COMPLETE (2026-08-14)** — all 8 surfaces scored (BFF + tasks 010–015, 017), each Fable-verified; **aggregate re-baseline published by task 016** (see "Task 016 — Aggregate Re-baseline" section below). Supersedes the March "A (95/100)".
 
 ---
 
@@ -14,7 +14,7 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 
 | Surface | D1 | D2 | D3 | D4 | D5 | D6 | D7 | D8 | D9 | D10 | D11 | **Overall** | Assessed | Source |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **BFF (`Sprk.Bff.Api`)** | B | C+ | B– | A– | C | B– | B | A– | B | D+ | C+ | **C+** ⚠︎ prov. | 2026-08-06 (Fable-verified) | [`workstreams/bff-api/design.md`](../workstreams/bff-api/design.md) + Verification Addendum |
+| **BFF (`Sprk.Bff.Api`)** | B | C+ | **F**¹ | A– | C | B– | B | A– | B | D+ | C+ | **F**¹ | 2026-08-06 (Fable); D3 re-scored 2026-08-14 (task 016) | [`workstreams/bff-api/design.md`](../workstreams/bff-api/design.md) + Verification Addendum |
 | **Shared client libs (Spaarke.*)** | B– | A– | B+ | A– | B– | B– | C+ | B– | C | D+ | C+ | **B–** | 2026-08-14 (Fable-verified) | [`workstreams/shared-client-libs/design.md`](../workstreams/shared-client-libs/design.md) |
 | **Shared server libs (Core/Dataverse/Scheduling)** | D+ | C+ | B– | B– | C+ | B– | C+ | B+ | B– | B– | D+ | **C+** | 2026-08-14 (Fable-verified) | [`workstreams/shared-server-libs/design.md`](../workstreams/shared-server-libs/design.md) |
 | **PCF controls (19 live)** | C+ | C+ | B+ | B+ | C+ | C+ | B– | C+ | D+ | C– | C+ | **C+** | 2026-08-14 (Fable-verified) | [`workstreams/pcf-controls/design.md`](../workstreams/pcf-controls/design.md) |
@@ -22,11 +22,24 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 | **Code pages + build sprawl** | C+ | B+ | A– | C+ | D+ | C+ | D+ | D | D+ | D+ | C– | **C** | 2026-08-14 (Fable-verified) | [`workstreams/code-pages-build/design.md`](../workstreams/code-pages-build/design.md) |
 | **Plugins (Spaarke.CustomApiProxy)** | D+ | C+ | D | C+ | C | C+ | B– | D | B– | D+ | D+ | **D** | 2026-08-14 (Fable-verified) | [`workstreams/plugins/design.md`](../workstreams/plugins/design.md) |
 | **Config-deployment (#1 KV federation)** | B– | D+ | **F** | A– | C | C+ | C+ | A | B+ | D+ | C | **F** | 2026-08-14 (Fable-verified) | [`workstreams/config-deployment/design.md`](../workstreams/config-deployment/design.md) |
-| **AGGREGATE** | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 016 — after all surfaces) | — |
+| **AGGREGATE (8 surfaces)** | — | — | **F**² | — | — | — | — | — | — | — | — | **F**² · maintainability mean **C+** | 2026-08-14 (task 016) | supersedes March "A (95/100)" |
 
-> **BFF Overall = C+ (provisional).** Per rubric §4.2: the equal-weighted mean of the 11 dimension points is ≈ 2.70 (**B–**), but the gating cap `min(B–, D2=C+, D3=B–)` = **C+** — the correctness dimension (D2, the broken invoice-totals path) gates the surface below its mean, exactly as the rubric intends. This is a **re-baseline input, not a final grade**; it improves as tasks 020–029 land (Bug-1 fix lifts D2, dead-code deletion lifts D5, tarball removal lifts D10). Re-score at wrap-up (task 090).
+## Task 016 — Aggregate Re-baseline (2026-08-14)
 
-> **⚠️ Cross-surface reconciliation for task 016 (aggregate re-baseline).** The config-deployment row scores the live anonymous Finance Dataverse-write endpoint as **D3 = F** (rubric §3's named F exemplar). The **BFF row scores the *same* defect as D3 B–** — because it was assessed 2026-08-06, *before* the rubric was published (task 001, 2026-08-14). Under the standing ruler this defect is an **F wherever scored**. Task 016 MUST reconcile: re-score BFF D3 → F (dropping BFF Overall from C+ to **F** until BFF task **023** lands the `@spaarke/auth` closure), OR document the exception. Fastest grade-recovery for BOTH surfaces = land task 023.
+**This supersedes the March "A (95/100)".** Eight surfaces scored against the standing rubric (D1–D11), each Fable-verified (NFR-05). The honest picture has two numbers, and both are true:
+
+- **Maintainability mean ≈ C+** (equal-weight mean of the 8 surface *means*: BFF 2.70, client-libs 2.67, server-libs 2.39, PCF 2.37, dataverse 2.64, code-pages 1.98, plugins 1.84, config 2.26 → **2.36 → C+**). The codebase is **structurally solid with real, schedulable debt**: runtime bones (correctness, security-at-the-seam, `@spaarke/auth` routing, ADR-013/022/028 adherence) are largely healthy; the debt is concentrated in **unenforced hygiene** — no PR-blocking CI gates on client/PCF/plugin surfaces, God components, build sprawl, observability gaps, and doc drift that accumulated below the enforcement threshold.
+- **Gating aggregate = F** (rubric §4.3 rule 2: the aggregate cannot exceed the weakest surface's gating dimension). The program carries a **live D3 = F** — a single unauthenticated Finance Dataverse-write endpoint (`FinanceRollupEndpoints.cs`), the rubric §3 named F exemplar. It surfaces on **two** rows (BFF, where it lives; config-deployment, which inherits it) but is **ONE root cause → ONE fix**.
+
+**The single highest-leverage action for the entire program grade is landing BFF task 023** (`@spaarke/auth` Finance closure, already owner-decided 2026-08-06). It clears both F's; the program then re-gates on the next-weakest gating dim (**plugins D3 = D** — the plain-text-secret proxy plugin, remediable by decommission per task 015's recommendation) and trends toward the C+ maintainability mean as the horizontals (CI gates 040–042, dead-code, doc-drift 034, CVE 032 incl. the new `pdfjs-dist`/`System.Text.Json` HIGH CVEs) land.
+
+**No A+ is published** (rubric §4.3 rule 3 requires every surface ≥ A– with no gating dim below A–). The aggregate re-scores at project wrap-up (task 090) as remediation lands.
+
+**¹ BFF D3 re-scored B– → F (task 016).** The BFF row was seeded 2026-08-06, *before* the rubric existed (task 001, 2026-08-14); its D3 B– scored the anonymous Finance Dataverse-write endpoint (finding B-1) on the old informal scale. Under the standing ruler that live unauthenticated data-mutation endpoint is the §3 **F** exemplar — the same defect config-deployment independently scored F. Re-scoring caps BFF Overall at F (`min(mean 2.70, D2 C+, D3 F) = F`). Recovers to the C-band once task 023 lands (D3 → ~B–) plus tasks 020–029 (D2/D5/D10 lifts).
+
+**² Aggregate F is one root cause, not a rotten codebase.** The two F surfaces share the single Finance endpoint. Absent that one live defect, the gating aggregate would sit at plugins D3 = D (also remediable — decommission), and the headline would track the **C+** maintainability mean. The F is a *gate*, not a verdict on eight surfaces' worth of code — exactly the honest signal the rubric's gating design is meant to produce.
+
+_The BFF row remains a re-baseline input; re-score at wrap-up (task 090)._
 
 ## BFF row evidence (verified 2026-08-06)
 
