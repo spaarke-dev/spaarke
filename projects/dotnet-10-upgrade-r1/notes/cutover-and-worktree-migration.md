@@ -49,6 +49,16 @@ Nothing conflicts today: this branch isn't merged, master is net8, dev is net8.
 
 ---
 
+## ⚠️ CRITICAL: close the IDE before merging (net8-clobber failure mode)
+
+**Observed live during a worktree migration (2026-08-14).** If Visual Studio / Rider has the solution **open** while you `git merge origin/master`, the IDE holds the *old net8* `.csproj` files in memory and can **autosave its stale buffer back over the merged net10 files** — silently reverting `Sprk.Bff.Api.csproj` / `Spaarke.Scheduling.csproj` (etc.) to `net8.0` on disk **after** the merge committed them as net10. A subsequent deploy then ships **net8 → 503** on the net10 dev App Service.
+
+**Avoid it:**
+1. **Close the IDE (or unload the solution) BEFORE `git merge origin/master`.** Merge from the terminal.
+2. After merging, reopen the IDE and let it reload — then run `git status`. It should stay **clean**.
+3. **If `*.csproj` reappear as modified showing `<TargetFramework>net8.0</TargetFramework>`, that's the IDE clobbering them** — `git checkout -- '*.csproj'` (or discard in the IDE) to restore the committed net10 version, and confirm `grep TargetFramework **/*.csproj` shows `net10.0` before any build/deploy.
+4. Quick guard before deploying: `grep -r "<TargetFramework>" src/server/**/*.csproj` must show **only `net10.0`**.
+
 ## Reactivating an OLD / dormant worktree to .NET 10
 
 When you pick a stale net8 branch back up after the cutover:

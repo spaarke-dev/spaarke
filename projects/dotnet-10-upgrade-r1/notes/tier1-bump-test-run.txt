@@ -1,0 +1,11 @@
+### Sprk.Bff.Api.Tests
+Passed!  - Failed:     0, Passed: 10415, Skipped:   101, Total: 10516, Duration: 2 m 35 s - Sprk.Bff.Api.Tests.dll (net10.0)
+### Spaarke.ArchTests
+Passed!  - Failed:     0, Passed:    28, Skipped:     0, Total:    28, Duration: 10 s - Spaarke.ArchTests.dll (net10.0)
+### Spaarke.Core.Tests
+Passed!  - Failed:     0, Passed:    45, Skipped:     0, Total:    45, Duration: 269 ms - Spaarke.Core.Tests.dll (net10.0)
+### Spaarke.Scheduling.Tests
+Passed!  - Failed:     0, Passed:    47, Skipped:    10, Total:    57, Duration: 8 s - Spaarke.Scheduling.Tests.dll (net10.0)
+### RecordSyncJob.IsolatedTests
+Passed!  - Failed:     0, Passed:    12, Skipped:     0, Total:    12, Duration: 221 ms - RecordSyncJob.IsolatedTests.dll (net10.0)
+ALL DONE
