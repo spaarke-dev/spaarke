@@ -281,7 +281,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
               filler slots).
             • no matches → a single "No confident match" card.
           The "Link another record" tile renders in every non-read-only state. */}
-      <div className={s.cards}>
+      <div className={reconcile ? s.cardsStack : s.cards}>
         {!isConfirmed &&
           (model.candidates.length > 0 ? (
             model.candidates.map(c => {
