@@ -101,7 +101,8 @@ describe('ReconciliationBrowseShell', () => {
     // Canonical SprkModal "N of M" counter (single source, header nav group).
     expect(await screen.findByText('1 of 3')).toBeInTheDocument();
     // Reader bound to record 0; tabs slot bound to record 0.
-    expect(await screen.findByTestId('reconciliation-browse-subject')).toHaveTextContent('Quarterly filing update');
+    // Subject now shows once in the modal title + once in the reader header (dup body subject removed).
+    expect((await screen.findAllByText('Quarterly filing update')).length).toBeGreaterThan(0);
     expect(screen.getByTestId('tabs-marker')).toHaveTextContent('tabs for comm-1');
 
     // Prev is disabled at the first record (cannot go before N=1).
@@ -112,7 +113,7 @@ describe('ReconciliationBrowseShell', () => {
 
     expect(await screen.findByText('2 of 3')).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getByTestId('reconciliation-browse-subject')).toHaveTextContent('Engagement letter countersigned')
+      expect(screen.getAllByText('Engagement letter countersigned').length).toBeGreaterThan(0)
     );
     expect(screen.getByTestId('tabs-marker')).toHaveTextContent('tabs for comm-2');
     expect(onIndexChange).toHaveBeenCalledWith(1, expect.objectContaining({ id: 'comm-2' }));
@@ -242,7 +243,8 @@ describe('ReconciliationBrowseShell', () => {
       webDarkTheme
     );
 
-    expect(await screen.findByTestId('reconciliation-browse-subject')).toHaveTextContent('Quarterly filing update');
+    // Subject now shows once in the modal title + once in the reader header (dup body subject removed).
+    expect((await screen.findAllByText('Quarterly filing update')).length).toBeGreaterThan(0);
     await waitFor(() => expect(errorSpy).not.toHaveBeenCalled());
     errorSpy.mockRestore();
   });

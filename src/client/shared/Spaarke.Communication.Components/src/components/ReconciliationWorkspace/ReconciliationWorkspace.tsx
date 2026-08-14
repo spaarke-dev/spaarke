@@ -247,6 +247,16 @@ function defaultToBrowseRecord(record: Record<string, unknown>): ReconciliationB
     cc: str(record, 'sprk_cc'),
     bcc: str(record, 'sprk_bcc'),
     body: str(record, 'sprk_body'),
+    // Reader Date row + TRIAGE box (prototype parity, owner UAT 2026-08-14). Priority/category
+    // read the OData FormattedValue (choice/lookup label) with a raw fallback.
+    receivedDate: str(record, 'sprk_receiveddate'),
+    triageSummary: str(record, 'sprk_triagesummary'),
+    triagePriority:
+      str(record, 'sprk_triagepriority@OData.Community.Display.V1.FormattedValue') ??
+      str(record, 'sprk_triagepriority'),
+    triageCategory:
+      str(record, 'sprk_triagecategory@OData.Community.Display.V1.FormattedValue') ??
+      str(record, 'sprk_triagecategory'),
   };
 }
 
