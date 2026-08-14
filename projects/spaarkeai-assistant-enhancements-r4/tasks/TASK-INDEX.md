@@ -44,6 +44,8 @@
 
 **Concurrency cap**: 6 agents/wave. **Build verification between waves** (mandatory): `dotnet build src/server/api/Sprk.Bff.Api/` if any `.cs` changed; `npm run build:prod` for PCF, `npm run build` for touched shared/SpaarkeAi packages.
 
+> **🆕 Runtime = .NET 10** (dev net10 since 2026-08-14; worktree net10-ready, `dotnet build -c Release` clean). SDK ≥10.0.100 required for BFF builds (`global.json` pins 10.0.100). **Never deploy the BFF from a net8 tree (503).** Re-baseline the publish size fresh under net10 (the ~49.63 MB figure was net8).
+
 ---
 
 ## Critical Path

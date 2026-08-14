@@ -77,7 +77,8 @@
 - **E2 target**: gate the free-string `SprkChatSuggestions` (the P2 dead-end); `ConsumerChips` are already capability-backed — do not rebuild them.
 - **ADR-047**: reactive card surface stays distinct from the notification spine (no new push channel).
 - **D9 (E4)**: host-proof flex chain, NO fixed/measured heights; confirm live-DOM repro first (partial fix `messageList min-height:0` already on master).
-- **BFF §10**: publish ≤60 MB (baseline ~49.63 MB incl. PDBs). Measure per BFF-touching task. `/conflict-check` before `Services/Ai`/`ConversationPane`/`SprkChat` PRs.
+- **BFF §10**: publish ≤60 MB. Measure per BFF-touching task. `/conflict-check` before `Services/Ai`/`ConversationPane`/`SprkChat` PRs.
+- **🆕 Runtime = .NET 10 (dev on net10 as of 2026-08-14)**: `global.json` pins SDK 10.0.100 (10.0.1xx installed machine-wide). BFF/server projects are `net10.0`. Every `dotnet` command in a BFF task needs SDK ≥10.0.100 — a "compatible .NET SDK was not found" error means a stale shell (open a fresh terminal), NOT a code problem. **NEVER deploy the BFF from a net8 tree — a net8 deploy to the net10 dev runtime 503s on startup.** This worktree is already net10 (merged net10 master 2026-08-14; `dotnet build -c Release` verified clean, 0 errors). The **~49.63 MB publish baseline was the net8 figure — RE-BASELINE fresh under net10** (net10 net-reduces surface per `dotnet-10-upgrade-r1`); measure the current net10 publish size when reporting §10. Client-only tasks (E2/E4 Vite/tsc) are .NET-runtime-independent — unaffected (use `npm run build`, not `build:prod` which is PCF-only). Health check: `curl https://spaarke-bff-dev.azurewebsites.net/healthz` → 200.
 
 ---
 

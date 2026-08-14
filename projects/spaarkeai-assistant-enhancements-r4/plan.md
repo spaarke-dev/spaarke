@@ -100,6 +100,8 @@ R4 extends the **existing** ADR-039 grounded-execution stack — no new dispatch
 
 **Concurrency cap**: 6 agents/wave. **Build verification between waves** (mandatory): `dotnet build src/server/api/Sprk.Bff.Api/` if any `.cs` changed; `npm run build:prod` for PCF, `npm run build` for touched shared/SpaarkeAi packages.
 
+> **🆕 Runtime = .NET 10** (dev on net10 as of 2026-08-14; this worktree merged net10 master + verified `dotnet build -c Release` clean, 0 errors). `global.json` pins SDK 10.0.100. BFF builds/deploys REQUIRE SDK ≥10.0.100 (a "compatible SDK not found" error = stale shell, open a fresh terminal). **Never deploy the BFF from a net8 tree (503 on the net10 runtime).** The ~49.63 MB publish figure was the net8 baseline — **re-baseline fresh under net10** when reporting §10 (task 080 + every BFF task). Client-only tasks are runtime-independent.
+
 ---
 
 ## Critical Path

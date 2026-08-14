@@ -10,7 +10,9 @@
 
 **Status**: not-started
 
-**Next Action**: On owner go-ahead, begin **Phase 0 — task 001** (behavior-gap register + eval-case harness) via `task-execute`. Baseline is current (`033c43a91`).
+**Next Action**: On owner go-ahead, begin **Phase 0 — task 001** (behavior-gap register + eval-case harness) via `task-execute`. Baseline is current (merged net10 master 2026-08-14).
+
+**🆕 Runtime**: dev + this worktree are on **.NET 10** (`global.json` 10.0.100; BFF csproj `net10.0`; `dotnet build -c Release` verified clean). BFF builds/deploys need SDK ≥10.0.100; never deploy the BFF from a net8 tree. Re-baseline publish size fresh under net10.
 
 ---
 
