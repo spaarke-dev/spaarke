@@ -4,7 +4,7 @@
     <title>Author the Code Quality Rubric (D1–D11 standing standard)</title>
     <phase>0 Program Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New standing standard doc (new file, no code); STANDARD per task-create Step 3.5.5 (new-file creation, no tests/, no hot-path code).</rigor-reason>
     <model-tier>opus</model-tier>

@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-14 (by context-handoff)
+> **Last Updated**: 2026-08-14 (EXECUTION STARTED — Phase 0)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none executing — project INITIALIZED + PLANNING-AUGMENTED; execution operator-gated |
-| **Step** | — (no task-execute has run; all work so far is planning/scoping) |
-| **Status** | 35 tasks authored + validated clean. **NET10 (2026-08-14)** — merged net10 master, BFF builds clean, publish baseline **44.96 MB incl PDBs**; net10 handoff + Fable HEAD-reconciliation integrated (findings hold; #3b confirmed). **origin/work pushed through `3ee43286e`; 3 commits UNPUSHED (net10 handoff + reconciliation + checkpoint, through `067cfefd8`)**; behind master 3 (normal churn). Tree clean. |
-| **Next Action** | OPERATOR CHOICE: (a) push branch (holding per owner preference), and/or (b) start execution — **task 001** (rubric, Phase 0) OR **task 017** (config-deployment assessment — feeds #1 KV federation + naming standard 063; needs "use a workflow" opt-in). Auth tasks (023/060/061/062/011) are GATED on task 019 (BFF Auth Surface Map, already produced at `notes/bff-auth-surface-map.md`). |
+| **Task** | **EXECUTION STARTED 2026-08-14** (operator: "continue - run tasks in parallel and autonomous where safe"). **Phase 0 COMPLETE.** |
+| **Step** | 001 ✅ · 002 ✅ · 003 ✅ — Phase 0 (Program Foundation) done. |
+| **Status** | **001 ✅** `docs/standards/CODE-QUALITY-RUBRIC.md` (D1–D11 + A–F composition w/ D2/D3 gating caps). **002 ✅** `notes/SCORECARD.md` reconciled to rubric §4.2 — **Overall** column added; BFF Overall = **C+ (provisional)** (mean B– capped by D2). **003 ✅** `notes/quality-assessment.workflow.js` (Fable-authored; `node --check` clean) + README — 11 read-only `Explore` finders → **hard-gated Fable verify** (structural: no path from raw findings to synthesis; throws on missing/dup verdict + >30% refutation) → synthesis w/ rubric §4.2 gating cap. Committed Phase 0 locally (NOT pushed). |
+| **Next Action** | **HOLDING at two operator gates** (nothing else is autonomous-safe): (1) **Assessment wave 010–015 + 017 + 019** — read-only, conflict-free, run the new workflow, but need per-run **"use a workflow"** opt-in (NFR-05). Say e.g. "use a workflow to assess shared client libs" (010) or "assess all remaining surfaces". 019 (auth map) gates 023/060/061/062. (2) **BFF Tranche A (020,021,022,023,027)** + deployment (060–063) — `parallel-safe:false`, outward-facing PRs needing /conflict-check + review; run one at a time on operator go. |
 
 ### What happened since init (2026-08-06 → 2026-08-13) — all PLANNING, no execution
 - **Initialized** via design-to-spec → project-pipeline (Project #741 under Epic #427; INDEX.md row; NG1 Idea #742). 27 tasks.

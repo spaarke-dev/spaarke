@@ -4,7 +4,7 @@
     <title>Scaffold the living SCORECARD.md (D1–D11 columns, BFF row seeded)</title>
     <phase>0 Program Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Simple new-file scaffold (a table + convention note); no code, no tests, no hot-path — MINIMAL per task-create Step 3.5.5.</rigor-reason>
     <model-tier>sonnet</model-tier>

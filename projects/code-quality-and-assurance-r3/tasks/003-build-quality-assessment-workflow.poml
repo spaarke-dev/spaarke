@@ -4,7 +4,7 @@
     <title>Build the reusable quality-assessment multi-agent Workflow</title>
     <phase>0 Program Foundation</phase>
     <gate>blocked until 001</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New tooling artifact (workflow script) with defined constraints; not code that ships in a hot path and not test-modifying — STANDARD per task-create Step 3.5.5.</rigor-reason>
     <model-tier>fable</model-tier>

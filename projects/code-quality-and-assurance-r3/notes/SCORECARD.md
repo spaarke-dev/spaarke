@@ -1,7 +1,7 @@
 # Code Quality & Assurance R3 — Living SCORECARD
 
-> **Deliverable**: spec.md FR-03 / FR-04 (Phase-0 re-baseline). **Rubric**: `docs/standards/CODE-QUALITY-RUBRIC.md` (D1–D11, authored by task 001).
-> **Convention**: append ONE row per surface at assessment/wrap-up. **No aggregate grade is published until every surface is scored** (FR-04) — the March "A (95/100)" is superseded and treated as stale/unverified.
+> **Deliverable**: spec.md FR-03 / FR-04 (Phase-0 re-baseline). **Rubric**: [`docs/standards/CODE-QUALITY-RUBRIC.md`](../../../docs/standards/CODE-QUALITY-RUBRIC.md) (D1–D11 + A–F scale) — **PUBLISHED** by task 001 (2026-08-14).
+> **Convention**: append ONE row per surface at assessment/wrap-up. The **Overall** column is the rubric §4.2 composition — the weighted-mean grade **capped by the gating dimensions D2 (Correctness) and D3 (Security)** (`min(mean, D2, D3)`); it is provisional until the surface's remediation completes (re-score at wrap-up). **No program aggregate grade is published until every surface is scored** (FR-04, task 016) — the March "A (95/100)" is superseded and treated as stale/unverified.
 > **Status**: seeded 2026-08-06 with the BFF row (workstream #1, Fable-verified). Remaining surfaces scored by tasks 010–015; aggregate by task 016.
 
 ---
@@ -12,17 +12,19 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 
 ## Per-surface scores
 
-| Surface | D1 | D2 | D3 | D4 | D5 | D6 | D7 | D8 | D9 | D10 | D11 | Assessed | Source |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **BFF (`Sprk.Bff.Api`)** | B | C+ | B– | A– | C | B– | B | A– | B | D+ | C+ | 2026-08-06 (Fable-verified) | [`workstreams/bff-api/design.md`](../workstreams/bff-api/design.md) + Verification Addendum |
-| Shared client libs | — | — | — | — | — | — | — | — | — | — | — | pending (task 010) | — |
-| Shared server libs | — | — | — | — | — | — | — | — | — | — | — | pending (task 011) | — |
-| PCF controls | — | — | — | — | — | — | — | — | — | — | — | pending (task 012) | — |
-| Dataverse model + ALM | — | — | — | — | — | — | — | — | — | — | — | pending (task 013) | — |
-| Code pages + build sprawl | — | — | — | — | — | — | — | — | — | — | — | pending (task 014) | — |
-| Plugins | — | — | — | — | — | — | — | — | — | — | — | pending (task 015) | — |
-| Config-deployment (#1 KV federation) | — | — | — | — | — | — | — | — | — | — | — | pending (task 017) | — |
-| **AGGREGATE** | — | — | — | — | — | — | — | — | — | — | — | pending (task 016 — after all surfaces) | — |
+| Surface | D1 | D2 | D3 | D4 | D5 | D6 | D7 | D8 | D9 | D10 | D11 | **Overall** | Assessed | Source |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| **BFF (`Sprk.Bff.Api`)** | B | C+ | B– | A– | C | B– | B | A– | B | D+ | C+ | **C+** ⚠︎ prov. | 2026-08-06 (Fable-verified) | [`workstreams/bff-api/design.md`](../workstreams/bff-api/design.md) + Verification Addendum |
+| Shared client libs | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 010) | — |
+| Shared server libs | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 011) | — |
+| PCF controls | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 012) | — |
+| Dataverse model + ALM | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 013) | — |
+| Code pages + build sprawl | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 014) | — |
+| Plugins | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 015) | — |
+| Config-deployment (#1 KV federation) | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 017) | — |
+| **AGGREGATE** | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 016 — after all surfaces) | — |
+
+> **BFF Overall = C+ (provisional).** Per rubric §4.2: the equal-weighted mean of the 11 dimension points is ≈ 2.70 (**B–**), but the gating cap `min(B–, D2=C+, D3=B–)` = **C+** — the correctness dimension (D2, the broken invoice-totals path) gates the surface below its mean, exactly as the rubric intends. This is a **re-baseline input, not a final grade**; it improves as tasks 020–029 land (Bug-1 fix lifts D2, dead-code deletion lifts D5, tarball removal lifts D10). Re-score at wrap-up (task 090).
 
 ## BFF row evidence (verified 2026-08-06)
 
