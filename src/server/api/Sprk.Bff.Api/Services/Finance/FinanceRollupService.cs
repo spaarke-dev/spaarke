@@ -223,15 +223,27 @@ public sealed class FinanceRollupService
 
     /// <summary>
     /// Get the underlying ServiceClient from IDataverseService for QueryExpression support.
-    /// Same pattern as FinancialCalculationToolHandler.
+    /// The sole registered impl (<see cref="DataverseServiceClientImpl"/>) WRAPS a ServiceClient and
+    /// exposes it via <see cref="DataverseServiceClientImpl.OrganizationService"/> — it does NOT derive
+    /// from ServiceClient, so a direct <c>is/as ServiceClient</c> check always fails at runtime (Bug-1).
+    /// Unwrap via the concrete impl, mirroring FinanceSummaryService / SpendSnapshotService / RecordService.
     /// </summary>
     private ServiceClient GetServiceClient()
     {
-        if (_dataverseService is ServiceClient sc)
-            return sc;
+        if (_dataverseService is not DataverseServiceClientImpl impl)
+        {
+            throw new InvalidOperationException(
+                $"FinanceRollupService requires IDataverseService to be backed by DataverseServiceClientImpl " +
+                $"for QueryExpression support (actual: {_dataverseService.GetType().FullName}).");
+        }
 
-        throw new InvalidOperationException(
-            "FinanceRollupService requires IDataverseService resolved as ServiceClient " +
-            "for QueryExpression support.");
+        var serviceClient = impl.OrganizationService;
+        if (serviceClient is null || !serviceClient.IsReady)
+        {
+            throw new InvalidOperationException(
+                "FinanceRollupService requires a ready Dataverse ServiceClient for QueryExpression support.");
+        }
+
+        return serviceClient;
     }
 }

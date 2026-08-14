@@ -5,7 +5,7 @@
     <phase>2 BFF Remediation</phase>
     <tranche>A</tranche>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Fixes a latent production correctness bug with a focused test (touches tests/) — FULL; TEST-MODIFYING override also applies.</rigor-reason>
     <model-tier>opus</model-tier>

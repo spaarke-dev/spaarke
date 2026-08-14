@@ -5,7 +5,7 @@
     <phase>2 BFF Remediation</phase>
     <tranche>A</tranche>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Fixes a latent production bug (dead builder + conflicting dual DI registration) on the BFF hot path; behavior-sensitive — FULL.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -25,8 +25,8 @@
 | 019 | BFF Auth Surface Map + dependency graph (gates auth tasks) | 1 Full Assessment | STANDARD | fable | xhigh | none | P1 | ✅ |
 | 016 | Re-baseline SCORECARD (aggregate) | 1 Full Assessment | STANDARD | opus | high | 010,011,012,013,014,015,017 | none | ✅ |
 | 020 | BFF-A: delete low-contention dead code (Scopes/Retry/StubLiveFact/archives) | 2 BFF Remediation | FULL | sonnet | high | none | A | ✅ |
-| 021 | BFF-A: fix invoice-totals cast in-place (Bug-1) + test | 2 BFF Remediation | FULL | opus | high | none | A | 🔲 |
-| 022 | BFF-A: .eml builder cleanup (Bug-2) | 2 BFF Remediation | FULL | sonnet | high | none | A | 🔲 |
+| 021 | BFF-A: fix invoice-totals cast in-place (Bug-1) + test | 2 BFF Remediation | FULL | opus | high | none | A | ✅ |
+| 022 | BFF-A: .eml builder cleanup (Bug-2) | 2 BFF Remediation | FULL | sonnet | high | none | A | ✅ |
 | 023 | BFF-A: auth closure via @spaarke/auth (§6 RESOLVED) | 2 BFF Remediation | FULL | opus | xhigh | none | A | 🔲 |
 | 027 | BFF-A: repo hygiene (tarballs/artifacts) | 2 BFF Remediation | STANDARD | sonnet | low | none | A | ✅ |
 | 024 | BFF-B: AI-facade compliance | 2 BFF Remediation | FULL | opus | high | none | B | 🔲 |
