@@ -19,7 +19,7 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 | **Shared server libs (Core/Dataverse/Scheduling)** | D+ | C+ | B– | B– | C+ | B– | C+ | B+ | B– | B– | D+ | **C+** | 2026-08-14 (Fable-verified) | [`workstreams/shared-server-libs/design.md`](../workstreams/shared-server-libs/design.md) |
 | PCF controls | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 012) | — |
 | **Dataverse model + ALM** | B– | B– | B– | B– | B | B– | C+ | B+ | C+ | C+ | C+ | **B–** | 2026-08-14 (Fable-verified) | [`workstreams/dataverse-model-alm/design.md`](../workstreams/dataverse-model-alm/design.md) |
-| Code pages + build sprawl | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 014) | — |
+| **Code pages + build sprawl** | C+ | B+ | A– | C+ | D+ | C+ | D+ | D | D+ | D+ | C– | **C** | 2026-08-14 (Fable-verified) | [`workstreams/code-pages-build/design.md`](../workstreams/code-pages-build/design.md) |
 | Plugins | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 015) | — |
 | **Config-deployment (#1 KV federation)** | B– | D+ | **F** | A– | C | C+ | C+ | A | B+ | D+ | C | **F** | 2026-08-14 (Fable-verified) | [`workstreams/config-deployment/design.md`](../workstreams/config-deployment/design.md) |
 | **AGGREGATE** | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 016 — after all surfaces) | — |
