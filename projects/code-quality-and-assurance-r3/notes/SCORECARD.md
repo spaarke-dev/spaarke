@@ -16,7 +16,7 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **BFF (`Sprk.Bff.Api`)** | B | C+ | B– | A– | C | B– | B | A– | B | D+ | C+ | **C+** ⚠︎ prov. | 2026-08-06 (Fable-verified) | [`workstreams/bff-api/design.md`](../workstreams/bff-api/design.md) + Verification Addendum |
 | **Shared client libs (Spaarke.*)** | B– | A– | B+ | A– | B– | B– | C+ | B– | C | D+ | C+ | **B–** | 2026-08-14 (Fable-verified) | [`workstreams/shared-client-libs/design.md`](../workstreams/shared-client-libs/design.md) |
-| Shared server libs | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 011) | — |
+| **Shared server libs (Core/Dataverse/Scheduling)** | D+ | C+ | B– | B– | C+ | B– | C+ | B+ | B– | B– | D+ | **C+** | 2026-08-14 (Fable-verified) | [`workstreams/shared-server-libs/design.md`](../workstreams/shared-server-libs/design.md) |
 | PCF controls | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 012) | — |
 | Dataverse model + ALM | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 013) | — |
 | Code pages + build sprawl | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 014) | — |

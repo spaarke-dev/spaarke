@@ -16,7 +16,7 @@
 | 002 | Scaffold the living SCORECARD.md | 0 Program Foundation | MINIMAL | sonnet | medium | 001 | P0 | ✅ |
 | 003 | Build the quality-assessment Workflow | 0 Program Foundation | STANDARD | fable | xhigh | 001 | none | ✅ |
 | 010 | Assess shared client libs (Spaarke.*) | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | ✅ |
-| 011 | Assess shared server libs | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
+| 011 | Assess shared server libs | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | ✅ |
 | 012 | Assess PCF controls | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
 | 013 | Assess Dataverse model + ALM | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |
 | 014 | Assess code pages + build sprawl | 1 Full Assessment | STANDARD | fable | xhigh | 001,003 | P1 | 🔲 |

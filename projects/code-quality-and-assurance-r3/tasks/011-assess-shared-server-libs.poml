@@ -4,7 +4,7 @@
     <title>Assess shared server libs (Spaarke.Core / Dataverse / Scheduling, ~10k LOC)</title>
     <phase>1 Full Assessment</phase>
     <gate>blocked until 001,003</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Read-only Fable-verified assessment producing a design.md; no src/ or tests/ modification — STANDARD per task-create Step 3.5.5.</rigor-reason>
     <model-tier>fable</model-tier>
