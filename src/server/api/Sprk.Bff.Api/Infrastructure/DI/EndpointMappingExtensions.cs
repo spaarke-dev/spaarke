@@ -61,8 +61,15 @@ public static class EndpointMappingExtensions
             Predicate = registration => registration.Tags.Contains("catalog")
         }).AllowAnonymous();
 
-        app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
-        app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
+        // Anonymous smoke probes that hit Dataverse live — rate-limited to prevent abuse
+        // (mirrors the /healthz/dataverse/doc/{id} sibling below). Task 023 (B-2): added
+        // RequireRateLimiting and stopped echoing ex.Message (see handler methods below).
+        app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("anonymous");
+        app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("anonymous");
 
         app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDocumentDataverseService dataverseService, ILogger<Program> logger) =>
         {
@@ -89,8 +96,10 @@ public static class EndpointMappingExtensions
             }
             catch (Exception ex)
             {
+                // Task 023 (MF-3): do NOT echo ex.Message / InnerException to the anonymous
+                // caller (information disclosure). The exception is logged server-side above.
                 logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
-                return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
+                return Results.Ok(new { status = "ERROR", documentId = id, message = "An error occurred retrieving the document. See server logs." });
             }
         })
             .AllowAnonymous()
@@ -375,7 +384,7 @@ public static class EndpointMappingExtensions
         app.MapAdminMembershipEndpoints();
     }
 
-    private static async Task<IResult> TestDataverseConnectionAsync(IDataverseHealthService dataverseService)
+    private static async Task<IResult> TestDataverseConnectionAsync(IDataverseHealthService dataverseService, ILogger<Program> logger)
     {
         try
         {
@@ -387,11 +396,14 @@ public static class EndpointMappingExtensions
         }
         catch (Exception ex)
         {
-            return TypedResults.Problem(detail: ex.Message, statusCode: 503, title: "Dataverse Connection Error");
+            // Task 023 (B-2): do NOT echo ex.Message to the anonymous caller (information
+            // disclosure). Log server-side and return a generic detail.
+            logger.LogError(ex, "Dataverse connection health probe failed");
+            return TypedResults.Problem(detail: "Dataverse connection test failed. See server logs.", statusCode: 503, title: "Dataverse Connection Error");
         }
     }
 
-    private static async Task<IResult> TestDataverseCrudOperationsAsync(IDataverseHealthService dataverseService)
+    private static async Task<IResult> TestDataverseCrudOperationsAsync(IDataverseHealthService dataverseService, ILogger<Program> logger)
     {
         try
         {
@@ -403,7 +415,10 @@ public static class EndpointMappingExtensions
         }
         catch (Exception ex)
         {
-            return TypedResults.Problem(detail: ex.Message, statusCode: 503, title: "Dataverse CRUD Test Error");
+            // Task 023 (B-2): do NOT echo ex.Message to the anonymous caller (information
+            // disclosure). Log server-side and return a generic detail.
+            logger.LogError(ex, "Dataverse CRUD health probe failed");
+            return TypedResults.Problem(detail: "Dataverse CRUD operations test failed. See server logs.", statusCode: 503, title: "Dataverse CRUD Test Error");
         }
     }
 }

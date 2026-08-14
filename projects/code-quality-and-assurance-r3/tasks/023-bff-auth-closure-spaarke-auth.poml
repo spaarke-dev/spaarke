@@ -5,7 +5,7 @@
     <phase>2 BFF Remediation</phase>
     <tranche>A</tranche>
     <gate>startable — §6 owner decision RESOLVED to @spaarke/auth (2026-08-06); residual gate = web-resource token feasibility (escalation below)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-sensitive auth change on the BFF hot path (closes an anonymous Dataverse-write endpoint); tags include auth — FULL unconditionally.</rigor-reason>
     <model-tier>opus</model-tier>
