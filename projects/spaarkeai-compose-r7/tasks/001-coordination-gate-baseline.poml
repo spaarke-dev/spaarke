@@ -14,7 +14,7 @@
     <parallel-safe>false</parallel-safe>
     <parallel-reason>Gate task — must complete before any implementation task starts; establishes the shared baseline the whole project cites.</parallel-reason>
     <deps>none</deps>
-    <tags>devops, ci-cd, bff-api, deploy</tags>
+    <tags>devops, ci-cd, bff-api, deploy, dotnet-10</tags>
     <estimated-effort>2 hours</estimated-effort>
   </metadata>
 
@@ -27,9 +27,12 @@
   <role>SPAARKE platform developer. Familiar with the BFF publish pipeline, /conflict-check, and Azure Document Intelligence configuration. Follow ADRs strictly.</role>
 
   <goal>
-    A coordination note exists at projects/spaarkeai-compose-r7/notes/coordination-baseline.md recording: (1) /conflict-check
-    result for the R7 hot-path files, (2) measured compressed BFF publish size (absolute), (3) confirmed on/off state of the
-    PDF intake compound DI gate in the target env, (4) status of watched PRs (#690 ci-lfs, #266 OpenXml).
+    A coordination note exists at projects/spaarkeai-compose-r7/notes/coordination-baseline.md recording: (0) net10-readiness
+    confirmation — branch merged net10 master, `dotnet --list-sdks` shows 10.0.1xx, `dotnet build -c Release` of the BFF is
+    clean on net10; (1) /conflict-check result for the R7 hot-path files, (2) measured compressed BFF publish size (absolute) —
+    the **net10** baseline (the ~46.94 MB figure cited in spec/plan was the net8 R6 baseline; this task re-measures on net10 and
+    that number supersedes it for all downstream NFR-01 delta reporting), (3) confirmed on/off state of the PDF intake compound
+    DI gate in the target env, (4) status of watched PRs (#690 ci-lfs, #266 OpenXml).
   </goal>
 
   <context>
@@ -58,6 +61,7 @@
     <files>
       <file>.claude/constraints/bff-extensions.md</file>
       <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md</file>
       <file>projects/INDEX.md</file>
       <file>projects/spaarkeai-compose-r7/spec.md</file>
       <file>projects/spaarkeai-compose-r7/CLAUDE.md</file>
@@ -66,8 +70,9 @@
 
   <steps mode="prescriptive">
     <step order="0" name="Context + rigor declaration">Declare rigor MINIMAL; load spec.md + CLAUDE.md + bff-extensions.md.</step>
+    <step order="0.5" name="net10-readiness">Confirm the branch is on net10 master (git rev-list --count HEAD..origin/master == 0), `dotnet --list-sdks` shows a 10.0.1xx entry, and `dotnet build -c Release src/server/api/Sprk.Bff.Api/` is clean. If build flags Graph/Kiota call sites, consult projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md. Record net10-ready = yes/no. (Baseline done at init 2026-08-14: branch merged net10 master, Release build clean.)</step>
     <step order="1">Run /conflict-check focused on ConversationPane.tsx, SprkChatInput.tsx, Services/Ai/**, Services/Compose/**. Record the result.</step>
-    <step order="2">Run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/; measure the compressed size; record absolute MB + the PDB convention.</step>
+    <step order="2">Run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ (on net10); measure the compressed size; record absolute MB + the PDB convention. This is the **net10** baseline that supersedes the net8 ~46.94 MB figure for all downstream NFR-01 delta reporting.</step>
     <step order="3">Inspect AnalysisServicesModule.cs:154 and the target-env config to confirm the compound PDF DI gate state; record ON/OFF.</step>
     <step order="4">Check the status of watched PRs #690 (ci-lfs) and #266 (OpenXml bump); note any relevance to FR-13 / dependency bumps.</step>
     <step order="5">Write projects/spaarkeai-compose-r7/notes/coordination-baseline.md with all four findings.</step>
@@ -88,6 +93,7 @@
   </outputs>
 
   <acceptance-criteria>
+    <criterion testable="true">The note records net10-readiness: branch 0 behind net10 master, SDK 10.0.1xx visible, BFF Release build clean.</criterion>
     <criterion testable="true">The coordination note records a /conflict-check result for the four hot-path file groups.</criterion>
     <criterion testable="true">The note records the measured compressed BFF publish size in MB and states the PDB convention.</criterion>
     <criterion testable="true">The note records the on/off state of the compound PDF DI gate in the target env, with the NullObject-degradation consequence if OFF.</criterion>

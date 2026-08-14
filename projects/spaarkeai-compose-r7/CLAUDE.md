@@ -93,7 +93,8 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for comp
 - **`ProjectForMount` becomes async** for the PDF fork (ADR-007/013 contract change) — keep the docx path synchronous-fast; document in code + PR (NFR-04).
 - **Server dedup is an atomic upsert** on `sprk_graphitemid_uk` — replace read-then-`CreateAsync`@2717 (the D1 hole).
 - **Reuse, don't fork** — `FormModal`/`SprkModal` (ADR-050), `promptForInstruction`, `forceVisible`, R6's `ComposePdfModelProjector`/`ProjectPdfToDocxAsync`. Consume `Services/Ai/PublicContracts/` for FR-11 — NO fork of `Services/Ai/`.
-- **BFF hygiene (root §10)**: BFF work stays in `Services/Compose/`; Placement Justification per BFF task; publish ≤60 MB (baseline ~46.94 MB); no new HIGH CVE; `/conflict-check` before every BFF PR.
+- **.NET 10 (as of 2026-08-14)**: master + dev runtime are **net10**; this branch is net10-ready (merged net10 master 2026-08-14; BFF Release build clean). SDK ≥10.0.100 required (`global.json` pins 10.0.100) — if a shell errors "A compatible .NET SDK was not found. Requested SDK version: 10.0.100", open a fresh terminal (stale SDK resolution), it's not a code problem. **NEVER deploy the BFF from a net8 tree** (→ 503 on the net10 runtime). Graph/Kiota break notes: `projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md`.
+- **BFF hygiene (root §10)**: BFF work stays in `Services/Compose/`; Placement Justification per BFF task; publish ≤60 MB — the **net10 baseline is re-measured in task 001** (the ~46.94 MB cited elsewhere was the net8 R6 baseline); no new HIGH CVE; `/conflict-check` before every BFF PR.
 - **`ComposeSaveMode` stays `'version' | 'new'`** — map labels only.
 - **NEVER delete `docxBridge.ts`.**
 - **Commit `--no-verify`**; co-author trailer `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
