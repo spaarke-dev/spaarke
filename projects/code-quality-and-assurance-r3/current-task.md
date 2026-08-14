@@ -8,6 +8,9 @@
 
 ## Quick Recovery (READ THIS FIRST)
 
+> 🔔 **BLOCKED 2026-08-14 — MONTHLY API SPEND LIMIT HIT.** All 6 remaining Phase-1 assessment workflows (011,012,013,014,015,017) failed when their Fable verify/synthesis agents returned `You've hit your monthly spend limit`. This is an EXTERNAL blocker — raise/reset at claude.ai/settings/usage. **Do NOT resume/relaunch any workflow until the limit is cleared** (every agent call fails + wastes retry budget). **Good news**: each surface's 11 read-only FINDERS mostly completed and are CACHED; only verify/synthesis was cut off. Once budget is restored, `Workflow({scriptPath, resumeFromRunId: <id>, args})` per surface — cached agents replay instantly, only the spend-failed verify/synth re-run. Run IDs: 011 `wf_78267cb8-c18` · 017 `wf_afca7b9b-22b` · 012 `wf_d18f1279-c8f` · 013 `wf_7f967ea6-f87` · 014 `wf_595794d2-98d` · 015 `wf_03c876dc-446`. Script now hardened against null verify/synth results (won't hard-crash; aborts cleanly with a clear message).
+
+
 | Field | Value |
 |-------|-------|
 | **Task** | **EXECUTION 2026-08-14.** Phase 0 COMPLETE. **Phase 1 assessment wave IN PROGRESS** (operator opted in: "use workflow"). |

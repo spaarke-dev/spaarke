@@ -584,6 +584,10 @@ const verdictBatches = await pipeline(verifyBatches, (batch) =>
 
 const verdictById = new Map();
 for (const vb of verdictBatches) {
+  // A verify-batch agent can return null on a terminal error (e.g. monthly
+  // spend limit). Skip it here; the missing-verdict gate below then catches the
+  // affected findings and refuses synthesis (NFR-05) — no crash, honest abort.
+  if (!vb || !Array.isArray(vb.verdicts)) continue;
   for (const v of vb.verdicts) {
     if (verdictById.has(v.findingId)) {
       throw new Error(`VERIFY GATE VIOLATION: duplicate verdict for ${v.findingId}. Aborting before synthesis (NFR-05).`);
@@ -596,7 +600,8 @@ const missing = deduped.filter((f) => !verdictById.has(f.findingId)).map((f) => 
 if (missing.length > 0) {
   throw new Error(
     `VERIFY GATE VIOLATION: ${missing.length} finding(s) received no Fable verdict [${missing.join(', ')}]. ` +
-      'Synthesis MUST NOT run on unverified findings (NFR-05). Aborting — re-run the workflow.',
+      'This usually means a verify-batch agent failed to complete (a terminal error such as the monthly API spend limit). ' +
+      'Synthesis MUST NOT run on unverified findings (NFR-05). Aborting — clear the blocker, then resume (cached agents replay; only the failed batches re-run).',
   );
 }
 
@@ -653,6 +658,12 @@ const synth = await agent(synthesisPrompt(cfg, verifiedFindings, refuted, dimens
   // (cfg.designPath). Its prompt hard-constrains all other writes.
 });
 
+if (!synth) {
+  throw new Error(
+    `Synthesis agent returned null for ${cfg.designPath} — a terminal agent error (e.g. the monthly API spend limit). ` +
+      'Assessment incomplete; clear the blocker and resume (cached finders + verdicts replay, only synthesis re-runs).',
+  );
+}
 if (!synth.designWritten) {
   throw new Error(`Synthesis reported designWritten=false for ${synth.designPath} — assessment is incomplete.`);
 }
