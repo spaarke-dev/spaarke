@@ -12,7 +12,7 @@
 |-------|-------|
 | **Task** | none executing — project INITIALIZED + PLANNING-AUGMENTED; execution operator-gated |
 | **Step** | — (no task-execute has run; all work so far is planning/scoping) |
-| **Status** | 35 tasks authored + validated clean; **branch 8 commits ahead of origin (through `0b4552b2c`), NOT pushed** (origin is at `16e1f7746` — the 4 init commits were pushed via /push-to-github; everything after is local) |
+| **Status** | 35 tasks authored + validated clean. **NET10 as of 2026-08-14** (merged net10 master; BFF builds clean; publish baseline now **44.96 MB incl PDBs**, was 46.89 net8). **behind master = 0**; **ahead of `origin/work/...` = 542** (the net10 merge + r3 commits; **NOT pushed**; HEAD `338583310`) |
 | **Next Action** | OPERATOR CHOICE: (a) push branch (holding per owner preference), and/or (b) start execution — **task 001** (rubric, Phase 0) OR **task 017** (config-deployment assessment — feeds #1 KV federation + naming standard 063; needs "use a workflow" opt-in). Auth tasks (023/060/061/062/011) are GATED on task 019 (BFF Auth Surface Map, already produced at `notes/bff-auth-surface-map.md`). |
 
 ### What happened since init (2026-08-06 → 2026-08-13) — all PLANNING, no execution
