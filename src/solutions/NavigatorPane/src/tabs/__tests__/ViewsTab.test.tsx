@@ -220,7 +220,7 @@ describe('ViewsTab', () => {
   // Click opens the REAL view via a main.aspx deep-link URL (UAT fix #5)
   // ───────────────────────────────────────────────────────────────────────
 
-  it('click_ViewRow_OpensMainAspxDeepLinkUrlWithViewIdAndViewType4230', async () => {
+  it('click_ViewRow_NavigatesInAppToTheUserqueryView', async () => {
     const fakeXrm = installMockXrm();
     renderViewsTab('light');
     const user = userEvent.setup();
@@ -229,17 +229,19 @@ describe('ViewsTab', () => {
 
     await user.click(screen.getByTestId('views-tab-row-uq-document-1'));
 
-    await waitFor(() => expect(fakeXrm.Navigation.openUrl).toHaveBeenCalledTimes(1));
-    const url = fakeXrm.Navigation.openUrl.mock.calls[0][0] as string;
-    expect(url).toBe(
-      'https://spaarkedev1.crm.dynamics.com/main.aspx?appid=app-guid-1&pagetype=entitylist' +
-        '&etn=sprk_document&viewid=%7buq-document-1%7d&viewtype=4230'
+    await waitFor(() =>
+      expect(fakeXrm.Navigation.navigateTo).toHaveBeenCalledWith({
+        pageType: 'entitylist',
+        entityName: 'sprk_document',
+        viewId: 'uq-document-1',
+        viewType: 'userquery',
+      })
     );
-    // The old, unreliable path must never fire alongside the URL-open.
-    expect(fakeXrm.Navigation.navigateTo).not.toHaveBeenCalled();
+    // In-app navigation only — never a new-tab openUrl (UAT fix #5).
+    expect(fakeXrm.Navigation.openUrl).not.toHaveBeenCalled();
   });
 
-  it('keydown_EnterOnViewRow_AlsoOpensTheMainAspxDeepLinkUrl', async () => {
+  it('keydown_EnterOnViewRow_AlsoNavigatesInAppToTheUserqueryView', async () => {
     const fakeXrm = installMockXrm();
     renderViewsTab('light');
     const user = userEvent.setup();
@@ -249,13 +251,15 @@ describe('ViewsTab', () => {
     screen.getByTestId('views-tab-row-uq-matter-1').focus();
     await user.keyboard('{Enter}');
 
-    await waitFor(() => expect(fakeXrm.Navigation.openUrl).toHaveBeenCalledTimes(1));
-    const url = fakeXrm.Navigation.openUrl.mock.calls[0][0] as string;
-    expect(url).toContain('pagetype=entitylist');
-    expect(url).toContain('etn=sprk_matter');
-    expect(url).toContain('viewid=%7buq-matter-1%7d');
-    expect(url).toContain('viewtype=4230');
-    expect(url).toContain('appid=app-guid-1');
+    await waitFor(() =>
+      expect(fakeXrm.Navigation.navigateTo).toHaveBeenCalledWith({
+        pageType: 'entitylist',
+        entityName: 'sprk_matter',
+        viewId: 'uq-matter-1',
+        viewType: 'userquery',
+      })
+    );
+    expect(fakeXrm.Navigation.openUrl).not.toHaveBeenCalled();
   });
 
   it('click_ViewRow_NoAppContextResolvable_FallsBackToNavigateToWithStringUserqueryViewType', async () => {
