@@ -37,6 +37,7 @@
   <constraints>
     <constraint source="ADR-038">Scope: classify each modified/failing test against the 7 KEEP categories; MAINTAIN-class tests stay at their KEEP path, SCAFFOLDING-class tests are deleted, AMBIGUOUS require reviewer judgment. Coverage is observation, never a gate. Ban Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor-null-check tests.</constraint>
     <constraint source="project">Scope: coordinate with ci-cd-unit-test-remediation-r1 (ADR-038 authority + workflow owner) via /conflict-check before touching shared test infra.</constraint>
+    <constraint source="net10-2026-08-14">Build on the net10 green suite (handback `notes/r3-handoff.md`; BFF 10,415/0/101, ArchTests 28, Core 45, Scheduling 47, RecordSync 12). KEEP/MAINTAIN (do NOT delete or reclassify as scaffolding): the H2 guard `DiGraphValidationTests` (net-new, MAINTAIN-class per the net10 /test-diet). Respect net10 test-detail changes: `ExternalParticipationService` cache tests use the single-source-of-truth const (`CacheVersion = ExternalParticipationService.CacheVersion` — don't re-hardcode); `MessageAttachmentMaterializer` asserts `sprk_relatedcommunication` (production rename — not `sprk_communication`). The net10 project already ran /test-diet (`dotnet-10-upgrade-r1/notes/test-diet-report.md`) — reconcile against it, don't re-litigate its retarget/realign edits.</constraint>
   </constraints>
 
   <knowledge>

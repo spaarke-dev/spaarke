@@ -40,6 +40,7 @@
     <constraint source="ADR-010">Scope: CommunicationModule decomposition adds cohesive helpers ONLY — registrations MUST be identical post-decomposition; no new abstractions/interfaces.</constraint>
     <constraint source="project">Scope (data-driven dispatch, NFR-08): before renaming any handler/tool, run the Dataverse sprk_analysistool.sprk_handlerclass pre-check (read-only) and record it in notes/dataverse-precheck.md. NEVER touch a HandlerId string. Do NOT rename either of the two R6 Ai/Handlers handlers.</constraint>
     <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+    <constraint source="net10-2026-08-14">Build on the net10 H2 DI fixes (handback `notes/r3-handoff.md`): net10 fixed 45 captive-dependency errors → 10 root singletons, and `ValidateOnBuild`/`ValidateScopes` are ON with a permanent guard test `DiGraphValidationTests`. The CommunicationModule decomposition MUST keep the DI graph clean — registrations identical, NO new captive deps (scoped-captured-by-singleton), `DiGraphValidationTests` stays green. Do NOT disable the DI validations to make the decompose pass.</constraint>
   </constraints>
 
   <knowledge>

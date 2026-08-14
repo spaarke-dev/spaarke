@@ -46,6 +46,7 @@
     <constraint source="ADR-028">Scope: the constant documents the APPLICATION (app-only) roles required by the BFF identity (app-reg and/or MI per ADR-028's MI mandate). Delegated scopes (Register-EntraAppRegistrations.ps1:87-90) are out of scope — do not merge the two lists.</constraint>
     <constraint source="auth-gate">GATED on the BFF Auth Surface Map (task 019 → notes/bff-auth-surface-map.md). The map resolves which service principal must hold the Graph app-roles (system-assigned MI vs UAMI — GAP #4); the verifier MUST target that SP. Do NOT assume the SP identity — take it from the map.</constraint>
     <constraint source="auth-map-2026-08-13">Map resolution: the identity is a **UAMI** — grant target is `mi-bff-api-dev` (clientId 5967251e…) / `mi-bff-api-demo` (b0ce4ca4…), NOT the retired `56ae2188…` and NOT the app-reg. The verifier census MUST run against BOTH the app-reg SP (the expected-role-list SOURCE) and the UAMI SP (the grant TARGET) per env, and flag drift. Owner/portal confirmation item (map §H): whether the full 11-role set was ever replicated from the retired principal onto the UAMI SP — surface it, don't assume.</constraint>
+    <constraint source="net10-2026-08-14">Environment reality (handback `notes/r3-handoff.md`): **only `spaarke-dev` is live** — demo/prod decommissioned. The UAMI-SP Graph-role census runs against **dev** (`mi-bff-api-dev` `5967251e…`) for now; demo (`mi-bff-api-demo` `b0ce4ca4…`) re-verify is DEFERRED until re-provisioned.</constraint>
   </constraints>
 
   <knowledge>
