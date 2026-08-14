@@ -1,6 +1,6 @@
 # Current Task State — dotnet-10-upgrade-r1
 
-> **Last Updated**: 2026-08-13 (P0+P1+P2+P3+P4 ✅ — 031/032/040/041/042 done this session. Clean tree, all pushed. Next = P5 050/051 OPERATOR-DRIVEN. Safe to /compact.)
+> **Last Updated**: 2026-08-14 (✅ PROJECT COMPLETE — cutover done, master+dev net10, 090 wrap-up closed. Next project: code-quality-and-assurance-r3.)
 > **Recovery**: Read "Quick Recovery" first. Root CLAUDE.md §4 — execute tasks via `task-execute`, not manually.
 
 ---
@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **P0 ✅ · P1 ✅ · P2 ✅ · P3 ✅ · P4 ✅**. **P5 050 ✅ (env evidence) · 051 Phase-1 slot smoke ✅ GO (net10 validated on Azure).** **Branch UPDATED with master (behind 0) + full net10 suite GREEN.** → **CUTOVER-READY.** Remaining: the coordinated cutover window (merge net10→master + flip dev + 4-5 worktrees merge master) + 090 wrap-up. 060/061 deferred (no prod env). |
-| **Active task** | none active — branch update complete; cutover pending owner (scheduled "this morning" 2026-08-13). |
-| **Status** | **CUTOVER LIVE — master net10 ✅ + main dev running net10 ✅.** origin/master=`d71bd3547` (net10). Main dev `spaarke-bff-dev` = `DOTNETCORE-10.0.9`, /healthz 200 stable, /ping pong, auth 401. Codeless AI agent disabled on main dev (FR-06). Deploy needed one auto-recover (runtime-transition cold-start timeout → stop/zipdeploy/start → green). |
-| **Next Action** | **Remaining cutover tail**: (1) OWNER sends the worktree broadcast (install .NET 10 SDK + `git merge origin/master` + test build) to the 4-5 active worktrees; (2) delete staging slot `spaarke-bff-dev-staging` (validation done, main dev now net10 — frees P1v3 compute); (3) **090 wrap-up** (`/test-diet` + doc-drift + INDEX + r3 handoff). Minor loose end: main repo local master stale at `efc20ffe5` (uncommitted researcher memory there). |
+| **Project phase** | **✅ PROJECT COMPLETE (2026-08-14).** All active tasks done (P0–P7); 060/061 prod/demo cutover DEFERRED (#773). master + dev on `DOTNETCORE-10.0.9`, suite green (BFF 10415/0), zero-CVE, publish 44.96 MB. |
+| **Active task** | none — project closed via 090. r3 handoff at [`notes/r3-handoff.md`](notes/r3-handoff.md). |
+| **Status** | **COMPLETE.** 090 wrap-up done: /test-diet clean (`notes/test-diet-report.md`), doc-drift swept (.NET 8→10 across 19 docs), INDEX flipped to ✅, r3 handoff written, deferred majors **#772** + prod cutover **#773** filed, staging slot deleted. Post-cutover extras: Tier-1 same-major patch pass, Bicep 0.46.1, `/worktree-net10-migrate` skill. |
+| **Next Action** | **None for this project.** Next: start **`code-quality-and-assurance-r3`** on the net10 baseline — load [`notes/r3-handoff.md`](notes/r3-handoff.md) first; migrate its worktree via `/worktree-net10-migrate`. Minor loose end: main repo local master stale at `efc20ffe5` (uncommitted researcher memory there). |
 | **Branch** | `work/dotnet-10-upgrade-r1` (worktree; exists on origin) — **behind master 0, ahead 45** |
 | **Git** | ✅ **CLEAN — tip `6ed88bab0`, 0 unpushed, behind master 0.** Latest: master re-sync `7960528cd` (70 commits; 2 additive conflicts MEMORY.md+INDEX.md union-resolved; BFF Communication files auto-merged) + test fix `6ed88bab0` (MessageAttachmentMaterializer: master renamed sprk_document lookup→sprk_relatedcommunication but left test stale = red-on-master too; realigned). Post-resync FULL suite GREEN: BFF **10415/0**/101, Arch 28, Core 45, Sched 47, RecordSync 12. **NOT merged to master — awaiting owner go (the cutover step).** |
 
