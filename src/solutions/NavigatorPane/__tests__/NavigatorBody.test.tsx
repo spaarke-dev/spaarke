@@ -2,8 +2,11 @@
  * NavigatorBody Component Tests
  *
  * Verifies task 040 acceptance criteria (spaarke-side-pane-navigation-history-r1
- * spec FR-01 + FR-11):
- *   - Recent/Pinned/Views tab scaffold + persistent search-bar placeholder render
+ * spec FR-01 + FR-11), UPDATED for the UAT-driven redesign (Recent / Bookmarks /
+ * Monitored / Views, 4 tabs — formerly Recent / Pinned / Views with Monitored
+ * nested inside Pinned) and the capture-wiring bug fix:
+ *   - Recent/Bookmarks/Monitored/Views tab scaffold + persistent search-bar
+ *     placeholder render
  *   - Renders in light AND dark themes (ADR-021 — Fluent v9 tokens, no hardcoded colors)
  *   - Tab selection switches the active panel
  *   - Portal FluentProvider re-wrap is present on the search-bar info Tooltip
@@ -13,6 +16,8 @@
  *     wires up (NFR-07)
  *   - No-Xrm surfaces degrade to a safe empty state and never throw (negative
  *     acceptance criterion)
+ *   - BUG FIX: `startNavigatorCapture` (previously defined but never invoked
+ *     anywhere) is now invoked exactly once on mount
  *
  * @see ../src/NavigatorBody.tsx
  * @see ADR-021 Fluent UI v9 design system (tokens, portal re-wrap, light/dark, --sprk-ui-scale)
@@ -31,6 +36,15 @@ import {
   scaleTheme,
 } from '@spaarke/ui-components';
 
+// Mocked so the capture-start assertion below doesn't depend on the real
+// ~1.5s poll loop actually ticking — this test only verifies NavigatorBody's
+// OWN wiring (the bug fix), not navigatorCaptureService.ts's poll behavior
+// itself (covered by that module's own test suite in the shared lib).
+jest.mock('@spaarke/ui-components/services/navigator/navigatorCaptureService', () => ({
+  startNavigatorCapture: jest.fn(() => jest.fn()),
+}));
+
+import { startNavigatorCapture } from '@spaarke/ui-components/services/navigator/navigatorCaptureService';
 import { NavigatorBody } from '../src/NavigatorBody';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -73,6 +87,7 @@ describe('NavigatorBody', () => {
   beforeEach(() => {
     localStorage.clear();
     installMockXrm();
+    (startNavigatorCapture as jest.Mock).mockClear();
   });
 
   afterEach(() => {
@@ -88,17 +103,18 @@ describe('NavigatorBody', () => {
   // Tab scaffold + search-bar placeholder
   // ───────────────────────────────────────────────────────────────────────
 
-  it('render_WithXrm_ShowsRecentPinnedViewsTabsAndQuickSwitcherSearchBox', async () => {
+  it('render_WithXrm_ShowsRecentBookmarksMonitoredViewsTabsAndQuickSwitcherSearchBox', async () => {
     renderNavigatorBody();
 
     expect(screen.getByTestId('navigator-tab-recent')).toHaveTextContent('Recent');
-    expect(screen.getByTestId('navigator-tab-pinned')).toHaveTextContent('Pinned');
+    expect(screen.getByTestId('navigator-tab-bookmarks')).toHaveTextContent('Bookmarks');
+    expect(screen.getByTestId('navigator-tab-monitored')).toHaveTextContent('Monitored');
     expect(screen.getByTestId('navigator-tab-views')).toHaveTextContent('Views');
     // task 070 — the search-bar placeholder is replaced by the real QuickSwitcher.
     expect(screen.getByTestId('navigator-quickswitcher-input')).toBeInTheDocument();
 
-    // Default active tab is Recent — task 041 wires this panel to <RecentTab>
-    // (replacing the task-040 placeholder text for the `recent` tab only).
+    // Default active tab is Recent — <RecentTab> renders only captured Viewed
+    // history now (UAT redesign removed the Viewed/Edited toggle).
     // installMockXrm() here has no `Utility`, so RecentTab's load short-circuits
     // to its empty state rather than querying history rows.
     expect(await screen.findByTestId('recent-tab-empty')).toHaveTextContent(
@@ -110,16 +126,22 @@ describe('NavigatorBody', () => {
     renderNavigatorBody();
     const user = userEvent.setup();
 
-    await user.click(screen.getByTestId('navigator-tab-pinned'));
+    await user.click(screen.getByTestId('navigator-tab-bookmarks'));
 
-    // Task 050 wires the `pinned` panel to <PinnedTab/>. installMockXrm() here
-    // has no `Utility`, so PinnedTab's load short-circuits to its empty state
-    // (mirrors the `recent`-tab assertion above) rather than the pre-050
-    // static placeholder text.
-    expect(await screen.findByTestId('pinned-tab-empty')).toHaveTextContent(
-      'Pinned records will appear here.'
+    // <BookmarksTab/> (formerly <PinnedTab/>). installMockXrm() here has no
+    // `Utility`, so BookmarksTab's load short-circuits to its empty state
+    // (mirrors the `recent`-tab assertion above).
+    expect(await screen.findByTestId('bookmarks-tab-empty')).toHaveTextContent(
+      'Pinned records, views, and links will appear here.'
     );
     expect(screen.queryByTestId('navigator-tab-panel-recent')).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId('navigator-tab-monitored'));
+
+    expect(await screen.findByTestId('monitored-tab-empty')).toHaveTextContent(
+      "Records you're monitoring will appear here."
+    );
+    expect(screen.queryByTestId('navigator-tab-panel-bookmarks')).not.toBeInTheDocument();
 
     await user.click(screen.getByTestId('navigator-tab-views'));
 
@@ -201,5 +223,26 @@ describe('NavigatorBody', () => {
     );
     expect(screen.queryByTestId('navigator-body')).not.toBeInTheDocument();
     expect(screen.queryByTestId('navigator-tabs')).not.toBeInTheDocument();
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // BUG FIX — startNavigatorCapture() was defined but never called anywhere,
+  // so no page-visit history was ever written and the Recent tab was
+  // permanently empty. NavigatorBody now starts the poll on mount.
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('mount_NavigatorBody_StartsNavigatorCaptureOnce', () => {
+    const { unmount } = renderNavigatorBody();
+
+    expect(startNavigatorCapture).toHaveBeenCalledTimes(1);
+    expect(startNavigatorCapture).toHaveBeenCalledWith(
+      expect.objectContaining({ onError: expect.any(Function) })
+    );
+
+    // Unmounting calls the returned stop function — the capture guard resets
+    // so a genuine remount (not asserted further here) can start its own poll.
+    const stopFn = (startNavigatorCapture as jest.Mock).mock.results[0].value;
+    unmount();
+    expect(stopFn).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,34 +1,29 @@
 /**
- * RecentTab Component Tests (task 041 Viewed, task 042 adds Viewed/Edited toggle — spec FR-03/FR-04 UI)
+ * RecentTab Component Tests
+ * (spaarke-side-pane-navigation-history-r1 task 041, spec FR-03 UI; UPDATED
+ * for the UAT-driven redesign — the task-042 Viewed/Edited segmented toggle
+ * is REMOVED, the on-row type-chip `Badge` pill is REMOVED in favor of a
+ * far-left `rowIconFor` icon.)
  *
- * Verifies the task-041 closed acceptance-criteria set + `<ui-tests>`:
+ * Verifies the closed acceptance-criteria set:
  *   - History rows render newest-first by `sprk_lastvisited`.
- *   - Each row's type chip matches its pagetype/logical target
- *     (Matter/Document/<other entity>/View/Page/Link).
+ *   - Each row shows a far-left record-type icon (replaces the removed chip).
  *   - Clicking a row invokes `Xrm.Navigation` for the row's logical target
  *     (`navigateTo` for entityrecord/entitylist, `openUrl` for weblink).
  *   - The inline star creates a per-user `sprk_type=pin` `sprk_navitem` and
  *     the row reflects the pinned state.
  *   - Renders correctly in light AND dark themes (ADR-021).
  *   - A row whose target retrieve returns 403/404 is trimmed without
- *     throwing (FR-12 minimal — full trimming is task 080).
+ *     throwing (FR-12, task 080).
+ *   - There is NO Viewed/Edited toggle anywhere in this tab.
  *
- * Plus the task-042 closed acceptance-criteria set + `<ui-tests>`:
- *   - The Viewed/Edited segmented toggle switches lists (light + dark).
- *   - Edited shows the merged `modifiedby=me` list, newest-first.
- *   - A flow-edited record (modifiedon-derived) appears in Edited.
- *   - An empty-result core-set entity contributes nothing to Edited, no error.
- *   - NO audit entity is ever queried by the Edited derivation.
- *
- * `window.Xrm` is installed directly (mirrors `NavigatorBody.test.tsx` /
- * `navigatorCaptureService.test.ts`) so `getXrm()` resolves it via its normal
- * `window.Xrm` frame-walk — no module mock of `xrmContext`,
- * `navItemRepository`, or `editedByMeService` itself; the fake `Xrm.WebApi`
- * drives real repository/service code paths (`listHistoryItems`/
- * `listPinItems`/`createPinItem`/`listEditedByMe`).
+ * `window.Xrm` is installed directly (mirrors `NavigatorBody.test.tsx`) so
+ * `getXrm()` resolves it via its normal `window.Xrm` frame-walk — no module
+ * mock of `xrmContext` or `navItemRepository` itself; the fake `Xrm.WebApi`
+ * drives real repository code paths (`listHistoryItems`/`listPinItems`/
+ * `createPinItem`).
  *
  * @see ../RecentTab.tsx
- * @see ../../services/editedByMeService.ts
  * @see ADR-021 Fluent UI v9 design system (tokens, light/dark)
  * @see ADR-022 React 16/17-safe shared-lib code (navItemRepository/xrmContext this tab consumes)
  */
@@ -57,7 +52,7 @@ const NavItemPageType = {
 const MATTER_ID = '11111111-1111-1111-1111-111111111111';
 const DOCUMENT_ID = '22222222-2222-2222-2222-222222222222';
 
-/** Five rows covering the full closed chip set, newest-first by design. */
+/** Five rows covering the full closed pagetype set, newest-first by design. */
 const FIVE_TYPE_ROWS = [
   {
     sprk_navitemid: 'nav-matter',
@@ -125,23 +120,6 @@ const FIVE_TYPE_ROWS = [
 // Fake Xrm
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Minimal per-entity "edited by me" row shape for the fake `retrieveMultipleRecords`. */
-interface FakeEditedRecord {
-  id: string;
-  modifiedon: string;
-  name?: string;
-}
-
-/** Primary-name field per core-set entity — mirrors the live spaarkedev1 EntityDefinitions shape (task 042 schema validation). */
-const EDITED_PRIMARY_NAME_FIELD: Record<string, string> = {
-  sprk_matter: 'sprk_matternumber',
-  sprk_project: 'sprk_projectnumber',
-  sprk_document: 'sprk_documentname',
-  sprk_todo: 'sprk_name',
-  sprk_event: 'sprk_eventname',
-  sprk_communication: 'sprk_name',
-};
-
 interface FakeXrmOptions {
   historyRows?: typeof FIVE_TYPE_ROWS;
   pinRows?: typeof FIVE_TYPE_ROWS;
@@ -149,8 +127,6 @@ interface FakeXrmOptions {
   inaccessibleTargetIds?: string[];
   /** Target ids that should fail `retrieveRecord` with a network/timeout-shaped error (task 080 — classifies `transient`, row is KEPT). */
   transientTargetIds?: string[];
-  /** Task 042 — rows returned per core-set entity for the Edited `modifiedby=me` query. */
-  editedRecordsByEntity?: Partial<Record<string, FakeEditedRecord[]>>;
 }
 
 function buildFakeXrm(options: FakeXrmOptions = {}) {
@@ -158,9 +134,8 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
   const pinRows = options.pinRows ?? [];
   const inaccessibleTargetIds = new Set(options.inaccessibleTargetIds ?? []);
   const transientTargetIds = new Set(options.transientTargetIds ?? []);
-  const editedRecordsByEntity = options.editedRecordsByEntity ?? {};
 
-  const retrieveMultipleRecords = jest.fn(async (entity: string, query?: string) => {
+  const retrieveMultipleRecords = jest.fn(async (_entity: string, query?: string) => {
     const isHistory = query?.includes(`sprk_type eq ${NavItemType.History}`);
     const isPin = query?.includes(`sprk_type eq ${NavItemType.Pin}`);
     if (isHistory) {
@@ -172,25 +147,8 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
     if (isPin) {
       return { entities: pinRows };
     }
-    if (query?.includes('_modifiedby_value eq')) {
-      // Task 042 — Edited derivation: per-core-entity modifiedby=me query.
-      const idField = `${entity}id`;
-      const nameField = EDITED_PRIMARY_NAME_FIELD[entity];
-      const rows = editedRecordsByEntity[entity] ?? [];
-      return {
-        entities: rows.map(r => ({
-          [idField]: r.id,
-          modifiedon: r.modifiedon,
-          ...(nameField && r.name !== undefined ? { [nameField]: r.name } : {}),
-        })),
-      };
-    }
     return { entities: [] };
   });
-
-  const getEntityMetadata = jest.fn(async (entity: string) => ({
-    PrimaryNameAttribute: EDITED_PRIMARY_NAME_FIELD[entity] ?? 'name',
-  }));
 
   const retrieveRecord = jest.fn(async (_entity: string, id: string) => {
     if (inaccessibleTargetIds.has(id)) {
@@ -229,8 +187,6 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
         getCurrentAppUrl: () => 'https://spaarkedev1.crm.dynamics.com',
         getVersion: () => '9.2',
       })),
-      // Task 042 — Edited derivation's display-name resolution.
-      getEntityMetadata,
     },
   };
 }
@@ -270,10 +226,10 @@ describe('RecentTab', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────
-  // Newest-first ordering + chip mapping (light + dark)
+  // Newest-first ordering + far-left icon (replaces the removed chip)
   // ───────────────────────────────────────────────────────────────────────
 
-  it('render_HistoryRows_ShowNewestFirstWithCorrectChips', async () => {
+  it('render_HistoryRows_ShowNewestFirstWithFarLeftIcons', async () => {
     installMockXrm();
     renderRecentTab('light');
 
@@ -284,6 +240,11 @@ describe('RecentTab', () => {
     const rowIds = FIVE_TYPE_ROWS.map(r => r.sprk_navitemid);
     for (const id of rowIds) {
       expect(screen.getByTestId(`recent-tab-row-${id}`)).toBeInTheDocument();
+      // Icon presence (replaces the removed Badge pill) — every row leads
+      // with a far-left record-type icon, whatever its pagetype.
+      const icon = screen.getByTestId(`recent-tab-row-icon-${id}`);
+      expect(icon).toBeInTheDocument();
+      expect(icon.querySelector('svg')).not.toBeNull();
     }
 
     // Newest-first: DOM order matches FIVE_TYPE_ROWS order (already newest -> oldest).
@@ -292,12 +253,8 @@ describe('RecentTab', () => {
       .map(el => el.getAttribute('data-testid'));
     expect(renderedIds).toEqual(rowIds.map(id => `recent-tab-row-${id}`));
 
-    // Chip mapping — closed set (Matter/Document/View/Page/Link).
-    expect(screen.getByTestId('recent-tab-row-chip-nav-matter')).toHaveTextContent('Matter');
-    expect(screen.getByTestId('recent-tab-row-chip-nav-document')).toHaveTextContent('Document');
-    expect(screen.getByTestId('recent-tab-row-chip-nav-view')).toHaveTextContent('View');
-    expect(screen.getByTestId('recent-tab-row-chip-nav-page')).toHaveTextContent('Page');
-    expect(screen.getByTestId('recent-tab-row-chip-nav-link')).toHaveTextContent('Link');
+    // No Badge chip anywhere anymore.
+    expect(screen.queryByTestId('recent-tab-row-chip-nav-matter')).not.toBeInTheDocument();
   });
 
   it('render_DarkTheme_RendersAllRowsWithoutError', async () => {
@@ -308,7 +265,24 @@ describe('RecentTab', () => {
       expect(screen.getByTestId('recent-tab')).toBeInTheDocument();
     });
     expect(screen.getByTestId('recent-tab-row-nav-matter')).toBeInTheDocument();
-    expect(screen.getByTestId('recent-tab-row-chip-nav-link')).toHaveTextContent('Link');
+    expect(screen.getByTestId('recent-tab-row-icon-nav-link')).toBeInTheDocument();
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // No Viewed/Edited toggle anywhere (UAT redesign removed it)
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('render_NeverShowsTheRemovedViewedEditedToggle', async () => {
+    installMockXrm();
+    renderRecentTab('light');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('recent-tab')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('recent-tab-mode-toggle')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('recent-tab-mode-viewed')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('recent-tab-mode-edited')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('recent-tab-edited')).not.toBeInTheDocument();
   });
 
   // ───────────────────────────────────────────────────────────────────────
@@ -471,130 +445,6 @@ describe('RecentTab', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('recent-tab-empty')).toBeInTheDocument();
-    });
-  });
-
-  // ───────────────────────────────────────────────────────────────────────
-  // Task 042 — Viewed/Edited segmented toggle (spec FR-04 / OQ-5)
-  // ───────────────────────────────────────────────────────────────────────
-
-  describe('Viewed/Edited toggle (task 042)', () => {
-    const EDITED_FIXTURES = {
-      sprk_matter: [{ id: 'edited-matter-1', modifiedon: '2026-08-10T10:00:00.000Z', name: 'MTR-100' }],
-      sprk_document: [{ id: 'edited-doc-1', modifiedon: '2026-08-12T09:00:00.000Z', name: 'Amendment.docx' }],
-      // sprk_project, sprk_todo, sprk_event, sprk_communication intentionally
-      // omitted — empty-result entities, exercised by the negative case below.
-    };
-
-    it('toggle_SwitchToEdited_ShowsMergedModifiedByMeListSortedDesc (light)', async () => {
-      const fakeXrm = installMockXrm({ editedRecordsByEntity: EDITED_FIXTURES });
-      renderRecentTab('light');
-      const user = userEvent.setup();
-
-      // Default mode is Viewed — verify it first.
-      await waitFor(() => expect(screen.getByTestId('recent-tab')).toBeInTheDocument());
-      expect(screen.getByTestId('recent-tab-mode-viewed')).toHaveAttribute('aria-pressed', 'true');
-      expect(screen.getByTestId('recent-tab-mode-edited')).toHaveAttribute('aria-pressed', 'false');
-
-      await user.click(screen.getByTestId('recent-tab-mode-edited'));
-
-      await waitFor(() => {
-        expect(screen.getByTestId('recent-tab-edited')).toBeInTheDocument();
-      });
-
-      // Newest-first: document (2026-08-12) before matter (2026-08-10).
-      const renderedIds = screen
-        .getAllByRole('listitem')
-        .map(el => el.getAttribute('data-testid'));
-      expect(renderedIds).toEqual([
-        'recent-tab-edited-row-sprk_document-edited-doc-1',
-        'recent-tab-edited-row-sprk_matter-edited-matter-1',
-      ]);
-      expect(screen.getByTestId('recent-tab-edited-row-sprk_document-edited-doc-1')).toHaveTextContent(
-        'Amendment.docx'
-      );
-      expect(
-        screen.getByTestId('recent-tab-edited-row-chip-sprk_document-edited-doc-1')
-      ).toHaveTextContent('Document');
-
-      // Viewed's own rows are no longer rendered while in Edited mode.
-      expect(screen.queryByTestId('recent-tab')).not.toBeInTheDocument();
-
-      // Every core-set entity was queried, none of them 'audit'.
-      const queriedEntities = fakeXrm.WebApi.retrieveMultipleRecords.mock.calls.map(call => call[0]);
-      expect(queriedEntities).not.toContain('audit');
-      expect(queriedEntities).toEqual(
-        expect.arrayContaining([
-          'sprk_matter',
-          'sprk_project',
-          'sprk_document',
-          'sprk_todo',
-          'sprk_event',
-          'sprk_communication',
-        ])
-      );
-    });
-
-    it('toggle_SwitchToEdited_RendersWithoutErrorInDarkTheme', async () => {
-      installMockXrm({ editedRecordsByEntity: EDITED_FIXTURES });
-      expect(() => renderRecentTab('dark')).not.toThrow();
-      const user = userEvent.setup();
-
-      await waitFor(() => expect(screen.getByTestId('recent-tab-mode-edited')).toBeInTheDocument());
-      await user.click(screen.getByTestId('recent-tab-mode-edited'));
-
-      await waitFor(() => {
-        expect(screen.getByTestId('recent-tab-edited')).toBeInTheDocument();
-      });
-      expect(screen.getByTestId('recent-tab-edited-row-sprk_document-edited-doc-1')).toBeInTheDocument();
-    });
-
-    it('click_ViewedAfterEdited_RestoresTheOriginalHistoryList', async () => {
-      installMockXrm({ editedRecordsByEntity: EDITED_FIXTURES });
-      renderRecentTab('light');
-      const user = userEvent.setup();
-
-      await waitFor(() => expect(screen.getByTestId('recent-tab')).toBeInTheDocument());
-      await user.click(screen.getByTestId('recent-tab-mode-edited'));
-      await waitFor(() => expect(screen.getByTestId('recent-tab-edited')).toBeInTheDocument());
-
-      await user.click(screen.getByTestId('recent-tab-mode-viewed'));
-
-      await waitFor(() => {
-        expect(screen.getByTestId('recent-tab')).toBeInTheDocument();
-      });
-      expect(screen.getByTestId('recent-tab-row-nav-matter')).toBeInTheDocument();
-      expect(screen.queryByTestId('recent-tab-edited')).not.toBeInTheDocument();
-    });
-
-    it('toggle_FlowEditedRecordAndEmptyResultEntity_AppearsAndIsHarmless', async () => {
-      // sprk_event was edited by a flow (not the UI) — no capture/history
-      // row for it exists anywhere in this fixture; it only shows up because
-      // its own modifiedon-derived query returns it. sprk_project,
-      // sprk_todo, sprk_communication are intentionally left with zero rows
-      // (empty-result entities) — they must contribute nothing and must not
-      // cause an error.
-      installMockXrm({
-        historyRows: [],
-        editedRecordsByEntity: {
-          sprk_event: [{ id: 'flow-event-1', modifiedon: '2026-08-13T03:00:00.000Z', name: 'Auto-scheduled hearing' }],
-        },
-      });
-      renderRecentTab('light');
-      const user = userEvent.setup();
-
-      await waitFor(() => expect(screen.getByTestId('recent-tab-mode-edited')).toBeInTheDocument());
-      await user.click(screen.getByTestId('recent-tab-mode-edited'));
-
-      await waitFor(() => {
-        expect(screen.getByTestId('recent-tab-edited')).toBeInTheDocument();
-      });
-
-      expect(screen.getByTestId('recent-tab-edited-row-sprk_event-flow-event-1')).toHaveTextContent(
-        'Auto-scheduled hearing'
-      );
-      // Exactly one row rendered — the five empty-result entities contributed nothing.
-      expect(screen.getAllByRole('listitem')).toHaveLength(1);
     });
   });
 });

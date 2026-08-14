@@ -356,7 +356,10 @@ describe('QuickSwitcher', () => {
         id: 'view-1',
         label: 'My Open Matters',
         chipLabel: 'View',
-        target: { type: 'entitylist', entityLogicalName: 'sprk_matter', viewId: 'uq-1' },
+        // `viewType: '4230'` — UAT bug fix (mirrors ViewsTab.tsx's
+        // `USERQUERY_VIEW_TYPE`); every view ViewsTab reports is a personal
+        // userquery, so this is always set on real entries.
+        target: { type: 'entitylist', entityLogicalName: 'sprk_matter', viewId: 'uq-1', viewType: '4230' },
       },
     ]);
 
@@ -366,10 +369,13 @@ describe('QuickSwitcher', () => {
     await user.type(screen.getByTestId('navigator-quickswitcher-input'), 'open matters');
     await user.click(await screen.findByTestId('navigator-quickswitcher-result-view-1'));
 
+    // `viewType` (BUG FIX) threads through to `navigateTo` so a personal view
+    // opens correctly rather than falling back to the entity default view.
     expect(fakeXrm.Navigation.navigateTo).toHaveBeenCalledWith({
       pageType: 'entitylist',
       entityName: 'sprk_matter',
       viewId: 'uq-1',
+      viewType: '4230',
     });
   });
 

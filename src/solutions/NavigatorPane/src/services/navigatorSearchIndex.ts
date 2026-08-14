@@ -61,7 +61,20 @@ export type SearchEntrySection = 'recent' | 'pinned' | 'view';
  */
 export type SearchEntryTarget =
   | { type: 'entityrecord'; entityLogicalName: string; entityId: string }
-  | { type: 'entitylist'; entityLogicalName: string; viewId?: string }
+  | {
+      type: 'entitylist';
+      entityLogicalName: string;
+      viewId?: string;
+      /**
+       * Personal (`userquery`) view marker for `Xrm.Navigation.navigateTo`'s
+       * `viewType` param (`'4230'`) — UAT bug fix, added alongside
+       * `xrmContext.ts`'s `PageInput.viewType` widen. `ViewsTab.tsx` always
+       * sets this (every entry it reports is a `userquery`); a Bookmarks-tab
+       * entitylist bookmark (an arbitrary pasted MDA URL) may not know its
+       * view's type at parse time and can leave this `undefined`.
+       */
+      viewType?: string;
+    }
   | { type: 'weblink'; url: string };
 
 /** One entry in the local index OR a live-escalation result (`source` distinguishes them). */

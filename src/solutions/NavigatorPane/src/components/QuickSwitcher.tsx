@@ -177,11 +177,14 @@ function navigateToTarget(xrm: XrmContext, target: SearchEntryTarget | null): vo
     return;
   }
 
-  // entitylist
+  // entitylist — `viewType` (UAT bug fix, xrmContext.ts widen) disambiguates a
+  // personal `userquery` id from a system `savedquery` id sharing the same
+  // GUID space; `undefined` here is a no-op for entries that don't know it.
   void navigation.navigateTo({
     pageType: 'entitylist',
     entityName: target.entityLogicalName,
     viewId: target.viewId,
+    viewType: target.viewType,
   });
 }
 

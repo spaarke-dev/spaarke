@@ -111,6 +111,18 @@ export interface PageInput {
    * for the Navigator Views tab's click-to-open-with-view-selected flow).
    */
   viewId?: string;
+  /**
+   * Saved view TYPE for `pageType: 'entitylist'` navigation — matches the
+   * real `Xrm.Navigation.navigateTo` `PageInputEntityList.viewType` contract
+   * (widened 2026-08-14, spaarke-side-pane-navigation-history-r1 UAT bug
+   * fix). Without this, `navigateTo` falls back to the entity's DEFAULT view
+   * even when `viewId` correctly identifies a personal (`userquery`) view —
+   * Dataverse needs `viewType` to disambiguate a `userquery` id (`'4230'`)
+   * from a system `savedquery` id (`'1039'`) sharing the same GUID space.
+   * The Navigator Views tab (`ViewsTab.tsx`) always passes `'4230'` since it
+   * only ever lists `userquery` views (see `ViewService.getAllUserQueries()`).
+   */
+  viewType?: string;
   data?: Record<string, any> | string;
   name?: string;
 }

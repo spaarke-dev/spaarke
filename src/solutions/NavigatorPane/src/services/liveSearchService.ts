@@ -189,7 +189,11 @@ export async function liveSearchViews(query: string): Promise<SearchIndexEntry[]
         id: `live-view-${view.id}`,
         label: view.name,
         chipLabel: 'View',
-        target: { type: 'entitylist', entityLogicalName: view.entityLogicalName, viewId: view.id },
+        // `viewType: '4230'` (UAT bug fix, mirrors ViewsTab.tsx's
+        // `USERQUERY_VIEW_TYPE`) — every view `getAllUserQueries()` returns
+        // is a personal `userquery`, so this is unconditionally correct here
+        // too; without it `navigateTo` falls back to the entity default view.
+        target: { type: 'entitylist', entityLogicalName: view.entityLogicalName, viewId: view.id, viewType: '4230' },
       }));
   } catch {
     return [];

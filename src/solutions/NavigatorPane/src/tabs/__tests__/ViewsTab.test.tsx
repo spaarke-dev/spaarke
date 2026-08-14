@@ -2,18 +2,22 @@
  * ViewsTab Component Tests
  * (spaarke-side-pane-navigation-history-r1 task 060, spec FR-10 UI)
  *
- * Verifies the task-060 closed acceptance-criteria set + `<ui-tests>`:
+ * Verifies the task-060 closed acceptance-criteria set + `<ui-tests>`, PLUS
+ * the UAT bug fix (`viewType`):
  *   - Given a user with saved userquery views, the Views tab lists them
- *     grouped by entity (`returnedtypecode`).
+ *     grouped by entity (`returnedtypecode`), each entity-group heading on a
+ *     subtle gray background band.
  *   - Clicking a listed view calls `Xrm.Navigation.navigateTo` with
- *     `pageType:'entitylist'` and the correct `entityName` + `viewId`.
+ *     `pageType:'entitylist'`, the correct `entityName` + `viewId`, AND
+ *     `viewType: '4230'` (BUG FIX — without it, `navigateTo` silently opened
+ *     the entity's DEFAULT view instead of the selected personal view).
  *   - System `savedquery` views are never shown by default (opt-in / pin-only
  *     per FR-10) — this tab never even queries `savedquery`.
  *   - Negative: a user with zero userqueries sees a benign empty state, not
  *     an error.
  *   - Renders correctly in light AND dark themes (ADR-021); no portal-
  *     rendered component here so no re-wrap assertion is needed (mirrors
- *     RecentTab.tsx/PinnedTab.tsx's own note).
+ *     RecentTab.tsx/BookmarksTab.tsx's own note).
  *   - No-Xrm degrades to the same safe empty state, never throws.
  *
  * `window.Xrm` is installed directly (mirrors RecentTab.test.tsx /
@@ -206,6 +210,7 @@ describe('ViewsTab', () => {
       pageType: 'entitylist',
       entityName: 'sprk_document',
       viewId: 'uq-document-1',
+      viewType: '4230',
     });
   });
 
@@ -223,7 +228,28 @@ describe('ViewsTab', () => {
       pageType: 'entitylist',
       entityName: 'sprk_matter',
       viewId: 'uq-matter-1',
+      viewType: '4230',
     });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // Gray background band on entity-group headings (UAT polish)
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('render_EntityGroupHeadings_HaveAGrayBackgroundBand', async () => {
+    installMockXrm();
+    renderViewsTab('light');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('views-tab-group-sprk_matter')).toBeInTheDocument();
+    });
+
+    const heading = screen.getByText('Matter');
+    // The heading's immediate wrapper carries the gray-band background class
+    // (a Griffel-generated class — presence of ANY class, not the token
+    // value itself, is what's checkable from a jsdom render).
+    expect(heading.parentElement?.className).toBeTruthy();
+    expect(heading.parentElement).not.toBe(screen.getByTestId('views-tab-group-sprk_matter'));
   });
 
   // ───────────────────────────────────────────────────────────────────────

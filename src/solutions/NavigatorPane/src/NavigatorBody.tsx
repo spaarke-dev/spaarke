@@ -7,20 +7,22 @@
  * rework — no dependency on SprkSidePaneHost internals beyond the
  * `SidePaneContributorProps` shape it is registered under in `main.tsx`.
  *
- * This task shipped the SCAFFOLD: a 3-tab layout (Recent / Pinned / Views) +
- * a persistent top-of-pane search-bar placeholder. Task 041 wires the
- * `recent` panel to `RecentTab` (history rows + type chips + navigate +
- * promote-to-pin). Task 050 wires the `pinned` panel to `PinnedTab`'s
- * Records group (the full pin gesture — see `pinService.ts`); `PinnedTab`
- * itself has seams for 051 (Bookmarks) and 052 (Monitored) to add sibling
- * groups without this file changing again. Task 060 wires the `views` panel
- * to `ViewsTab` (userquery views grouped by entity, via `ViewService`). Task
- * 070 replaces the search-bar placeholder with `QuickSwitcher` — local
- * fuzzy-match over the Recent/Pinned/Views entries those three tabs report
- * into `services/navigatorSearchIndex.ts`, escalating to a live
- * `Xrm.WebApi`/`ViewService` lookup on no local hit (FR-11). The info-icon
- * `Tooltip` this file owns (portal re-wrap, below) stays in place as a
- * search-availability + keyboard-accelerator hint.
+ * UAT-driven redesign (this file's current shape): a 4-tab layout — Recent /
+ * Bookmarks / Monitored / Views — plus a persistent top-of-pane search bar
+ * (`QuickSwitcher`, local fuzzy-match over the Recent/Bookmarks/Views
+ * entries those tabs report into `services/navigatorSearchIndex.ts`,
+ * escalating to a live `Xrm.WebApi`/`ViewService` lookup on no local hit —
+ * FR-11). `recent` -> `RecentTab` (captured Viewed history + navigate +
+ * promote-to-pin); `bookmarks` -> `BookmarksTab` (the former `pinned` tab's
+ * Records + Bookmarks groups, merged into one flat list, gestures moved to
+ * the top — supersedes the now-deleted `PinnedTab.tsx`); `monitored` ->
+ * `MonitoredTab` (the former Monitored `<section>`, promoted to its own
+ * tab); `views` -> `ViewsTab` (userquery views grouped by entity, via
+ * `ViewService`). This component also owns the BUG FIX that starts the
+ * task-030 capture poll (`startNavigatorCapture`, below) — previously
+ * defined but never invoked anywhere, so the Recent tab had no history to
+ * render. The info-icon `Tooltip` this file owns (portal re-wrap, below)
+ * stays in place as a search-availability + keyboard-accelerator hint.
  *
  * ADR-021 compliance:
  *  - Fluent v9 tokens only (no hardcoded colors) — light/dark handled by
@@ -70,8 +72,10 @@ import {
   setupCodePageThemeListener,
   useUiScale,
 } from '@spaarke/ui-components';
+import { startNavigatorCapture } from '@spaarke/ui-components/services/navigator/navigatorCaptureService';
 import { QuickSwitcher } from './components/QuickSwitcher';
-import { PinnedTab } from './tabs/PinnedTab';
+import { BookmarksTab } from './tabs/BookmarksTab';
+import { MonitoredTab } from './tabs/MonitoredTab';
 import { RecentTab } from './tabs/RecentTab';
 import { ViewsTab } from './tabs/ViewsTab';
 
@@ -91,14 +95,36 @@ export interface NavigatorBodyProps {
   paneId?: string;
 }
 
-const NAVIGATOR_TABS = ['recent', 'pinned', 'views'] as const;
+// UAT-driven redesign: Recent | Bookmarks | Monitored | Views (formerly
+// Recent | Pinned | Views, with Monitored nested inside Pinned — see
+// BookmarksTab.tsx / MonitoredTab.tsx module docblocks for the split).
+const NAVIGATOR_TABS = ['recent', 'bookmarks', 'monitored', 'views'] as const;
 type NavigatorTabValue = (typeof NAVIGATOR_TABS)[number];
 
 const TAB_LABELS: Record<NavigatorTabValue, string> = {
   recent: 'Recent',
-  pinned: 'Pinned',
+  bookmarks: 'Bookmarks',
+  monitored: 'Monitored',
   views: 'Views',
 };
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Capture start guard (BUG FIX — task-030's `startNavigatorCapture()` was
+// defined but never called anywhere, so no page-visit history was ever
+// written and the Recent tab was permanently empty)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Module-level guard so the capture poll starts at most ONCE per live
+ * mount, even if React (e.g. `React.StrictMode`'s dev-only synthetic
+ * mount/cleanup/re-mount — see `main.tsx`) fires this component's mount
+ * effect more than once. The effect's own cleanup resets this flag on a
+ * REAL unmount, so a genuine remount (previous instance fully torn down)
+ * still starts its own poll — the guard only prevents two polls running
+ * concurrently, it does not permanently disable capture for the page's
+ * lifetime.
+ */
+let navigatorCaptureStarted = false;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -163,6 +189,25 @@ export const NavigatorBody: React.FC<NavigatorBodyProps> = ({ paneId }) => {
 
   React.useEffect(() => setupCodePageThemeListener(setBaseTheme), []);
 
+  // BUG FIX: wire up the capture poll so the Recent tab actually has history
+  // to render. `startNavigatorCapture` has NO dependency on pane
+  // visibility/collapse state (NFR-05, see its own module docblock) — start
+  // it once here and it keeps polling (~1.5s) even while the pane is
+  // collapsed, since `SprkSidePaneHost` mounts this pane's content with
+  // `alwaysRender: true`. See `navigatorCaptureStarted` above for the
+  // once-per-live-mount guard.
+  React.useEffect(() => {
+    if (navigatorCaptureStarted) return undefined;
+    navigatorCaptureStarted = true;
+    const stop = startNavigatorCapture({
+      onError: err => console.warn('[Navigator] capture error', err),
+    });
+    return () => {
+      stop();
+      navigatorCaptureStarted = false;
+    };
+  }, []);
+
   const handleTabSelect = React.useCallback((_event: SelectTabEvent, data: SelectTabData) => {
     setSelectedTab(data.value as NavigatorTabValue);
   }, []);
@@ -193,7 +238,7 @@ export const NavigatorBody: React.FC<NavigatorBodyProps> = ({ paneId }) => {
             // SprkSidePaneHost rail-icon Tooltip precedent rather than
             // relying on an ambient applyStylesToPortals default alone.
             <FluentProvider theme={resolvedTheme} applyStylesToPortals={true}>
-              <span>Searches Recent, Pinned, and Views instantly, then Dataverse if nothing local matches. Press Ctrl+K (Cmd+K) to jump to search from anywhere in the pane.</span>
+              <span>Searches Recent, Bookmarks, and Views instantly, then Dataverse if nothing local matches. Press Ctrl+K (Cmd+K) to jump to search from anywhere in the pane.</span>
             </FluentProvider>
           }
         >
@@ -229,8 +274,10 @@ export const NavigatorBody: React.FC<NavigatorBodyProps> = ({ paneId }) => {
       >
         {selectedTab === 'recent' ? (
           <RecentTab />
-        ) : selectedTab === 'pinned' ? (
-          <PinnedTab />
+        ) : selectedTab === 'bookmarks' ? (
+          <BookmarksTab />
+        ) : selectedTab === 'monitored' ? (
+          <MonitoredTab />
         ) : (
           <ViewsTab />
         )}

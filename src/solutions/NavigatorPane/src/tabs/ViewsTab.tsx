@@ -104,11 +104,24 @@ function groupByEntity(views: IViewDefinition[]): EntityViewGroup[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Personal (`userquery`) view marker for `Xrm.Navigation.navigateTo`'s
+ * `viewType` param. UAT bug fix: without `viewType`, `navigateTo` falls back
+ * to the entity's DEFAULT view even though `viewId` correctly identifies a
+ * personal view — Dataverse needs `viewType` to disambiguate a `userquery`
+ * id from a system `savedquery` id sharing the same GUID space. Every view
+ * this tab ever lists comes from `ViewService.getAllUserQueries()` (see
+ * module docblock), so this constant is unconditionally correct here.
+ */
+const USERQUERY_VIEW_TYPE = '4230';
+
+/**
  * Navigate to a view's entity list with that view selected. `viewId` is the
  * `userquery` id — Dataverse's `navigateTo` accepts a personal-view id the
- * same way it accepts a `savedquery` id. Takes `xrm` explicitly (rather than
+ * same way it accepts a `savedquery` id, but REQUIRES `viewType` to actually
+ * honor it instead of silently opening the entity's default view (UAT bug
+ * fix — see {@link USERQUERY_VIEW_TYPE}). Takes `xrm` explicitly (rather than
  * re-resolving `getXrm()` internally) to match `navigateToRow`'s signature
- * in RecentTab.tsx/PinnedTab.tsx.
+ * in RecentTab.tsx/BookmarksTab.tsx.
  */
 function navigateToView(xrm: XrmContext, view: IViewDefinition): void {
   const navigation = xrm.Navigation;
@@ -117,16 +130,22 @@ function navigateToView(xrm: XrmContext, view: IViewDefinition): void {
     pageType: 'entitylist',
     entityName: view.entityLogicalName,
     viewId: view.id,
+    viewType: USERQUERY_VIEW_TYPE,
   });
 }
 
-/** Maps a loaded view to a `navigatorSearchIndex.ts` entry (task 070, FR-11). */
+/** Maps a loaded view to a `navigatorSearchIndex.ts` entry (task 070, FR-11). `viewType` (UAT bug fix) so Enter/click on a view search result opens the same personal view, not the entity default. */
 function viewToSearchEntry(view: IViewDefinition): SearchIndexEntry {
   return {
     id: `view-${view.id}`,
     label: view.name,
     chipLabel: 'View',
-    target: { type: 'entitylist', entityLogicalName: view.entityLogicalName, viewId: view.id },
+    target: {
+      type: 'entitylist',
+      entityLogicalName: view.entityLogicalName,
+      viewId: view.id,
+      viewType: USERQUERY_VIEW_TYPE,
+    },
   };
 }
 
@@ -138,12 +157,23 @@ const useStyles = makeStyles({
   container: {
     display: 'flex',
     flexDirection: 'column',
-    ...shorthands.gap(tokens.spacingVerticalM),
+    // Clear vertical whitespace between entity groups (UAT polish).
+    ...shorthands.gap(tokens.spacingVerticalL),
   },
   group: {
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalXS),
+  },
+  // Subtle gray background band under each entity-group heading (UAT
+  // polish) — a full-width block, not just the label text, so the
+  // "MATTER"/"EVENT"/"DOCUMENT" subsection reads as a distinct band.
+  groupHeadingBand: {
+    display: 'flex',
+    alignItems: 'center',
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    ...shorthands.padding(tokens.spacingVerticalXS, tokens.spacingHorizontalS),
   },
   groupHeading: {
     color: tokens.colorNeutralForeground3,
@@ -266,7 +296,7 @@ export const ViewsTab: React.FC = () => {
   } else {
     const groups = groupByEntity(views);
     content = (
-      <div data-testid="views-tab">
+      <div className={styles.container} data-testid="views-tab">
         {groups.map(group => {
           const entityLabel = formatEntityLabel(group.entityLogicalName);
           return (
@@ -276,7 +306,9 @@ export const ViewsTab: React.FC = () => {
               aria-label={entityLabel}
               data-testid={`views-tab-group-${group.entityLogicalName}`}
             >
-              <Text className={styles.groupHeading}>{entityLabel}</Text>
+              <div className={styles.groupHeadingBand}>
+                <Text className={styles.groupHeading}>{entityLabel}</Text>
+              </div>
               <div role="list" aria-label={`${entityLabel} views`}>
                 {group.views.map(view => (
                   <div
