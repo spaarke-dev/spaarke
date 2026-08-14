@@ -333,6 +333,9 @@ function parseArgs(raw) {
       a.designPath ||
       `projects/code-quality-and-assurance-r3/workstreams/${String(a.surface).trim()}/design.md`,
     extraContext: a.extraContext ? String(a.extraContext) : '',
+    // Timestamp MUST come from args — new Date()/Date.now() are banned in
+    // Workflow scripts (they break resume determinism). Passed by the invoker.
+    assessedDate: a.assessedDate ? String(a.assessedDate) : '',
   };
 }
 
@@ -482,15 +485,36 @@ phase('dedup-gate');
 
 const allFindings = [];
 const dimensionGradeInputs = [];
-for (const res of finderResults) {
+const failedDimensions = [];
+// A finder that exhausts the StructuredOutput retry cap (or dies terminally)
+// returns null (Workflow agent() contract). Do NOT crash on res.dimension and do
+// NOT silently drop the dimension — record the gap so synthesis + SCORECARD show it.
+DIMENSIONS.forEach((dim, di) => {
+  const res = finderResults[di];
+  if (!res || !res.dimension) {
+    failedDimensions.push(dim.id);
+    dimensionGradeInputs.push({
+      dimension: dim.id,
+      firstPassGrade: null,
+      gradeRationale:
+        'FINDER FAILED — this dimension produced no schema-valid first-pass output. Grade conservatively from cross-dimension context or mark NOT-ASSESSED; do NOT invent an A. Flag it in the SCORECARD row.',
+    });
+    return;
+  }
   dimensionGradeInputs.push({ dimension: res.dimension, firstPassGrade: res.grade, gradeRationale: res.gradeRationale });
-  res.findings.forEach((f, i) => {
+  (res.findings || []).forEach((f, i) => {
     allFindings.push({
       findingId: `${res.dimension}-${String(i + 1).padStart(2, '0')}`,
       dimension: res.dimension,
       ...f,
     });
   });
+});
+if (failedDimensions.length) {
+  log(
+    `WARNING: ${failedDimensions.length} finder(s) returned no valid output — flagged NOT-ASSESSED (no silent drop): ${failedDimensions.join(', ')}. ` +
+      'Synthesis grades these conservatively; re-run the specific finder(s) if a gating dimension (D2/D3) is among them.',
+  );
 }
 
 const byLocation = new Map();
@@ -649,7 +673,7 @@ log(
 // row to notes/SCORECARD.md itself; this workflow does not touch SCORECARD.md).
 // ---------------------------------------------------------------------------
 
-const today = new Date().toISOString().slice(0, 10);
+const today = cfg.assessedDate || 'UNDATED — stamp on SCORECARD append';
 const row =
   `| **${cfg.surfaceTitle}** | ${DIMENSIONS.map((d) => dg[d.id]).join(' | ')} | ${today} (Fable-verified) | ` +
   `[\`${cfg.designPath}\`](${cfg.designPath}) |`;

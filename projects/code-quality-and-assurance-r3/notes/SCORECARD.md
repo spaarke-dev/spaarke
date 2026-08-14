@@ -15,7 +15,7 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 | Surface | D1 | D2 | D3 | D4 | D5 | D6 | D7 | D8 | D9 | D10 | D11 | **Overall** | Assessed | Source |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | **BFF (`Sprk.Bff.Api`)** | B | C+ | B– | A– | C | B– | B | A– | B | D+ | C+ | **C+** ⚠︎ prov. | 2026-08-06 (Fable-verified) | [`workstreams/bff-api/design.md`](../workstreams/bff-api/design.md) + Verification Addendum |
-| Shared client libs | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 010) | — |
+| **Shared client libs (Spaarke.*)** | B– | A– | B+ | A– | B– | B– | C+ | B– | C | D+ | C+ | **B–** | 2026-08-14 (Fable-verified) | [`workstreams/shared-client-libs/design.md`](../workstreams/shared-client-libs/design.md) |
 | Shared server libs | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 011) | — |
 | PCF controls | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 012) | — |
 | Dataverse model + ALM | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 013) | — |
