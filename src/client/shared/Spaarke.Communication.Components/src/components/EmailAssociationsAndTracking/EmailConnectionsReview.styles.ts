@@ -98,6 +98,44 @@ export const useConnectionsReviewStyles = makeStyles({
     cursor: 'pointer',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
+  // ── Compact (reconcile variant) candidate card — the prototype's single-row layout
+  //    (owner UAT 2026-08-14): `{name}` + `{type} · {n}% match` on the left, an inline
+  //    "Confirm" button on the right, content-height (NO 72px floor) so the cards are the
+  //    same compact size as the prototype. Selected/green highlight reuses the shared
+  //    cardSelected/cardPrimary border+fill classes.
+  candCompact: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
+    minWidth: 0,
+    paddingBlock: tokens.spacingVerticalS,
+    paddingInline: tokens.spacingHorizontalM,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  compactMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    flex: '1 1 auto',
+    cursor: 'pointer',
+  },
+  compactName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  compactScore: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+
   // 🔵 Selected (requires-review pick) — brand border/fill.
   cardSelected: {
     border: `${tokens.strokeWidthThin} solid ${tokens.colorBrandStroke1}`,

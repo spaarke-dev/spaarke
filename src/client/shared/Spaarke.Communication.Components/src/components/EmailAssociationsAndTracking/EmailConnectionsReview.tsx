@@ -32,6 +32,7 @@ import * as React from 'react';
 import {
   MessageBar,
   MessageBarBody,
+  MessageBarActions,
   Menu,
   MenuTrigger,
   MenuPopover,
@@ -39,12 +40,13 @@ import {
   MenuItem,
   Button,
 } from '@fluentui/react-components';
-import { Search20Regular, DocumentAdd20Regular } from '@fluentui/react-icons';
+import { Search20Regular, DocumentAdd20Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
 import { getXrmForPicker } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
   applyRegardingSelection,
   advanceAssociationStatus,
+  clearPrimaryRegarding,
   type PrimaryCandidate,
 } from '../../logic/connections';
 import type { EmailConnectionsReviewProps } from './EmailAssociationsAndTracking.types';
@@ -160,6 +162,30 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     [confirmCandidate]
   );
 
+  // Reconcile variant — per-line UNDO of the confirmed primary (owner UAT 2026-08-14).
+  // Unfiles the association via the shipped `clearPrimaryRegarding` (nulls the typed lookup +
+  // the denorm fields + resets `sprk_associationstatus`), returning the row to Needs-review.
+  // `onAssociationsChanged` re-derives the gate so Fields/Tasks re-lock. Best-effort with
+  // an inline error on failure.
+  const handleUndoPrimary = React.useCallback(async (): Promise<void> => {
+    if (!model.primary) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await clearPrimaryRegarding(writeContext, model.primary.entity ?? '');
+      if (!res.success) {
+        setError(res.error ?? 'Could not undo this association.');
+        return;
+      }
+      setSelectedKey(undefined);
+      onAssociationsChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unexpected error while undoing.');
+    } finally {
+      setBusy(false);
+    }
+  }, [model.primary, writeContext, onAssociationsChanged]);
+
   // "New record" (task 064, E1b) → the host opens Quick Start / a Create*Wizard and
   // resolves with the created record's ref (or null when cancelled). A created ref is
   // filed as the confirmed regarding via the SAME additive `confirmCandidate` →
@@ -229,6 +255,20 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
           <MessageBarBody>
             Filed to <strong>{filedLabel}</strong>. Move to Fields / Tasks to continue.
           </MessageBarBody>
+          {!readOnly && (
+            <MessageBarActions>
+              <Button
+                size="small"
+                appearance="secondary"
+                icon={<ArrowUndo16Regular />}
+                disabled={busy}
+                onClick={() => void handleUndoPrimary()}
+                data-testid="association-undo"
+              >
+                Undo
+              </Button>
+            </MessageBarActions>
+          )}
         </MessageBar>
       )}
 
@@ -255,7 +295,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
                   selected={isSelected || isGreen}
                   tone={isGreen ? 'primary' : 'select'}
                   showConfirm={isSelected && k !== confirmedKey}
-                  confirmLabel={reconcile ? 'Select' : undefined}
+                  compact={reconcile}
                   busy={busy}
                   readOnly={readOnly}
                   onSelect={() => setSelectedKey(k)}
