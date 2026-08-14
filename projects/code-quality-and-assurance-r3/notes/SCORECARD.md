@@ -38,4 +38,6 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 - **D10 D+** — 2 tarballs (31.8 MB) tracked in git; `.gitignore` gap for `*.tar.gz`; CS0618 warnings in Release build.
 - **D11 C+** — `.claude/patterns/webresource/subgrid-parent-rollup.md` actively mandates the AllowAnonymous anti-pattern (MF-2); the assessment docs themselves verified accurate against code.
 
+**net10 HEAD refresh (2026-08-14, Fable):** BFF row still valid post-merge (532 commits). Publish **43.67 MB compressed incl PDBs** at HEAD (≈ the 44.96 net10 rebaseline; D4 stays A–). Oversized-file census drift (D1/D5 evidence): `Api/Ai/ChatEndpoints.cs` 4,066 (was 3,587), `ComposeService.cs` 3,573, `CommunicationService.cs` 2,676, `OfficeService.cs` 2,038; `CommunicationModule.cs` 490→557 lines. Resolved-by-master: MF-4 captive-dep + the `56ae2188` stale doc refs (D11 nudges up slightly). #3b still required. Full detail: `workstreams/bff-api/design.md` §net10 HEAD Reconciliation.
+
 _The BFF row is a re-baseline input, not a final grade — it improves as tasks 020–029 land. Re-score at wrap-up (task 090)._

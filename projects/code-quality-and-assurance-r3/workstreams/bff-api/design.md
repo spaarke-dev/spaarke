@@ -303,3 +303,36 @@ D1 Architecture **B** · D2 Correctness **C+** · D3 Security **B–** · D4 Per
 
 ### NG1 track update — 2026-08-13
 NG1 (this design's non-goal: unify the two Dataverse **access stacks** — `ServiceClient` vs raw-HTTP) is **no longer deferred-out-of-scope**. Per the `customer-provisioning-orchestration-r1` ask + owner decision, NG1 is on an **assess-then-decide** track owned by r3 **task 011** (shared-server-libs assessment → verified NG1 design + re-estimate). r3 **task 060** drops the *vestigial separate* Dataverse S2S app-reg (#3a — scripts/docs/KV, zero code consumers). The substantive **#3b** piece — migrating the BFF's own shared-lib Dataverse path (`DataverseServiceClientImpl`/`DataverseWebApiService`) off `ClientSecret` to MI (still secret-based in prod; identity-attribution change) — is **part of task 011's NG1 design** (same 2 files as the access-stack unification). The remaining access-stack unification + #3b are decided together on task 011's verified design. See `notes/deployment-refactors-assessment-2026-08-12.md`.
+
+---
+
+## net10 HEAD Reconciliation — 2026-08-14 (Fable, after merging 532 net10-master commits)
+
+A read-only Fable pass re-verified every §3 finding + the Verification Addendum against **net10 HEAD** (`net10.0` + Graph 6.5.0 / Kiota 2.0). **Verdict: essentially everything STILL HOLDS**; net10 did not invalidate the BFF workstream. Details:
+
+### Still-holds (with drift)
+- **Dead code (020/029)** — all items still present + dead (Scopes; Safety cluster; `RetryPolicies.cs`; `StubLiveFactResolver.cs`; both `_archive/`; archived test). KEEPs still wired: `StubInsightGraph` `InsightsModule.cs:53`; Todo `TodoSyncModule.cs:47/:68-71/:73-76/:85-98`. Scopes prose ref now `PlaybookEndpoints.cs:410`.
+- **Bug-1 invoice cast (021)** — still broken, exact: `FinanceRollupService.cs:230` (helper :228, live :85); `Finance/Tools/FinancialCalculationToolHandler.cs:140,:206`; `DataverseServiceClientImpl.cs:18` still not a ServiceClient; live via `InvoiceExtractionJobHandler.cs:253`.
+- **13 downcasts (028)** — still 13 impls / no unwrap helper; **+2 line drift** on 8 of 13 (`SavedQueryService:219, RecordService:208, MetadataService:300, GridConfigurationService:168, FinanceSummaryService:446, SpendSnapshotService:824, TodoGenerationService:884, MembershipFieldDiscoveryService:560`; unchanged `FetchService:83, UserPrivilegeChecker:126`).
+- **Facade A-1..A-4 (024)** — all present; A-2 ctor now `:102-103`, A-3 ctor `:90-91`; `IActionSeam.cs:27-53` still writes-only; §F.1 comment now `AnalysisServicesModule.cs:~168-181`; MF-6 `InvoiceExtractionJobHandler.cs:33,:55`.
+- **Auth (023)** — B-1 `FinanceRollupEndpoints.cs:29,:46` still anonymous; B-2 `EndpointMappingExtensions.cs:64-65` unguarded, ex.Message now **:390,:406** + doc-probe leak `:93`; B-3 OBO 7 / User `:18,:22`; **no `SetFallbackPolicy`**. MF-1 (3 KPI web-resources send no auth) + MF-2 (`.claude/patterns/webresource/subgrid-parent-rollup.md` still mandates AllowAnonymous) + MF-3 still live. **The 3 landmine-doc fixes SURVIVED the merge.**
+- **Endpoints/ migration (025)** — same 6 files + test refs (`Phase2IntegrationTests.cs:1098,1121`).
+- **Tarballs/.gitignore (027)** — 2 tarballs tracked; `*.tar.gz` gap confirmed.
+- **Auth-map graph (019)** — `API_CLIENT_SECRET` = same 5+ consumers, **zero new sites in 532 commits**; UAMI `mi-bff-api-dev 5967251e…` still the identity.
+
+### Drifted (path/stat — material)
+- **Bug-2 .eml (022)** — worker MOVED to `Workers/Office/UploadFinalizationWorker.cs` (parser call `:1054`); singleton reg now `Workers/Office/OfficeWorkersModule.cs:31`. Dead half + dual-reg substance unchanged.
+- **CommunicationModule (026)** — GREW to **557 lines / ~86 registrations / still 0 helpers** (was 490/75). Finding stronger; re-diff helper boundaries before extracting.
+
+### RESOLVED-BY-MASTER (drop/shrink)
+- **MF-4 captive-dep (022)** — FIXED: `Workers/Office/UploadFinalizationWorker.cs:1031-1037` now scope-resolves per operation. Drop 022's "lifetime safe for singleton worker" criterion → simplify to "single registration, scoped".
+- **`56ae2188` stale doc refs (019)** — GONE from `auth-azure-resources.md` + BFF `CLAUDE.md:111`; only mention left correctly labels it RETIRED. Task 019's "fix stale refs" sub-item = done.
+- **Graph6/Kiota2 modernization** — landed on master (pins deleted, NU1903 gone, `DriveItemOperations` → 40 `catch (ODataError)`). The deferred modernization the assessment sized is done; **`ServiceException` retained in Graph.Core 4.x**.
+
+### #3b VERDICT — STILL NEEDED, exactly as scoped
+Master did NOT migrate the shared-lib credential camp: `DataverseServiceClientImpl.cs:41-65` (ClientSecret conn-string), `DataverseWebApiService.cs:37-56` (hard-require `Dataverse:ClientSecret`), `DataverseOptions.cs:32 [Required]` + `ConfigurationModule.cs:30-34` ValidateOnStart — all unchanged; removing the secret still crashes startup. `Dataverse-S2S-*` still zero src consumers (060/#3a clean). The `deployment-refactors-assessment §Addendum` prescriptive ordering remains valid at HEAD.
+
+### NEW net10-surfaced (high-signal)
+- **~32 dead `catch (ServiceException)` sites in 5 files** (`UploadSessionManager` 17, `ContainerOperations` 9, `SpeContainerMembershipService` 4, `SpeAdminGraphService` 1, `SendEmailNodeExecutor` 1) — master converted DriveItemOperations to ODataError but left these as belt-and-suspenders dead catches. Candidate mechanical addition to **task 020** (copy the DriveItemOperations pattern; SpeAdminGraphService/SendEmailNodeExecutor are contested → quiet-window). **Zero Graph/ODataError exposure in any r3-targeted file** — Graph6 does not constrain r3.
+- **Oversized-file census drift (SCORECARD/MF-5)**: `Api/Ai/ChatEndpoints.cs` **4,066** (was 3,587), `ComposeService.cs` **3,573**, `CommunicationService.cs` **2,676**, `OfficeService.cs` **2,038**.
+- **Publish at HEAD**: 43.67 MB compressed incl PDBs (Compress-Archive; ≈ the 44.96 net10 rebaseline convention), well under 60. CS0618 ×3 (`DemoExpirationService.cs:347-348`) persists (task 041 baseline).

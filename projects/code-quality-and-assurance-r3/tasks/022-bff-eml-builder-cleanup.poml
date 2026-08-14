@@ -40,7 +40,7 @@
     <constraint source="project">Scope (BFF Bug-2 only): remove the dead builder methods; keep ExtractAttachments (line 681); unify the dual registration into ONE correct lifetime; share only SanitizeFileName. Do NOT merge EmlGenerationService or GraphMessageToEmlConverter (NG2).</constraint>
     <constraint source="project">Scope: verify ExtractAttachments has no other consumers before touching its signature; the live path (UploadFinalizationWorker.cs:1047) MUST behave identically.</constraint>
     <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
-    <constraint source="verification-2026-08-06">Scope (MF-4 captive-dependency): the last-wins IEmailToEmlConverter registration is the SCOPED one (EmailServicesModule.cs:44-46, after OfficeWorkersModule.cs:31 singleton in Program.cs order), and it is captured by the SINGLETON hosted UploadFinalizationWorker (ctor :54/:88). The final single registration lifetime MUST be safe for that singleton hosted worker — do not leave a scoped service captured by a singleton.</constraint>
+    <constraint source="net10-2026-08-14">Path drift (net10 HEAD): the singleton reg is now `Workers/Office/OfficeWorkersModule.cs:31`; the live parser call is `Workers/Office/UploadFinalizationWorker.cs:1054`. **MF-4 captive-dependency RESOLVED-BY-MASTER** — the worker now scope-resolves `IEmailToEmlConverter` per operation (`UploadFinalizationWorker.cs:1031-1037`), so the earlier "scoped-captured-by-singleton" concern is gone. Scope here reduces to: delete the dead builder half + unify to ONE (scoped) registration.</constraint>
   </constraints>
 
   <knowledge>
@@ -76,7 +76,7 @@
     <criterion testable="true">Given the live path, UploadFinalizationWorker.cs:1047 → ExtractAttachments behaves identically (build + full test green).</criterion>
     <criterion testable="true">Negative: the two live builders (EmlGenerationService, GraphMessageToEmlConverter) are unchanged (NG2 respected).</criterion>
     <criterion testable="true">Publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) reported; no new NuGet package.</criterion>
-    <criterion testable="true">The final single IEmailToEmlConverter registration lifetime is compatible with the singleton hosted UploadFinalizationWorker (no scoped-captured-by-singleton); build validates DI at startup.</criterion>
+    <criterion testable="true">Exactly one IEmailToEmlConverter registration remains (scoped); the net10 DI validation (DiGraphValidationTests + ValidateOnBuild) stays green.</criterion>
   </acceptance-criteria>
 
   <notes>Maps spec.md FR-07 (Bug-2) / bff design §3.3 + Phase 2b.</notes>
