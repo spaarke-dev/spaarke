@@ -297,10 +297,19 @@ const SYNTHESIS_SCHEMA = {
 function parseArgs(raw) {
   let a = raw;
   if (typeof raw === 'string') {
-    a = {};
-    for (const part of raw.split(/[;\n]/)) {
-      const m = part.match(/^\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$/);
-      if (m) a[m[1]] = m[2];
+    const trimmed = raw.trim();
+    a = null;
+    // The Workflow runtime may expose the `args` object as a JSON string — accept that first.
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      try { a = JSON.parse(trimmed); } catch { a = null; }
+    }
+    // Fallback: "key=value; key=value" string form.
+    if (!a || typeof a !== 'object') {
+      a = {};
+      for (const part of raw.split(/[;\n]/)) {
+        const m = part.match(/^\s*([A-Za-z][A-Za-z0-9_]*)\s*=\s*(.+?)\s*$/);
+        if (m) a[m[1]] = m[2];
+      }
     }
   }
   a = a || {};

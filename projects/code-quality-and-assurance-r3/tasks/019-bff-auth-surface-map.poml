@@ -4,7 +4,7 @@
     <title>BFF Auth Surface Map + secret/identity→consumer dependency graph (read-only; gates all auth tasks)</title>
     <phase>1 Full Assessment</phase>
     <gate>startable (read-only; run BEFORE any auth-touching task executes)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Read-only investigation producing a reference artifact; no source change. STANDARD. Its VALUE is de-risking the FULL-rigor auth tasks it gates (023/060/061/062/#3b).</rigor-reason>
     <model-tier>fable</model-tier>

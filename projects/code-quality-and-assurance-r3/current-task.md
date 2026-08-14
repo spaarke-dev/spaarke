@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **EXECUTION STARTED 2026-08-14** (operator: "continue - run tasks in parallel and autonomous where safe"). **Phase 0 COMPLETE.** |
-| **Step** | 001 ✅ · 002 ✅ · 003 ✅ — Phase 0 (Program Foundation) done. |
-| **Status** | **001 ✅** `docs/standards/CODE-QUALITY-RUBRIC.md` (D1–D11 + A–F composition w/ D2/D3 gating caps). **002 ✅** `notes/SCORECARD.md` reconciled to rubric §4.2 — **Overall** column added; BFF Overall = **C+ (provisional)** (mean B– capped by D2). **003 ✅** `notes/quality-assessment.workflow.js` (Fable-authored; `node --check` clean) + README — 11 read-only `Explore` finders → **hard-gated Fable verify** (structural: no path from raw findings to synthesis; throws on missing/dup verdict + >30% refutation) → synthesis w/ rubric §4.2 gating cap. Committed Phase 0 locally (NOT pushed). |
-| **Next Action** | **HOLDING at two operator gates** (nothing else is autonomous-safe): (1) **Assessment wave 010–015 + 017 + 019** — read-only, conflict-free, run the new workflow, but need per-run **"use a workflow"** opt-in (NFR-05). Say e.g. "use a workflow to assess shared client libs" (010) or "assess all remaining surfaces". 019 (auth map) gates 023/060/061/062. (2) **BFF Tranche A (020,021,022,023,027)** + deployment (060–063) — `parallel-safe:false`, outward-facing PRs needing /conflict-check + review; run one at a time on operator go. |
+| **Task** | **EXECUTION 2026-08-14.** Phase 0 COMPLETE. **Phase 1 assessment wave IN PROGRESS** (operator opted in: "use workflow"). |
+| **Step** | Phase 0: 001 ✅ 002 ✅ 003 ✅. Phase 1: **019 ✅** (auth map closed against existing artifact — sections A–H verified) · **010 🔄 RUNNING** (Workflow `wfapjhd0d`/`wf_3dd07493-ec8`, background). 011,012,013,014,015,017 queued. 016 (aggregate) after all. |
+| **Status** | Phase-0 committed `1aea2f47f` (NOT pushed). **010 assessment workflow launched** (first real execution of `quality-assessment.workflow.js` — proving the runtime before fanning out the rest). On clean return I: review the synthesized `workstreams/shared-client-libs/design.md`, append its SCORECARD row, mark 010 ✅, then **fan out 011 + 017 + 012–015 in parallel**. Workflow verify/synth = Fable xhigh (NFR-05). |
+| **Next Action** | (1) Await 010 workflow completion (background notify) → review design + SCORECARD row + mark ✅. (2) Fan out remaining surface assessments in parallel via the same workflow (args per `notes/quality-assessment.workflow.README.md` §3). (3) STILL GATED (not autonomous): **BFF Tranche A (020,021,022,023,027)** + deployment (060–063) — outward-facing PRs, /conflict-check + operator review, one at a time. Auth tasks now unblocked by 019. |
 
 ### What happened since init (2026-08-06 → 2026-08-13) — all PLANNING, no execution
 - **Initialized** via design-to-spec → project-pipeline (Project #741 under Epic #427; INDEX.md row; NG1 Idea #742). 27 tasks.
