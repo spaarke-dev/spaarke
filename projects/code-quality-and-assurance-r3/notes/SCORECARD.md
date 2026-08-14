@@ -17,7 +17,7 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 | **BFF (`Sprk.Bff.Api`)** | B | C+ | B– | A– | C | B– | B | A– | B | D+ | C+ | **C+** ⚠︎ prov. | 2026-08-06 (Fable-verified) | [`workstreams/bff-api/design.md`](../workstreams/bff-api/design.md) + Verification Addendum |
 | **Shared client libs (Spaarke.*)** | B– | A– | B+ | A– | B– | B– | C+ | B– | C | D+ | C+ | **B–** | 2026-08-14 (Fable-verified) | [`workstreams/shared-client-libs/design.md`](../workstreams/shared-client-libs/design.md) |
 | **Shared server libs (Core/Dataverse/Scheduling)** | D+ | C+ | B– | B– | C+ | B– | C+ | B+ | B– | B– | D+ | **C+** | 2026-08-14 (Fable-verified) | [`workstreams/shared-server-libs/design.md`](../workstreams/shared-server-libs/design.md) |
-| PCF controls | — | — | — | — | — | — | — | — | — | — | — | — | pending (task 012) | — |
+| **PCF controls (19 live)** | C+ | C+ | B+ | B+ | C+ | C+ | B– | C+ | D+ | C– | C+ | **C+** | 2026-08-14 (Fable-verified) | [`workstreams/pcf-controls/design.md`](../workstreams/pcf-controls/design.md) |
 | **Dataverse model + ALM** | B– | B– | B– | B– | B | B– | C+ | B+ | C+ | C+ | C+ | **B–** | 2026-08-14 (Fable-verified) | [`workstreams/dataverse-model-alm/design.md`](../workstreams/dataverse-model-alm/design.md) |
 | **Code pages + build sprawl** | C+ | B+ | A– | C+ | D+ | C+ | D+ | D | D+ | D+ | C– | **C** | 2026-08-14 (Fable-verified) | [`workstreams/code-pages-build/design.md`](../workstreams/code-pages-build/design.md) |
 | **Plugins (Spaarke.CustomApiProxy)** | D+ | C+ | D | C+ | C | C+ | B– | D | B– | D+ | D+ | **D** | 2026-08-14 (Fable-verified) | [`workstreams/plugins/design.md`](../workstreams/plugins/design.md) |
