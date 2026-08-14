@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-06 14:20
+> **Last Updated**: 2026-08-13 (by context-handoff)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,16 +10,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project initialized, execution operator-gated |
-| **Step** | — |
-| **Status** | none |
-| **Next Action** | Register portfolio under Epic #427 + add `projects/INDEX.md` row + file NG1 Idea; then Phase 0 task 001 (rubric). Assessments (Phase 1) require operator "use a workflow" opt-in. |
+| **Task** | none executing — project INITIALIZED + PLANNING-AUGMENTED; execution operator-gated |
+| **Step** | — (no task-execute has run; all work so far is planning/scoping) |
+| **Status** | 35 tasks authored + validated clean; **branch 8 commits ahead of origin (through `0b4552b2c`), NOT pushed** (origin is at `16e1f7746` — the 4 init commits were pushed via /push-to-github; everything after is local) |
+| **Next Action** | OPERATOR CHOICE: (a) push branch (holding per owner preference), and/or (b) start execution — **task 001** (rubric, Phase 0) OR **task 017** (config-deployment assessment — feeds #1 KV federation + naming standard 063; needs "use a workflow" opt-in). Auth tasks (023/060/061/062/011) are GATED on task 019 (BFF Auth Surface Map, already produced at `notes/bff-auth-surface-map.md`). |
 
-### Files Modified This Session
-- Project artifacts generated (README, plan, CLAUDE.md, current-task.md, tasks/, TASK-INDEX.md)
+### What happened since init (2026-08-06 → 2026-08-13) — all PLANNING, no execution
+- **Initialized** via design-to-spec → project-pipeline (Project #741 under Epic #427; INDEX.md row; NG1 Idea #742). 27 tasks.
+- **BFF workstream handoff + Fable verification** integrated: relocated BFF design → `workstreams/bff-api/design.md`; A/B tranche split (020→020+029, 021→021+028); §6 auth resolved to `@spaarke/auth`. 29 tasks.
+- **Absorbed r1 deployment-complexity ask** (`notes/deployment-complexity-refactors-ask-2026-08-12.md`) → **Phase 6**; tasks **017** (#1 KV assess), **060** (#3a app-reg drop), **061** (#2 config validation), **062** (#4 Graph app-role constants). #3 SPLIT after Fable grounding (#3a=060 clean; **#3b shared-lib ClientSecret→MI migration → NG1/task-011**). NG1 reframed: deferred → **assess-then-decide (task 011)**. 33 tasks.
+- **BFF Auth Surface Map** (owner-requested de-risk): task **019** + `notes/bff-auth-surface-map.md` (Fable). Gates 023/060/061/062. 34 tasks.
+- **Resource/secret naming standardization** (owner, productization): task **063** + extended 017; r3 owns standard+gate, **r1 owns apply+live-env remediation** (handback in assessment doc). 35 tasks.
+- **Live doc landmine FIXED** (committed): 3 docs told operators `Dataverse-ClientSecret` was safe to remove → crashes BFF. Corrected.
+- **Portal confirmations**: A resolved (`BFF-API-ClientSecret`=`1e40baad`), B resolved (no separate `Dataverse-ClientSecret`), #3 CI resolved (OIDC). Remaining self-resolve in tasks (062 role census, PowerBi SP, email Service Endpoint).
 
 ### Critical Context
-Standing quality program, single worktree, surfaces = workstreams. Assessment-first (Fable-verified, gating). BFF workstream already assessed. Initialize-only: no task auto-executed.
+Standing quality PROGRAM, single worktree, surfaces = workstreams, assessment-first (Fable-verified, gating). Owner decisions live in `CLAUDE.md` §Decisions Made. **Nothing has been executed** — all 35 tasks are 🔲. **@spaarke/auth (ADR-028)** for auth; **#3b credential migration** is the sensitive one (identity-attribution change) on the NG1/011 track; **`BFF-API-ClientSecret`** = 1 KV secret / 5 config keys / 9 consumers (never-remove). Reference docs: `notes/bff-auth-surface-map.md`, `notes/deployment-refactors-assessment-2026-08-12.md`, `workstreams/bff-api/design.md`. **NOTE**: no "daily briefing" work in this project (confirmed 2026-08-13 — that's a different `spaarke-daily-update-service` worktree).
 
 ---
 
