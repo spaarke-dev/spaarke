@@ -1437,7 +1437,7 @@ This section consolidates the Engine's resource footprint per environment. Autho
 | **Cosmos DB account (NoSQL/SQL API)** | `Microsoft.DocumentDB/databaseAccounts` | Serverless or autoscale 400–4000 RU/s (start serverless for Phase 1; promote to autoscale at ~1M vertices) | `cosmos-graph.bicep` |
 | **Cosmos DB database** | `Microsoft.DocumentDB/databaseAccounts/sqlDatabases` | — | `cosmos-graph.bicep` |
 | **Cosmos DB container** | `Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers` | Partition key: `/tenantId`; indexing policy excludes `embedding` field from default index path | `cosmos-graph.bicep` |
-| **Function App (Flex Consumption)** | `Microsoft.Web/sites` (kind: functionapp,linux) | Flex Consumption plan; per-tenant scale; .NET 8 isolated | `functions.bicep` |
+| **Function App (Flex Consumption)** | `Microsoft.Web/sites` (kind: functionapp,linux) | Flex Consumption plan; per-tenant scale; .NET 10 isolated | `functions.bicep` |
 | **Function App Hosting Plan** | `Microsoft.Web/serverfarms` | Flex Consumption SKU | `functions.bicep` |
 | **AI Search indexes (×4)** | `Microsoft.Search/searchServices/indexes` (deployed via deployment script — Management API, not Bicep-native for index schema) | `insight-matters`, `insight-decisions`, `insight-risks`, `insight-sessions` — JSON schemas in `infra/insights/schemas/` | `search-indexes.bicep` + deployment script |
 | **Service Bus topic** | `Microsoft.ServiceBus/namespaces/topics` | `spaarke-dataverse-changes-{tenant}` on existing or new namespace (Standard SKU minimum — topics + sessions required) | `servicebus-topic.bicep` |

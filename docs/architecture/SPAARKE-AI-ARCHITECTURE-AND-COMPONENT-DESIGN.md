@@ -40,7 +40,7 @@
 ### 0.1 What Spaarke AI is
 
 Spaarke is an **enterprise AI-directed legal operations intelligence platform**
-embedded in Power Apps + Dataverse and SharePoint Embedded, with a .NET 8 BFF
+embedded in Power Apps + Dataverse and SharePoint Embedded, with a .NET 10 BFF
 mediating between clients (PCF controls, Code Pages, ribbons, custom pages)
 and backend services (Azure OpenAI, Azure AI Search, Document Intelligence,
 Dataverse, Cosmos DB, Redis).

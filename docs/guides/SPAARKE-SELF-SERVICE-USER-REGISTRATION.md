@@ -14,7 +14,7 @@ The Spaarke Self-Service Registration system automates demo user provisioning. P
 
 ```
                                     ┌─────────────────────────────────────┐
-                                    │           BFF API (.NET 8)          │
+                                    │           BFF API (.NET 10)          │
                                     │  spe-api-dev-67e2xz.azurewebsites  │
 ┌──────────────┐   POST             │                                     │
 │  Website     │   /demo-request    │  RegistrationEndpoints              │
@@ -501,7 +501,7 @@ To modify a template:
 
 ### DemoExpirationService
 
-- **Type**: .NET 8 `BackgroundService` (ADR-001 pattern, same structure as `DailySendCountResetService`)
+- **Type**: .NET 10 `BackgroundService` (ADR-001 pattern, same structure as `DailySendCountResetService`)
 - **Schedule**: Runs daily at midnight UTC
 - **Location**: `src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs`
 

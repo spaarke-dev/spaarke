@@ -56,8 +56,8 @@ Run `ls src/client/pcf/` for the authoritative list.
 
 | Subdirectory | Tech | See Also |
 |--------------|------|----------|
-| `api/Sprk.Bff.Api/` | .NET 8 Minimal API | `docs/architecture/sdap-bff-api-patterns.md` |
-| `shared/` | .NET 8 shared libraries | `docs/architecture/INDEX.md` |
+| `api/Sprk.Bff.Api/` | .NET 10 Minimal API | `docs/architecture/sdap-bff-api-patterns.md` |
+| `shared/` | .NET 10 shared libraries | `docs/architecture/INDEX.md` |
 
 BFF API entry point: `src/server/api/Sprk.Bff.Api/Program.cs` (all endpoint registration, DI, middleware).
 

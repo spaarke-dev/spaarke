@@ -18,7 +18,7 @@ Accessing Dataverse from the BFF API (REST or SDK client).
 - **ADR-010**: DI minimalism — register via feature module
 
 ## Key Rules
-- Two approaches: `DataverseWebApiClient` (pure REST, .NET 8 compatible) vs `DataverseServiceClientImpl` (SDK)
+- Two approaches: `DataverseWebApiClient` (pure REST, .NET 10 compatible) vs `DataverseServiceClientImpl` (SDK)
 - Token refresh with 5-minute buffer before expiry
 - Extract created record GUID from `OData-EntityId` header (REST) or return value (SDK)
 - OData query: use `$filter`, `$select`, `$top` — handle `@odata.nextLink` for pagination

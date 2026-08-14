@@ -315,7 +315,7 @@ Sequence: Teams/M365 Copilot → AgentEndpoints → SpaarkeAgentHandler → Play
 
 | Decision | Choice | Rationale | ADR |
 |----------|--------|-----------|-----|
-| Central BFF hub | Single .NET 8 API serves all frontends | Avoid service proliferation; single auth boundary | ADR-001 |
+| Central BFF hub | Single .NET 10 API serves all frontends | Avoid service proliferation; single auth boundary | ADR-001 |
 | Endpoint filters for auth | Per-endpoint resource authorization | No global middleware; fine-grained control | ADR-008 |
 | SpeFileStore facade | Wrap Graph SDK behind concrete facade | Prevent Graph type leakage above facade layer | ADR-007 |
 | Dual auth strategies | OBO for user-initiated, app-only for jobs | Background workers have no user context | ADR-008 |

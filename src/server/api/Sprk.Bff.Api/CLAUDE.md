@@ -8,7 +8,7 @@
 
 ## Module Overview
 
-**Sprk.Bff.Api** is the unified .NET 8 Minimal API serving as the backend for the **SDAP** (Spaarke Data & AI Platform). It provides 7 functional domains:
+**Sprk.Bff.Api** is the unified .NET 10 Minimal API serving as the backend for the **SDAP** (Spaarke Data & AI Platform). It provides 7 functional domains:
 
 - **SPE / Documents**: SharePoint Embedded file operations, OBO token exchange, container management
 - **AI Platform**: Chat (SSE), document analysis, RAG search, playbooks, knowledge bases, semantic search

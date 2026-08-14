@@ -8,7 +8,7 @@
 
 ## 1. What is Spaarke?
 
-Spaarke is an **enterprise AI-directed legal operations intelligence platform** built on Power Apps/Dataverse, SharePoint Embedded, and Azure AI services; backend in **.NET 8 Minimal API**; frontend in **custom React Code Pages and PCF components**; the AI layer combines an internal **JPS (JSON Prompt Schema)** playbook system with Azure OpenAI deployments and a retrieval layer over SharePoint Embedded documents.
+Spaarke is an **enterprise AI-directed legal operations intelligence platform** built on Power Apps/Dataverse, SharePoint Embedded, and Azure AI services; backend in **.NET 10 Minimal API**; frontend in **custom React Code Pages and PCF components**; the AI layer combines an internal **JPS (JSON Prompt Schema)** playbook system with Azure OpenAI deployments and a retrieval layer over SharePoint Embedded documents.
 
 ---
 
