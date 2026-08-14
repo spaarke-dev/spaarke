@@ -39,7 +39,7 @@
   <constraints>
     <constraint source="project">Scope (BFF Bug-2 only): remove the dead builder methods; keep ExtractAttachments (line 681); unify the dual registration into ONE correct lifetime; share only SanitizeFileName. Do NOT merge EmlGenerationService or GraphMessageToEmlConverter (NG2).</constraint>
     <constraint source="project">Scope: verify ExtractAttachments has no other consumers before touching its signature; the live path (UploadFinalizationWorker.cs:1047) MUST behave identically.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
     <constraint source="verification-2026-08-06">Scope (MF-4 captive-dependency): the last-wins IEmailToEmlConverter registration is the SCOPED one (EmailServicesModule.cs:44-46, after OfficeWorkersModule.cs:31 singleton in Program.cs order), and it is captured by the SINGLETON hosted UploadFinalizationWorker (ctor :54/:88). The final single registration lifetime MUST be safe for that singleton hosted worker — do not leave a scoped service captured by a singleton.</constraint>
   </constraints>
 
@@ -57,7 +57,7 @@
     <step order="2">Delete ConvertToEmlAsync / GenerateEmlFileNameAsync / BuildMimeMessage / Fetch* (dead builder half); keep ExtractAttachments intact.</step>
     <step order="3">Unify the dual registration: pick the correct single lifetime and remove the conflicting one (EmailServicesModule.cs:44-46 vs OfficeWorkersModule.cs:31).</step>
     <step order="4">Share only the Windows-strict SanitizeFileName helper where the live builders need it; do NOT merge the two live builders.</step>
-    <step order="5">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="5">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
     <step order="6">Update TASK-INDEX.md: set task 022 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -75,7 +75,7 @@
     <criterion testable="true">Given the change, only one DI registration for the converter remains (single correct lifetime); the dead builder members are gone.</criterion>
     <criterion testable="true">Given the live path, UploadFinalizationWorker.cs:1047 → ExtractAttachments behaves identically (build + full test green).</criterion>
     <criterion testable="true">Negative: the two live builders (EmlGenerationService, GraphMessageToEmlConverter) are unchanged (NG2 respected).</criterion>
-    <criterion testable="true">Publish ≤ 60 MB with delta vs 46.89 MB reported; no new NuGet package.</criterion>
+    <criterion testable="true">Publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) reported; no new NuGet package.</criterion>
     <criterion testable="true">The final single IEmailToEmlConverter registration lifetime is compatible with the singleton hosted UploadFinalizationWorker (no scoped-captured-by-singleton); build validates DI at startup.</criterion>
   </acceptance-criteria>
 

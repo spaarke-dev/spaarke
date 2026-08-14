@@ -38,7 +38,7 @@
   <constraints>
     <constraint source="project">Scope (Bug-1 in-place only): correct exactly the 3 broken casts on the invoice-totals path so it no longer throws. Do NOT introduce the shared extension here (task 028) and do NOT touch the other 10 downcast sites. Do NOT unify the two Dataverse stacks (NG1).</constraint>
     <constraint source="ADR-038">Scope: add a focused behavior test for the invoice-totals path (KEEP category); no Mock&lt;HttpMessageHandler&gt;, no DI-registration/ctor-null-check tests.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check (Finance files are highly contested) before the PR.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check (Finance files are highly contested) before the PR.</constraint>
   </constraints>
 
   <knowledge>
@@ -54,7 +54,7 @@
     <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING). Read bff design §3.2 Bug-1; run /conflict-check on the Finance files.</step>
     <step order="1">Confirm the runtime type behind IDataverseService (DataverseServiceClientImpl) and how the invoice path obtains a ServiceClient; correct the 3 casts (FinanceRollupService.cs:228; Finance/Tools/FinancialCalculationToolHandler.cs:140-146 and ~205-211) so the path resolves the underlying ServiceClient correctly (or fails loud with consumer context, never silently).</step>
     <step order="2">Add a focused behavior test for the invoice-totals path (InvoiceExtractionJobHandler → FinancialCalculationToolHandler.ExecuteAsync) asserting totals compute instead of throwing InvalidOperationException.</step>
-    <step order="3">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB in notes/publish-size-report.md.</step>
+    <step order="3">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) in notes/publish-size-report.md.</step>
     <step order="4">Update TASK-INDEX.md: set task 021 status to ✅.</step>
     <step order="5">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -68,7 +68,7 @@
   <acceptance-criteria>
     <criterion testable="true">Given the invoice-totals test, totals compute successfully (no InvalidOperationException) — the previously-broken path passes.</criterion>
     <criterion testable="true">Negative: when the underlying impl is not a ServiceClient, the path fails loud with consumer context (never a silent wrong result).</criterion>
-    <criterion testable="true">dotnet build + full dotnet test green; publish ≤ 60 MB with delta vs 46.89 MB reported; no new NuGet package; two Dataverse stacks NOT unified.</criterion>
+    <criterion testable="true">dotnet build + full dotnet test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) reported; no new NuGet package; two Dataverse stacks NOT unified.</criterion>
     <criterion testable="true">Scope guard: only the 3 invoice-path cast sites changed (task 028 owns the other 10 + the shared extension).</criterion>
   </acceptance-criteria>
 

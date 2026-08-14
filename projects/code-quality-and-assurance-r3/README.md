@@ -1,6 +1,6 @@
 # Code Quality & Assurance R3
 
-> **Portfolio**: [Project #741](https://github.com/spaarke-dev/spaarke/issues/741) under [Epic #427](https://github.com/spaarke-dev/spaarke/issues/427) `[Epic]: Code Quality` · [Board #2](https://github.com/users/spaarke-dev/projects/2) — one Project Issue; surfaces = workstreams, no per-surface Issues. Status=Active, 27 tasks, Start 2026-08-06.
+> **Portfolio**: [Project #741](https://github.com/spaarke-dev/spaarke/issues/741) under [Epic #427](https://github.com/spaarke-dev/spaarke/issues/427) `[Epic]: Code Quality` · [Board #2](https://github.com/users/spaarke-dev/projects/2) — one Project Issue; surfaces = workstreams, no per-surface Issues. Status=Active, 35 tasks, Start 2026-08-06.
 > **Status**: Initialized — assessment-first; execution operator-gated
 > **Branch**: `work/code-quality-and-assurance-r3` (single worktree; surfaces = workstreams)
 
@@ -56,7 +56,7 @@ R1 built the quality *system*; R2 did the first *structural* remediation. The pr
 - [ ] Reusable `quality-assessment` Workflow runs end-to-end with a mandatory Fable verification stage.
 - [ ] Honest re-baseline published in `notes/SCORECARD.md`; no unverified aggregate grade; March "95/100" superseded.
 - [ ] Every remaining surface has a Fable-verified assessment `design.md` **before** its remediation is planned.
-- [ ] BFF surface executed: 6 dead-code items removed (zero dangling refs), 2 bugs fixed (invoice-totals test passing), 13 downcasts → 1 extension, auth closed via `@spaarke/auth`, 4 facade violations behind `PublicContracts/`, `Endpoints/` deleted (route-dump identical), `CommunicationModule` decomposed, 2 tarballs untracked; publish ≤ 60 MB compressed with delta vs 46.89 MB reported.
+- [ ] BFF surface executed: 6 dead-code items removed (zero dangling refs), 2 bugs fixed (invoice-totals test passing), 13 downcasts → 1 extension, auth closed via `@spaarke/auth`, 4 facade violations behind `PublicContracts/`, `Endpoints/` deleted (route-dump identical), `CommunicationModule` decomposed, 2 tarballs untracked; publish ≤ 60 MB compressed with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) reported.
 - [ ] Forcing-functions live (per-surface activation): ArchTests expanded, analyzers-as-errors on, lint/CVE/size/doc-drift CI gates green.
 - [ ] Horizontals executed: security (`@spaarke/auth`), test-quality (`/test-diet` + 138-failing reconciliation), CVE (no HIGH), observability (no PII in logs), doc-drift.
 - [ ] Archived 12-item R3 draft fully reconciled — no item dropped silently.

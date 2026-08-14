@@ -39,7 +39,7 @@
   <constraints>
     <constraint source="ADR-010">Scope: CommunicationModule decomposition adds cohesive helpers ONLY — registrations MUST be identical post-decomposition; no new abstractions/interfaces.</constraint>
     <constraint source="project">Scope (data-driven dispatch, NFR-08): before renaming any handler/tool, run the Dataverse sprk_analysistool.sprk_handlerclass pre-check (read-only) and record it in notes/dataverse-precheck.md. NEVER touch a HandlerId string. Do NOT rename either of the two R6 Ai/Handlers handlers.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
   </constraints>
 
   <knowledge>
@@ -57,7 +57,7 @@
     <step order="2">Run the Dataverse sprk_analysistool.sprk_handlerclass pre-check (read-only): query for any row whose sprk_handlerclass references Services/Finance/Tools/FinancialCalculationToolHandler; record the result in notes/dataverse-precheck.md.</step>
     <step order="3">If any sprk_analysistool row references the class, invoke the escalation trigger and STOP the rename. Otherwise rename Services/Finance/Tools/FinancialCalculationToolHandler → FinanceTotalsCalculator (update DI + injection sites only; touch NO HandlerId string).</step>
     <step order="4">Apply the optional Phase-5 helpers: shared circuit-breaker-registry wiring helper across OpenAiClient/ResilientSearchClient/GraphHttpMessageHandler + app-only HTTP boilerplate consolidation (behavior-neutral).</step>
-    <step order="5">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="5">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
     <step order="6">Update TASK-INDEX.md: set task 026 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -76,7 +76,7 @@
     <criterion testable="true">Given the decomposition, the CommunicationModule registration set is identical (diff shows no added/removed/changed registration).</criterion>
     <criterion testable="true">Given the pre-check, notes/dataverse-precheck.md records the sprk_analysistool.sprk_handlerclass verification BEFORE any rename.</criterion>
     <criterion testable="true">Negative: if a sprk_analysistool row references the Finance handler class, the rename was NOT performed and the escalation was raised; no HandlerId string was touched in any case.</criterion>
-    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package; the two R6 Ai/Handlers handlers unchanged.</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package; the two R6 Ai/Handlers handlers unchanged.</criterion>
   </acceptance-criteria>
 
   <notes>Maps spec.md FR-12 / bff design §3.3 + Phase 5a/5b/5d. Optional Phase-5 helpers owner-APPROVED.</notes>

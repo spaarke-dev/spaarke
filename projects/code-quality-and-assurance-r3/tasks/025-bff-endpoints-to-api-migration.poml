@@ -36,7 +36,7 @@
   <constraints>
     <constraint source="project">Scope (namespace-only): move exactly the 6 remaining Endpoints/ files to Api/; update namespaces + the 5 test-line usings; delete the legacy Endpoints/ tree. Do NOT change any route string or extension-method name.</constraint>
     <constraint source="project">Scope: the route table MUST be byte-identical — capture a route-dump before and after and diff them as the acceptance gate.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
   </constraints>
 
   <knowledge>
@@ -54,7 +54,7 @@
     <step order="3">Update the 5 test-line usings.</step>
     <step order="4">Delete the legacy Endpoints/ tree.</step>
     <step order="5">Capture a route-dump after; diff against baseline — MUST be byte-identical.</step>
-    <step order="6">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="6">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
     <step order="7">Update TASK-INDEX.md: set task 025 status to ✅.</step>
     <step order="8">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -71,7 +71,7 @@
   <acceptance-criteria>
     <criterion testable="true">Given the migration, the route-dump diff before/after is byte-identical (zero route change).</criterion>
     <criterion testable="true">Given the change, the legacy Endpoints/ folder is gone and the 5 test-line usings are updated.</criterion>
-    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package.</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package.</criterion>
   </acceptance-criteria>
 
   <notes>Maps spec.md FR-11 / bff design §3.6 + Phase 5c.</notes>

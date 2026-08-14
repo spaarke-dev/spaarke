@@ -4,7 +4,7 @@
 > **Execution**: operator-gated. All task work via `task-execute`. Assessments (010–015, 017) run via the `quality-assessment` Workflow — operator per-run opt-in ("use a workflow"); Fable adversarial-verification is non-negotiable (NFR-05).
 > **Task count**: 35 (29 initial + 4 from the 2026-08-13 deployment/config ask: 017, 060, 061, 062; + 019 BFF Auth Surface Map; + 063 resource/secret naming standard + conformance gate, owner-requested for productization — r3 owns standard+gate, r1 applies/remediates live envs).
 > **Auth gate**: task **019** (BFF Auth Surface Map + secret/identity→consumer dependency graph, read-only) GATES all auth-touching tasks — **023, 060, 061, 062** consult it before changing anything, and task **011** consumes it for the #3b credential-migration decision. Run 019 before any auth remediation lands.
-> **Baseline**: BFF publish 46.89 MB compressed (ceiling 60 MB). `/conflict-check` before every remediation PR (19 worktrees touch BFF).
+> **Baseline**: BFF publish 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) compressed (ceiling 60 MB). `/conflict-check` before every remediation PR (19 worktrees touch BFF).
 
 ---
 

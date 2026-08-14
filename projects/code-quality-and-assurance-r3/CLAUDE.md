@@ -74,7 +74,7 @@ The task-execute skill ensures ADRs/constraints/patterns load, context is tracke
 - **Assessments run via the `quality-assessment` Workflow** (Phase 0 deliverable) — the Workflow tool requires a **per-run operator opt-in** ("use a workflow"). Do NOT auto-launch a Workflow; the operator invokes each assessment turn explicitly. Manual agent fan-out is the fallback only.
 - **Adversarial verification (Fable) is non-negotiable** on every assessment — it caught 2 real BFF bugs AND corrected 2 false-positive "dead code" claims that were load-bearing.
 - **`/conflict-check` before EVERY remediation PR** — 19 active worktrees touch BFF. Assessments are read-only ⇒ conflict-free ⇒ run anytime.
-- **BFF publish ≤ 60 MB compressed** (baseline 46.89 MB); report absolute + delta on every BFF-touching task. **No new NuGet packages.**
+- **BFF publish ≤ 60 MB compressed** (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta on every BFF-touching task. **No new NuGet packages.**
 - **Data-driven dispatch is not grep-provable** — Dataverse `sprk_analysistool.sprk_handlerclass` pre-check before any handler/tool rename or delete; never touch a `HandlerId` string.
 - **Verify dead code against `src/` AND `tests/`** (BFF exposes internals via `InternalsVisibleTo` to 3 test assemblies) before deletion.
 - **Surfaces 2–6 remediation is DEFERRED** — task-created only after each surface's Fable-verified assessment `design.md` exists.
@@ -122,7 +122,12 @@ When tasks can run in parallel (no dependencies), each task MUST still use task-
 
 ## Implementation Notes
 
-*No notes yet*
+- **2026-08-14: Merged net10 master into this worktree.** BFF is now **.NET 10** (TFM `net10.0`, `global.json` 10.0.100; SDK 10.0.101 machine-wide). `dotnet build -c Release` = clean (0 errors, 21 pre-existing warnings). Per the `dotnet-10-upgrade-r1` handback (its INDEX row + `projects/dotnet-10-upgrade-r1/notes/publish-size-rebaseline.md`):
+  - **Publish baseline moved 49.63/46.89 → 44.96 MB incl PDBs (net10 SHRANK it −4.67 MB)**; ceiling 60 unchanged. All r3 BFF-task references updated to 44.96.
+  - **Do NOT re-pin the superseded CVE packages** — net10 (Graph 5→6.5 / Kiota 1→2, task 033) already closed the Kiota HIGH CVE (GHSA-7j59-v9qr-6fq9) + removed FR-04 pins. Task **032** (dependency/CVE) must build on this, not re-introduce pins.
+  - **Build on the net10 fixes** (H1 `BackgroundService.ExecuteAsync` threading, H2 dev-boot DI validation, H3 X509CertificateLoader) — don't undo them.
+  - **`DataverseServiceClientImpl.cs` was changed on master** — the #3b/auth-map/BFF-verification file:line references (grounded against the 08-06 base) should be **re-verified at head** before those tasks execute (the tasks already instruct re-grounding).
+  - Root `CLAUDE.md` §10 + `.claude/constraints/azure-deployment.md` baseline already updated to 44.96 by the net10 project (main-session writes) — no r3 action needed there.
 
 ---
 

@@ -41,7 +41,7 @@
   <constraints>
     <constraint source="ADR-028">Scope: all client→BFF auth routes through @spaarke/auth; the web-resource caller MUST authenticate via @spaarke/auth (NOT HMAC, NOT anonymous). Owner directive per spec.md FR-09.</constraint>
     <constraint source="project">Scope (BFF auth only): add .RequireAuthorization() to FinanceRollupEndpoints.cs:29,46 + OBOEndpoints (7) + UserEndpoints (2); harden the 2 healthz dataverse probes (rate-limit like the doc sibling + stop echoing ex.Message). Do NOT change endpoint routes or response contracts beyond auth/rate-limit/error-detail.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check (Finance + auth files highly contested) before the PR.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check (Finance + auth files highly contested) before the PR.</constraint>
     <constraint source="verification-2026-08-06">Scope EXPANSION from the Fable verification addendum (workstreams/bff-api/design.md): (MF-1) the Scorecard-sibling web-resource callers are ALSO broken today (send no Authorization header) — `src/solutions/webresources/sprk_matter_kpi_refresh.js:269`, `sprk_kpi_subgrid_refresh.js:294`, `sprk_kpiassessment_quickcreate.js:54-56,262-263`. Migrate ALL FOUR callers (incl. sprk_subgrid_parent_rollup.js) to @spaarke/auth, OR explicitly hand the 3 KPI callers to task 030/FR-17 with a documented note — do NOT leave them silently 401. (MF-3) The "hardened" sibling `/healthz/dataverse/doc/{id}` ALSO leaks — scrub `ex.Message` + `ex.InnerException?.Message` at EndpointMappingExtensions.cs:93 in addition to :382,:398.</constraint>
     <constraint source="verification-2026-08-06">Scope (MF-2 doc-drift, MUST): after making the endpoints require auth, REWRITE `.claude/patterns/webresource/subgrid-parent-rollup.md:16` — it currently MANDATES the anti-pattern ("MUST use .AllowAnonymous() because web resources cannot acquire Azure AD tokens"). Left unfixed, the next agent reintroduces anonymous endpoints. This file is under `.claude/` → main-session edit only (root CLAUDE.md §3).</constraint>
     <constraint source="auth-gate">GATED on the BFF Auth Surface Map (task 019 → notes/bff-auth-surface-map.md) — the shared verified auth picture. Before changing any scheme/policy/RequireAuthorization, consult the map's inbound section + the CIAM-scheme-vs-RequireAuthorization interaction finding (GAP #2); if the map flags an interaction (e.g. the external CIAM scheme or a fallback-policy effect), honor its recommendation or escalate.</constraint>
@@ -68,7 +68,7 @@
     <step order="4">Harden /healthz/dataverse + /healthz/dataverse/crud (EndpointMappingExtensions.cs:64-65): add .RequireRateLimiting("anonymous") like the doc sibling and stop echoing ex.Message.</step>
     <step order="5">Add explicit .RequireAuthorization() to OBOEndpoints (7) + UserEndpoints (2).</step>
     <step order="6">Add/adjust a negative test: an unauthenticated request to a recalculate endpoint returns 401.</step>
-    <step order="7">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="7">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
     <step order="8">Update TASK-INDEX.md: set task 023 status to ✅.</step>
     <step order="9">Document any deviation (and any @spaarke/auth web-resource gap surfaced → route to task 030 / FR-17) in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -88,7 +88,7 @@
     <criterion testable="true">Negative: an unauthenticated request to a recalculate endpoint returns 401 (not 200, not an unhandled error).</criterion>
     <criterion testable="true">Given the web-resource caller, it authenticates via @spaarke/auth (not HMAC, not anonymous).</criterion>
     <criterion testable="true">Given the healthz probes, both are rate-limited like the doc sibling and no longer echo ex.Message; OBO (7) + User (2) have explicit .RequireAuthorization().</criterion>
-    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package.</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package.</criterion>
     <criterion testable="true">grep of src/solutions/webresources for Authorization|Bearer|token is non-empty for the migrated callers; no r3-owned recalculate/recalculate-grades endpoint remains reachable without auth by a web-resource that this task did not migrate or explicitly hand to task 030.</criterion>
     <criterion testable="true">No health endpoint (incl. /healthz/dataverse/doc/{id} at EndpointMappingExtensions.cs:93) echoes ex.Message or InnerException.Message.</criterion>
     <criterion testable="true">.claude/patterns/webresource/subgrid-parent-rollup.md no longer mandates .AllowAnonymous(); it documents the @spaarke/auth path.</criterion>

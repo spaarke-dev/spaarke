@@ -41,7 +41,7 @@
   <constraints>
     <constraint source="project">Scope (downcast consolidation only): add the extension in Spaarke.Dataverse next to DataverseServiceClientImpl; replace every copy/call site. Do NOT unify the two Dataverse stacks (NG1) — this is boilerplate consolidation within the app-only HTTP camp only.</constraint>
     <constraint source="ADR-038">Scope: keep/extend the invoice-totals behavior test from task 021; no Mock&lt;HttpMessageHandler&gt;, no DI-registration/ctor-null-check tests.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check (Services/Dataverse+Finance+Ai are highly contested) before the PR; land in a quiet window.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check (Services/Dataverse+Finance+Ai are highly contested) before the PR; land in a quiet window.</constraint>
     <constraint source="verification-2026-08-06">Scope caution (addendum): in MembershipFieldDiscoveryService the unwrap is called inside a `protected virtual FetchLookupAttributesAsync` (:415, impl :558) — the consolidation MUST preserve the subclass-override seam (do not seal or inline in a way that breaks overrides). Exact 13-impl/17-site list is in the verification addendum.</constraint>
   </constraints>
 
@@ -60,7 +60,7 @@
     <step order="2">grep the whole BFF for `as ServiceClient` / `is ServiceClient` and inline unwrap copies; enumerate the current exact count (bff design says ~13 impls / ~17 sites — verify).</step>
     <step order="3">Replace every copy/call site with the shared extension, including the 3 invoice-path sites task 021 fixed in-place.</step>
     <step order="4">grep-verify zero IDataverseService as/is ServiceClient casts remain outside the shared extension.</step>
-    <step order="5">dotnet build + full dotnet test green (invoice-totals test still passes); run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="5">dotnet build + full dotnet test green (invoice-totals test still passes); run dotnet publish and record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
     <step order="6">Update TASK-INDEX.md: set task 028 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -81,7 +81,7 @@
     <criterion testable="true">Given the change, grep confirms zero IDataverseService as/is ServiceClient casts remain outside the single shared extension.</criterion>
     <criterion testable="true">Negative: TryUnwrapServiceClient returns null + logs (does not throw) when the impl is not a ServiceClient; UnwrapServiceClient throws with the consumer name.</criterion>
     <criterion testable="true">The invoice-totals behavior test (from task 021) still passes after routing through the extension.</criterion>
-    <criterion testable="true">dotnet build + full dotnet test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package; two Dataverse stacks NOT unified.</criterion>
+    <criterion testable="true">dotnet build + full dotnet test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package; two Dataverse stacks NOT unified.</criterion>
   </acceptance-criteria>
 
   <notes>Maps spec.md FR-08 / bff design §3.3 + §9 row 1, Phase 2b. **Tranche B** (quiet window) — supersedes the in-place fix in task 021.</notes>

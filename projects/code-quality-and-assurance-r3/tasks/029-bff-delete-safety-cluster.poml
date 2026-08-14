@@ -41,7 +41,7 @@
   <constraints>
     <constraint source="project">Scope (Safety cluster only): delete exactly the 6 src files + update/remove the 2 referencing test files; fix the 3 stale crefs. Do NOT touch PromptShieldChatMiddleware or any other Services/Ai code.</constraint>
     <constraint source="project">Scope: verify against src/ AND tests/ (InternalsVisibleTo to 3 test assemblies) before deleting — grep both trees; abort if any live consumer is found.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check against active AI worktrees before the PR; land in a quiet window.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check against active AI worktrees before the PR; land in a quiet window.</constraint>
   </constraints>
 
   <knowledge>
@@ -59,7 +59,7 @@
     <step order="2">grep src/ AND tests/ to confirm the cluster is unwired and superseded by PromptShieldChatMiddleware; identify the 2 referencing test files.</step>
     <step order="3">Delete the 6 src files; update/remove the 2 test files; fix the 3 stale &lt;see cref&gt; (CS1574) references.</step>
     <step order="4">dotnet build src/server/api/Sprk.Bff.Api/ + full dotnet test green.</step>
-    <step order="5">Run dotnet publish -c Release, record absolute + delta vs 46.89 MB in notes/publish-size-report.md.</step>
+    <step order="5">Run dotnet publish -c Release, record absolute + delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) in notes/publish-size-report.md.</step>
     <step order="6">Update TASK-INDEX.md: set task 029 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -77,7 +77,7 @@
     <criterion testable="true">Given the deletions, grep of src/ AND tests/ returns zero dangling references to the Safety cluster types.</criterion>
     <criterion testable="true">Given the build, dotnet build is clean (2 CS1574 crefs fixed) and full dotnet test is green.</criterion>
     <criterion testable="true">PromptShieldChatMiddleware and all other Services/Ai code are untouched.</criterion>
-    <criterion testable="true">Publish size reported ≤ 60 MB compressed with delta vs 46.89 MB; no new NuGet package added.</criterion>
+    <criterion testable="true">Publish size reported ≤ 60 MB compressed with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package added.</criterion>
   </acceptance-criteria>
 
   <notes>Maps spec.md FR-06 / bff design §3.1 (Safety cluster row), Phase 1. **Tranche B** (contested Services/Ai — quiet window). Split from task 020.</notes>

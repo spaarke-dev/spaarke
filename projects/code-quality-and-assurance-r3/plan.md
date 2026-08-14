@@ -38,7 +38,7 @@
 - Single project / single worktree; surfaces = workstreams on one branch.
 - Assessment-first: full Fable-verified assessment produces the documentation that gates remediation planning.
 - Behavior-preserving by default; delete > deprecate; adversarial verification is non-negotiable.
-- BFF publish ≤ 60 MB compressed (baseline 46.89 MB); no new NuGet packages; `/conflict-check` before every remediation PR.
+- BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); no new NuGet packages; `/conflict-check` before every remediation PR.
 
 ### Key Technical Decisions
 

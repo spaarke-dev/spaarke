@@ -29,7 +29,7 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 - **D1 B** — governance strong (ADR-032 uniform, PublicContracts facade exists) but 4+1 live facade violations; 6 files >2.4k LOC (`SpeAdminGraphService.cs` 4,910).
 - **D2 C+** — live broken invoice-totals cast (Bug-1); 3 KPI web resources silently 401-broken (MF-1); dead `.eml` half with conflicting registrations (Bug-2).
 - **D3 B–** — anonymous Dataverse-write (B-1); unguarded live-Dataverse health probes echoing exception detail (B-2 + doc/{id}); 9 anonymous-by-omission endpoints; no fallback policy.
-- **D4 A–** — 46.90 MB compressed vs 60 MB ceiling; rate-limiting on anonymous surfaces.
+- **D4 A–** — 44.96 MB incl PDBs (net10 baseline; net8 was 46.90) compressed vs 60 MB ceiling; rate-limiting on anonymous surfaces.
 - **D5 C** — 2,701 dead prod LOC + 1,149 test LOC (verified exact); 13 downcast copies; triple `.eml` builder.
 - **D6 B–** — false "follows ScorecardCalculatorEndpoints exactly" comment; exact-name class collision; 3 legacy namespaces mid-migration.
 - **D7 B** — 831 test LOC exercising unwired code; archived test file in tree; live invoice path untested (bug shipped).

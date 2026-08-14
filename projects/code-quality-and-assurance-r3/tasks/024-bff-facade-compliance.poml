@@ -42,7 +42,7 @@
   <constraints>
     <constraint source="ADR-013">Scope: CRUD/non-AI code uses Services/Ai/PublicContracts/ only; MUST NOT inject IActionResolver/IActionRunner/IPlaybookLookupService directly. This task enforces the rule (no tension — it is the point).</constraint>
     <constraint source="project">Scope: A-1's IFileSummarizeAi MUST preserve the SSE chunk contract byte-for-byte and the 503 semantics; keep request validation in the endpoint. Do NOT change AI internals — only relocate/wrap.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
   </constraints>
 
   <knowledge>
@@ -65,7 +65,7 @@
     <step order="3">Add IFileSummarizeAi (mirror CommunicationTriageAi) and swap A-1 (WorkspaceFileEndpoints) to it, preserving SSE chunk + 503 semantics and keeping validation in the endpoint.</step>
     <step order="4">Update the AnalysisServicesModule.cs:169 comment.</step>
     <step order="5">grep-verify no non-AI file injects IActionResolver/IActionRunner/IPlaybookLookupService.</step>
-    <step order="6">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 46.89 MB.</step>
+    <step order="6">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
     <step order="7">Update TASK-INDEX.md: set task 024 status to ✅.</step>
     <step order="8">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -89,7 +89,7 @@
     <criterion testable="true">Given the change, grep confirms no non-AI file injects IActionResolver/IActionRunner/IPlaybookLookupService.</criterion>
     <criterion testable="true">Given A-1, the SSE chunk contract + 503 semantics are byte-compatible with before (verified by test).</criterion>
     <criterion testable="true">Given the change, IWorkspacePrefillAi.RunPrefillActionAsync serves both A-2 and A-3; IPlaybookLookupService lives under PublicContracts/; AnalysisServicesModule.cs:169 comment updated.</criterion>
-    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 46.89 MB; no new NuGet package.</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package.</criterion>
     <criterion testable="true">Post-fix grep confirms no non-AI file injects IActionResolver/IActionRunner/IPlaybookLookupService — including InvoiceExtractionJobHandler.cs:33,55 (non-Ai/ namespace injecting IPlaybookLookupService; cleared by A-4's relocation — verification addendum MF-6).</criterion>
   </acceptance-criteria>
 

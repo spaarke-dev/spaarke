@@ -107,7 +107,7 @@ R3 is a **standing quality program** — not a polish sprint — that (a) re-bas
 
 ### Non-Functional Requirements
 
-- **NFR-01 (Publish size)**: BFF publish ≤ **60 MB compressed** (baseline **46.89 MB incl. PDBs**, 2026-08-05). Report absolute size + delta on every BFF-touching task. BFF work is expected to *reduce* size. Escalation: ≥+5 MB single-task delta → justify; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP.
+- **NFR-01 (Publish size)**: BFF publish ≤ **60 MB compressed** (baseline **44.96 MB incl PDBs (net10 baseline; net8 was 46.89) incl. PDBs**, 2026-08-05). Report absolute size + delta on every BFF-touching task. BFF work is expected to *reduce* size. Escalation: ≥+5 MB single-task delta → justify; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP.
 - **NFR-02 (Behavior-preserving)**: Every task except the explicit bug-fixes (FR-07) and auth changes (FR-09) must be provably behavior-neutral — `dotnet build` + full `dotnet test` + publish-size diff as the acceptance gate. Delete > deprecate.
 - **NFR-03 (Conflict discipline)**: Assessments are read-only ⇒ zero merge-conflict risk ⇒ run anytime. `/conflict-check` MUST run before **every** remediation PR against `projects/INDEX.md` (19 active worktrees touch BFF).
 - **NFR-04 (Small PRs)**: Remediation lands as small, reviewable, revertible per-surface PRs off the one branch; most-contested surfaces (BFF, Finance/Communication/Email files) sequenced into quiet windows.
@@ -191,7 +191,7 @@ All other work is deletion, rename, move, in-place consolidation, or extension o
 2. [ ] Reusable `quality-assessment` Workflow runs end-to-end with a Fable verification stage — Verify: one full surface run produces a verified design.
 3. [ ] Honest re-baseline published; no unverified aggregate grade; March "95/100" superseded — Verify: `notes/SCORECARD.md` Phase-0 output.
 4. [ ] Every remaining surface has a Fable-verified assessment `design.md` **before** its remediation is planned — Verify: assessment design precedes each surface's task-create.
-5. [ ] BFF surface executed: 6 dead-code items removed (zero dangling refs), 2 bugs fixed (invoice-totals test passing), 13 downcasts → 1 extension, auth closed via `@spaarke/auth`, 4 facade violations behind `PublicContracts/`, `Endpoints/` deleted (route-dump identical), `CommunicationModule` decomposed, 2 tarballs untracked — Verify: build + full test green; grep checks; publish-size delta vs 46.89 MB reported.
+5. [ ] BFF surface executed: 6 dead-code items removed (zero dangling refs), 2 bugs fixed (invoice-totals test passing), 13 downcasts → 1 extension, auth closed via `@spaarke/auth`, 4 facade violations behind `PublicContracts/`, `Endpoints/` deleted (route-dump identical), `CommunicationModule` decomposed, 2 tarballs untracked — Verify: build + full test green; grep checks; publish-size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) reported.
 6. [ ] Forcing-functions live: ArchTests expanded (fail-on-seeded-violation), analyzers-as-errors on, lint/CVE/size/doc-drift CI gates green — **per-surface activation** — Verify: each surface's last step flips its gate; no repo-wide big-bang.
 7. [ ] Horizontals executed: security (`@spaarke/auth` consistency), test-quality (`/test-diet` + 138-failing reconciliation), CVE (no HIGH), observability (no PII in logs), doc-drift — Verify: each sweep's findings tracked to closure.
 8. [ ] Archived 12-item R3 draft fully reconciled (§3) — no item dropped silently — Verify: reconciliation table each item disposition + VERIFY.
@@ -230,7 +230,7 @@ All other work is deletion, rename, move, in-place consolidation, or extension o
 - **Assessment ordering**: surfaces assessed by leverage (client libs → server libs → PCF → data model → code pages → plugins) per design §7; BFF already assessed. Adjustable if the owner reprioritizes.
 - **Epic parent**: Epic **#427** is the correct registration parent (per session handoff); verified at `/project-pipeline` time.
 - **`@spaarke/auth` web-resource support**: assumed feasible for the `sprk_subgrid_parent_rollup.js` caller; if a real gap exists, FR-09 escalates it to FR-17 as a broader fix.
-- **Publish-size direction**: BFF work assumed to *reduce* compressed publish size from 46.89 MB; reported per task regardless.
+- **Publish-size direction**: BFF work assumed to *reduce* compressed publish size from 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); reported per task regardless.
 - **Single-branch execution**: all workstreams execute on `work/code-quality-and-assurance-r3`; surface folders (`workstreams/{surface}/`, e.g. `workstreams/bff-api/`) are semantic homes only, not separate execution units.
 
 ## Unresolved Questions

@@ -28,7 +28,7 @@ R1 built the quality *system* (tooling, scorecard, CI/nightly gates). R2 did the
 
 The March "A (95/100)" is treated as **stale and unverified.** R3 Phase 0 re-scores every surface against the rubric (§5) using the verified assessment method (§6). What we know today:
 
-- **BFF** — assessed 2026-08-05/06. Structurally strong (A– on DI/gating; publish 46.89 MB compressed, healthy) but carrying 1 broken production path, ~2.7k LOC dead code, and an auth exposure → **surface grade ~B/B–, remediation scoped** (BFF workstream #1).
+- **BFF** — assessed 2026-08-05/06. Structurally strong (A– on DI/gating; publish 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) compressed, healthy) but carrying 1 broken production path, ~2.7k LOC dead code, and an auth exposure → **surface grade ~B/B–, remediation scoped** (BFF workstream #1).
 - **Every other surface** — **not yet re-scored.** No credible current grade until Phase 0 runs.
 
 We do **not** publish an aggregate grade until Phase 0 completes. The re-baseline is a deliverable, not an assumption.
@@ -203,7 +203,7 @@ Because all surface remediation executes in this one worktree (§4), the program
 </hot-path-declaration>
 ```
 
-**Placement Justification (§10 governance):** the code delta is **net-negative** — this program removes/consolidates code (dead-code deletion, 13→1 downcast, folder migration) and adds no new BFF endpoints/services/packages. The only additive surface is the `UnwrapServiceClient` extension (in `Spaarke.Dataverse`, replaces 13 copies) and `PublicContracts/` facade methods (which *reduce* CRUD→AI coupling). Publish size is expected to **drop** (BFF baseline 46.89 MB compressed). `ci-workflows=Y` coordinates with `ci-cd-unit-test-remediation-r1` (owns existing-workflow edits). **This program's row must be added to [`projects/INDEX.md`](../INDEX.md)** so the ~19 other BFF worktrees see it; `/conflict-check` runs before every remediation PR.
+**Placement Justification (§10 governance):** the code delta is **net-negative** — this program removes/consolidates code (dead-code deletion, 13→1 downcast, folder migration) and adds no new BFF endpoints/services/packages. The only additive surface is the `UnwrapServiceClient` extension (in `Spaarke.Dataverse`, replaces 13 copies) and `PublicContracts/` facade methods (which *reduce* CRUD→AI coupling). Publish size is expected to **drop** (BFF baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) compressed). `ci-workflows=Y` coordinates with `ci-cd-unit-test-remediation-r1` (owns existing-workflow edits). **This program's row must be added to [`projects/INDEX.md`](../INDEX.md)** so the ~19 other BFF worktrees see it; `/conflict-check` runs before every remediation PR.
 
 ## 12. Deliverables
 

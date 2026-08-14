@@ -11,7 +11,7 @@
 
 ## 0. Summary & verdict
 
-Routine-maintenance review of the BFF API. The BFF is **structurally healthy and unusually well-governed** — ADR-032 null-object kill-switch gating is applied consistently, there are no captive-dependency bugs, publish size is healthy (**46.89 MB compressed incl. PDBs**, ceiling 60 MB), and the endpoint surface is largely clean. The problems are **accumulated redundancy, dead weight, and two latent production bugs** — not rot.
+Routine-maintenance review of the BFF API. The BFF is **structurally healthy and unusually well-governed** — ADR-032 null-object kill-switch gating is applied consistently, there are no captive-dependency bugs, publish size is healthy (**44.96 MB incl PDBs (net10 baseline; net8 was 46.89) compressed incl. PDBs**, ceiling 60 MB), and the endpoint surface is largely clean. The problems are **accumulated redundancy, dead weight, and two latent production bugs** — not rot.
 
 This project is a bounded, mostly-mechanical cleanup with **two genuine correctness fixes** and **one security decision that needs the owner**. It removes ~2,700 LOC of production dead code (+~1,150 test LOC), collapses 13 copy-pasted downcast helpers into one extension, fixes an always-failing cast on the invoice-totals path, closes an unauthenticated Dataverse-write exposure, finishes an abandoned folder migration, and improves reviewability of the DI layer.
 
@@ -20,7 +20,7 @@ Verified cleanliness scorecard:
 | Area | Grade | Note |
 |---|---|---|
 | DI correctness (gating, lifetimes, dupes) | **A–** | ADR-032 applied rigorously; no captive deps; one 75-registration monolith (`CommunicationModule`) |
-| Publish size / dependencies | **A** | 46.89 MB compressed; no HIGH CVE surfaced; package pins documented |
+| Publish size / dependencies | **A** | 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) compressed; no HIGH CVE surfaced; package pins documented |
 | Endpoint / facade hygiene | **B** | 4 facade-boundary violations; incomplete `Endpoints/`→`Api/` migration |
 | Auth consistency | **B–** | 1 anonymous Dataverse-**write** endpoint (owner decision); 2 unguarded health probes; 2 files anonymous-by-omission |
 | Service redundancy | **C+** | 13× copy-pasted downcast (+3 broken), triple `.eml` builder, financial-handler tangle, orphaned retry helper |
@@ -197,7 +197,7 @@ Ordered by risk-adjusted value. Each bullet is a candidate task for `/task-creat
 </hot-path-declaration>
 ```
 
-BFF=Y → publish-size check (≤60 MB compressed) on every BFF-touching task; baseline **46.89 MB compressed incl. PDBs (2026-08-05)**. **No new NuGet packages** — this project only removes/consolidates code. `/conflict-check` MUST run before each BFF PR against [`projects/INDEX.md`](../INDEX.md) (13 of 17 active worktrees touch BFF — coordination risk is real, especially for the Finance/Communication/Email files).
+BFF=Y → publish-size check (≤60 MB compressed) on every BFF-touching task; baseline **44.96 MB incl PDBs (net10 baseline; net8 was 46.89) compressed incl. PDBs (2026-08-05)**. **No new NuGet packages** — this project only removes/consolidates code. `/conflict-check` MUST run before each BFF PR against [`projects/INDEX.md`](../INDEX.md) (13 of 17 active worktrees touch BFF — coordination risk is real, especially for the Finance/Communication/Email files).
 
 ---
 
@@ -244,7 +244,7 @@ All other work is deletion, rename, or in-place consolidation — no new surface
 - [ ] No non-AI file injects an `IActionResolver`/`IActionRunner`/`IPlaybookLookupService` (grep-verified); `AnalysisServicesModule.cs:169` comment updated.
 - [ ] `/healthz/dataverse*` probes rate-limited + no `ex.Message` leak; Finance auth decision implemented per §6.
 - [ ] `Endpoints/` folder deleted; route table byte-identical (route-dump diff).
-- [ ] 2 tarballs `git rm --cached`; publish size ≤ 60 MB compressed, reported with delta vs 46.89 MB baseline.
+- [ ] 2 tarballs `git rm --cached`; publish size ≤ 60 MB compressed, reported with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) baseline.
 - [ ] `/conflict-check` clean (or coordinated) against active BFF worktrees before each PR.
 
 ## 13. Risks
@@ -279,7 +279,7 @@ All other work is deletion, rename, or in-place consolidation — no new surface
 - **Facade**: A-1 `WorkspaceFileEndpoints.cs:153-154,264-265`; A-2 `MatterPreFillService.cs:50-51`; A-3 `ProjectPreFillService.cs:41-42`; A-4 `WorkspaceAiService.cs:60,79`. `IActionSeam` (`PublicContracts/IActionSeam.cs:27-56`) has no resolve→run. Reference `PublicContracts/CommunicationTriageAi.cs:49-56`. Comment `AnalysisServicesModule.cs:168-176`.
 - **Auth**: B-1 `FinanceRollupEndpoints.cs:29,46` (sibling `Api/ScorecardCalculatorEndpoints.cs:28,46` requires auth). B-2 `EndpointMappingExtensions.cs:64-65`; ex.Message echo `:382,:398`. B-3 OBO 7 (`OBOEndpoints.cs:16,55,106,141,205,245,315`) + User 2 (`UserEndpoints.cs:18,22`); **no `SetFallbackPolicy` anywhere**.
 - **Structure**: `Endpoints/` = 6 files, 3 legacy namespaces; test refs `UpdateContainerTypeSettingsTests.cs:8`, `RegisterContainerTypeTests.cs:4`, `ContainerTypeEndpointsTests.cs:9` (usings) + `Phase2IntegrationTests.cs:1098,1121` (fully-qualified type refs — a using-swap won't catch these); src `SpeAdminEndpoints.cs:3`, `EndpointMappingExtensions.cs:17`. `CommunicationModule.cs` 490/75/0-helpers.
-- **Publish**: 46.90 MB compressed incl PDBs (≈ baseline 46.89; well under 60).
+- **Publish**: 44.96 MB incl PDBs (net10 baseline; net8 was 46.90) compressed incl PDBs (≈ baseline 46.89; well under 60).
 
 ### Drift corrections
 - **DC-1 (task 027)**: the "127 MB build artifacts" claim was measured in a DIFFERENT worktree. In THIS worktree only the **2 committed tarballs** exist: `src/server/api/Sprk.Bff.Api/deployment.tar.gz` (15.88 MB) + `spe-bff-api-deployment.tar.gz` (15.95 MB) = 31.8 MB. **`.gitignore` covers `*.zip` (line 63) but has NO `*.tar.gz` pattern → the tarballs will re-commit unless it is added.** Also flagged (out of BFF scope): `projects/pcf-orphan-cleanup-r1/backups-2026-06-22/*.zip` (10 solution zips) are tracked.

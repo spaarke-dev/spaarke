@@ -20,7 +20,7 @@
 
   <prompt>Delete the low-contention dead-code items from Sprk.Bff.Api (bff design §3.1, Tranche A): the Scopes folder (Services/Scopes/{ScopeInheritanceService,ScopeCopyService,OwnershipValidator}.cs, ~1,285 LOC), orphaned Infrastructure/Resilience/RetryPolicies.cs (~298 LOC), StubLiveFactResolver.cs (~56 LOC, owner-APPROVED for deletion), both _archive/ folders, and the archived test. The Safety cluster is deliberately NOT in this task — it touches heavily-contested Services/Ai and is handled in Tranche B (task 029). Verify against src/ AND tests/ before deleting. PRESERVE the explicit KEEPs.</prompt>
   <role>SPAARKE platform developer with BFF cleanup expertise. Follow root CLAUDE.md §10 BFF Hygiene + ADR-032. Delete &gt; deprecate; behavior-preserving.</role>
-  <goal>The Tranche-A dead-code items are removed with zero dangling references (grep-verified against src/ and tests/), dotnet build + full dotnet test green, and the publish-size delta vs 46.89 MB reported.</goal>
+  <goal>The Tranche-A dead-code items are removed with zero dangling references (grep-verified against src/ and tests/), dotnet build + full dotnet test green, and the publish-size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) reported.</goal>
 
   <context>
     <background>spec.md FR-06. The BFF assessment (Fable-verified) confirmed these items are provably dead in src/ AND tests/ (BFF exposes internals via InternalsVisibleTo to 3 test assemblies, so test refs were checked explicitly). The verification pass CORRECTED 2 first-pass false positives that are load-bearing and MUST be preserved: StubInsightGraph (wired InsightsModule.cs:53) and the Todo NullObject/ + Placeholder/ ADR-032 factory pair (TodoSyncModule.cs:84-98). The Safety cluster (6 src in Services/Ai/* + 2 test files) is split into Tranche B (task 029) because Services/Ai is the most-contested area (many AI worktrees).</background>
@@ -43,7 +43,7 @@
     <constraint source="project">Scope (BFF Tranche-A dead-code only): delete exactly Scopes folder (3), RetryPolicies.cs, StubLiveFactResolver.cs, both _archive/ folders, the archived test. Do NOT delete the Safety cluster here (task 029) and do NOT delete anything else.</constraint>
     <constraint source="ADR-032">Scope: PRESERVE the KEEPs — StubInsightGraph.cs (wired InsightsModule.cs:53) and Todo NullObject/ + Placeholder/ factory pair (TodoSyncModule.cs:84-98). These are ADR-032 seams, verified load-bearing.</constraint>
     <constraint source="project">Scope: verify dead code against src/ AND tests/ (InternalsVisibleTo to 3 test assemblies) before each deletion — grep both trees for references.</constraint>
-    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 46.89 MB); report absolute size + delta in notes. No new NuGet packages. Run /conflict-check against projects/INDEX.md before the PR.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute size + delta in notes. No new NuGet packages. Run /conflict-check against projects/INDEX.md before the PR.</constraint>
   </constraints>
 
   <knowledge>
@@ -61,7 +61,7 @@
     <step order="2">For each item, grep src/ AND tests/ for references to confirm zero live consumers; abort an individual deletion if any live ref is found (the KEEPs prove first-pass audits can be wrong).</step>
     <step order="3">Delete the Scopes folder (3 files), orphaned RetryPolicies.cs, StubLiveFactResolver.cs, both _archive/ folders (remove the now-empty folders), and the archived test.</step>
     <step order="4">Run dotnet build src/server/api/Sprk.Bff.Api/ + full dotnet test; confirm green.</step>
-    <step order="5">Run dotnet publish -c Release to deploy/api-publish/, measure compressed size, record absolute + delta vs 46.89 MB in notes/publish-size-report.md.</step>
+    <step order="5">Run dotnet publish -c Release to deploy/api-publish/, measure compressed size, record absolute + delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) in notes/publish-size-report.md.</step>
     <step order="6">Update TASK-INDEX.md: set task 020 status to ✅.</step>
     <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
   </steps>
@@ -79,7 +79,7 @@
     <criterion testable="true">Given the deletions, grep of src/ AND tests/ returns zero dangling references to any removed type; both _archive/ folders are gone.</criterion>
     <criterion testable="true">Given the build, dotnet build is clean and full dotnet test is green.</criterion>
     <criterion testable="true">Given the KEEPs, StubInsightGraph.cs and the Todo NullObject/+Placeholder/ pair still exist and are still wired.</criterion>
-    <criterion testable="true">Publish size reported ≤ 60 MB compressed with delta vs 46.89 MB; no new NuGet package added.</criterion>
+    <criterion testable="true">Publish size reported ≤ 60 MB compressed with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package added.</criterion>
   </acceptance-criteria>
 
   <notes>Maps spec.md FR-06 / bff design §3.1 + Phase 1. **Tranche A** (low-contention paths — do first). Safety cluster deletion split to task 029 (Tranche B, contested Services/Ai). FULL rigor.</notes>

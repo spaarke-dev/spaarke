@@ -31,7 +31,7 @@ Lineage: `code-quality-and-assurance-r1` (tooling/scorecard, C→B) → `r2` (17
 
 ## Hot-path (this program carries ONE declaration)
 
-`bff=Y · spaarkeai=Y · ci-workflows=Y · skill-directives=Y · root-claude-md=N`. Net-negative code delta (mostly removal/consolidation). `/conflict-check` before EVERY remediation PR (19 other worktrees touch BFF). BFF publish baseline: 46.89 MB compressed (ceiling 60).
+`bff=Y · spaarkeai=Y · ci-workflows=Y · skill-directives=Y · root-claude-md=N`. Net-negative code delta (mostly removal/consolidation). `/conflict-check` before EVERY remediation PR (19 other worktrees touch BFF). BFF publish baseline: 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) compressed (ceiling 60).
 
 ## One OUTSTANDING owner decision (gates BFF remediation)
 

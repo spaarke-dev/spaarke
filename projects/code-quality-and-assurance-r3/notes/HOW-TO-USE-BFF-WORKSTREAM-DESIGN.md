@@ -66,7 +66,7 @@ Because BFF is now a *workstream* (not a project), some of its self-contained go
 
 - **§7 Hot-Path Declaration** (in the BFF doc) → **superseded**. r3 carries ONE program-level declaration (r3 design §11: `bff=Y/spaarkeai=Y/ci=Y/skills=Y`). Don't emit a second one.
 - **§8 Placement Justification / §9 Component Justification** → **keep + reuse verbatim** in the BFF PRs (still required by root CLAUDE.md §10/§11 for any BFF-touching PR).
-- **Per-BFF-PR obligations still apply**: `dotnet publish` size check (≤60 MB compressed; baseline 46.89 MB), `dotnet list package --vulnerable`, test updates, `/conflict-check`. These attach to each BFF *task/PR*, not to a separate project.
+- **Per-BFF-PR obligations still apply**: `dotnet publish` size check (≤60 MB compressed; baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)), `dotnet list package --vulnerable`, test updates, `/conflict-check`. These attach to each BFF *task/PR*, not to a separate project.
 - **§10 ADR tensions** → carry into the relevant tasks' `<escalation>`/ADR-tension notes.
 
 ## 6. Verification discipline (don't skip)
