@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>H2 — adversarial verification of DI-graph fixes by a non-author</title>
+    <phase>P2 Dev-boot DI validation</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Independent behavioral verification of DI fixes (NFR-07); mandatory non-author pass.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Adversarial reasoning about DI lifetimes/captive dependencies — must match the author task's tier.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>V2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verification-only (read + report); MUST be a different agent than task 020's author (NFR-07).</parallel-reason>
+    <deps>020</deps>
+    <tags>dotnet, bff-api, dependency-injection, verification, behavioral</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Adversarially verify task 020's DI-graph fixes as a NON-AUTHOR: independently boot the BFF in Development on net10 to confirm a clean start, then for each fix try to REFUTE that it is behavior-preserving — e.g. a lifetime change that alters sharing semantics, or a null-object registration that silently changes a feature-gated path. Confirm no `ValidateOnBuild`/`ValidateScopes` suppression was used. Report CONFIRMED / REFUTED per fix; refuted items reopen task 020.</prompt>
+  <role>SPAARKE platform developer acting as an independent adversarial reviewer of DI lifetime/registration correctness. You did NOT write task 020. Follow ADRs strictly.</role>
+  <goal>A report `notes/h2-verification.md` with an independent clean-boot confirmation and, per fix from task 020, a CONFIRMED/REFUTED verdict with a concrete failure scenario for any REFUTED. Any REFUTED reopens task 020 before P2 closes.</goal>
+
+  <context>
+    <background>NFR-07 mandates the DI fixes be adversarially verified by a non-author. The risk is a "fix" that makes boot succeed but changes sharing semantics (e.g. singleton→scoped altering state) or masks a feature-gated defect via a null-object that changes behavior.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/h2-di-validation.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/** (fixes under review)</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/h2-verification.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">DI fixes applied; Development boots clean.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-07">MUST be a reviewer who did NOT author task 020 (separate agent). Read + report only.</constraint>
+    <constraint source="project">Independently boot the BFF in Development to confirm the clean start; do not accept the author's claim.</constraint>
+    <constraint source="ADR-032">Scrutinize each null-object registration for behavior-preservation — a null-object that changes what a feature-gated path does is a defect, not a fix.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Adversarial verification of DI lifetime/registration fixes</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="adversarial-verify" location="projects/dotnet-10-upgrade-r1/design.md">design §9 — independent pass.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-08/NFR-07 + task 020 output. Declare RIGOR: FULL. Confirm you are NOT the task-020 author.</step>
+    <step order="1">Independently boot the BFF in Development on net10; confirm a clean start (no validation exception).</step>
+    <step order="2">For each fix, attempt to construct a behavior-change (sharing-semantics / feature-gated-path) failure scenario.</step>
+    <step order="3">Confirm neither `ValidateOnBuild` nor `ValidateScopes` was disabled anywhere.</step>
+    <step order="4">Record per-fix CONFIRMED/REFUTED + failure scenarios; flag task 020 🔄 if any REFUTED.</step>
+    <step order="5">Write `notes/h2-verification.md`.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 021 status to ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If verification finds a fix that is not behavior-preserving and the correct resolution requires a design decision, STOP and surface per CLAUDE.md §6.5.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run BFF in Development</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/h2-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The reviewer independently confirms a clean Development boot on net10.</criterion>
+    <criterion testable="true">Each task-020 fix has a CONFIRMED/REFUTED verdict; every REFUTED carries a concrete behavior-change scenario.</criterion>
+    <criterion testable="true">The report confirms `ValidateOnBuild`/`ValidateScopes` were not disabled.</criterion>
+    <criterion testable="true">Negative: the reviewer is a different agent than the task-020 author (recorded).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec NFR-07. Pairs with task 020. Dispatch as a separate agent/session.
+
+  COMPLETION (2026-08-12): Executed by a NON-AUTHOR opus subagent in an isolated worktree (different agent than task 020's main-session + `fix-h2` author). **Verdict: PASS.** Independently re-ran `dotnet test ... --filter DiGraphValidationTests` on net10 → `Passed: 1, Failed: 0` (clean boot confirmed without trusting the author). All 10 roots R1–R10 CONFIRMED behavior-preserving (0 REFUTED). Stream-scope lifetimes (R1 UploadFinalizationWorker, R9 CommunicationService) CONFIRMED — every SPE stream materialized to memory (CopyToAsync→ToArray / in-memory MemoryStream) before scope disposal; no use-after-dispose; behavior-preservation rests on `SpeFileStore` being a stateless ADR-007 facade (holds). R5 ActionResolver demote + NullActionResolver symmetry CONFIRMED (stateless resolver; no singleton consumer via grep; guard-pass dispositive; null-object P3 fail-fast throw unchanged by lifetime). `ValidateOnBuild`/`ValidateScopes` NOT disabled anywhere in production (only test-fixture, which the guard re-enables). Guard test `DiGraphValidationTests.cs` truly asserts (reachable `Assert.Fail`, network-free, no file I/O) — recommend KEEP. No §6.5 escalation. Task 020 stands (not reopened). Full report: `notes/h2-verification.md`.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

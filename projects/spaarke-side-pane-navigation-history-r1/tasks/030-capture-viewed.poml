@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Recent (Viewed) capture — getPageContext() polling → history sprk_navitem upsert</title>
+    <phase>3 Capture</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New client-side capture engine in @spaarke/ui-components (.ts); frontend/shared-lib; the passive capture path underpins the whole Recent stream and writes Dataverse rows via Xrm.WebApi.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>High reuse — re-adopts the recovered contextService.ts polling loop and mirrors the useSprkMemoRepository Xrm.WebApi CRUD pattern; closed acceptance set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group C runs alongside task 040 (Navigator code-page shell) — different files (capture service/repository vs code-page shell), no shared surface.</parallel-reason>
+    <deps>011,021</deps>
+    <tags>capture,frontend,shared-lib</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Build the passive Recent (Viewed) capture engine by re-adopting the recovered contextService.ts polling loop (~0.5–2s): on each poll, read Xrm.Utility.getPageContext(); on page change, upsert a history sprk_navitem via Xrm.WebApi (mirroring the useSprkMemoRepository CRUD pattern), deduping by target and bumping sprk_lastvisited / sprk_visitcount, resolving the display name on first sighting. The derived "current page" is recomputed each poll (never cached authoritative) and is null when the user leaves records. There is NO per-form handler.</prompt>
+  <role>SPAARKE platform developer with Xrm.WebApi CRUD + Xrm.Utility.getPageContext() polling expertise and shared-lib React-16/17 constraints. Follow ADRs strictly.</role>
+  <goal>A capture engine in @spaarke/ui-components: a polling service (re-adopted from contextService.ts) plus an Xrm.WebApi sprk_navitem repository (mirroring useSprkMemoRepository). Navigating across records upserts ordered history rows (dedupe + bump on re-visit); leaving records sets the derived current page to null; capture runs from the persistent pane (continues while collapsed) with no per-form handler.</goal>
+  <context>
+    <background>Per spec FR-03 + plan.md Phase 3 task 030. Capture is zero-form-handler, zero-plugin: the persistent app-level pane (011 host / 001 bootstrap) polls getPageContext() and writes history rows via host-context Xrm.WebApi under the signed-in user. The recovered notes/retired-sidepane-code/contextService.ts is the polling loop to re-adopt; useSprkMemoRepository is the closest Xrm.WebApi CRUD analog (retrieveMultiple / create / debounced-update + frame-walk). OQ-6 (custom-page label resolution) is resolved here by inspecting getPageContext() output on the target build.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/services/navigator/navigatorCaptureService.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/services/navigator/navItemRepository.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/services/navigator/__tests__/navigatorCaptureService.test.ts</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts</file>
+      <file role="canonical-reference">src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts</file>
+      <file role="canonical-reference">src/solutions/EventDetailSidePane/src/services/eventService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">SprkSidePaneHost + persistent pane the capture loop runs inside (alwaysRender:true keeps it polling while collapsed).</dependency>
+      <dependency task="021" status="pending">Deployed UserOwned sprk_navitem entity the history rows are written to.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">All data access host-context via Xrm.WebApi under the signed-in user (per DATA-ACCESS-DECISION-CRITERIA.md); NO Sprk.Bff.Api code.</constraint>
+    <constraint source="project">NO per-form OnLoad/OnSave web resource and NO Dataverse plugin — capture is driven only by the persistent pane's getPageContext() poll (NFR-02).</constraint>
+    <constraint source="project">Dedupe by target: re-visiting an existing history target bumps sprk_lastvisited / sprk_visitcount rather than creating a duplicate row (FR-03).</constraint>
+    <constraint source="project">The derived "current page" is recomputed each poll (never cached as authoritative); leaving records sets it to null (FR-03).</constraint>
+    <constraint source="project">Capture MUST continue while the pane is collapsed (alwaysRender:true) — do not tie the poll to pane visibility (NFR-05).</constraint>
+    <constraint source="ADR-022">Keep this @spaarke/ui-components code React-16/17-safe: no createRoot; use JSXElement not JSX.Element.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>getPageContext() polling capture + Xrm.WebApi sprk_navitem upsert (host-context)</topic>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Re-adopt the polling loop" location="projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts">Re-adopt the ~2s poll + page-change detection; replace its sessionStorage capture with a history sprk_navitem upsert. Recompute current page each poll; null on leaving records.</pattern>
+      <pattern name="Xrm.WebApi CRUD analog" location="src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts">Mirror retrieveMultiple / create / debounced-update + frame-walk (getXrmWebApi) for the sprk_navitem repository; use the widened xrmContext getXrm frame-walk.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read the four canonical-reference files.</step>
+    <step order="1">Build navItemRepository.ts: Xrm.WebApi CRUD for sprk_navitem (retrieveMultiple by owner+type, create, update) mirroring useSprkMemoRepository (frame-walk getXrm, error parse from eventService).</step>
+    <step order="2">Re-adopt contextService.ts into navigatorCaptureService.ts: a ~0.5–2s poll reading Xrm.Utility.getPageContext(); detect page change; recompute derived current page each poll (null when not on a record).</step>
+    <step order="3">On page change to a resolvable record: upsert a history sprk_navitem — dedupe by target (sprk_targetlogicalname + sprk_targetid); on existing target bump sprk_lastvisited + sprk_visitcount; on first sighting resolve and store sprk_displayname.</step>
+    <step order="4">Guard the no-resolvable-entity case: a page with no resolvable entity (e.g. dashboard/settings) does NOT write a malformed row — skip the write. Investigate custom-page label resolution (OQ-6) from getPageContext() output on the target build; best-effort label.</step>
+    <step order="5">Ensure the loop is owned by the persistent pane and independent of pane visibility (keeps polling while collapsed).</step>
+    <step order="6">Author tests: Matter→Project→Document yields 3 ordered history rows; re-visit bumps not-duplicates; leaving records sets current=null; no-resolvable-entity writes nothing. Mock Xrm.WebApi + getPageContext.</step>
+    <step order="7">Recompile @spaarke/ui-components and run tests; confirm green.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 030 status to completed.</step>
+    <step order="9">Document any deviation (incl. the OQ-6 custom-page resolution finding) in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If getPageContext() on the target build does not expose a reliable current-user OData literal or a resolvable entity/id for the core records (R2), STOP and escalate rather than writing best-guess targets — this affects the FR-03/FR-04 baseline (root §6).</trigger>
+  </escalation>
+  <justification>
+    <existing>The recovered polling capture loop at projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/contextService.ts (retired, not currently wired in). Closest live CRUD analog: src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts.</existing>
+    <extension>Yes — re-adopt + adapt contextService.ts (replace its sessionStorage sink with a sprk_navitem upsert) and mirror the useSprkMemoRepository Xrm.WebApi CRUD pattern; do not build a parallel capture mechanism.</extension>
+    <cost-of-doing-nothing>Without the passive capture engine there is no Recent (Viewed) stream — the primary Navigator surface (FR-03) is empty, and the whole "one-gesture access to where I was" value proposition fails.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Capture-on-navigate produces ordered history rows">
+      <steps>
+        <step>With the persistent pane running, navigate Matter → Project → Document in the MDA.</step>
+        <step>Query sprk_navitem (type=history) via Xrm.WebApi.</step>
+        <step>Re-visit the Matter; re-query.</step>
+      </steps>
+      <expected>Three ordered history rows exist after the first pass; re-visiting bumps the Matter's sprk_lastvisited / sprk_visitcount rather than adding a duplicate row. (No rendered pane surface is asserted here — the capture engine renders no UI; light/dark theming per ADR-021 is verified by the NavigatorPane render tasks 040+.)</expected>
+    </test>
+    <test name="Capture continues while pane collapsed">
+      <steps>
+        <step>Collapse the pane, then navigate to another record.</step>
+        <step>Query sprk_navitem for the newly visited record.</step>
+      </steps>
+      <expected>A history row for the record visited while collapsed exists (alwaysRender:true keeps the poll running).</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/navigator/navigatorCaptureService.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/navigator/navItemRepository.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/services/navigator/__tests__/navigatorCaptureService.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the persistent pane is running, when the user navigates Matter → Project → Document, then three ordered history sprk_navitem rows are created via Xrm.WebApi.</criterion>
+    <criterion testable="true">Given an existing history target, when the user re-visits it, then sprk_lastvisited / sprk_visitcount are bumped and no duplicate row is created.</criterion>
+    <criterion testable="true">Given the user leaves records (navigates to a non-record page), then the derived current page is null.</criterion>
+    <criterion testable="true">Given the implementation, when reviewed, then NO per-form OnLoad/OnSave handler exists — capture is driven only by the pane's getPageContext() poll.</criterion>
+    <criterion testable="true">Given the pane is collapsed, when the user navigates, then capture continues (a history row is still written).</criterion>
+    <criterion testable="true">Negative: given a page with no resolvable entity, when the poll fires, then no malformed sprk_navitem row is written.</criterion>
+    <criterion testable="true">All unit tests pass; shared-lib build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-03 + plan.md Phase 3 task 030. Re-adopt contextService.ts; mirror useSprkMemoRepository. Retention prune-on-write is added in task 031 (do not add retention here). Resolve OQ-6 (custom-page label) from getPageContext() output and record the finding in notes/.
+
+COMPLETED 2026-08-13 (FULL rigor, sonnet/high). Built navItemRepository.ts (Xrm.WebApi CRUD for sprk_navitem via the widened xrmContext getXrm() frame-walk; exports the deployed NavItemType/NavItemSource/NavItemPageType option-set integer maps) + navigatorCaptureService.ts (startNavigatorCapture(): re-adopts contextService.ts's poll loop, 1.5s default, re-acquires Xrm fresh every tick per the task-001 spike lesson, dedupe+bump via findHistoryItem/bumpHistoryItem, sprk_displayname resolved via Xrm.Utility.getEntityMetadata + retrieveRecord rather than a hardcoded parent map since capture spans any entity). 6 new Jest tests all pass; tsc build clean; full Spaarke.UI.Components suite (2602 tests) shows only pre-existing unrelated failures (XrmDataverseClient, surfaceLaunchRegistry, buildDynamicWorkspaceConfig — none touch navigator/ or xrmContext.ts's exported surface). No new files/exports were added to xrmContext.ts itself — getPageContext/getEntityMetadata typings are declared locally in navigatorCaptureService.ts per ADR-022 "keep the shared surface slim."
+
+Capture scope decision: history capture is scoped to pageType==='entityrecord' with a resolvable entityName+entityId only; entitylist/dashboard/custom/webresource pages are treated as "no resolvable entity" (skip write) — satisfies the negative acceptance criterion and keeps the (targetlogicalname,targetid) dedupe key well-formed. Full rationale + the OQ-6 finding in projects/spaarke-side-pane-navigation-history-r1/notes/task-030-capture-decisions.md: OQ-6 is carried forward (no live-browser custom-page observation was available in this task run); it does not block 030 since custom pages fall into the skip bucket for history, and its real consumer is the FR-08 "Pin this page" bookmark gesture (task 051), which should empirically inspect a custom page before implementing that label.
+
+Escalation trigger did NOT fire — R2 (current-user OData literal) remains resolved GO per the task-001 spike; no new blocker surfaced.
+
+Wiring startNavigatorCapture() into SprkSidePaneHost / the app-startup bootstrap is explicitly out of scope for 030 (owned by 040/086) — this task ships the capture engine as a standalone, host-agnostic module per the POML's `<outputs>` (navItemRepository.ts, navigatorCaptureService.ts, __tests__/navigatorCaptureService.test.ts only).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -47,7 +47,7 @@ The following must already exist before starting this checklist. See [`ENVIRONME
 | Azure subscription with Contributor access | — | For App Service + Key Vault management |
 | Azure AD tenant GUID | `{tenant-guid}` | The customer's home tenant |
 | BFF Azure AD app registration | App ID `{bff-app-id}` | One client secret in Key Vault (still required for OBO; MI replaces the rest) |
-| App Service (BFF API) | `https://spaarke-bff-{env}.azurewebsites.net` (Linux .NET 8) | **Must have a user-assigned managed identity (UAMI) attached** (e.g., `mi-bff-api-{env}`); see canonical Bicep at `infrastructure/bicep/modules/app-service.bicep` |
+| App Service (BFF API) | `https://spaarke-bff-{env}.azurewebsites.net` (Linux .NET 10) | **Must have a user-assigned managed identity (UAMI) attached** (e.g., `mi-bff-api-{env}`); see canonical Bicep at `infrastructure/bicep/modules/app-service.bicep` |
 | App Service managed identity (UAMI) | `clientId: {uami-client-id}`, `principalId: {uami-principal-id}` | Set `Graph__ManagedIdentity__ClientId` AND `ManagedIdentity__ClientId` App Settings to the UAMI's clientId; `DefaultAzureCredential` uses these to target the UAMI. The UAMI's principalId is what gets registered in Dataverse Application User (§6) and granted Graph app roles (§5) and Exchange ApplicationAccessPolicy (§7). |
 | Key Vault | `{kv-name}.vault.azure.net` | UAMI principal must have **Key Vault Secrets User** role at the vault scope (RBAC mode) |
 | Dataverse environment | `https://{dataverse-org}.crm.dynamics.com` | The customer's Dataverse org |

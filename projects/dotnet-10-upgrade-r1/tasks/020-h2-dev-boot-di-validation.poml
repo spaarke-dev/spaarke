@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>H2 — dev-boot DI validation on net10 (fix ValidateOnBuild/ValidateScopes failures)</title>
+    <phase>P2 Dev-boot DI validation</phase>
+    <gate>010 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Behavioral .NET 9 change surfacing latent DI defects across ~99 registrations (ADR-032); brownfield root-cause.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Diagnosing captive-dependency / unresolvable-ctor defects across the DI graph requires architectural judgment (root CLAUDE.md §8.5).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial critical path; edits DI modules across the BFF; verified by task 021 after.</parallel-reason>
+    <deps>010</deps>
+    <tags>dotnet, bff-api, dependency-injection, behavioral, migration</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In .NET 9+, `ValidateOnBuild` + `ValidateScopes` are enabled by default in the Development environment — so latent DI misconfiguration (unresolvable constructor dependencies, captive scoped-in-singleton) becomes a startup crash in Development (Production is unaffected). Boot the BFF in the Development environment on net10, and fix every `ValidateOnBuild`/`ValidateScopes` failure surfaced. Produce a CLOSED defect list with the fix for each. This is a feature — it finds real defects — not a workaround.</prompt>
+  <role>SPAARKE platform developer. Expert in Microsoft.Extensions.DependencyInjection lifetimes, captive-dependency detection, scope validation, and the ADR-032 null-object kill-switch pattern. Follow ADRs strictly.</role>
+  <goal>The BFF starts clean in the Development environment on net10 (no ValidateOnBuild/ValidateScopes exceptions); `notes/h2-di-validation.md` lists every surfaced DI defect + its fix; Production boot path is unaffected.</goal>
+
+  <context>
+    <background>design §5 H2. ~99 DI registrations, many conditional/null-object modules (ADR-032). The validation exercises the whole graph. Common failures: a singleton capturing a scoped service, or a ctor dependency with no registration behind a feature flag. Fixes = correct the lifetime or the registration; do NOT disable validation to make boot succeed. Depends on task 010 so worker lifecycle changes are already in place before validating the graph.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/**/*Module.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/h2-di-validation.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Worker lifecycle changes landed (H1) so the graph validated is the final one.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-032">Conditional/null-object registrations must remain symmetric (a feature-gated service that is mapped unconditionally must be registered unconditionally, via the null-object pattern) — fix asymmetries, don't paper over them.</constraint>
+    <constraint source="NFR-01">Fixes correct DI lifetime/registration errors; they MUST NOT change runtime behavior of a correctly-resolving service.</constraint>
+    <constraint source="project">MUST NOT disable `ValidateOnBuild`/`ValidateScopes` to force a clean boot — the whole point is to find and fix the defects (spec FR-08).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>DI ValidateOnBuild/ValidateScopes on net10 + ADR-032 null-object registrations</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="nullobject-symmetry" location=".claude/constraints/bff-extensions.md">§F.1 asymmetric-registration anti-pattern — endpoints mapped unconditionally need unconditional (null-object) registration.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-08 + design §5 H2 + ADR-032. Declare RIGOR: FULL.</step>
+    <step order="1">Boot the BFF with `ASPNETCORE_ENVIRONMENT=Development` on net10; capture every ValidateOnBuild/ValidateScopes exception.</step>
+    <step order="2">For each failure, diagnose root cause (unresolvable ctor dep vs captive scoped-in-singleton vs asymmetric feature-gated registration) and apply the correct fix (lifetime change / add null-object registration / fix ctor dep).</step>
+    <step order="3">Re-boot until Development starts clean; confirm Production boot path is unaffected (spot-check registrations you changed).</step>
+    <step order="4">Write `notes/h2-di-validation.md` — the closed defect list + fix per item.</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 020 status to ✅ (hand off to 021 for adversarial verification).</step>
+    <step order="6">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a DI defect can only be resolved by a genuine behavior change (not a lifetime/registration correction), STOP and surface per CLAUDE.md §6.5 — that is a design decision, not a retarget fix.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Run BFF in Development</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/** (fixed registrations)</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/h2-di-validation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `ASPNETCORE_ENVIRONMENT=Development` on net10, when the BFF boots, then it starts with no ValidateOnBuild/ValidateScopes exception.</criterion>
+    <criterion testable="true">`notes/h2-di-validation.md` lists every surfaced DI defect with its root cause + fix (closed set).</criterion>
+    <criterion testable="true">Negative: `ValidateOnBuild`/`ValidateScopes` are NOT disabled; the Production boot path is unchanged.</criterion>
+    <criterion testable="true">Any asymmetric feature-gated registration is fixed via the ADR-032 null-object pattern, not by removing the endpoint mapping.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-08 + NFR-07 (verified in task 021). This is a quality forcing-function per design §4 principle 5.
+
+  COMPLETION (2026-08-12): H2 validation executed in-process without live infra via a diagnostic probe that reused CustomWebAppFactory's neutralization (mocked IDataverseService + fake IGraphClientFactory + RemoveAll&lt;IHostedService&gt; + full fake config) with ValidateOnBuild+ValidateScopes RE-ENABLED. Surfaced **45 captive-dependency (singleton→scoped) errors, zero infra noise**, cascading from **10 root singletons** (7 analysed + R8/R9/R10 unmasked during iteration — the validator reports one captured-scoped dep per descriptor). Probe iterated **45→19→2→0 = CLEAN**. Fixes (all behavior-preserving lifetime/anchoring corrections, NFR-01): **Family A scope-per-unit-of-work** (inject/reuse IServiceScopeFactory, resolve scoped dep in a per-operation scope spanning any stream consumption) for R1 UploadFinalizationWorker, R2 ProfileSummaryWorker, R3 CommunicationEnrichmentService, R4 IncomingCommunicationProcessor, R6 AiAnalysisNodeExecutor, R7 LiveFactNode, R8/R9 CommunicationService/R10; **Family B demote-to-Scoped** for R5 ActionResolver (+ NullActionResolver peer demoted symmetrically per ADR-032 — validated safe because the CLEAN probe proves no singleton consumes it). 9 BFF source files + 24 test files (ctor rewires + 2 scope-factory stubs). **MUST-NOT-disable-validation honored** (FR-08); no IsDevelopment branch; Production path unaffected (env-agnostic lifetime changes). Escalation trigger did NOT fire (no behavior change needed). VERIFIED independently by main session: probe CLEAN + BFF Release build 0 errors + targeted Nodes/Communication tests 44 pass/0 fail + full diff review (stream scopes span consumption). Probe **promoted** to a permanent CI regression guard `tests/unit/Sprk.Bff.Api.Tests/DiGraphValidationTests.cs` (asserting, network-free) — flagged for 021/030 shape review. Closed defect list + as-built fixes: `notes/h2-di-validation.md`. Step 9.5: code-review PASS (scope pattern correct, behavior-preserving); adr-check PASS (ADR-032 symmetry, ADR-010, ADR-001). Adversarially verified next by task 021 (non-author).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

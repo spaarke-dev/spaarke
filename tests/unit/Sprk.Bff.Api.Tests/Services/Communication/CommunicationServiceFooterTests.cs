@@ -94,7 +94,7 @@ public class CommunicationServiceFooterTests
             dispatcher, senderValidator,
             Mock.Of<ICommunicationDataverseService>(), entity.Object,
             Mock.Of<IDocumentDataverseService>(),
-            null!, null!, null!,
+            null!, null!,
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             Mock.Of<ILogger<CommunicationService>>(),

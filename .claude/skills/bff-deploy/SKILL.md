@@ -18,6 +18,8 @@ last-reviewed: 2026-05-16
 
 Deploy the BFF API (`Sprk.Bff.Api`) to Azure App Service.
 
+> 🟢 **.NET 10 runtime (2026-08-13, `dotnet-10-upgrade-r1` task 042)**: the BFF now targets **net10.0**; the App Service runtime string is **`DOTNETCORE|10.0`** (pipe form for `linuxFxVersion`/`az webapp config set`; colon form `DOTNETCORE:10.0` for `az webapp create --runtime`/`list-runtimes`). A runtime/binary mismatch = hard startup **503**. The framework-dependent linux-x64 publish is **~45 MB compressed** on net10 (was ~49.63 MB net8; measured baseline 44.96 MB incl. PDBs, task 031). For the **near-term dev direct-deploy** sequence and the **future prod/demo zero-downtime slot-swap** playbook (with exact `az` commands, pipe/colon forms, port-8080/no-`ASPNETCORE_URLS` rules, and Linux-no-auto-swap), see the runbook: [`projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md`](../../../projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md). Do NOT hardcode `ASPNETCORE_URLS`/`UseUrls()` or pin `RuntimeFrameworkVersion`.
+
 > 🚨 **CRITICAL — Silent Deploy Failures (May 2026)**: `az webapp deploy --type zip` has been observed to return HTTP 200 + Kudu `status=4 success` while NOT actually replacing the DLLs on disk. The running .NET host holds file locks on the DLLs and Windows refuses overwrites — but the deploy mechanism reports success anyway. **Never trust the success message alone.** Always verify with SHA-256 hash comparison via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically; manual deploys MUST verify (see Manual Verification section below).
 
 > 🟡 **Linux App Service cold-start note (2026-05-14)**: After a `stop → Kudu zipdeploy → start` cycle (the script's auto-recover path), Linux App Service often takes **90–120 seconds** to respond to `/healthz`. Before 2026-05-14 the script's default health window was 60 s and reported a false failure here even though the deploy was successful and hash-verify had passed. The default is now **24 retries × 5 s = 120 s**, overridable via `-MaxHealthCheckRetries`. If hash-verify passes but `/healthz` still times out, the deploy is correct — the app is just still booting. Re-run `curl /healthz` manually after another 30–60 s instead of redeploying.
@@ -74,7 +76,7 @@ All paths are relative to the repository root. **Claude Code MUST use these exac
 - ❌ `$HOME/` or user home directory
 - ❌ Any path outside the project tree (`src/server/api/Sprk.Bff.Api/`)
 
-**Why**: Publishing to external directories produces incomplete packages (~22 MB) missing nested DLLs. The correct package from the project directory is ~61 MB.
+**Why**: Publishing to external directories produces incomplete packages (~22 MB) missing nested DLLs. The correct package from the project directory is ~45 MB.
 
 ---
 
@@ -95,7 +97,7 @@ All paths are relative to the repository root. **Claude Code MUST use these exac
 The deployment script handles critical packaging steps that are easy to get wrong manually:
 
 1. **Publishes from the project directory** — `dotnet publish -c Release -o ./publish` must run from `src/server/api/Sprk.Bff.Api/` so all dependencies resolve correctly
-2. **Creates a complete zip** — `Compress-Archive -Path "$PublishPath\*"` from the publish folder includes ALL nested directories and DLLs (~61 MB). A manual zip from `/tmp` or other locations may produce an incomplete package (~22 MB) that silently drops endpoints.
+2. **Creates a complete zip** — `Compress-Archive -Path "$PublishPath\*"` from the publish folder includes ALL nested directories and DLLs (~45 MB). A manual zip from `/tmp` or other locations may produce an incomplete package (~22 MB) that silently drops endpoints.
 3. **Waits for restart** — 10-second pause after deployment before health check
 4. **Verifies health** — Retries health check up to 6 times
 
@@ -132,7 +134,7 @@ Expected output:
 [1/4] Building API...
   Build successful
 [2/4] Creating deployment package...
-  Package created: ~61 MB          # <-- VERIFY: must be 55-65 MB
+  Package created: ~45 MB          # <-- VERIFY: must be 40-50 MB (net10)
 [3/4] Deploying to Azure...
   Deployment complete (or: auto-recovered via Kudu zipdeploy)
 [4/4] Verifying file replacement on server...
@@ -171,7 +173,7 @@ When the user wants to deploy manually for fastest iteration:
    ```powershell
    .\scripts\Deploy-BffApi.ps1
    ```
-2. **Verify**: Check output shows `~61 MB` package and `Health check passed!`
+2. **Verify**: Check output shows `~45 MB` package and `Health check passed!`
 3. **Test endpoint**:
    ```bash
    curl -s -o /dev/null -w "%{http_code}" https://spaarke-bff-dev.azurewebsites.net/api/{your-endpoint}
@@ -190,9 +192,9 @@ When the user wants to deploy manually for fastest iteration:
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Package size < 40 MB | Incomplete zip (missing DLLs) | Delete `publish/` dir, re-run script |
+| Package size < 30 MB | Incomplete zip (missing DLLs) | Delete `publish/` dir, re-run script |
 | MSB3030 error during publish | Nested `publish/publish/` | Delete `src/server/api/Sprk.Bff.Api/publish/` |
-| Health check passes but endpoints 404 | Incomplete package | Re-deploy with script, verify ~61 MB |
+| Health check passes but endpoints 404 | Incomplete package | Re-deploy with script, verify ~45 MB |
 | Deploy reports success but old code runs (SILENT FILE LOCK FAILURE) | The running .NET host on Windows App Service held file locks on `Sprk.Bff.Api.dll`. `az webapp deploy --type zip` returned 200 and Kudu logged "Deployment successful" but the DLL on disk was never replaced. **First observed May 12, 2026.** | The hardened `Deploy-BffApi.ps1` now compares local + remote SHA-256 hashes for 6 critical files after every deploy and auto-recovers with stop → Kudu zipdeploy → start. If you must deploy manually, always verify: see "Manual verification" below. |
 | Persistent old code after restart | Deployment didn't register | Use Kudu Zip Push Deploy: `curl -X POST "https://{app}.scm.azurewebsites.net/api/zipdeploy?isAsync=true" -H "Authorization: Bearer $(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)" -H "Content-Type: application/zip" --data-binary @publish.zip` — stop the app first if files are locked. |
 
@@ -242,7 +244,7 @@ If any file shows MISMATCH, the deploy did NOT replace it. Recover with stop →
 |---|---|---|
 | `az webapp deploy --type zip` returns 200 + "Deployment successful" but DLLs not actually replaced | Running .NET host holds file locks on `Sprk.Bff.Api.dll`; Windows silently refuses overwrites; OneDeploy reports success regardless | **2026-05-14 G-2 incident.** Always verify with SHA-256 hash via Kudu VFS. The hardened `Deploy-BffApi.ps1` does this automatically + auto-recovers via stop → Kudu zipdeploy → start. NEVER trust deploy "success" alone. |
 | Health check fails at 60s but the deploy actually succeeded | Default window sized for Windows warm-restart; Linux App Service cold-start is 90-120s | Default is now 120s (24 retries × 5s). Hash-verify success + healthz timeout = deploy correct, still booting. Wait one more cycle before declaring failure. |
-| Package size < 40 MB after publish | Incomplete zip — missing nested DLLs because publish ran from `/tmp` or outside project tree | Always publish from `src/server/api/Sprk.Bff.Api/` (not external dirs). Verify package is 55-65 MB. |
+| Package size < 30 MB after publish | Incomplete zip — missing nested DLLs because publish ran from `/tmp` or outside project tree | Always publish from `src/server/api/Sprk.Bff.Api/` (not external dirs). Verify package is 40-50 MB (net10). |
 | Health check passes but specific endpoints return 404 | Incomplete package: route handler couldn't compile at startup due to missing DLL | Test specific endpoints behind `.RequireAuthorization()` — should return 401 (route found, auth needed), NEVER 404. If 404, deploy is incomplete. |
 | MSB3030 error during publish | Nested `publish/publish/` directory from leftover prior publish | Delete `src/server/api/Sprk.Bff.Api/publish/` before re-publishing. The script does this automatically (Step 1). |
 | `(ResourceNotFound) The Resource 'Microsoft.Web/sites/X' under resource group 'Y' was not found` | App Service was renamed/migrated since the skill or script defaults were last updated | **2026-05-27 incident**: skill + script defaults were `spe-api-dev-67e2xz` / `spe-infrastructure-westus2`; actual dev had moved to `spaarke-bff-dev` / `rg-spaarke-dev`. **Pre-flight FIX**: BEFORE running the deploy script, verify the target exists: `az webapp show -g $ResourceGroupName -n $AppServiceName --query state -o tsv`. If the resource doesn't exist, list active web apps (`az webapp list --query "[].{name:name, rg:resourceGroup}" -o table`) to find the current target. Updated skill defaults on 2026-05-27 to reflect post-migration names. |

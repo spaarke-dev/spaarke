@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Retention — prune-on-write, 30-day age for history rows</title>
+    <phase>3 Capture</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the capture upsert (030) — client-side .ts in @spaarke/ui-components that deletes Dataverse rows via Xrm.WebApi; deletion behavior warrants the code-review + adr-check gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified addition to an existing service with a closed acceptance set; no brownfield root-cause.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group E runs alongside task 051 (bookmarks) — different files/features (retention prune on the capture path vs bookmark gestures), no shared surface.</parallel-reason>
+    <deps>030</deps>
+    <tags>capture</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add prune-on-write, 30-day-age retention to the capture upsert built in 030: on each history capture write, delete the current user's history sprk_navitem rows older than 30 days. Pins and bookmarks (sprk_type=pin) never auto-expire. There is no scheduled job and no plugin — pruning runs inline on the capture write.</prompt>
+  <role>SPAARKE platform developer with Xrm.WebApi CRUD + retention-logic expertise and shared-lib React-16/17 constraints. Follow ADRs strictly.</role>
+  <goal>The capture write path (030) prunes the signed-in user's history rows older than 30 days on each capture upsert; sprk_type=pin rows are never deleted by retention; pruning affects only the current user's rows. No scheduled job, no plugin.</goal>
+  <context>
+    <background>Per spec FR-05 + owner clarification OQ-2 (prune-on-write, 30-day age) + plan.md Phase 3 task 031. Retention must run without a plugin or scheduled job, so it is folded into the existing capture upsert: each time capture writes a history row, it also deletes that user's history rows whose sprk_lastvisited is older than 30 days. Pins/bookmarks persist indefinitely.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/navigator/navigatorCaptureService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/navigator/navItemRepository.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/navigator/__tests__/navigatorCaptureService.test.ts</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">The capture upsert service + sprk_navitem repository this task extends with prune-on-write.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Prune runs INLINE on each capture write — no scheduled job, no Dataverse plugin (NFR-02 / FR-05).</constraint>
+    <constraint source="project">Only sprk_type=history rows older than 30 days (by sprk_lastvisited) are deleted; sprk_type=pin rows (pins + bookmarks) never auto-expire (FR-05).</constraint>
+    <constraint source="project">Prune only the signed-in user's rows — host-context Xrm.WebApi under the current user; owner-scoped so no cross-user deletion is possible (NFR-03).</constraint>
+    <constraint source="ADR-022">Keep this @spaarke/ui-components code React-16/17-safe: no createRoot; use JSXElement not JSX.Element.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Prune-on-write retention over host-context Xrm.WebApi</topic>
+    <files>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fold prune into the capture write" location="src/client/shared/Spaarke.UI.Components/src/services/navigator/navigatorCaptureService.ts">After the history upsert succeeds, query the current user's history rows with sprk_lastvisited older than (now - 30 days) and delete them via Xrm.WebApi; leave sprk_type=pin untouched.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read the 030 capture service + repository.</step>
+    <step order="1">Add a repository method to delete the current user's history sprk_navitem rows where sprk_type=history AND sprk_lastvisited older than (now - 30 days), via Xrm.WebApi.</step>
+    <step order="2">Call the prune from the capture upsert path (after the history write) so it runs prune-on-write; ensure it never targets sprk_type=pin rows.</step>
+    <step order="3">Extend tests: a history row older than 30 days is deleted after the next capture write; a pin row is never auto-deleted; prune scopes to the current user only. Mock Xrm.WebApi with seeded old/pin rows.</step>
+    <step order="4">Recompile @spaarke/ui-components and run tests; confirm green.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set task 031 status to completed.</step>
+    <step order="6">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If prune-on-write cannot reliably scope deletes to the current user's history rows only (risk of deleting pins or another user's rows), STOP and escalate rather than shipping a delete path with that risk (root §6 — destructive operation).</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/navigator/navigatorCaptureService.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/navigator/navItemRepository.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/services/navigator/__tests__/navigatorCaptureService.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a history sprk_navitem row older than 30 days, when the next capture write occurs, then that row is deleted.</criterion>
+    <criterion testable="true">Given a sprk_type=pin row (pin or bookmark), when capture writes and prunes, then the pin row is never auto-deleted (pins persist indefinitely).</criterion>
+    <criterion testable="true">Negative: given another user's rows, when the current user's prune runs, then only the current user's history rows are affected (owner-scoped).</criterion>
+    <criterion testable="true">All unit tests pass; shared-lib build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-05 + OQ-2 + plan.md Phase 3 task 031. Prune-on-write only — no scheduled job, no plugin. Modifies the 030 capture path (modify-only, no new component justification required).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>FR-14 — App Service Bicep runtime DOTNETCORE|10.0 (+ platform.json) + Functions runtime bump</title>
+    <phase>P4 CI/CD + deploy plumbing</phase>
+    <gate>032 complete</gate>
+    <status>completed</status>
+    <completion-note>2026-08-13: all 5 App Service runtime strings DOTNETCORE|8.0 → DOTNETCORE|10.0 (pipe) across app-service.bicep, app-service-slot.bicep, deployment-slot.bicep, byok/main.bicep + platform.json (regenerated via `az bicep build`). Functions runtime dotnet-isolated 8.0 → 10.0 (function-app.bicep) — Flex Consumption net10 support CONFIRMED by researcher (escalation valve did NOT fire); version string is bare '10.0'. All bicep builds clean. TWO items flagged to owner: (1) platform.json regen carried ~611 lines of PRE-EXISTING infra drift (last compiled 2026-03-13, source edited through 2026-07-16) — kept the honest full recompile per prescriptive constraint; surgical 2-line alternative available. (2) Core Tools v4.7.0 func-publish regression for net10 Flex (core-tools#4794) — runbook note for task 042, not an ARM gate. See notes/bicep-runtime-bump.md.</completion-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Infra-as-code runtime string change; a mismatch = hard startup 503; deployment-critical.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Enumerated string edits across 5 Bicep locations + a Functions module + ARM recompile; bounded but deployment-critical.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Infra runtime strings must land coherently with the CI + deploy plumbing; keep serial with 040/042.</parallel-reason>
+    <deps>032</deps>
+    <tags>deployment, dotnet, migration, ci</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Update the App Service runtime string from `DOTNETCORE|8.0` to `DOTNETCORE|10.0` across the 5 Bicep locations (`app-service.bicep`, `app-service-slot.bicep`, `deployment-slot.bicep`, `byok/main.bicep`, and the compiled `platform.json`) and recompile `platform.json` from its Bicep source, and bump the insights Functions runtime from `dotnet-isolated 8.0` to the target version (verify Flex Consumption supports it). Use the PIPE form for `linuxFxVersion`. NOTE: for the production App Service, the runtime string is applied ON THE SLOT during cutover (tasks 050/051/061) — this task fixes the IaC source of truth so future provisioning is correct; it does not itself flip the live prod runtime.</prompt>
+  <role>SPAARKE platform developer. Expert in Azure Bicep/ARM, App Service linuxFxVersion, Functions runtime config, and .NET runtime strings. Follow ADRs strictly.</role>
+  <goal>All 5 Bicep runtime-string locations read `DOTNETCORE|10.0`; `platform.json` is regenerated from its Bicep source (no hand-edit drift); the insights Functions module targets the supported net10/isolated version; `bicep build` is clean.</goal>
+
+  <context>
+    <background>Exploration found `DOTNETCORE|8.0` at `infrastructure/bicep/modules/app-service.bicep:14`, `app-service-slot.bicep:39`, `deployment-slot.bicep:22`, `infrastructure/byok/main.bicep:369`, and compiled `infrastructure/bicep/platform.json:647,931`; the insights Functions runtime at `infra/insights/modules/function-app.bicep:176-178` (`dotnet-isolated 8.0`). Design §7: `DOTNETCORE|10.0` (pipe) for `linuxFxVersion`; `DOTNETCORE:10.0` (colon) for `az webapp create --runtime`/`list-runtimes`. Framework mismatch = hard startup 503. `platform.json` is compiled output — regenerate, don't hand-edit both places inconsistently. (This item is folded into FR-14 by exploration; the spec FR-14 text emphasizes the /bff-deploy skill + runbook, which is task 042.)</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/modules/app-service.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/app-service-slot.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/deployment-slot.bicep</file>
+      <file role="modify">infrastructure/byok/main.bicep</file>
+      <file role="modify">infrastructure/bicep/platform.json</file>
+      <file role="modify">infra/insights/modules/function-app.bicep</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">Package graph final; safe to touch deploy plumbing.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use the PIPE form `DOTNETCORE|10.0` for `linuxFxVersion`. Recompile `platform.json` from its Bicep source (`platform.bicep`) rather than hand-editing the ARM output alone.</constraint>
+    <constraint source="project">Verify Azure Functions Flex Consumption supports the target `dotnet-isolated` version before bumping the insights module; if it lags, record the constraint (this may stay 8.0 or move to a supported version).</constraint>
+    <constraint source="ADR-029">No self-contained; framework-dependent runtime supplied by the platform via the runtime string.</constraint>
+    <constraint source="NFR-04">Runtime string and deployed TFM must change together at cutover (slot swap is atomic) — this task fixes the IaC source, not the live prod flip.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>App Service linuxFxVersion + Functions runtime for net10</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="runtime-strings" location="projects/dotnet-10-upgrade-r1/design.md">design §7 — pipe vs colon runtime strings + mismatch = 503.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load spec FR-14 + design §7. Declare RIGOR: FULL.</step>
+    <step order="1">Edit the 4 Bicep module/param locations to `DOTNETCORE|10.0` (pipe).</step>
+    <step order="2">Recompile `platform.json` from its Bicep source (`bicep build`); confirm both the param default and the hardcoded occurrence now read `DOTNETCORE|10.0`.</step>
+    <step order="3">Verify Flex Consumption supports the target `dotnet-isolated` version; bump `infra/insights/modules/function-app.bicep` accordingly (or record the lag).</step>
+    <step order="4">Run `bicep build` on all touched files; confirm no compile errors.</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 041 status to ✅.</step>
+    <step order="6">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Flex Consumption does NOT support net10 `dotnet-isolated` in the target region, STOP and surface per CLAUDE.md §6 — the insights Functions bump may need to defer to a supported version rather than force an unsupported runtime.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">n/a (Bicep)</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">infrastructure/bicep/modules/*.bicep + infrastructure/byok/main.bicep + infrastructure/bicep/platform.json</output>
+    <output type="config">infra/insights/modules/function-app.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 5 App Service runtime-string locations read `DOTNETCORE|10.0` (pipe); `platform.json` is regenerated from Bicep (param default + hardcoded occurrence both updated).</criterion>
+    <criterion testable="true">The insights Functions module targets a Flex-Consumption-supported version (or the lag is documented).</criterion>
+    <criterion testable="true">`bicep build` is clean on all touched files.</criterion>
+    <criterion testable="true">Negative: no live production runtime is flipped by this task (IaC source only; the prod flip is the slot swap in 061).</criterion>
+  </acceptance-criteria>
+
+  <notes>Folded into FR-14 by exploration (spec FR-14 text emphasizes the skill/runbook = task 042). Design §7 mismatch = 503 is the reason this must be exact.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

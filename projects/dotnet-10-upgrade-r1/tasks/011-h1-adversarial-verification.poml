@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>H1 — adversarial verification of BackgroundService verdicts by a non-author</title>
+    <phase>P1 Hit-site remediation</phase>
+    <gate>010 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Independent behavioral verification of the highest-risk change (NFR-07); mandatory non-author pass.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Adversarial reasoning about startup ordering/fail-fast correctness — must match the author task's tier.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>V1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Verification-only (read + report); may overlap task 012 but must be a DIFFERENT agent than task 010's author (NFR-07). No shared file writes with 012.</parallel-reason>
+    <deps>010</deps>
+    <tags>dotnet, bff-api, background-jobs, verification, behavioral</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Adversarially verify task 010's H1 BackgroundService audit as a NON-AUTHOR: independently confirm the per-worker list is complete (grep the BFF yourself — do not trust the author's list), and for each worker try to REFUTE the "safe/remediated" verdict by constructing a concrete startup-ordering or fail-fast failure scenario under the net10 threading change. Default to "not proven safe" when uncertain. Report confirmed-safe, refuted (needs more work), and any worker the author MISSED.</prompt>
+  <role>SPAARKE platform developer acting as an independent adversarial reviewer. Expert in ASP.NET Core hosted-service lifecycle + the .NET 10 BackgroundService threading change. You did NOT write task 010. Follow ADRs strictly.</role>
+  <goal>A verification report `notes/h1-verification.md` with, per worker: the author's verdict, your independent verdict (CONFIRMED / REFUTED / MISSED), and for any REFUTED/MISSED a concrete failure scenario. If any worker is refuted or missed, task 010 is reopened before P1 closes.</goal>
+
+  <context>
+    <background>NFR-07 mandates behavioral changes (H1 workers, H2 DI) be adversarially verified by a non-author — the fan-out → adversarial-verify method. This is the verify half for H1. The whole point of the "no issues" mandate (design §9) is that "done" is not asserted by the implementer.</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/h1-backgroundservice-audit.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/** (the workers under review)</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/h1-verification.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">H1 audit + remediations complete.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-07">MUST be performed by a reviewer who did NOT author task 010 (dispatch as a separate agent). Read + report only — this task does not itself write worker code.</constraint>
+    <constraint source="project">Independently re-grep for BackgroundService/IHostedService implementers; do not accept the author's list as complete.</constraint>
+    <constraint source="project">Bias toward refutation: default a verdict to "not proven safe" when the safety argument is not airtight.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Adversarial verification of hosted-service startup semantics</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+    </files>
+    <patterns>
+      <pattern name="adversarial-verify" location="projects/dotnet-10-upgrade-r1/design.md">design §9 — independent pass, not implementer assertion.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-07/NFR-07 + task 010 output. Declare RIGOR: FULL. Confirm you are NOT the task-010 author.</step>
+    <step order="1">Independently grep the BFF for every BackgroundService/IHostedService; diff your list against the author's — flag any MISSED worker.</step>
+    <step order="2">For each worker, attempt to construct a concrete net10 startup-ordering/fail-fast failure that the author's verdict would miss.</step>
+    <step order="3">Record per-worker: author verdict, your verdict (CONFIRMED/REFUTED/MISSED), and a failure scenario for any non-confirmed.</step>
+    <step order="4">If any REFUTED/MISSED, mark task 010 for reopen in TASK-INDEX (🔄) and summarize what must be fixed.</step>
+    <step order="5">Write `notes/h1-verification.md`.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 011 status to ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If verification finds a worker whose correct net10 behavior requires an actual behavior change (not just re-anchoring init), STOP and surface per CLAUDE.md §6.5 — escalate rather than approving a silent behavior delta.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build (to reproduce)</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/h1-verification.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The report covers every worker in the author's list PLUS any the reviewer's independent grep surfaced.</criterion>
+    <criterion testable="true">Each worker has an independent verdict (CONFIRMED/REFUTED/MISSED); every non-CONFIRMED carries a concrete failure scenario.</criterion>
+    <criterion testable="true">If any worker is REFUTED/MISSED, task 010 is flagged 🔄 in TASK-INDEX and P1 does not close until re-verified.</criterion>
+    <criterion testable="true">Negative: the reviewer is a different agent than the task-010 author (recorded in the report).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec NFR-07. Pairs with task 010. Dispatch as a separate agent/session to satisfy the non-author requirement.
+
+  COMPLETION (2026-08-12): executed by a NON-AUTHOR opus subagent (`verify-h1`), separate from task 010's author (recorded — negative criterion satisfied). Read-only; no source edits, no build. **VERDICT: PASS.** Independent grep closed-set = **28 (MATCH)** = 23 BackgroundService + 5 IHostedService; all 20 non-worker mentions confirmed comment/`IJobHandler`/`IScheduledJob`; archived `JobProcessor.cs.archived-*` legitimately excluded (not `.cs`, not compiled); 0 `IHostedLifecycleService`. **All 28 CONFIRMED SAFE — 0 REFUTED, 0 MISSED** → task 010 NOT reopened (no 🔄). Two residual items empirically closed: §5 dashboard-cache reader `Endpoints/SpeAdmin/DashboardEndpoints.cs:72-76` returns **204 when metrics==null** (built for cold cache — no populate-before-traffic assumption); §6 `CreateProcessor` in ProfileSummaryWorker:82 / IndexingWorkerHostedService:76 uses compile-time `const` queue names + null-checked client → effectively un-throwable, listener wiring not a fail-fast. TodoGenerationService 500.30 constructor-avoidance guard reconfirmed (ctor :168-176 no Dataverse touch; resolution post-await :213). Escalation trigger did NOT fire. Output written to `notes/h1-adversarial-verification.md` (POML goal named `h1-verification.md`; the descriptive name was kept because task 010's audit-doc §8 handoff already cross-references it — filename reconciled here, content complete). H1 (010+011) is DONE + independently verified.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

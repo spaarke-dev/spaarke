@@ -32,6 +32,11 @@ public class AiAnalysisNodeExecutorTests
         scopedServiceProviderMock
             .Setup(sp => sp.GetService(typeof(IToolHandlerRegistry)))
             .Returns(_toolHandlerRegistryMock.Object);
+        // IRecordSearchService is now resolved from the per-execution scope (task 020, R6)
+        // rather than the ctor — expose it on the scoped provider for the L3 entity-context path.
+        scopedServiceProviderMock
+            .Setup(sp => sp.GetService(typeof(IRecordSearchService)))
+            .Returns(Mock.Of<IRecordSearchService>());
 
         var serviceScopeMock = new Mock<IServiceScope>();
         serviceScopeMock.Setup(s => s.ServiceProvider).Returns(scopedServiceProviderMock.Object);
@@ -48,7 +53,6 @@ public class AiAnalysisNodeExecutorTests
             serviceProviderMock.Object,
             null!, // ReferenceRetrievalService — not exercised in these unit tests
             Mock.Of<IRagService>(),
-            Mock.Of<IRecordSearchService>(),
             _loggerMock.Object);
     }
 

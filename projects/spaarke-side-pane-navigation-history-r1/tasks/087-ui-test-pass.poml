@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="087" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>UI test pass — run the ui-test skill against the deployed NavigatorPane (light + dark, all flows)</title>
+    <phase>9 Framework-proof, deploy, UI test</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>End-to-end browser UI test pass against the deployed pane; no production code authored — exercises + files defects.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI test pass with an enumerated closed set of flows via the ui-test skill.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Deploy</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs against the freshly-deployed environment from task 086 — must follow the deploy serially, not alongside it.</parallel-reason>
+    <deps>086</deps>
+    <tags>e2e-test</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Run the ui-test skill against the deployed NavigatorPane and verify every user-facing flow in BOTH light and dark: the docked pane renders, capture-on-navigate, pin/unpin, "Pin this page" + "+ Add bookmark", search / quick-switcher, and the Views tab. Confirm no console errors and that ADR-021 dark-mode + portal FluentProvider re-wrap hold. Any failing flow is filed as a defect, not silently passed.</prompt>
+  <role>SPAARKE platform QA engineer with the ui-test (Chrome integration) skill + Fluent v9 dark-mode expertise. Follow ADRs strictly.</role>
+  <goal>A documented UI test pass showing all enumerated Navigator flows pass in light and dark with no console errors and verified ADR-021 dark-mode + portal re-wrap, with any failing flow filed as a defect in project notes.</goal>
+  <context>
+    <background>Per spec Success Criteria (verification) + plan.md Phase 9 task 087 + R4 risk (Fluent v9 portal dark-mode regression). This is the end-to-end verification pass against the deployed pane from task 086.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/solutions/NavigatorPane/</file>
+      <file role="new">projects/spaarke-side-pane-navigation-history-r1/notes/087-ui-test-results.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="086" status="pending">Deployed NavigatorPane webresource + wired Path B bootstrap to test against.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Run via the ui-test skill against the deployed environment; do NOT author production code — exercise, observe, and file defects.</constraint>
+    <constraint source="ADR-021">Verify Fluent v9 dark-mode correctness + portal FluentProvider re-wrap on every portalled surface in the pane (R4 regression risk).</constraint>
+    <constraint source="project">Any failing flow MUST be filed as a defect (project notes / GitHub issue), NOT silently passed.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Browser-based UI testing of a docked code-page pane (ui-test skill) incl. ADR-021 dark-mode verification</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="ui-test flows" location=".claude/skills/ui-test/SKILL.md">Drive each enumerated flow in the deployed model-driven app; capture console + screenshots in light and dark.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (STANDARD) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the ui-test skill + spec Success Criteria.</step>
+    <step order="1">Docked pane render: confirm the pane appears at app load in light, then dark; no console errors; portal re-wrap present (ADR-021).</step>
+    <step order="2">Capture-on-navigate: navigate 3 records; confirm Recent (Viewed) populates in order in both themes.</step>
+    <step order="3">Pin/unpin: star a record → appears in Pinned→Records; unstar → removed.</step>
+    <step order="4">Bookmarks: "Pin this page" (one click, no typing) and "+ Add bookmark" (paste an MDA record/view URL → labeled target; paste an external URL → raw weblink opening a new tab).</step>
+    <step order="5">Search / quick-switcher: local fuzzy-match filters live; a no-local-hit query finds a live Dataverse record/view; accelerator focuses the box; Enter navigates.</step>
+    <step order="6">Views tab: lists the user's saved views grouped by entity; click opens the entity grid with the view selected.</step>
+    <step order="7">Record results (light + dark, console state, screenshots) in notes/087-ui-test-results.md; file each failing flow as a defect.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 087 status to completed.</step>
+    <step order="9">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If a core flow (capture-on-navigate, pin, or the docked pane rendering) fails in the deployed environment, STOP and escalate (root §6) — file the defect and do not mark the pass complete on a broken core flow.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Docked pane + capture-on-navigate in light and dark">
+      <steps>
+        <step>Open the app in light theme; confirm the docked pane; navigate 3 records.</step>
+        <step>Switch to dark theme (data-theme=dark / prefers-color-scheme dark) and repeat.</step>
+      </steps>
+      <expected>The pane renders and Recent (Viewed) captures the 3 visits in order in both themes; no console errors; portal FluentProvider re-wrap present (ADR-021).</expected>
+    </test>
+    <test name="Pin/unpin + bookmarks">
+      <steps>
+        <step>Star a record, then unstar it.</step>
+        <step>Use "Pin this page"; then "+ Add bookmark" with an MDA record/view URL and an external URL.</step>
+      </steps>
+      <expected>Pin appears in Pinned→Records then removed; "Pin this page" needs no typing; MDA URL becomes a labeled target; external URL stored raw and opens a new tab.</expected>
+    </test>
+    <test name="Search / quick-switcher + Views tab">
+      <steps>
+        <step>Type local + no-local-hit queries; use the accelerator + Enter.</step>
+        <step>Open the Views tab and click a saved view.</step>
+      </steps>
+      <expected>Local entries filter live; no-hit finds a live record/view; accelerator focuses + Enter navigates; the Views tab lists views grouped by entity and click opens the grid.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="ui-test">Drive the deployed NavigatorPane in Chrome across all enumerated flows in light + dark.</tool>
+  </tools>
+  <outputs>
+    <output type="doc">projects/spaarke-side-pane-navigation-history-r1/notes/087-ui-test-results.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed pane, when each enumerated flow runs in light AND dark, then all flows pass.</criterion>
+    <criterion testable="true">Given each flow, when it runs, then there are no console errors and ADR-021 dark-mode + portal re-wrap are verified.</criterion>
+    <criterion testable="true">Negative: given a flow fails, when the pass is recorded, then the failure is filed as a defect (not silently passed).</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec Success Criteria verification + plan.md Phase 9 task 087 (+ R4 portal dark-mode regression risk). This task IS the ui-test pass; runs against the task-086 deploy (parallel-safe:false).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

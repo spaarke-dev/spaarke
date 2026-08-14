@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Services.Communication.Models;
 
-namespace Sprk.Bff.Api.Services.Communication.Engine;
+namespace Sprk.Bff.Api.Infrastructure.Graph;
 
 /// <summary>
 /// Maps a channel-specific <see cref="Message"/> (Microsoft Graph) into the channel-neutral

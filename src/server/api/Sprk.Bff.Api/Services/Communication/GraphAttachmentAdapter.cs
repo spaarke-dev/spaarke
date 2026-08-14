@@ -1,7 +1,7 @@
 using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Services.Email;
 
-namespace Sprk.Bff.Api.Services.Communication;
+namespace Sprk.Bff.Api.Infrastructure.Graph;
 
 /// <summary>
 /// Maps Microsoft Graph FileAttachment objects to EmailAttachmentInfo,

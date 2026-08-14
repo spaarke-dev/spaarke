@@ -54,13 +54,42 @@ import {
 
 const DEFAULT_SKELETON_COUNT = 6;
 
-/** Formats a card's date for display. Accepts an ISO string or a `Date`; falls back to the raw string on parse failure. */
+/**
+ * Formats a card's date for display. Accepts an ISO string or a `Date`; falls back to the raw
+ * string on parse failure. Time-aware (UAT 2026-08-13 — "can't tell when emails were received"):
+ * cards are already grouped under TODAY/YESTERDAY/date bucket headers, so an email from **today**
+ * shows its **time** (e.g. "7:02 PM") — the missing signal — while older emails keep the compact
+ * "Aug 13" date. The full date+time is always available on hover via the card's `title` (see the
+ * `title` prop on the date span below).
+ */
 function formatCardDate(date: string | Date): string {
   const parsed = date instanceof Date ? date : new Date(date);
   if (Number.isNaN(parsed.getTime())) {
     return typeof date === 'string' ? date : '';
   }
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
+  const now = new Date();
+  const isToday =
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate();
+  return isToday
+    ? new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(parsed)
+    : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric' }).format(parsed);
+}
+
+/** Full date+time for the card's hover title, so any email's exact receipt time is one hover away. */
+function formatCardDateTitle(date: string | Date): string {
+  const parsed = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(parsed.getTime())) {
+    return typeof date === 'string' ? date : '';
+  }
+  return new Intl.DateTimeFormat('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(parsed);
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -514,7 +543,9 @@ export const EmailCardList: React.FC<EmailCardListProps> = ({
           <Text className={styles.from} title={item.from}>
             {item.from}
           </Text>
-          <Text className={styles.date}>{formatCardDate(item.date)}</Text>
+          <Text className={styles.date} title={formatCardDateTitle(item.date)}>
+            {formatCardDate(item.date)}
+          </Text>
         </div>
         <Text className={mergeClasses(styles.subject, unread ? styles.subjectUnread : undefined)} title={item.subject}>
           {item.subject}

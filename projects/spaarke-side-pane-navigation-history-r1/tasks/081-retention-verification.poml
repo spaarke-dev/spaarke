@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Retention verification — seed a &gt;30-day history row, capture, confirm prune + pins persist</title>
+    <phase>8 Security &amp; retention verification</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Verification/testing task over the existing prune-on-write logic (031); no new production surface, tests only.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified verification with a closed acceptance set against already-built retention logic.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Verification test that reads/exercises the retention behavior; Phase F peers (070/080/085) touch different surfaces — no shared-file contention.</parallel-reason>
+    <deps>031</deps>
+    <tags>testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Verify the prune-on-write 30-day retention (FR-05): seed a history sprk_navitem row older than 30 days for the signed-in user, trigger a capture write, and confirm the old row is pruned while pins persist. Confirm another user's old rows are untouched.</prompt>
+  <role>SPAARKE platform developer with Xrm.WebApi + Dataverse ownership-model test expertise. Follow ADRs strictly.</role>
+  <goal>A verification (test + documented run) proving that a seeded &gt;30-day history row is deleted on the next capture write, that a pin row survives, and that another user's old rows are untouched — exercising the existing retention logic from task 031 without adding new production code.</goal>
+  <context>
+    <background>Per spec FR-05 (verification) + Success Criterion 7 + plan.md Phase 8 task 081. Retention is prune-on-write: on each history upsert the user's history rows older than 30 days are deleted; pins/bookmarks never auto-expire. This task verifies that behavior end-to-end and confirms per-user isolation (NFR-03).</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/src/services/__tests__/retention.verify.test.ts</file>
+      <file role="canonical-reference">src/solutions/NavigatorPane/src/services/retentionService.ts</file>
+      <file role="canonical-reference">src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">Prune-on-write 30-day retention logic that deletes history rows older than 30 days on each capture upsert.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">MODIFY-ONLY / verification: do NOT change the retention logic (031) — seed, trigger, and assert. If a defect is found, file it, do not silently patch outside scope.</constraint>
+    <constraint source="project">Host-context only — seeding + assertions use Xrm.WebApi under the signed-in user; no BFF, no plugin, no scheduled job.</constraint>
+    <constraint source="project">Per-user isolation (NFR-03): the prune MUST only affect the signed-in user's rows; another user's old rows are untouched.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Prune-on-write 30-day retention verification + Dataverse per-user (ownerid) isolation</topic>
+    <files>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Seed + assert via Xrm.WebApi" location="src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts">Follow the existing retrieveMultiple/create shape to seed a dated history row and assert its presence/absence after a capture write.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (STANDARD) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read the retention logic (031).</step>
+    <step order="1">Seed a history sprk_navitem row with sprk_lastvisited older than 30 days for the signed-in user; also seed a pin (sprk_type=pin) row and (for isolation) an old history row owned by a different user.</step>
+    <step order="2">Trigger a capture write (upsert a fresh history row) to invoke the prune-on-write path.</step>
+    <step order="3">Assert the seeded &gt;30-day history row for the signed-in user is gone; the pin row survives; the other user's old row is untouched.</step>
+    <step order="4">Document the verification run + evidence in projects/spaarke-side-pane-navigation-history-r1/notes/ (ties to Success Criterion 7).</step>
+    <step order="5">Update tasks/TASK-INDEX.md: set task 081 status to completed.</step>
+    <step order="6">Document any deviation (e.g., a discovered defect filed against 031) in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the seeded &gt;30-day row is NOT pruned, or a pin is pruned, or another user's rows are affected, STOP and escalate (root §6) — file the defect against task 031 rather than patching the retention logic under this verification task.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build the NavigatorPane + run the retention verification test (Jest).</tool>
+  </tools>
+  <outputs>
+    <output type="test">src/solutions/NavigatorPane/src/services/__tests__/retention.verify.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a seeded history row older than 30 days, when a capture write occurs, then that row is gone.</criterion>
+    <criterion testable="true">Given a pin (sprk_type=pin) row, when a capture write occurs, then the pin row survives.</criterion>
+    <criterion testable="true">Negative: given another user's old history rows, when the signed-in user's prune runs, then those rows are untouched.</criterion>
+    <criterion testable="true">Verification test passes; build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-05 verification + Success Criterion 7 + plan.md Phase 8 task 081. Verification only — exercises the 031 retention logic; per-user isolation per NFR-03.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

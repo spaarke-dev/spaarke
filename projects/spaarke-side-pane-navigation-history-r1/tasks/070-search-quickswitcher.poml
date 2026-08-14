@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Search bar / quick-switcher — local fuzzy-match, escalate to live Dataverse lookup, keyboard accelerator</title>
+    <phase>7 Search</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Interactive frontend .tsx in the NavigatorPane; Fluent v9 UI with keyboard-accelerator + navigation side-effects.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified search feature over already-built tab data with a closed acceptance set; no architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Owns the persistent search-box file; Phase F peers (080/081/085) touch different surfaces — no shared-file contention.</parallel-reason>
+    <deps>041,050,060</deps>
+    <tags>frontend,fluent-ui</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Build the persistent top-of-pane search box / quick-switcher: local fuzzy-match across Recent/Pinned/Views entries (instant, as-you-type), escalating to a live Dataverse record/view lookup on no local hit. A keyboard accelerator focuses the box from anywhere in the pane, and Enter navigates to the top result.</prompt>
+  <role>SPAARKE platform developer with Fluent UI v9 + Power Apps Xrm client-API expertise (keyboard accessibility, live lookup). Follow ADRs strictly.</role>
+  <goal>A persistent search box at the top of the NavigatorPane that filters Recent/Pinned/Views entries live, escalates to a live Xrm.WebApi Dataverse record/view lookup when there is no local hit, is focusable via a keyboard accelerator from anywhere in the pane, and navigates to the top result on Enter. Includes UI tests.</goal>
+  <context>
+    <background>Per spec FR-11 + plan.md Phase 7 task 070. The quick-switcher unifies navigation across the three tabs (Recent 041, Pinned 050, Views 060) with a local-first fuzzy match, escalating to a live Dataverse lookup only on a miss. Keyboard-accessible per NFR-07.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/src/components/QuickSwitcher.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts</file>
+      <file role="canonical-reference">src/solutions/EventDetailSidePane/src/services/eventService.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">Recent (Viewed) tab entries the local fuzzy-match searches over.</dependency>
+      <dependency task="050" status="pending">Pinned (Records) entries the local fuzzy-match searches over.</dependency>
+      <dependency task="060" status="pending">Views tab entries the local fuzzy-match searches over.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Local fuzzy-match runs first and instantly across in-memory Recent/Pinned/Views entries; the live Dataverse lookup fires ONLY on no local hit (FR-11).</constraint>
+    <constraint source="project">Host-context only — the live lookup uses Xrm.WebApi under the signed-in user; no BFF, no plugin, no per-form web resource.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; honor light/dark + --sprk-ui-scale via scaledTheme/useUiScale; portal FluentProvider re-wrap for any portalled surface; the accelerator + result list MUST be keyboard-accessible (NFR-07).</constraint>
+    <constraint source="ADR-022">Any @spaarke/ui-components code touched MUST stay React-16/17-safe: no createRoot; use JSXElement not JSX.Element.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Fluent v9 search/combobox + keyboard accelerator + local fuzzy-match with live Dataverse escalation</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Live lookup escalation" location="src/solutions/EventDetailSidePane/src/services/eventService.ts">Model the on-miss Dataverse record/view lookup on the existing side-pane Xrm.WebApi retrieveMultiple pattern; escalate only when the local fuzzy-match returns nothing.</pattern>
+      <pattern name="View lookup" location="src/client/shared/Spaarke.UI.Components/src/services/ViewService.ts">Use ViewService for the view side of the live lookup rather than re-querying userquery.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read the tab components (041/050/060) whose entries feed the search.</step>
+    <step order="1">Render a persistent search box at the top of the pane (above the tabs); wire an in-memory index of Recent/Pinned/Views entries.</step>
+    <step order="2">Implement local fuzzy-match: as the user types, filter the in-memory entries instantly and render matches.</step>
+    <step order="3">On no local hit, escalate to a live Dataverse record/view lookup via Xrm.WebApi (records) + ViewService (views); render the live results.</step>
+    <step order="4">Register a keyboard accelerator that focuses the search box from anywhere in the pane; make the results list keyboard-navigable (NFR-07).</step>
+    <step order="5">On Enter, navigate to the top result (record/list/view via navigateTo, or the appropriate target for the entry type); an empty query shows the normal tab content, not an error.</step>
+    <step order="6">Author UI tests: typing filters local entries live; a no-local-hit query finds a live Dataverse record/view; the accelerator focuses the box; Enter navigates to the top result; empty query shows normal tab content; light AND dark with portal re-wrap (ADR-021).</step>
+    <step order="7">Recompile @spaarke/ui-components (if touched) + build the NavigatorPane; run tests; confirm green.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 070 status to completed.</step>
+    <step order="9">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If a reliable keyboard accelerator cannot be registered from within the pane iframe on the target UCI build (focus does not reach the box from anywhere in the pane), STOP and escalate (root §6) with the observed behavior rather than shipping a non-functional accelerator.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Local fuzzy-match filters live (light and dark)">
+      <steps>
+        <step>Populate Recent/Pinned/Views, type a substring of a known entry in light theme.</step>
+        <step>Repeat in dark theme (data-theme=dark / prefers-color-scheme dark).</step>
+      </steps>
+      <expected>Local entries filter live as typed; Fluent v9 tokens honor light and dark; portalled content wrapped in its own FluentProvider (ADR-021).</expected>
+    </test>
+    <test name="Escalates to live Dataverse lookup on no local hit">
+      <steps>
+        <step>Type a query that matches no local entry but matches a Dataverse record/view.</step>
+      </steps>
+      <expected>The quick-switcher performs a live Xrm.WebApi record / ViewService view lookup and shows the live result.</expected>
+    </test>
+    <test name="Accelerator focuses box; Enter navigates top result; empty query shows tabs">
+      <steps>
+        <step>With focus elsewhere in the pane, press the keyboard accelerator, then press Enter on a query with a top result.</step>
+        <step>Clear the query.</step>
+      </steps>
+      <expected>The accelerator focuses the box; Enter navigates to the top result; clearing the query returns the normal tab content, not an error.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components (if touched) + build the NavigatorPane code page + run Jest UI tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/src/components/QuickSwitcher.tsx</output>
+    <output type="test">src/solutions/NavigatorPane/src/components/__tests__/QuickSwitcher.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given Recent/Pinned/Views entries, when the user types, then the local entries filter live (instant, in-memory).</criterion>
+    <criterion testable="true">Given a query with no local hit, when the user searches, then a live Dataverse record/view is found via Xrm.WebApi / ViewService.</criterion>
+    <criterion testable="true">Given focus is anywhere in the pane, when the accelerator is pressed, then the search box is focused.</criterion>
+    <criterion testable="true">Given a query with a top result, when the user presses Enter, then navigation to the top result occurs.</criterion>
+    <criterion testable="true">Negative: given an empty query, when the box is empty, then the normal tab content is shown, not an error.</criterion>
+    <criterion testable="true">All UI tests pass; build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-11 + plan.md Phase 7 task 070. Local-first, escalate-on-miss; keyboard-accessible per NFR-07.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

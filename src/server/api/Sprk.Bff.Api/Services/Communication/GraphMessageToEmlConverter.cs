@@ -1,7 +1,8 @@
 using Microsoft.Graph.Models;
 using MimeKit;
+using Sprk.Bff.Api.Services.Communication;
 
-namespace Sprk.Bff.Api.Services.Communication;
+namespace Sprk.Bff.Api.Infrastructure.Graph;
 
 /// <summary>
 /// Converts a Microsoft Graph Message (with expanded attachments) to RFC 2822 .eml format.

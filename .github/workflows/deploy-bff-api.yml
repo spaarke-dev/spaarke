@@ -18,11 +18,9 @@
 name: Deploy BFF API
 
 on:
-  push:
-    branches:
-      - master
-    paths:
-      - 'src/server/api/**'
+  # NOTE (dotnet-10-upgrade-r1, 2026-08-11): the `push: master` auto-deploy trigger
+  # was REMOVED. BFF deploys are operator-driven from the worktree (/bff-deploy + az);
+  # CI must never auto-deploy on merge. Deploy on demand via workflow_dispatch only.
   workflow_dispatch:
     inputs:
       environment:
@@ -46,7 +44,7 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
-  DOTNET_VERSION: '8.x'
+  DOTNET_VERSION: '10.x'
   API_PROJECT: src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj
 
 jobs:
@@ -62,7 +60,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
@@ -102,7 +100,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 

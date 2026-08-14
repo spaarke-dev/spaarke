@@ -134,12 +134,12 @@ public class CommunicationServiceArchiveEmbedTests
             Mock.Of<ICommunicationDataverseService>(),
             entityService,
             Mock.Of<IDocumentDataverseService>(),
-            speFileStore,
             accountService,
             jobSubmissionService,
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
-            Mock.Of<ILogger<CommunicationService>>());
+            Mock.Of<ILogger<CommunicationService>>(),
+            scopeFactory: SpeScopeFactoryStub.Create(speFileStore));
     }
 
     /// <summary>
