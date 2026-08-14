@@ -71,4 +71,30 @@ public class OfficeStorageUploader
             return (false, null, null, null, ex.Message);
         }
     }
+
+    /// <summary>
+    /// FR-C3 (email-communication-intelligence-r2, R-3): deletes a just-uploaded SPE drive item that turned out
+    /// to be a byte-identical content DUPLICATE — the office save path suppressed the second document AND skips
+    /// finalization, so this transient blob is now truly unreferenced (gate-after-write cleanup). Best-effort /
+    /// non-fatal: a failed cleanup logs and returns false; it NEVER fails the save (the dedup already succeeded).
+    /// Only ever called with the drive item THIS request just uploaded — never the canonical's own item.
+    /// </summary>
+    public async Task<bool> DeleteFromSpeAsync(string driveId, string itemId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var deleted = await _speFileStore.DeleteFileAsync(driveId, itemId, cancellationToken);
+            _logger.LogInformation(
+                "Deleted transient duplicate SPE blob DriveId={DriveId}, ItemId={ItemId} (deleted={Deleted})",
+                driveId, itemId, deleted);
+            return deleted;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Transient duplicate SPE blob cleanup failed (non-fatal) for DriveId={DriveId}, ItemId={ItemId}",
+                driveId, itemId);
+            return false;
+        }
+    }
 }

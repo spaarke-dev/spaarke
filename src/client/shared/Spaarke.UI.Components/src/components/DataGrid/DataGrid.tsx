@@ -73,13 +73,7 @@ import {
 } from './fetchXmlOverlay';
 import type { MembershipResolver } from '../../services/membership';
 import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
-import {
-  discoverChips,
-  augmentFetchXmlWithChips,
-  FilterChipBar,
-  type ChipDescriptor,
-  type ChipState,
-} from './filterChips';
+import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type ChipState } from './filterChips';
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
 import type { SavedQuerySummary } from '../../services/IDataverseClient';
@@ -719,14 +713,25 @@ async function resolveSource(
 
 function extractEntityFromFetchXml(fetchXml: string): string | undefined {
   if (!fetchXml) return undefined;
+  // Primary: DOMParser (browser). Fall back to a regex when DOMParser is
+  // unavailable/returns a parsererror (owner UAT 2026-08-12 #4C — a valid inline
+  // fetchXml was yielding an empty entityName → the "Cannot resolve entityName"
+  // error; the regex makes extraction robust to DOMParser quirks/XML-decl/BOM/
+  // entity-encoded quotes). Matches `<entity name="…">` or `name='…'`.
   try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(fetchXml, 'text/xml');
-    if (doc.querySelector('parsererror')) return undefined;
-    return doc.querySelector('entity')?.getAttribute('name') ?? undefined;
+    if (typeof DOMParser !== 'undefined') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(fetchXml, 'text/xml');
+      if (!doc.querySelector('parsererror')) {
+        const name = doc.querySelector('entity')?.getAttribute('name');
+        if (name) return name;
+      }
+    }
   } catch {
-    return undefined;
+    /* fall through to regex */
   }
+  const m = /<entity\b[^>]*\bname\s*=\s*['"]([^'"]+)['"]/i.exec(fetchXml);
+  return m?.[1] ?? undefined;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

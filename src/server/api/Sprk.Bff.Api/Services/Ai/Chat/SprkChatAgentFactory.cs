@@ -9,13 +9,13 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.Foundry;
-using Sprk.Bff.Api.Services.Ai.PublicContracts;
-using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai.Memory;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Services.Workspace;
 
@@ -330,6 +330,33 @@ public class SprkChatAgentFactory
     /// <c>SessionDispatchRequest.ModelTierOverride</c>). Default <c>null</c> = no override — the
     /// dispatched Binding's own tier composition governs unchanged (pre-task-011 behavior).
     /// </param>
+    /// <param name="activeContextTabId">
+    /// spaarkeai-assistant-enhancements-r2 FR-A3 (Active-tab awareness / focus-stamp): the
+    /// <c>WorkspaceTab.Id</c> of the tab the user has explicitly focused, sourced from the client
+    /// focus-stamp (<c>ChatSendMessageRequest.ActiveContext.TabId</c>). Forwarded to
+    /// <see cref="BuildWorkspaceStateBlock"/> so the "(active)" label prefers the explicit focus-stamp
+    /// over the legacy <c>UpdatedAt</c>-most-recent heuristic. The active tab then contributes its
+    /// COMPACT content shape while background tabs stay metadata-only (FR-A4, ADR-015 Path A). Default
+    /// <c>null</c> = no focus-stamp → the <c>UpdatedAt</c> fallback governs unchanged (backward compatible).
+    /// </param>
+    /// <param name="liveTabs">
+    /// spaarkeai-assistant-enhancements-r3 task 011 (FR-03 re-point): the LIVE open workspace tabs,
+    /// mapped from <c>StoredSession.Tabs</c> (written by the client via
+    /// <c>PATCH /api/ai/chat/sessions/{id}/tabs</c> → <c>ISessionPersistenceService.SaveTabsAsync</c>)
+    /// at the ChatEndpoints call site. This is the source-of-record for what is actually open — it
+    /// SUPERSEDES the runtime-inert <c>IWorkspaceStateService.GetTabsAsync</c> read (whose write path
+    /// was retired by AIR2-075). These tabs are UNIONed with any still-valid pinned durable rows from
+    /// <c>IWorkspaceStateService</c> (live rows win on same tab id) before
+    /// <see cref="BuildWorkspaceStateBlock"/>. Null (the default) preserves the legacy
+    /// <c>IWorkspaceStateService</c>-only behavior for any call site that omits it.
+    /// </param>
+    /// <param name="activeItem">
+    /// spaarkeai-assistant-enhancements-r3 task 011 (FR-04, server half): the client-supplied
+    /// active-item handle (<c>{id,type,label}</c>) published by the task-001 conduit and carried on
+    /// the chat request. Forwarded verbatim into the single active-item slot of
+    /// <see cref="BuildWorkspaceStateBlock"/>. ADR-015: id-not-content — the handle NEVER carries item
+    /// content; all content is tool-fetched by id. Null = no active item published → empty slot.
+    /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
@@ -351,6 +378,9 @@ public class SprkChatAgentFactory
         IReadOnlyList<SessionOutput>? ledgerOutputs = null,
         string? activeSessionFileId = null,
         AiModelTier? modelTierOverride = null,
+        string? activeContextTabId = null,
+        IReadOnlyList<WorkspaceTab>? liveTabs = null,
+        WorkspaceActiveItemHandle? activeItem = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -543,11 +573,35 @@ public class SprkChatAgentFactory
         // 8K accounting as document context + knowledge + memory composition.
         try
         {
+            // R3 task 011 (FR-03 re-point, owner decision 2026-08-10): the awareness block is now
+            // fed from the LIVE open tabs (`liveTabs`, mapped from StoredSession.Tabs at the endpoint)
+            // UNIONed with any still-valid PINNED durable rows from IWorkspaceStateService (live rows
+            // win on same tab id). Root cause: IWorkspaceStateService.GetTabsAsync's WRITE path was
+            // retired by AIR2-075, so that store is runtime-inert (empty except pre-existing pinned
+            // rows) — feeding the block from it alone made the whole block inert against production
+            // traffic. The live tabs are the source-of-record (ISessionPersistenceService.SaveTabsAsync).
             var workspaceService = scope.ServiceProvider.GetService<IWorkspaceStateService>();
-            if (workspaceService is not null)
+            if (workspaceService is not null || liveTabs is not null || activeItem is not null)
             {
-                var tabs = await workspaceService.GetTabsAsync(tenantId, sessionId, cancellationToken);
-                var workspaceBlock = BuildWorkspaceStateBlock(tabs, sessionId);
+                IReadOnlyList<WorkspaceTab> blockTabs;
+                if (liveTabs is not null)
+                {
+                    var liveIds = new HashSet<string>(liveTabs.Select(t => t.Id), StringComparer.Ordinal);
+                    var pinnedDurable = workspaceService is not null
+                        ? (await workspaceService.GetTabsAsync(tenantId, sessionId, cancellationToken))
+                            .Where(t => t.IsPinned && !liveIds.Contains(t.Id))
+                        : Enumerable.Empty<WorkspaceTab>();
+                    blockTabs = liveTabs.Concat(pinnedDurable).ToList();
+                }
+                else
+                {
+                    // Legacy path (no live tabs supplied): preserve the prior IWorkspaceStateService read.
+                    blockTabs = workspaceService is not null
+                        ? await workspaceService.GetTabsAsync(tenantId, sessionId, cancellationToken)
+                        : Array.Empty<WorkspaceTab>();
+                }
+
+                var workspaceBlock = BuildWorkspaceStateBlock(blockTabs, sessionId, activeContextTabId, activeItem);
                 if (!string.IsNullOrEmpty(workspaceBlock))
                 {
                     if (TryReservePromptBudget(
@@ -846,6 +900,18 @@ public class SprkChatAgentFactory
         var turnOptions = scope.ServiceProvider
             .GetService<IOptions<AgentTurnOptions>>()?.Value ?? new AgentTurnOptions();
         var turnContract = new AgentTurnContract(turnOptions.ToolCallBudget);
+        // FR-12 tool economy (task 030): derive the deterministic OPEN-tab context-type set from the LIVE
+        // open tabs (`liveTabs` — the source-of-record for what is actually open that task 011 re-pointed
+        // the awareness block to), mapping each tab's widgetType / typed WidgetData.Kind through the
+        // WidgetContextTypeResolver (the C# mirror of the client widget→context-type registry, task 022).
+        // Fed to the PreFilter's tab-economy predicate so a parity capability mounts ONLY while a matching
+        // tab is open. NULL when no live tabs were supplied (legacy call site) → the predicate stays inert;
+        // a non-null EMPTY set ("tabs known, none map") DOES scope tab-gated tools out. ADR-015: reads only
+        // tab identity/category — never item content. Hoisted into the pre-filter scope here (never fetched
+        // inside PreFilter).
+        var openTabContextTypes = liveTabs is not null
+            ? WidgetContextTypeResolver.ResolveOpenTabContextTypes(liveTabs)
+            : null;
         var filterContext = new AgentToolFilterContext(
             Surface: AgentToolFilterContext.AssistantSurface,
             HasSessionFiles: context.UploadedFiles is { Count: > 0 },
@@ -855,7 +921,8 @@ public class SprkChatAgentFactory
             // when ChatHostContext.IsValid() (a genuine host entity — EntityType + EntityId present +
             // known type). Feeds the requires-no-attached-record PreFilter predicate (e.g. hides
             // "Create matter" when already inside a matter). Threaded here, never fetched inside PreFilter.
-            HasAttachedRecord: hostContext?.IsValid() == true);
+            HasAttachedRecord: hostContext?.IsValid() == true,
+            OpenTabContextTypes: openTabContextTypes);
         var finalTools = AgentToolProjection.Finalize(
             tools, filterContext, turnContract, citationContext, _logger);
 
@@ -1437,8 +1504,13 @@ public class SprkChatAgentFactory
     /// <see cref="WorkspaceStateBlockMaxCharsRich"/> to fit the richer per-tab shapes.
     /// </para>
     /// <para>
-    /// <b>Active tab convention</b>: the tab with the most recent <c>UpdatedAt</c>
-    /// is labeled "(active)". Preserved from task 053.
+    /// <b>Active tab convention</b> (spaarkeai-assistant-enhancements-r2 FR-A3/A4): when a
+    /// client focus-stamp is supplied (<paramref name="activeContextTabId"/> matching a visible
+    /// tab's <c>Id</c>), THAT tab is labeled "(active)" — preferred over the legacy
+    /// <c>UpdatedAt</c>-most-recent heuristic. When no focus-stamp is present (or it matches no
+    /// visible tab), the <c>UpdatedAt</c>-max tab is labeled active (backward-compatible fallback,
+    /// preserved from task 053). The active tab contributes its COMPACT content shape; background
+    /// tabs contribute metadata-only fields (FR-A4, ADR-015 Path A exception).
     /// </para>
     /// </remarks>
     internal const int WorkspaceStateBlockMaxChars = 500;
@@ -1451,59 +1523,153 @@ public class SprkChatAgentFactory
     /// </summary>
     internal const int WorkspaceStateBlockMaxCharsRich = 2000;
 
-    internal string BuildWorkspaceStateBlock(IReadOnlyList<WorkspaceTab> tabs, string sessionId)
+    internal string BuildWorkspaceStateBlock(
+        IReadOnlyList<WorkspaceTab> tabs,
+        string sessionId,
+        string? activeContextTabId = null,
+        WorkspaceActiveItemHandle? activeItem = null)
     {
-        // FR-58 + FR-59 BINDING: filter is `visibleToAssistant === true` AND widget has
-        // derivable visible state. Both required. Privacy default — when EITHER condition
-        // is unmet, the tab does NOT appear in the agent prompt.
+        // FR-58 + FR-59 + ADR-015 Path A (spaarkeai-assistant-enhancements-r2, owner-approved
+        // 2026-08-05) BINDING: a tab appears when it has derivable visible state AND either
+        //   (a) the user opted it in (`visibleToAssistant === true`), OR
+        //   (b) it is the ACTIVE tab — the client focus-stamp (`activeContextTabId`) matches.
+        // (b) is "active-tab-as-consent": focusing a tab IS the consent to make it content-visible
+        // (only the active tab; see the `contentVisible: isActive` gate below — background tabs stay
+        // metadata-only and still require the opt-in flag). This completes the Path A exception whose
+        // focus-stamp *hoist* landed in task 012 but whose *visibility bypass* did not — so a user-
+        // opened email/document tab was permanently invisible (every user tab defaults
+        // `visibleToAssistant=false` and no UI ever flips it). Fix: R2 UAT 2026-08-07.
+        // R3 task 011 (FR-03): appearance is now IDENTITY-based. A tab appears when it passes
+        // the Path-A visibility filter AND it has either a derivable visible state (task 010/074
+        // derivation — preserved) OR a usable DisplayName (the live-tab title mapped from
+        // StoredWorkspaceTab). The DisplayName arm is what lets LIVE open tabs — whose opaque
+        // persisted widgetData carries no `kind` and therefore derives a null visible state —
+        // still surface by {type,label,active}. This does NOT widen ADR-015: the block now emits
+        // identity ONLY (no ambient widget content — see the trimmed per-tab line below), so a
+        // tab appearing by DisplayName leaks no content. Task 074's FR-59 privacy default is
+        // preserved for the (state == null AND no DisplayName) case — such a tab still drops.
         var visible = tabs
-            .Where(t => t.VisibleToAssistant)
+            .Where(t => t.VisibleToAssistant
+                || (!string.IsNullOrWhiteSpace(activeContextTabId)
+                    && string.Equals(t.Id, activeContextTabId, StringComparison.Ordinal)))
             .Select(t => (Tab: t, State: TryDeriveVisibleState(t)))
-            .Where(p => p.State is not null)
+            .Where(p => p.State is not null || !string.IsNullOrWhiteSpace(p.Tab.DisplayName))
             .ToList();
 
-        if (visible.Count == 0) return string.Empty;
+        if (visible.Count == 0 && activeItem is null) return string.Empty;
 
-        // Most-recent UpdatedAt → "active" (preserved from task 053 v1 simplification;
-        // explicit active-tab state from registry is a separate follow-up).
+        // Default ordering: most-recent UpdatedAt first (preserved from task 053 v1).
         var ordered = visible.OrderByDescending(p => p.Tab.UpdatedAt).ToList();
 
-        var sb = new System.Text.StringBuilder();
-        sb.Append("\n\n## Workspace State\n");
-        sb.Append("Tabs the user has marked visible to the assistant. Per-tab fields are deterministic visible state only (ADR-015 — no raw user text, no widget bodies).\n");
-
-        var truncatedAt = -1;
-        for (var i = 0; i < ordered.Count; i++)
+        // spaarkeai-assistant-enhancements-r2 FR-A3: prefer the explicit client focus-stamp over
+        // the UpdatedAt-most-recent heuristic. When the stamp's tabId matches a visible tab, hoist
+        // it to the front so it becomes "Tab 1 (active)". When there is no stamp — or the stamp
+        // matches no visible tab (stale/closed tab) — the UpdatedAt-max tab stays active (backward-
+        // compatible fallback). Deterministic labeling only; no intent classification (ADR-039).
+        // After this hoist, the active tab is ALWAYS at index 0.
+        if (!string.IsNullOrWhiteSpace(activeContextTabId))
         {
-            var (tab, state) = ordered[i];
-            var activeMarker = i == 0 ? " (active)" : "";
-            var pinnedMarker = tab.IsPinned ? " user-pinned" : "";
-            var matterName = tab.MatterContext?.MatterName;
-            var matterSuffix = string.IsNullOrWhiteSpace(matterName) ? "" : $" matter=\"{matterName}\"";
-
-            // Header line + structured fields. Format chosen so the LLM can parse without
-            // needing to validate a JSON envelope per tab while still treating each tab as
-            // a discrete block.
-            var header = $"- Tab {i + 1}{activeMarker}: widgetType={tab.WidgetType}{pinnedMarker}{matterSuffix}\n";
-            var fields = FormatVisibleStateFields(state!);
-            var block = header + fields;
-
-            if (sb.Length + block.Length > WorkspaceStateBlockMaxCharsRich)
+            var stampIndex = ordered.FindIndex(p =>
+                string.Equals(p.Tab.Id, activeContextTabId, StringComparison.Ordinal));
+            if (stampIndex > 0)
             {
-                truncatedAt = i;
-                break;
+                var active = ordered[stampIndex];
+                ordered.RemoveAt(stampIndex);
+                ordered.Insert(0, active);
             }
-            sb.Append(block);
+            // stampIndex == 0 → already active; stampIndex < 0 → no match → UpdatedAt fallback.
         }
 
-        if (truncatedAt >= 0)
+        var sb = new System.Text.StringBuilder();
+
+        if (ordered.Count > 0)
         {
-            _logger.LogInformation(
-                "R6 task 074: Workspace State block truncated against fallback ceiling — sessionId={SessionId}, includedTabs={Included}, droppedTabs={Dropped}, charBudget={Budget}",
-                sessionId, truncatedAt, ordered.Count - truncatedAt, WorkspaceStateBlockMaxCharsRich);
+            sb.Append("\n\n## Workspace State\n");
+            sb.Append("The tab the user is currently focused on, plus any tabs they have marked visible to the assistant. Each tab is IDENTITY ONLY — type + label + which one is active (ADR-015: no raw user text, no widget bodies, no ambient content). To act on a tab's content, fetch it by id via the appropriate tool.\n");
+
+            var truncatedAt = -1;
+            for (var i = 0; i < ordered.Count; i++)
+            {
+                var (tab, state) = ordered[i];
+                var isActive = i == 0;
+                var activeMarker = isActive ? " (active)" : "";
+
+                // R3 task 011 (FR-03): the per-tab emission is TRIMMED to EXACTLY
+                // {type, label, active} — no ambient widget content of any kind (no tldr,
+                // summary, selectionText, snippet, filename, mimeType, sizeBytes, rowCount,
+                // filteredColumns, selectedRows, dashboardName, lastViewedSection, matter,
+                // pinned markers, or any other widget-data field). `type` is the tab's
+                // widgetType; `label` is a thin identity slice (tab title / derived identity
+                // name); `active` is the "(active)" marker. All real content is tool-fetched
+                // by id downstream (ADR-015 Path A, honest). This is the id-not-content
+                // boundary the project rests on — the trim is proven by a governance test.
+                var label = ResolveTabLabel(tab, state);
+                var block = $"- Tab {i + 1}{activeMarker}: widgetType={tab.WidgetType} label=\"{label}\"\n";
+
+                if (sb.Length + block.Length > WorkspaceStateBlockMaxCharsRich)
+                {
+                    truncatedAt = i;
+                    break;
+                }
+                sb.Append(block);
+            }
+
+            if (truncatedAt >= 0)
+            {
+                _logger.LogInformation(
+                    "R6 task 074: Workspace State block truncated against fallback ceiling — sessionId={SessionId}, includedTabs={Included}, droppedTabs={Dropped}, charBudget={Budget}",
+                    sessionId, truncatedAt, ordered.Count - truncatedAt, WorkspaceStateBlockMaxCharsRich);
+            }
+        }
+
+        // R3 task 011 (FR-04, server half): the single active-item slot. Exactly ONE handle,
+        // carrying ONLY {id,type,label} (never content — ADR-015). Published client-side by the
+        // task-001 conduit and threaded on the chat request. Empty (nothing emitted) when no
+        // active item is published — no stale/duplicate handle.
+        if (activeItem is not null)
+        {
+            if (sb.Length == 0)
+            {
+                sb.Append("\n\n## Workspace State\n");
+            }
+            sb.Append("\n### Active Item\n");
+            sb.Append("The item the user is currently acting on. Identity handle only — fetch its content by id via the appropriate tool (ADR-015: no content is carried here).\n");
+            sb.Append($"- id: {activeItem.Id}\n");
+            sb.Append($"- type: {activeItem.Type}\n");
+            sb.Append($"- label: \"{activeItem.Label}\"\n");
         }
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// R3 task 011 (FR-03) — resolve the trimmed per-tab <c>label</c> (a thin identity slice,
+    /// ADR-015 Path A). Preference order:
+    /// <list type="number">
+    ///   <item>The live-tab title (<see cref="WorkspaceTab.DisplayName"/>, mapped from
+    ///   <c>StoredWorkspaceTab.DisplayName</c>) when present — the authoritative tab-strip label.</item>
+    ///   <item>Else the derived identity name from the visible state (Dashboard name / filename /
+    ///   email subject) — preserves task 010's layout-tab label ("Daily Briefing", "Calendar")
+    ///   and the Compose/DocumentViewer filename when a live tab carries no title.</item>
+    ///   <item>Else the raw <see cref="WorkspaceTab.WidgetType"/> as a last-resort identity.</item>
+    /// </list>
+    /// Never emits item content (bodies, snippets, selection text, row/chart data) — only the
+    /// identity name a user would recognize on the tab strip.
+    /// </summary>
+    private static string ResolveTabLabel(WorkspaceTab tab, WorkspaceTabVisibleState? state)
+    {
+        if (!string.IsNullOrWhiteSpace(tab.DisplayName))
+            return tab.DisplayName!.Trim();
+
+        var derived = state switch
+        {
+            WorkspaceTabVisibleState.Dashboard db when !string.IsNullOrWhiteSpace(db.DashboardName) => db.DashboardName,
+            WorkspaceTabVisibleState.DocumentViewer d when !string.IsNullOrWhiteSpace(d.Filename) => d.Filename,
+            WorkspaceTabVisibleState.Email em when !string.IsNullOrWhiteSpace(em.Subject) => em.Subject,
+            _ => null,
+        };
+
+        return !string.IsNullOrWhiteSpace(derived) ? derived! : tab.WidgetType;
     }
 
     /// <summary>
@@ -1544,6 +1710,37 @@ public class SprkChatAgentFactory
     /// </summary>
     internal const string ComposeDefaultFilename = "Compose document";
 
+    /// <summary>
+    /// Registry widget-type discriminator for LegalWorkspaceApp embedded layout tabs
+    /// (Daily Briefing, Calendar, Corporate Workspace, and any other pinned/auto-installed
+    /// workspace layout). MUST match the client's <c>WorkspacePane.tsx</c> dispatch calls
+    /// (<c>widgetType: 'workspace'</c>, <c>widgetData: {{ layoutId, layoutName }}</c> — see
+    /// e.g. the auto-install and pinned-workspace-reopen effects). Layout tabs are
+    /// conceptually Dashboard-category (LegalWorkspaceApp embedded mode; mirrors the
+    /// client's <c>dashboardWidgetVisibility</c> derivation), so they project onto the
+    /// existing <see cref="WorkspaceTabVisibleState.Dashboard"/> variant — see the contract
+    /// note on <see cref="DeriveWorkspaceLayoutVisibleState"/>.
+    /// </summary>
+    internal const string WorkspaceLayoutWidgetType = "workspace";
+
+    /// <summary>
+    /// Graceful default label for a layout tab (<see cref="WorkspaceLayoutWidgetType"/>)
+    /// whose server-readable <see cref="WorkspaceTabWidgetData"/> carries no dashboard
+    /// name (the contract-gap fallback — see <see cref="DeriveWorkspaceLayoutVisibleState"/>).
+    /// Keeps the agent-visible identity as "a workspace layout is open" rather than
+    /// silently disappearing (the pre-fix null-derivation behavior).
+    /// </summary>
+    internal const string WorkspaceLayoutDefaultLabel = "Workspace layout";
+
+    /// <remarks>
+    /// <b>task 041b (2026-08-06, spaarkeai-assistant-enhancements-r2, "Path 1: persisted
+    /// Email carrier")</b>: resolves the task 041 escalation. <see cref="EmailTabWidgetData"/>
+    /// (added by 041b) is the persisted server-side carrier for real email fields
+    /// (subject/from/date/threadId/snippet), populated client-side from
+    /// <c>useEmailWorkspaceRecord</c> at tab open/update (task 042a). Email now behaves like
+    /// the other 4 widgets: content persisted in <c>widgetData</c>, both derivations
+    /// structurally enforced, ADR-015-authoritative.
+    /// </remarks>
     internal static WorkspaceTabVisibleState? TryDeriveVisibleState(WorkspaceTab tab)
     {
         // spaarkeai-compose-r2 ("the flip"): a first-class Compose Direct widget
@@ -1557,6 +1754,19 @@ public class SprkChatAgentFactory
         if (string.Equals(tab.WidgetType, ComposeWidgetType, StringComparison.OrdinalIgnoreCase))
         {
             return DeriveComposeVisibleState(tab.WidgetData);
+        }
+
+        // R3 task 010 (FR-01) — layout/dashboard tabs (Daily Briefing, Calendar, ...) HOLD NO
+        // per-item content; they are a named LegalWorkspaceApp embedded layout. Mirror the
+        // Compose special-case above: checked BEFORE the closed-union switch because the
+        // client's actual wire payload for these tabs (`{ layoutId, layoutName }`) carries NO
+        // `kind` discriminator (the exact "no kind" gap this task closes — see the contract
+        // note on DeriveWorkspaceLayoutVisibleState). Pre-fix, tabs of this widgetType fell
+        // through to the switch's `_ => null` default and were invisible to the agent
+        // regardless of VisibleToAssistant (the R2 UAT gap this task fixes).
+        if (string.Equals(tab.WidgetType, WorkspaceLayoutWidgetType, StringComparison.OrdinalIgnoreCase))
+        {
+            return DeriveWorkspaceLayoutVisibleState(tab.WidgetData);
         }
 
         // Closed-union switch over the polymorphic widget-data types. A new widget kind
@@ -1585,6 +1795,16 @@ public class SprkChatAgentFactory
                 SortColumn: t.SortColumn,
                 FilteredColumns: t.FilteredColumns,
                 SelectedRows: t.SelectedRows?.Count ?? 0),
+
+            // task 041b ("Path 1: persisted Email carrier"). EmlDocumentId is deliberately
+            // NOT projected — it is a fetch handle for on-demand eml-render (FR-C4), not
+            // prompt content, mirroring DocumentViewer's DocumentId omission.
+            EmailTabWidgetData em => new WorkspaceTabVisibleState.Email(
+                Subject: em.Subject,
+                From: em.From,
+                Date: em.Date,
+                ThreadId: em.ThreadId,
+                Snippet: TruncateEmailSnippet(em.Snippet)),
 
             // Unknown / null widget data → no visible state (privacy default).
             _ => null,
@@ -1643,6 +1863,56 @@ public class SprkChatAgentFactory
             SelectionText: null);
     }
 
+    /// <summary>
+    /// R3 task 010 (FR-01) — derive the agent-visible state for a LegalWorkspaceApp embedded
+    /// layout tab (widgetType "workspace" — Daily Briefing, Calendar, Corporate Workspace,
+    /// and any other pinned/auto-installed layout). Projects onto the EXISTING
+    /// <see cref="WorkspaceTabVisibleState.Dashboard"/> variant (§11 reuse — no new closed-
+    /// union member): a layout tab IS conceptually a Dashboard per FR-57 ("composable section
+    /// grid, LegalWorkspaceApp embedded mode"), so extending that category is the correct
+    /// home, not a parallel one. Identity ONLY — <c>{ widgetType, dashboardName,
+    /// lastViewedSection }</c>, never section payloads or chart data (ADR-015, mirrors
+    /// <see cref="DashboardTabWidgetData"/>'s existing privacy contract).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Preferred path</b>: the persisted widgetData is a <see cref="DashboardTabWidgetData"/>
+    /// (kind "Dashboard") carrying the real <c>dashboardName</c> — e.g. "Daily Briefing" or
+    /// "Calendar". The real name flows straight through, including <c>lastViewedSection</c>.
+    /// </para>
+    /// <para>
+    /// <b>CONTRACT GAP (reported to the client-owning agent, mirrors the Compose contract gap
+    /// on <see cref="DeriveComposeVisibleState"/>)</b>: the client's <c>WorkspacePane.tsx</c>
+    /// dispatches layout tabs with <c>widgetData: { layoutId, layoutName }</c> and NO <c>kind</c>
+    /// discriminator (e.g. the auto-install-default-workspace and pinned-workspace-reopen
+    /// effects) — this is the literal "no kind" gap FR-01 names. The strict
+    /// <see cref="WorkspaceTabWidgetData"/> polymorphic union cannot resolve that shape to a
+    /// typed payload, so <see cref="WorkspaceTab.WidgetData"/> degrades to <c>null</c> for these
+    /// tabs today. Pre-fix, <see cref="TryDeriveVisibleState"/> returned <c>null</c> for the
+    /// whole tab in that case (the R2 UAT gap: Daily Briefing / Calendar invisible to the
+    /// agent). This fallback instead emits a Dashboard identity with a graceful default label
+    /// — {type,label} is ALWAYS non-null now, never a silent drop. The durable fix is
+    /// client-owned: persist the layout tab's widgetData as
+    /// <c>{ kind: "Dashboard", layoutId, dashboardName: layoutName }</c> (the field the client
+    /// already computes as <c>layoutName</c>) so the real name reaches this derivation. Server
+    /// reuses the existing Dashboard type only — no new widget kind, no schema change.
+    /// </para>
+    /// </remarks>
+    private static WorkspaceTabVisibleState DeriveWorkspaceLayoutVisibleState(WorkspaceTabWidgetData? widgetData)
+    {
+        // Preferred: a Dashboard-shaped payload carries the real layout name.
+        if (widgetData is DashboardTabWidgetData db && !string.IsNullOrWhiteSpace(db.DashboardName))
+        {
+            return new WorkspaceTabVisibleState.Dashboard(db.DashboardName, db.LastViewedSection);
+        }
+
+        // Fallback (contract gap): no server-readable dashboard name — emit a Dashboard
+        // identity with a graceful default label so the layout tab is VISIBLE (identity-only,
+        // {type,label}) rather than silently dropped. Never masquerades unrelated content as
+        // the label.
+        return new WorkspaceTabVisibleState.Dashboard(WorkspaceLayoutDefaultLabel, null);
+    }
+
     /// <summary>Summary has visible state when EITHER a non-empty TL;DR OR a non-empty body exists.</summary>
     private static bool HasSummaryState(SummaryTabWidgetData s)
         => !string.IsNullOrWhiteSpace(s.Tldr) || !string.IsNullOrWhiteSpace(s.Body);
@@ -1671,20 +1941,51 @@ public class SprkChatAgentFactory
     }
 
     /// <summary>
-    /// Format a derived <see cref="WorkspaceTabVisibleState"/> as the per-tab prompt
-    /// fields. Indented 2 spaces under the tab header. ADR-015: only deterministic
-    /// fields are emitted; selectionText is the only content-bearing field and respects
-    /// the 200-char cap upstream.
+    /// task 041b — cap an Email tab's snippet at the same <see cref="SelectionTextMaxChars"/>
+    /// bound <see cref="TruncateSelection"/> applies to DocumentViewer's selectionText. The
+    /// snippet is the sole content-bearing Email field per ADR-015.
     /// </summary>
-    internal static string FormatVisibleStateFields(WorkspaceTabVisibleState state)
+    private static string? TruncateEmailSnippet(string? snippet)
+    {
+        if (string.IsNullOrWhiteSpace(snippet)) return null;
+        var trimmed = snippet.Trim();
+        if (trimmed.Length <= SelectionTextMaxChars) return trimmed;
+        return trimmed[..SelectionTextMaxChars] + "…";
+    }
+
+    /// <summary>
+    /// Format a derived <see cref="WorkspaceTabVisibleState"/> as per-tab prompt fields.
+    ///
+    /// <para>
+    /// <b>R3 task 011 (FR-03) note</b>: this helper is NO LONGER wired into
+    /// <see cref="BuildWorkspaceStateBlock"/> — the workspace-state block is now IDENTITY ONLY
+    /// (<c>{type,label,active}</c> per tab; no ambient widget content). It is retained as the
+    /// content-projection helper (still unit-tested directly) for on-demand / tool-fetched
+    /// rendering paths; it MUST NOT be re-attached to the awareness block without re-opening the
+    /// ADR-015 id-not-content boundary. Indented 2 spaces; selectionText/snippet are the only
+    /// content-bearing fields and respect the 200-char cap upstream.
+    /// </para>
+    /// </summary>
+    /// <param name="state">The derived visible state to format.</param>
+    /// <param name="contentVisible">
+    /// spaarkeai-assistant-enhancements-r2 FR-A4 (ADR-015 Path A): when <c>true</c> (the ACTIVE
+    /// tab) the compact content-bearing fields are emitted — Summary <c>tldr</c>/<c>summary</c> and
+    /// DocumentViewer <c>selectionText</c>. When <c>false</c> (a BACKGROUND tab) those
+    /// content-bearing fields are suppressed and only identity/metadata fields (filename, mimeType,
+    /// sizeBytes, hasSelection flag, dashboard/section names, row/column counts, edit flag) are
+    /// emitted. Background tabs therefore stay metadata-only; the active tab is content-visible.
+    /// Default <c>true</c> preserves the pre-r2 all-tabs-content behavior for any legacy caller.
+    /// </param>
+    internal static string FormatVisibleStateFields(WorkspaceTabVisibleState state, bool contentVisible = true)
     {
         var sb = new System.Text.StringBuilder();
         switch (state)
         {
             case WorkspaceTabVisibleState.Summary s:
-                if (!string.IsNullOrWhiteSpace(s.Tldr))
+                // tldr + summary are agent-generated CONTENT projections — active-tab only (FR-A4).
+                if (contentVisible && !string.IsNullOrWhiteSpace(s.Tldr))
                     sb.Append($"  tldr: {s.Tldr}\n");
-                if (!string.IsNullOrWhiteSpace(s.SummaryText))
+                if (contentVisible && !string.IsNullOrWhiteSpace(s.SummaryText))
                     sb.Append($"  summary: {s.SummaryText}\n");
                 sb.Append($"  hasUserEdits: {(s.HasUserEdits ? "true" : "false")}\n");
                 break;
@@ -1694,7 +1995,8 @@ public class SprkChatAgentFactory
                 sb.Append($"  mimeType: {d.MimeType}\n");
                 sb.Append($"  sizeBytes: {d.SizeBytes}\n");
                 sb.Append($"  hasSelection: {(d.HasSelection ? "true" : "false")}\n");
-                if (!string.IsNullOrWhiteSpace(d.SelectionText))
+                // selectionText is the only content-bearing DocumentViewer field — active-tab only.
+                if (contentVisible && !string.IsNullOrWhiteSpace(d.SelectionText))
                     sb.Append($"  selectionText: {d.SelectionText}\n");
                 break;
 
@@ -1711,6 +2013,20 @@ public class SprkChatAgentFactory
                 if (t.FilteredColumns is { Count: > 0 })
                     sb.Append($"  filteredColumns: [{string.Join(", ", t.FilteredColumns)}]\n");
                 sb.Append($"  selectedRows: {t.SelectedRows}\n");
+                break;
+
+            case WorkspaceTabVisibleState.Email em:
+                // subject/from/date/threadId are identity/metadata fields — always emitted
+                // (background tabs included), mirroring DocumentViewer's filename/mimeType.
+                sb.Append($"  subject: {em.Subject}\n");
+                sb.Append($"  from: {em.From}\n");
+                sb.Append($"  date: {em.Date}\n");
+                if (!string.IsNullOrWhiteSpace(em.ThreadId))
+                    sb.Append($"  threadId: {em.ThreadId}\n");
+                // snippet is the only content-bearing Email field — active-tab only (FR-A4),
+                // same gating as DocumentViewer.selectionText / Summary.tldr+summary.
+                if (contentVisible && !string.IsNullOrWhiteSpace(em.Snippet))
+                    sb.Append($"  snippet: {em.Snippet}\n");
                 break;
         }
         return sb.ToString();

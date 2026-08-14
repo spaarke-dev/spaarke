@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Project wrap-up — final quality gates, test-diet, cleanup, docs, lessons-learned</title>
+    <phase>9 Wrap-up</phase>
+    <gate>blocked until 002,013,025,039,043</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Runs code-review + adr-check + test-diet gates across all project code; touches many files</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Orchestrates existing gate skills (code-review, adr-check, test-diet, repo-cleanup) — no novel implementation</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final sequential task — aggregates all phases; runs gates over the whole project</parallel-reason>
+    <deps>002,013,025,039,043</deps>
+    <tags>testing, deploy, refactoring</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close out the project: run final quality gates (code-review + adr-check), run the project-close
+    test-diet gate (ADR-038), run repo-cleanup, update README/plan to Complete, and document
+    lessons-learned.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the Spaarke task lifecycle, quality gates, and repo hygiene.</role>
+
+  <goal>
+    The project is formally complete: all quality gates pass (no unresolved criticals), scaffolding tests
+    reconciled per test-diet, ephemeral notes cleaned, README + plan marked Complete with graduation
+    criteria checked, and lessons-learned recorded.
+  </goal>
+
+  <context>
+    <background>
+      Mandatory final task for every project (task-create Step 3.7). Also runs the project-close test diet
+      gate (CLAUDE.md §7) and updates the active-project registry entry for R2 in projects/INDEX.md.
+    </background>
+    <relevant-files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/README.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/plan.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/notes/lessons-learned.md</file>
+      <file>projects/INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Run /test-diet BEFORE marking the project complete (CLAUDE.md §7 project-close gate, ADR-038). It is read-only — emit git rm/git mv for the reviewer.</constraint>
+    <constraint source="project">Resolve or explicitly defer (via /defer) any critical code-review or adr-check finding before marking Complete.</constraint>
+    <constraint source="ADR-038">Reconcile tests added/modified against the build-vs-maintain classifier; SCAFFOLDING deleted, MAINTAIN kept at its KEEP path.</constraint>
+    <constraint source="project">Update the R2 row in projects/INDEX.md to reflect completion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Run /code-review over all project code; resolve criticals or /defer with a concrete failure mode.</step>
+    <step order="2">Run /adr-check over all project code; resolve or formalize exceptions (CLAUDE.md §6.5).</step>
+    <step order="3">Run /test-diet to reconcile tests added/modified (ADR-038); apply the emitted git rm/git mv after reviewer approval.</step>
+    <step order="4">Run /repo-cleanup projects/spaarkeai-assistant-enhancements-r2; approve removals (notes/debug, spikes, drafts).</step>
+    <step order="5">Update README.md: Status=Complete, Phase=Complete, Progress=100%, Completed Date set, all graduation criteria checked, changelog entry.</step>
+    <step order="6">Update plan.md: Status=Complete; mark milestones ✅.</step>
+    <step order="7">Append lessons-learned to notes/lessons-learned.md (corrections + confirmed non-obvious approaches + why).</step>
+    <step order="8">Update projects/INDEX.md R2 row to Complete.</step>
+    <step order="9">Verify all tasks in TASK-INDEX.md are ✅; update this task to ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If code-review or adr-check surfaces a critical that is neither fixable in scope nor a defensible §6.5 exception, STOP and escalate rather than marking the project Complete.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="npm">Build TypeScript projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r2/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r2/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">code-review + adr-check run with no unresolved criticals (or documented §6.5 exceptions).</criterion>
+    <criterion testable="true">/test-diet run; scaffolding vs maintain reconciled per ADR-038.</criterion>
+    <criterion testable="true">repo-cleanup completed; ephemeral notes removed.</criterion>
+    <criterion testable="true">README + plan marked Complete; all graduation criteria checked.</criterion>
+    <criterion testable="true">lessons-learned.md updated; projects/INDEX.md R2 row marked Complete; all tasks ✅ in TASK-INDEX.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Project-close test-diet gate is a HARD WARNING if skipped (CLAUDE.md §7). Wrap-up PR must cite the test-diet report.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill.</protocol>
+  </execution>
+</task>

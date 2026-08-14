@@ -14,6 +14,27 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 public static class ExternalAccessModule
 {
     /// <summary>
+    /// Static allow-list of the outside-counsel widget <c>sprk_gridconfiguration</c> record ids
+    /// authored by task 016 (2026-08-06). See the "grid-configuration" module registration below.
+    /// </summary>
+    /// <summary>
+    /// Shared empty-set singleton for always-fail-closed predicates (e.g. the "matters" module,
+    /// D-016-1) — avoids allocating a new empty <see cref="HashSet{T}"/> on every predicate call
+    /// (code-review Step 4 perf nit).
+    /// </summary>
+    private static readonly IReadOnlySet<Guid> EmptyRecordIds = new HashSet<Guid>();
+
+    private static readonly IReadOnlySet<Guid> OutsideCounselGridConfigurationIds = new HashSet<Guid>
+    {
+        Guid.Parse("61711823-1092-f111-b8dc-7ced8ddc4a05"), // Projects
+        Guid.Parse("3af4102c-1092-f111-b8dc-7ced8ddc4a05"), // Documents
+        Guid.Parse("3ff4102c-1092-f111-b8dc-7ced8ddc4a05"), // Invoices
+        Guid.Parse("42f4102c-1092-f111-b8dc-7ced8ddc4a05"), // Work Assignments
+        Guid.Parse("583a2a33-1092-f111-b8dc-7ced8ddc4a05"), // Matters
+        Guid.Parse("403e5d37-cb94-f111-b8db-00224835447a"), // Service Requests (internal-only, task 028)
+    };
+
+    /// <summary>
     /// Adds external access services: participation data loading and project data queries.
     /// </summary>
     public static IServiceCollection AddExternalAccess(this IServiceCollection services)
@@ -36,6 +57,25 @@ public static class ExternalAccessModule
         // Data service — queries project data (projects, documents, events, contacts, organizations)
         // for external SPA users using managed identity app-only access.
         services.AddHttpClient<ExternalDataService>((sp, client) =>
+        {
+            var config = sp.GetRequiredService<IConfiguration>();
+            var dataverseUrl = config["Dataverse:ServiceUrl"];
+            if (!string.IsNullOrEmpty(dataverseUrl))
+            {
+                client.BaseAddress = new Uri($"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/");
+                client.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+                client.DefaultRequestHeaders.Add("OData-Version", "4.0");
+            }
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+
+        // Module entitlement resolver (task 072, owner Option B) — resolves the Tier-1 module-code set
+        // the external-spa widget registry gates tabs on (/api/v1/external/me/entitlements): workforce
+        // from sprk_approlemodulemap (App-Role → module), CIAM blanket outside-counsel set. Typed
+        // HttpClient (app-only Dataverse read, broker-only NFR-02) with a 60s Redis map cache (ADR-009 —
+        // caches the small GLOBAL config map as DATA, never an authorization decision). Concrete
+        // registration (ADR-010) — single implementation, mirroring ExternalParticipationService.
+        services.AddHttpClient<ModuleEntitlementResolver>((sp, client) =>
         {
             var config = sp.GetRequiredService<IConfiguration>();
             var dataverseUrl = config["Dataverse:ServiceUrl"];
@@ -79,6 +119,132 @@ public static class ExternalAccessModule
         services.AddScoped<ICallerPrincipalStrategy, WorkforcePrincipalStrategy>();
         services.AddScoped<ICallerPrincipalResolver, CallerPrincipalResolver>();
 
+        // Module-host registration framework (spaarke-SPA-external-access-platform-r2 task 015 · FR-22 ·
+        // ADR-028 A3). Generalizes the resolver seam into a per-module registry: each module registers a
+        // Tier-2 record predicate (over the plane-agnostic CallerPrincipal) that the BffDataverseClient
+        // read-data group applies. Registering a module is purely additive (call AddExternalModule) — no
+        // route/filter/handler change. The registry is a singleton built from every registered
+        // ExternalModuleDescriptor; it holds no per-request state (the predicate delegates run on the
+        // request's CallerPrincipal), so it is read-only + thread-safe after startup. ADR-010: concrete
+        // registration — the pluggable seam is the per-module descriptor delegates, not an interface.
+        services.AddSingleton<ExternalModuleRegistry>(sp =>
+        {
+            var registry = new ExternalModuleRegistry();
+            foreach (var descriptor in sp.GetServices<ExternalModuleDescriptor>())
+            {
+                registry.Register(descriptor);
+            }
+            return registry;
+        });
+
+        // FIRST module — the collaboration / Secure-Project surface delivered by teams-app-r1, now
+        // registered OVER the framework (design.md §3 reuse-as-is + generalize). Its Tier-2 predicate IS
+        // the project scope both plane strategies already composed onto CallerPrincipal.ProjectAccess
+        // (CIAM → sprk_externalrecordaccess participations; workforce → accessible-record-set). Task 016
+        // registers the remaining outside-counsel modules (matter/document/invoice/work-assignment) the
+        // same way — AddExternalModule with one descriptor each, no framework change.
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "collaboration",
+            RecordEntity = "sprk_project",
+            RecordIdAttribute = "sprk_projectid",
+            AccessibleRecordIds = principal => principal.GetAccessibleProjectIds().ToHashSet(),
+        });
+
+        // Task 028 (2026-08-10) — POLYMORPHIC Tier-2 scoping. Supersedes task 016's single-parent
+        // (project-only) wiring. Access is held at ROOT records (Project / Matter / Work Assignment);
+        // a child (Document / Invoice) rolls up to ANY accessible root, so each child module declares a
+        // LIST of OR'd scope dimensions — one per typed parent lookup (all verified live: sprk_document
+        // has sprk_project/sprk_matter/sprk_workassignment; sprk_invoice has sprk_matter/sprk_project).
+        // The accessible-root id sets (P/M/W) are already composed onto CallerPrincipal by both plane
+        // strategies (CIAM → grants-only; workforce → membership ∪ grants), so every predicate stays a
+        // pure synchronous read of the principal (no extra Dataverse round-trip). Each widget's inline
+        // FetchXML projects the parent-lookup attributes (hidden columns) so ScopeRows can evaluate
+        // them; the server-side injector emits <filter type='or'> across the non-empty dimensions.
+
+        // Documents — visible when attached to an accessible project OR matter OR work assignment.
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "documents",
+            RecordEntity = "sprk_document",
+            ScopeDimensions = new[]
+            {
+                new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
+                new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
+                new ScopeDimension { Attribute = "sprk_workassignment", AccessibleIds = p => p.GetAccessibleWorkAssignmentIds() },
+            },
+        });
+
+        // Invoices — visible when attached to an accessible matter OR project (invoices carry both
+        // sprk_matter and sprk_project lookups; R1's project-only scope silently hid matter-parented
+        // invoices — the concrete over-hide task 028 fixes).
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "invoices",
+            RecordEntity = "sprk_invoice",
+            ScopeDimensions = new[]
+            {
+                new ScopeDimension { Attribute = "sprk_matter", AccessibleIds = p => p.GetAccessibleMatterIds() },
+                new ScopeDimension { Attribute = "sprk_project", AccessibleIds = p => p.GetAccessibleProjectIds().ToHashSet() },
+            },
+        });
+
+        // Work Assignments — a FIRST-CLASS ROOT (task 028): a standalone WA (no project/matter) can be
+        // granted to outside counsel and carry its own documents. Scoped by the WA's OWN id ∈ the
+        // caller's accessible work-assignment set (was: scoped by sprk_regardingproject, which hid any
+        // WA not tied to an accessible project — including grant-only standalone WAs).
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "work-assignments",
+            RecordEntity = "sprk_workassignment",
+            RecordIdAttribute = "sprk_workassignmentid",
+            AccessibleRecordIds = p => p.GetAccessibleWorkAssignmentIds(),
+        });
+
+        // Matters — a first-class ROOT (task 028; supersedes the D-016-1 always-empty stub). Scoped by
+        // the matter's own id ∈ the caller's accessible matter set (CIAM → matter grants; workforce →
+        // membership ∪ matter grants). No Contact→Organization resolution needed: matter access is an
+        // explicit sprk_externalrecordaccess grant of recordtype=Matter, exactly like project access.
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "matters",
+            RecordEntity = "sprk_matter",
+            RecordIdAttribute = "sprk_matterid",
+            AccessibleRecordIds = p => p.GetAccessibleMatterIds(),
+        });
+
+        // Service Requests (task 028) — INTERNAL-ONLY. Shows the caller's OWN submitted requests
+        // (sprk_requestedby == caller contact). Fail-closed for the CIAM partner plane: the accessible
+        // set is empty for a non-workforce caller, so a partner sees 0 rows even if the tab were somehow
+        // requested — server-side enforcement of "internal-only" that does not rely on the client hiding
+        // the tab (the external-spa also entitlement-gates the tab off the partner surface).
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "service-requests",
+            RecordEntity = "sprk_servicerequest",
+            RecordIdAttribute = "sprk_requestedby",
+            AccessibleRecordIds = p =>
+                p.Plane == CallerPrincipalPlane.Workforce && p.ContactId != Guid.Empty
+                    ? new HashSet<Guid> { p.ContactId }
+                    : EmptyRecordIds,
+        });
+
+        // grid-configuration (D-016-2): every <DataGrid configId=…/> widget fetches its own
+        // sprk_gridconfiguration record via BffDataverseClient.retrieveRecord BEFORE it can resolve
+        // an entity/fetchXml at all (DataGrid.tsx fetchConfigRecord) — that read goes through this
+        // SAME Tier-2-gated seam (GET /api/dataverse/record/{entity}/{id}), so sprk_gridconfiguration
+        // must ALSO be a registered module or every widget's config load is denied and no grid ever
+        // renders. A grid-configuration record carries only column/layout metadata (no tenant PII, no
+        // Graph pointer) — safe to expose by a small static allow-list of the exact config record ids
+        // task 016 authored (NOT "all gridconfiguration records"), fail-closed to any other id.
+        services.AddExternalModule(new ExternalModuleDescriptor
+        {
+            Name = "grid-configuration",
+            RecordEntity = "sprk_gridconfiguration",
+            RecordIdAttribute = "sprk_gridconfigurationid",
+            AccessibleRecordIds = _ => OutsideCounselGridConfigurationIds,
+        });
+
         // Accessible-record-set composition + enforcement gate (teams-app-r1 task 022, spec FR-06 /
         // design §5). Composes accessible(principal) = systemuser→ADR-034 membership (auto) ∪
         // contact→sprk_externalrecordaccess grants ∪ contact→standing-grant runtime membership, and is
@@ -100,6 +266,23 @@ public static class ExternalAccessModule
         // cross-tenant client above; reuses PasswordGenerator (RegistrationModule). Singleton per ADR-010.
         services.AddSingleton<CiamUserProvisioningService>();
 
+        return services;
+    }
+
+    /// <summary>
+    /// Registers one external module (widget) on the module-host platform (FR-22 · ADR-028 A3). Purely
+    /// additive: the <see cref="ExternalModuleRegistry"/> singleton aggregates every registered
+    /// <see cref="ExternalModuleDescriptor"/> at startup. This is the "add a module = register" seam —
+    /// no route, filter, resolver, or handler changes. Task 016 uses it to register the outside-counsel
+    /// modules. Registration order does not matter — the registry factory enumerates every registered
+    /// descriptor at resolution time — but keep module registration in <c>AddExternalAccess</c>'s
+    /// composition path so the registry singleton is also registered.
+    /// </summary>
+    public static IServiceCollection AddExternalModule(
+        this IServiceCollection services, ExternalModuleDescriptor descriptor)
+    {
+        ArgumentNullException.ThrowIfNull(descriptor);
+        services.AddSingleton(descriptor);
         return services;
     }
 }

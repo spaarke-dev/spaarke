@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Implement getAgentVisibleState() on the email widget + on-demand body via eml-render (FR-C1/C4)</title>
+    <phase>5 C — Email visibility</phase>
+    <gate>blocked until 040</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend widget implementation reaching data held in a record hook</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The email compact shape lives in useEmailWorkspaceRecord, not the widget wrapper — non-trivial data-plumbing across the widget boundary</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>C2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits EmailWorkspaceWidget + registration — separate files from ConversationPane; depends on 040's Email shape</parallel-reason>
+    <deps>040</deps>
+    <tags>react, frontend, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Implement `getAgentVisibleState()` on the real email workspace widget (EmailWorkspaceWidget; and CommunicationsWorkspaceWidget where it can be a tab), returning the compact Email shape (subject, from, date, thread id, short snippet or current selection) by reaching the data held in `useEmailWorkspaceRecord`; register it (the 4th getVisibleState arg); when a turn needs the full body/thread, the agent fetches it on-demand via the existing `eml-render` tool (no consent gate — active-tab-as-consent).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript shared-lib expertise; comfortable plumbing widget-boundary data from a record hook into a registry getVisibleState arg and reasoning about on-demand vs per-turn content injection.</role>
+  <goal>An open, visible-to-assistant email tab contributes its compact shape to the agent prompt; "summarize this email" triggers an eml-render fetch (full body not injected into every turn).</goal>
+  <context>
+    <background>FR-C1/C4. EmailWorkspaceWidget is registered as type 'email' at register-workspace-widgets.ts:802-817 with NO 4th getVisibleState arg (so no getAgentVisibleState today). The widget wrapper holds NO email data — email fields (subject/from/date/thread/snippet/selection) live in Spaarke.Communication.Components/src/components/EmailWorkspace/ via useEmailWorkspaceRecord.ts. On-demand full body already exists: GET /api/documents/{documentId}/eml-render (FileAccessEndpoints.cs:901-949). EmailStubWidget (FR-C5) is ABSENT from this worktree — out of scope.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailWorkspaceWidget.tsx (implement getAgentVisibleState)</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts (add the 4th getVisibleState arg at :802-817)</file>
+      <file>src/client/shared/Spaarke.Communication.Components/src/components/EmailWorkspace/useEmailWorkspaceRecord.ts (source of email fields)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs (eml-render :901-949, on-demand only)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-015">Emit only the COMPACT shape ambiently; full body ON-DEMAND via eml-render, not per-turn.</constraint>
+    <constraint source="ADR-007">eml-render is the SPE-backed on-demand body path.</constraint>
+    <constraint source="project">The widget wrapper holds no email data — derive the compact shape from useEmailWorkspaceRecord.</constraint>
+    <constraint source="project">No explicit consent gate (active-tab-as-consent).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Expose the compact email shape from useEmailWorkspaceRecord to the widget.</step>
+    <step order="2">Implement getAgentVisibleState() returning the 040 Email shape.</step>
+    <step order="3">Register it (4th getVisibleState arg in register-workspace-widgets.ts).</step>
+    <step order="4">Verify the full body is fetched on-demand via eml-render (not injected per turn).</step>
+    <step order="5">Build the shared lib; test.</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If the email compact shape cannot be reached from useEmailWorkspaceRecord without a broader refactor of EmailWorkspace, STOP and escalate rather than expanding scope into the email component internals.</trigger>
+  </escalation>
+  <ui-tests>
+    <test name="Email visible">
+      <steps>Open an email tab, verify the Assistant can state its subject/sender/thread; ask "summarize this email", verify an eml-render fetch occurs and the full body is not in every turn. Include an ADR-021 dark-mode no-regression check.</steps>
+      <expected>The Assistant states the open email's subject/sender/thread; "summarize this email" triggers an eml-render fetch; the full body is not injected into every turn; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <justification>
+    <existing>EmailWorkspaceWidget registered without getVisibleState; holds no email data.</existing>
+    <extension>Yes — implement the registry's getVisibleState arg + read useEmailWorkspaceRecord.</extension>
+    <cost-of-doing-nothing>The Assistant can't see an open email's subject/sender/thread.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/EmailWorkspaceWidget.tsx</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A visible email tab contributes its compact shape (subject/from/date/thread/snippet) to the agent prompt.</criterion>
+    <criterion testable="true">"summarize this email" triggers an eml-render fetch.</criterion>
+    <criterion testable="true">The full body is not injected into every turn.</criterion>
+    <criterion testable="true">No consent gate.</criterion>
+    <criterion testable="true">CommunicationsWorkspaceWidget contributes the shape where it can be a tab.</criterion>
+  </acceptance-criteria>
+  <notes>FR-C1/C4; FR-C5 (EmailStub) is OUT of scope.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

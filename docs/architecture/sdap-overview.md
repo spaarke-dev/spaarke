@@ -52,7 +52,7 @@ SDAP is an enterprise platform integrating Dataverse with SharePoint Embedded (S
 └─────────────────────────────────┼────────────────────────────────────────────┘
                                   │
 ┌─────────────────────────────────┼────────────────────────────────────────────┐
-│  BFF API (Sprk.Bff.Api)        │        .NET 8 Minimal API                  │
+│  BFF API (Sprk.Bff.Api)        │        .NET 10 Minimal API                  │
 │  spe-api-dev-67e2xz.azurewebsites.net                                       │
 │                                                                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │

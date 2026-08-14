@@ -1,14 +1,18 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Azure.Core;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Services.Compose.Operations;
@@ -99,6 +103,26 @@ public static class ComposeEndpoints
             .Produces<SaveComposeDocumentResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status404NotFound)
+            .Produces(StatusCodes.Status500InternalServerError);
+
+        // (3a) POST /api/compose/documents/{documentSpeId}/apply-template — FR-05 (task 032,
+        //      spaarkeai-compose-r6): apply a firm/matter template's chrome to a PERSISTED Compose
+        //      document. The ENDPOINT resolves the template via IComposeTemplateSource (task 031's
+        //      ADR-013 PublicContracts facade — templates are org-shared assets read app-only, the
+        //      SAME auth class as the email-template render at CommunicationTemplateEndpoints; the
+        //      DOCUMENT bytes stay user-OBO), then IComposeService.ApplyTemplateAsync runs the ONE
+        //      030 part-merge engine and persists a new SPE version through the existing replace
+        //      path. Deterministic OOXML packaging — NOT an AI dispatch (ADR-039).
+        group.MapPost("/documents/{documentSpeId}/apply-template", ApplyTemplate)
+            .WithName("ComposeApplyTemplate")
+            .WithSummary("Apply a firm/matter template's chrome to a persisted Compose document via the OOXML part-merge engine (FR-05)")
+            // SPE persistence (writes a new version) → ai-persist, same bucket as sibling Save (3).
+            .RequireRateLimiting("ai-persist")
+            .Produces<ApplyComposeTemplateResponse>(StatusCodes.Status200OK)
+            .Produces(StatusCodes.Status400BadRequest)
+            .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
@@ -999,13 +1023,19 @@ public static class ComposeEndpoints
             };
 
             // FR-01 (task 010, spaarkeai-compose-fidelity-r4.5, WS-1 "one reader everywhere"): run the
-            // retained bytes through the SAME projection builder LoadAsync uses (via
-            // IComposeService.ProjectDocument) so the assistant-upload door renders through the one
-            // reader (F-2) instead of the client mammoth fallback. Fail-closed + best-effort — a
-            // non-.docx upload (e.g. a retained .pdf/.txt) or an unreadable source yields
-            // Status=Failed/CanEdit=false (never throws); the client keys off Status/CanEdit, not
+            // retained bytes through the SAME projection builder LoadAsync uses so the assistant-upload
+            // door renders through the one reader (F-2) instead of the client mammoth fallback.
+            // Task 012 (the client cutover): upgraded ProjectDocument → ProjectForMount — the bytes are
+            // paraId-minted FIRST (in-memory, fail-open) and BOTH the HTML projection and the canonical
+            // content model are built from the same minted bytes, so the editor's node ids and the
+            // retained model's block ids agree; the minted bytes are what this response returns as
+            // Content (the client's retained mount baseline). Fail-closed + best-effort — a non-.docx
+            // upload (e.g. a retained .pdf/.txt) or an unreadable source yields Status=Failed/
+            // CanEdit=false + a null model (never throws); the client keys off Status/CanEdit, not
             // Html.Length, so this never fails the upload-mount itself (mirrors Load's own contract).
-            var projection = composeService.ProjectDocument(binary, ct);
+            var mount = composeService.ProjectForMount(binary, ct);
+            var projection = mount.Projection;
+            binary = mount.Content.ToArray();
             if (projection.Status == ComposeProjectionStatus.Failed)
             {
                 logger.LogWarning(
@@ -1028,7 +1058,12 @@ public static class ComposeEndpoints
                 Content: binary,
                 Size: binary.Length,
                 Projection: MapProjectionResponse(projection),
-                CorrelationId: httpContext.TraceIdentifier));
+                CorrelationId: httpContext.TraceIdentifier,
+                // Task 012: the retained canonical model for the imported-save mapper (see
+                // LoadComposeDocumentResponse.ContentModel). Built from the SAME minted Content above.
+                ContentModel: mount.ContentModel,
+                // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+                ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings)));
         }
         catch (Exception ex)
         {
@@ -1069,7 +1104,14 @@ public static class ComposeEndpoints
 
         // Pure, synchronous, no I/O (ADR-007/ADR-013) — the SAME builder instance LoadAsync/Upload
         // use, so Browse renders through the one reader (F-2), not a forked projection path.
-        var projection = composeService.ProjectDocument(body.Content, ct);
+        // Task 012 (the client cutover): upgraded ProjectDocument → ProjectForMount — mint paraIds
+        // FIRST (in-memory; this door still persists NOTHING), then build the HTML projection AND the
+        // canonical content model from the same minted bytes so their ids agree. When minting mutated
+        // the bytes, the response echoes them (`content`) so the client adopts the id-carrying copy as
+        // its retained mount baseline; when nothing needed minting the echo is omitted (the caller's
+        // own bytes are already identical — no payload growth).
+        var mount = composeService.ProjectForMount(body.Content, ct);
+        var projection = mount.Projection;
         if (projection.Status == ComposeProjectionStatus.Failed)
         {
             logger.LogWarning(
@@ -1085,7 +1127,13 @@ public static class ComposeEndpoints
 
         return Results.Ok(new ComposeProjectResponse(
             Projection: MapProjectionResponse(projection),
-            CorrelationId: httpContext.TraceIdentifier));
+            CorrelationId: httpContext.TraceIdentifier,
+            // Task 012: the retained canonical model + (only when minting mutated the bytes) the
+            // minted content echo — see the handler comment above. Still stateless: nothing persisted.
+            ContentModel: mount.ContentModel,
+            Content: mount.Minted ? mount.Content.ToArray() : null,
+            // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+            ContentModelWarnings: MapWarningResponses(mount.ContentModelWarnings)));
     }
 
     /// <summary>
@@ -1139,6 +1187,12 @@ public static class ComposeEndpoints
                 .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
                 .ToList(),
             SchemaVersion: projection.SchemaVersion);
+
+    /// <summary>Task 013 (012-review F7): maps service-layer projection warnings onto the wire DTO
+    /// (code + count only — the Detail never crosses the wire). Null-propagating.</summary>
+    private static IReadOnlyList<ComposeProjectionWarningResponse>? MapWarningResponses(
+        IReadOnlyList<ComposeProjectionWarning>? warnings)
+        => warnings?.Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count)).ToList();
 
     private static async Task<IResult> Load(
         string documentSpeId,
@@ -1249,11 +1303,35 @@ public static class ComposeEndpoints
                 Projection: MapProjectionResponse(result.Projection),
                 CorrelationId: httpContext.TraceIdentifier,
                 // G1 (FR-01, task 020): the persisted authored-vs-imported origin marker (Path A only).
-                Origin: result.Origin));
+                Origin: result.Origin,
+                // Task 012 (the client cutover): the canonical content model the client RETAINS and
+                // re-posts (merged with editor state) on an imported dirty save — the render-on-save
+                // (a1) request shape. Null when the canonical projection failed (client falls back to
+                // the transitional op-log shape). Additive, camelCase (ADR-040).
+                ContentModel: result.ContentModel,
+                // Task 013 (012-review F7): the canonical projection's flatten warnings - the client
+                // folds them into the FIRST model-path save's degradation banner. Additive.
+                ContentModelWarnings: MapWarningResponses(result.ContentModelWarnings),
+                // Task 040 (FR-06, PDF intake): "pdf" when Content is the docx SYNTHESIZED from the
+                // PDF's canonical-model projection; null for a native docx load. Additive (ADR-040).
+                SourceFormat: result.SourceFormat));
         }
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (ComposePdfIntakeException ex)
+        {
+            // Task 040 Step-9.5 HIGH-1: honest PDF-intake ProblemDetails — 503 (intake unavailable,
+            // retryable) vs 422 (this document is not projectable) — carrying the service's real
+            // message instead of collapsing into the generic 500 catch-all. MUST precede the
+            // InvalidOperationException catch below (this type derives from it).
+            logger.LogWarning(ex, "Compose load: PDF intake refused (unavailable={Unavailable}). TraceId={TraceId}",
+                ex.Unavailable, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
+                title: ex.Unavailable ? "PDF Intake Unavailable" : "PDF Not Editable",
+                detail: ex.Message);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {
@@ -1427,6 +1505,9 @@ public static class ComposeEndpoints
             // forkNew forces a fresh record ("Save New Document").
             TransientKey = body.TransientKey,
             ForkNew = body.ForkNew,
+            // Task 041 B-MED-3 (option C): the source record whose links the new document inherits
+            // (PDF-sourced create-on-save — filed alongside the source PDF).
+            SourceDocumentRecordId = body.SourceDocumentRecordId,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -1464,11 +1545,32 @@ public static class ComposeEndpoints
                 // clean-apply engine mode selection without a follow-up Load).
                 Origin: result.Origin,
                 // Prong 1 (task 055): best-effort partial-apply outcome (null on the clean path).
-                PartialApply: result.PartialApply));
+                PartialApply: result.PartialApply,
+                // Task 026 (FR-04): success-with-warnings degradation surface — mapped to the same
+                // wire DTO the load path uses (code + count only; the service record's Detail never
+                // crosses the wire).
+                DegradationWarnings: result.DegradationWarnings?
+                    .Select(w => new ComposeProjectionWarningResponse(w.Code, w.Count))
+                    .ToList(),
+                // Task 012: the post-save canonical model (render-path saves only) — the client adopts it
+                // as its new retained loaded model + re-baselines its snapshot. Additive (ADR-040).
+                ContentModel: result.ContentModel));
         }
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (ComposePdfIntakeException ex)
+        {
+            // Task 040 Step-9.5 HIGH-2: a save baseline resolved to PDF bytes (rogue/stale caller —
+            // the 041 client saves PDF-sourced docs via create-on-save). Refuse with the honest 422
+            // instead of a deep OOXML failure surfacing as a generic 500. MUST precede the
+            // InvalidOperationException catch below (this type derives from it).
+            logger.LogWarning(ex, "Compose save: PDF baseline refused. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
+                title: ex.Unavailable ? "PDF Intake Unavailable" : "PDF Cannot Be Saved In Place",
+                detail: ex.Message);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
         {
@@ -1535,6 +1637,171 @@ public static class ComposeEndpoints
                 title: "Internal Server Error",
                 detail: $"Save failed: {ex.GetType().Name}: {ex.Message}. TraceId={httpContext.TraceIdentifier}");
         }
+    }
+
+    // FR-05 (task 032, spaarkeai-compose-r6): apply-template. The endpoint's own responsibilities
+    // mirror CommunicationTemplateEndpoints.RenderTemplateAsync exactly for the TEMPLATE leg:
+    // resolve dataverseUrl from IOptions<DataverseOptions>.EnvironmentUrl and mint the app-only
+    // Dataverse token from the DI-injected central TokenCredential ({url}/.default — ADR-028
+    // canonical server-outbound; templates are org-shared assets, the same class as email
+    // templates). The DOCUMENT leg (download/replace) stays user-OBO inside
+    // IComposeService.ApplyTemplateAsync. IComposeTemplateSource is the ADR-013-sanctioned
+    // PublicContracts facade — no AI internals are injected here.
+    private static async Task<IResult> ApplyTemplate(
+        string documentSpeId,
+        [FromBody] ApplyComposeTemplateBody? body,
+        IComposeService composeService,
+        IComposeTemplateSource templateSource,
+        TokenCredential credential,
+        IOptions<DataverseOptions> dataverseOptions,
+        ILoggerFactory loggerFactory,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
+
+        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
+        if (body is null) return BadRequest("Request body is required.");
+        if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
+        if (string.IsNullOrWhiteSpace(body.TemplateIdOrName)) return BadRequest("templateIdOrName is required in the request body.");
+
+        var dataverseUrl = dataverseOptions.Value.EnvironmentUrl;
+        if (string.IsNullOrWhiteSpace(dataverseUrl))
+        {
+            logger.LogError("Compose apply-template: Dataverse:EnvironmentUrl is not configured. TraceId={TraceId}",
+                httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Dataverse Not Configured",
+                detail: "Dataverse:EnvironmentUrl is not configured on this server.");
+        }
+
+        logger.LogInformation(
+            "Compose apply-template: drive={DriveId} item={DocumentSpeId} template={TemplateIdOrName} variables={VariableCount} TraceId={TraceId}",
+            body.DriveId, documentSpeId, body.TemplateIdOrName, body.Variables?.Count ?? 0, httpContext.TraceIdentifier);
+
+        try
+        {
+            // 1) App-only Dataverse token for the org-shared template read (ADR-028; mirrors
+            //    CommunicationTemplateEndpoints step 2).
+            var scope = $"{dataverseUrl.TrimEnd('/')}/.default";
+            var accessToken = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), ct)
+                .ConfigureAwait(false);
+
+            // 2) Resolve the firm/matter template (fetch + optional {{variable}} render — task 031).
+            var resolved = await templateSource.ResolveAsync(
+                    body.TemplateIdOrName,
+                    NormalizeTemplateVariables(body.Variables),
+                    dataverseUrl,
+                    accessToken.Token,
+                    ct)
+                .ConfigureAwait(false);
+
+            if (resolved is null)
+            {
+                logger.LogWarning(
+                    "Compose apply-template: template '{TemplateIdOrName}' not found or has no stored attachment. TraceId={TraceId}",
+                    body.TemplateIdOrName, httpContext.TraceIdentifier);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status404NotFound,
+                    title: "Template Not Found",
+                    detail: $"Template '{body.TemplateIdOrName}' was not found or has no stored .dotx/.docx attachment.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+            }
+
+            // 3) Merge + persist + re-project (user-OBO document leg — the 030 engine inside).
+            var result = await composeService.ApplyTemplateAsync(
+                    httpContext, body.DriveId, documentSpeId, resolved.TemplateBytes, resolved.TemplateName, ct)
+                .ConfigureAwait(false);
+
+            return Results.Ok(new ApplyComposeTemplateResponse(
+                DocumentSpeId: result.DocumentSpeId,
+                DriveId: result.DriveId,
+                TemplateName: result.TemplateName,
+                VersionId: result.VersionId,
+                ETag: result.ETag,
+                Size: result.Size,
+                CorrelationId: httpContext.TraceIdentifier,
+                MergeWarnings: MapWarningResponses(result.MergeWarnings),
+                ContentModel: result.ContentModel,
+                ContentModelWarnings: MapWarningResponses(result.ContentModelWarnings)));
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(ex.Message);
+        }
+        catch (ComposePdfIntakeException ex)
+        {
+            // Step-9.5 A-MEDIUM-1 (task 041 review): a PDF item cannot take a template merge — honest
+            // typed ProblemDetails instead of a deep OOXML failure as a generic 500. MUST precede the
+            // InvalidOperationException catch below (this type derives from it).
+            logger.LogWarning(ex, "Compose apply-template: PDF target refused. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.Unavailable ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status422UnprocessableEntity,
+                title: ex.Unavailable ? "PDF Intake Unavailable" : "Template Cannot Apply To A PDF",
+                detail: ex.Message);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(ex, "Compose apply-template: SPE drive-item not found. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Document Not Found",
+                detail: $"SPE drive-item '{documentSpeId}' was not found or is unreadable.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            logger.LogWarning(ex, "Compose apply-template: OBO denied. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Forbidden",
+                detail: "Caller lacks SPE ACL permission for this drive-item.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.3");
+        }
+        catch (Sprk.Bff.Api.Infrastructure.Graph.DocumentLockedByWordException ex)
+        {
+            // Same honest 423 copy as the Save path — the replace leg hits the identical co-authoring lock.
+            logger.LogWarning(ex, "Compose apply-template: drive-item locked by Word co-authoring (423). TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status423Locked,
+                title: "Open in Word",
+                detail: "This document is open in Word — close it there, then try again. It also releases " +
+                        "automatically within a few minutes.",
+                type: "https://tools.ietf.org/html/rfc4918#section-11.3");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Compose apply-template: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while applying the template.");
+        }
+    }
+
+    /// <summary>FR-05 (task 032): normalizes the request's JSON variable values (deserialized as
+    /// <see cref="JsonElement"/>) to the scalar shapes the template engine's <c>{{variable}}</c>
+    /// render expects — strings/numbers/bools pass through as scalars; anything else degrades to its
+    /// raw JSON text (never a <c>JsonElement.ToString()</c> surprise).</summary>
+    private static Dictionary<string, object?>? NormalizeTemplateVariables(Dictionary<string, JsonElement>? variables)
+    {
+        if (variables is null || variables.Count == 0) return null;
+
+        var normalized = new Dictionary<string, object?>(variables.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in variables)
+        {
+            normalized[key] = value.ValueKind switch
+            {
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.Number => value.TryGetInt64(out var l) ? l : value.GetDouble(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Null or JsonValueKind.Undefined => null,
+                _ => value.GetRawText(),
+            };
+        }
+        return normalized;
     }
 
     private static async Task<IResult> Promote(
@@ -2001,7 +2268,12 @@ public sealed record ComposeUploadResponse(
     // this into `mountTransient` so the editor mounts via the SAME projection branch as a
     // stored-document Load, instead of the client mammoth fallback (F-2 one reader).
     [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    // Task 012 (the client cutover): retained canonical model for the imported-save mapper — built
+    // from the SAME minted Content this response returns. Null when the canonical projection failed.
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/project</c> (FR-03 task 011, spaarkeai-compose-fidelity-r4.5,
@@ -2025,7 +2297,17 @@ public sealed record ComposeProjectRequest(
 /// </summary>
 public sealed record ComposeProjectResponse(
     [property: JsonPropertyName("projection")] ComposeProjectionResponse Projection,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    // Task 012 (the client cutover): the retained canonical model (null when projection failed) and —
+    // ONLY when server-side paraId minting mutated the caller's bytes — the minted content echo the
+    // client MUST adopt as its retained mount baseline (so editor node ids, retained-model block ids,
+    // and the save-time carrier stay one id universe). Omitted (null) when nothing needed minting:
+    // the caller's own bytes are already identical, so no payload growth on the common path. The door
+    // remains stateless — nothing is persisted server-side.
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    [property: JsonPropertyName("content")] byte[]? Content = null,
+    // Task 013 (012-review F7): canonical-projection flatten warnings for the client fold.
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
 
 /// <summary>
 /// Request body for <c>POST /api/compose/active-document</c> (task 113 / UAT defects 4/5).
@@ -2132,7 +2414,12 @@ public sealed record SaveComposeDocumentBody(
     /// <summary>G7 (FR-06, task 022): the deliberate <b>Save New Document</b> fork — <c>true</c> skips the
     /// transient-key dedup and mints a fresh record. Default <c>false</c> = <b>Save Version</b> (replace/dedup).
     /// See <see cref="SaveComposeDocumentRequest.ForkNew"/>.</summary>
-    [property: JsonPropertyName("forkNew")] bool ForkNew = false);
+    [property: JsonPropertyName("forkNew")] bool ForkNew = false,
+    // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): the SOURCE sprk_document record this
+    // create derives from — sent by the client on a PDF-sourced create-on-save so the new Word document
+    // INHERITS the source PDF's record links (matter/project/… — filed alongside the PDF). Optional/
+    // trailing (ADR-040 additive); null = no inheritance (every pre-existing flow).
+    [property: JsonPropertyName("sourceDocumentRecordId")] Guid? SourceDocumentRecordId = null);
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentBody(
@@ -2175,7 +2462,19 @@ public sealed record LoadComposeDocumentResponse(
     // null the SAME as "imported" (never strict-equal null to "authored"), per the BINDING null-handling
     // contract (ComposeOrigin remarks). Optional/trailing so existing callers deserializing this response
     // are unaffected.
-    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null);
+    [property: JsonPropertyName("origin")] ComposeOrigin? Origin = null,
+    // Task 012 (the client cutover): the canonical content model, built from the SAME minted bytes as
+    // the HTML projection (paraIds agree). The client retains it and re-posts it — merged with editor
+    // state, every server-set field preserved — as the imported dirty save's `contentModel` (+ a
+    // baseline source). Null when the canonical projection failed. Optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    // Task 013 (012-review F7): flatten warnings of the canonical-model projection (codes + counts) -
+    // folded by the client into the FIRST model-path save's degradation banner. Optional/trailing.
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null,
+    // Task 040 (FR-06, PDF intake): "pdf" when content is the docx SYNTHESIZED from the PDF's
+    // canonical-model projection (client keys the honest-lossiness UX + save-as-docx routing off
+    // this); null for a native docx load. Optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("sourceFormat")] string? SourceFormat = null);
 
 /// <summary>Wire shape of the server DOCX→editor projection (design §3.3). <c>status</c> is
 /// <c>"success" | "partial" | "failed"</c>; the client mounts <c>html</c> only when <c>canEdit</c>, else it
@@ -2238,7 +2537,41 @@ public sealed record SaveComposeDocumentResponse(
     // unresolvable ops are listed here so the client can prompt the user to redo just those edits (never
     // silently applied, never silently dropped). Null on the common path (clean batch apply) and on a
     // batch-level refusal (which still fails hard). Optional/trailing so existing callers are unaffected.
-    [property: JsonPropertyName("partialApply")] PartialApplySummary? PartialApply = null);
+    [property: JsonPropertyName("partialApply")] PartialApplySummary? PartialApply = null,
+    // Task 026 (FR-04 graceful degradation): render-side degradation warnings (codes + counts) — content
+    // the authoring engine simplified/dropped on this save (success-with-warnings; NEVER a 422 for a
+    // hard-tier construct). Null/absent when nothing degraded. Optional/trailing so existing callers
+    // deserializing this response are unaffected.
+    [property: JsonPropertyName("degradationWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? DegradationWarnings = null,
+    // Task 012 (the client cutover): the post-save canonical model (render-path saves only) — null on
+    // op-log/clean saves or when the post-save projection failed. Optional/trailing (ADR-040 additive).
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null);
+
+/// <summary>Request body for <c>POST /api/compose/documents/{id}/apply-template</c> (FR-05, task 032).
+/// <c>templateIdOrName</c> is a template record id (GUID) or the exact template <c>title</c>;
+/// <c>variables</c> optionally feeds the <c>{{placeholder}}</c> render (raw stored bytes when
+/// absent — byte-faithful for variable-free house templates).</summary>
+public sealed record ApplyComposeTemplateBody(
+    [property: JsonPropertyName("driveId")] string DriveId,
+    [property: JsonPropertyName("templateIdOrName")] string TemplateIdOrName,
+    [property: JsonPropertyName("variables")] Dictionary<string, JsonElement>? Variables = null);
+
+/// <summary>Response shape for <c>POST /api/compose/documents/{id}/apply-template</c> (FR-05,
+/// task 032) — the new SPE version the merged document was persisted as, the 030 engine's
+/// <c>template-merge-*</c> degradation warnings (codes + counts only — the Detail never crosses
+/// the wire), and the post-merge canonical content model the client re-mounts on. Additive JSON,
+/// optional trailing fields (ADR-040).</summary>
+public sealed record ApplyComposeTemplateResponse(
+    [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
+    [property: JsonPropertyName("driveId")] string? DriveId,
+    [property: JsonPropertyName("templateName")] string TemplateName,
+    [property: JsonPropertyName("versionId")] string VersionId,
+    [property: JsonPropertyName("eTag")] string? ETag,
+    [property: JsonPropertyName("size")] long? Size,
+    [property: JsonPropertyName("correlationId")] string CorrelationId,
+    [property: JsonPropertyName("mergeWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? MergeWarnings = null,
+    [property: JsonPropertyName("contentModel")] ComposeContentModel? ContentModel = null,
+    [property: JsonPropertyName("contentModelWarnings")] IReadOnlyList<ComposeProjectionWarningResponse>? ContentModelWarnings = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
 public sealed record PromoteComposeDocumentResponse(

@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -33,14 +34,18 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// </remarks>
 public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentService
 {
-    private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
+    // IPostUploadIndexingEnqueuer and the three ICommunication*Ai facades (Triage/Propose/CreateTask)
+    // are Scoped; this service is a Singleton consumed by singleton producers (CommunicationService,
+    // CommunicationChannelDispatcher, …), so each is resolved from a fresh scope at its single use-site
+    // (dotnet-10-upgrade task 020, R3) rather than captured on the ctor — otherwise the Singleton graph
+    // fails ValidateScopes. Each enrichment step is an independent, stateless AI/enqueue call, so a
+    // per-call scoped instance is behavior-preserving.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IConfiguration _configuration;
     private readonly ICommunicationAssessedProducer _assessedProducer;
-    private readonly ICommunicationTriageAi _triageAi;
-    private readonly ICommunicationProposeAi _proposeAi;
-    private readonly ICommunicationCreateTaskAi _createTaskAi;
     private readonly IActionSeam _actionSeam;
+    private readonly Engine.CategoryRoutingGate _routingGate;
     private readonly ILogger<CommunicationEnrichmentService> _logger;
 
     // ── Job B propose (task 030, FR-09) — sprk_emailreviewlog / sprk_emailupdatefield constants ──
@@ -169,24 +174,20 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         };
 
     public CommunicationEnrichmentService(
-        IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
+        IServiceScopeFactory scopeFactory,
         IGenericEntityService genericEntityService,
         IConfiguration configuration,
         ICommunicationAssessedProducer assessedProducer,
-        ICommunicationTriageAi triageAi,
-        ICommunicationProposeAi proposeAi,
-        ICommunicationCreateTaskAi createTaskAi,
         IActionSeam actionSeam,
+        Engine.CategoryRoutingGate routingGate,
         ILogger<CommunicationEnrichmentService> logger)
     {
-        _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _genericEntityService = genericEntityService;
         _configuration = configuration;
         _assessedProducer = assessedProducer ?? throw new ArgumentNullException(nameof(assessedProducer));
-        _triageAi = triageAi ?? throw new ArgumentNullException(nameof(triageAi));
-        _proposeAi = proposeAi ?? throw new ArgumentNullException(nameof(proposeAi));
-        _createTaskAi = createTaskAi ?? throw new ArgumentNullException(nameof(createTaskAi));
         _actionSeam = actionSeam ?? throw new ArgumentNullException(nameof(actionSeam));
+        _routingGate = routingGate ?? throw new ArgumentNullException(nameof(routingGate));
         _logger = logger;
     }
 
@@ -397,7 +398,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
         // App-only path: the outbound .eml was written to SPE by the BFF's Managed Identity, so MI can
         // read its own write (writer-identity rule per sdap-auth-patterns.md Pattern 4). Non-fatal.
-        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct);
+        // IPostUploadIndexingEnqueuer is Scoped — resolve it per-operation from a scope (R3).
+        using var scope = _scopeFactory.CreateScope();
+        var postUploadIndexingEnqueuer = scope.ServiceProvider.GetRequiredService<IPostUploadIndexingEnqueuer>();
+        await postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct);
 
         _logger.LogInformation(
             "Enrichment[rag-indexing] enqueued outbound RAG indexing (previously-missing half closed) | CommunicationId: {CommunicationId}, DocumentId: {DocumentId}.",
@@ -481,7 +485,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             TenantId = tenantId,
         };
 
-        var result = await _triageAi.TriageAsync(request, ct);
+        // ICommunicationTriageAi is Scoped — resolve it per-operation from a scope (R3).
+        using var scope = _scopeFactory.CreateScope();
+        var triageAi = scope.ServiceProvider.GetRequiredService<ICommunicationTriageAi>();
+        var result = await triageAi.TriageAsync(request, ct);
 
         if (result is null)
         {
@@ -601,6 +608,13 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
                 : RiConfidenceScorer.UrgencyWeightFromClassification(classification.Urgency);
             fields["sprk_riconfidence"] = RiConfidenceScorer.Compute(urgencyWeight, deterministicAgreement);
 
+            // category → owning team (FR-E7 / task 057, ADR-018 CategoryRoutingGate): when routing is enabled
+            // and the category is mapped, ASSIGN the communication to the mapped team by setting ownerid (an
+            // ownership set on THIS same additive triage update — ADR-024, no second write path). Wrapped
+            // independently so a routing failure (unknown team / query error) NEVER drops the triage fields
+            // (NFR-04). An unmapped category / disabled routing leaves ownerid untouched (default view).
+            await AssignOwningTeamAsync(result.Category, fields, communicationId, ct).ConfigureAwait(false);
+
             await _genericEntityService.UpdateAsync("sprk_communication", communicationId, fields, ct)
                 .ConfigureAwait(false);
 
@@ -633,6 +647,64 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             TopCount = 1,
         };
         query.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, categoryName);
+
+        var result = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+        return result.Entities.Count > 0 ? result.Entities[0].Id : null;
+    }
+
+    /// <summary>
+    /// FR-E7 (task 057): if the ADR-018 <see cref="Engine.CategoryRoutingGate"/> maps <paramref name="category"/>
+    /// to an owning team, resolve that team's id and set <c>ownerid</c> in <paramref name="fields"/> (assigning
+    /// the communication to the team on the SAME additive triage update). Wrapped in its own try/catch so a
+    /// routing failure never drops the triage fields (NFR-04). An unmapped category, disabled routing, or an
+    /// unknown team name is a no-op (the communication is left in the default/unassigned view — never a forced
+    /// mis-assignment). Tenant-scoped resolution activates when a tenant key is plumbed; the global map applies
+    /// today (single-org default, mirroring <see cref="AutoFileOptions"/>).
+    /// </summary>
+    private async Task AssignOwningTeamAsync(
+        string? category, Dictionary<string, object> fields, Guid communicationId, CancellationToken ct)
+    {
+        try
+        {
+            var teamName = _routingGate.ResolveTeamName(category, tenantKey: null);
+            if (string.IsNullOrWhiteSpace(teamName))
+                return;
+
+            var teamId = await ResolveTeamIdByNameAsync(teamName, ct).ConfigureAwait(false);
+            if (teamId.HasValue)
+            {
+                fields["ownerid"] = new EntityReference("team", teamId.Value);
+                _logger.LogInformation(
+                    "Enrichment[email-triage] routing: category {Category} → team {Team} — assigning ownerid | CommunicationId: {CommunicationId}.",
+                    category, teamName, communicationId);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Enrichment[email-triage] routing: category {Category} maps to team {Team} but no team row matches that name — leaving ownerid unset | CommunicationId: {CommunicationId}.",
+                    category, teamName, communicationId);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Routing is additive — a failure here must NOT drop the triage fields or fail capture (NFR-04).
+            _logger.LogWarning(
+                ex,
+                "Enrichment[email-triage] routing: category→team assignment failed (non-fatal; triage fields still persist) | Category: {Category}, CommunicationId: {CommunicationId}.",
+                category, communicationId);
+        }
+    }
+
+    /// <summary>Resolves a team NAME to its <c>teamid</c> via the SAME name-lookup read path
+    /// <see cref="ResolveTriageCategoryIdAsync"/> uses (no new query mechanism). Null when no team matches.</summary>
+    private async Task<Guid?> ResolveTeamIdByNameAsync(string teamName, CancellationToken ct)
+    {
+        var query = new QueryExpression("team")
+        {
+            ColumnSet = new ColumnSet(false),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("name", ConditionOperator.Equal, teamName);
 
         var result = await _genericEntityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
         return result.Entities.Count > 0 ? result.Entities[0].Id : null;
@@ -770,7 +842,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             TenantId = tenantId,
         };
 
-        var candidates = await _proposeAi.ProposeAsync(request, ct).ConfigureAwait(false);
+        // ICommunicationProposeAi is Scoped — resolve it per-operation from a scope (R3).
+        using var scope = _scopeFactory.CreateScope();
+        var proposeAi = scope.ServiceProvider.GetRequiredService<ICommunicationProposeAi>();
+        var candidates = await proposeAi.ProposeAsync(request, ct).ConfigureAwait(false);
         if (candidates is not { Count: > 0 })
         {
             _logger.LogDebug(
@@ -1163,7 +1238,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
                 TenantId = tenantId,
             };
 
-            var candidates = await _createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
+            // ICommunicationCreateTaskAi is Scoped — resolve it per-operation from a scope (R3).
+            using var scope = _scopeFactory.CreateScope();
+            var createTaskAi = scope.ServiceProvider.GetRequiredService<ICommunicationCreateTaskAi>();
+            var candidates = await createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
             if (candidates is not { Count: > 0 })
             {
                 _logger.LogDebug(
@@ -1627,7 +1705,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
                     TenantId = tenantId,
                 };
 
-                var candidates = await _createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
+                // ICommunicationCreateTaskAi is Scoped — resolve it per-operation from a scope (R3).
+                using var scope = _scopeFactory.CreateScope();
+                var createTaskAi = scope.ServiceProvider.GetRequiredService<ICommunicationCreateTaskAi>();
+                var candidates = await createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
                 if (candidates is not { Count: > 0 })
                 {
                     continue;

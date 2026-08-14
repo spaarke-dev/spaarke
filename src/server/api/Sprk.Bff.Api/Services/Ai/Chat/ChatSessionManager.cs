@@ -295,14 +295,35 @@ public class ChatSessionManager
     /// </summary>
     /// <param name="session">The updated session to cache.</param>
     /// <param name="ct">Cancellation token.</param>
-    internal virtual async Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+    /// <param name="awaitCosmosWrite">
+    /// FR-D2 (task 030): when <c>true</c>, the Cosmos write-through is CONFIRMED — this method does
+    /// not return until the Cosmos upsert completes — instead of the default fire-and-forget (D-06).
+    /// <see cref="ChatHistoryManager.AddMessageAsync"/> sets this for the FIRST message of a session
+    /// (<c>messages[0]</c>) only, so the transcript + title seed (FR-D4) survive a Redis eviction.
+    /// Every other caller (and every later turn) keeps the default <c>false</c> — no latency
+    /// regression on turns 2+ (NFR-03).
+    /// </param>
+    internal virtual async Task UpdateSessionCacheAsync(
+        ChatSession session,
+        CancellationToken ct = default,
+        bool awaitCosmosWrite = false)
     {
         // 1. Refresh Redis hot cache
         await CacheSessionAsync(session, ct);
 
-        // 2. Write-through to Cosmos DB (warm path, D-06) — fire-and-forget.
-        // Cosmos failure must not block the message add path or affect the streaming response.
-        FireAndForgetCosmosPersist(session);
+        // 2. Write-through to Cosmos DB (warm path, D-06).
+        if (awaitCosmosWrite)
+        {
+            // FR-D2: confirmed write for messages[0] — awaited so the caller (and, transitively,
+            // the HTTP request handler) does not complete until the durable warm-tier copy exists.
+            await AwaitedCosmosPersistAsync(session);
+        }
+        else
+        {
+            // Fire-and-forget (D-06 default). Cosmos failure must not block the message add path
+            // or affect the streaming response.
+            FireAndForgetCosmosPersist(session);
+        }
     }
 
     /// <summary>
@@ -587,6 +608,31 @@ public class ChatSessionManager
     }
 
     /// <summary>
+    /// Confirmed (awaited) Cosmos DB upsert for <paramref name="session"/> — the FR-D2 (task 030)
+    /// counterpart to <see cref="FireAndForgetCosmosPersist"/>. Reserved for the FIRST message of a
+    /// session (<c>messages[0]</c>) so the transcript + title seed (FR-D4) are durable in Cosmos
+    /// before the caller (ultimately the SendMessage request handler) returns, closing the gap where
+    /// a Redis eviction between response-completion and the fire-and-forget write finishing would
+    /// otherwise strand a brand-new session with a blank transcript on reopen.
+    ///
+    /// Still routes the underlying Cosmos call through <see cref="CancellationToken.None"/> —
+    /// mirroring <see cref="FireAndForgetCosmosPersist"/>: a client mid-request disconnect must not
+    /// abort a write whose entire purpose is to outlive the request. Only the AWAIT boundary differs
+    /// between the two methods; the write itself is identical (same mapper, same non-throwing
+    /// failure policy inside <see cref="SessionPersistenceService"/>).
+    /// </summary>
+    private async Task AwaitedCosmosPersistAsync(ChatSession session)
+    {
+        if (_persistence is null)
+        {
+            return;
+        }
+
+        var stored = MapChatSessionToStoredSession(session);
+        await _persistence.PersistSessionAsync(stored, CancellationToken.None, awaitCosmosWrite: true);
+    }
+
+    /// <summary>
     /// Maps a <see cref="ChatSession"/> (hot Redis model) to a <see cref="StoredSession"/>
     /// (Cosmos DB warm document). Preserves all message content and metadata, document
     /// references (DocumentId, AdditionalDocumentIds, UploadedFiles manifest), and the
@@ -626,6 +672,29 @@ public class ChatSessionManager
             WidgetStates = [],
             CreatedAt = session.CreatedAt,
             LastActivity = session.LastActivity,
+
+            // FR-D4 (task 032) — stored session title round-trips through the warm tier.
+            Title = session.Title,
+
+            // FR-D10 (task 033) — persist the host context through the warm tier so filed-state SURVIVES
+            // a Redis eviction + Cosmos reload. This is what makes the ttl re-assertion below correct on
+            // every turn: without it, a reopened filed session would restore with a null HostContext and
+            // the next turn would re-derive ttl = null, silently reverting the doc to the 90-day default.
+            // Same "must survive warm-store restore" class as the document references above (ADR-040).
+            HostContext = session.HostContext,
+
+            // FR-D10 (task 033) — per-item Cosmos retention override, DERIVED from live filed-state so
+            // every write-through re-asserts it (a later turn's upsert must never reset a filed doc to
+            // the 90-day container default — filed-state now round-trips via HostContext above, so this
+            // holds even across a warm-tier reload). A session is "filed" once promoted to an Analysis —
+            // its HostContext.EntityType becomes AnalysisHostContextEntityType ("sprk_analysisoutput",
+            // set by PromoteSessionToAnalysisAsync). Filed → ttl = -1 (never expire, FR-D10); unfiled →
+            // null (rides the 90-day default, unchanged). No cleanup job, no container change — the spike
+            // (notes/d10-ttl-spike.md) confirmed the container DefaultTimeToLive is non-null so per-item
+            // overrides take effect.
+            Ttl = string.Equals(session.HostContext?.EntityType, AnalysisHostContextEntityType, StringComparison.Ordinal)
+                ? StoredSession.NeverExpireTtl
+                : null,
 
             // Document references (ADR-040 fix — file refs survive the warm store)
             DocumentId = session.DocumentId,
@@ -717,6 +786,17 @@ public class ChatSessionManager
                 ? SessionPersistenceService.MapFromStored(stored.UploadedFiles)
                 : null)
         {
+            // FR-D4 (task 032) — restore the stored session title from the warm tier.
+            Title = stored.Title,
+
+            // FR-D10 (task 033) — restore the host context (filed-state) from the warm tier so a
+            // reopened filed session is still recognized as filed. This keeps the ttl re-derivation in
+            // MapChatSessionToStoredSession correct across a Redis-eviction + Cosmos-reload: the next
+            // turn re-asserts ttl = -1 instead of silently reverting to the 90-day default. Null for
+            // knowledge-only sessions or warm documents that pre-date the field (Dataverse remains the
+            // cold-tier authority for those). The ChatHostContext normalizer is idempotent on restore.
+            HostContext = stored.HostContext,
+
             // Session ledger (ADR-040 / FR-P0-01 — restored DARK at P0, zero readers).
             // Empty stored lists map to null ("no ledger entries yet").
             Outputs = SessionPersistenceService.MapOutputsFromStored(stored.Outputs),

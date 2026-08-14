@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
@@ -195,7 +196,6 @@ public class CommunicationIntegrationTests
             Mock.Of<ICommunicationDataverseService>(),
             resolvedEntityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!, // SpeFileStore - not used when ArchiveToSpe=false
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
@@ -1257,11 +1257,9 @@ public class CommunicationIntegrationTests
                 Sprk.Bff.Api.Tests.Services.Communication.AssociationTestSupport.Mapper(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
-            Mock.Of<IEmailAttachmentProcessor>(),
             new GraphMessageToEmlConverter(),
-            null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped
+            Mock.Of<IServiceScopeFactory>(), // SpeFileStore + IPostUploadIndexingEnqueuer now resolved per-message via scope (R4); archival path skipped when ArchiveContainerId unset
             jobSubmissionService,
-            Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
@@ -1281,7 +1279,8 @@ public class CommunicationIntegrationTests
         string subject = "E2E Inbound Test",
         string body = "<p>Hello from external sender.</p>",
         string graphMessageId = "AAMkAGE1M2IyNGNm-inbound-001",
-        string? uniqueBody = null)
+        string? uniqueBody = null,
+        string? internetMessageId = null)
     {
         // For inbound tests, we need Graph to return a message when fetched.
         // The IncomingCommunicationProcessor calls graphClient.Users[email].Messages[id].GetAsync
@@ -1290,6 +1289,7 @@ public class CommunicationIntegrationTests
         var messageJson = System.Text.Json.JsonSerializer.Serialize(new
         {
             id = graphMessageId,
+            internetMessageId = internetMessageId, // FR-C1/C2: null on tests that don't exercise message-id dedup
             from = new { emailAddress = new { name = senderEmail.Split('@')[0], address = senderEmail } },
             toRecipients = new[] { new { emailAddress = new { name = "Central Mailbox", address = recipientEmail } } },
             ccRecipients = Array.Empty<object>(),
@@ -1346,13 +1346,16 @@ public class CommunicationIntegrationTests
             .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { accountEntity });
 
-        // Capture the sprk_communication entity created by the processor
+        // Capture the sprk_communication entity created by the processor. Task 021 re-routed the inbound
+        // create onto the race-proof ICommunicationDataverseService.CreateCommunicationRaceProofAsync
+        // (returns (Guid Id, bool WasDuplicate)); the Entity built is unchanged.
         dataverseMock
-            .Setup(d => d.CreateAsync(
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
-            .ReturnsAsync(expectedRecordId);
+            .Callback<DataverseEntity, string?, CancellationToken>((entity, _, _) => capturedEntity = entity)
+            .ReturnsAsync((expectedRecordId, false));
 
         var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
 
@@ -1436,11 +1439,12 @@ public class CommunicationIntegrationTests
             .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new[] { accountEntity });
         dataverseMock
-            .Setup(d => d.CreateAsync(
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
-            .ReturnsAsync(Guid.NewGuid());
+            .Callback<DataverseEntity, string?, CancellationToken>((entity, _, _) => capturedEntity = entity)
+            .ReturnsAsync((Guid.NewGuid(), false));
 
         var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
 
@@ -1473,11 +1477,12 @@ public class CommunicationIntegrationTests
             .ReturnsAsync(Array.Empty<DataverseEntity>());
 
         dataverseMock
-            .Setup(d => d.CreateAsync(
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((entity, _) => capturedEntity = entity)
-            .ReturnsAsync(Guid.NewGuid());
+            .Callback<DataverseEntity, string?, CancellationToken>((entity, _, _) => capturedEntity = entity)
+            .ReturnsAsync((Guid.NewGuid(), false));
 
         var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
 
@@ -1534,11 +1539,12 @@ public class CommunicationIntegrationTests
             .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(Array.Empty<DataverseEntity>());
         dataverseMock
-            .Setup(d => d.CreateAsync(
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<DataverseEntity, CancellationToken>((_, _) => createCallCount++)
-            .ReturnsAsync(Guid.NewGuid());
+            .Callback<DataverseEntity, string?, CancellationToken>((_, _, _) => createCallCount++)
+            .ReturnsAsync((Guid.NewGuid(), false));
 
         var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
 
@@ -1559,6 +1565,118 @@ public class CommunicationIntegrationTests
         // Verify the dedup contract: Graph message fetch was called for each invocation
         graphFactoryMock.Verify(f => f.ForApp(), Times.AtLeast(2),
             "Each ProcessAsync call should attempt to fetch the message from Graph");
+    }
+
+    [Fact]
+    public async Task InboundPipeline_CrossMailboxDuplicate_MergesDeliveringMailboxOntoCanonical()
+    {
+        // FR-C2 (task 022): the SAME email (one internet-message-id) delivered to a SECOND monitored mailbox is a
+        // cross-mailbox duplicate — its delivering mailbox MUST be merged onto the canonical row (set-union), not
+        // dropped, and no second sprk_communication is created.
+        const string internetMessageId = "<msg-fr-c2-001@partner.com>";
+        const string secondMailbox = "mailbox-litigation@spaarke.com";
+        var canonicalId = Guid.NewGuid();
+        const string graphMessageId = "AAMkAGE1-fr-c2-dup";
+
+        var (graphFactoryMock, _) = CreateInboundGraphMock(
+            recipientEmail: secondMailbox, graphMessageId: graphMessageId, internetMessageId: internetMessageId);
+
+        var dataverseMock = new Mock<IDataverseService>();
+        var acct = new DataverseEntity("sprk_communicationaccount") { Id = Guid.NewGuid() };
+        acct["sprk_emailaddress"] = secondMailbox;
+        acct["sprk_receiveenabled"] = true;
+        acct["sprk_autocreaterecords"] = false;
+        acct["sprk_accounttype"] = new OptionSetValue(100000000);
+        dataverseMock
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { acct });
+
+        // Step 3.5: the canonical already exists for this internet-message-id (delivered to mailbox-central earlier).
+        var canonicalRow = new DataverseEntity("sprk_communication", canonicalId);
+        canonicalRow["sprk_deliveredmailboxes"] = "mailbox-central@spaarke.com";
+        dataverseMock
+            .Setup(d => d.GetCommunicationByInternetMessageIdAsync(internetMessageId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(canonicalRow);
+        dataverseMock
+            .Setup(d => d.RetrieveAsync("sprk_communication", canonicalId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(canonicalRow);
+        Dictionary<string, object>? written = null;
+        dataverseMock
+            .Setup(d => d.UpdateAsync("sprk_communication", canonicalId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, f, _) => written = f)
+            .Returns(Task.CompletedTask);
+
+        var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
+        await processor.ProcessAsync(secondMailbox, graphMessageId, ct: CancellationToken.None);
+
+        written.Should().NotBeNull("the cross-mailbox duplicate must merge its delivering mailbox onto the canonical");
+        written![DeliveryContextMerge.DeliveredMailboxesAttribute].Should().Be(
+            "mailbox-central@spaarke.com; mailbox-litigation@spaarke.com",
+            "no delivery fact is lost — the canonical reflects BOTH delivering mailboxes (set-union)");
+        dataverseMock.Verify(
+            d => d.CreateCommunicationRaceProofAsync(It.IsAny<DataverseEntity>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the cross-mailbox duplicate short-circuits before any create");
+    }
+
+    [Fact]
+    public async Task InboundPipeline_UploadThenCapture_LinksExistingArchiveDocumentToCommunication()
+    {
+        // FR-C4 (task 025), upload-then-capture order: the user "Save to Spaarke"-d this email's .eml archive
+        // (a sprk_document with the same internet-message-id) BEFORE the mailbox capture ran. When capture creates
+        // the canonical sprk_communication, that pre-existing archive document is LINKED to it (its
+        // existing sprk_relatedcommunication lookup is set) — so the reconciliation surface shows ONE email, not two rows.
+        const string internetMessageId = "<msg-fr-c4-capture@partner.com>";
+        const string recipientEmail = "mailbox-central@spaarke.com";
+        const string graphMessageId = "AAMkAGE1-fr-c4-capture";
+        var communicationId = Guid.NewGuid();
+        var archiveDocId = Guid.NewGuid();
+
+        var (graphFactoryMock, _) = CreateInboundGraphMock(
+            recipientEmail: recipientEmail, graphMessageId: graphMessageId, internetMessageId: internetMessageId);
+
+        var dataverseMock = new Mock<IDataverseService>();
+        var acct = new DataverseEntity("sprk_communicationaccount") { Id = Guid.NewGuid() };
+        acct["sprk_emailaddress"] = recipientEmail;
+        acct["sprk_receiveenabled"] = true;
+        acct["sprk_autocreaterecords"] = false; // skip attachment processing
+        acct["sprk_accounttype"] = new OptionSetValue(100000000);
+        dataverseMock
+            .Setup(d => d.QueryCommunicationAccountsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new[] { acct });
+
+        // Not a cross-mailbox duplicate → the canonical is created here (upload happened first, capture second).
+        dataverseMock
+            .Setup(d => d.GetCommunicationByInternetMessageIdAsync(internetMessageId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null);
+        dataverseMock
+            .Setup(d => d.CreateCommunicationRaceProofAsync(
+                It.Is<DataverseEntity>(e => e.LogicalName == "sprk_communication"),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((communicationId, false));
+
+        // FR-C4: the archive document was uploaded earlier — the cross-path query finds it by message-id.
+        dataverseMock
+            .Setup(d => d.RetrieveMultipleAsync(
+                It.Is<Microsoft.Xrm.Sdk.Query.QueryExpression>(q => q.EntityName == "sprk_document"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<DataverseEntity> { new("sprk_document", archiveDocId) }));
+
+        Guid? linkedDoc = null;
+        Dictionary<string, object>? docWrite = null;
+        dataverseMock
+            .Setup(d => d.UpdateAsync("sprk_document", archiveDocId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, id, f, _) => { linkedDoc = id; docWrite = f; })
+            .Returns(Task.CompletedTask);
+
+        var processor = BuildIncomingProcessor(graphFactoryMock, dataverseMock);
+        await processor.ProcessAsync(recipientEmail, graphMessageId, ct: CancellationToken.None);
+
+        linkedDoc.Should().Be(archiveDocId, "the pre-existing .eml archive document is linked to the newly-captured communication (FR-C4)");
+        docWrite.Should().NotBeNull();
+        ((EntityReference)docWrite![CrossPathLink.LinkedCommunicationAttribute]).Id.Should().Be(
+            communicationId, "the two representations resolve to ONE email — the document points at the canonical communication");
     }
 
     [Fact(Skip = "Requires fully mocked Graph SDK subscriptions and Communication services")]

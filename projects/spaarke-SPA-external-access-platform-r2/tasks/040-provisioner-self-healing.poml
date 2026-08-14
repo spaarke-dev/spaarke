@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Provisioner self-healing on CIAM POST /users 409 (recover oid by email, continue)</title>
+    <phase>P4 Hardening + Front Door depth</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Brownfield root-cause on the CIAM provisioning path; modifies .cs on a high-blast-radius auth/identity surface; tags include bff-api + auth (CLAUDE.md §8 FULL triggers).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brownfield root-cause on an identity-provisioning failure window (DI-025-01) with a create-ok/persist-fail race — high blast radius, subtle correctness (oid must be the pre-existing account's, never a new one).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Brownfield provisioner root-cause on the shared external-access surface (Services/Registration + Api/ExternalAccess) that teams-app-r1 also owns; must not race other BFF edits.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make the CIAM external-user provisioner self-heal the create-ok/persist-fail window (DI-025-01):
+    when Graph POST /users returns 409 Conflict because the account already exists, recover the
+    existing account's stable oid by its email identity and continue the flow (bind oid to the Contact
+    + send the invite email) instead of failing. A re-invoke after a prior persist failure must
+    complete without any manual oid binding.
+  </prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in Entra External ID (CIAM) Graph provisioning, idempotent create-or-recover flows, and the R1 Contact-by-oid identity model.</role>
+
+  <goal>
+    CiamUserProvisioningService (and the invite flow that consumes it) recovers from a 409 on
+    POST /users by looking up the existing CIAM user's oid via its email identity and returning that
+    oid, so the caller binds it to sprk_externalobjectid and completes persist + email. A retried
+    invite after a persist failure reaches a fully-provisioned, oid-bound Contact with no manual step.
+  </goal>
+
+  <context>
+    <background>
+      FR-18: On CIAM POST /users 409 (create-ok/persist-fail window, DI-025-01), recover the existing
+      oid by email identity and continue (persist + email). Acceptance: a re-invoke after a persist
+      failure self-heals without manual oid binding. Today CreateCiamUserAsync calls
+      graphClient.Users.PostAsync directly (CiamUserProvisioningService.cs:69) and has NO 409 handling —
+      a second invite for an email whose account was created but whose Contact persist failed throws,
+      leaving an orphaned CIAM account and a Contact with no oid.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Registration/CiamUserProvisioningService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/InviteExternalUserEndpoint.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+    </relevant-files>
+    <dependencies>None. Builds on shipped R1 provisioner + Contact-by-oid machinery.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">On the CIAM path, resolve external Contacts by oid and bind oid on first login/submission; the recovered oid MUST be the pre-existing account's stable object id (never a freshly minted one) — scope: CIAM provisioning + Contact binding only.</constraint>
+    <constraint source="ADR-019">Surface unrecoverable provisioning failures as ProblemDetails (Results.Problem) with a title/detail; do not leak Graph exception messages — scope: the invite endpoint's error path.</constraint>
+    <constraint source="ADR-010">Recover-by-email uses the existing CIAM Graph client factory; do not add a new interface with a single implementation — extend the concrete CiamUserProvisioningService — scope: this service only.</constraint>
+    <constraint source="project">§10 BFF hygiene: state a Placement Justification in the PR description (cite .claude/constraints/bff-extensions.md) even though this modifies existing BFF code; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report absolute compressed size + delta vs 46.90 MB baseline (incl PDBs). Ceiling ≤60 MB.</constraint>
+    <constraint source="project">Run /conflict-check before the BFF PR — teams-app-r1 owns the same external-access surface (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Services/Registration/**).</constraint>
+    <constraint source="ADR-038">The recovery flow's live 409/Graph behavior is a live-only property — do NOT false-green it with Mock&lt;HttpMessageHandler&gt;; verify the 409→recover window in seam/live (or manual runbook). Any deterministic mapping (409 detection + email→filter construction) that is a pure function may be a KEEP-path unit test; no DI-registration or ctor-null tests — scope: tests for this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Contact resolve-or-create by oid" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">Resolve-by-oid (:231) and bind-oid (:323) — the oid recovered on 409 flows into this bind path.</pattern>
+      <pattern name="CIAM user creation" location="src/server/api/Sprk.Bff.Api/Services/Registration/CiamUserProvisioningService.cs">CreateCiamUserAsync (:57) + BuildCiamUser identities block (email as emailAddress SignInType) — the email used to recover the oid is the same IssuerAssignedId.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read CiamUserProvisioningService.cs end-to-end; confirm CreateCiamUserAsync:69 (graphClient.Users.PostAsync) is the sole POST /users call and has no 409 handling. Trace the caller in InviteExternalUserEndpoint.cs (ResolveOrCreateContactAsync :172, oid→sprk_externalobjectid :139) to confirm where the returned oid is bound and where persist + email happen.</step>
+    <step order="2">Confirm the exact Graph exception type + shape returned on a duplicate local-email account (ODataError / ServiceException with 409/Conflict). Determine whether the 409 body exposes a recoverable identifier or whether a follow-up GET is required.</step>
+    <step order="3">If (and only if) the 409 does NOT expose a recoverable oid/email path, STOP and escalate per §6 (see &lt;escalation&gt;). Otherwise continue.</step>
+    <step order="4">Add a recover-by-email lookup on CiamUserProvisioningService using the existing _ciamGraphClientFactory: query users filtered by the email identity (identities/any(...emailAddress...) or mail eq) and return the existing account's stable Id (oid).</step>
+    <step order="5">Wrap the POST /users call so that on 409 Conflict it calls the recover-by-email lookup and returns the recovered oid; on any other error, rethrow. Log at Information with a [CIAM-PROVISION] recovered-oid marker (never log the temp password).</step>
+    <step order="6">Verify the invite endpoint continues normally on a recovered oid — binds oid to sprk_externalobjectid and completes persist + email — with no code path that requires a manual oid binding. Ensure the unrecoverable case returns ProblemDetails (ADR-019).</step>
+    <step order="7">Add KEEP-path tests: deterministic unit tests for the pure 409-detection + email→filter construction; document the live 409→recover window verification in a seam/manual runbook note (NOT an in-process HttpMessageHandler mock).</step>
+    <step order="8">Build (dotnet build src/server/api/Sprk.Bff.Api/) + dotnet test the affected test project; run dotnet publish -c Release and record compressed size + delta vs 46.90 MB baseline in the task notes; run dotnet list package --vulnerable --include-transitive and confirm no new HIGH CVE.</step>
+    <step order="9">Run /conflict-check and state the Placement Justification in the PR description.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="11">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Graph 409 response body does NOT expose a recoverable oid/email path (i.e., there is no reliable way to look up the pre-existing account's stable oid by the invited email), STOP and escalate per §6 — do NOT guess an oid, mint a new account, or silently swallow the 409.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/CiamUserProvisioningService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (deterministic 409-detection + email-filter unit tests)</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/ (409-recover seam/manual verification runbook + publish-size delta)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a CIAM account already exists for the invited email (create-ok/persist-fail window), when the invite is re-invoked, then POST /users returns 409, the service recovers the existing account's stable oid by email identity, and the flow continues to bind oid + persist + email — with NO manual oid binding.</criterion>
+    <criterion testable="true">Given a recovered oid, when the Contact is persisted, then sprk_externalobjectid equals the pre-existing account's oid (NOT a newly created account) and subsequent resolve-by-oid returns the same Contact.</criterion>
+    <criterion testable="true">Given a 409 whose body exposes no recoverable oid/email path, when provisioning runs, then the service does NOT mint a new account or fabricate an oid — it escalates/stops and the endpoint returns ProblemDetails (ADR-019), never a leaked Graph exception message.</criterion>
+    <criterion testable="true">Given a first-time invite for a brand-new email (no 409), when provisioning runs, then behavior is byte-for-byte unchanged from today (no regression to the happy path).</criterion>
+    <criterion testable="true">BFF publish ≤60 MB compressed; delta vs 46.90 MB baseline reported; no new HIGH CVE; no Mock&lt;HttpMessageHandler&gt;/DI-registration/ctor-null tests added.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    DI-025-01 is the create-ok/persist-fail race. The recovered oid MUST be the pre-existing account's
+    — this is the whole point of the fix; a fresh account would strand the original. The live 409
+    behavior is a live-only property (ADR-038 / NFR-07): do not build an in-process mock that fakes the
+    409 through the Graph client — verify it in seam/live or via the documented manual runbook.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist.</protocol>
+  </execution>
+</task>

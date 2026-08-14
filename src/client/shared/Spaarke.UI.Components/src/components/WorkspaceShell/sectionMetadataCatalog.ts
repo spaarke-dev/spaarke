@@ -43,6 +43,7 @@ import {
   EditRegular,
   MailRegular,
   DocumentSearchRegular,
+  TaskListSquareLtrRegular,
 } from '@fluentui/react-icons';
 import type { SectionCategory } from './types';
 
@@ -280,6 +281,21 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     description: 'Outlook-style reading pane for your email communications',
     category: 'data',
     icon: MailRegular,
+    defaultHeight: '720px',
+    entityName: 'sprk_communication',
+  },
+  // email-communication-intelligence-r2 UAT Fix #6 (2026-08-13): Reconciliation
+  // section — email-association review/triage/follow-up surface over
+  // sprk_communication (`ReconciliationWorkspace`). Pattern D dual-use with the
+  // `communications-reconciliation` direct widget; surfaced as a system widget in
+  // the workspace dropdown via a "Reconciliation" sprk_workspacelayout row. See
+  // `reconciliation.registration.ts`.
+  {
+    id: 'reconciliation',
+    label: 'Reconciliation',
+    description: 'Review and reconcile inbound email associations, triage, and follow-ups',
+    category: 'data',
+    icon: TaskListSquareLtrRegular,
     defaultHeight: '720px',
     entityName: 'sprk_communication',
   },

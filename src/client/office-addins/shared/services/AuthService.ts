@@ -38,6 +38,18 @@ export interface IAuthService {
    */
   getAccessToken(scopes?: string[]): Promise<string | null>;
   isAuthenticated(): boolean;
+  /**
+   * Invalidate the in-memory token cache so the next `getAccessToken()` call
+   * re-acquires from the provider/strategy rather than returning a
+   * possibly-stale cached token. Does NOT log the user out (mirrors
+   * `SpaarkeAuthProvider.clearCache()`, not `clearAllCaches()`/`logout()`).
+   *
+   * Used by `ApiClient`'s single-retry-on-401 path (task 040 / FR-B0) before
+   * re-acquiring a token for the retry attempt — mirrors `@spaarke/auth`'s
+   * `authenticatedFetch`, which calls `provider.clearCache()` on a 401 before
+   * its own retry.
+   */
+  clearCache(): void;
 }
 
 export interface AuthConfig {
@@ -119,6 +131,10 @@ class AuthService implements IAuthService {
 
   isAuthenticated(): boolean {
     return this.provider?.isAuthenticated() ?? false;
+  }
+
+  clearCache(): void {
+    this.provider?.clearCache();
   }
 }
 

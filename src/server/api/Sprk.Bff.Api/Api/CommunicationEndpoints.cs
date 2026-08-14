@@ -13,6 +13,8 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
+using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 
@@ -238,6 +240,19 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
+        // POST /api/communications/{id}/confirm-affinity — FR-A4 affinity confirmation-write (R-1). The confirm
+        // surface calls this FIRE-AND-FORGET after a human confirms this communication is regarding {target},
+        // recording the (signal → target) frequency so AffinityRung can SUGGEST that target for future untagged
+        // messages with matching signals. Learns from HUMAN confirmations only (not the engine's auto-files).
+        // Best-effort / non-fatal (NFR-04): a disabled tenant, unmapped target, or store failure is a no-op that
+        // still returns 200 — it MUST NOT fail the user's confirmation (the regarding write already succeeded
+        // client-side via Xrm.WebApi, ADR-024). Auth-scoped via the endpoint filter (NFR-07).
+        group.MapPost("/{id:guid}/confirm-affinity", RecordAffinityConfirmationAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("RecordCommunicationAffinityConfirmation")
+            .WithDescription("FR-A4 affinity learning: record that a human confirmed this communication is regarding {targetEntityType}:{targetRecordId}, incrementing the per-(signal, target) confirmation frequency the deterministic AffinityRung reads. Signals are computed with the SAME AffinityRung.ExtractSignals the read path uses (read/write canonicalization parity). Best-effort — never fails the confirmation; disabled-tenant / unmapped-target / store-failure are no-ops.")
+            .Produces<RecordAffinityConfirmationResult>(StatusCodes.Status200OK);
+
         // GET /api/communications/queue-feed?regarding=&top= — the FR-17 ranked-exceptions queue-feed (task 032).
         // Surface-agnostic: r1 supplies the feed ONLY, r5 builds the Exceptions Queue surface on top of it (C-3).
         // Composes unresolved/Suggested/Ambiguous association exceptions + OPEN pending Job B proposals (task 030)
@@ -265,11 +280,66 @@ public static class CommunicationEndpoints
         group.MapPost("/proposals/{reviewLogId:guid}/apply", ApplyProposalAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
             .WithName("ApplyCommunicationProposal")
-            .WithDescription("Job B apply (FR-10): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .WithDescription("Job B apply (FR-10 / FR-E4): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only audit row. An optional body {\"overrideValue\":\"…\"} (FR-E4) applies the reviewer's EDITED value instead of the AI's — through the same allow-list + citation + coercion guards, recorded as an Overriden audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .Accepts<ApplyProposalRequest>("application/json")
             .Produces<ApplyProposalResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/proposals/{reviewLogId}/dismiss — Job B REJECT (task 055b / FR-E4). The Fields
+        // reconcile tab (task 055) POSTs a proposal's ReviewLogId here on Reject. The service resolves the rejecting
+        // caller server-side (fail-closed 403), re-confirms the proposal is the OPEN pending row (409 if already
+        // resolved), and writes ONE append-only Dismissed sprk_emailreviewlog audit row — NO record change, NO
+        // allow-list/citation re-validation (a rejection is safe regardless of drift). The proposal then no longer
+        // surfaces as OPEN in the queue-feed. Contrast Hold ("leave Proposed") which is a client-only no-op. Takes no
+        // request body. Registered unconditionally (ADR-010/ADR-032). r1 builds no UI.
+        group.MapPost("/proposals/{reviewLogId:guid}/dismiss", DismissProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("DismissCommunicationProposal")
+            .WithDescription("Job B reject (FR-E4): terminally dismiss a pending field-update proposal — write one append-only Dismissed audit row attributed to the rejecting user and make NO record change. Caller resolved server-side (403 fail-closed); a missing proposal (404), malformed proposal (422), or non-pending/already-resolved proposal (409) are refused.")
+            .Produces<DismissProposalResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/proposals/{reviewLogId}/create-task/apply — Job C APPLY (task 034 / FR-D5, backs
+        // FR-E5). Sibling of the Job B apply above. r5's Tasks reconcile tab (task 056) POSTs a confirmed create-task
+        // proposal's ReviewLogId here on Approve, with the human-supplied FR-E5 fields in the body. The service
+        // CREATES the sprk_event (type=task) via the blessed IActionSeam.CreateTaskAsync write core, PATCHes the
+        // remaining FR-E5 fields (status/completed-date/base-date/final-due-date) under the confirming user's
+        // MSCRMCallerID impersonation, and writes ONE append-only Applied audit row (Path B — the facade is unchanged
+        // per ADR-013; see CommunicationCreateTaskApplyService remarks). Caller resolved server-side (403 fail-closed);
+        // a non-create-task/unverifiable-citation proposal (422), an already-resolved proposal (409), or a failed
+        // create/patch (422) are refused. Registered unconditionally (ADR-010/ADR-032). r1 builds no UI.
+        group.MapPost("/proposals/{reviewLogId:guid}/create-task/apply", ApplyCreateTaskProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("ApplyCommunicationCreateTaskProposal")
+            .WithDescription("Job C apply (FR-D5): create the sprk_event (type=task) a confirmed create-task proposal describes via IActionSeam.CreateTaskAsync, PATCH the human-supplied FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-create-task/unverifiable-citation (422), already-resolved (409), or failed create/patch (422) are refused.")
+            .Produces<ApplyCreateTaskResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/{communicationId}/create-task — Job C AD-HOC create (task 056b / FR-E5). The Tasks
+        // reconcile tab's "+ New task" (a task the reviewer AUTHORED, not proposed by the engine) POSTs here with the
+        // task form + the confirmed record as the regarding. Reuses the SAME create-task path as an applied proposal —
+        // IActionSeam.CreateTaskAsync + the caller-impersonated FR-E5 PATCH + ONE append-only Applied audit row — with
+        // NO proposal row / NO citation / NO open-walk (there is nothing extracted to verify). Association gating is the
+        // UI's (NFR-10): the caller supplies the confirmed record, matching the applied-proposal sibling's posture.
+        // Caller resolved server-side (403 fail-closed); a blank subject / missing regarding (422) or a failed
+        // create/patch (422) are refused. Registered unconditionally (ADR-010/032). r1 builds no UI.
+        group.MapPost("/{communicationId:guid}/create-task", CreateAdHocTaskAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("CreateCommunicationAdHocTask")
+            .WithDescription("Job C ad-hoc create (FR-E5 \"+ New task\"): create a reviewer-authored sprk_event (type=task) regarding the confirmed record via IActionSeam.CreateTaskAsync, PATCH the FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row — the SAME create-task path as an applied proposal, minus the proposal/citation. Caller resolved server-side (403 fail-closed); blank subject / missing regarding (422), or failed create/patch (422) are refused.")
+            .Accepts<CreateAdHocTaskRequest>("application/json")
+            .Produces<CreateAdHocTaskResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
 
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
@@ -866,6 +936,30 @@ public static class CommunicationEndpoints
     }
 
     /// <summary>
+    /// FR-A4 affinity confirmation-write (email-communication-intelligence-r2, R-1). Records that a HUMAN
+    /// confirmed communication <paramref name="id"/> is regarding the requested target, incrementing the
+    /// per-(signal, target) affinity frequency so <see cref="AffinityRung"/> can SUGGEST that target for future
+    /// untagged messages with matching signals. Computes the SAME signals the read rung uses
+    /// (<see cref="AffinityRung.ExtractSignals"/> over the reconstructed envelope) — keeping read/write
+    /// canonicalization identical. Learns from HUMAN confirmations only (the client calls it after the user's
+    /// regarding write), never the engine's deterministic auto-files, so affinity does not self-reinforce.
+    /// <para>
+    /// Best-effort / non-fatal (NFR-04): an invalid/unmapped target, a disabled tenant, or any store failure is a
+    /// no-op that STILL returns 200 — this MUST NOT fail the user's confirmation (the regarding write already
+    /// committed client-side via Xrm.WebApi per ADR-024; this is a fire-and-forget learning signal on top).
+    /// </para>
+    /// </summary>
+    private static async Task<IResult> RecordAffinityConfirmationAsync(
+        Guid id,
+        RecordAffinityConfirmationRequest request,
+        AffinityConfirmationRecorder recorder,
+        CancellationToken ct)
+    {
+        var recorded = await recorder.RecordAsync(id, request?.TargetEntityType, request?.TargetRecordId, ct);
+        return TypedResults.Ok(new RecordAffinityConfirmationResult(recorded));
+    }
+
+    /// <summary>
     /// FR-17 ranked-exceptions queue-feed (task 032) — delegates entirely to
     /// <see cref="CommunicationQueueFeedService.GetQueueFeedAsync"/> (caller resolved server-side inside the
     /// service, same access posture as every other communication read). READ-ONLY; r1 supplies the feed only,
@@ -887,11 +981,64 @@ public static class CommunicationEndpoints
     // via SdapProblemException (403/404/409/422/500).
     private static async Task<IResult> ApplyProposalAsync(
         Guid reviewLogId,
+        [FromBody] ApplyProposalRequest? request,
         ICommunicationProposalApplyService applyService,
         HttpContext context,
         CancellationToken ct)
     {
-        var result = await applyService.ApplyAsync(reviewLogId, context.User, ct);
+        // Optional body carries the reviewer's edited value (FR-E4); absent/blank ⇒ apply the stored proposed value.
+        var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job B reject / dismiss (task 055b / FR-E4). The caller is resolved server-side inside the service (fail-closed
+    // 403); the proposal is terminally dismissed by writing ONE append-only Dismissed audit row with no record change.
+    // Failures surface as RFC 7807 ProblemDetails via SdapProblemException (403/404/409/422). No request body.
+    private static async Task<IResult> DismissProposalAsync(
+        Guid reviewLogId,
+        ICommunicationProposalApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.DismissAsync(reviewLogId, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job C apply (task 034 / FR-D5). The caller is resolved server-side inside the service (fail-closed 403); the
+    // sprk_event is created via IActionSeam.CreateTaskAsync and its FR-E5 fields PATCHed under that caller's
+    // MSCRMCallerID impersonation; failures surface as RFC 7807 ProblemDetails via SdapProblemException
+    // (403/404/409/422/500). The request body (optional) carries the human-supplied FR-E5 fields from the reconcile tab.
+    private static async Task<IResult> ApplyCreateTaskProposalAsync(
+        Guid reviewLogId,
+        [FromBody] ApplyCreateTaskRequest? request,
+        ICommunicationCreateTaskApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.ApplyAsync(reviewLogId, request, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job C ad-hoc create (task 056b / FR-E5 "+ New task"). Creates a reviewer-authored sprk_event regarding the
+    // confirmed record via the same audited create-task path as an applied proposal (no proposal / no citation). The
+    // caller is resolved server-side (fail-closed 403); failures surface as RFC 7807 ProblemDetails
+    // (403/422/500). The body carries the task form + the confirmed record as the regarding.
+    private static async Task<IResult> CreateAdHocTaskAsync(
+        Guid communicationId,
+        [FromBody] CreateAdHocTaskRequest? request,
+        ICommunicationCreateTaskApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        if (request is null)
+        {
+            return Results.Problem(
+                title: "Bad Request",
+                detail: "A request body with at least a task subject and the regarding record is required.",
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var result = await applyService.CreateAdHocAsync(communicationId, request, context.User, ct);
         return TypedResults.Ok(result);
     }
 

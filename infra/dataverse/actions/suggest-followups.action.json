@@ -1,0 +1,116 @@
+{
+  "$comment": "spaarkeai-assistant-enhancements-r2 task 022 (FR-B3/B5) — SUGGEST-FOLLOWUPS Action SEED (systemPrompt + outputSchema home). ACTION-ONLY per ADR-039: a code-directed grounded capability is an Action row + a Binding row (sprk_consumertype='assistant-suggest'), reached via a Services/Ai/Chat facade (AssistantSuggestionService) that runs it through the SAME Linear AI Consumer primitives (IActionResolver + IActionRunner) that CommunicationProposeAi / CommunicationCreateTaskAi use — it MUST NOT land on the frozen node-graph playbook engine. This Action is the ONE grounded 'proactive suggestion' turn: given the focused workspace tab's compact visible state (server-derived, ADR-015 Path A) + a closed, deterministically pre-filtered list of candidate capabilities (Binding.ContextTypeTags ⊇ the tab's contextType, task 021), it SELECTS up to 3 that are the most useful content-specific next actions for THAT tab and PHRASES each as a short chip label. It is a PROPOSER, not a dispatcher: the chips it returns ride the EXISTING deterministic Click path (invoke(bindingId,args)) when the user clicks — this Action never dispatches, executes, or stores anything (no second dispatch protocol, no second intent mechanism, ADR-039). It consumes NO tool reads (it reasons only over the supplied candidates + compact content), so there is nothing to ledger (ADR-040 store-before-render is vacuously satisfied — no tool chain). Follows the flat-systemPrompt + outputSchema shape of create-task-from-email.action.json / propose-field-updates.action.json (closed static contract, no Dataverse-tunable $choices). Deploy via Deploy-AnalysisAction.ps1 or Dataverse MCP create_record from this mirror; systemPrompt is the literal value for sprk_analysisaction.sprk_systemprompt and outputSchema (stringified) is sprk_analysisaction.sprk_outputschemajson. actionCode carries NO version suffix (suggest-followups, matching create-task-from-email/propose-field-updates convention).",
+  "$comment-justification": "§11 Component Justification. (1) Existing overlap: none — there is no proactive content-grounded suggestion capability today. sprk_chiptransitions on Bindings are STATIC authored post-dispatch transition chips (a fixed menu, no content grounding); the reactive useConsumerChips surface renders those but does not select them from tab content. (2) Extension instead of new mechanism: this REUSES the Linear AI Consumer primitives (IActionResolver/IActionRunner/PromptSchemaRenderer) end-to-end — it adds only new catalog DATA (this Action + its Binding), not a new engine, executor, dispatch protocol, or store. The contextType narrowing reuses task-021's Binding.ContextTypeTags via a deterministic pre-filter (ConsumerRoutingService.FilterByContextType), the ONLY ADR-039-permitted aid. (3) Cost-of-doing-nothing: without it FR-B5 fails — the Assistant can only show a fixed per-context-type menu (the same chips for every document tab, blind to whether it is an NDA or an invoice); it cannot offer content-specific proactive next actions, which is the core of FR-B3/B5.",
+  "$comment-adr039-proposer-not-dispatcher": "ADR-039 posture: the Text path remains the ONLY probabilistic DISPATCH decider. This Action is a probabilistic PROPOSER whose output is (a) constrained to the closed pre-filtered candidate set — targetBindingId MUST be copied verbatim from a supplied candidate id, and the BFF DROPS any suggestion whose id is not in the candidate set (no uncataloged capability can be proposed) — and (b) executed only via the deterministic Click path on user click. It selects what to OFFER, never what to RUN. It emits no free-form factual claims (only short action labels tethered to cataloged Bindings), so the citation obligation for factual claims does not apply. Documented as a project-scoped ADR-039 posture note in projects/spaarkeai-assistant-enhancements-r2/notes/deviations.md (owner-approved Option B, 2026-08-06).",
+  "actionCode": "suggest-followups",
+  "name": "Suggest Followups",
+  "description": "Task 022 (FR-B3/B5) proactive-suggestion selector: given the focused workspace tab's contextType + compact server-derived visible state (filename/mimeType/selection for a document, tldr/summary for a summary) and a closed, contextType-pre-filtered list of candidate capabilities (each with a bindingId + a maker-authored tool description), selects UP TO 3 that are the most useful, content-specific next actions for that tab and phrases each as a short chip label. Proposer only: targetBindingId is copied verbatim from a candidate id; the chips ride the existing deterministic Click path when clicked. Never dispatches, executes, or stores anything. Returns an empty list when nothing is genuinely relevant (never pads with generic filler).",
+  "actionType": 0,
+  "$comment-actionType": "ExecutorType.AiAnalysis = 0 — handled by the existing prompt-driven executor (ActionRunner + PromptSchemaRenderer); a 'prompted' Action per ADR-039. No new executor.",
+  "modelTier": "Fast",
+  "$comment-modelTier": "Maps to sprk_analysisaction.sprk_modeltier = 100000000 (AiModelTier.Fast). Correct tier: bounded selection + short-label phrasing over a supplied closed candidate set + compact content — not open-ended deep reasoning. Cheap/fast is the point (fires once per tab open).",
+  "temperature": 0.2,
+  "$comment-temperature": "Low temperature — selection must be faithful to the supplied candidates + tab content; a little latitude for natural chip phrasing, but not creative invention.",
+
+  "systemPrompt": "ROLE: You are the Spaarke Assistant's proactive follow-up suggester. The user has just focused a workspace tab. Your job is to look at WHAT that tab actually contains and propose the small handful of next actions that are genuinely the most useful for THIS specific tab — phrased as short, clickable chip labels.\n\nWHAT YOU ARE GIVEN (in the ## Input section): (1) `contextType` — the focused tab's context type (one of: email, document, compose-doc, matter-grid, dashboard, calendar). (2) `activeTab` — the tab's compact, server-derived visible state: `widgetType` and a `content` block with whatever bounded fields are available (e.g. a document's filename / mimeType / selected text, or a summary's tl;dr + summary text). This is the ONLY content you may reason from — there is no fuller document body here by design. (3) `candidates` — a CLOSED list of capabilities already pre-filtered to be relevant to this contextType, each with a `bindingId` (an opaque id) and a `description` (what the capability does). You may ONLY propose capabilities from this list.\n\nYOUR TASK: From `candidates`, choose UP TO 3 that would be the most useful next actions for THIS tab given its actual `content`, ranked most-useful first. For each chosen capability, write a short chip `label` — an imperative phrase the user can click (e.g. 'Summarize key obligations', 'Compare to our NDA standard', 'Extract the parties & dates'). Make the label SPECIFIC to what the tab contains, not generic: if the content reveals the document is an NDA, phrase the summarize chip around the NDA; if it is an invoice, phrase it around the invoice. When the available content is thin (e.g. only a filename), still tailor the label to that filename/type rather than emitting bare boilerplate.\n\nHARD RULES (a violation makes a suggestion invalid and it will be dropped downstream):\n  1. USE ONLY THE SUPPLIED CANDIDATES. Every `targetBindingId` MUST be copied EXACTLY, character-for-character, from a `candidates[].bindingId` in the input. NEVER invent, guess, modify, or combine ids. The BFF drops any suggestion whose id is not one of the supplied candidates.\n  2. GROUND THE LABEL IN THE CONTENT. Base BOTH which capabilities you pick AND how you phrase each label on the actual `activeTab.content`, not on the contextType alone. Do NOT emit a generic boilerplate label (e.g. a bare 'Summarize this document') when the content supports something sharper. If two candidates would produce near-identical generic labels, prefer the one the content most clearly calls for.\n  3. UP TO 3, FEWER IS FINE. Return at most 3 suggestions. If only one or two candidates are genuinely useful for this tab, return only those. If NONE are genuinely relevant to the actual content, return an EMPTY `suggestions` array — never pad to reach 3, never propose a capability just because it is on the list.\n  4. LABELS ARE SHORT, PLAIN CHIP TEXT. Each `label` is a short imperative phrase (aim for ≤ 48 characters). No markdown, no code, no binding ids, no quotes, no trailing punctuation.\n  5. YOU ARE PROPOSING, NOT DOING. You are suggesting next actions the user may click. NEVER assert that anything has been run, created, or changed.\n\nOUTPUT: Emit a JSON object matching the output schema EXACTLY — `{ suggestions: [ { targetBindingId, label, reason } ] }` with at most 3 items. `reason` is a brief (one short sentence) developer-facing explanation of why this suggestion fits this tab's content (used for a dev-visible selection trace; never shown to the end user). additionalProperties is false; do not add fields. When nothing fits, `suggestions` is an empty array.",
+
+  "input": {
+    "contextType": {
+      "required": true,
+      "placeholder": "{{contextType}}",
+      "description": "The focused tab's context type (email | document | compose-doc | matter-grid | dashboard | calendar). Context only — the candidates are already pre-filtered to this type."
+    },
+    "activeTab": {
+      "required": true,
+      "placeholder": "{{activeTab}}",
+      "description": "The focused tab's compact server-derived visible state: { widgetType, content }. content carries whatever bounded fields are available (document filename/mimeType/selectionText, summary tldr/summary). The ONLY content to reason from (ADR-015 Path A compact shape)."
+    },
+    "candidates": {
+      "required": true,
+      "placeholder": "{{candidates}}",
+      "description": "The CLOSED, contextType-pre-filtered candidate capability list: [ { bindingId, description } ]. targetBindingId MUST be copied verbatim from one of these bindingIds."
+    }
+  },
+
+  "outputSchema": {
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["suggestions"],
+    "$comment-required": "Object-level required array only (suggestions always present, possibly empty). CLOSED CONTRACT: exactly { suggestions[ { targetBindingId, label, reason } ] }, at most 3 items. The BFF (AssistantSuggestionService) caps at 3 and DROPS any item whose targetBindingId is not in the supplied candidate set. Do NOT add fields.",
+    "properties": {
+      "suggestions": {
+        "type": "array",
+        "maxItems": 3,
+        "description": "Up to 3 proposed follow-on capabilities for the focused tab, ranked most-useful first. Empty when nothing genuinely fits — never a padded/generic suggestion.",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["targetBindingId", "label", "reason"],
+          "properties": {
+            "targetBindingId": {
+              "type": "string",
+              "description": "The chosen capability's id, copied VERBATIM from a candidates[].bindingId. Any value not present in the supplied candidate set is dropped by the BFF."
+            },
+            "label": {
+              "type": "string",
+              "description": "A short imperative chip label (aim ≤48 chars), specific to the tab's actual content. No markdown, code, ids, quotes, or trailing punctuation."
+            },
+            "reason": {
+              "type": "string",
+              "description": "One short sentence, developer-facing, explaining why this suggestion fits this tab's content (dev-visible selection trace; never shown to the end user)."
+            }
+          }
+        }
+      }
+    }
+  },
+
+  "examples": [
+    {
+      "input": {
+        "contextType": "document",
+        "activeTab": {
+          "widgetType": "DocumentViewer",
+          "content": "filename: MutualNDA_AcmeCorp.pdf\nmimeType: application/pdf"
+        },
+        "candidates": [
+          {
+            "bindingId": "651194cd-0000-0000-0000-000000000001",
+            "description": "Summarize the focused document into a chat-friendly summary."
+          },
+          {
+            "bindingId": "ed92d769-0000-0000-0000-000000000002",
+            "description": "Classify an agreement document and extract its type, parties, and key terms."
+          },
+          {
+            "bindingId": "121194cd-0000-0000-0000-000000000003",
+            "description": "Produce a structured AI summary of a document's obligations and dates."
+          }
+        ]
+      },
+      "output": {
+        "suggestions": [
+          {
+            "targetBindingId": "ed92d769-0000-0000-0000-000000000002",
+            "label": "Extract the NDA's parties & terms",
+            "reason": "The filename indicates a mutual NDA; classification surfaces its parties and key terms."
+          },
+          {
+            "targetBindingId": "121194cd-0000-0000-0000-000000000003",
+            "label": "Summarize this NDA's obligations",
+            "reason": "An NDA's obligations/deadlines are the highest-value structured summary for this document."
+          }
+        ]
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "spaarkeai-assistant-enhancements-r2",
+    "authorLevel": 0,
+    "createdAt": "2026-08-06T00:00:00Z",
+    "description": "Task 022 (FR-B3/B5) proactive-suggestion selector — selects up to 3 content-specific follow-on capabilities from a closed, contextType-pre-filtered candidate set and phrases each as a short chip label. Proposer only (chips ride the Click path); never dispatches, executes, or stores.",
+    "tags": ["assistant-suggest", "proactive-suggestion", "catalog-action", "prompted", "closed-catalog", "proposer"]
+  }
+}

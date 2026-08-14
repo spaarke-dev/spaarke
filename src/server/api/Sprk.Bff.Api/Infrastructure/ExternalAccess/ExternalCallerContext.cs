@@ -81,6 +81,39 @@ public sealed class ExternalParticipation
 }
 
 /// <summary>
+/// The FULL set of a Contact's active <c>sprk_externalrecordaccess</c> grants, partitioned by the
+/// grant's typed root lookup (spaarke-SPA-external-access-platform-r2 task 028 — polymorphic Tier-2
+/// scoping). A grant row targets exactly ONE root via its typed lookup (<c>sprk_project</c> /
+/// <c>sprk_matter</c> / <c>sprk_workassignment</c> — verified live), so the row falls into exactly one
+/// bucket here. Projects keep their access level (the CIAM <c>/me</c> per-project level mapping depends
+/// on it); matters and work assignments are id sets (read-scoping needs only the id — access derives
+/// from the root, and within-root rights are not level-differentiated for those types yet).
+/// </summary>
+/// <remarks>
+/// Direct document/invoice-level grants are intentionally OUT OF SCOPE (design §6 — access to a child
+/// derives from an accessible ROOT), so the grant table's <c>sprk_invoice</c> lookup is not read here.
+/// </remarks>
+public sealed class ExternalGrantSet
+{
+    /// <summary>Project grants (id + level) — level preserved for the CIAM <c>/me</c> mapping.</summary>
+    public required IReadOnlyList<ExternalParticipation> Projects { get; init; }
+
+    /// <summary>Matter grants (ids of <c>sprk_matter</c> the contact was granted).</summary>
+    public required IReadOnlySet<Guid> Matters { get; init; }
+
+    /// <summary>Work-assignment grants (ids of <c>sprk_workassignment</c> the contact was granted).</summary>
+    public required IReadOnlySet<Guid> WorkAssignments { get; init; }
+
+    /// <summary>The empty grant set (no grants of any root type).</summary>
+    public static ExternalGrantSet Empty { get; } = new()
+    {
+        Projects = Array.Empty<ExternalParticipation>(),
+        Matters = new HashSet<Guid>(),
+        WorkAssignments = new HashSet<Guid>(),
+    };
+}
+
+/// <summary>
 /// Access level values for external participation (matches sprk_accesslevel choice field).
 /// </summary>
 public enum ExternalAccessLevel
@@ -146,6 +179,11 @@ public sealed class WorkforcePrincipal
     /// <summary>The workforce tenant id (<c>tid</c> claim).</summary>
     public required string TenantId { get; init; }
 
+    /// <summary>The caller's tenant-verified email/UPN (from token claims). Used as the fallback key to
+    /// find the caller's contact-grants when a <see cref="WorkforcePrincipalKind.SystemUser"/> has no
+    /// derived <see cref="ContactId"/> (no <c>sprk_primarycontact</c> link). May be empty.</summary>
+    public string Email { get; init; } = string.Empty;
+
     /// <summary>True when this is a systemuser principal (ADR-034 membership plane).</summary>
     public bool IsSystemUser => Kind == WorkforcePrincipalKind.SystemUser;
 
@@ -192,16 +230,19 @@ public sealed class WorkforcePrincipalResolution
     public static WorkforcePrincipalResolution Resolved(WorkforcePrincipal principal)
         => new() { Principal = principal ?? throw new ArgumentNullException(nameof(principal)) };
 
-    /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId).</summary>
+    /// <summary>Constructs a systemuser outcome (systemuserId + derived contactId + verified email).
+    /// <paramref name="email"/> is the fallback key for the caller's contact-grants when the systemuser
+    /// has no derived contact (see <see cref="WorkforcePrincipal.Email"/>).</summary>
     public static WorkforcePrincipalResolution ForSystemUser(
-        Guid systemUserId, Guid? derivedContactId, string oid, string tenantId)
+        Guid systemUserId, Guid? derivedContactId, string oid, string tenantId, string? email = null)
         => Resolved(new WorkforcePrincipal
         {
             Kind = WorkforcePrincipalKind.SystemUser,
             SystemUserId = systemUserId,
             ContactId = derivedContactId,
             Oid = oid,
-            TenantId = tenantId
+            TenantId = tenantId,
+            Email = email ?? string.Empty
         });
 
     /// <summary>Constructs a contact-only outcome (contactId anchor).</summary>

@@ -22,6 +22,7 @@ import type {
   ImportedComment,
   ComposeServerProjection,
   ComposeDocumentOrigin,
+  ComposeContentModel,
 } from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
@@ -172,6 +173,48 @@ export interface ComposeWorkspaceState {
    * projection now renders an explicit error/unavailable state instead.
    */
   projection: ComposeServerProjection | null;
+  /**
+   * task 012 (spaarkeai-compose-r6, render-on-save cutover): the retained CANONICAL content model
+   * from the mount door's server response (Load / Upload / Browse->project all carry the additive
+   * `contentModel` field since commit 70be80006) — the imported save mapper's MERGE BASE
+   * (`ComposeEditorHandle.buildImportedContentModel(loadedContentModel, …)` folds the editor's edits
+   * + comment threads onto it). Set ATOMICALLY wherever `projection` is set (same clear-rather-than-
+   * inherit discipline). `null` = legacy session / older BFF / failed canonical projection → the save
+   * falls back to the transitional op-log request shape (unchanged behavior). Replaced by the
+   * post-save model on a successful model-path save (`saveSucceeded.contentModel`).
+   */
+  loadedContentModel: ComposeContentModel | null;
+  /**
+   * task 013 (r6, review F7): the canonical-model projection's FLATTEN warnings from the SAME mount
+   * response that carried `loadedContentModel` (`contentModelWarnings` on the load / upload /
+   * project payloads — e.g. `text-box-flattened`, `complex-object-dropped`; previously
+   * server-log-only). The loss they describe MATERIALIZES on the FIRST model-path save (the
+   * byte-identical passthrough / op-log shapes never render from the flatten-tier model), so
+   * `triggerSave` folds them into the `saveDegradationWarnings` it dispatches there — and they are
+   * CLEARED via the `saveSucceeded.contentModel` adoption (the post-save adopted model already
+   * reflects the loss) so subsequent saves do not repeat them. Same set/clear lifecycle as
+   * `loadedContentModel`; null = none surfaced / older BFF.
+   */
+  loadedContentModelWarnings: Array<{ code: string; count: number }> | null;
+  /**
+   * Task 041 (spaarkeai-compose-r6, FR-06 — PDF intake): the load's source format. `'pdf'` = the
+   * mounted docx was SYNTHESIZED server-side from a PDF's canonical-model projection (task 040;
+   * the original PDF is untouched in SPE). Drives (a) the honest-lossiness notice banner and (b)
+   * the save routing: while `'pdf'`, EVERY save takes the create-on-save path with a `.docx`
+   * display name — a new Word document, never docx bytes replaced onto the `.pdf` item. Cleared
+   * to null by `saveSucceeded` (the doc is re-targeted to its new docx identity) and by every
+   * fresh mount. Null = native docx (the overwhelmingly common case — behavior unchanged).
+   */
+  sourceFormat: string | null;
+  /**
+   * 026-F5 (task 012, r6): SAVE-time degradation warnings — content the server (and/or the client
+   * imported-model mapper) simplified/dropped while authoring the LAST successful save. A SEPARATE
+   * warning family from `importWarnings` (load-time import fidelity): the workspace suppresses the
+   * import banner (`hideImportWarnings`, UAT round-7 #8) but save warnings MUST still render.
+   * REPLACED wholesale on every successful save — `null` (a clean save) clears any stale banner
+   * (026-F5's second half). Never merged into `importWarnings` (that was the bug).
+   */
+  saveDegradationWarnings: Array<{ code: string; count: number }> | null;
   /** User-facing error message (NOT a Tier 3 sink). */
   errorMessage: string | null;
   /** UAT #10/#11 (task 052): true when the last save failed with HTTP 423 (the doc is open in Word — a
@@ -229,7 +272,13 @@ export type ComposeWorkspaceAction =
   // G8 (FR-07, task 030): `externalChange` (default false) carries the external-change flag THROUGH a
   // remount — a clean-editor auto-remount dispatches requestLoad with externalChange:true so the
   // banner still renders after loadSucceeded. Every other requestLoad (initial open / Search) omits it.
-  | { kind: 'requestLoad'; documentRef: ComposeDocumentRef; sessionId: string; externalChange?: boolean }
+  | {
+      kind: 'requestLoad';
+      documentRef: ComposeDocumentRef;
+      sessionId: string;
+      externalChange?: boolean;
+      carryDegradationWarnings?: Array<{ code: string; count: number }> | null;
+    }
   | {
       kind: 'loadSucceeded';
       docxBytes: ArrayBuffer;
@@ -250,6 +299,21 @@ export type ComposeWorkspaceAction =
       // older BFF both omit it). Normalized to `null` in the reducer (BINDING null-handling contract —
       // treated the same as 'imported').
       origin?: ComposeDocumentOrigin | null;
+      // task 012 (r6): the canonical content model from the Load response (additive since commit
+      // 70be80006). Undefined/null (older BFF, or projection failure) → null → the save falls back
+      // to the transitional op-log shape. Set atomically with `projection`.
+      contentModel?: ComposeContentModel | null;
+      // task 013 (r6, review F7): the canonical-model projection's flatten warnings from the same
+      // response — folded into saveDegradationWarnings on the first model-path save. Undefined/null
+      // (older BFF / no loss) → null.
+      contentModelWarnings?: Array<{ code: string; count: number }> | null;
+      // Task 041 (FR-06, PDF intake): the Load response's sourceFormat marker ('pdf' = the mounted
+      // docx was synthesized from a PDF). Undefined/null (older BFF / native docx) → null.
+      sourceFormat?: string | null;
+      // Task 041 (FR-06): a client-minted transient dedup key, supplied ONLY on a PDF-sourced load —
+      // carried onto documentRef.transientKey so the PDF's repeated create-on-saves dedup to ONE new
+      // docx record (the G7 mechanism, reused).
+      transientKey?: string;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -280,6 +344,13 @@ export type ComposeWorkspaceAction =
       containerId?: string;
       sessionId?: string;
       projection?: ComposeServerProjection | null;
+      // task 012 (r6): the canonical content model from the Upload / Browse->project response (same
+      // additive field as `loadSucceeded.contentModel`). Undefined/null normalizes to null → op-log
+      // fallback save shape. Set atomically with `projection`.
+      contentModel?: ComposeContentModel | null;
+      // task 013 (r6, review F7): the projection's flatten warnings from the same response — same
+      // lifecycle as `contentModel` (see the loadSucceeded field above).
+      contentModelWarnings?: Array<{ code: string; count: number }> | null;
       // G7 (FR-06, task 022): the client-minted stable transient-draft dedup key
       // (mintTransientKey). Carried onto documentRef.transientKey so every create-on-save sends it →
       // repeated saves dedup to ONE record. Omitted by an older caller → no dedup (unchanged behavior).
@@ -324,10 +395,18 @@ export type ComposeWorkspaceAction =
       // Prong 1 (task 055): best-effort partial-apply summary when some ops couldn't be anchored server-side
       // (null/omitted on the common clean-batch path). Drives the honest "N edits couldn't be saved" banner.
       partialApply?: ComposePartialApplyInfo | null;
+      // task 012 (r6): the post-save content model adopted as the NEW merge base after a successful
+      // MODEL-PATH save (the server's returned model, or — when the server omitted it — the model
+      // the client POSTed; the caller resolves that fallback). Omitted on op-log / born-in-editor
+      // saves → the reducer keeps the existing `loadedContentModel` (never regresses to null).
+      contentModel?: ComposeContentModel | null;
     }
   | { kind: 'saveFailed'; errorMessage: string; isLock?: boolean }
   | { kind: 'reset' }
   | { kind: 'importWarnings'; warnings: Array<{ type: string; message: string }> }
+  // 026-F5 (task 012, r6): REPLACE the save-time degradation-warning set. Dispatched on EVERY
+  // successful save: warnings present → set; none → null (a clean save clears the stale banner).
+  | { kind: 'saveDegradationWarnings'; warnings: Array<{ code: string; count: number }> | null }
   | { kind: 'pendingAssistantInsert'; payload: ComposeAssistantToWorkspaceFlow }
   | { kind: 'clearPendingAssistantInsert' }
   // ── Task 050 (Spike #3 §9): SPE check-out lifecycle actions ───────────────
@@ -361,6 +440,10 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   importedRevisions: [],
   importedComments: [],
   projection: null,
+  loadedContentModel: null,
+  loadedContentModelWarnings: null,
+  sourceFormat: null,
+  saveDegradationWarnings: null,
   errorMessage: null,
   saveErrorIsLock: false,
   partialApply: null,
@@ -389,6 +472,10 @@ export function composeWorkspaceReducer(
         // banner still renders after loadSucceeded (which spreads ...state). Defaults false for every
         // normal load (initial open / Search).
         externalChangePending: action.externalChange ?? false,
+        // 032 Step-9.5 F2: requestLoad resets to INITIAL_STATE, which WIPES a just-dispatched
+        // degradation banner. Apply-template's merge warnings exist ONLY in the apply response —
+        // carry them through the remount or they are silently lost (loud-not-silent principle).
+        saveDegradationWarnings: action.carryDegradationWarnings ?? null,
       };
     case 'loadSucceeded':
       return {
@@ -406,14 +493,25 @@ export function composeWorkspaceReducer(
         importedComments: action.importedComments ?? [],
         // The server projection (null for an older BFF → task 013/F-2 error-unavailable state).
         projection: action.projection ?? null,
+        // task 012 (r6): the canonical content model — set ATOMICALLY with projection (same source
+        // response). Omitted (older BFF / failed canonical projection) → null → op-log fallback save.
+        loadedContentModel: action.contentModel ?? null,
+        // task 013 (r6, F7): the projection's flatten warnings — same atomic set/clear as the model.
+        loadedContentModelWarnings: action.contentModelWarnings ?? null,
         // G1 (FR-01, task 020): normalize an omitted/undefined field (Path B continuation, or an
         // older BFF) to `null` — the BINDING null-handling contract treats null as 'imported'.
         origin: action.origin ?? null,
+        // Task 041 (FR-06, PDF intake): 'pdf' = the mounted docx was synthesized from a PDF —
+        // drives the honest-lossiness notice + the create-on-save routing. Omitted → null.
+        sourceFormat: action.sourceFormat ?? null,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
               sprkDocumentId: action.sprkDocumentId ?? state.documentRef.sprkDocumentId,
               fileName: action.fileName ?? state.documentRef.fileName,
+              // Task 041: the PDF dedup key (supplied only on PDF-sourced loads) — repeated saves
+              // of the same PDF session create-on-save onto ONE new docx record (G7 mechanism).
+              transientKey: action.transientKey ?? state.documentRef.transientKey,
             }
           : state.documentRef,
         errorMessage: null,
@@ -479,6 +577,16 @@ export function composeWorkspaceReducer(
         // caller's projection round-trip failed/was unreachable — task 013 (F-2): the editor now
         // renders an explicit error/unavailable state for that case (no client fallback reader).
         projection: action.projection ?? null,
+        // task 012 (r6): set atomically with projection — SAME clear-rather-than-inherit discipline
+        // (a new transient mount over a prior loaded doc must never keep the prior doc's model).
+        loadedContentModel: action.contentModel ?? null,
+        // task 013 (r6, F7): same lifecycle as the model — set from this mount's response or cleared.
+        loadedContentModelWarnings: action.contentModelWarnings ?? null,
+        // Task 041 (FR-06): a transient mount is not a PDF-sourced load — clear rather than inherit.
+        sourceFormat: null,
+        // 026-F5 (task 012, r6): a fresh mount has no save history — clear any stale save-warning
+        // banner from a prior document mounted in this same tab.
+        saveDegradationWarnings: null,
         // G1 (FR-01, task 020): a fresh transient mount has no persisted origin yet (this doc has
         // never been saved) — explicitly clear rather than inheriting a PRIOR document's origin from
         // an earlier mount in the same tab (same "clear rather than inherit" rationale as
@@ -517,6 +625,16 @@ export function composeWorkspaceReducer(
         // editor seeds directly from `initialHtml`), so the editor's docx-mount branch (projection /
         // error-unavailable) is never reached here — this was never a mammoth consumer (task 012 audit).
         projection: null,
+        // task 012 (r6): a born-in-editor seed has no loaded/imported baseline model — its saves
+        // author the whole document via `buildContentModel()`, never the imported-model merge path.
+        loadedContentModel: null,
+        // task 013 (r6, F7): no projection ran for this mount — nothing was flattened.
+        loadedContentModelWarnings: null,
+        // Task 041 (FR-06): a born-in-editor seed is not a PDF-sourced load — clear rather than inherit.
+        sourceFormat: null,
+        // 026-F5 (task 012, r6): clear any stale save-warning banner from a prior mount (same
+        // clear-rather-than-inherit rationale as mountTransient).
+        saveDegradationWarnings: null,
         // G1 (FR-01, task 020): same rationale as mountTransient — a fresh AI-drafted seed has no
         // persisted origin yet.
         origin: null,
@@ -544,15 +662,47 @@ export function composeWorkspaceReducer(
         //   the LOAD-TIME original (set on loadSucceeded) and MUST stay fixed across saves so
         //   every save is a delta vs the load-time original (FR-01). Advancing it each save would
         //   re-baseline onto the just-saved version and corrupt the tracked-change accumulation.
-        versionId: state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null),
+        //   Task 041 (FR-06, PDF intake) EXCEPTION: a PDF-sourced doc's load-time versionId is the
+        //   PDF ITEM's version — meaningless as a baseline for the NEW docx its create-on-save just
+        //   minted. Re-baseline onto the save response's versionId (the new doc's first version)
+        //   instead of keeping the PDF's.
+        versionId:
+          state.sourceFormat === 'pdf'
+            ? action.versionId && action.versionId.length > 0
+              ? action.versionId
+              : null
+            : (state.versionId ?? (action.versionId && action.versionId.length > 0 ? action.versionId : null)),
         // G1 (FR-01, task 020): refresh from this save's resolved origin when the response carries
         // one; otherwise keep whatever state already had (never regress a known origin to null just
         // because an older BFF response omitted the field).
         origin: action.origin ?? state.origin,
+        // task 012 (r6): a successful MODEL-PATH save adopts the post-save model as the new merge
+        // base. Omitted (op-log / born-in-editor save, or a caller without one) → keep the existing
+        // base — NEVER regress a known model to null on success.
+        loadedContentModel: action.contentModel ?? state.loadedContentModel,
+        // task 013 (r6, F7): model adoption ⇔ a model-path save just materialized the projection's
+        // flatten loss (triggerSave folded these into that save's saveDegradationWarnings dispatch)
+        // — CLEAR them so subsequent saves do not repeat them (the adopted post-save model already
+        // reflects the loss). An op-log / born-in-editor save (no `action.contentModel`) keeps them:
+        // the loss has NOT materialized on the byte-identical path yet.
+        loadedContentModelWarnings: action.contentModel ? null : state.loadedContentModelWarnings,
+        // Task 041 (FR-06, PDF intake): the create-on-save re-targeted the doc to its NEW docx
+        // identity (documentSpeId/driveId below) — it is a native docx from here on. Clearing the
+        // marker routes subsequent saves onto the normal replace path and retires the PDF notice.
+        sourceFormat: null,
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
               sprkDocumentId: action.sprkDocumentId ?? state.documentRef.sprkDocumentId,
+              // Task 041 (FR-06): a PDF-sourced save just created a NEW Word document — reflect the
+              // .docx name locally (triggerSave sent it as the create displayName) so subsequent
+              // replace-path saves and the toolbar show the document's real identity. Review
+              // B-LOW-4: the undefined-name fallback MIRRORS triggerSave's ('document.pdf' →
+              // 'document.docx') so local state never diverges from the server record.
+              fileName:
+                state.sourceFormat === 'pdf'
+                  ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
+                  : state.documentRef.fileName,
               // gap 1.7: carry the server-minted SPE id back so the mount is no longer transient
               // (empty speDriveItemId) — a second Save now targets the real drive-item.
               speDriveItemId:
@@ -572,6 +722,10 @@ export function composeWorkspaceReducer(
       return INITIAL_STATE;
     case 'importWarnings':
       return { ...state, importWarnings: action.warnings };
+    // 026-F5 (task 012, r6): wholesale REPLACE of the save-warning family — every successful save
+    // dispatches this; null (a clean save) clears the stale banner.
+    case 'saveDegradationWarnings':
+      return { ...state, saveDegradationWarnings: action.warnings };
     case 'pendingAssistantInsert':
       return { ...state, pendingAssistantInsert: action.payload };
     case 'clearPendingAssistantInsert':

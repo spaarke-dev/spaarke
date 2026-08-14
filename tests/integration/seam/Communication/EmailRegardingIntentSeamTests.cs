@@ -95,8 +95,11 @@ public sealed class EmailRegardingIntentSeamTests
         var config = new ConfigurationBuilder().Build();
 
         return new CommunicationEnrichmentService(
-            enqueuer.Object, entityService, config, producer.Object,
-            triageAi.Object, proposeAi.Object, createTaskAi.Object, actionSeam.Object,
+            EnrichmentScopeFactoryStub.Create(
+                enqueuer.Object, triageAi.Object, proposeAi.Object, createTaskAi.Object),
+            entityService, config, producer.Object,
+            actionSeam.Object,
+            TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

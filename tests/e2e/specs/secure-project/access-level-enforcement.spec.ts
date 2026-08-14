@@ -38,7 +38,7 @@
  *
  * Prerequisites (live environment):
  *   - Power Pages SPA deployed (sprk_externalworkspace web resource)
- *   - BFF API deployed with ExternalCallerAuthorizationFilter active
+ *   - BFF API deployed with CallerPrincipalAuthorizationFilter active
  *   - Three test Contact records with active sprk_externalrecordaccess rows:
  *       VIEW_ONLY_USER_EMAIL      — sprk_accesslevel = 100000000
  *       COLLABORATE_USER_EMAIL    — sprk_accesslevel = 100000001
@@ -63,35 +63,33 @@
  *
  * @see spec.md FR-03: Access Level Enforcement
  * @see src/client/external-spa/src/hooks/useAccessLevel.ts
- * @see src/server/api/Sprk.Bff.Api/Api/Filters/ExternalCallerAuthorizationFilter.cs
+ * @see src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs
  */
 
-import { test, expect, Page, BrowserContext } from "@playwright/test";
+import { test, expect, Page, BrowserContext } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Environment configuration
 // ---------------------------------------------------------------------------
 
-const POWER_PAGES_URL =
-  process.env.POWER_PAGES_URL || "https://spaarke-portal-dev.powerappsportals.com";
+const POWER_PAGES_URL = process.env.POWER_PAGES_URL || 'https://spaarke-portal-dev.powerappsportals.com';
 
-const BFF_API_URL =
-  process.env.BFF_API_URL || "https://spe-api-dev-67e2xz.azurewebsites.net";
+const BFF_API_URL = process.env.BFF_API_URL || 'https://spe-api-dev-67e2xz.azurewebsites.net';
 
-const TEST_PROJECT_ID = process.env.TEST_PROJECT_ID || "";
+const TEST_PROJECT_ID = process.env.TEST_PROJECT_ID || '';
 
 // Portal JWT tokens for each test user (obtained via portal login flow or
 // pre-generated for test environments using Entra External ID test accounts)
 const TOKENS = {
-  viewOnly: process.env.VIEW_ONLY_TOKEN || "",
-  collaborate: process.env.COLLABORATE_TOKEN || "",
-  fullAccess: process.env.FULL_ACCESS_TOKEN || "",
+  viewOnly: process.env.VIEW_ONLY_TOKEN || '',
+  collaborate: process.env.COLLABORATE_TOKEN || '',
+  fullAccess: process.env.FULL_ACCESS_TOKEN || '',
 };
 
 const TEST_USERS = {
-  viewOnly: process.env.VIEW_ONLY_USER_EMAIL || "viewonly@external-test.example.com",
-  collaborate: process.env.COLLABORATE_USER_EMAIL || "collaborate@external-test.example.com",
-  fullAccess: process.env.FULL_ACCESS_USER_EMAIL || "fullaccess@external-test.example.com",
+  viewOnly: process.env.VIEW_ONLY_USER_EMAIL || 'viewonly@external-test.example.com',
+  collaborate: process.env.COLLABORATE_USER_EMAIL || 'collaborate@external-test.example.com',
+  fullAccess: process.env.FULL_ACCESS_USER_EMAIL || 'fullaccess@external-test.example.com',
 };
 
 // ---------------------------------------------------------------------------
@@ -153,17 +151,17 @@ const SELECTORS = {
 
 const API_PATHS = {
   // Upload endpoint — requires Collaborate or Full Access
-  documentUpload: "/api/v1/external/documents/upload",
+  documentUpload: '/api/v1/external/documents/upload',
   // Download endpoint — requires Collaborate or Full Access
   documentDownload: (id: string) => `/api/v1/external/documents/${id}/download`,
   // Create event — requires Collaborate or Full Access
-  createEvent: "/api/v1/external/events",
+  createEvent: '/api/v1/external/events',
   // Create task — requires Collaborate or Full Access
-  createTask: "/api/v1/external/tasks",
+  createTask: '/api/v1/external/tasks',
   // Playbook execution — requires Collaborate or Full Access
-  runPlaybook: "/api/v1/external/playbooks/execute",
+  runPlaybook: '/api/v1/external/playbooks/execute',
   // Invite user — requires Full Access
-  inviteUser: "/api/v1/external-access/invite",
+  inviteUser: '/api/v1/external-access/invite',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -178,14 +176,10 @@ const API_PATHS = {
  * In a live test environment, this would navigate to the real Power Pages URL.
  * The function is designed to be extended with real auth flows (e.g. PKCE).
  */
-async function navigateAsUser(
-  page: Page,
-  context: BrowserContext,
-  token: string
-): Promise<void> {
+async function navigateAsUser(page: Page, context: BrowserContext, token: string): Promise<void> {
   // Intercept all BFF API calls and inject the portal Bearer token.
   // This allows tests to run without requiring a full browser-based OIDC login.
-  await context.route(`${BFF_API_URL}/**`, async (route) => {
+  await context.route(`${BFF_API_URL}/**`, async route => {
     const headers = {
       ...route.request().headers(),
       Authorization: `Bearer ${token}`,
@@ -218,7 +212,7 @@ async function apiBffCall(
       const response = await fetch(url as string, {
         method: method as string,
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
         body: body ? JSON.stringify(body) : undefined,
@@ -231,12 +225,7 @@ async function apiBffCall(
       }
       return { status: response.status, body: responseBody };
     },
-    [
-      `${BFF_API_URL}${path}`,
-      method,
-      body ?? null,
-      token,
-    ] as [string, string, Record<string, unknown> | null, string]
+    [`${BFF_API_URL}${path}`, method, body ?? null, token] as [string, string, Record<string, unknown> | null, string]
   );
 }
 
@@ -247,25 +236,22 @@ async function apiBffCall(
 // In a live environment, obtain a real document ID from the project.
 // This constant is used in server-side enforcement tests where we call the
 // download endpoint directly to verify 403 is returned for View Only users.
-const PLACEHOLDER_DOCUMENT_ID = process.env.TEST_DOCUMENT_ID || "test-document-placeholder-id";
+const PLACEHOLDER_DOCUMENT_ID = process.env.TEST_DOCUMENT_ID || 'test-document-placeholder-id';
 
 // ===========================================================================
 // Test Suite: Access Level Enforcement — Client-Side UI
 // ===========================================================================
 
-test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", () => {
+test.describe('Access Level Enforcement — Client-Side UI @e2e @access-level', () => {
   // =========================================================================
   // View Only user
   // =========================================================================
 
-  test.describe("View Only user (accessLevel=100000000)", () => {
-    test("should NOT see Upload Document button in DocumentLibrary", async ({
-      page,
-      context,
-    }) => {
+  test.describe('View Only user (accessLevel=100000000)', () => {
+    test('should NOT see Upload Document button in DocumentLibrary', async ({ page, context }) => {
       // Skip if test tokens are not configured
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured — skipping live test");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured — skipping live test");
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured — skipping live test');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured — skipping live test');
 
       await navigateAsUser(page, context, TOKENS.viewOnly);
 
@@ -276,12 +262,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.uploadDocumentBtn)).not.toBeVisible();
     });
 
-    test("should NOT see Download buttons in DocumentLibrary", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should NOT see Download buttons in DocumentLibrary', async ({ page, context }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.viewOnly);
       await expect(page.locator(SELECTORS.documentLibrary)).toBeVisible({ timeout: 20000 });
@@ -291,12 +274,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(downloadButtons).toHaveCount(0);
     });
 
-    test("should NOT see Add Task button in SmartTodo", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should NOT see Add Task button in SmartTodo', async ({ page, context }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.viewOnly);
 
@@ -307,12 +287,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.addTaskBtn)).not.toBeVisible();
     });
 
-    test("should NOT see Add Event button in EventsCalendar", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should NOT see Add Event button in EventsCalendar', async ({ page, context }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.viewOnly);
       await expect(page.locator(SELECTORS.eventsCalendar)).toBeVisible({ timeout: 20000 });
@@ -321,9 +298,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.addEventBtn)).not.toBeVisible();
     });
 
-    test("should NOT see AI Toolbar", async ({ page, context }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should NOT see AI Toolbar', async ({ page, context }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.viewOnly);
 
@@ -331,9 +308,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.aiToolbar)).not.toBeVisible();
     });
 
-    test("should NOT see Invite User button", async ({ page, context }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should NOT see Invite User button', async ({ page, context }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.viewOnly);
 
@@ -341,12 +318,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.inviteUserBtn)).not.toBeVisible();
     });
 
-    test("should see document list and pre-computed AI summaries (read-only)", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see document list and pre-computed AI summaries (read-only)', async ({ page, context }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.viewOnly);
       await expect(page.locator(SELECTORS.documentLibrary)).toBeVisible({ timeout: 20000 });
@@ -355,12 +329,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.documentGrid)).toBeVisible();
     });
 
-    test("should see semantic search input (available to all levels)", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see semantic search input (available to all levels)', async ({ page, context }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.viewOnly);
 
@@ -373,13 +344,10 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
   // Collaborate user
   // =========================================================================
 
-  test.describe("Collaborate user (accessLevel=100000001)", () => {
-    test("should see Upload Document button in DocumentLibrary", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+  test.describe('Collaborate user (accessLevel=100000001)', () => {
+    test('should see Upload Document button in DocumentLibrary', async ({ page, context }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.collaborate);
       await expect(page.locator(SELECTORS.documentLibrary)).toBeVisible({ timeout: 20000 });
@@ -388,12 +356,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.uploadDocumentBtn)).toBeVisible();
     });
 
-    test("should see Download buttons in DocumentLibrary", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see Download buttons in DocumentLibrary', async ({ page, context }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.collaborate);
       await expect(page.locator(SELECTORS.documentLibrary)).toBeVisible({ timeout: 20000 });
@@ -403,12 +368,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(downloadButtons.first()).toBeVisible();
     });
 
-    test("should see Add Task button in SmartTodo", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see Add Task button in SmartTodo', async ({ page, context }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.collaborate);
       await expect(page.locator(SELECTORS.smartTodo)).toBeVisible({ timeout: 20000 });
@@ -417,12 +379,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.addTaskBtn)).toBeVisible();
     });
 
-    test("should see Add Event button in EventsCalendar", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see Add Event button in EventsCalendar', async ({ page, context }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.collaborate);
       await expect(page.locator(SELECTORS.eventsCalendar)).toBeVisible({ timeout: 20000 });
@@ -431,9 +390,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.addEventBtn)).toBeVisible();
     });
 
-    test("should see AI Toolbar", async ({ page, context }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see AI Toolbar', async ({ page, context }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.collaborate);
 
@@ -443,12 +402,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.aiRunAnalysisBtn)).toBeVisible();
     });
 
-    test("should NOT see Invite User button (invite requires Full Access)", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should NOT see Invite User button (invite requires Full Access)', async ({ page, context }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.collaborate);
 
@@ -456,9 +412,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.inviteUserBtn)).not.toBeVisible();
     });
 
-    test("should see semantic search input", async ({ page, context }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see semantic search input', async ({ page, context }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.collaborate);
       await expect(page.locator(SELECTORS.semanticSearchInput)).toBeVisible({ timeout: 20000 });
@@ -469,25 +425,19 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
   // Full Access user
   // =========================================================================
 
-  test.describe("Full Access user (accessLevel=100000002)", () => {
-    test("should see Upload Document button in DocumentLibrary", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+  test.describe('Full Access user (accessLevel=100000002)', () => {
+    test('should see Upload Document button in DocumentLibrary', async ({ page, context }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.fullAccess);
       await expect(page.locator(SELECTORS.documentLibrary)).toBeVisible({ timeout: 20000 });
       await expect(page.locator(SELECTORS.uploadDocumentBtn)).toBeVisible();
     });
 
-    test("should see Download buttons in DocumentLibrary", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see Download buttons in DocumentLibrary', async ({ page, context }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.fullAccess);
       await expect(page.locator(SELECTORS.documentLibrary)).toBeVisible({ timeout: 20000 });
@@ -496,33 +446,27 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(downloadButtons.first()).toBeVisible();
     });
 
-    test("should see Add Task button in SmartTodo", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see Add Task button in SmartTodo', async ({ page, context }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.fullAccess);
       await expect(page.locator(SELECTORS.smartTodo)).toBeVisible({ timeout: 20000 });
       await expect(page.locator(SELECTORS.addTaskBtn)).toBeVisible();
     });
 
-    test("should see Add Event button in EventsCalendar", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see Add Event button in EventsCalendar', async ({ page, context }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.fullAccess);
       await expect(page.locator(SELECTORS.eventsCalendar)).toBeVisible({ timeout: 20000 });
       await expect(page.locator(SELECTORS.addEventBtn)).toBeVisible();
     });
 
-    test("should see AI Toolbar with all actions", async ({ page, context }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see AI Toolbar with all actions', async ({ page, context }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.fullAccess);
       await expect(page.locator(SELECTORS.aiToolbar)).toBeVisible({ timeout: 20000 });
@@ -530,9 +474,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.aiRunAnalysisBtn)).toBeVisible();
     });
 
-    test("should see Invite User button", async ({ page, context }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see Invite User button', async ({ page, context }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.fullAccess);
 
@@ -540,9 +484,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.inviteUserBtn)).toBeVisible({ timeout: 20000 });
     });
 
-    test("should be able to open InviteUserDialog", async ({ page, context }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should be able to open InviteUserDialog', async ({ page, context }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.fullAccess);
       await expect(page.locator(SELECTORS.inviteUserBtn)).toBeVisible({ timeout: 20000 });
@@ -551,9 +495,9 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
       await expect(page.locator(SELECTORS.inviteUserDialog)).toBeVisible();
     });
 
-    test("should see semantic search input", async ({ page, context }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('should see semantic search input', async ({ page, context }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       await navigateAsUser(page, context, TOKENS.fullAccess);
       await expect(page.locator(SELECTORS.semanticSearchInput)).toBeVisible({ timeout: 20000 });
@@ -565,7 +509,7 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
 // Test Suite: Access Level Enforcement — Server-Side (API rejects bypass)
 // ===========================================================================
 //
-// These tests verify that the BFF API's ExternalCallerAuthorizationFilter and
+// These tests verify that the BFF API's CallerPrincipalAuthorizationFilter and
 // access-level-aware endpoint logic reject unauthorized operations even when
 // the client-side UI is bypassed (e.g. a View Only user calling the upload
 // endpoint directly via fetch or curl).
@@ -580,19 +524,19 @@ test.describe("Access Level Enforcement — Client-Side UI @e2e @access-level", 
 //
 // ===========================================================================
 
-test.describe("Access Level Enforcement — Server-Side API @e2e @access-level @server-side", () => {
+test.describe('Access Level Enforcement — Server-Side API @e2e @access-level @server-side', () => {
   // =========================================================================
   // View Only — must be rejected for write operations
   // =========================================================================
 
-  test.describe("View Only (100000000) — API rejects write operations", () => {
-    test("BFF rejects document download for View Only user with 403", async ({ page }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured — skipping server-side test");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+  test.describe('View Only (100000000) — API rejects write operations', () => {
+    test('BFF rejects document download for View Only user with 403', async ({ page }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured — skipping server-side test');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       const { status, body } = await apiBffCall(
         page,
-        "GET",
+        'GET',
         API_PATHS.documentDownload(PLACEHOLDER_DOCUMENT_ID),
         TOKENS.viewOnly
       );
@@ -601,98 +545,68 @@ test.describe("Access Level Enforcement — Server-Side API @e2e @access-level @
       expect(status).toBe(403);
       // ProblemDetails error code indicates access level insufficient
       const problemDetail = body as { errorCode?: string; detail?: string };
-      expect(
-        problemDetail?.errorCode || problemDetail?.detail
-      ).toBeTruthy();
+      expect(problemDetail?.errorCode || problemDetail?.detail).toBeTruthy();
     });
 
-    test("BFF rejects document upload for View Only user with 403", async ({ page }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF rejects document upload for View Only user with 403', async ({ page }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       // Call upload endpoint with a minimal payload; we expect 403 before any
       // validation of the multipart body occurs.
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.documentUpload,
-        TOKENS.viewOnly,
-        { projectId: TEST_PROJECT_ID }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.documentUpload, TOKENS.viewOnly, {
+        projectId: TEST_PROJECT_ID,
+      });
 
       expect(status).toBe(403);
     });
 
-    test("BFF rejects event creation for View Only user with 403", async ({ page }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF rejects event creation for View Only user with 403', async ({ page }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.createEvent,
-        TOKENS.viewOnly,
-        {
-          projectId: TEST_PROJECT_ID,
-          title: "Test Event — should be rejected",
-          startDate: new Date().toISOString(),
-        }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.createEvent, TOKENS.viewOnly, {
+        projectId: TEST_PROJECT_ID,
+        title: 'Test Event — should be rejected',
+        startDate: new Date().toISOString(),
+      });
 
       expect(status).toBe(403);
     });
 
-    test("BFF rejects task creation for View Only user with 403", async ({ page }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF rejects task creation for View Only user with 403', async ({ page }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.createTask,
-        TOKENS.viewOnly,
-        {
-          projectId: TEST_PROJECT_ID,
-          title: "Test Task — should be rejected",
-        }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.createTask, TOKENS.viewOnly, {
+        projectId: TEST_PROJECT_ID,
+        title: 'Test Task — should be rejected',
+      });
 
       expect(status).toBe(403);
     });
 
-    test("BFF rejects playbook execution for View Only user with 403", async ({ page }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF rejects playbook execution for View Only user with 403', async ({ page }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.runPlaybook,
-        TOKENS.viewOnly,
-        {
-          playbookId: "summarize-project",
-          projectId: TEST_PROJECT_ID,
-        }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.runPlaybook, TOKENS.viewOnly, {
+        playbookId: 'summarize-project',
+        projectId: TEST_PROJECT_ID,
+      });
 
       expect(status).toBe(403);
     });
 
-    test("BFF rejects invitation for View Only user with 403", async ({ page }) => {
-      test.skip(!TOKENS.viewOnly, "VIEW_ONLY_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF rejects invitation for View Only user with 403', async ({ page }) => {
+      test.skip(!TOKENS.viewOnly, 'VIEW_ONLY_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.inviteUser,
-        TOKENS.viewOnly,
-        {
-          email: "unauthorized-invite@external-test.example.com",
-          projectId: TEST_PROJECT_ID,
-          accessLevel: 100000000,
-        }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.inviteUser, TOKENS.viewOnly, {
+        email: 'unauthorized-invite@external-test.example.com',
+        projectId: TEST_PROJECT_ID,
+        accessLevel: 100000000,
+      });
 
       // Must be rejected — View Only cannot invite
       expect(status).toBe(403);
@@ -703,16 +617,14 @@ test.describe("Access Level Enforcement — Server-Side API @e2e @access-level @
   // Collaborate — allowed for CRUD, rejected for invite
   // =========================================================================
 
-  test.describe("Collaborate (100000001) — API allows CRUD, rejects invite", () => {
-    test("BFF allows document download request for Collaborate user (not 403)", async ({
-      page,
-    }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+  test.describe('Collaborate (100000001) — API allows CRUD, rejects invite', () => {
+    test('BFF allows document download request for Collaborate user (not 403)', async ({ page }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       const { status } = await apiBffCall(
         page,
-        "GET",
+        'GET',
         API_PATHS.documentDownload(PLACEHOLDER_DOCUMENT_ID),
         TOKENS.collaborate
       );
@@ -723,42 +635,28 @@ test.describe("Access Level Enforcement — Server-Side API @e2e @access-level @
       expect(status).not.toBe(403);
     });
 
-    test("BFF allows playbook execution for Collaborate user (not 403)", async ({
-      page,
-    }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF allows playbook execution for Collaborate user (not 403)', async ({ page }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.runPlaybook,
-        TOKENS.collaborate,
-        {
-          playbookId: "summarize-project",
-          projectId: TEST_PROJECT_ID,
-        }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.runPlaybook, TOKENS.collaborate, {
+        playbookId: 'summarize-project',
+        projectId: TEST_PROJECT_ID,
+      });
 
       // Not 403 (auth passed; downstream may fail for other reasons in test env)
       expect(status).not.toBe(403);
     });
 
-    test("BFF rejects invitation for Collaborate user with 403", async ({ page }) => {
-      test.skip(!TOKENS.collaborate, "COLLABORATE_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF rejects invitation for Collaborate user with 403', async ({ page }) => {
+      test.skip(!TOKENS.collaborate, 'COLLABORATE_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.inviteUser,
-        TOKENS.collaborate,
-        {
-          email: "unauthorized-invite@external-test.example.com",
-          projectId: TEST_PROJECT_ID,
-          accessLevel: 100000000,
-        }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.inviteUser, TOKENS.collaborate, {
+        email: 'unauthorized-invite@external-test.example.com',
+        projectId: TEST_PROJECT_ID,
+        accessLevel: 100000000,
+      });
 
       // Collaborate cannot invite — must be 403
       expect(status).toBe(403);
@@ -769,16 +667,14 @@ test.describe("Access Level Enforcement — Server-Side API @e2e @access-level @
   // Full Access — allowed for all operations including invite
   // =========================================================================
 
-  test.describe("Full Access (100000002) — API allows all operations", () => {
-    test("BFF allows document download for Full Access user (not 403)", async ({
-      page,
-    }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+  test.describe('Full Access (100000002) — API allows all operations', () => {
+    test('BFF allows document download for Full Access user (not 403)', async ({ page }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       const { status } = await apiBffCall(
         page,
-        "GET",
+        'GET',
         API_PATHS.documentDownload(PLACEHOLDER_DOCUMENT_ID),
         TOKENS.fullAccess
       );
@@ -786,44 +682,30 @@ test.describe("Access Level Enforcement — Server-Side API @e2e @access-level @
       expect(status).not.toBe(403);
     });
 
-    test("BFF allows playbook execution for Full Access user (not 403)", async ({
-      page,
-    }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF allows playbook execution for Full Access user (not 403)', async ({ page }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.runPlaybook,
-        TOKENS.fullAccess,
-        {
-          playbookId: "summarize-project",
-          projectId: TEST_PROJECT_ID,
-        }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.runPlaybook, TOKENS.fullAccess, {
+        playbookId: 'summarize-project',
+        projectId: TEST_PROJECT_ID,
+      });
 
       expect(status).not.toBe(403);
     });
 
-    test("BFF allows invitation for Full Access user (not 403)", async ({ page }) => {
-      test.skip(!TOKENS.fullAccess, "FULL_ACCESS_TOKEN not configured");
-      test.skip(!TEST_PROJECT_ID, "TEST_PROJECT_ID not configured");
+    test('BFF allows invitation for Full Access user (not 403)', async ({ page }) => {
+      test.skip(!TOKENS.fullAccess, 'FULL_ACCESS_TOKEN not configured');
+      test.skip(!TEST_PROJECT_ID, 'TEST_PROJECT_ID not configured');
 
       // NOTE: This test sends a real invitation request. Use a test-only email
       // address that does not result in a real invitation being sent, or mock
       // the Entra External ID invitation call at the infrastructure level.
-      const { status } = await apiBffCall(
-        page,
-        "POST",
-        API_PATHS.inviteUser,
-        TOKENS.fullAccess,
-        {
-          email: `e2e-invite-test-${Date.now()}@external-test.example.com`,
-          projectId: TEST_PROJECT_ID,
-          accessLevel: 100000000,
-        }
-      );
+      const { status } = await apiBffCall(page, 'POST', API_PATHS.inviteUser, TOKENS.fullAccess, {
+        email: `e2e-invite-test-${Date.now()}@external-test.example.com`,
+        projectId: TEST_PROJECT_ID,
+        accessLevel: 100000000,
+      });
 
       // Full Access is authorized for invite (may succeed 201 or fail 422/500
       // due to test environment limitations, but must NOT be 403)
@@ -846,38 +728,35 @@ test.describe("Access Level Enforcement — Server-Side API @e2e @access-level @
 //
 // ===========================================================================
 
-test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @access-level @mocked", () => {
+test.describe('Access Level Enforcement — Mocked Context (CI-safe) @e2e @access-level @mocked', () => {
   // Shared mock for a test document used across all capability matrix tests
-  const MOCK_DOCUMENT_ID = "mock-doc-id-001";
-  const MOCK_PROJECT_ID = TEST_PROJECT_ID || "mock-project-id-001";
+  const MOCK_DOCUMENT_ID = 'mock-doc-id-001';
+  const MOCK_PROJECT_ID = TEST_PROJECT_ID || 'mock-project-id-001';
 
   /**
    * Sets up route interception to mock the BFF context endpoint to return a
    * specific access level, and mocks document/event/task list endpoints.
    */
-  async function setupMockedContext(
-    context: BrowserContext,
-    accessLevelValue: number
-  ): Promise<void> {
+  async function setupMockedContext(context: BrowserContext, accessLevelValue: number): Promise<void> {
     // Mock /external/context endpoint
-    await context.route(`${BFF_API_URL}/api/v1/external/context`, async (route) => {
+    await context.route(`${BFF_API_URL}/api/v1/external/context`, async route => {
       await route.fulfill({
         status: 200,
-        contentType: "application/json",
+        contentType: 'application/json',
         body: JSON.stringify({
-          contactId: "mock-contact-id",
-          email: "mock-user@external-test.example.com",
-          displayName: "Mock Test User",
+          contactId: 'mock-contact-id',
+          email: 'mock-user@external-test.example.com',
+          displayName: 'Mock Test User',
           projects: [
             {
               projectId: MOCK_PROJECT_ID,
-              projectName: "Mock Secure Project",
+              projectName: 'Mock Secure Project',
               accessLevel:
                 accessLevelValue === 100000000
-                  ? "ViewOnly"
+                  ? 'ViewOnly'
                   : accessLevelValue === 100000001
-                    ? "Collaborate"
-                    : "FullAccess",
+                    ? 'Collaborate'
+                    : 'FullAccess',
             },
           ],
         }),
@@ -885,54 +764,45 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
     });
 
     // Mock document list endpoint
-    await context.route(
-      `${BFF_API_URL}/api/v1/external/documents?projectId=${MOCK_PROJECT_ID}`,
-      async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({
-            value: [
-              {
-                sprk_documentid: MOCK_DOCUMENT_ID,
-                sprk_name: "Mock Contract.pdf",
-                sprk_documenttype: "contract",
-                sprk_summary: "This is a mock AI-generated summary of the contract document.",
-                createdon: new Date().toISOString(),
-              },
-            ],
-          }),
-        });
-      }
-    );
+    await context.route(`${BFF_API_URL}/api/v1/external/documents?projectId=${MOCK_PROJECT_ID}`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          value: [
+            {
+              sprk_documentid: MOCK_DOCUMENT_ID,
+              sprk_name: 'Mock Contract.pdf',
+              sprk_documenttype: 'contract',
+              sprk_summary: 'This is a mock AI-generated summary of the contract document.',
+              createdon: new Date().toISOString(),
+            },
+          ],
+        }),
+      });
+    });
 
     // Mock events list endpoint
-    await context.route(
-      `${BFF_API_URL}/api/v1/external/events?projectId=${MOCK_PROJECT_ID}`,
-      async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ value: [] }),
-        });
-      }
-    );
+    await context.route(`${BFF_API_URL}/api/v1/external/events?projectId=${MOCK_PROJECT_ID}`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ value: [] }),
+      });
+    });
 
     // Mock tasks list endpoint
-    await context.route(
-      `${BFF_API_URL}/api/v1/external/tasks?projectId=${MOCK_PROJECT_ID}`,
-      async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify({ value: [] }),
-        });
-      }
-    );
+    await context.route(`${BFF_API_URL}/api/v1/external/tasks?projectId=${MOCK_PROJECT_ID}`, async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ value: [] }),
+      });
+    });
 
     // Block all other BFF calls so they don't cause test failures
-    await context.route(`${BFF_API_URL}/**`, async (route) => {
-      await route.fulfill({ status: 200, body: "{}" });
+    await context.route(`${BFF_API_URL}/**`, async route => {
+      await route.fulfill({ status: 200, body: '{}' });
     });
   }
 
@@ -940,21 +810,21 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
   // Mocked: View Only capability matrix
   // =========================================================================
 
-  test.describe("Mocked View Only (100000000) — capability matrix verification", () => {
+  test.describe('Mocked View Only (100000000) — capability matrix verification', () => {
     test.beforeEach(async ({ context }) => {
       await setupMockedContext(context, 100000000);
     });
 
-    test("document grid is visible (read-only allowed)", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping — no SPA URL");
+    test('document grid is visible (read-only allowed)', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping — no SPA URL');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.documentLibrary)).toBeVisible({ timeout: 20000 });
     });
 
-    test("upload button is absent", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('upload button is absent', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -962,8 +832,8 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
       await expect(page.locator(SELECTORS.uploadDocumentBtn)).not.toBeVisible();
     });
 
-    test("download buttons are absent", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('download buttons are absent', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -971,32 +841,32 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
       await expect(page.locator(SELECTORS.downloadBtn)).toHaveCount(0);
     });
 
-    test("AI toolbar is absent", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('AI toolbar is absent', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.aiToolbar)).not.toBeVisible({ timeout: 10000 });
     });
 
-    test("invite user button is absent", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('invite user button is absent', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.inviteUserBtn)).not.toBeVisible({ timeout: 10000 });
     });
 
-    test("add task button is absent", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('add task button is absent', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.addTaskBtn)).not.toBeVisible({ timeout: 10000 });
     });
 
-    test("add event button is absent", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('add event button is absent', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -1008,13 +878,13 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
   // Mocked: Collaborate capability matrix
   // =========================================================================
 
-  test.describe("Mocked Collaborate (100000001) — capability matrix verification", () => {
+  test.describe('Mocked Collaborate (100000001) — capability matrix verification', () => {
     test.beforeEach(async ({ context }) => {
       await setupMockedContext(context, 100000001);
     });
 
-    test("upload button is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('upload button is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -1022,8 +892,8 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
       await expect(page.locator(SELECTORS.uploadDocumentBtn)).toBeVisible();
     });
 
-    test("download buttons are visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('download buttons are visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -1031,32 +901,32 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
       await expect(page.locator(SELECTORS.downloadBtn).first()).toBeVisible();
     });
 
-    test("AI toolbar is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('AI toolbar is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.aiToolbar)).toBeVisible({ timeout: 20000 });
     });
 
-    test("invite user button is absent", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('invite user button is absent', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.inviteUserBtn)).not.toBeVisible({ timeout: 10000 });
     });
 
-    test("add task button is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('add task button is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.addTaskBtn)).toBeVisible({ timeout: 20000 });
     });
 
-    test("add event button is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('add event button is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -1068,13 +938,13 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
   // Mocked: Full Access capability matrix
   // =========================================================================
 
-  test.describe("Mocked Full Access (100000002) — capability matrix verification", () => {
+  test.describe('Mocked Full Access (100000002) — capability matrix verification', () => {
     test.beforeEach(async ({ context }) => {
       await setupMockedContext(context, 100000002);
     });
 
-    test("upload button is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('upload button is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -1082,8 +952,8 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
       await expect(page.locator(SELECTORS.uploadDocumentBtn)).toBeVisible();
     });
 
-    test("download buttons are visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('download buttons are visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -1091,32 +961,32 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
       await expect(page.locator(SELECTORS.downloadBtn).first()).toBeVisible();
     });
 
-    test("AI toolbar is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('AI toolbar is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.aiToolbar)).toBeVisible({ timeout: 20000 });
     });
 
-    test("invite user button is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('invite user button is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.inviteUserBtn)).toBeVisible({ timeout: 20000 });
     });
 
-    test("add task button is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('add task button is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
       await expect(page.locator(SELECTORS.addTaskBtn)).toBeVisible({ timeout: 20000 });
     });
 
-    test("add event button is visible", async ({ page }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+    test('add event button is visible', async ({ page }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       const projectUrl = `${POWER_PAGES_URL}/workspace/project/${MOCK_PROJECT_ID}`;
       await page.goto(projectUrl);
@@ -1132,27 +1002,24 @@ test.describe("Access Level Enforcement — Mocked Context (CI-safe) @e2e @acces
   // intercepting API calls and returning 403 responses, then verifying the
   // SPA handles them gracefully (shows error states, not silent failures).
 
-  test.describe("Mocked server-side 403 handling — SPA error resilience", () => {
-    test("View Only upload attempt shows error state when server rejects with 403", async ({
-      page,
-      context,
-    }) => {
-      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes("localhost"), "Skipping");
+  test.describe('Mocked server-side 403 handling — SPA error resilience', () => {
+    test('View Only upload attempt shows error state when server rejects with 403', async ({ page, context }) => {
+      test.skip(!TEST_PROJECT_ID && !POWER_PAGES_URL.includes('localhost'), 'Skipping');
 
       await setupMockedContext(context, 100000001); // Set as Collaborate in context
 
       // Override upload endpoint to return 403 (simulating a misconfigured
       // client that shows the upload button despite View Only access)
-      await context.route(`${BFF_API_URL}${API_PATHS.documentUpload}`, async (route) => {
+      await context.route(`${BFF_API_URL}${API_PATHS.documentUpload}`, async route => {
         await route.fulfill({
           status: 403,
-          contentType: "application/problem+json",
+          contentType: 'application/problem+json',
           body: JSON.stringify({
-            type: "https://spaarke.com/errors/access-denied",
-            title: "Forbidden",
+            type: 'https://spaarke.com/errors/access-denied',
+            title: 'Forbidden',
             status: 403,
-            detail: "Access level insufficient for document upload",
-            errorCode: "SDAP_ACCESS_LEVEL_INSUFFICIENT",
+            detail: 'Access level insufficient for document upload',
+            errorCode: 'SDAP_ACCESS_LEVEL_INSUFFICIENT',
           }),
         });
       });

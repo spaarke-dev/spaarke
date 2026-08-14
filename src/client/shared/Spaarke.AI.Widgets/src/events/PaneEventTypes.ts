@@ -15,6 +15,8 @@
  * @see useDispatchPaneEvent — React dispatch hook
  */
 
+import type { WidgetContextType } from '../types/shared';
+
 // ---------------------------------------------------------------------------
 // Channel union
 // ---------------------------------------------------------------------------
@@ -423,6 +425,19 @@ export interface WorkspacePaneEvent {
 
   /** Identifies the widget kind (e.g. `"document-summary"`, `"clause-list"`). */
   widgetType?: string;
+
+  /**
+   * The CLOSED FR-B1/FR-C3 contextType tag (task 020) declared on the
+   * `widgetType`'s `WidgetMetadata` registration, carried on `active_widget_changed`
+   * so subscribers (e.g. `deriveActiveTabFocusStamp` in SpaarkeAi) can scope
+   * themselves to the active tab's surface kind without re-deriving it via a
+   * second registry lookup. `undefined` when the widget declared none.
+   *
+   * This is DISTINCT from the free-form `contextType?: string` on
+   * `ContextPaneEvent` below (the Context-pane channel's open-ended payload
+   * classifier) — do not conflate the two.
+   */
+  widgetContextType?: WidgetContextType;
 
   /** Arbitrary payload specific to the widget type. */
   widgetData?: unknown;

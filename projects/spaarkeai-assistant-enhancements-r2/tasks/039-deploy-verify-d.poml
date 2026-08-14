@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Deploy + verify Workstream D (history &amp; resume: code page + BFF)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 030,031,032,033,034,035,036,037,038</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment + verification</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deploy via bff-deploy + code-page-deploy</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deployment step after all D tasks land</parallel-reason>
+    <deps>030,031,032,033,034,035,036,037,038</deps>
+    <tags>deploy, frontend, bff-api</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Deploy BFF + SpaarkeAi with D and verify Success Criteria 4–7 (rich resume, first-turn survives eviction, history UX, Set related record + &gt;90-day retention).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deployment expertise with the bff-deploy + code-page-deploy skills; comfortable running end-to-end verification of the history &amp; resume success criteria.</role>
+  <goal>D deployed and its success criteria verified.</goal>
+  <context>
+    <background>All Workstream D code (030–038) has landed; deploy both surfaces and verify Success Criteria 4–7: rich resume restores chat+tabs+document+attachment+redline; the first turn survives simulated Redis eviction; history rows have titles/preview/tab-summary with rename/delete and no up-arrow; Set related record files to a matter and is resumable after &gt;90 days.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/</file>
+      <file>src/solutions/SpaarkeAi/</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Use bff-deploy + code-page-deploy; verify publish ≤60 MB.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Deploy BFF (record publish size).</step>
+    <step order="2">Deploy SpaarkeAi.</step>
+    <step order="3">Verify: rich resume restores chat+tabs+document+attachment+redline; first turn survives simulated eviction; history rows have titles/preview/tab-summary with rename/delete and no up-arrow; Set related record files to a matter and is resumable after &gt;90 days.</step>
+    <step order="4">Update TASK-INDEX ✅.</step>
+    <step order="5">Record in notes/.</step>
+  </steps>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r2/notes/d-deploy-verify.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Both deploy.</criterion>
+    <criterion testable="true">Publish ≤60 MB.</criterion>
+    <criterion testable="true">Success Criteria 4, 5, 6, 7 verified.</criterion>
+  </acceptance-criteria>
+  <notes>Success Criteria 4–7.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

@@ -43,7 +43,7 @@ The **server projection** is the sole docx→editor mapper. Every entry path res
 
 The client **`mammoth` fallback + `docxToTipTapHtml` are deleted** from Compose (`docxBridge.ts` keeps only the `paraId` utilities). `mammoth` remains a repo dependency for SprkChat/Notepad — only the Compose usage was removed.
 
-- **Browse round-trip (Tension T-2, Path A)**: `POST /api/compose/project` is **read-only, stateless** — it injects no `ITenantCache`/`ISpeFileOperations`/Dataverse type, so persistence is *structurally impossible*. This does not violate ADR-040 / R4 I-2 ("client authors no bytes"): the client still authors nothing; the server only *reads* and hands back a render.
+- **Browse round-trip (Tension T-2, Path A)**: `POST /api/compose/project` is **read-only, stateless** — it injects no `ITenantCache`/`ISpeFileOperations`/Dataverse type, so persistence is *structurally impossible*. This does not violate ADR-040 / R4 I-2 ("client authors no bytes"): the client still authors nothing; the server only *reads* and hands back a render. **R6 refresh (task 027, 2026-08-06)**: the door remains STATELESS, but since the render-on-save cutover it is no longer purely read-only in the narrow sense — it paraId-MINTS the caller's bytes in-memory (the ingest fill-gaps stamp, so the HTML projection and the canonical `contentModel` it now also returns agree on ids) and, ONLY when minting mutated the bytes, echoes the minted copy back (`content`) for the client to adopt as its retained mount baseline. Nothing is persisted server-side; the echo is response payload. It also returns `contentModelWarnings` (the canonical projection's flatten warnings, folded by the client into the first model-path save's degradation banner).
 - **Null/unreachable projection**: after mammoth removal, a `projection: null` mount (e.g. BFF unreachable on browse) renders an explicit **"couldn't prepare … for editing"** error state — never a silent blank editor and never a second reader.
 - **One-reader proof**: seam tests assert the upload and browse endpoints return **byte-identical projection HTML** to the Load path for the same bytes.
 
@@ -121,7 +121,7 @@ All under the authenticated `/api/compose` group (`RequireAuthorization`, ADR-00
 |---|---|---|
 | `GET /api/compose/documents/{id}` | stored-doc Load → projection | R4 |
 | `POST /api/compose/upload` | retained-bytes → projection (transient mount) | returns projection **alongside** `Content` bytes |
-| `POST /api/compose/project` | **stateless** bytes → projection (browse) | R4.5; no persist, no authoring (T-2) |
+| `POST /api/compose/project` | **stateless** bytes → projection + canonical `contentModel` (+ minted-bytes echo when ids were minted) (browse) | R4.5 (T-2); R6 task 027 refresh — no persist; in-memory paraId mint + echo only |
 
 `ComposeProjectionResponse` mapping is shared (`MapProjectionResponse`) across Load/upload/project — one wire shape (F-2). Publish delta for the whole read/reference feature: **~0 MB** (pure OOXML; no package).
 

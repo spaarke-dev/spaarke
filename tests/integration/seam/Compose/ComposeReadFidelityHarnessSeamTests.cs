@@ -116,6 +116,17 @@ public sealed class ComposeReadFidelityHarnessSeamTests
 
         for (var i = 0; i < sourceParagraphs.Count; i++)
         {
+            // Task 013 re-baseline (026 accept-flatten contract): a paragraph INSIDE w:txbxContent has no
+            // projected block of its OWN - its display text accept-flattens into the HOST paragraph's block
+            // (one AlternateContent branch chosen; the unchosen branch's paragraphs are visited-not-emitted).
+            // The flattened text's presence is pinned by ComposeHardTierDegradationSeamTests (the NDA
+            // "For: Appligent, Inc." exactly-once oracle); per-paragraph exactness is out of scope here.
+            if (sourceParagraphs[i].Ancestors<TextBoxContent>().Any()
+                || sourceParagraphs[i].Ancestors<DocumentFormat.OpenXml.AlternateContentFallback>().Any())
+            {
+                continue;
+            }
+
             var paraId = projection.ParaIdMap[i].ParaId;
             var golden = ExtractGoldenParagraphText(sourceParagraphs[i]);
             var projected = ExtractProjectedParagraphText(projection.Html, paraId);

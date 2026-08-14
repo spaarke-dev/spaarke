@@ -101,11 +101,12 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0  # Required for GitVersion and better diff analysis
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers (else ~200 Compose corpus seam tests fail on pointer files; mirrors compose-fidelity-gate job)
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.x'
+          dotnet-version: '10.x'
 
       - name: Setup .NET Framework targeting pack
         shell: pwsh
@@ -275,10 +276,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.x'
+          dotnet-version: '10.x'
 
       - name: Cache NuGet packages
         uses: actions/cache@v5
@@ -447,10 +448,10 @@ jobs:
         with:
           ref: ${{ github.head_ref || github.ref }}
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.x'
+          dotnet-version: '10.x'
 
       - name: Restore dependencies
         run: dotnet restore --verbosity minimal
@@ -515,14 +516,14 @@ jobs:
       - name: Dependencies audit
         shell: pwsh
         run: |
-          # Check for vulnerable packages, ignoring those documented as accepted-risk
-          # in ADR-029 (Graph 5.x / Kiota 1.x stack pending major-bump).
-          # See docs/assessments/bff-warning-suppression-analysis-2026-06-01.md § 3.6.
-          # Accepted-risk list (each entry requires explicit rationale below):
-          # - Microsoft.Kiota.* : NU1903 HIGH GHSA-7j59-v9qr-6fq9 — pending Graph SDK 6.x / Kiota 2.x major-bump (ADR-029)
-          # - OpenMcdf          : Moderate GHSA-jxpf-xq2m-q525 — transitive via DocumentFormat.OpenXml; no patched version available
-          # - OpenTelemetry.Api : Moderate GHSA-g94r-2vxg-569j — transitive via Microsoft.Extensions.* telemetry; upstream patch pending
-          $acceptedRiskPackages = @('Microsoft.Kiota.', 'OpenMcdf', 'OpenTelemetry.Api')
+          # Check for vulnerable packages. Accepted-risk allow-list EMPTIED 2026-08-13
+          # (dotnet-10-upgrade-r1 task 032; see projects/dotnet-10-upgrade-r1/notes/cve-audit.md).
+          # The net10 package graph has ZERO vulnerable packages — all 3 former entries are stale:
+          # - Microsoft.Kiota.* : HIGH GHSA-7j59-v9qr-6fq9 FIXED — Graph 6.5 (task 033) pulls transitive Kiota 2.0.0 (> 1.22.0 floor); direct pins removed. Not accepted-risk.
+          # - OpenMcdf          : Moderate GHSA-jxpf-xq2m-q525 CLEARED — bumped 3.1.4 -> 3.2.0 (task 004).
+          # - OpenTelemetry.Api : Moderate GHSA-g94r-2vxg-569j CLEARED — bumped 1.15.3 -> 1.17.0 (task 004).
+          # Empty list = the gate now fails on ANY future transitive advisory (stricter posture, matches NoWarn=NU1903 removal in task 004).
+          $acceptedRiskPackages = @()
           $output = dotnet list package --vulnerable --include-transitive 2>&1 | Out-String
           Write-Output $output
           if ($output -match "has the following vulnerable packages") {
@@ -559,10 +560,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.x'
+          dotnet-version: '10.x'
 
       - name: Restore dependencies
         run: dotnet restore --verbosity minimal
@@ -725,3 +726,59 @@ jobs:
           echo "- [ ] Configure deployment environments" >> $GITHUB_STEP_SUMMARY
           echo "- [ ] Set up monitoring and alerting" >> $GITHUB_STEP_SUMMARY
           echo "- [ ] Complete service registrations for test coverage" >> $GITHUB_STEP_SUMMARY
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Compose fidelity gate (FR-08, spaarkeai-compose-r6 tasks 060/061 +
+  # ADR-049 R6 amendment point 3) — RELEASE-GATING.
+  #
+  # Runs the corpus round-trip fidelity harness
+  # (tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs):
+  # every `.docx` under tests/fixtures/compose-corpus/ is driven through one
+  # full render-on-save wire round trip (load → edit → save → reopen) and
+  # classified pass/warn/fail. FAIL-class results fail their xUnit Theory —
+  # that non-zero `dotnet test` exit IS the gate; no continue-on-error here
+  # by design (an advisory gate would defeat spec FR-08).
+  #
+  # Deliberately a SEPARATE self-contained job (same rationale as eval-gate):
+  # existing jobs are owned by ci-cd-unit-test-remediation-r1 and are not
+  # modified. `lfs: true` on checkout pulls the Git-LFS `.docx` corpus bytes
+  # (same mechanism as PR #690's build-test fix); a missing-LFS checkout
+  # fails LOUDLY via ComposeCorpusFixtureLocator's PK-signature guard — it
+  # can never silently skip the gate. The per-document breakdown
+  # (fidelity-gate-result.json, written next to the test assembly by the
+  # harness's result sink) is uploaded as an artifact even on red.
+  # ──────────────────────────────────────────────────────────────────────────
+  compose-fidelity-gate:
+    name: Compose Fidelity Gate (Corpus Round-Trip)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (with Git-LFS corpus fixtures)
+        uses: actions/checkout@v6
+        with:
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Fidelity gate (corpus round-trip — merge-blocking)
+        shell: pwsh
+        run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug --filter "FullyQualifiedName~FidelityGate"
+
+      - name: Upload fidelity-gate-result.json (per-document breakdown)
+        uses: actions/upload-artifact@v6
+        if: always()   # the breakdown matters MOST when the gate is red
+        with:
+          name: fidelity-gate-result
+          path: tests/unit/Sprk.Bff.Api.Tests/bin/**/fidelity-gate-result.json
+          if-no-files-found: warn  # absent only if the run crashed pre-sink; the test step is already red then

@@ -1,0 +1,53 @@
+{
+  "_comment_top": "spaarkeai-assistant-enhancements-r3 task 023 (FR-09 — per-item Email parity) — seed row for the email.draft_forward tool. EXTENDS EmailDraftToolHandler (§11 reuse-first / NFR-06 — NOT a new handler family) via the sprk_configuration 'method' discriminator (method = 'forward'); the TextRefinementHandler multi-row precedent.",
+  "_comment_routing": "Runtime invocation routes to EmailDraftToolHandler via sprk_handlerclass; the handler dispatches on sprk_configuration.method = 'forward'. Auto-discovered (ADR-010). The deterministic ADR-039 PreFilter/catalog projects the LLM-facing function name from sprk_name — NO classifier.",
+  "_comment_obo": "ADR-028 / ADR-015 MUST rule: the source email subject/body is READ over the caller's OBO token via IDataverseUserClient — no app-only path. Content is tool-fetched BY communicationId; no email content enters the arguments/prompt.",
+  "_comment_thread_preservation": "FR-10 invariant boundary: the tool returns the AI-authored forwarding-note TEXT ONLY. It NEVER composes/appends/duplicates the forwarded thread — task 024's client-side bodyOverride injects the note ABOVE the reducer-derived quotedThread the Forward composer appends. A tool that embedded the thread would be a whole-body-replacing defect.",
+  "_comment_ai_facade": "ADR-013 / BFF §10: AI generation is consumed through the IEmailDraftAi PublicContracts facade (intent 'custom' + a fixed forwarding-note instruction authored server-side inside the handler) — never IChatClient/IOpenAiClient injected into the handler. NullEmailDraftAi mirror (ADR-032) keeps the facade always resolvable; unavailable → clean DEPENDENCY_UNAVAILABLE.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read). Reads the email over OBO and produces draft text; creates no record, sends nothing — no confirmation gate.",
+  "_comment_description_parity": "Multi-row handler — sprk_description authored HERE (exempt from single-row CatalogToolDescriptionParityContractTests, matching TextRefinementHandler). Runtime parity via seed script + RoutingConsumerTypeHealthCheck.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Email Forward Draft",
+  "sprk_toolcode": "EMAIL-DRAFT-FORWARD",
+  "sprk_toolid": "email.draft_forward",
+  "sprk_namespace": "email",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "sprk_description": "Auto-drafts a brief forwarding note for the selected email, addressed by communicationId. Reads the email under the calling user's permissions and returns ONLY a short authored note that introduces the forwarded message in one or two sentences — it does NOT include or restate the forwarded thread (the composer preserves the original message below the note). Use this when the user asks to forward the email that is currently open/selected; recipients are decided by the composer, not this tool. Returns { tool, communicationId, draft } — hand the draft to the Forward composer; do not restate it in chat.",
+  "sprk_handlerclass": "EmailDraftToolHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — this tool exists for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "email.draft_forward Request",
+    "description": "Auto-drafts a forwarding note for the selected email. Content is fetched by communicationId over OBO; NO email content is passed as an argument (ADR-015).",
+    "type": "object",
+    "required": ["communicationId"],
+    "properties": {
+      "communicationId": {
+        "type": "string",
+        "format": "uuid",
+        "minLength": 1,
+        "description": "The sprk_communication record id (GUID) of the email to forward (the currently selected/open email)."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "email.draft_forward Result",
+    "type": "object",
+    "required": ["tool", "communicationId", "draft"],
+    "properties": {
+      "tool": { "const": "email.draft_forward" },
+      "communicationId": { "type": "string", "description": "The email that is being forwarded." },
+      "draft": { "type": "string", "description": "The AI-authored forwarding-note TEXT ONLY — the client composes it above the forwarded thread via bodyOverride (thread-preservation invariant, FR-10)." },
+      "emlDocumentId": { "type": ["string", "null"], "description": "The archived .eml document id, when one exists (grounding)." }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "method discriminator — read by EmailDraftToolHandler.ResolveMethod at execution time to route to the forward path.",
+    "method": "forward"
+  }
+}

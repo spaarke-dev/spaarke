@@ -4,7 +4,7 @@
     <title>HMAC footer/token signing helper (Key Vault)</title>
     <phase>1 Pillar A: Trusted threading &amp; external matching</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Security-critical crypto (HMAC signing key from Key Vault, tamper-evidence); NEW BFF surface; tags include auth; modifies .cs — Step 3.5.5 FULL triggers.</rigor-reason>
     <model-tier>opus</model-tier>

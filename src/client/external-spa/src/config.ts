@@ -93,44 +93,61 @@ export const MSAL_BFF_SCOPE: string = requireEnvVar('VITE_MSAL_BFF_SCOPE', 'CIAM
 export const APP_VERSION = '1.0.0';
 
 // ---------------------------------------------------------------------------
-// Teams collaboration host — workforce app-registration values (task 012)
+// Workforce plane — multitenant app-registration values (task 012 Teams host + task 013 browser)
 // ---------------------------------------------------------------------------
 
 /**
- * MSAL client id + BFF scope for the Teams collaboration host (ADR-028 Amendment A2). Read LAZILY
- * (not via `requireEnvVar` at module load like the CIAM constants above) because these are OPTIONAL
- * for a CIAM-only build/deploy — a standalone SPA build must still succeed even before CI/CD wires
- * Teams-specific substitution (task 071). `TeamsHostAdapter` calls this only after confirming the
- * app is actually running inside Teams; a missing/placeholder value at that point is a fail-loud
- * `TeamsWorkforceAuthError` (see host/TeamsHostAdapter.ts), not a build-time throw.
+ * MSAL client id + BFF scope for the WORKFORCE plane (ADR-028 Amendments A2 + A3). ONE multitenant
+ * app registration (reused `1e40baad-…`, task 061) serves the workforce plane in BOTH hosts — the
+ * Teams collaboration tab (silent SSO / NAA, task 012) AND the standalone browser "My organization"
+ * home-realm choice (redirect flow, task 013). The values are identical (same authority, same aud);
+ * only the acquisition transport differs, so both paths share these env vars.
+ *
+ * Read LAZILY (not via `requireEnvVar` at module load like the CIAM constants above) because these
+ * are OPTIONAL for a CIAM-only build/deploy — a standalone SPA build must still succeed even before
+ * CI/CD wires workforce substitution (task 071). Callers invoke this only after determining the
+ * caller is on the workforce plane (Teams host confirmed, or the browser realm chooser picked "My
+ * organization"); a missing/placeholder value at that point is a fail-loud error, not a build throw.
  */
-export interface TeamsWorkforceEnvConfig {
+export interface WorkforceEnvConfig {
   /** Workforce (multitenant) SPA app-registration client id — reused `1e40baad-…` app (task 061). */
   clientId: string;
   /** BFF API OAuth scope for the workforce plane, e.g. `api://{app-id}/access_as_user`. */
   bffScope: string;
 }
 
+/** @deprecated Prefer {@link WorkforceEnvConfig}; retained so existing Teams-host imports keep resolving. */
+export type TeamsWorkforceEnvConfig = WorkforceEnvConfig;
+
 function isUnsetOrPlaceholder(value: string | undefined): boolean {
   return !value || /^#\{.+\}#$/.test(value);
 }
 
 /**
- * Read + validate the Teams workforce env values. Throws a clear, fail-loud error if missing or
- * still an un-substituted CI/CD placeholder — callers (the Teams host adapter) MUST only invoke
- * this after confirming the app is actually running inside Teams (see `detectTeamsHost()`).
+ * Read + validate the workforce plane env values. Throws a clear, fail-loud error if missing or
+ * still an un-substituted CI/CD placeholder — callers MUST only invoke this after determining the
+ * caller is actually on the workforce plane (Teams host confirmed via `detectTeamsHost()`, or the
+ * browser realm chooser picked "My organization").
  */
-export function getTeamsWorkforceEnvConfig(): TeamsWorkforceEnvConfig {
+export function getWorkforceEnvConfig(): WorkforceEnvConfig {
   const clientId = import.meta.env.VITE_TEAMS_MSAL_CLIENT_ID;
   const bffScope = import.meta.env.VITE_TEAMS_MSAL_BFF_SCOPE;
 
   if (isUnsetOrPlaceholder(clientId) || isUnsetOrPlaceholder(bffScope)) {
     throw new Error(
-      '[ExternalSPA] Missing or unsubstituted Teams workforce environment variables ' +
-        '(VITE_TEAMS_MSAL_CLIENT_ID / VITE_TEAMS_MSAL_BFF_SCOPE). Required only when running ' +
-        'inside a Teams host — see .env.example.'
+      '[ExternalSPA] Missing or unsubstituted workforce environment variables ' +
+        '(VITE_TEAMS_MSAL_CLIENT_ID / VITE_TEAMS_MSAL_BFF_SCOPE). Required only when running on the ' +
+        'workforce plane (inside Teams, or the browser "My organization" realm) — see .env.example.'
     );
   }
 
   return { clientId: clientId as string, bffScope: bffScope as string };
+}
+
+/**
+ * Back-compat alias for the Teams host adapter (task 012). Delegates to {@link getWorkforceEnvConfig}
+ * — the Teams tab and the browser workforce realm read the SAME multitenant app-registration values.
+ */
+export function getTeamsWorkforceEnvConfig(): WorkforceEnvConfig {
+  return getWorkforceEnvConfig();
 }

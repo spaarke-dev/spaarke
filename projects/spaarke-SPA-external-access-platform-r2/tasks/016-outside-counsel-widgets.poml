@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Refactor Outside Counsel surfaces into WIDGETS: Projects · Matters · Work Assignments · Documents · Invoices (DataGrid-config sprk_gridconfiguration + BffDataverseClient read)</title>
+    <phase>P1 Workspace-shell foundation</phase>
+    <gate>blocked-until:012,015</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Refactors the R1 Outside-Counsel workspace (modifying .tsx) into registered widgets with an R1-parity obligation; touches BFF read surface (bff-api tag) + DataGrid config; participation-scoped read correctness is load-bearing.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified refactor over the delivered DataGrid framework + BffDataverseClient seam + the task-012 registry; Sonnet 5 @ high per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on both the widget registry (012) and the generalized module-framework read seam (015); touches the shared external-access BFF read surface — /conflict-check required.</parallel-reason>
+    <deps>012,015</deps>
+    <tags>frontend, bff-api</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Refactor R1's Outside Counsel workspace surfaces into registered WIDGETS on the shell — Projects, Matters, Work Assignments,
+    Documents, Invoices — each rendered as a DataGrid-config widget (a sprk_gridconfiguration record per surface, entity =
+    sprk_project / sprk_matter / sprk_document / sprk_invoice / work-assignment) read via the read-only BffDataverseClient
+    (IDataverseClient) over the task-015 module-framework read seam. Register each as an outside-counsel-default widget in the
+    task-012 registry. R1 parity: an outside-counsel Contact (CIAM) uses these exactly as the R1 Outside-Counsel workspace.
+  </prompt>
+
+  <role>SPAARKE platform developer + Fluent v9 / React 18 frontend engineer with BFF read-endpoint fluency. Follow ADRs strictly. Skilled at config-driven DataGrid composition over the broker read seam.</role>
+
+  <goal>
+    Five registered outside-counsel widgets (Projects · Matters · Work Assignments · Documents · Invoices), each a
+    &lt;DataGrid configId=… /&gt; backed by a sprk_gridconfiguration record and the read-only BffDataverseClient over the
+    task-015 module read seam (app-only, participation-scoped, no OBO). They open as the outside-counsel role-default tab set
+    in the shell (task 012). R1 parity is preserved: the surfaces behave exactly as the R1 Outside-Counsel workspace. Widgets
+    are READ-ONLY (broker). BFF touch is minimal — grid config + the per-widget read path (mostly already generalized by 015).
+  </goal>
+
+  <context>
+    <background>
+      Per spec.md FR-05 (R1 Outside Counsel refactored into a registered surface with no loss of R1 behavior; an OC Contact signs
+      in via CIAM and uses it exactly as R1) + design.md §12(A) role-defaulted widgets (outside-counsel = Projects · Matters ·
+      Work Assignments · Documents · Invoices) + notes/workspace-shell-foundation.md. The DataGrid framework is delivered:
+      &lt;DataGrid configId=… /&gt; + sprk_gridconfiguration (per-entity config) + IDataverseClient; the read-only BffDataverseClient
+      is the broker impl that runs external. Task 015 generalized the module-framework read seam so each module's read-data
+      endpoint group is resolver + Tier-2 scoped and consumed by BffDataverseClient; task 012 provides the registry the widgets
+      register into. This task authors the five sprk_gridconfiguration records + the five widget wrappers + registers them.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx (the &lt;DataGrid configId=… /&gt; framework component)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGridPageShell.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/BffDataverseClient.ts (read-only IDataverseClient broker — inject into each widget)</file>
+      <file>src/client/external-spa/src/ (the widget registry + shell from tasks 011/012 — register the five widgets here)</file>
+      <file>src/client/external-spa/src/pages/ProjectPage.tsx (R1 Outside-Counsel surface — parity reference for behavior)</file>
+      <file>src/client/external-spa/src/pages/WorkspaceHomePage.tsx (R1 workspace — parity reference)</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (author a sprk_gridconfiguration record — maker recipe)</file>
+    </relevant-files>
+    <dependencies>012 (the widget registry + tabbed role-defaulted workspace these widgets register into). 015 (the generalized module-framework read seam + BffDataverseClient wiring the widgets read over — participation-scoped, app-only).</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">§10 BFF Hygiene (BFF touch minimal — grid config + read path): state a Placement Justification in the PR for any read-endpoint addition (cite .claude/constraints/bff-extensions.md); run /conflict-check BEFORE the PR (external-access read surface shared with teams-app-r1); verify publish ≤60 MB compressed + report delta vs baseline if any BFF code changes; no new HIGH CVE. Most read wiring should already exist from task 015 — prefer reuse.</constraint>
+    <constraint source="NFR-01">Read is broker-only / app-only — no OBO on the CIAM path; widgets are READ-ONLY; MUST NOT expose Graph pointers, key on record/document id.</constraint>
+    <constraint source="NFR-08">Each widget's rows are Tier-2 scoped by the module predicate (participation grant / sprk_externalrecordaccess for CIAM outside-counsel) — being entitled to the widget does NOT reveal all records (negative test).</constraint>
+    <constraint source="ADR-021">Fluent v9 + React 18; semantic tokens ONLY; zero hardcoded hex; light/dark + Teams-theme parity (scope: the five DataGrid widgets).</constraint>
+    <constraint source="project">Reuse the &lt;DataGrid configId=… /&gt; framework + BffDataverseClient — do NOT hand-roll grids or fork LegalWorkspaceApp (Xrm-bound) (§11); a widget = a sprk_gridconfiguration record + a thin wrapper + a registry entry.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/workspace-shell-foundation.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataGrid-config widget" location="src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx">A widget = &lt;DataGrid configId=… client={BffDataverseClient} /&gt; backed by a sprk_gridconfiguration record — no hand-rolled grid.</pattern>
+      <pattern name="Read-only broker" location="src/client/shared/Spaarke.UI.Components/src/services/BffDataverseClient.ts">Inject BffDataverseClient (read-only IDataverseClient) so each widget reads participation-scoped rows app-only over the task-015 seam.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Run /conflict-check against teams-app-r1 for the external-access read surface before any BFF edit; record the result.</step>
+    <step order="2">Read the DataGrid framework + configuration guide + the R1 Outside-Counsel surfaces (ProjectPage/WorkspaceHomePage) to capture the R1-parity behavior (columns, actions, empty states) per surface.</step>
+    <step order="3">Author a sprk_gridconfiguration record per surface: Projects (sprk_project), Matters (sprk_matter), Work Assignments (work-assignment entity), Documents (sprk_document), Invoices (sprk_invoice) — columns/filters matching R1 parity.</step>
+    <step order="4">Build a thin widget wrapper per surface = &lt;DataGrid configId=… client={BffDataverseClient} /&gt;; confirm each reads over the task-015 module read seam (resolver + Tier-2 predicate, app-only). Add/extend BFF read endpoints ONLY if 015's generalized path does not already cover the entity — prefer reuse.</step>
+    <step order="5">Register the five widgets in the task-012 registry as outside-counsel role-defaults ({id,title,icon,requiredEntitlement,defaultForRoles:[outside-counsel],lazyLoader}).</step>
+    <step order="6">Run npm run build:prod (external-spa); if any BFF code changed, run dotnet build + dotnet test + dotnet publish -c Release and report size/delta + no new HIGH CVE. Run the ui-tests below.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="8">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build/test the external-spa (npm run build:prod)</tool>
+    <tool name="dotnet">Build/test/publish the BFF ONLY if read endpoints change</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/external-spa/src/ (five outside-counsel DataGrid-config widget wrappers + registry entries)</output>
+    <output type="docs">sprk_gridconfiguration records (5 — Projects/Matters/Work Assignments/Documents/Invoices) authored per the DataGrid configuration guide</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an outside-counsel Contact (CIAM), when they open the workspace, then Projects · Matters · Work Assignments · Documents · Invoices appear as role-default widget tabs and each renders a DataGrid backed by its sprk_gridconfiguration record.</criterion>
+    <criterion testable="true">R1 parity: the refactored surfaces behave exactly as the R1 Outside-Counsel workspace (same columns/filters/actions, no loss of behavior) — verified against ProjectPage/WorkspaceHomePage.</criterion>
+    <criterion testable="true">Each widget reads via the read-only BffDataverseClient over the task-015 module read seam (app-only, no OBO); rows are Tier-2 scoped to the Contact's participation grants (sprk_externalrecordaccess).</criterion>
+    <criterion testable="true">Negative (NFR-08): an outside-counsel Contact with no participation on a given project/matter/invoice sees NO rows for it — being entitled to the widget does not reveal all records.</criterion>
+    <criterion testable="true">Negative (NFR-01): no Graph pointer is exposed to the SPA; endpoints key on record/document id; the widgets are read-only (no write path).</criterion>
+    <criterion testable="true">Given dark mode AND the Teams theme, when toggled, then the five widgets adapt via semantic tokens with zero hardcoded hex (ADR-021).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Renders five OC widgets"><steps><step>Load workspace as an outside-counsel /me payload</step><step>Open each of the five widget tabs</step></steps><expected>each DataGrid renders participation-scoped rows; no console errors</expected></test>
+    <test name="Participation scoping (negative)"><steps><step>Load as a Contact with a limited participation set</step><step>Inspect rows across widgets</step></steps><expected>only participation-granted records appear; non-granted records absent</expected></test>
+    <test name="Dark+Teams theme (ADR-021)"><steps><step>Toggle dark mode</step><step>Toggle the Teams theme</step></steps><expected>tokens adapt; zero hardcoded hex</expected></test>
+  </ui-tests>
+
+  <notes>
+    Refactor (not new surface) — R1 Outside-Counsel surfaces re-hosted as DataGrid-config widgets. BFF touch is minimal: the
+    read seam is generalized by task 015, so this task mostly authors grid config + thin wrappers + registry entries; add read
+    endpoints only if 015's path does not cover an entity, and if so apply §10 (Placement Justification + /conflict-check +
+    publish ≤60 MB). This delivers spec Success Criterion 5 (Outside Counsel works unchanged as a registered surface).
+
+    COMPLETED 2026-08-06. Full deviations + verification in
+    projects/spaarke-SPA-external-access-platform-r2/notes/task-016-deviations.md. Summary: 5 sprk_gridconfiguration
+    records authored (inline FetchXML, read-only command bar); 5 thin DataGrid widget wrappers + a shared
+    createGridWidgetBody factory + a gridDataverseClient singleton wired to /api/v1/external; widgetRegistry.ts
+    lazyLoaders swapped from placeholder to real. BFF: registered 5 more ExternalModuleDescriptor entries
+    (documents/invoices/work-assignments/matters/grid-configuration) in ExternalAccessModule.cs, reusing the SAME
+    accessible-project-id predicate as "collaboration" by pointing RecordIdAttribute at each child's project-lookup
+    (sprk_document.sprk_project, sprk_invoice.sprk_project, sprk_workassignment.sprk_regardingproject) instead of its
+    own primary id — required one small additive fix to ExternalModuleRegistry.TryGetRecordId (EntityReference case).
+    Matters is a documented Path-A exception (CLAUDE.md §6.5): always-empty Tier-2 predicate (fail-closed) because
+    sprk_matter has no lookup back to sprk_project and no Contact→Organization affiliation resolver exists — paired
+    with R1's own verbatim "Matter-level workspace access is coming soon" stub copy, so this is R1-parity-preserving,
+    not a regression. All verification green: npx tsc --noEmit clean, npm run build succeeded, dotnet build 0 errors,
+    dotnet test 9803/0/101-skipped, publish 48.29 MB (+1.38 MB vs 46.91 MB baseline, well under 60 MB ceiling), no
+    vulnerable packages. Quality gates (code-review + adr-check) self-invoked per Step 9.5: 2 findings fixed
+    (per-call HashSet allocation → static field; explicit read-only command-bar lockdown), 0 Critical, 0 ADR
+    violations.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all &lt;knowledge&gt;&lt;files&gt; before starting; follow the task-execute pre-execution checklist. Build the external-spa with npm run build:prod; run /conflict-check before any BFF read-endpoint PR.</protocol>
+  </execution>
+</task>

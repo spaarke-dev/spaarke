@@ -189,6 +189,78 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
     expect(nulledBinds).toHaveLength(0);
   });
 
+  it('FR-A4 (R-1): fires recordAffinity with the confirmed target after a successful confirm (fire-and-forget learning)', async () => {
+    const recordAffinity = jest.fn();
+    const props = baseProps({ writeContext: { ...makeWriteContext(), recordAffinity } });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(recordAffinity).toHaveBeenCalledWith('sprk_matter', 'mtr-1'));
+  });
+
+  it('FR-A4 (R-1): does NOT record affinity when the confirmation write fails (learning only follows a real confirm)', async () => {
+    const recordAffinity = jest.fn();
+    const ctx = makeWriteContext();
+    (ctx.webApi.updateRecord as jest.Mock).mockRejectedValue(new Error('write failed'));
+    const props = baseProps({ writeContext: { ...ctx, recordAffinity } });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await waitFor(() => expect(ctx.webApi.updateRecord).toHaveBeenCalled());
+    expect(recordAffinity).not.toHaveBeenCalled();
+  });
+
+  // ── Task 064 (E1b): "New record" launcher → confirmable candidate ──────────
+  it('E1b: "New record" launcher resolving a ref FILES it via the additive applyRegardingSelection path (no second write path)', async () => {
+    const onLaunchCreateRecord = jest
+      .fn()
+      .mockResolvedValue({ id: 'mtr-new', entityType: 'sprk_matter', name: 'New Matter 42' });
+    const props = baseProps({ onLaunchCreateRecord });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('create-new-record'));
+
+    await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
+    // The created record flows through the SAME confirm → applyRegardingSelection write.
+    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+    const call = (props.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0];
+    expect(call[0]).toBe('sprk_communication');
+    expect(call[1]).toBe(HOST_ID);
+    const payload = call[2] as Record<string, unknown>;
+    // The matter regarding lookup is bound to the newly-created record (additive; no nulled siblings).
+    const bind = Object.entries(payload).find(([k]) => k.endsWith('@odata.bind'));
+    expect(bind?.[1]).toEqual(expect.stringContaining('mtr-new'));
+    const nulled = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
+    expect(nulled).toHaveLength(0);
+  });
+
+  it('E1b: "New record" launcher resolving null (wizard cancelled) writes NOTHING', async () => {
+    const onLaunchCreateRecord = jest.fn().mockResolvedValue(null);
+    const props = baseProps({ onLaunchCreateRecord });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('create-new-record'));
+
+    await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
+    // No confirm write on a cancelled create.
+    expect(props.writeContext.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  it('E1b: with NO launcher, the tile falls back to the fire-and-forget onCreateNewRecord (existing consumers unchanged)', () => {
+    const onCreateNewRecord = jest.fn();
+    const props = baseProps({ onCreateNewRecord });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('create-new-record'));
+
+    expect(onCreateNewRecord).toHaveBeenCalledTimes(1);
+    expect(props.writeContext.webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
   it('NEEDS CONFIRMATION: an auto-matched (autoFiled) top candidate is pre-selected with a Confirm', () => {
     renderWithProvider(
       <EmailConnectionsReview
@@ -287,6 +359,84 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
     expect(screen.getByTestId('email-connections-review')).toBeInTheDocument();
     expect(errorSpy).not.toHaveBeenCalled();
     errorSpy.mockRestore();
+  });
+});
+
+describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-08-13)', () => {
+  beforeEach(() => {
+    _resetNavPropCacheForTests();
+    global.fetch = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE) as unknown as typeof fetch;
+  });
+
+  it('item 3: the per-card commit button reads "Select" (not "Confirm")', () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps({ variant: 'reconcile' })} />);
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    expect(screen.getByRole('button', { name: 'Select' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+  });
+
+  it('item 4: "Look up another record" is a labelled field that opens the record-type menu', async () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps({ variant: 'reconcile' })} />);
+    expect(screen.getByText('Look up another record')).toBeInTheDocument();
+    // The default variant's card tile with the "Link another record" label is NOT rendered.
+    expect(screen.queryByRole('button', { name: /Link another record/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('link-another-record'));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.length).toBeGreaterThan(0);
+  });
+
+  it('item 5: "New record" is a full-width button that still fires the additive create-and-file path', async () => {
+    const onLaunchCreateRecord = jest
+      .fn()
+      .mockResolvedValue({ id: 'mtr-new', entityType: 'sprk_matter', name: 'New Matter 42' });
+    const props = baseProps({ variant: 'reconcile', onLaunchCreateRecord });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('create-new-record'));
+    await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+  });
+
+  it('item 6: a confirmed primary shows the "Filed to …" success banner', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          variant: 'reconcile',
+          associationStatus: STATUS_RESOLVED,
+          associationProvenanceJson: provenance([
+            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, {
+              number: 'MAT-1',
+              written: true,
+            }),
+          ]),
+          filedAssociations: [{ entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v Beta' }],
+        })}
+      />
+    );
+    const banner = screen.getByTestId('association-filed-banner');
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveTextContent(/Filed to/i);
+    expect(banner).toHaveTextContent(/Acme v Beta/);
+  });
+
+  it('the default variant does NOT render the filed banner (email-form layout unchanged)', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          associationStatus: STATUS_RESOLVED,
+          associationProvenanceJson: provenance([
+            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, {
+              number: 'MAT-1',
+              written: true,
+            }),
+          ]),
+          filedAssociations: [{ entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v Beta' }],
+        })}
+      />
+    );
+    expect(screen.queryByTestId('association-filed-banner')).not.toBeInTheDocument();
+    // Default confirmed state still shows the "Link another record" card tile.
+    expect(screen.getByRole('button', { name: /Link another record/i })).toBeInTheDocument();
   });
 });
 

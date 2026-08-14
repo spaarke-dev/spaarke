@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>GET /me entitlement endpoint (Redis-cached + invalidated)</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:021</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags `bff-api`, `api`, `cache`; new BFF endpoint on the shared external-access surface; modifies `.cs` — FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>New public endpoint contract that the whole launcher depends on; cache-invalidation correctness (ADR-009) across both planes has high blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>021</deps>
+    <tags>bff-api, api, cache</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Add `GET /me` — the entitlement endpoint that returns the caller's entitled modules (resolved via task 021's `IModuleEntitlementResolver`) plus record participations where applicable, Redis-cached and invalidated on entitlement/grant change (ADR-009). This extends the R1 `/api/v1/external/me` concept (which returned participations only) with the new Tier-1 module set.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. BFF API engineer fluent in Minimal API endpoint groups, ADR-008 route-group filters, and ADR-009 Redis caching + invalidation.</role>
+  <goal>A `GET /me` endpoint on the external-access group returns `{ modules: [...entitled module ids...], participations: [...] }` for the resolved caller (both planes), backed by a Redis cache keyed per-caller and invalidated when entitlement or grants change. Registered under the `ExternalCollaboration` dual-scheme policy with the `CallerPrincipalAuthorizationFilter`. Unit + KEEP-path integration tests exist. The launcher (P1 client) consumes it.</goal>
+  <context>
+    <background>FR-10: `GET /me` returns the caller's entitled modules (App-Role for internal, Contact-entitlement for external) + record participations where applicable; Redis-cached, invalidated on entitlement/grant change. Acceptance: entitlement changes visible within the cache-invalidation window; unentitled modules absent. R1 already has `/api/v1/external/me` returning Project participations only — this EXTENDS the concept with the Tier-1 module set from task 021's resolver. The endpoint sits behind the shipped `AuthPolicies.ExternalCollaboration` (dual-scheme) + `CallerPrincipalAuthorizationFilter` group filter.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs — `/api/v1/external` group :56; add or extend the `/me` map here. Follow the group registration + filter attachment shape already present.</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs :29 — LIVE group filter that sets `CallerPrincipal` on `HttpContext.Items`; `/me` reads that principal.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/AuthPolicies.cs — `ExternalCollaboration` :42 (dual-scheme, live) is the policy to apply.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/IModuleEntitlementResolver.cs — task 021's resolver the endpoint calls for the module set.</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs — `IAccessibleRecordSetService.ComposeAsync` :45 for participations (Tier-2), included where applicable.</file>
+    </relevant-files>
+    <dependencies>Task 021 (resolver) provides the module set. Task 020 (schema) is the invalidation trigger source. Consumed by the P1 client launcher.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-009">Redis-first: cache the `/me` result keyed per-caller (oid/ContactId); invalidate that key on any entitlement or grant change (task 026 grant/revoke, task 020 entitlement writes). Cache is an optimization, never the authorization source. Scope: `/me` response caching only.</constraint>
+    <constraint source="ADR-008">Authorization via the route-group policy + `CallerPrincipalAuthorizationFilter`, NOT global middleware. Scope: `/me` endpoint group.</constraint>
+    <constraint source="ADR-019">Errors as ProblemDetails; unauthenticated → 401, no principal → deny. Scope: `/me` error paths.</constraint>
+    <constraint source="spec-NFR08">The `modules` array is Tier-1 (entitlement); `participations` is Tier-2 (record scope) — the two are computed independently and both server-enforced. Entitlement to a module NEVER implies visibility of all its records. Scope: `/me` response semantics.</constraint>
+    <constraint source="project">Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); `dotnet publish -c Release` compressed size + delta vs 46.90 MB baseline reported (≤60 MB); no new HIGH CVE; `/conflict-check` before the PR (teams-app-r1 shares this surface).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/api/endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-group" location="src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs">Map the endpoint into the existing `/api/v1/external` group with the `ExternalCollaboration` policy + `CallerPrincipalAuthorizationFilter`.</pattern>
+      <pattern name="redis-cache-invalidate" location=".claude/adr/ADR-009-redis-caching.md">Cache-aside with explicit invalidation on write; never authorize from cache.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec FR-10 + NFR-08 + ADR-009. Read `ExternalAccessEndpoints.cs` group registration + `CallerPrincipalAuthorizationFilter` + `AuthPolicies.ExternalCollaboration` to see how the group is wired.</step>
+    <step order="2">Add `GET /me` to the `/api/v1/external` group: read `CallerPrincipal` from `HttpContext.Items`; call `IModuleEntitlementResolver.ResolveAsync` for the Tier-1 module set; call `IAccessibleRecordSetService.ComposeAsync` for participations where applicable. Return a DTO `{ modules, participations }`. (If R1 `/me` exists, extend it rather than duplicating — reconcile the response shape.)</step>
+    <step order="3">Add cache-aside: on request, read the per-caller Redis key; on miss, resolve + populate. Define an invalidation helper (e.g. `InvalidateMeAsync(callerKey)`) and wire it to be callable from grant/revoke (task 026) and entitlement writes.</step>
+    <step order="4">Ensure the endpoint is under `ExternalCollaboration` policy + `CallerPrincipalAuthorizationFilter`; unauthenticated → 401 (ProblemDetails).</step>
+    <step order="5">Add unit + KEEP-path integration tests (ADR-038): entitled modules present; unentitled modules absent (negative); after a grant change + invalidation, the new module appears within the invalidation window; unauthenticated → 401; a cache hit returns the same authorized set (cache never widens authorization).</step>
+    <step order="6">Build + test: `dotnet build` + `dotnet test`. Run `dotnet publish -c Release` and record compressed size + delta.</step>
+    <step order="7">Run `/conflict-check`; write Placement Justification + publish-size delta into the PR/task notes.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/</step>
+  </steps>
+  <escalation>
+    <trigger>If extending the R1 `/api/v1/external/me` would break the shipped R1 response contract that live outside-counsel clients depend on, STOP and confirm the additive shape (new field vs new route) with the owner (§6) before changing the existing route.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test/publish .NET</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalAccessEndpoints.cs (GET /me + invalidation helper)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + KEEP-path integration test for /me entitlement + cache invalidation</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given an entitled caller (either plane), when GET /me is called, then the response `modules` array contains exactly their entitled module ids and `participations` reflects their Tier-2 record set.</criterion>
+    <criterion testable="true">Given a caller not entitled to module X, when GET /me is called, then X is absent from `modules` (negative — unentitled modules absent).</criterion>
+    <criterion testable="true">Given an entitlement/grant change followed by cache invalidation, when GET /me is called again, then the change is visible within the invalidation window (ADR-009).</criterion>
+    <criterion testable="true">Given an unauthenticated request, when GET /me is called, then it returns 401 ProblemDetails and no principal is resolved.</criterion>
+    <criterion testable="true">Given a warm cache, when GET /me is served from cache, then the authorized set equals the freshly-resolved set (cache never widens authorization).</criterion>
+    <criterion testable="true">Given `dotnet publish -c Release`, when measured, then compressed size + delta vs 46.90 MB baseline is reported and ≤60 MB; BFF test suite passes; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>R1 `/api/v1/external/me` in `ExternalAccessEndpoints.cs` returns Project participations ONLY (no module set). Grep shows no endpoint returning the entitled-module set.</existing>
+    <extension>Extend the concept, not fork: reuse the `/api/v1/external` group + `ExternalCollaboration` policy + `CallerPrincipalAuthorizationFilter`, and add the Tier-1 module set (from task 021) to the response. New resolver dependency makes this an extension of the existing route's contract.</extension>
+    <cost-of-doing-nothing>Without the module set on `/me`, the P1 launcher cannot decide which cards to render/route, so entitlement-gating (FR-02) is impossible client-side and server-truth (NFR-06) has no delivery channel.</cost-of-doing-nothing>
+  </justification>
+  <notes>Cache key must be per-caller (oid for workforce, ContactId for CIAM). Invalidation is the load-bearing correctness property — expose an `InvalidateMeAsync` the admin grant/revoke path (task 026) and entitlement writes call. Do NOT authorize from cache; the cache stores an already-authorized projection.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; §10 gate at Step 9.5.</protocol>
+  </execution>
+</task>

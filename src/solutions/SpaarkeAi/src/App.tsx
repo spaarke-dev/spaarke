@@ -48,9 +48,10 @@ import {
   scaleTheme,
   useUiScale,
 } from "@spaarke/ui-components";
-import { getAuthProvider } from "@spaarke/auth";
 import { getBffBaseUrl } from "./config/runtimeConfig";
+import { useAuthProbe } from "./hooks/useAuthProbe";
 import { ThreePaneShell } from "./components/shell/ThreePaneShell";
+import { ensureNavigatorPane } from "./ensureNavigatorPane";
 // spaarkeai-compose-r1 task 092 (Phase 7 three-pane pivot, supersedes task 046's
 // Path A shortcut per spec-supplement-2026-07-01-three-pane-pivot.md FR-S1):
 // When the modal is launched with `?composeMode=editor&…`, we NO LONGER render
@@ -177,35 +178,11 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
 
   // UI-gating flag only — NOT the token. Downstream BFF calls acquire fresh
   // tokens per-request via authenticatedFetch / useAuth() (Spaarke Auth v2).
-  // This effect probes the provider once at mount so the shell can render
+  // `useAuthProbe()` probes the provider at mount (retrying with backoff — see
+  // its docblock for the FIX 3 root-cause writeup) so the shell can render
   // auth-aware UI; it does NOT store the token string in React state, which
   // was the root cause of the 401-after-idle bug (audit §H-5).
-  const [isAuthenticated, setIsAuthenticated] = React.useState<boolean>(false);
-
-  React.useEffect(() => {
-    let cancelled = false;
-
-    const probeAuth = async (): Promise<void> => {
-      try {
-        const provider = getAuthProvider();
-        const accessToken = await provider.getAccessToken();
-        if (!cancelled && accessToken) {
-          setIsAuthenticated(true);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          console.warn("[SpaarkeAi] Auth probe failed:", err);
-          setIsAuthenticated(false);
-        }
-      }
-    };
-
-    void probeAuth();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const isAuthenticated = useAuthProbe();
 
   const bffBaseUrl = (() => {
     try {
@@ -323,6 +300,15 @@ export const App: React.FC<AppProps> = (props) => {
   React.useEffect(() => {
     document.documentElement.style.setProperty("--sprk-ui-scale", String(uiScale));
   }, [uiScale]);
+
+  // Global Navigator side pane (spaarke-side-pane-navigation-history-r1 task 086):
+  // SpaarkeAi is the universal home page, so it registers the app-level Navigator
+  // pane on mount (host-launch pattern, like EventsPage → CalendarSidePane). The
+  // pane persists across all navigation (Xrm.App.sidePanes are app-level).
+  // Idempotent + never throws — see ensureNavigatorPane.ts.
+  React.useEffect(() => {
+    ensureNavigatorPane();
+  }, []);
 
   return (
     <FluentProvider theme={scaledTheme}>

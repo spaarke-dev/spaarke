@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Scaffold module-host prototype (shell chrome + card launcher + realm chooser)</title>
+    <phase>P0 UX Design + Prototype</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation in the spaarke-prototype repo (NOT production code); frontend/fluent-ui prototype surface with no ADR-graded blast radius. FULL gates skipped per §8 STANDARD row.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded, fully-specified frontend scaffold using an existing skill mechanism and named reference impls; no architectural or ADR-migration judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>This is the prototype base experiment that tasks 002/003/004 build on; it creates the experiment folder + shell/launcher scaffolding those tasks extend, so it must land first and alone.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, prototype, fluent-ui</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Scaffold a Mode-1 standalone UX experiment in the spaarke-prototype repo that renders the module-host SPA shell chrome, an M365-waffle-style card launcher, and a browser sign-in realm chooser — the interactive north-star base that tasks 003/004 extend. Build entirely on @spaarke/ui-components (ActionCardRow/ActionCard, ThemeToggle/useTheme); do NOT hand-roll UI and do NOT touch production code.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Fluent v9 + React 18 UX-prototype expertise; fluent-v9-component conventions; spaarke-prototype experiment mechanics.</role>
+  <goal>A runnable Mode-1 experiment exists under spaarke-prototype/projects/spaarke-SPA-external-access-platform-r2-p0/ (or the skill-assigned experiment folder) with: (1) shell chrome (header with logo, ThemeToggle, user menu + light nav) whose look extends R1 external-spa AppHeader/NavigationBar; (2) an entitlement-gated card launcher composed from ActionCardRow + ActionCard; (3) a browser realm chooser offering "My organization / Partner"; all three rendering under HMR with light, dark, and Teams theme, with zero hardcoded hex.</goal>
+  <context>
+    <background>R2 generalizes R1's single Outside-Counsel SPA into a module-host SPA whose home is a card launcher showing only entitled modules (spec FR-01/FR-02/FR-03). Per ux-brief §1 the design is Fluent-v9-only, dark-mode-first, hub-not-destination, one shell with an invisible identity plane, and entitlement-honest. P0 validates this UX in spaarke-prototype BEFORE any production build; the approved prototype becomes the P1/P3 build target (ux-brief §6).</background>
+    <relevant-files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md (§1 principles, §3 surface→component map: Sign-in/realm chooser, Home card launcher, Shell chrome rows)</file>
+      <file>c:/code_files/spaarke-prototype/projects/_templates/experiment-variant-template.tsx (canonical Mode-1 variant scaffold to copy)</file>
+      <file>c:/code_files/spaarke-prototype/projects/_templates/experiment-index-template.ts (experiment index scaffold)</file>
+      <file>c:/code_files/spaarke-prototype/projects/_templates/experiment-readme-template.md (experiment README scaffold)</file>
+      <file>c:/code_files/spaarke-prototype/_infra/mocks/index.ts (mock auth/dataverse/xrm harness to consume)</file>
+      <file>src/client/external-spa/src/components/AppHeader.tsx (R1 shell-chrome look to extend — reference only, do not import production code into the prototype)</file>
+      <file>src/client/external-spa/src/components/NavigationBar.tsx (R1 light nav look to extend — reference only)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCard.tsx (card primitive to reuse)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCardRow.tsx (card-row primitive to reuse)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts (@spaarke/ui-components exports incl. useTheme/ThemeToggle)</file>
+    </relevant-files>
+    <dependencies>None. This is the base prototype experiment; tasks 002/003/004 depend on it.</dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Build in the spaarke-prototype repo (c:/code_files/spaarke-prototype) ONLY. Do NOT modify any file under this worktree's src/ (production code) — the prototype references R1 look but reproduces it in the experiment.</constraint>
+    <constraint source="project">Use the /prototype-experiment-init skill (Mode-1 standalone) as the scaffolding mechanism; do NOT hand-create the experiment folder structure.</constraint>
+    <constraint source="ADR-021">All prototype UI uses Fluent v9 semantic tokens via makeStyles/tokens — zero hardcoded hex/RGB/shadow/typography in every surface built in this task (shell chrome, launcher, realm chooser).</constraint>
+    <constraint source="ADR-022">Fluent v9 + React 18 for all prototype surfaces in this task.</constraint>
+    <constraint source="project">Shared-library mandate (CLAUDE.md §11): the card launcher composes ActionCardRow + ActionCard from @spaarke/ui-components; theme via useTheme/ThemeToggle. NO hand-rolled card/grid/header components when a shared primitive exists.</constraint>
+    <constraint source="project">Demonstrate every ux-brief §4 required state that applies to these three surfaces: loading, empty (no entitled cards), error, unentitled/denied, dark mode, Teams theme, keyboard-only, narrow width (Teams personal-tab). Use mock data toggles to exercise each.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/ux-brief.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Mode-1 standalone experiment" location="c:/code_files/spaarke-prototype/projects/_templates/experiment-variant-template.tsx">Copy the variant template as the base render surface; wire mock toggles per state.</pattern>
+      <pattern name="Card launcher" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/ActionCardRow.tsx">Compose ActionCardRow with ActionCard children (icon+label; hover/focus/keyboard/dark-mode built in) — the M365-waffle grid per ux-brief §3.</pattern>
+      <pattern name="Fluent v9 conventions" location=".claude/skills/fluent-v9-component/SKILL.md">Load fluent-v9-component conventions before writing any component.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load knowledge files (ux-brief §1/§3, ADR-021/022, spec FR-01/02/03) and the fluent-v9-component skill conventions.</step>
+    <step order="2">Invoke /prototype-experiment-init (Mode-1 standalone) to scaffold the experiment folder in spaarke-prototype for this project; confirm the dev server / HMR runs green before adding surfaces.</step>
+    <step order="3">Build the shell chrome variant: header (logo, ThemeToggle, user menu) + light nav, extending the visual language of R1 external-spa AppHeader/NavigationBar; add a Teams-embedded flag that hides redundant chrome (ux-brief §3 Shell chrome row).</step>
+    <step order="4">Build the card launcher using ActionCardRow + ActionCard, entitlement-gated from mock /me data (show only entitled cards); add a graceful empty-state when none are entitled (ux-brief §3 Home card launcher; FR-02).</step>
+    <step order="5">Build the browser realm chooser: explicit "My organization / Partner" chooser (Fluent v9 Buttons); document that Teams host = silent SSO with no chooser (ux-brief §3 Sign-in/realm chooser; FR-03 assumption).</step>
+    <step order="6">Wire mock toggles that demonstrate every applicable ux-brief §4 state (loading, empty, error, unentitled/denied, dark, Teams theme, keyboard-only, narrow width) for each of the three surfaces.</step>
+    <step order="7">Author the experiment README (from the readme template) describing the three surfaces, the state toggles, and how to run it; note that this is the base other P0 tasks extend.</step>
+    <step order="8">Run the ui-tests below; capture that dark + Teams theme adapt via semantic tokens with zero console errors.</step>
+    <step order="9">Update projects/spaarke-SPA-external-access-platform-r2/tasks/TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="10">Document any deviations (e.g., a surface that had to hand-roll a primitive and why) in projects/spaarke-SPA-external-access-platform-r2/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If a required surface cannot be composed from an existing @spaarke/ui-components primitive and would need net-new bespoke UI, STOP and surface the §11 three-question gate to the owner before hand-rolling — do not silently invent a component.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Build/run the prototype experiment (npm install --legacy-peer-deps --no-audit --no-fund; dev server / HMR)</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+  <outputs>
+    <output type="code">c:/code_files/spaarke-prototype/projects/{experiment-folder}/ (Mode-1 experiment: shell chrome + card launcher + realm chooser variants)</output>
+    <output type="docs">c:/code_files/spaarke-prototype/projects/{experiment-folder}/README.md (experiment README)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the experiment dev server, when it starts, then shell chrome, card launcher, and realm chooser all render under HMR with zero console errors.</criterion>
+    <criterion testable="true">Given mock /me with entitlement to {A,B}, when the launcher renders, then exactly cards A and B appear (ActionCard) and an unentitled card C is absent (FR-02 honesty).</criterion>
+    <criterion testable="true">Given mock /me with NO entitlements, when the launcher renders, then the graceful empty-state is shown (not a blank page, not an error).</criterion>
+    <criterion testable="true">Given the realm chooser in a browser context, when rendered, then "My organization" and "Partner" options are both present and keyboard-focusable; given a Teams-host flag, then the chooser is suppressed.</criterion>
+    <criterion testable="true">Given the theme toggle, when switched to dark and to the Teams theme, then all three surfaces adapt via semantic tokens with zero hardcoded hex (grep the experiment source: no raw #RRGGBB / rgb()).</criterion>
+    <criterion testable="true">Given keyboard-only navigation, when tabbing through the launcher and realm chooser, then all interactive elements are reachable and show visible focus.</criterion>
+    <criterion testable="true">Given a narrow (Teams personal-tab width) viewport, when each surface renders, then layout reflows without horizontal overflow.</criterion>
+    <criterion testable="true">Negative: no file under this worktree's production src/ is modified by this task (git status of the worktree stays clean of src/ changes).</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>No existing home-launcher surface: WorkspaceWidgetRegistry (src/client/shared/Spaarke.AI.Widgets/src/registry/) mounts widgets/tabs, not an entitlement-gated launcher; R1 external-spa has AppHeader/NavigationBar chrome but no card launcher or realm chooser. Verified by grep for "ActionCardRow" launcher usage + absence of a realm chooser.</existing>
+    <extension>Yes for the primitives (reuse ActionCardRow/ActionCard/ThemeToggle) — No net-new UI primitive is created; the launcher/realm-chooser composition is a new prototype surface (not production) validating FR-01/02/03.</extension>
+    <cost-of-doing-nothing>Without a validated shell+launcher+realm-chooser prototype, P1/P3 production frontend has no approved build target and each downstream surface risks inventing net-new UX that fails owner review — the exact drift ux-brief §6 exists to prevent.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Renders">
+      <steps>
+        <step>Start the experiment dev server</step>
+        <step>Load shell chrome, card launcher, and realm chooser variants</step>
+      </steps>
+      <expected>All three render; no console errors</expected>
+    </test>
+    <test name="Dark Mode + Teams theme (ADR-021)">
+      <steps>
+        <step>Toggle dark mode via ThemeToggle</step>
+        <step>Switch to the Teams theme</step>
+        <step>Verify semantic tokens adapt across all three surfaces</step>
+      </steps>
+      <expected>Zero hardcoded hex; both dark and Teams themes adapt correctly</expected>
+    </test>
+  </ui-tests>
+  <notes>ux-brief §3 rows: "Sign-in / realm chooser", "Home card launcher", "Shell chrome". §4 required-states checklist is the done-bar. This experiment is the base tasks 003/004 extend; keep the folder + component names stable. The experiment folder name is assigned by /prototype-experiment-init — record it in the README and TASK-INDEX.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge files before starting; follow task-execute pre-exec checklist; use /prototype-experiment-init for scaffolding and fluent-v9-component for component conventions.</protocol>
+  </execution>
+</task>

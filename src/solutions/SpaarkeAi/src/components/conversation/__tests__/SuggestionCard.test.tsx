@@ -1,11 +1,16 @@
 /**
- * SuggestionCard + useSuggestionCards tests — spaarke-notification-spine-r1 task 051 / FR-16.
+ * SuggestionCard (presentational) tests.
  *
- * Covers the acceptance criteria:
- *   - renders-from-envelope: a valid kind=suggestion envelope renders a bordered card.
- *   - expired-suggestion-does-not-render: an expired envelope is filtered PRE-mount (absence).
- *   - click-re-fetches-before-dispatch: the BFF re-ground fires BEFORE the shared dispatch (call-order).
- *   - stale-suggestion-fails-gracefully: a row gone from /pending → no dispatch + a stable local line.
+ * Originally authored by spaarke-notification-spine-r1 task 051 / FR-16 to cover BOTH the
+ * `SuggestionCard` presentational component AND the spine-driven `useSuggestionCards` lifecycle
+ * hook. assistant-enhancements-r2 task 001 (FR-E1) removed the spine-driven proactive-suggestion
+ * surface (`useSuggestionCards.tsx` deleted), so the hook-lifecycle describe block was removed.
+ * `SuggestionCard.tsx` is RETAINED — it is still reused by `useRerunFullAnalysisCard` (a separate,
+ * client-local "Rerun a full analysis" card) — so its presentational tests remain.
+ *
+ * Covers:
+ *   - renders-from-model: a suggestion model renders a bordered card with title + stable test id;
+ *     the main region calls onAction, the 'x' calls onDismiss independently.
  *   - dark-mode-token-correctness (ADR-021): renders token-driven (no inline color) under both themes.
  *
  * ADR-021 note (mirrors ConsumerChips.test.tsx): token-driven styling is asserted STRUCTURALLY
@@ -14,84 +19,14 @@
 
 import '@testing-library/jest-dom';
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
 import type { Theme } from '@fluentui/react-components';
 
 import { SuggestionCard } from '../SuggestionCard';
-import {
-  useSuggestionCards,
-  type SuggestionCardsDeps,
-  type SuggestionEnvelopeLite,
-  type PendingSuggestionItem,
-} from '../useSuggestionCards';
-
-// A fixed clock so expiry is deterministic regardless of wall time.
-const NOW_MS = Date.parse('2026-07-22T12:00:00.000Z');
-const FUTURE = '2026-07-22T13:00:00.000Z'; // after NOW → valid
-const PAST = '2026-07-22T11:00:00.000Z'; // before NOW → expired
-
-function envelope(overrides: Partial<SuggestionEnvelopeLite> = {}): SuggestionEnvelopeLite {
-  return {
-    kind: 'suggestion',
-    suggestionId: 'sugg-1',
-    source: 'daily-briefing',
-    regardingRecordId: 'rec-1',
-    regardingRecordType: 'sprk_matter',
-    title: 'Review Acme v. Beta',
-    actionHint: 'review',
-    expiresAt: FUTURE,
-    ...overrides,
-  };
-}
-
-function pendingItem(env: SuggestionEnvelopeLite, outboxRowId = 'row-1'): PendingSuggestionItem {
-  return { outboxRowId, kind: 'suggestion', envelope: env, expiresAt: env.expiresAt };
-}
 
 function renderWithTheme(ui: React.ReactElement, theme: Theme = webLightTheme) {
   return render(<FluentProvider theme={theme}>{ui}</FluentProvider>);
-}
-
-/** Test harness that renders only the hook's suggestion slot. */
-function Harness(props: { deps: SuggestionCardsDeps }): React.JSX.Element {
-  const { suggestionSlot } = useSuggestionCards(props.deps);
-  return <>{suggestionSlot}</>;
-}
-
-/** Captures the `suggestion` handler so a test can simulate a spine signal (live or poll). */
-function captureSubscribe(): {
-  subscribe: SuggestionCardsDeps['subscribe'];
-  fire: () => void;
-} {
-  let handler: ((event: unknown) => void) | null = null;
-  const subscribe: SuggestionCardsDeps['subscribe'] = (_kind, cb) => {
-    handler = cb as (event: unknown) => void;
-    return () => {
-      handler = null;
-    };
-  };
-  return {
-    subscribe,
-    fire: () => handler?.({ outboxRowId: 'row-1', kind: 'suggestion', source: 'live' }),
-  };
-}
-
-function baseDeps(overrides: Partial<SuggestionCardsDeps> = {}): SuggestionCardsDeps {
-  return {
-    subscribe: jest.fn(() => () => {}),
-    fetchPending: jest.fn(async () => [] as ReadonlyArray<PendingSuggestionItem>),
-    onSuggestionAction: jest.fn(),
-    dismiss: jest.fn(async () => {}),
-    inject: jest.fn(),
-    now: () => NOW_MS,
-    ...overrides,
-  };
-}
-
-/** Expand the collapsed-by-default disclosure banner so the card list renders. */
-function expandBanner(): void {
-  fireEvent.click(screen.getByTestId('suggestion-banner'));
 }
 
 describe('SuggestionCard (presentational)', () => {
@@ -141,147 +76,5 @@ describe('SuggestionCard (presentational)', () => {
     expect(inlineStyle).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
     expect(inlineStyle).not.toMatch(/rgb\(/);
     unmount();
-  });
-});
-
-describe('useSuggestionCards (lifecycle)', () => {
-  it('renders a card once a suggestion signal re-grounds a valid, non-expired row', async () => {
-    const { subscribe, fire } = captureSubscribe();
-    const deps = baseDeps({
-      subscribe,
-      fetchPending: jest.fn(async () => [pendingItem(envelope())]),
-    });
-    renderWithTheme(<Harness deps={deps} />);
-
-    fire(); // a live spine signal → re-ground from /pending
-    // The collapsed-by-default banner appears first; expand it to reveal the card list.
-    expect(await screen.findByTestId('suggestion-banner')).toBeInTheDocument();
-    expandBanner();
-    expect(await screen.findByTestId('suggestion-card-sugg-1')).toBeInTheDocument();
-    expect(screen.getByTestId('suggestion-cards')).toBeInTheDocument();
-  });
-
-  it('does NOT render an expired suggestion (filtered pre-mount, verified by absence)', async () => {
-    const { subscribe, fire } = captureSubscribe();
-    const deps = baseDeps({
-      subscribe,
-      fetchPending: jest.fn(async () => [pendingItem(envelope({ expiresAt: PAST }))]),
-    });
-    renderWithTheme(<Harness deps={deps} />);
-
-    fire();
-    // Let the signal-driven refresh resolve, then assert the card never mounted.
-    await waitFor(() => expect(deps.fetchPending).toHaveBeenCalled());
-    expect(screen.queryByTestId('suggestion-card-sugg-1')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('suggestion-cards')).not.toBeInTheDocument();
-  });
-
-  it('re-fetches/re-grounds via the BFF BEFORE acting on the suggestion (call-order)', async () => {
-    const { subscribe, fire } = captureSubscribe();
-    const fetchPending = jest.fn(async () => [pendingItem(envelope())]); // still-present on both calls
-    const onSuggestionAction = jest.fn();
-    const deps = baseDeps({ subscribe, fetchPending, onSuggestionAction });
-    renderWithTheme(<Harness deps={deps} />);
-
-    fire();
-    expect(await screen.findByTestId('suggestion-banner')).toBeInTheDocument();
-    expandBanner();
-    const card = await screen.findByTestId('suggestion-card-sugg-1');
-    fireEvent.click(card);
-
-    await waitFor(() => expect(onSuggestionAction).toHaveBeenCalledTimes(1));
-    // The click-time re-fetch (the last fetchPending call) must precede the action.
-    const fetchOrders = fetchPending.mock.invocationCallOrder;
-    const lastFetchOrder = fetchOrders[fetchOrders.length - 1];
-    const actionOrder = onSuggestionAction.mock.invocationCallOrder[0];
-    expect(lastFetchOrder).toBeLessThan(actionOrder);
-    // The fresh envelope is handed to the host with BOTH the record type + id — the
-    // inputs the host needs to open the regarding record in a modal (task 052).
-    expect(onSuggestionAction).toHaveBeenCalledWith(
-      expect.objectContaining({ regardingRecordType: 'sprk_matter', regardingRecordId: 'rec-1' })
-    );
-  });
-
-  it('does NOT render a suggestion missing its record type (not openable)', async () => {
-    const { subscribe, fire } = captureSubscribe();
-    // No regardingRecordType → cannot open a record → must not render (owner rule: shown ⇒ actionable).
-    const noType = { ...envelope(), regardingRecordType: '' } as SuggestionEnvelopeLite;
-    const deps = baseDeps({
-      subscribe,
-      fetchPending: jest.fn(async () => [pendingItem(noType)]),
-    });
-    renderWithTheme(<Harness deps={deps} />);
-
-    fire();
-    await waitFor(() => expect(deps.fetchPending).toHaveBeenCalled());
-    expect(screen.queryByTestId('suggestion-card-sugg-1')).not.toBeInTheDocument();
-  });
-
-  it('fails gracefully when the re-fetch shows the suggestion is stale/revoked (no dispatch, stable line)', async () => {
-    const { subscribe, fire } = captureSubscribe();
-    // Present when the signal re-grounds, GONE at click time (expired/revoked server-side).
-    const fetchPending = jest
-      .fn<Promise<ReadonlyArray<PendingSuggestionItem>>, []>()
-      .mockResolvedValueOnce([pendingItem(envelope())])
-      .mockResolvedValueOnce([]);
-    const onSuggestionAction = jest.fn();
-    const inject = jest.fn();
-    const deps = baseDeps({ subscribe, fetchPending, onSuggestionAction, inject });
-    renderWithTheme(<Harness deps={deps} />);
-
-    fire();
-    expect(await screen.findByTestId('suggestion-banner')).toBeInTheDocument();
-    expandBanner();
-    const card = await screen.findByTestId('suggestion-card-sugg-1');
-    fireEvent.click(card);
-
-    await waitFor(() => expect(inject).toHaveBeenCalledTimes(1));
-    expect(onSuggestionAction).not.toHaveBeenCalled();
-    // The injected line is a stable local message (ADR-019) — not a raw server string.
-    const injected = inject.mock.calls[0][0] as { content?: string };
-    expect(typeof injected.content).toBe('string');
-    expect(injected.content).toMatch(/no longer available/i);
-  });
-
-  it('collapses the cards behind a "You have N new notifications" banner by default', async () => {
-    const { subscribe, fire } = captureSubscribe();
-    const deps = baseDeps({
-      subscribe,
-      fetchPending: jest.fn(async () => [pendingItem(envelope())]),
-    });
-    renderWithTheme(<Harness deps={deps} />);
-
-    fire();
-    const banner = await screen.findByTestId('suggestion-banner');
-    expect(banner).toHaveTextContent('You have 1 new notification');
-    // Cards are hidden until the banner is expanded (they don't eat the conversation space).
-    expect(screen.queryByTestId('suggestion-card-sugg-1')).not.toBeInTheDocument();
-    expandBanner();
-    expect(await screen.findByTestId('suggestion-card-sugg-1')).toBeInTheDocument();
-  });
-
-  it('dismisses a suggestion server-side and removes the card when the "x" is clicked', async () => {
-    const { subscribe, fire } = captureSubscribe();
-    const dismiss = jest.fn(async () => {});
-    const onSuggestionAction = jest.fn();
-    const deps = baseDeps({
-      subscribe,
-      fetchPending: jest.fn(async () => [pendingItem(envelope())]),
-      dismiss,
-      onSuggestionAction,
-    });
-    renderWithTheme(<Harness deps={deps} />);
-
-    fire();
-    expect(await screen.findByTestId('suggestion-banner')).toBeInTheDocument();
-    expandBanner();
-    await screen.findByTestId('suggestion-card-sugg-1');
-
-    fireEvent.click(screen.getByTestId('suggestion-dismiss-sugg-1'));
-
-    // Server dismiss called with the outbox row id; the card is removed; NO action dispatched.
-    await waitFor(() => expect(dismiss).toHaveBeenCalledWith('row-1'));
-    await waitFor(() => expect(screen.queryByTestId('suggestion-card-sugg-1')).not.toBeInTheDocument());
-    expect(onSuggestionAction).not.toHaveBeenCalled();
   });
 });

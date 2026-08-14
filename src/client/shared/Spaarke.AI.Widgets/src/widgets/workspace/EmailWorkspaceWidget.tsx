@@ -38,6 +38,7 @@
 import * as React from 'react';
 import { makeStyles } from '@fluentui/react-components';
 import { EmailWorkspace } from '@spaarke/communication-components';
+import type { EmailWorkspaceVisibleState } from '@spaarke/communication-components';
 import {
   XrmDataverseClient,
   createXrmDataService,
@@ -49,6 +50,7 @@ import {
 } from '@spaarke/ui-components';
 import { useAiSession } from '../../providers/useAiSession';
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
+import type { EmailTabWidgetData } from '../../types/WorkspaceTab';
 
 // Bounded-height host for the DIRECT widget mount (owner UAT 2026-08-03 R5 item 1).
 // ROOT CAUSE (DevTools showed the widget rendering 752×8209px): the SpaarkeAi tab/section
@@ -77,14 +79,73 @@ const useStyles = makeStyles({
 /**
  * Direct workspace widget wrapper for `<EmailWorkspace />`.
  *
- * `data` / `isLoading` / `error` / `className` / `tabId` / `isActiveTab` from
+ * `data` / `isLoading` / `error` / `className` / `isActiveTab` from
  * `WorkspaceWidgetProps` are intentionally unused — the Email surface is not
  * AI-directed data; it drives its own Dataverse reads via `useEmailViews` /
  * `useEmailWorkspaceRecord` (tasks 031/040) once mounted with host adapters.
+ *
+ * `tabId` + `onDataChange` ARE used (task 042b, FR-C1 "Path 1: persisted Email
+ * carrier"): when this widget is mounted AS a workspace TAB, the selected
+ * email's compact shape is persisted into the tab's `WorkspaceTab.widgetData`
+ * as an `EmailTabWidgetData` — see `handleVisibleEmailChange` below.
  */
-export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
+export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = ({ tabId, onDataChange }) => {
   const styles = useStyles();
   const { authenticatedFetch, bffBaseUrl } = useAiSession();
+
+  // FR-C1 (task 042b): persist the selected email's COMPACT shape into this
+  // tab's `WorkspaceTab.widgetData`. This rides the EXISTING widget self-update
+  // seam (`WorkspaceWidgetProps.onDataChange` → `widget_update` PaneEventBus
+  // event → `WorkspaceTabManager.updateTab` → `PATCH /tabs` write-through, the
+  // task-025 AnalysisEditor persistence path) — NO new persistence mechanism.
+  // Both the server `TryDeriveVisibleState` and the client registry
+  // `getVisibleState('email')` then read the Email shape from `widgetData`.
+  // `emlDocumentId` is persisted as an on-demand `eml-render` fetch handle
+  // (FR-C4); it is deliberately excluded from the agent-visible derivation.
+  //
+  // spaarkeai-assistant-enhancements-r3 task 012 (FR-05) walk-back:
+  //   1. `snippet` (the sole CONTENT-bearing field, R2 FR-C1) is now OMITTED —
+  //      the Assistant-visible persisted carrier is id/label ONLY (ADR-015).
+  //   2. The patch additionally carries a TRANSIENT `communicationId` field —
+  //      NOT part of `EmailTabWidgetData` / the BFF contract. This widget lives
+  //      in the shared `Spaarke.AI.Widgets` package and per ADR-012 MUST NOT
+  //      import the SpaarkeAi-solution active-item conduit directly, so it rides
+  //      this EXISTING `onDataChange` emit instead (§11 — redirect, not a new
+  //      selection model). The SpaarkeAi host (`WorkspacePane.handleTabDataChange`
+  //      → `deriveEmailActiveItemFromPatch`) reads `communicationId` to publish
+  //      the conduit id handle, then STRIPS it before persisting — the field
+  //      never reaches the server / the `EmailTabWidgetData` shape on the wire.
+  //   3. On deselect (`state === null`) the widget now ALSO signals
+  //      `{ communicationId: null }` (clear-only — no `kind`/subject/etc.) so
+  //      the host clears the active-item conduit WITHOUT clobbering the last
+  //      persisted Email carrier (same "leave it intact" contract as before).
+  //
+  // Gated on `tabId` + `onDataChange` so the population fires ONLY for the tab
+  // mount (both are supplied by the host tab manager); the standalone code-page
+  // mount and isolated renders supply neither → no-op.
+  const handleVisibleEmailChange = React.useCallback(
+    (state: EmailWorkspaceVisibleState | null): void => {
+      if (!onDataChange || !tabId) return;
+      if (!state) {
+        // Deselect — active-item clear signal ONLY; the host strips this before any
+        // persisted-widgetData merge (see docblock above).
+        onDataChange({ communicationId: null });
+        return;
+      }
+      const widgetData: EmailTabWidgetData & { communicationId: string } = {
+        kind: 'Email',
+        emlDocumentId: state.emlDocumentId,
+        subject: state.subject,
+        from: state.from,
+        date: state.date,
+        ...(state.threadId ? { threadId: state.threadId } : {}),
+        // `snippet` (content) intentionally OMITTED — task 012 walk-back of the R2 FR-C1 carrier.
+        communicationId: state.communicationId,
+      };
+      onDataChange(widgetData);
+    },
+    [onDataChange, tabId]
+  );
 
   // Stable across the widget's lifetime — one Xrm-backed adapter set per
   // mount, matching `XrmDataverseClient`'s own "instantiate once" guidance
@@ -156,6 +217,7 @@ export const EmailWorkspaceWidget: React.FC<WorkspaceWidgetProps> = () => {
         onDraftWithAi={composeHandlers.onDraftWithAi}
         fromMailbox={fromMailbox}
         dataverseUrl={dataverseUrl}
+        onVisibleEmailChange={handleVisibleEmailChange}
       />
     </div>
   );

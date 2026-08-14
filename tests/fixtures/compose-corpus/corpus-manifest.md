@@ -101,6 +101,66 @@ zipped as the final `.docx`.
 
 ---
 
+## 1.6. R6 render-on-save regression exemplar (task 004)
+
+`AppligentNDA_Signed.docx` was moved here from `projects/spaarkeai-compose-r6/notes/` (task 004) as the seed
+regression fixture for the render-on-save re-architecture (spec FR-08): it is the current **interior-location
+HTTP 422** hard-fail document, and the R6 core invariant ("save renders from the model — never patches
+inherited bytes") is required to eliminate this defect **by construction** rather than by surgical anchoring.
+
+| # | Filename | Track Changes | Fields | SDT / Content Controls | Tables | Tabs | Multi-level Numbering | Headers/Footers | Empty Paragraphs | Multi-Section | Text Boxes / `mc:AlternateContent` | Duplicate `w14:paraId` | Known Defect(s) Exercised |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| 14 | `AppligentNDA_Signed.docx` | No — zero `w:ins`/`w:del` in `document.xml` | No — zero `w:fldChar`/`w:fldSimple` | No — zero `w:sdt`; `customXml/item1.xml` present but is only an empty Word bibliography-sources part (`b:Sources`), unrelated to content controls | No — zero `w:tbl` | Yes — 10 `<w:tab/>` stops | No — single-level only: one `numId` (`1`) / `ilvl` (`0`), `w:numFmt="decimal"`, referenced 10×; `numbering.xml` also defines 8 unused `bullet`-format abstractNums (dead numbering defs, not exercised by the body) | No — package has no `word/header*.xml` / `word/footer*.xml` parts and no `w:headerReference`/`w:footerReference` | No — zero self-closing empty `<w:p/>` (55 `<w:p ` total, all carry runs) | Yes — 3 `<w:sectPr>` | **Yes** — 7 `mc:AlternateContent` blocks, each a Choice/Fallback pair (7 `w:drawing` DrawingML Choice branches + 7 `w:pict` VML Fallback branches); 12 `w:txbxContent` regions split across 6 `wps:txbx` (DrawingML textbox) + 6 `v:textbox` (VML textbox) elements | **Yes** — 55 `w14:paraId` attributes total, only 52 unique; 3 values (`2BBF07C9`, `2BBF07CA`, `2BBF07CB`) each occur exactly twice, located in/around the signature block (`"For:   Appligent,   Inc."` recital line and the `"______________ signature Ralph  Schroeder"` signature line) — i.e. the duplicate paraIds sit inside the Choice/Fallback textbox content, consistent with Word assigning the same `paraId` to both branches of an `mc:AlternateContent` pair when it duplicates a paragraph across the DrawingML and VML representations | **Interior-location HTTP 422** — a whole-doc text-search/`paraId`-keyed anchor lookup (`DocxAnnotationWriter.LocateTarget`-style) collides on the duplicate `paraId`s inside the AlternateContent signature-block textboxes and fails to resolve a unique anchor. Render-on-save (this project's core invariant) removes the failure mode by construction: there is no anchor/text-search on the save path, and the load-side projection must flatten each `mc:AlternateContent` pair to a single branch (Choice/DrawingML preferred, Fallback/VML discarded) rather than double-emitting both branches' paragraphs, and must not assume `paraId` uniqueness for node identity. **Expected round-trip behavior: accept + flatten with a user-visible warning; never a 422.** |
+
+### Verification method (§1.6)
+
+Feature-coverage cells above were derived empirically by unzipping the working-copy `.docx` (real bytes staged
+before/at the `git mv` in task 004 — the file was already a Git-LFS pointer once committed, `oid
+sha256:e94081390378a8fafd708337797ec4e3c2f7da8761eb52461863d44da590e939`, `size 27986`; confirmed via
+`git cat-file -p <commit>:<path>`) and grepping `word/document.xml` for the same literal OOXML markers used in
+§1/§1.5 (`w:ins`/`w:del`, `w:fldChar`/`w:fldSimple`, `w:sdt`, `w:tbl`, `w:tab`, `w:numPr`/`w:ilvl`/`w:numId`,
+`w:headerReference`/`w:footerReference`, `w:sectPr`), PLUS the two markers specific to this document's defect:
+`mc:AlternateContent` / `w:txbxContent` / `v:textbox` / `wps:txbx` (text boxes and DrawingML-vs-VML fallback
+pairs), and `w14:paraId` duplicate detection (`sort | uniq -c` over all `w14:paraId="..."` attribute values —
+55 total, 52 unique, 3 duplicated). The package part listing (`unzip -l`) was also enumerated directly to
+confirm the absence of `word/header*.xml`/`word/footer*.xml` parts, ruling out headers/footers rather than
+inferring it from the absence of reference elements alone.
+
+### Notes / discrepancies vs. the "Signed" filename and NDA provenance
+
+- **Provenance, not a digital signature.** `docProps/core.xml` records `dc:creator = "Virginia Gavin"`,
+  `dc:title = "AppligentNDA..fm"`; `docProps/custom.xml` records `Creator = "FrameMaker 5.5.6"` and
+  `Producer = "Acrobat Distiller 4.0 for Macintosh"`. The package contains **no** `_xmlsignatures` part and no
+  OOXML digital-signature markup — "Signed" in the filename refers to a scanned/typed signature block
+  embedded as ordinary text/textbox content (`"signature Ralph  Schroeder"` literal run text), not a
+  cryptographic signature. This is consistent with the doc's likely lineage: FrameMaker → PDF (Distiller) →
+  PDF-to-Word conversion, which is the typical origin of the heavy `mc:AlternateContent`
+  DrawingML/VML-textbox-per-line-block structure seen here (PDF-to-DOCX converters frequently emit each
+  fixed-position PDF text run as an anchored textbox rather than flowed paragraph text) — this is *why* this
+  doc, rather than the other corpus rows, is the one that exercises the AlternateContent/duplicate-paraId
+  defect class.
+- **Multi-level numbering column reads "No" despite `numbering.xml` defining several abstractNums.** Only one
+  `numId`/`ilvl` pair (`1`/`0`, decimal) is actually referenced by `document.xml`; the additional bullet-format
+  abstractNum definitions in `numbering.xml` are present in the package but unused by any paragraph in this
+  saved copy — recorded per the same "code (bytes) wins" convention as §1's notes.
+
+---
+
+## 1.7. R6 multi-author redline exemplar (task 027 — SYNTHETIC)
+
+**SYNTHETIC** — authored by `spaarkeai-compose-r6` task 027 via the same raw-OOXML-parts method as §1.5
+(no owner-supplied redlined document exists; row 4's owner placeholder remains OPEN — this exemplar does
+NOT close it, mirroring the §2 row-7/row-11 note). Fills the 025-F6 gap: the corpus previously carried
+ZERO live revision markup, so the task-025 tracked-changes capture/render path had no corpus exercise.
+Schema-validated (OpenXmlValidator Office2019: 0 errors) and projection-verified (all revision facts
+captured) at authoring.
+
+| # | Filename | Track Changes | Authors | Constructs | Known Defect(s) Exercised | Status |
+|---|---|---|---|---|---|---|
+| 15 | `multi-author-redline-synthetic.docx` | **Yes — live** | 2 (`Alice Chen` 2026-08-01, `Bob Rivera` 2026-08-02) | `w:ins` (mid-paragraph insert, Alice) · `w:del`/`w:delText` + adjacent `w:ins` (replace pair, Bob) · `w:rPrChange` (bold added, Alice) · `w:pPrChange` (center alignment, Bob) · paragraph-MARK deletion `w:pPr/w:rPr/w:del` (merge case, Alice) · tracked-inserted hyperlink `w:hyperlink ⊃ w:ins ⊃ w:r` (Word-canonical nesting, Bob) — unique `w14:paraId` per paragraph (0A100001–0A100008), unique revision `w:id` (101–107), xsd:dateTime dates | Task-025 tracked-changes round-trip through the canonical model (capture → model facts → render as real `w:ins`/`w:del` with preserved authorship); multi-author attribution preservation; the 025 revision-grouping + hyperlink-outside-wrapper invariants at seam level (task 027 fidelity suite) | Synthetic |
+
+---
+
 ## 2. Owner-supplied worst-offenders (Phase 0 intake — PLACEHOLDER rows)
 
 Per spec Unresolved Question ("Corpus documents — owner to supply the worst-offender set"), the following rows
@@ -136,3 +196,5 @@ Owner intake process: land the redacted `.docx` under this directory (auto-regis
 | `spaarkeai-compose-r4` | 006 — Phase 0 hard-replace gate | Gate evidence: schema + applier spike (CIPO) + corpus byte-diff harness (all fixtures) green, per NFR-08. |
 | `spaarkeai-compose-fidelity-r4.5` | 002 — text-exactness + numbering-exactness harness | Text-exact (character-for-character run text) + numbering-exact (computed label == golden label in §1.5) assertions across the full corpus, per R4.5 NFR-01/NFR-02; any ❌ is a release blocker (spec Success Criteria 2+3). |
 | `spaarkeai-compose-fidelity-r4.5` | 050 — WS-5 page/line spike | `line-numbered-pleading.docx` (row 13) is the ONLY corpus input carrying `w:lnNumType` — used to measure rendered-line divergence against a layout engine (LibreOffice-headless / Word-rendering service), per FR-19. |
+| `spaarkeai-compose-r6` | 013 — NDA 422 regression test | `AppligentNDA_Signed.docx` (row 14) is the seed input for the seam/regression test proving render-on-save no longer hits `DocxAnnotationWriter.LocateTarget` interior-location HTTP 422 on this doc (text-box `mc:AlternateContent` + duplicate `w14:paraId`) — handled by construction, not surgical anchoring. |
+| `spaarkeai-compose-r6` | 060 — fidelity harness | `AppligentNDA_Signed.docx` (row 14) is a harness seed exercising `mc:AlternateContent` Choice/Fallback textbox flattening + duplicate-`paraId` de-duplication in the render-on-save path. |

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>E2b/E2c — Fields tab type-correct controls (date/optionset/lookup) + "+ Update other fields" record form</title>
+    <phase>5 Pillar E — Reconciliation UI (mount build, UAT round-2)</phase>
+    <gate>none — prototype approved; OOB self-resolve, NO BFF, no new host prop</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING + modifies .tsx in shared Communication.Components; typed-control matrix + navigateTo; Step 9.5 unconditional.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Typed-control matrix driven by async Dataverse attribute metadata + graceful degradation across 4 control types; higher judgment than a single-control change.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared Spaarke.Communication.Components (hot-path); sequential main-session; /conflict-check before PR.</parallel-reason>
+    <deps>055,063</deps>
+    <tags>react, typescript, frontend, fluent-ui, testing</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    In `FieldUpdateReconcileTab`, (E2b) replace the single plain text `Input` value editor with a
+    TYPE-CORRECT control chosen from the proposal's `fieldType` hint + self-resolved Dataverse
+    attribute metadata (`getXrmForPicker().Utility.getEntityMetadata(targetEntity,[targetField])`):
+    DateTime → date input, Picklist/State/Status → option-set dropdown, Lookup → OOB advanced-lookup
+    (lookupObjects with the attribute's Targets), Number → number input, else → text. Add (E2c) a
+    full-width "+ Update other fields" button that opens the CONFIRMED regarding record's OOB form
+    (self-resolved `Xrm.Navigation.navigateTo`), modal-on-modal. Everything self-resolves Xrm (guarded
+    no-op on non-MDA → graceful fallback to the current text input). NO BFF, no new host prop.
+  </prompt>
+  <role>SPAARKE frontend developer. Expert in @spaarke/communication-components + Fluent v9 + the getXrmForPicker bridge + Dataverse attribute metadata. Reuse in-package patterns; defensive metadata parsing; graceful non-MDA fallback.</role>
+  <goal>
+    Each field proposal renders the control that matches its real type; option-set + lookup values come
+    from live attribute metadata; a "+ Update other fields" button opens the confirmed record's form.
+    On a non-MDA/dev host (no bridge) everything degrades to the current editable text input + the
+    fieldType hint (date/number still honored) — nothing breaks, no proposal is blocked.
+  </goal>
+
+  <context>
+    <background>
+      Plan §9. `FieldUpdateReconcileTab.tsx`: proposals carry `targetEntity`/`targetField`/`fieldType`
+      (`:78-82`); the editor today is one plain `<Input>` (`:401-408`) bound to `edited[reviewLogId] ?? newValue`.
+      `regarding` (`{entityType,recordId}`) is the confirmed record (`:63-68`, `:128`). The OOB reuse
+      bridge is `getXrmForPicker` (`@spaarke/ui-components`; typed only for `Utility.lookupObjects` →
+      declare a LOCAL extended type for `Utility.getEntityMetadata` + `Navigation.navigateTo` and cast).
+      Date pattern in-package: `<Input type="date">` (see TaskReconcileTab). Option-set pattern: `<Select>`.
+      Lookup pattern: EmailConnectionsReview:157-176. Test mock pattern: 066's `mockPickerXrm`.
+    </background>
+    <relevant-files>
+      <file role="edit">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx</file>
+      <file role="edit-tests">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/FieldUpdateReconcileTab.test.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="plan-§9">SCOPE: self-resolve OOB via `getXrmForPicker` (metadata + lookup + navigateTo); NO BFF; NO new host prop. Declare a LOCAL extended Xrm type + cast (do NOT modify ui-components' getXrmForPicker type).</constraint>
+    <constraint source="plan-§9">Control matrix by resolved type (metadata AttributeType, falling back to the `fieldType` string hint): DateTime→`<Input type="date">`; Picklist/State/Status→`<Select>` seeded from the metadata OptionSet options; Lookup→OOB advanced-lookup (`lookupObjects` with the attribute Targets) showing the picked name; Number→`<Input type="number">`; else→text `<Input>`. Preserve `data-testid="field-reconcile-edit"` for the text/date/number path; add distinct testids for the dropdown + lookup.</constraint>
+    <constraint source="plan-§9">Graceful degradation: metadata fetch is best-effort behind try/catch + the non-MDA guard. If the bridge/metadata is absent, fall back to the current text `<Input>` (date/number still honored from the `fieldType` hint). NEVER block a proposal on missing metadata.</constraint>
+    <constraint source="plan-§9">E2c: a full-width "+ Update other fields" button (Add icon, "+ {verb}" consistency) at the tab bottom → `getXrmForPicker().Navigation.navigateTo({pageType:'entityrecord', entityName: regarding.entityType, entityId: regarding.recordId}, {target:2})` (guarded no-op non-MDA). Only shown when `regarding` is confirmed. Modal-on-modal — the tab stays mounted; on the navigateTo promise resolve, re-`load()` the proposals (the record may have changed).</constraint>
+    <constraint source="project">The Accept payload is unchanged: `handleAccept` still sends `{overrideValue}` = the control's current string value (option-set → the integer value as string; lookup → the id; date → the date string). Keep the server coercion contract.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; reuse `<Select>`/`<Input>`/`<Button>` + `AddRegular`/`SearchRegular` icons.</constraint>
+    <constraint source="project">No deploy. Build + test only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>projects/email-communication-intelligence-r2/notes/pillar-e-mount-build-plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="OOB lookup" location="src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx">Lines 157-176 — lookupObjects reuse + guard + id normalization.</pattern>
+      <pattern name="date + select controls" location="src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx">In-package `<Input type="date">` + `<Select>` usage to mirror.</pattern>
+      <pattern name="picker mock" location="src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/TaskReconcileTab.test.tsx">The 066 `mockPickerXrm` jest.mock('@spaarke/ui-components') pattern — extend with getEntityMetadata + Navigation.navigateTo.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load POML + plan §9 + read FieldUpdateReconcileTab render/handleAccept + the getXrmForPicker shape. /conflict-check (shared Communication.Components).</step>
+    <step order="1">Add a LOCAL extended Xrm type (Utility.getEntityMetadata + Utility.lookupObjects + Navigation.navigateTo) + a `getXrm()` cast helper. Import `Select`, `AddRegular`, `SearchRegular`, `getXrmForPicker`.</step>
+    <step order="2">Add `fieldMeta` state (per reviewLogId: {type?, options?, targets?}); a defensive `resolveFieldMeta` parser; a useEffect that resolves metadata for the loaded proposals (best-effort, guarded).</step>
+    <step order="3">Replace the value editor with a `renderValueControl(p)` that switches on resolved type / fieldType hint → date/number Input, option-set Select, lookup (button + picked-name), or text Input (default). Store the chosen value into `edited[reviewLogId]`.</step>
+    <step order="4">Add the full-width "+ Update other fields" button (only when `regarding` set) → `openRecordForm()` via self-resolved Navigation.navigateTo (guarded); re-`load()` on resolve.</step>
+    <step order="5">Tests: extend the mock with getEntityMetadata (Picklist+options, Lookup+Targets, DateTime) + Navigation.navigateTo. Assert: optionset renders a Select with options + Accept sends the chosen value; lookup opens + sets id; date renders a date input; non-MDA → text fallback; "+ Update other fields" calls navigateTo with the confirmed record. Keep existing assertions.</step>
+    <step order="6">Build shared lib green (tsc 0-err) + FieldUpdateReconcileTab jest suite green. Step 9.5 (code-review + adr-check). TASK-INDEX 065 → ✅; notes/065-*.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `getEntityMetadata` is not available on the host Xrm at all (not just non-MDA — e.g. the API shape differs fundamentally from the defensive parser's assumptions in a way that can't degrade to text), STOP and report rather than guessing a bespoke metadata source.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/FieldUpdateReconcileTab.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Picklist/optionset proposal renders a dropdown seeded from live metadata options; Accept sends the selected option-set value (as string) in {overrideValue}.</criterion>
+    <criterion testable="true">A Lookup proposal opens the OOB advanced-lookup (lookupObjects with the attribute Targets); a pick sets the normalized id + shows the name; Accept sends the id.</criterion>
+    <criterion testable="true">A DateTime proposal renders a date input; a Number proposal a number input (from the fieldType hint, no metadata required).</criterion>
+    <criterion testable="true">Non-MDA/dev host (no bridge): every proposal falls back to the editable text input (date/number still honored) — nothing is blocked; existing field-reconcile-edit testid still present for text/date/number.</criterion>
+    <criterion testable="true">A full-width "+ Update other fields" button (shown only when regarding is confirmed) calls Navigation.navigateTo with {pageType:'entityrecord', entityName: regarding.entityType, entityId: regarding.recordId}; on resolve the proposal list reloads. Guarded no-op non-MDA.</criterion>
+    <criterion testable="true">No BFF touch, no new host prop; getXrmForPicker reused; Accept/{overrideValue} contract unchanged.</criterion>
+    <criterion testable="true">Shared lib builds green (tsc 0-err); FieldUpdateReconcileTab jest suite green; existing assertions unchanged.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>task-execute FULL; Step 9.5 gates; /conflict-check before PR (shared Communication.Components).</protocol>
+  </execution>
+</task>

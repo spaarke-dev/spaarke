@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Rehydrate the client attachment chip from the UploadedFiles manifest on restore (FR-D5)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 035</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend restore wiring</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive rehydrate reading an existing server manifest</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane.tsx (shared client spine); depends on 035 restore</parallel-reason>
+    <deps>035</deps>
+    <tags>react, frontend</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Re-hydrate the client attachment chip from the server UploadedFiles manifest on restore.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 frontend expertise; comfortable reading an existing server manifest shape and rehydrating client UI state on restore.</role>
+  <goal>Reopening a session with an attached file shows the file chip again.</goal>
+  <context>
+    <background>FR-D5 — on restore (via the 035 rich path), the client attachment chip is not rehydrated. The server already persists an UploadedFiles manifest on the session (SessionPersistenceService.UpdateUploadedFilesAsync:300+); read its shape and drive the chip from it.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs (UpdateUploadedFilesAsync:300+ / UploadedFiles manifest — read the shape)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-040">Read the existing UploadedFiles manifest from the restored session — no new store.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">On restore (035 path), read the UploadedFiles manifest from the restored session.</step>
+    <step order="2">Rehydrate the attachment chip from it.</step>
+    <step order="3">Build.</step>
+    <step order="4">Update TASK-INDEX ✅.</step>
+  </steps>
+  <ui-tests>
+    <test name="Attachment chip restored">
+      <steps>Reopen a session that had a file attached, verify the chip reappears. Include an ADR-021 dark-mode check.</steps>
+      <expected>The attachment chip reappears on restore; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Reopening a session with an attached file shows the file chip.</criterion>
+    <criterion testable="true">No new persistence added.</criterion>
+  </acceptance-criteria>
+  <notes>FR-D5. DONE 2026-08-06 (owner-approved full paired slice; file-scope lifted). Layers:
+    (1) BFF — added minimal `RestoredUploadedFile(FileId,FileName,ContentType,SizeBytes)` projection to
+    `RestoredSession` + `SessionRestoreService` (projects the ALREADY-loaded `StoredSession.UploadedFiles`;
+    ADR-040 no new store/query) + `SessionRestoreUploadedFileDto` on `SessionRestoreResponse` mapped in
+    `RestoreSessionAsync`. Enriched fields (SummaryText/Sections/Citations/ExtractedText) deliberately
+    excluded (ADR-015 Tier-2). 3 unit tests (`SessionRestoreServiceUploadedFilesTests`) pass. BFF build
+    clean; publish 46.97 MB compressed incl PDBs (≤60, no package delta).
+    (2) Client — `useSessionRestore.ts` `SessionRestoreSpec.uploadedFiles` (+backward-compat normalize);
+    `ThreePaneShell` RestoreContextValue += `sessionId` + `uploadedFiles`; `ConversationPane` reads
+    `restoreCtx.uploadedFiles`, gates on `chatSessionId===restoreCtx.sessionId` + live-count==0, renders the
+    restored chip through the SAME host-owned `FilesAttachedIndicator`.
+    SprkChat `initialAttachments` seam AVOIDED (coordinator's sanctioned fallback): seeding
+    `useChatFileAttachment` would re-fire `onAttachmentsChanged` → useAttachments ready-transition
+    side-effects (spurious "File attached" msgs, `files_staged` dispatch, task-024 new-session prompt on a
+    restored session that has prior messages). Shared lib `@spaarke/ui-components` UNTOUCHED (ADR-012) — no
+    rebuild needed. typecheck Surface-owned:0; 618/618 ConvPane Jest tests pass incl new
+    `ConversationPane.restore-attachment-chip.test.tsx` (chip shows / empty-hidden / session-gated / dark-mode
+    ADR-021). Step 9.5 code-review + adr-check: 0 Critical, 0 violations. NOT committed (orchestrator does the
+    consolidated build+commit). NOTE: this rehydrates the COLD-LOAD restore path (`/restore` via
+    useSessionRestore); the in-session History-menu reopen (035's `/tabs`+loadHistory, WorkspacePane-owned) is
+    a separate carrier not covered here.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

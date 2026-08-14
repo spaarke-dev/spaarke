@@ -349,7 +349,7 @@ public class OfficeProblemDetailsTests
         };
 
         // Act
-        var result = OfficeProblemDetailsExtensions.FromGraphException(ex, _correlationId);
+        var result = OfficeProblemDetailsExtensions.FromGraphException(ex.ResponseStatusCode, ex.Error?.Code, ex.Error?.Message, _correlationId);
         var (status, json) = await ExecuteResultAsync(result);
 
         // Assert - Graph auth errors should map to OFFICE_009 (Access Denied)
@@ -374,7 +374,7 @@ public class OfficeProblemDetailsTests
         };
 
         // Act
-        var result = OfficeProblemDetailsExtensions.FromGraphException(ex, _correlationId);
+        var result = OfficeProblemDetailsExtensions.FromGraphException(ex.ResponseStatusCode, ex.Error?.Code, ex.Error?.Message, _correlationId);
         var (status, json) = await ExecuteResultAsync(result);
 
         // Assert - Non-auth Graph errors should map to OFFICE_013 (Graph API Error)

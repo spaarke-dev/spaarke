@@ -35,6 +35,7 @@ import type {
   IEmailAiDraftResult,
 } from '@spaarke/ui-components';
 import type { IResolverWriteContext } from '../../logic/connections';
+import type { EmailWorkspaceVisibleState } from './EmailWorkspace.mapping';
 
 /**
  * The webApi bridge this workspace needs for the additive associations write
@@ -159,4 +160,26 @@ export interface EmailWorkspaceProps {
    * unaffected. Forwarded to `EmailReadingPaneShell`'s `hideList`.
    */
   hideList?: boolean;
+  /**
+   * spaarkeai-assistant-enhancements-r2 task 042b (FR-C1) — additive, optional
+   * "values out" callback (same pattern as the shell's `onSelectedIdChange` /
+   * the attachments view's `onCountChange`): surfaces the COMPACT,
+   * agent-visible-adjacent snapshot of the currently-selected email
+   * ({@link EmailWorkspaceVisibleState}) whenever the selection or its resolved
+   * record changes, and `null` when nothing is selected / the read is loading or
+   * failed. Recomputed from the SAME single per-selection read (`record`) — no
+   * second Dataverse call. The SpaarkeAi `email` widget mount forwards this to
+   * `WorkspaceWidgetProps.onDataChange` so the compact shape persists into the
+   * tab's `WorkspaceTab.widgetData` (Path 1 persisted-Email carrier). The
+   * standalone code-page mount omits it → zero behavior change (NFR-06).
+   *
+   * spaarkeai-assistant-enhancements-r3 task 012 (FR-05): the surfaced state now
+   * also carries `communicationId` (the selected `sprk_communicationid`) — the
+   * identity anchor the SpaarkeAi `email` widget wrapper redirects to the
+   * widget-agnostic active-item conduit as `{ id, type: 'email', label: subject }`
+   * (id/label only, NEVER the email body/content — ADR-015). `EmailWorkspace`
+   * itself stays host-agnostic: it only emits the compact shape via this prop —
+   * it does NOT know about the conduit (ADR-012).
+   */
+  onVisibleEmailChange?: (state: EmailWorkspaceVisibleState | null) => void;
 }

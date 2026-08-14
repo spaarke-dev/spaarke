@@ -213,6 +213,47 @@ export const useConnectionsReviewStyles = makeStyles({
   },
   chipRemove: { minWidth: 'auto', paddingInline: 0, height: '20px' },
 
+  // ── Reconcile variant (owner UAT round-3 2026-08-13) — prototype-parity layout ──
+  // "Look up another record" as a LABELLED FIELD (owner: "lookup record as more of a
+  // field"): a caption label above a full-width input-styled control that opens the
+  // record-type menu → host polymorphic picker. Reads like the prototype's
+  // `Field label="Look up another record"` row.
+  lookupField: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS },
+  lookupFieldLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground2,
+  },
+  // Input-look control: full width, neutral field surface + stroke, placeholder text
+  // left, search glyph right. A button (opens the type menu) styled as a text field.
+  lookupControl: {
+    boxSizing: 'border-box',
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+    paddingBlock: tokens.spacingVerticalS,
+    paddingInline: tokens.spacingHorizontalM,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  lookupPlaceholder: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground3,
+  },
+  lookupControlIcon: { flexShrink: 0, color: tokens.colorBrandForeground1, fontSize: '20px' },
+  // "New record" as a FULL-WIDTH button (owner: "+New record as a full width button").
+  newRecordFullWidth: { width: '100%' },
+
   // ── Shared affordances ──
   actionsRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
   linkRow: {

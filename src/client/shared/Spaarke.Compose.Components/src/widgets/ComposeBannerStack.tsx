@@ -10,8 +10,11 @@
  *   2. Cross-user 409 conflict banner (Task 050) — when `checkoutStatus === 'conflict'`.
  *   3. Non-fatal checkout failure banner — when `checkoutStatus === 'failed'`.
  *   4. Multi-tab cancelled banner (Task 051) — when `checkoutStatus === 'cancelled'`.
- *   5. Import warnings banner — when mammoth surfaced any warnings.
- *   6. Pending assistant draft banner (Flow 5) — when there is a staged draft.
+ *   5. Import warnings banner — when the load-time import surfaced any warnings
+ *      (suppressible via `hideImportWarnings`, UAT round-7 #8).
+ *   6. Save-degradation banner (026-F5, task 012 r6) — SAVE-time warnings; its own
+ *      family, NOT gated by `hideImportWarnings`; a clean save clears it.
+ *   7. Pending assistant draft banner (Flow 5) — when there is a staged draft.
  *
  * The whole stack renders only when at least one row would surface; the parent
  * decides whether to mount it at all. This keeps the DOM minimal.
@@ -67,6 +70,26 @@ export interface ComposeBannerStackProps {
    * don't render. Default false (every other consumer keeps the banner).
    */
   hideImportWarnings?: boolean;
+  /**
+   * 026-F5 (task 012, spaarkeai-compose-r6): SAVE-time degradation warnings — content the server
+   * (and/or the client imported-model mapper) simplified/dropped while authoring the LAST successful
+   * save. Rendered as its OWN dismissible warning banner, deliberately NOT gated by
+   * {@link ComposeBannerStackProps.hideImportWarnings} (that UAT round-7 #8 suppression applies only
+   * to the LOAD-time import-fidelity banner — save warnings must still render). `null`/empty (a clean
+   * save, or a parent that predates the field) renders nothing — the parent dispatches `null` after a
+   * clean save so a stale banner clears. Dismissal is signature-keyed sessionStorage (same convention
+   * as the import banner, SEPARATE key): a NEW warning set (different signature) re-shows the banner.
+   */
+  saveDegradationWarnings?: Array<{ code: string; count: number }> | null;
+  /**
+   * Task 041 (spaarkeai-compose-r6, FR-06 — PDF intake): true while the mounted document was opened
+   * FROM A PDF (server-synthesized docx, task 040). Renders the honest-lossiness notice: fixed-layout
+   * PDF → the editable version may reflow/simplify formatting; saving creates a NEW Word document and
+   * the original PDF is unchanged (version history is the safety net). No false "identical to source"
+   * claim. Dismissable per mount; a fresh PDF open re-warns (honesty over convenience). The parent
+   * clears it after the first successful save (the doc is a native docx from then on).
+   */
+  pdfSourceNotice?: boolean;
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /**
    * UAT #7 (compose-r2): a monotonically-incrementing token bumped by the parent on every
@@ -117,24 +140,88 @@ function importWarningsSignature(warnings: ReadonlyArray<{ type: string; message
 
 const IMPORT_WARNINGS_DISMISS_KEY_PREFIX = 'spaarke-compose:import-warnings-dismissed:';
 
+// 026-F5 (task 012, r6): SEPARATE dismissal key for the SAVE-degradation banner family — dismissing
+// the load-time import banner must never suppress save warnings (and vice-versa).
+const SAVE_DEGRADATION_DISMISS_KEY_PREFIX = 'spaarke-compose:save-degradation-dismissed:';
+
 /** Best-effort sessionStorage read — never throws (private-browsing / quota / SSR-safe). */
-function readImportWarningsDismissed(signature: string): boolean {
+function readDismissedFlag(prefix: string, signature: string): boolean {
   if (typeof window === 'undefined' || !window.sessionStorage || signature === '') return false;
   try {
-    return window.sessionStorage.getItem(IMPORT_WARNINGS_DISMISS_KEY_PREFIX + signature) === '1';
+    return window.sessionStorage.getItem(prefix + signature) === '1';
   } catch {
     return false;
   }
 }
 
 /** Best-effort sessionStorage write — never throws. */
-function writeImportWarningsDismissed(signature: string): void {
+function writeDismissedFlag(prefix: string, signature: string): void {
   if (typeof window === 'undefined' || !window.sessionStorage || signature === '') return;
   try {
-    window.sessionStorage.setItem(IMPORT_WARNINGS_DISMISS_KEY_PREFIX + signature, '1');
+    window.sessionStorage.setItem(prefix + signature, '1');
   } catch {
     // Ignore — a failed persist just means the per-mount React state still governs this render.
   }
+}
+
+/** Kept as thin wrappers so the FR-21 import-banner call sites read unchanged. */
+function readImportWarningsDismissed(signature: string): boolean {
+  return readDismissedFlag(IMPORT_WARNINGS_DISMISS_KEY_PREFIX, signature);
+}
+function writeImportWarningsDismissed(signature: string): void {
+  writeDismissedFlag(IMPORT_WARNINGS_DISMISS_KEY_PREFIX, signature);
+}
+
+// ---------------------------------------------------------------------------
+// 026-F5 (task 012, r6) — save-degradation warning copy
+// ---------------------------------------------------------------------------
+// Known degradation codes → one concise human sentence each; anything else falls back to the generic
+// "Some content was simplified when saving (code ×N)." line. Codes are the server render-side /
+// client mapper vocabulary (ComposeContentModel save path).
+
+const SAVE_DEGRADATION_COPY: Record<string, string> = {
+  'comment-anchor-dropped': "A comment's anchor could not be placed; the comment text was kept.",
+  'hyperlink-target-dropped': "A link's target could not be preserved.",
+  'tracked-format-change-dropped': 'A tracked formatting change was simplified.',
+  'tracked-format-change-flattened': 'A tracked formatting change was simplified.',
+  'comment-duplicate-dropped': 'A duplicate comment was dropped.',
+  'op-log-ignored': 'Some pending edit operations were superseded by the saved document state.',
+  'text-box-flattened': 'A text box was converted to regular text.',
+  'complex-object-dropped': 'A drawing or embedded object could not be carried over.',
+  // Task 013 (012-review F6): an id collision is not a "simplification" - the comment kept the
+  // document's own version rather than the posted one.
+  'comment-id-collision': "A comment could not be matched to its original; the document's version was kept.",
+  'tracked-move-downgraded': 'A tracked move was saved as delete + insert.',
+  'tracked-nested-revision-simplified': 'A nested tracked change was simplified.',
+  'edited-paragraph-page-break-dropped': 'A page break inside an edited paragraph was dropped.',
+  'edited-paragraph-line-break-dropped': 'A line break inside an edited paragraph was dropped.',
+  'edited-table-structure-rebuilt': "An edited table's structure was rebuilt; some table formatting may be simplified.",
+  'comment-anchor-unresolved': 'A comment could not be anchored and was not saved.',
+  // Task 041 (FR-06, PDF intake): the pdf-intake-* degradation family (task 040's projector) — these
+  // ride ContentModelWarnings on a PDF open and fold into the first model-path save like the docx
+  // flatten codes. Honest, non-alarming copy; the general reflow fact also drives the PDF notice banner.
+  'pdf-intake-fixed-layout-reflowed': 'Content was reflowed from the fixed PDF page layout.',
+  'pdf-intake-page-chrome-dropped': 'Repeating page headers, footers, and page numbers were not carried over.',
+  'pdf-intake-footnote-inlined': 'A footnote was placed inline in the main text.',
+  'pdf-intake-formula-flattened': 'A formula was converted to plain text.',
+  'pdf-intake-list-approximated': 'A bulleted line was converted to a list item.',
+  'pdf-intake-table-style-approximated': "A table's PDF styling was replaced with standard table formatting.",
+  'pdf-intake-table-cell-consolidated': 'Overlapping table cells were combined into one cell.',
+  'pdf-intake-table-cell-dropped': "A table cell's text could not be placed and was left out — please check the table.",
+};
+
+/** One human-readable line per warning; known codes get friendly copy (+ ×N when repeated). */
+function saveDegradationSentence(warning: { code: string; count: number }): string {
+  const known = SAVE_DEGRADATION_COPY[warning.code];
+  if (known) {
+    return warning.count > 1 ? `${known} (×${warning.count})` : known;
+  }
+  return `Some content was simplified when saving (${warning.code}${warning.count > 1 ? ` ×${warning.count}` : ''}).`;
+}
+
+/** Stable content signature for a save-degradation set — the sessionStorage dismissal key suffix. */
+function saveDegradationSignature(warnings: ReadonlyArray<{ code: string; count: number }>): string {
+  return warnings.map(w => `${w.code}:${w.count}`).join('|');
 }
 
 const useStyles = makeStyles({
@@ -160,11 +247,22 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     checkoutFailureMessage,
     importWarnings,
     hideImportWarnings = false,
+    saveDegradationWarnings = null,
+    pdfSourceNotice = false,
     pendingAssistantInsert,
     saveSuccessToken = 0,
     partialApply = null,
     reviewFindingsDegraded = null,
   } = props;
+
+  // Task 041 (FR-06, PDF intake): per-mount dismissal only — DELIBERATELY not sessionStorage-keyed
+  // (unlike the import/save-warning banners): every fresh PDF open must re-warn (honesty over
+  // convenience — the lossiness is per-open, and the parent clears the notice after the first save).
+  const [pdfNoticeDismissed, setPdfNoticeDismissed] = React.useState(false);
+  React.useEffect(() => {
+    if (pdfSourceNotice) setPdfNoticeDismissed(false);
+  }, [pdfSourceNotice]);
+  const showPdfSourceNotice = pdfSourceNotice && !pdfNoticeDismissed;
 
   // FR-21 (DEF-15, R3 UAT round-3 carry-in): the "Document opened with N
   // simplification(s)" warning is informational and dismiss-and-stay-closed for
@@ -187,6 +285,24 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   }, [importWarningsSig]);
 
   const showImportWarnings = importWarnings.length > 0 && !importWarningsDismissed && !hideImportWarnings;
+
+  // 026-F5 (task 012, r6): the SAVE-degradation banner — its own family, its own signature-keyed
+  // sessionStorage dismissal (SEPARATE key from the import banner), and deliberately NOT gated by
+  // `hideImportWarnings` (that suppression covers only load-time import fidelity). A NEW warning set
+  // (different signature) re-shows the banner; the parent passing null (a clean save) clears it.
+  const saveWarnings = saveDegradationWarnings ?? [];
+  const saveWarningsSig = React.useMemo(() => saveDegradationSignature(saveWarnings), [saveDegradationWarnings]);
+  const [saveWarningsDismissed, setSaveWarningsDismissed] = React.useState<boolean>(() =>
+    readDismissedFlag(SAVE_DEGRADATION_DISMISS_KEY_PREFIX, saveWarningsSig)
+  );
+  React.useEffect(() => {
+    setSaveWarningsDismissed(readDismissedFlag(SAVE_DEGRADATION_DISMISS_KEY_PREFIX, saveWarningsSig));
+  }, [saveWarningsSig]);
+  const dismissSaveWarnings = React.useCallback((): void => {
+    writeDismissedFlag(SAVE_DEGRADATION_DISMISS_KEY_PREFIX, saveWarningsSig);
+    setSaveWarningsDismissed(true);
+  }, [saveWarningsSig]);
+  const showSaveDegradation = saveWarnings.length > 0 && !saveWarningsDismissed;
 
   // UAT #7: a successful Save previously showed no confirmation — the button flipped from
   // "Saving" back to idle silently. Surface a transient success MessageBar whenever the parent
@@ -226,7 +342,9 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   const showReviewFindingsDegradedBanner = showReviewFindingsDegraded && !reviewFindingsDegradedDismissed;
 
   const showStack =
+    showPdfSourceNotice ||
     showImportWarnings ||
+    showSaveDegradation ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
     showSaveSuccessBanner ||
@@ -240,6 +358,32 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
 
   return (
     <div className={styles.bannerStack}>
+      {showPdfSourceNotice ? (
+        // Task 041 (FR-06, PDF intake) — the honest-lossiness notice. Fluent v9 semantic tokens only
+        // (ADR-021; MessageBar intent colors are theme-derived — correct in light AND dark). Copy
+        // contract: fixed-layout honesty, NO "identical to source" claim, version history / original
+        // PDF preserved as the safety net, save-creates-a-new-Word-document expectation set up front.
+        <MessageBar intent="info" data-testid="compose-workspace-pdf-source-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Opened from PDF</MessageBarTitle>
+            This document was converted from a fixed-layout PDF, so some formatting was simplified and content may
+            reflow. Saving creates a new Word document — the original PDF is unchanged and remains available with its
+            version history.
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-pdf-source-dismiss"
+                onClick={() => setPdfNoticeDismissed(true)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
       {showSaveSuccessBanner ? (
         <MessageBar intent="success" data-testid="compose-workspace-save-success-banner" aria-live="polite">
           <MessageBarBody>
@@ -390,6 +534,28 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 icon={<Dismiss16Regular />}
                 data-testid="compose-workspace-import-warning-dismiss"
                 onClick={dismissImportWarnings}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
+      {showSaveDegradation ? (
+        // 026-F5 (task 012, r6): save-time degradation — the save SUCCEEDED but some content was
+        // simplified while authoring it. Own dismissible banner; NOT gated by hideImportWarnings.
+        <MessageBar intent="warning" data-testid="compose-workspace-save-degradation-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Some content was simplified when saving</MessageBarTitle>
+            {saveWarnings.map(saveDegradationSentence).join(' ')}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-save-degradation-dismiss"
+                onClick={dismissSaveWarnings}
               />
             }
           />

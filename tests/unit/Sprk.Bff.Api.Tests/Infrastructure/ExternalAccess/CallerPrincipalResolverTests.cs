@@ -134,6 +134,16 @@ public class CallerPrincipalResolverTests
                 RecordIds = new HashSet<Guid> { p1, p2 },
                 Sources = new AccessibleRecordSetSources(true, false, false)
             });
+        // Task 028: the strategy now composes matter + work-assignment roots too — empty here.
+        accessible.Setup(s => s.ComposeAsync(
+                It.IsAny<WorkforcePrincipal>(), It.Is<string>(e => e != "sprk_project"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WorkforcePrincipal _, string entity, CancellationToken _) => new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.SystemUser,
+                EntityType = entity,
+                RecordIds = new HashSet<Guid>(),
+                Sources = new AccessibleRecordSetSources(true, false, false)
+            });
 
         var strategy = new WorkforcePrincipalStrategy(
             resolver.Object, accessible.Object, Mock.Of<ILogger<WorkforcePrincipalStrategy>>());
@@ -171,6 +181,16 @@ public class CallerPrincipalResolverTests
                 PrincipalKind = WorkforcePrincipalKind.ContactOnly,
                 EntityType = "sprk_project",
                 RecordIds = new HashSet<Guid> { grant },
+                Sources = new AccessibleRecordSetSources(false, true, false)
+            });
+        // Task 028: the strategy now composes matter + work-assignment roots too — empty here.
+        accessible.Setup(s => s.ComposeAsync(
+                It.IsAny<WorkforcePrincipal>(), It.Is<string>(e => e != "sprk_project"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((WorkforcePrincipal _, string entity, CancellationToken _) => new AccessibleRecordSet
+            {
+                PrincipalKind = WorkforcePrincipalKind.ContactOnly,
+                EntityType = entity,
+                RecordIds = new HashSet<Guid>(),
                 Sources = new AccessibleRecordSetSources(false, true, false)
             });
 
@@ -218,11 +238,16 @@ public class CallerPrincipalResolverTests
         participations.Setup(s => s.ResolveExternalContactAsync(
                 It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(contactId);
-        participations.Setup(s => s.GetParticipationsAsync(contactId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new List<ExternalParticipation>
+        participations.Setup(s => s.GetGrantSetAsync(contactId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ExternalGrantSet
             {
-                new() { ProjectId = p1, AccessLevel = ExternalAccessLevel.ViewOnly },
-                new() { ProjectId = p2, AccessLevel = ExternalAccessLevel.FullAccess }
+                Projects = new List<ExternalParticipation>
+                {
+                    new() { ProjectId = p1, AccessLevel = ExternalAccessLevel.ViewOnly },
+                    new() { ProjectId = p2, AccessLevel = ExternalAccessLevel.FullAccess }
+                },
+                Matters = new HashSet<Guid>(),
+                WorkAssignments = new HashSet<Guid>(),
             });
 
         var strategy = new CiamContactPrincipalStrategy(

@@ -80,6 +80,7 @@ import type { AuthenticatedFetchFn } from '../../services/EntityCreationService'
 import { MessageBubble } from './subcomponents/MessageBubble';
 import { EmailInFlowBlock } from './subcomponents/EmailInFlowBlock';
 import type { ConversationRenderItem, ConversationViewHandle, ConversationViewProps } from './ConversationView.types';
+import { thinScrollbarStyle } from '../../theme/scrollbar';
 
 // ---------------------------------------------------------------------------
 // Styles (ADR-021 — semantic tokens only, no hardcoded colors)
@@ -176,15 +177,10 @@ const useStyles = makeStyles({
     // Thin modern scrollbar (owner UAT 2026-08-04 item 1 — consistency with the Email
     // widget). The jump-to-latest circle-down button stays as an extra affordance; the
     // bar is now visible+thin instead of suppressed. Semantic tokens (ADR-021).
-    scrollbarWidth: 'thin',
-    scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
-    '::-webkit-scrollbar': { width: '8px', height: '8px' },
-    '::-webkit-scrollbar-thumb': {
-      backgroundColor: tokens.colorNeutralStroke1,
-      borderRadius: tokens.borderRadiusMedium,
-    },
-    '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
-    '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+    // spaarkeai-assistant-enhancements-r2 Phase 0 FIX 2: this was the most complete of
+    // several near-duplicate inline copies — hoisted to the shared `thinScrollbarStyle`
+    // (theme/scrollbar.ts) so SprkChat and future consumers reuse the SAME definition.
+    ...thinScrollbarStyle,
   },
   centerState: {
     flex: 1,

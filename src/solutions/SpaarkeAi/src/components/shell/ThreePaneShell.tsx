@@ -106,6 +106,10 @@ export type { ComposeLaunchContextValue } from "@spaarke/compose-components";
 // parent (the document is persisted before the gate opens).
 import { useCreateOnSaveAssociationGate } from "../compose/useCreateOnSaveAssociationGate";
 import { CreateOnSaveAssociationGateDialog } from "../compose/CreateOnSaveAssociationGateDialog";
+// spaarkeai-assistant-enhancements-r3 task 001 — the widget-agnostic active-item conduit. Mounted above
+// both panes (like ComposeActionBridgeProvider) so the workspace tab-focus feed publishes and the
+// assistant pane consumes the single active-item handle (id/type/label; NEVER bytes — ADR-015 / ADR-030).
+import { ActiveItemConduitProvider } from "../workspace/activeItemConduit";
 // UAT round-1 follow-on (task 071): "Notify me when completed" — the review-complete toast
 // bridge. Mounted alongside the shell's Toaster below (SPAARKEAI_SHELL_TOASTER_ID) so it shares
 // the SAME portal/stacking order as restore-failure toasts (§11 reuse — no second Toaster).
@@ -536,12 +540,19 @@ function ShellStageManager({ children }: ShellStageManagerProps): React.JSX.Elem
 // ---------------------------------------------------------------------------
 
 export interface RestoreContextValue {
+  /** The restored session id — lets panes gate restore-derived UI to the session it belongs to. */
+  sessionId: string;
   /** Conversation summary from the restore spec (null if no summary or no restore). */
   conversationSummary: string | null;
   /** Recent messages from the restore spec (empty if no restore). */
   recentMessages: SessionRestoreSpec["recentMessages"];
   /** Whether entities have changed since the session was saved. */
   hasStaleEntities: boolean;
+  /**
+   * FR-D5 — the restored session's uploaded-files manifest (empty when none). ConversationPane
+   * reads this to rehydrate the attachment chip on cold-load restore (ADR-040: existing manifest).
+   */
+  uploadedFiles: SessionRestoreSpec["uploadedFiles"];
 }
 
 export const RestoreContext = React.createContext<RestoreContextValue | null>(null);
@@ -666,9 +677,11 @@ function SessionRestoreManager({ children, sessionId }: SessionRestoreManagerPro
     () =>
       restoreSpec
         ? {
+            sessionId: restoreSpec.sessionId,
             conversationSummary: restoreSpec.conversationSummary,
             recentMessages: restoreSpec.recentMessages,
             hasStaleEntities: restoreSpec.hasStaleEntities,
+            uploadedFiles: restoreSpec.uploadedFiles,
           }
         : null,
     [restoreSpec]
@@ -834,6 +847,14 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
      * PaneEventBus discriminants (ADR-030 closed union untouched).
      */}
     <ComposeActionBridgeProvider>
+    {/*
+     * task 001 (spaarkeai-assistant-enhancements-r3): the widget-agnostic active-item conduit spans
+     * both panes so the workspace tab-focus feed (WorkspacePane) publishes the single active-item
+     * handle and the assistant pane (ConversationPane) can read it. Same non-bus, sibling-pane
+     * rationale as ComposeActionBridge — a plain React context carrying id/type/label ONLY, no bytes
+     * (ADR-015), no new PaneEventBus discriminant (ADR-030). Placed above both panes.
+     */}
+    <ActiveItemConduitProvider>
     <PaneEventBusProvider>
       <AiSessionProvider
         bffBaseUrl={bffBaseUrl}
@@ -926,6 +947,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
         </ShellStageManager>
       </AiSessionProvider>
     </PaneEventBusProvider>
+    </ActiveItemConduitProvider>
     </ComposeActionBridgeProvider>
     </ComposeLaunchContext.Provider>
   );

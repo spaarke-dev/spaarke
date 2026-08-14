@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Services.Communication.Access;
 using Sprk.Bff.Api.Services.Communication.Channels;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Services.Communication.Tracking;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Jobs.Handlers;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
@@ -33,7 +34,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly ICommunicationDataverseService _communicationService;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IDocumentDataverseService _documentService;
-    private readonly SpeFileStore _speFileStore;
+    // SpeFileStore is Scoped; this service is a Singleton (consumed by singleton callers such as
+    // RegistrationEmailService / DemoProvisioningService), so it is resolved per-operation from
+    // _scopeFactory at each SPE use-site (dotnet-10-upgrade task 020, R9) rather than captured on
+    // the ctor. The scope spans the whole operation (incl. any downloaded-stream consumption), so a
+    // fresh instance per unit of work is behavior-preserving.
     private readonly CommunicationAccountService _accountService;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
@@ -42,6 +47,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly IDirectThreadAccessService? _directThreadAccess;
     private readonly CommunicationParticipantIndexer? _participantIndexer;
     private readonly CommunicationArrivedProducer? _arrivedProducer;
+    // FR-A1 (task 010/012): the outbound tracking-footer signer + per-tenant gate. Optional/null-tolerant so
+    // the existing bare test constructions keep compiling; production DI supplies both (registered in
+    // CommunicationModule). Null → no footer is injected (best-effort, NFR-04).
+    private readonly ITrackingTokenSigner? _trackingTokenSigner;
+    private readonly TrackingFooterGate? _trackingFooterGate;
     private readonly CommunicationOptions _options;
     private readonly ILogger<CommunicationService> _logger;
 
@@ -76,7 +86,6 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         ICommunicationDataverseService communicationService,
         IGenericEntityService genericEntityService,
         IDocumentDataverseService documentService,
-        SpeFileStore speFileStore,
         CommunicationAccountService accountService,
         JobSubmissionService jobSubmissionService,
         ICommunicationEnrichmentService enrichmentService,
@@ -86,14 +95,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         IServiceScopeFactory? scopeFactory = null,
         IDirectThreadAccessService? directThreadAccess = null,
         CommunicationParticipantIndexer? participantIndexer = null,
-        CommunicationArrivedProducer? arrivedProducer = null)
+        CommunicationArrivedProducer? arrivedProducer = null,
+        ITrackingTokenSigner? trackingTokenSigner = null,
+        TrackingFooterGate? trackingFooterGate = null)
     {
         _channelDispatcher = channelDispatcher;
         _senderValidator = senderValidator;
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
         _documentService = documentService;
-        _speFileStore = speFileStore;
         _accountService = accountService;
         _jobSubmissionService = jobSubmissionService;
         _enrichmentService = enrichmentService;
@@ -102,8 +112,85 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         _directThreadAccess = directThreadAccess;
         _participantIndexer = participantIndexer;
         _arrivedProducer = arrivedProducer;
+        _trackingTokenSigner = trackingTokenSigner;
+        _trackingFooterGate = trackingFooterGate;
         _options = options.Value;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// FR-A1 (task 012): returns <paramref name="request"/> with the transparent, HMAC-signed tracking footer
+    /// appended to its <see cref="SendCommunicationRequest.Body"/> — but ONLY when the tracking footer is
+    /// enabled for the tenant AND the request regards a record AND a signed token is produced. Otherwise
+    /// returns the request unchanged. Best-effort / non-fatal (NFR-04 / ADR-045): ANY failure logs and returns
+    /// the ORIGINAL request, so footer injection NEVER fails the send. Called by BOTH email send branches
+    /// (shared-mailbox + OBO/user) so the footer logic is not forked; the returned request is used for the SEND
+    /// only — the persisted Dataverse record keeps the original body.
+    /// </summary>
+    /// <remarks>
+    /// The tenant key is <c>null</c> on single-org deployments (consistent with <c>AutoFileGate</c> /
+    /// <c>AssociationContext.TenantKey</c>); the gate + signer then resolve the global config + secret. The
+    /// footer is rendered to match <see cref="SendCommunicationRequest.BodyFormat"/> (this DTO carries a single
+    /// body + format, not separate HTML/text fields) — a visible <c>&lt;hr/&gt;&lt;p&gt;</c> disclosure for HTML,
+    /// a plain <c>---</c> block for text — so it stays TRANSPARENT (ADR-028: no hidden/invisible markup) and is
+    /// quoted back on reply for the <c>TrackingTokenRung</c> (task 013).
+    /// </remarks>
+    private async Task<SendCommunicationRequest> ApplyTrackingFooterAsync(
+        SendCommunicationRequest request, string correlationId, CancellationToken ct)
+    {
+        // Guard: helpers absent (bare test ctor) → no footer.
+        if (_trackingFooterGate is null || _trackingTokenSigner is null)
+            return request;
+
+        try
+        {
+            const string? tenantKey = null; // single-org; multi-tenant would thread a real key here.
+            var settings = _trackingFooterGate.Resolve(tenantKey);
+            if (!settings.Enabled)
+                return request;
+
+            // Primary regarding = the first caller-supplied association (mirrors ExplicitReferenceRung's
+            // authoritative regarding). No regarding record → nothing to reference → no footer.
+            var regarding = request.Associations?
+                .FirstOrDefault(a => a is not null && !string.IsNullOrWhiteSpace(a.EntityType) && a.EntityId != Guid.Empty);
+            if (regarding is null)
+                return request;
+
+            var token = await _trackingTokenSigner
+                .SignAsync(regarding.EntityType, regarding.EntityId, tenantKey, DateTimeOffset.UtcNow, ct)
+                .ConfigureAwait(false);
+            if (string.IsNullOrEmpty(token))
+            {
+                // Enabled but no token (signing key unconfigured/unavailable) → omit the footer rather than
+                // stamp an unverifiable disclosure. Non-fatal (NFR-04); logged so ops can diagnose the config.
+                _logger.LogWarning(
+                    "Tracking footer enabled but no signed token was produced (signing key unavailable); sending without footer | CorrelationId: {CorrelationId}",
+                    correlationId);
+                return request;
+            }
+
+            var recordRef = !string.IsNullOrWhiteSpace(regarding.EntityName)
+                ? regarding.EntityName!
+                : $"{regarding.EntityType} {regarding.EntityId}";
+
+            var footerText = settings.MessageTemplate
+                .Replace("{record-ref}", recordRef, StringComparison.Ordinal)
+                .Replace("{signed-token}", token, StringComparison.Ordinal);
+
+            var body = request.BodyFormat == BodyFormat.HTML
+                ? $"{request.Body}<hr />\n<p>{System.Net.WebUtility.HtmlEncode(footerText)}</p>"
+                : $"{request.Body}\n\n---\n{footerText}";
+
+            return request with { Body = body };
+        }
+        catch (Exception ex)
+        {
+            // NFR-04 / ADR-045: footer injection NEVER fails the send.
+            _logger.LogWarning(ex,
+                "Tracking footer injection failed (non-fatal); sending without footer | CorrelationId: {CorrelationId}",
+                correlationId);
+            return request;
+        }
     }
 
     /// <summary>
@@ -383,7 +470,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
                     ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
                     ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
-                    ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                    ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
                     ["sprk_graphitemid"] = itemId,
                     ["sprk_graphdriveid"] = driveId,
                 };
@@ -1044,10 +1131,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // failure surfaces as SdapProblemException (GRAPH_SEND_FAILED) and propagates unchanged.
         try
         {
+            // FR-A1 (task 012): inject the transparent signed footer for the SEND only (best-effort/non-fatal);
+            // the original `request` is kept for the Dataverse record below.
+            var sendRequest = await ApplyTrackingFooterAsync(request, correlationId, cancellationToken);
+
             var sendResult = await _channelDispatcher.ResolveSender(request.CommunicationType).SendAsync(
                 new ChannelSendRequest
                 {
-                    Communication = request,
+                    Communication = sendRequest,
                     FromAddress = senderResult.Email!,
                     FromDisplayName = senderResult.DisplayName,
                     UserMode = false,
@@ -1371,10 +1462,14 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // SdapProblemException (GRAPH_SEND_FAILED, sendMode=User) and propagate unchanged.
         try
         {
+            // FR-A1 (task 012): inject the transparent signed footer for the SEND only (best-effort/non-fatal);
+            // the original `request` is kept for the Dataverse record below.
+            var sendRequest = await ApplyTrackingFooterAsync(request, correlationId, ct);
+
             var sendResult = await _channelDispatcher.ResolveSender(request.CommunicationType).SendAsync(
                 new ChannelSendRequest
                 {
-                    Communication = request,
+                    Communication = sendRequest,
                     FromAddress = userEmail,
                     UserMode = true,
                     HttpContext = httpContext,
@@ -1965,7 +2060,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
 
         using var stream = new MemoryStream(emlResult.Content);
-        var fileHandle = await _speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
+        // SpeFileStore is Scoped — resolve it per-operation (R9); scope lives to method end.
+        using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
+            "IServiceScopeFactory is required to resolve SpeFileStore for SPE archival.")).CreateScope();
+        var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+        var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
 
         _logger.LogInformation(
             "Archived communication .eml to SPE | CommunicationId: {CommunicationId}, Path: {Path}",
@@ -1980,7 +2079,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_filename"] = emlResult.FileName, // AI analyzer reads this for file type detection
             ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
             ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
-            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
             ["sprk_graphitemid"] = fileHandle?.Id,
             ["sprk_graphdriveid"] = driveId,
             ["sprk_isemailarchive"] = true,
@@ -2051,7 +2150,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             try
             {
-                await using var content = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+                // SpeFileStore is Scoped — resolve per-attachment (R9); scope spans the stream copy below.
+                using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
+                    "IServiceScopeFactory is required to resolve SpeFileStore for .eml embed download.")).CreateScope();
+                var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+                await using var content = await speFileStore.DownloadFileAsync(driveId, itemId, ct);
                 if (content is null)
                 {
                     _logger.LogWarning(
@@ -2154,7 +2257,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
                     ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
                     ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
-                    ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                    ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
                     ["sprk_graphitemid"] = speItemId,
                     ["sprk_graphdriveid"] = driveId,
                 };
@@ -2266,6 +2369,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var attachments = new List<ChannelAttachment>(attachmentDocumentIds.Length);
         long totalSize = 0;
 
+        // SpeFileStore is Scoped — resolve once for this whole download operation (R9); the scope
+        // spans every attachment's metadata + content download and the consumption of those streams.
+        using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
+            "IServiceScopeFactory is required to resolve SpeFileStore for attachment download.")).CreateScope();
+        var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+
         for (var i = 0; i < attachmentDocumentIds.Length; i++)
         {
             var sprkDocumentId = attachmentDocumentIds[i];
@@ -2338,7 +2447,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             FileHandleDto? metadata;
             try
             {
-                metadata = await _speFileStore.GetFileMetadataAsync(driveId, itemId, ct);
+                metadata = await speFileStore.GetFileMetadataAsync(driveId, itemId, ct);
             }
             catch (Exception ex)
             {
@@ -2398,7 +2507,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             Stream? contentStream;
             try
             {
-                contentStream = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+                contentStream = await speFileStore.DownloadFileAsync(driveId, itemId, ct);
             }
             catch (Exception ex)
             {

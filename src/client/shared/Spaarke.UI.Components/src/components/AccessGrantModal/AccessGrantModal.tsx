@@ -68,10 +68,12 @@ import * as React from 'react';
 import {
   Button,
   Checkbox,
-  Combobox,
   Option,
+  Dropdown,
+  Link,
   Spinner,
   Text,
+  Tooltip,
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
@@ -80,9 +82,19 @@ import {
   tokens,
   shorthands,
 } from '@fluentui/react-components';
-import { PersonRegular, DismissCircleRegular } from '@fluentui/react-icons';
+import { PersonRegular, DismissCircleRegular, BuildingRegular } from '@fluentui/react-icons';
 import { SprkModal } from '../SprkModal';
-import type { IAccessGrantModalProps, IAccessGrantCandidate, IAccessGrantRecord, IContactSearchResult } from './types';
+// Record picker (task 073 v1.0.24) — "+ Contact" / "+ Organization" open the host's
+// NATIVE Dataverse advanced-lookup side pane (Xrm.Utility.lookupObjects, injected as
+// pickContact/pickOrganization) — the same advanced-find surface the wizards use. The
+// modal renders `nonBlocking` so that page-level pane is not covered by a backdrop.
+import type {
+  IAccessGrantModalProps,
+  IAccessGrantCandidate,
+  IAccessGrantRecord,
+  IContactSearchResult,
+  IOrganizationPick,
+} from './types';
 import { DEFAULT_ACCESS_LEVEL_OPTIONS } from './types';
 
 const useStyles = makeStyles({
@@ -92,10 +104,49 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
     marginBottom: tokens.spacingVerticalXL,
   },
+  // Subsection headers — 20px semibold (task 073 UAT #5).
   sectionTitle: {
     fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase300,
+    fontSize: tokens.fontSizeBase500,
+    lineHeight: tokens.lineHeightBase500,
     color: tokens.colorNeutralForeground1,
+  },
+  // Subsection header row: title on the left, action buttons (+ Contact / + Organization) right-aligned.
+  sectionHeaderRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    columnGap: tokens.spacingHorizontalM,
+  },
+  sectionHeaderActions: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    flexShrink: 0,
+  },
+  // Padding below the "Add Access Permissions" header row, before the list
+  // (task 073 UAT v1.0.24 #3).
+  listArea: {
+    display: 'flex',
+    flexDirection: 'column',
+    marginTop: tokens.spacingVerticalM,
+  },
+  // Contact name rendered as a link that opens the Contact record (v1.0.24 #6).
+  contactLink: {
+    fontSize: tokens.fontSizeBase300,
+    cursor: 'pointer',
+  },
+  levelRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'end',
+    columnGap: tokens.spacingHorizontalM,
+    marginTop: tokens.spacingVerticalS,
+  },
+  levelField: {
+    minWidth: '180px',
   },
   sectionSubtitle: {
     fontSize: tokens.fontSizeBase200,
@@ -140,11 +191,9 @@ const useStyles = makeStyles({
     fontStyle: 'italic',
     ...shorthands.padding(tokens.spacingVerticalS, 0),
   },
-  pickerRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    alignItems: 'center',
-    columnGap: tokens.spacingHorizontalS,
+  // Per-row access-level dropdown (task 073 v1.0.23) — sized so "Pick access level" fits.
+  rowLevelDropdown: {
+    minWidth: '160px',
   },
   notAuthorized: {
     display: 'flex',
@@ -179,42 +228,51 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   open,
   onClose,
   recordId,
+  recordType = 'project',
   canGrantAccess = true,
   authenticatedFetch,
   fetchCandidates,
   fetchExistingGrants,
-  searchContacts,
+  fetchStandingContacts,
+  // searchContacts / searchOrganizations remain in the props contract (SPA-host
+  // fallback) but are unused by this PCF-hosted modal, which uses the native
+  // advanced-lookup pickers below (task 073 UAT v1.0.24 #1/#4).
+  pickContact,
+  pickOrganization,
+  onOpenContact,
   isInternalContact,
-  onSetStandingGrant,
+  // onSetStandingGrant remains in the props contract but is unused: the standing
+  // grant is now set on the Contact record itself, not here (task 073 UAT v1.0.24 #5).
   title = 'Manage Access',
   accessLevelOptions = DEFAULT_ACCESS_LEVEL_OPTIONS,
   defaultAccessLevel,
   accessPermissionState = 'standard',
 }) => {
   const styles = useStyles();
-  const effectiveAccessLevel =
-    defaultAccessLevel ?? accessLevelOptions[0]?.value ?? DEFAULT_ACCESS_LEVEL_OPTIONS[0].value;
 
   // Access-Permission sharing gate (task 043, FR-14 Option A). Deliberately
   // computed from the prop alone — never from `effectiveAccessLevel` or any
   // other per-grant `sprk_accesslevel` concept above, so the two stay
   // structurally independent (see the module doc comment).
   const grantsBlocked = accessPermissionState === 'restricted';
-  const standingGrantAllowed = accessPermissionState === 'standard';
 
   const [loading, setLoading] = React.useState(false);
   const [candidates, setCandidates] = React.useState<IAccessGrantCandidate[]>([]);
   const [existingGrants, setExistingGrants] = React.useState<IAccessGrantRecord[]>([]);
+  // Items (contacts OR organizations) checked to grant, keyed by contactId/orgId.
   const [selectedCandidateIds, setSelectedCandidateIds] = React.useState<Set<string>>(new Set());
-  const [standingForCandidate, setStandingForCandidate] = React.useState<Set<string>>(new Set());
   const [approving, setApproving] = React.useState(false);
+  // A native advanced-lookup pick is in flight — used only to disable the
+  // "+ Contact"/"+ Organization" buttons so a double-click can't open two panes.
+  const [picking, setPicking] = React.useState(false);
 
-  const [searchQuery, setSearchQuery] = React.useState('');
-  const [searchResults, setSearchResults] = React.useState<IContactSearchResult[]>([]);
-  const [searching, setSearching] = React.useState(false);
-  const [selectedNamed, setSelectedNamed] = React.useState<IContactSearchResult | null>(null);
-  const [standingForNamed, setStandingForNamed] = React.useState(false);
-  const [addingNamed, setAddingNamed] = React.useState(false);
+  // Per-row access level (task 073 v1.0.23) — keyed by item id (contactId/orgId).
+  // NO default: a row is not grantable until the admin picks its level ("Pick access level").
+  const [rowLevels, setRowLevels] = React.useState<Record<string, number>>({});
+  // Contacts + organizations staged via the native "+ Contact" / "+ Organization"
+  // advanced lookup — appended into the "Add Access Permissions" list as selectable rows.
+  const [lookedUpContacts, setLookedUpContacts] = React.useState<IContactSearchResult[]>([]);
+  const [lookedUpOrgs, setLookedUpOrgs] = React.useState<IOrganizationPick[]>([]);
 
   const [revokeTargetId, setRevokeTargetId] = React.useState<string | null>(null);
   const [revoking, setRevoking] = React.useState(false);
@@ -225,25 +283,38 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     setLoading(true);
     setNotice(null);
     try {
-      const [candidateList, grantList] = await Promise.all([fetchCandidates(), fetchExistingGrants()]);
-      setExistingGrants(grantList);
+      const [candidateList, grantList, standingList] = await Promise.all([
+        fetchCandidates(),
+        fetchExistingGrants(),
+        // Standing-grant members (task 073 UAT #2) — optional; a host that
+        // hasn't wired the flag omits it. Failing soft so a standing-read
+        // problem (e.g. field-level-security denial) never blocks the modal.
+        fetchStandingContacts ? fetchStandingContacts().catch(() => [] as IAccessGrantRecord[]) : Promise.resolve([]),
+      ]);
+      // Union standing rows into Current Access, deduped by contactId — an
+      // explicit per-record `sprk_externalrecordaccess` grant (which carries an
+      // accessRecordId and IS revocable) wins over a standing row for the same
+      // contact, so a contact with both shows once and stays revocable.
       const grantedContactIds = new Set(grantList.map(g => g.contactId));
-      setCandidates(candidateList.filter(c => !grantedContactIds.has(c.contactId)));
+      const standingOnly = standingList.filter(s => !grantedContactIds.has(s.contactId));
+      setExistingGrants([...grantList, ...standingOnly]);
+      // Exclude both explicitly-granted AND standing members from the
+      // candidate-approve list (they already have access).
+      const currentAccessContactIds = new Set([...grantedContactIds, ...standingOnly.map(s => s.contactId)]);
+      setCandidates(candidateList.filter(c => !currentAccessContactIds.has(c.contactId)));
     } catch {
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
     } finally {
       setLoading(false);
     }
-  }, [fetchCandidates, fetchExistingGrants]);
+  }, [fetchCandidates, fetchExistingGrants, fetchStandingContacts]);
 
   React.useEffect(() => {
     if (open && canGrantAccess) {
       setSelectedCandidateIds(new Set());
-      setStandingForCandidate(new Set());
-      setSearchQuery('');
-      setSearchResults([]);
-      setSelectedNamed(null);
-      setStandingForNamed(false);
+      setRowLevels({});
+      setLookedUpContacts([]);
+      setLookedUpOrgs([]);
       void loadData();
     }
     // Only re-run when the modal transitions open (and once per open), not on every render.
@@ -266,28 +337,25 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   );
 
   /** Outcome of a single {@link grantContact} call — the grant write itself
-   * either succeeds or throws; these flags describe the two BEST-EFFORT,
-   * non-blocking follow-ons (NFR-06) so callers can build one combined notice
-   * instead of each sub-step clobbering the other's message. */
+   * either succeeds or throws; `notifyPending` describes the one BEST-EFFORT,
+   * non-blocking follow-on (NFR-06 — the escalated internal deep-link notify gap)
+   * so callers can build one combined notice. */
   interface IGrantOutcome {
     notifyPending: boolean;
-    standingGrantFailed: boolean;
   }
 
   /**
    * The single grant core shared by candidate-approve and named-add (per the
    * task's "no duplicate write path" constraint). Classifies the contact
-   * internal-vs-external, routes to the correct BUILT endpoint, then
-   * best-effort applies the standing-grant flag (NFR-06 — never rolls back
-   * the grant on a standing-grant-write or notify failure). Throws only when
-   * the grant write itself fails; the two follow-on concerns are reported via
-   * the returned flags so a caller driving multiple grants (approve-selected)
-   * can aggregate one notice instead of each write overwriting the last.
+   * internal-vs-external and routes to the correct BUILT endpoint. Throws only
+   * when the grant write itself fails; the notify concern is reported via the
+   * returned flag so a caller driving multiple grants (approve-selected) can
+   * aggregate one notice instead of each write overwriting the last.
    */
   const grantContact = React.useCallback(
     async (
       contact: { contactId: string; fullName: string; email?: string },
-      opts: { standingGrant: boolean }
+      opts: { level: number }
     ): Promise<IGrantOutcome> => {
       const [firstName, ...rest] = contact.fullName.trim().split(/\s+/);
       const lastName = rest.join(' ') || firstName;
@@ -305,10 +373,13 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
 
       if (!internal && contact.email) {
         // External, known email → the built, atomic onboard+grant+CIAM-email endpoint.
+        // Polymorphic root (task 070/071): send {recordType, recordId} — the BFF
+        // binds the correct typed root lookup (project|matter|workassignment).
         await postJson('/api/v1/external-access/invite-and-grant', {
           email: contact.email,
-          projectId: recordId,
-          accessLevel: effectiveAccessLevel,
+          recordType,
+          recordId,
+          accessLevel: opts.level,
           firstName,
           lastName,
         });
@@ -317,8 +388,9 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // file → the built grant-only core (no CIAM onboarding attempted).
         await postJson('/api/v1/external-access/grant', {
           contactId: contact.contactId,
-          projectId: recordId,
-          accessLevel: effectiveAccessLevel,
+          recordType,
+          recordId,
+          accessLevel: opts.level,
         });
         if (internal) {
           // Escalated gap — see the module doc comment. The grant itself
@@ -327,106 +399,169 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         }
       }
 
-      let standingGrantFailed = false;
-      if (opts.standingGrant && onSetStandingGrant) {
-        try {
-          await onSetStandingGrant(contact.contactId, true);
-        } catch {
-          standingGrantFailed = true;
-        }
-      }
-
-      return { notifyPending, standingGrantFailed };
+      return { notifyPending };
     },
-    [effectiveAccessLevel, isInternalContact, onSetStandingGrant, postJson, recordId]
+    [isInternalContact, postJson, recordId, recordType]
   );
 
-  const handleApproveSelected = React.useCallback(async () => {
-    if (selectedCandidateIds.size === 0) return;
+  // Unified "Available Contacts & Organizations" list (task 073 v1.0.23): role-based membership
+  // candidates + any contacts/organizations staged via the "+ Contact" / "+ Organization" side pane.
+  // Each item carries its own per-row access level. Granted contacts are excluded by loadData().
+  interface IAvailableItem {
+    id: string; // contactId (contact) or organizationId (organization)
+    name: string;
+    meta: string;
+    kind: 'contact' | 'organization';
+    contact?: { contactId: string; fullName: string; email?: string };
+    org?: IOrganizationPick;
+  }
+  const availableItems = React.useMemo<IAvailableItem[]>(() => {
+    const byId = new Map<string, IAccessGrantCandidate>();
+    for (const c of candidates) byId.set(c.contactId, c);
+    for (const c of lookedUpContacts) {
+      if (!byId.has(c.contactId)) {
+        byId.set(c.contactId, { contactId: c.contactId, fullName: c.fullName, email: c.email, role: 'Looked up' });
+      }
+    }
+    const items: IAvailableItem[] = [];
+    for (const c of byId.values()) {
+      items.push({
+        id: c.contactId,
+        name: c.fullName,
+        meta: `${c.role}${c.email ? ` · ${c.email}` : ''}`,
+        kind: 'contact',
+        contact: { contactId: c.contactId, fullName: c.fullName, email: c.email },
+      });
+    }
+    for (const o of lookedUpOrgs) {
+      items.push({ id: o.id, name: o.name, meta: 'All organization contacts', kind: 'organization', org: o });
+    }
+    return items;
+  }, [candidates, lookedUpContacts, lookedUpOrgs]);
+
+  /** Writes a first-class ORGANIZATION grant (task 073 #7) — access for all contacts at the org.
+   * `contactId` is omitted so the BFF treats (empty contact + organizationId) as an org grant; every
+   * active member of the organization then inherits access at check time (server Term-3 union). */
+  const grantOrganization = React.useCallback(
+    async (org: IOrganizationPick, level: number): Promise<void> => {
+      await postJson('/api/v1/external-access/grant', {
+        recordType,
+        recordId,
+        accessLevel: level,
+        organizationId: org.id,
+      });
+    },
+    [postJson, recordType, recordId]
+  );
+
+  // Commits the checked rows (the "Add (N)" action). Returns `true` only when every
+  // selected row was granted successfully — Save uses this to decide whether to close
+  // (task 073 UAT v1.0.29 #1B). Returns `false` (staying open) when a level is missing
+  // or any grant failed, so the notice explains what to fix.
+  const handleGrantSelected = React.useCallback(async (): Promise<boolean> => {
+    const selected = availableItems.filter(it => selectedCandidateIds.has(it.id));
+    if (selected.length === 0) return true;
+    // Every selected row must have a level (no default) before it can be granted.
+    const missing = selected.filter(it => rowLevels[it.id] === undefined);
+    if (missing.length > 0) {
+      setNotice({ intent: 'warning', text: `Pick an access level for: ${missing.map(m => m.name).join(', ')}.` });
+      return false;
+    }
     setApproving(true);
-    const toApprove = candidates.filter(c => selectedCandidateIds.has(c.contactId));
     let failures = 0;
+    let granted = 0;
     let anyNotifyPending = false;
-    let anyStandingGrantFailed = false;
-    for (const candidate of toApprove) {
+    for (const it of selected) {
+      const level = rowLevels[it.id];
       try {
-        const outcome = await grantContact(candidate, { standingGrant: standingForCandidate.has(candidate.contactId) });
-        anyNotifyPending = anyNotifyPending || outcome.notifyPending;
-        anyStandingGrantFailed = anyStandingGrantFailed || outcome.standingGrantFailed;
+        if (it.kind === 'contact' && it.contact) {
+          const outcome = await grantContact(it.contact, { level });
+          anyNotifyPending = anyNotifyPending || outcome.notifyPending;
+        } else if (it.kind === 'organization' && it.org) {
+          await grantOrganization(it.org, level);
+        }
+        granted += 1;
       } catch {
         failures += 1;
       }
     }
+
     setApproving(false);
+    setSelectedCandidateIds(new Set());
+    setRowLevels({});
+    setLookedUpContacts([]);
+    setLookedUpOrgs([]);
     await loadData();
 
     if (failures > 0) {
       setNotice({
         intent: 'error',
-        text: `${toApprove.length - failures} of ${toApprove.length} grant(s) succeeded; ${failures} failed. Try again for the failed contact(s).`,
+        text: `Granted access to ${granted} of ${selected.length}; ${failures} failed. Please try again.`,
       });
     } else if (anyNotifyPending) {
       setNotice({
         intent: 'warning',
-        text: `Granted access to ${toApprove.length} contact(s). Internal notify (deep-link) is not yet available for internal workforce contacts — they will not receive an automatic notification (escalated; see project notes).`,
-      });
-    } else if (anyStandingGrantFailed) {
-      setNotice({
-        intent: 'warning',
-        text: `Granted access to ${toApprove.length} contact(s), but setting the standing-grant flag failed for at least one. You can retry from the Contact form.`,
+        text: `Granted access to ${granted} item(s). Internal notify (deep-link) is not yet available for internal workforce contacts (escalated; see project notes).`,
       });
     } else {
-      setNotice({ intent: 'success', text: `Granted access to ${toApprove.length} contact(s).` });
+      setNotice({ intent: 'success', text: `Granted access to ${granted} item(s).` });
     }
-  }, [candidates, grantContact, loadData, selectedCandidateIds, standingForCandidate]);
+    // Success (for Save's close decision) iff nothing failed — a notify-pending
+    // grant still succeeded (the record-access row was written).
+    return failures === 0;
+  }, [availableItems, selectedCandidateIds, rowLevels, grantContact, grantOrganization, loadData]);
 
-  const handleAddNamed = React.useCallback(async () => {
-    if (!selectedNamed) return;
-    setAddingNamed(true);
+  // Save (task 073 UAT v1.0.29 #1B): if rows are staged but not yet added, COMMIT
+  // them (respecting the level-required guard), then close on success; otherwise
+  // just close. So the user's pending selection isn't silently lost on Save.
+  const handleSave = React.useCallback(async () => {
+    if (selectedCandidateIds.size === 0) {
+      onClose();
+      return;
+    }
+    const ok = await handleGrantSelected();
+    if (ok) onClose();
+  }, [selectedCandidateIds, handleGrantSelected, onClose]);
+
+  // Cancel / × (task 073 UAT v1.0.29 #1B): warn if there are pending (staged,
+  // not-yet-added) selections so they aren't silently discarded.
+  const [showPendingWarning, setShowPendingWarning] = React.useState(false);
+  const handleCancelAttempt = React.useCallback(() => {
+    if (selectedCandidateIds.size > 0) setShowPendingWarning(true);
+    else onClose();
+  }, [selectedCandidateIds, onClose]);
+
+  // ── Native advanced-lookup pickers (task 073 v1.0.24 #1/#4) ─────────────────
+  // `+ Contact` / `+ Organization` open the host's NATIVE Dataverse advanced-lookup
+  // side pane (Xrm.Utility.lookupObjects, injected as pickContact/pickOrganization)
+  // — the same advanced-find surface the wizards use. The pick is staged into the
+  // "Add Access Permissions" list and auto-selected. Works because the modal is
+  // `nonBlocking` (no backdrop covering the page-level lookup pane).
+  const openContactPicker = React.useCallback(async () => {
+    if (!pickContact) return;
+    setPicking(true);
     try {
-      const outcome = await grantContact(selectedNamed, { standingGrant: standingForNamed });
-      const grantedName = selectedNamed.fullName;
-      setSelectedNamed(null);
-      setSearchQuery('');
-      setSearchResults([]);
-      setStandingForNamed(false);
-      await loadData();
-      if (outcome.notifyPending) {
-        setNotice({
-          intent: 'warning',
-          text: `${grantedName} was granted access. Internal notify (deep-link) is not yet available — the contact will not receive an automatic notification (escalated; see project notes).`,
-        });
-      } else if (outcome.standingGrantFailed) {
-        setNotice({
-          intent: 'warning',
-          text: `${grantedName} was granted access, but setting the standing-grant flag failed. You can retry from the Contact form.`,
-        });
-      } else {
-        setNotice({ intent: 'success', text: `Granted access to ${grantedName}.` });
-      }
-    } catch {
-      setNotice({ intent: 'error', text: `Failed to grant access to ${selectedNamed.fullName}. Please try again.` });
+      const picked = await pickContact();
+      if (!picked) return;
+      setLookedUpContacts(prev => (prev.some(c => c.contactId === picked.contactId) ? prev : [...prev, picked]));
+      setSelectedCandidateIds(prev => new Set(prev).add(picked.contactId));
     } finally {
-      setAddingNamed(false);
+      setPicking(false);
     }
-  }, [grantContact, loadData, selectedNamed, standingForNamed]);
+  }, [pickContact]);
 
-  const handleSearchChange = React.useCallback(
-    (query: string) => {
-      setSearchQuery(query);
-      setSelectedNamed(null);
-      if (!query || query.trim().length < 2) {
-        setSearchResults([]);
-        return;
-      }
-      setSearching(true);
-      searchContacts(query)
-        .then(results => setSearchResults(results))
-        .catch(() => setSearchResults([]))
-        .finally(() => setSearching(false));
-    },
-    [searchContacts]
-  );
+  const openOrgPicker = React.useCallback(async () => {
+    if (!pickOrganization) return;
+    setPicking(true);
+    try {
+      const picked = await pickOrganization();
+      if (!picked) return;
+      setLookedUpOrgs(prev => (prev.some(o => o.id === picked.id) ? prev : [...prev, picked]));
+      setSelectedCandidateIds(prev => new Set(prev).add(picked.id));
+    } finally {
+      setPicking(false);
+    }
+  }, [pickOrganization]);
 
   const confirmRevoke = React.useCallback(async () => {
     const target = existingGrants.find(g => g.accessRecordId === revokeTargetId);
@@ -436,10 +571,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     }
     setRevoking(true);
     try {
+      // Revoke is root-agnostic (task 070): it deactivates by accessRecordId +
+      // contactId and no longer requires a root id, so no recordType/recordId is sent.
       await postJson('/api/v1/external-access/revoke', {
         accessRecordId: target.accessRecordId,
         contactId: target.contactId,
-        projectId: recordId,
       });
       setRevokeTargetId(null);
       await loadData();
@@ -449,19 +585,10 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     } finally {
       setRevoking(false);
     }
-  }, [existingGrants, loadData, postJson, recordId, revokeTargetId]);
+  }, [existingGrants, loadData, postJson, revokeTargetId]);
 
   const toggleCandidateSelected = (contactId: string) => {
     setSelectedCandidateIds(prev => {
-      const next = new Set(prev);
-      if (next.has(contactId)) next.delete(contactId);
-      else next.add(contactId);
-      return next;
-    });
-  };
-
-  const toggleCandidateStanding = (contactId: string) => {
-    setStandingForCandidate(prev => {
       const next = new Set(prev);
       if (next.has(contactId)) next.delete(contactId);
       else next.add(contactId);
@@ -474,14 +601,29 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   return (
     <>
       <SprkModal
+        // task 073 v1.0.24 — the modal is `nonBlocking` (Fluent non-modal: no
+        // backdrop, no focus trap) so the host's NATIVE advanced-lookup pane
+        // (Xrm.Utility.lookupObjects, opened by "+ Contact"/"+ Organization")
+        // renders on top and stays interactive instead of being covered by a
+        // modal backdrop — the proven CommunicationActions composer pattern.
         open={open}
-        onClose={onClose}
+        onClose={handleCancelAttempt}
         title={title}
         size="lg"
         dismiss="explicit"
+        nonBlocking
+        // While a native advanced-lookup pane is open (picking), hide this surface
+        // so the (higher-z-index) modal doesn't cover the lookup (task 073 UAT
+        // v1.0.29 #1A). The modal stays mounted — staged picks survive.
+        hidden={picking}
+        footerStart={
+          <Button appearance="secondary" onClick={handleCancelAttempt}>
+            Cancel
+          </Button>
+        }
         footer={
-          <Button appearance="primary" onClick={onClose}>
-            Close
+          <Button appearance="primary" onClick={() => void handleSave()}>
+            Save
           </Button>
         }
       >
@@ -510,148 +652,195 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
               </div>
             ) : (
               <>
-                {/* Access-Permission sharing gate banner (task 043, FR-14 Option A) —
-                    shown only when Restricted; existing access below remains
-                    reviewable/revocable regardless of this gate. */}
+                {/* Restricted banner (task 073 UAT #4) — light-red (error intent). */}
                 {grantsBlocked && (
-                  <MessageBar intent="warning" style={{ marginBottom: tokens.spacingVerticalM }}>
+                  <MessageBar intent="error" style={{ marginBottom: tokens.spacingVerticalM }}>
                     <MessageBarBody>
-                      <MessageBarTitle>External access is off for this record</MessageBarTitle>
-                      This record's Access Permission is set to Restricted, so new external grants (approving a
-                      membership candidate or adding a named contact) are blocked. Existing access can still be reviewed
-                      and revoked below.
+                      <MessageBarTitle>Restricted Access</MessageBarTitle>
+                      Only system users may have access. External users must be assigned system user licenses to access.
                     </MessageBarBody>
                   </MessageBar>
                 )}
 
-                {/* Section 1 — candidate approve list (task 021 role-allowlist source) */}
-                <div className={styles.section}>
-                  <Text className={styles.sectionTitle}>Membership candidates</Text>
-                  <Text className={styles.sectionSubtitle}>
-                    Contacts assigned to this record via an access-conferring role. Approving writes a grant
-                    (provenance: membership-approved).
-                  </Text>
-                  {candidates.length === 0 ? (
-                    <Text className={styles.emptyState}>No unapproved membership candidates.</Text>
-                  ) : (
-                    candidates.map(candidate => (
-                      <div className={styles.row} key={candidate.contactId}>
-                        <Checkbox
-                          checked={selectedCandidateIds.has(candidate.contactId)}
-                          onChange={() => toggleCandidateSelected(candidate.contactId)}
-                          aria-label={`Select ${candidate.fullName}`}
-                          disabled={grantsBlocked}
-                        />
-                        <div className={styles.rowMain}>
-                          <Text className={styles.rowName}>{candidate.fullName}</Text>
-                          <Text className={styles.rowMeta}>
-                            {candidate.role}
-                            {candidate.email ? ` · ${candidate.email}` : ''}
-                          </Text>
+                {/* Add Access Permissions (task 073 UAT v1.0.24 #2) — role-based members + looked-up
+                    contacts/orgs. "+ Contact" / "+ Organization" (icon-only, #4) open the NATIVE
+                    advanced-lookup pane. Select, choose a level, Add. */}
+                <div className={styles.section} style={{ marginTop: tokens.spacingVerticalL }}>
+                  <div className={styles.sectionHeaderRow}>
+                    <Text className={styles.sectionTitle}>Add Access Permissions</Text>
+                    <div className={styles.sectionHeaderActions}>
+                      {/* Icon-only "+" triggers (task 073 UAT v1.0.24 #4) — open the native
+                          advanced-lookup pane (pickContact/pickOrganization). */}
+                      {pickContact && (
+                        <Tooltip content="Add contact" relationship="label">
+                          <Button
+                            appearance="secondary"
+                            size="small"
+                            icon={<PersonRegular />}
+                            onClick={() => void openContactPicker()}
+                            disabled={grantsBlocked || picking}
+                            aria-label="Add contact"
+                          >
+                            +
+                          </Button>
+                        </Tooltip>
+                      )}
+                      {pickOrganization && (
+                        <Tooltip content="Add organization" relationship="label">
+                          <Button
+                            appearance="secondary"
+                            size="small"
+                            icon={<BuildingRegular />}
+                            onClick={() => void openOrgPicker()}
+                            disabled={grantsBlocked || picking}
+                            aria-label="Add organization"
+                          >
+                            +
+                          </Button>
+                        </Tooltip>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Padding below the header row, before the list (task 073 UAT v1.0.24 #3). */}
+                  <div className={styles.listArea}>
+                    {availableItems.length === 0 ? (
+                      <Text className={styles.emptyState}>
+                        No contacts or organizations yet. Use “+ Contact” or “+ Organization” to add.
+                      </Text>
+                    ) : (
+                      availableItems.map(item => (
+                        <div className={styles.row} key={item.id}>
+                          <Checkbox
+                            checked={selectedCandidateIds.has(item.id)}
+                            onChange={() => toggleCandidateSelected(item.id)}
+                            aria-label={`Select ${item.name}`}
+                            disabled={grantsBlocked}
+                          />
+                          <div className={styles.rowMain}>
+                            {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6);
+                                organization rows show a building glyph + plain name. */}
+                            {item.kind === 'contact' && item.contact && onOpenContact ? (
+                              <Link
+                                className={styles.contactLink}
+                                onClick={() => onOpenContact(item.contact!.contactId)}
+                              >
+                                {item.name}
+                              </Link>
+                            ) : (
+                              <Text className={styles.rowName}>
+                                {item.kind === 'organization' ? <BuildingRegular /> : null} {item.name}
+                              </Text>
+                            )}
+                            <Text className={styles.rowMeta}>{item.meta}</Text>
+                          </div>
+                          <div className={styles.rowActions}>
+                            {/* Per-row access level (task 073 v1.0.23) — no default; "Pick access level". */}
+                            <Dropdown
+                              className={styles.rowLevelDropdown}
+                              placeholder="Pick access level"
+                              value={
+                                rowLevels[item.id] !== undefined
+                                  ? (accessLevelOptions.find(o => o.value === rowLevels[item.id])?.label ?? '')
+                                  : ''
+                              }
+                              selectedOptions={rowLevels[item.id] !== undefined ? [String(rowLevels[item.id])] : []}
+                              disabled={grantsBlocked}
+                              onOptionSelect={(_, data) => {
+                                if (data.optionValue) {
+                                  const v = Number(data.optionValue);
+                                  setRowLevels(prev => ({ ...prev, [item.id]: v }));
+                                }
+                              }}
+                            >
+                              {accessLevelOptions.map(o => (
+                                <Option key={o.value} value={String(o.value)} text={o.label}>
+                                  {o.label}
+                                </Option>
+                              ))}
+                            </Dropdown>
+                          </div>
                         </div>
-                        <div className={styles.rowActions}>
-                          {onSetStandingGrant && standingGrantAllowed && (
-                            <Checkbox
-                              label="Standing grant"
-                              checked={standingForCandidate.has(candidate.contactId)}
-                              onChange={() => toggleCandidateStanding(candidate.contactId)}
-                              disabled={!selectedCandidateIds.has(candidate.contactId)}
-                            />
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                  {candidates.length > 0 && (
+                      ))
+                    )}
+                  </div>
+
+                  <div className={styles.levelRow}>
                     <Button
                       appearance="primary"
                       disabled={selectedCandidateIds.size === 0 || approving || grantsBlocked}
                       icon={approving ? <Spinner size="tiny" /> : undefined}
-                      onClick={handleApproveSelected}
-                      style={{ alignSelf: 'flex-start' }}
+                      onClick={handleGrantSelected}
                     >
-                      Approve selected ({selectedCandidateIds.size})
-                    </Button>
-                  )}
-                </div>
-
-                {/* Section 2 — named-contact person-picker */}
-                <div className={styles.section}>
-                  <Text className={styles.sectionTitle}>Add a named contact</Text>
-                  <Text className={styles.sectionSubtitle}>
-                    Search for any Contact to grant explicit access, regardless of role assignment.
-                  </Text>
-                  <div className={styles.pickerRow}>
-                    <Combobox
-                      freeform
-                      placeholder="Search contacts by name or email…"
-                      value={searchQuery}
-                      onInput={e => handleSearchChange((e.target as HTMLInputElement).value)}
-                      onOptionSelect={(_, data) => {
-                        const found = searchResults.find(r => r.contactId === data.optionValue);
-                        setSelectedNamed(found ?? null);
-                        if (found) setSearchQuery(found.fullName);
-                      }}
-                      expandIcon={searching ? <Spinner size="tiny" /> : undefined}
-                      disabled={grantsBlocked}
-                    >
-                      {searchResults.map(result => (
-                        <Option key={result.contactId} value={result.contactId} text={result.fullName}>
-                          {result.fullName}
-                          {result.email ? ` (${result.email})` : ''}
-                        </Option>
-                      ))}
-                    </Combobox>
-                    {onSetStandingGrant && standingGrantAllowed && (
-                      <Checkbox
-                        label="Standing grant"
-                        checked={standingForNamed}
-                        onChange={(_, data) => setStandingForNamed(Boolean(data.checked))}
-                        disabled={!selectedNamed}
-                      />
-                    )}
-                    <Button
-                      appearance="primary"
-                      icon={addingNamed ? <Spinner size="tiny" /> : <PersonRegular />}
-                      disabled={!selectedNamed || addingNamed || grantsBlocked}
-                      onClick={handleAddNamed}
-                    >
-                      Add
+                      Add ({selectedCandidateIds.size})
                     </Button>
                   </div>
                 </div>
 
-                {/* Section 3 — existing grants + revoke */}
-                <div className={styles.section}>
-                  <Text className={styles.sectionTitle}>Current access</Text>
-                  {existingGrants.length === 0 ? (
-                    <Text className={styles.emptyState}>No active grants for this record.</Text>
-                  ) : (
-                    existingGrants.map(grant => (
-                      <div className={styles.row} key={grant.accessRecordId}>
-                        <div className={styles.rowMain}>
-                          <Text className={styles.rowName}>{grant.fullName}</Text>
-                          <Text className={styles.rowMeta}>
-                            Granted by {grant.grantedByName ?? 'unknown'} on {formatGrantDate(grant.grantedDate)}
-                            {grant.provenance ? ` · ${grant.provenance}` : ''}
-                          </Text>
-                        </div>
-                        <div className={styles.rowActions}>
-                          <Badge appearance="tint" color="informative">
-                            {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ?? grant.accessLevel}
-                          </Badge>
-                          <Button
-                            appearance="subtle"
-                            size="small"
-                            onClick={() => setRevokeTargetId(grant.accessRecordId)}
-                            disabled={revoking}
-                          >
-                            Revoke
-                          </Button>
-                        </div>
-                      </div>
-                    ))
-                  )}
+                {/* Current Access (task 073 UAT v1.0.24 #7 — extra top padding above the section) */}
+                <div className={styles.section} style={{ marginTop: tokens.spacingVerticalXXL }}>
+                  <Text className={styles.sectionTitle}>Current Access</Text>
+                  <div className={styles.listArea}>
+                    {existingGrants.length === 0 ? (
+                      <Text className={styles.emptyState}>No active grants for this record.</Text>
+                    ) : (
+                      existingGrants.map(grant => {
+                        // Standing-grant rows (task 073 UAT #2) confer ongoing
+                        // membership via the contact's global `sprk_standinggrant`
+                        // flag — there is NO per-record `sprk_externalrecordaccess`
+                        // row to revoke here, so they render non-revocable with a
+                        // "Standing" badge instead of an access-level + Revoke.
+                        const isStanding = grant.provenance === 'standing' || !grant.accessRecordId;
+                        // Organization grant (task 073 #7): everyone at the firm inherits access. Unlike a
+                        // standing grant it IS a real per-record row, so it keeps the level badge + Revoke.
+                        const isOrg = grant.provenance === 'organization';
+                        return (
+                          <div className={styles.row} key={grant.accessRecordId ?? `standing-${grant.contactId}`}>
+                            <div className={styles.rowMain}>
+                              {/* Contact name → link opening the Contact record (task 073 UAT v1.0.24 #6).
+                                Org grants key on the org id (not a contact), so they stay plain text. */}
+                              {!isOrg && onOpenContact ? (
+                                <Link className={styles.contactLink} onClick={() => onOpenContact(grant.contactId)}>
+                                  {grant.fullName}
+                                </Link>
+                              ) : (
+                                <Text className={styles.rowName}>{grant.fullName}</Text>
+                              )}
+                              <Text className={styles.rowMeta}>
+                                {isStanding
+                                  ? 'Standing grant — ongoing access to assigned records'
+                                  : isOrg
+                                    ? 'Organization grant — all organization contacts have access'
+                                    : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
+                              </Text>
+                            </div>
+                            <div className={styles.rowActions}>
+                              {isStanding ? (
+                                <Badge appearance="tint" color="success">
+                                  Standing
+                                </Badge>
+                              ) : (
+                                <>
+                                  <Badge appearance="tint" color="informative">
+                                    {accessLevelOptions.find(o => o.value === grant.accessLevel)?.label ??
+                                      grant.accessLevel}
+                                  </Badge>
+                                  <Button
+                                    appearance="subtle"
+                                    size="small"
+                                    onClick={() => setRevokeTargetId(grant.accessRecordId!)}
+                                    disabled={revoking}
+                                  >
+                                    Revoke
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
                 </div>
               </>
             )}
@@ -688,6 +877,37 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         <Text>
           Revoke access for <strong>{revokeTarget?.fullName}</strong>? They will immediately lose access to this record
           (unless a standing grant or other membership still applies).
+        </Text>
+      </SprkModal>
+
+      {/* Pending-changes warning (task 073 UAT v1.0.29 #1B) — the user staged a
+          contact/organization but didn't click "Add" before Cancel/×. */}
+      <SprkModal
+        open={showPendingWarning}
+        onClose={() => setShowPendingWarning(false)}
+        title="Unsaved access permissions"
+        size="xs"
+        dismiss="alert"
+        maximizable={false}
+        footerStart={
+          <Button
+            appearance="secondary"
+            onClick={() => {
+              setShowPendingWarning(false);
+              onClose();
+            }}
+          >
+            Discard &amp; close
+          </Button>
+        }
+        footer={
+          <Button appearance="primary" onClick={() => setShowPendingWarning(false)}>
+            Keep editing
+          </Button>
+        }
+      >
+        <Text>
+          New access permissions are pending. Click <strong>Add</strong> to confirm, or they will not be saved.
         </Text>
       </SprkModal>
     </>

@@ -173,6 +173,239 @@ export interface WidgetState<TData = unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// WidgetContextType (FR-B1 + FR-C3 — task 020)
+// ---------------------------------------------------------------------------
+
+/**
+ * CLOSED set of "what kind of workspace surface is this" tags for a
+ * registered widget. Exactly these six values — do not widen ad hoc.
+ *
+ * This is a DISTINCT concept from the free-form `contextType?: string` on
+ * `ContextPaneEvent` (`events/PaneEventTypes.ts`, the Context-pane channel's
+ * payload classifier, e.g. `"document"` / `"email"` / `"clause"`). That field
+ * is per-EVENT and open-ended; `WidgetContextType` is per-WIDGET-TYPE and
+ * closed. Do not conflate or reuse one for the other.
+ *
+ * Feeds FR-B1's proactive-chip scoping (Workstream B): the active workspace
+ * tab's declared `contextType` lets chip selection scope itself to "this tab
+ * is a document" / "this tab is an email" etc. Per ADR-039, this is DATA
+ * carried on the (already-closed) widget-registry catalog — never a
+ * classifier, reranker, or second intent-detection mechanism.
+ *
+ * @see WidgetMetadata.contextType — where this is declared per widget
+ * @see register-workspace-widgets.ts — per-widget assignment
+ */
+export type WidgetContextType = 'email' | 'document' | 'compose-doc' | 'matter-grid' | 'dashboard' | 'calendar';
+
+// ---------------------------------------------------------------------------
+// WidgetAssistantContract (R3 spaarkeai-assistant-enhancements task 022,
+// FR-08 + FR-15 SHAPE)
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical catalog tool name for the FR-06/task-020 parameterized
+ * `configId`-driven overview tool — ONE tool reused across every grid plus
+ * the Daily Briefing/Calendar dashboard tabs (NFR-06: no per-grid handlers).
+ * Every overview-only widget's `assistantContract.overviewTools` references
+ * this ONE literal so there is a single place to update if the BFF catalog
+ * row (task 020) lands under a different name.
+ */
+export const OVERVIEW_QUERY_TOOL_NAME = 'overview_query' as const;
+
+/**
+ * Where a per-item card's tool output lands once invoked (FR-09/FR-10/FR-11).
+ *  - `'chat'`     — the tool answers inline in the conversation transcript
+ *                   (e.g. "Summarize the thread" / "Summarize" a document).
+ *  - `'composer'` — opens the existing email composer (`SendEmailDialog` via
+ *                   `useEmailComposeActions.openComposer`) pre-filled.
+ *  - `'compose'`  — opens the Compose (ADR-049) drafting surface.
+ */
+export type AssistantCardLanding = 'chat' | 'composer' | 'compose';
+
+/**
+ * respond | direct | hybrid (FR-13). A DATA field the deterministic
+ * follow-on derivation (FR-14, task 041) reads — never a classifier and
+ * never model-interpreted prompt prose (ADR-039 invariant: no second
+ * intent-detection mechanism).
+ *
+ *  - `'respond'` — the widget only ever answers IN CHAT. Covers BOTH an
+ *    overview/query surface with no per-item action cards of its own (e.g. a
+ *    grid — `perItemCards: []`) AND a per-item surface whose cards ALL land
+ *    `'chat'` (e.g. `document-viewer` — see task 040/D-8: every card answers
+ *    in chat, so the widget is `'respond'` even though it has cards).
+ *  - `'direct'`  — the widget's tools always open ANOTHER surface (composer
+ *    or Compose) with no standalone chat answer — every `perItemCards` entry
+ *    has `landing !== 'chat'`.
+ *  - `'hybrid'`  — the widget mixes both: at least one per-item card answers
+ *    in chat (e.g. Summarize) AND at least one opens another surface (e.g.
+ *    Reply, Draft memo). E.g. `email` — Reply/Reply All/Forward land
+ *    `'composer'`, Summarize the thread lands `'chat'`.
+ *
+ * INVARIANT (task 040, made authoritative + single-sourced): this field MUST
+ * agree with the widget's own `perItemCards[].landing` values per the three
+ * rules above — it is a derived-but-declared summary of the cards, not an
+ * independent guess. `WorkspaceWidgetRegistry.interactionPattern.test.ts`'s
+ * "interactionPattern is consistent with perItemCards landings" suite
+ * enforces this for every registered widget so the two never drift.
+ *
+ * task 022 defined this field on the SHAPE and best-effort populated it for
+ * the in-scope widgets ahead of tasks 025/026 landing the concrete per-item
+ * card implementations. task 040 is the single-sourcing checkpoint that
+ * reconciled every value against the shipped card `landing`s (`email` was
+ * already correct at `'hybrid'`; `document-viewer` was corrected from its
+ * task-022 placeholder `'hybrid'` to `'respond'` once task 026 finalized all
+ * three document cards to land `'chat'` — see `register-document-viewer-widget.ts`).
+ * Read this field ONLY via `getWidgetInteractionPattern()` /
+ * `getWidgetAssistantContract().interactionPattern` (`WorkspaceWidgetRegistry.ts`)
+ * — never re-derive or hardcode it per-widget-type at a call site (task 041's
+ * follow-on derivation is the first runtime consumer).
+ */
+export type AssistantInteractionPattern = 'respond' | 'direct' | 'hybrid';
+
+/**
+ * One per-item action card declared on a widget's Assistant contract.
+ *
+ * Per ASSISTANT-UI-ELEMENT-CRITERIA.md, per-item actions on an active item
+ * are CARDS (never chips) — this array enumerates card actions only.
+ *
+ * NEVER carries item content (ADR-015 — identity + capability metadata
+ * only): a human-facing label, a catalog tool NAME, and a landing tag.
+ */
+export interface AssistantContractCard {
+  /**
+   * Human-facing card label shown in the workspace pane, e.g. `"Reply"`,
+   * `"Summarize the thread"`. MUST NOT contain item content (a subject line,
+   * a body excerpt, etc.) — labels are static per-widget-type strings.
+   */
+  readonly label: string;
+  /**
+   * A stable identifier for what this card does, in one of two forms
+   * (task 040 reconciliation — both are legitimate, honest shapes; a reader
+   * MUST check which one a given widget uses before assuming catalog-tool
+   * semantics):
+   *
+   *  1. An ADR-039 closed-catalog TOOL NAME the LLM can invoke (e.g.
+   *     `'draft_reply'`, `'summarize_thread'` on `email` — real
+   *     `EmailDraftToolHandler` catalog rows, task 023). The LLM never
+   *     invokes an unlisted tool — for these widgets this string MUST match
+   *     a registered catalog Tool.
+   *  2. A stable CLIENT-SIDE KEY with no catalog-tool backing (e.g.
+   *     `'summarize_document'`, `'draft_document_response'`,
+   *     `'draft_document_memo'` on `document-viewer` — documents have no
+   *     deterministic REST/tool entry point). `DocumentPerItemCards.tsx`
+   *     maps each key to a fixed chat instruction sent through the existing
+   *     `pendingOutboundMessage` seam with the document's id armed
+   *     one-shot (ADR-015) — see that file's docblock. This form never
+   *     appears as an invocable name in the tool catalog.
+   */
+  readonly tool: string;
+  /** Where the tool's output lands once invoked. */
+  readonly landing: AssistantCardLanding;
+}
+
+/**
+ * The Assistant-contract metadata SHAPE (FR-08 + FR-15). Declared per widget
+ * as the OPTIONAL `WidgetMetadata.assistantContract` field, additive
+ * alongside the existing `WidgetMetadata.contextType` (task 020):
+ *
+ *   1. context-type             — `WidgetMetadata.contextType` (existing;
+ *                                  NOT duplicated inside this object — read
+ *                                  the two fields together).
+ *   2. overview tool(s)         — `overviewTools`.
+ *   3. per-item cards + landing — `perItemCards`.
+ *   4. interaction pattern      — `interactionPattern`.
+ *
+ * OPTIONAL at this stage: task 022 DEFINES the shape and POPULATES it for
+ * the in-scope widgets named in spec FR-08/FR-09/FR-11 (grids, Daily
+ * Briefing, Calendar, Email, Documents). task 050 makes this field
+ * structurally REQUIRED and adds the registry enforcement guard (FR-15) so
+ * no widget can ship without a contract. This task does NOT implement that
+ * enforcement — see FR-15 / task 050.
+ *
+ * Every field here is identity/capability metadata (a label, a tool NAME, a
+ * landing tag) — NEVER item content (ADR-015).
+ *
+ * @see WidgetMetadata.contextType — the existing closed context-type union
+ *      (task 020) this contract is read alongside.
+ * @see WidgetMetadata.assistantContract — where this is attached per widget.
+ */
+export interface WidgetAssistantContract {
+  /**
+   * Overview/query tool name(s) that answer chat questions for this surface
+   * from its own data lane (FR-06/FR-07). Empty array = this widget has no
+   * overview tool of its own (e.g. a per-item-only surface whose overview
+   * lives on a sibling grid widget — see `email`/`document-viewer` below).
+   *
+   * `readonly` — this is static catalog-shaped declarative data (ADR-039),
+   * often a SHARED object reused by reference across multiple registrations
+   * (e.g. every overview-only grid); it is never mutated after registration.
+   */
+  readonly overviewTools: readonly string[];
+  /**
+   * Per-item action cards for the widget's active item (FR-09/FR-10/FR-11).
+   * Empty array = an overview-only surface with no per-item cards.
+   *
+   * `readonly` — see `overviewTools` above.
+   */
+  readonly perItemCards: readonly AssistantContractCard[];
+  /** respond | direct | hybrid (FR-13) — see `AssistantInteractionPattern`. */
+  readonly interactionPattern: AssistantInteractionPattern;
+}
+
+// ---------------------------------------------------------------------------
+// WidgetAssistantContractOptOut (R3 task 050, FR-15 ENFORCEMENT)
+// ---------------------------------------------------------------------------
+
+/**
+ * Explicit "this widget has NO Assistant contract" marker (FR-15, task 050).
+ *
+ * Task 050 makes `WidgetMetadata.assistantContract` a REQUIRED member so a
+ * widget can no longer ship without declaring its Assistant relationship. A
+ * widget that legitimately has no overview tool / per-item cards (e.g. an R1
+ * analysis-output widget, an intent-dispatcher launcher, a standalone metrics
+ * dashboard, or Compose — whose read/write fidelity is governed separately by
+ * ADR-049) MUST say so EXPLICITLY with this marker + a documented reason,
+ * rather than by silent omission. That is the whole point of the enforcement:
+ * force a decision at every registration site, while still allowing a
+ * documented "no" (see `WidgetMetadata.assistantContract`).
+ *
+ * The `optOut: true` literal is the discriminant that distinguishes this from
+ * a real `WidgetAssistantContract`; `reason` is a human-facing sentence the
+ * registry guard requires to be non-empty. Build via `assistantContractOptOut()`.
+ */
+export interface WidgetAssistantContractOptOut {
+  /** Discriminant — always `true`. Distinguishes an opt-out from a real contract. */
+  readonly optOut: true;
+  /** Non-empty human reason WHY this widget declares no Assistant contract. */
+  readonly reason: string;
+}
+
+/**
+ * Build a frozen {@link WidgetAssistantContractOptOut} marker.
+ *
+ * @param reason - Non-empty sentence explaining why this widget has no
+ *                 Assistant contract (overview tool / per-item cards). The
+ *                 registry guard (task 050) throws if the reason is blank.
+ */
+export function assistantContractOptOut(reason: string): WidgetAssistantContractOptOut {
+  return Object.freeze({ optOut: true as const, reason });
+}
+
+/**
+ * Type guard: is this `assistantContract` value the explicit opt-out marker
+ * (rather than a real {@link WidgetAssistantContract})? Used by the registry
+ * accessors so `getWidgetAssistantContract()` keeps returning `undefined` for
+ * opt-out widgets (preserving the pre-050 "no contract → undefined" contract
+ * every downstream consumer — the FR-14/task-041 follow-on derivation, the
+ * interaction-pattern accessor — already relies on).
+ */
+export function isAssistantContractOptOut(
+  value: WidgetAssistantContract | WidgetAssistantContractOptOut | null | undefined
+): value is WidgetAssistantContractOptOut {
+  return value != null && (value as WidgetAssistantContractOptOut).optOut === true;
+}
+
+// ---------------------------------------------------------------------------
 // WidgetMetadata
 // ---------------------------------------------------------------------------
 
@@ -215,6 +448,41 @@ export interface WidgetMetadata {
    * registration order.
    */
   defaultOrder: number;
+
+  /**
+   * OPTIONAL closed-set tag (FR-B1 + FR-C3, task 020) classifying what kind
+   * of workspace surface this widget represents. Omit when the widget has no
+   * honest fit among the six values — `undefined` here means "none", not an
+   * authoring gap.
+   *
+   * @see WidgetContextType for the closed set + rationale.
+   */
+  contextType?: WidgetContextType;
+
+  /**
+   * REQUIRED (R3 task 050, FR-15 ENFORCEMENT) Assistant-contract metadata:
+   * the overview tool(s), per-item cards + landing target, and interaction
+   * pattern this widget declares to the Assistant. Additive sibling to
+   * `contextType` above (context-type stays that existing field — not
+   * duplicated inside this object).
+   *
+   * Task 022 defined the SHAPE and left this field OPTIONAL; task 050 makes it
+   * a REQUIRED member so a widget can no longer be registered without making
+   * an EXPLICIT decision about its Assistant relationship. Every registration
+   * MUST supply EITHER:
+   *   - a real {@link WidgetAssistantContract} (overview tool + per-item cards
+   *     + interaction pattern), OR
+   *   - an explicit {@link WidgetAssistantContractOptOut} marker
+   *     (`assistantContractOptOut('<reason>')`) documenting WHY it has none.
+   *
+   * Silent omission is now BOTH a compile-time type error (this member is
+   * required) AND a runtime failure (the `WorkspaceWidgetRegistry` guard throws
+   * on a missing/blank field). See FR-15 / task 050.
+   *
+   * @see WidgetAssistantContract for the full contract shape + rationale.
+   * @see WidgetAssistantContractOptOut for the documented-no marker.
+   */
+  assistantContract: WidgetAssistantContract | WidgetAssistantContractOptOut;
 }
 
 // ---------------------------------------------------------------------------

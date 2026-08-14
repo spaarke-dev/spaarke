@@ -18,16 +18,35 @@ import { useNavigate } from 'react-router-dom';
 import { useIsAuthenticated, useMsal } from '@azure/msal-react';
 import { InteractionStatus } from '@azure/msal-browser';
 import { Spinner } from '@fluentui/react-components';
-import { MSAL_BFF_SCOPE } from '../config';
-import { captureReturnTo, consumeReturnTo } from '../auth/msal-auth';
+import { captureReturnTo, consumeReturnTo, getActiveLoginScope } from '../auth/msal-auth';
 
 interface AuthGuardProps {
   children: React.ReactNode;
+  /**
+   * True when running inside the Teams host. In Teams, authentication is completed during bootstrap
+   * (TeamsHostAdapter.selectAuthStrategy acquires a BFF-valid workforce token — via NAA or the Teams
+   * SSO getAuthToken fallback — BEFORE <App> is rendered), so this guard must NOT run the MSAL
+   * account gate below. See the early return for the full rationale.
+   */
+  teamsHost?: boolean;
 }
 
-export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
+export const AuthGuard: React.FC<AuthGuardProps> = ({ children, teamsHost = false }) => {
   // In mock mode, skip MSAL entirely — render children as if authenticated.
   if (import.meta.env.VITE_DEV_MOCK === 'true') {
+    return <>{children}</>;
+  }
+
+  // Inside the Teams host, the caller is already authenticated by the time this guard mounts:
+  // main.tsx only renders <App> after TeamsHostAdapter.initialize() resolves, which means a
+  // BFF-valid workforce token was acquired and the active BFF token acquirer is wired. The Teams
+  // SSO fallback (authentication.getAuthToken) that desktop relies on returns a RAW bearer token
+  // that never lands in the MSAL account cache — so useIsAuthenticated() would be false here even
+  // though the user is fully authenticated. Running the MSAL gate below would then fire
+  // instance.loginRedirect(), and a full-page redirect inside the Teams iframe is blocked
+  // (NFR-04 — never redirect inside Teams), leaving a blank tab. So in Teams, render children
+  // directly. (On web, NAA populates the account and the standard gate below applies.)
+  if (teamsHost) {
     return <>{children}</>;
   }
 
@@ -41,8 +60,12 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children }) => {
     if (!isAuthenticated && inProgress === InteractionStatus.None) {
       // Preserve the intended deep link (e.g. an emailed /project/{id}) across the redirect.
       captureReturnTo();
+      // Request the BFF scope for the CURRENTLY-SELECTED plane's authority (task 013): CIAM by
+      // default (byte-for-byte unchanged), or the workforce scope when the browser realm chooser
+      // picked "My organization". A CIAM instance cannot mint a workforce-audience token, so the
+      // scope must track the plane the mounted MSAL instance was built for.
       void instance.loginRedirect({
-        scopes: [MSAL_BFF_SCOPE],
+        scopes: [getActiveLoginScope()],
       });
     }
   }, [isAuthenticated, inProgress, instance]);

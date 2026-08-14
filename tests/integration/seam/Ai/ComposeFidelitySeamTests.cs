@@ -587,9 +587,31 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 {
     public const string TestTenantId = "tenant-compose-fidelity-seam-001";
 
+    /// <summary>The authenticated user's `name` claim the fake auth handler stamps - the save-path
+    /// revision author (ComposeService.ResolveRevisionAuthor). Hoisted (027 review F4) so consumers
+    /// assert against the ONE definition instead of duplicating the literal.</summary>
+    public const string AuthenticatedUserName = "Spaarke Fidelity Seam Test User";
+
     public Mock<ISpeFileOperations> SpeMock { get; } = new(MockBehavior.Loose);
     public Mock<IGenericEntityService> DataverseMock { get; } = new(MockBehavior.Loose);
     public Mock<IPostUploadIndexingEnqueuer> IndexingMock { get; } = new(MockBehavior.Loose);
+
+    /// <summary>Task 032 (spaarkeai-compose-r6, FR-05): the template-resolution module boundary for the
+    /// apply-template seam (`ComposeApplyTemplateSeamTests`). The REAL `ComposeTemplateSource` performs
+    /// Dataverse Web-API HTTP with a real app-only token — external by definition, so it is doubled here
+    /// exactly like the SPE/Dataverse-entity boundaries above (ADR-038 "mock at module boundaries"). The
+    /// REAL ComposeService + ComposeTemplatePartMergeEngine stay in play.</summary>
+    public Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource> TemplateSourceMock { get; } = new(MockBehavior.Loose);
+
+    /// <summary>Task 042 (spaarkeai-compose-r6, FR-06): the PDF-intake module boundary for the
+    /// PDF round-trip seam (`ComposePdfIntakeRoundTripSeamTests`). The REAL `ComposePdfIntakeSource`
+    /// calls Azure Document Intelligence (`prebuilt-layout`) — external by definition, so it is
+    /// doubled at the SAME PublicContracts seam as the template source above (ADR-038 "mock at
+    /// module boundaries"). Everything downstream of the DocumentLayout contract — the REAL
+    /// ComposePdfModelProjector, ComposeDocumentRenderer, projection builders, ComposeService PDF
+    /// branch, endpoints — stays in play. (The Azure-DI-shape → DocumentLayout mapping itself is
+    /// covered by TextExtractorLayoutMappingTests via DocumentIntelligenceModelFactory.)</summary>
+    public Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource> PdfIntakeSourceMock { get; } = new(MockBehavior.Loose);
 
     /// <summary>Resets the boundary mocks between tests (xUnit runs a class's [Fact]s sequentially
     /// against the same IClassFixture instance).</summary>
@@ -598,6 +620,8 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
         SpeMock.Reset();
         DataverseMock.Reset();
         IndexingMock.Reset();
+        TemplateSourceMock.Reset();
+        PdfIntakeSourceMock.Reset();
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -717,6 +741,21 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 
             services.RemoveAll<IPostUploadIndexingEnqueuer>();
             services.AddSingleton(IndexingMock.Object);
+
+            // Task 032 (FR-05): the apply-template endpoint's two external boundaries —
+            // (a) IComposeTemplateSource (real impl does Dataverse HTTP; doubled like the entity
+            //     boundary above), and
+            // (b) the central TokenCredential (Program.cs registers a real Azure credential whose
+            //     GetTokenAsync would attempt live auth in the test host) → a static fake token.
+            // Inert for every other seam suite sharing this fixture (nothing else resolves them
+            // on their request paths).
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeTemplateSource>();
+            services.AddSingleton(TemplateSourceMock.Object);
+            // Task 042: PDF-intake PublicContracts boundary double (see PdfIntakeSourceMock remarks).
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposePdfIntakeSource>();
+            services.AddSingleton(PdfIntakeSourceMock.Object);
+            services.RemoveAll<Azure.Core.TokenCredential>();
+            services.AddSingleton<Azure.Core.TokenCredential>(new ComposeFidelitySeamFakeTokenCredential());
         });
     }
 
@@ -726,6 +765,19 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         return client;
     }
+}
+
+/// <summary>Task 032 (FR-05): static fake for the central <see cref="Azure.Core.TokenCredential"/> —
+/// the apply-template endpoint mints an app-only Dataverse token before resolving the template; a
+/// live credential would attempt real auth in the test host. Never inspected beyond being passed to
+/// the (mocked) IComposeTemplateSource.</summary>
+internal sealed class ComposeFidelitySeamFakeTokenCredential : Azure.Core.TokenCredential
+{
+    public override Azure.Core.AccessToken GetToken(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+        => new("seam-fake-dataverse-token", DateTimeOffset.UtcNow.AddHours(1));
+
+    public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken)
+        => new(new Azure.Core.AccessToken("seam-fake-dataverse-token", DateTimeOffset.UtcNow.AddHours(1)));
 }
 
 /// <summary>Fake auth handler emitting oid + tid (+ name) claims — the Save/create-on-save endpoints
@@ -755,8 +807,8 @@ internal sealed class ComposeFidelitySeamFakeAuthHandler : AuthenticationHandler
             new("oid", oid),
             new("tid", ComposeFidelitySeamFixture.TestTenantId),
             new(System.Security.Claims.ClaimTypes.NameIdentifier, oid),
-            new(System.Security.Claims.ClaimTypes.Name, "Spaarke Fidelity Seam Test User"),
-            new("name", "Spaarke Fidelity Seam Test User"),
+            new(System.Security.Claims.ClaimTypes.Name, ComposeFidelitySeamFixture.AuthenticatedUserName),
+            new("name", ComposeFidelitySeamFixture.AuthenticatedUserName),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

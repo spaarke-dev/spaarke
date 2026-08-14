@@ -58,19 +58,29 @@ public static class InviteAndGrantExternalUserEndpoint
         if (string.IsNullOrWhiteSpace(request.Email))
             return ProblemDetailsHelper.ValidationError("Email is required.");
 
-        if (request.ProjectId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
-
         if (!Enum.IsDefined(typeof(ExternalAccessLevel), request.AccessLevel))
             return ProblemDetailsHelper.ValidationError(
                 $"AccessLevel must be one of: {string.Join(", ", Enum.GetNames<ExternalAccessLevel>())}.");
+
+        // Resolve the polymorphic grant root (project|matter|workassignment) or the legacy ProjectId
+        // shorthand up-front, so a missing/unknown root is rejected 400 BEFORE any onboarding side effect.
+        var grantRoot = GrantExternalAccessEndpoint.ResolveGrantRoot(new GrantAccessRequest(
+            ContactId: Guid.Empty, // not relevant to root resolution — resolved separately below
+            ProjectId: request.ProjectId,
+            AccessLevel: (ExternalAccessLevel)request.AccessLevel,
+            ExpiryDate: request.ExpiryDate,
+            OrganizationId: request.OrganizationId,
+            RecordType: request.RecordType,
+            RecordId: request.RecordId));
+        if (!grantRoot.Ok)
+            return ProblemDetailsHelper.ValidationError(grantRoot.Error!);
 
         var portalUrl = configuration["ExternalAccess:PortalUrl"]
             ?? throw new InvalidOperationException("ExternalAccess:PortalUrl is not configured.");
 
         logger.LogInformation(
-            "[EXT-INVITE-GRANT] Core user onboarding+granting {Email} to Project {ProjectId} at level {AccessLevel}",
-            request.Email, request.ProjectId, request.AccessLevel);
+            "[EXT-INVITE-GRANT] Core user onboarding+granting {Email} to {RootType} {RootId} at level {AccessLevel}",
+            request.Email, grantRoot.Type, grantRoot.Id, request.AccessLevel);
 
         // ── Step 1: Onboard (idempotent CIAM provision) — reuse the invite core (task 025) ──
         Guid contactId;
@@ -91,29 +101,32 @@ public static class InviteAndGrantExternalUserEndpoint
         }
 
         // ── Step 2: Grant (audited; grantee = the Contact, NOT the firm) — reuse the grant core (task 026) ──
-        // The grantee is the resolved Contact (person). request.AccountId (optional) is record-keeping
-        // only (sprk_accountid) — it is never the grantee.
+        // The grantee is the resolved Contact (person). request.OrganizationId (optional) is the grantee's
+        // firm/org (sprk_organization) for firm-level scoping — it is never the grantee. The grant is bound
+        // to the polymorphic root resolved above (project|matter|workassignment).
         var grantRequest = new GrantAccessRequest(
             contactId,
             request.ProjectId,
             (ExternalAccessLevel)request.AccessLevel,
             request.ExpiryDate,
-            request.AccountId);
+            request.OrganizationId,
+            request.RecordType,
+            request.RecordId);
         var callerSystemUserId = GrantExternalAccessEndpoint.ResolveCallerSystemUserId(httpContext);
 
         Guid accessRecordId;
         try
         {
             accessRecordId = await GrantExternalAccessEndpoint.CreateGrantAsync(
-                grantRequest, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+                grantRequest, grantRoot.Type, grantRoot.Id, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
         }
         catch (Exception ex)
         {
             // Onboarding succeeded (Contact {ContactId} provisioned) but the grant failed. Re-running the
             // action is safe — onboarding is idempotent and re-issues only the grant.
             logger.LogError(ex,
-                "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} ({Email}) but the grant failed for Project {ProjectId}",
-                contactId, request.Email, request.ProjectId);
+                "[EXT-INVITE-GRANT] Onboarded Contact {ContactId} ({Email}) but the grant failed for {RootType} {RootId}",
+                contactId, request.Email, grantRoot.Type, grantRoot.Id);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -126,8 +139,8 @@ public static class InviteAndGrantExternalUserEndpoint
         }
 
         logger.LogInformation(
-            "[EXT-INVITE-GRANT] Onboarded ({Status}) + granted Contact {ContactId} to Project {ProjectId} — access record {AccessRecordId}",
-            onboardStatus, contactId, request.ProjectId, accessRecordId);
+            "[EXT-INVITE-GRANT] Onboarded ({Status}) + granted Contact {ContactId} to {RootType} {RootId} — access record {AccessRecordId}",
+            onboardStatus, contactId, grantRoot.Type, grantRoot.Id, accessRecordId);
 
         return TypedResults.Ok(new InviteAndGrantResponse(contactId, onboardStatus, accessRecordId, portalUrl));
     }

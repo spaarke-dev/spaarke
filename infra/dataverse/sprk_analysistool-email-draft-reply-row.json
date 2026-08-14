@@ -1,0 +1,59 @@
+{
+  "_comment_top": "spaarkeai-assistant-enhancements-r3 task 023 (FR-09 — per-item Email parity) — seed row for the email.draft_reply tool. EXTENDS EmailDraftToolHandler (§11 reuse-first / NFR-06 — NOT a new handler family): four sprk_analysistool rows point at sprk_handlerclass = EmailDraftToolHandler; each row's sprk_configuration carries a 'method' discriminator the handler reads at execution time (the TextRefinementHandler multi-row precedent). This row's method = 'reply'.",
+  "_comment_routing": "Runtime invocation routes to EmailDraftToolHandler via sprk_handlerclass; the handler dispatches on sprk_configuration.method = 'reply'. Auto-discovered (ADR-010). The deterministic ADR-039 PreFilter/catalog projects the LLM-facing function name from sprk_name — NO classifier, NO second dispatch surface.",
+  "_comment_obo": "ADR-028 / ADR-015 MUST rule: the source email subject/body is READ over the caller's OBO token via IDataverseUserClient (sprk_communication) — a user who cannot read the email fails with their own access error; no app-only path is reachable. Content is tool-fetched BY communicationId; no email content enters the arguments/prompt.",
+  "_comment_thread_preservation": "FR-10 invariant boundary: the tool returns the AI-authored draft body TEXT ONLY. It NEVER composes/appends/duplicates the quoted thread — task 024's client-side bodyOverride injects the draft ABOVE the reducer-derived quotedThread, which the composer still appends. A tool that embedded the thread would be a whole-body-replacing defect.",
+  "_comment_ai_facade": "ADR-013 / BFF §10: AI generation is consumed through the IEmailDraftAi PublicContracts facade (intent 'reply') — never IChatClient/IOpenAiClient injected into the handler. A NullEmailDraftAi mirror is registered when the AzureOpenAI gate is off (ADR-032), so the facade is ALWAYS resolvable (no asymmetric registration, §10 F.1); when unavailable the tool returns a clean DEPENDENCY_UNAVAILABLE.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read). The tool reads the email over OBO and produces draft text; it creates no record and sends nothing — no confirmation gate.",
+  "_comment_description_parity": "EmailDraftToolHandler is now a MULTI-ROW handler; a single ToolHandlerMetadata.Description cannot mirror N per-method rows, so this row's sprk_description is authored HERE (exempt from the single-row CatalogToolDescriptionParityContractTests, matching TextRefinementHandler). Runtime live-vs-code parity is covered by the seed script + RoutingConsumerTypeHealthCheck.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Email Reply Draft",
+  "sprk_toolcode": "EMAIL-DRAFT-REPLY",
+  "sprk_toolid": "email.draft_reply",
+  "sprk_namespace": "email",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "sprk_description": "Auto-drafts the authored body of a REPLY to the selected email, addressed by communicationId. Reads the email's subject and body under the calling user's permissions and returns ONLY the reply message text — it does NOT include or restate the quoted thread (the composer preserves the original thread below the draft). Use this when the user asks to reply to the email that is currently open/selected. Optionally pass mode ('reply' or 'replyAll'); the recipients are decided by the composer, not this tool. Returns { tool, communicationId, mode, draft } — hand the draft to the Reply composer; do not restate it in chat.",
+  "sprk_handlerclass": "EmailDraftToolHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — this tool exists for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "email.draft_reply Request",
+    "description": "Auto-drafts the reply body for the selected email. Content is fetched by communicationId over OBO; NO email content is passed as an argument (ADR-015).",
+    "type": "object",
+    "required": ["communicationId"],
+    "properties": {
+      "communicationId": {
+        "type": "string",
+        "format": "uuid",
+        "minLength": 1,
+        "description": "The sprk_communication record id (GUID) of the email to reply to (the currently selected/open email)."
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["reply", "replyAll"],
+        "description": "Reply mode. Recipients are derived by the composer, not this tool; the authored body is identical either way. Defaults to 'reply'."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "email.draft_reply Result",
+    "type": "object",
+    "required": ["tool", "communicationId", "draft"],
+    "properties": {
+      "tool": { "const": "email.draft_reply" },
+      "communicationId": { "type": "string", "description": "The email that was replied to." },
+      "mode": { "type": ["string", "null"], "description": "The reply mode echoed back ('reply' | 'replyAll')." },
+      "draft": { "type": "string", "description": "The AI-authored reply body TEXT ONLY — the client composes it above the quoted thread via bodyOverride (thread-preservation invariant, FR-10)." },
+      "emlDocumentId": { "type": ["string", "null"], "description": "The archived .eml document id, when one exists (grounding)." }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "method discriminator — read by EmailDraftToolHandler.ResolveMethod at execution time to route to the reply path.",
+    "method": "reply"
+  }
+}

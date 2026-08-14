@@ -4,7 +4,7 @@
     <title>Citation navigation — ParaIdMap-style reference map over the reader + resolveCitation jump/highlight (reuse Compose CitationResolver, no second mechanism)</title>
     <phase>5 Pillar E — Reconciliation UI</phase>
     <gate>deps 053 complete (normalized reader surface exists)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Correctness-critical citation anchoring (NFR-11) reusing the Compose read-reference-fidelity layer; a mis-mapped anchor mis-navigates a reviewer; net-new glue; §8 FULL.</rigor-reason>
     <model-tier>opus</model-tier>

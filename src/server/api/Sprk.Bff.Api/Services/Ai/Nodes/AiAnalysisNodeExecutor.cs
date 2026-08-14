@@ -34,20 +34,21 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     private readonly IServiceProvider _serviceProvider;
     private readonly ReferenceRetrievalService _referenceRetrieval;
     private readonly IRagService _ragService;
-    private readonly IRecordSearchService _recordSearchService;
     private readonly ILogger<AiAnalysisNodeExecutor> _logger;
 
+    // IRecordSearchService is Scoped. This executor is Singleton (required by NodeExecutorRegistry),
+    // so — consistent with how it already resolves the Scoped IToolHandlerRegistry per execution —
+    // IRecordSearchService is resolved from the per-execution scope inside RetrieveEntityContextAsync
+    // rather than captured on the ctor (dotnet-10-upgrade task 020, R6). Behavior is unchanged.
     public AiAnalysisNodeExecutor(
         IServiceProvider serviceProvider,
         ReferenceRetrievalService referenceRetrieval,
         IRagService ragService,
-        IRecordSearchService recordSearchService,
         ILogger<AiAnalysisNodeExecutor> logger)
     {
         _serviceProvider = serviceProvider;
         _referenceRetrieval = referenceRetrieval;
         _ragService = ragService;
-        _recordSearchService = recordSearchService;
         _logger = logger;
     }
 
@@ -224,7 +225,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
             // L3 Entity Context Retrieval: query records index for parent entity metadata.
             // Controlled by retrievalConfig.IncludeEntityContext (off by default).
             var entityContextKnowledge = await RetrieveEntityContextAsync(
-                context, retrievalConfig, cancellationToken);
+                context, retrievalConfig, scope.ServiceProvider, cancellationToken);
 
             // Merge L1 + L2 + L3 knowledge before passing to tool context
             var mergedRagKnowledge = MergeKnowledgeContext(
@@ -1053,6 +1054,7 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     private async Task<string?> RetrieveEntityContextAsync(
         NodeExecutionContext context,
         KnowledgeRetrievalConfig retrievalConfig,
+        IServiceProvider scopedProvider,
         CancellationToken cancellationToken)
     {
         // Never mode skips all retrieval including L3
@@ -1126,7 +1128,9 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
                 Query = parentEntityId
             };
 
-            var searchResponse = await _recordSearchService.SearchAsync(searchRequest, cancellationToken);
+            // IRecordSearchService is Scoped — resolve it from the per-execution scope (R6).
+            var recordSearchService = scopedProvider.GetRequiredService<IRecordSearchService>();
+            var searchResponse = await recordSearchService.SearchAsync(searchRequest, cancellationToken);
 
             stopwatch.Stop();
 

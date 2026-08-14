@@ -8,7 +8,7 @@
 
 ## Module Overview
 
-**Sprk.Bff.Api** is the unified .NET 8 Minimal API serving as the backend for the **SDAP** (Spaarke Data & AI Platform). It provides 7 functional domains:
+**Sprk.Bff.Api** is the unified .NET 10 Minimal API serving as the backend for the **SDAP** (Spaarke Data & AI Platform). It provides 7 functional domains:
 
 - **SPE / Documents**: SharePoint Embedded file operations, OBO token exchange, container management
 - **AI Platform**: Chat (SSE), document analysis, RAG search, playbooks, knowledge bases, semantic search
@@ -236,7 +236,7 @@ try
 {
     return await fileStore.UploadAsync(file);
 }
-catch (ServiceException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.NotFound)
 {
     return Results.Problem(
         detail: "Container not found",
@@ -301,40 +301,47 @@ HostContext flows through every layer. When null, search remains tenant-wide (ba
 
 ### Microsoft.Graph and Kiota Packages
 
-The BFF API uses Microsoft.Graph SDK which depends on Kiota packages. **All Kiota packages must be the same version** to avoid assembly binding errors at runtime.
+> **Updated 2026-08-13 (dotnet-10-upgrade-r1 task 033)**: bumped `Microsoft.Graph` 5.105.0 → 6.5.0.
+> Kiota is now a **transitive-only** dependency (pulled via `Microsoft.Graph.Core 4.0.1`) at
+> **2.0.0** — the 7 direct `Microsoft.Kiota.*` `PackageReference`s that previously pinned the
+> version-match invariant have been **deleted**. See
+> `projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md` for the full call-site
+> sizing and `notes/kiota-cve-finding.md` for the CVE history (CVE-2026-44503 /
+> GHSA-7j59-v9qr-6fq9, High — fixed at Kiota ≥1.22.0; transitive 2.0.0 is well above that floor).
 
-#### Required Packages (must be same version)
+The BFF API uses the Microsoft.Graph SDK, which depends on Kiota packages. **All resolved Kiota
+assemblies must be the same version** to avoid assembly binding errors at runtime — this is now
+satisfied **transitively** by Graph 6.x, not by direct pins.
+
+#### Required Package (direct)
 
 ```xml
-<!-- Microsoft Graph SDK -->
-<PackageReference Include="Microsoft.Graph" Version="5.101.0" />
-
-<!-- Kiota packages - ALL must match. Floor 1.22.0: remediates CVE-2026-44503
-     (GHSA-7j59-v9qr-6fq9, High) — RedirectHandler leaked Cookie/Proxy-Authorization
-     headers on cross-host redirects < 1.22.0. Do NOT downgrade below 1.22.0. -->
-<PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.22.0" />
+<!-- Microsoft Graph SDK v6.x — pulls Microsoft.Graph.Core 4.0.1 + transitive
+     Microsoft.Kiota.* 2.0.x. Do NOT add direct Microsoft.Kiota.* PackageReferences
+     unless a genuine transitive-version conflict forces one (document the reason inline
+     if you do). -->
+<PackageReference Include="Microsoft.Graph" Version="6.5.0" />
 ```
 
-#### Why This Matters
+#### Why No Direct Kiota Pins Anymore
 
-Microsoft.Graph pulls Kiota packages as transitive dependencies. If you only update direct refs (Abstractions, Authentication.Azure), the transitive packages stay at older versions, causing:
+Previously, 7 direct `Microsoft.Kiota.*` pins existed solely to float the transitive graph to
+1.22.0 to clear CVE-2026-44503 while staying on `Microsoft.Graph 5.x`. Under `Microsoft.Graph
+6.5.0`, the transitive Kiota version (2.0.0) is already above that CVE floor, so the pins became
+pure maintenance burden (7 lines to keep in lockstep on every Graph bump) with no remaining
+purpose. Deleting them does **not** reintroduce the historical assembly-binding-conflict risk —
+that risk was from *partial* direct updates (e.g., bumping `Abstractions` but not
+`Serialization.Json`); with zero direct pins, NuGet resolves every Kiota assembly to the single
+version Graph.Core's own dependency graph specifies.
 
-```
-FileNotFoundException: Could not load file or assembly
-'Microsoft.Kiota.Abstractions, Version=1.17.1.0'
-```
+#### If a Transitive Kiota Conflict Ever Forces a Direct Pin
 
-#### When Updating Kiota
-
-1. Update **ALL** Kiota package references to the same version
-2. Verify with `dotnet list package --include-transitive | grep -i kiota`
-3. Build and test locally before deploying
+1. Confirm the conflict is real: `dotnet list package --include-transitive | grep -i kiota` —
+   look for more than one distinct Kiota version across the resolved graph.
+2. If forced to pin, pin **ALL** `Microsoft.Kiota.*` references to the SAME version (never a
+   partial set) and add an inline comment explaining which conflict required it.
+3. Re-verify with `dotnet list package --include-transitive | grep -i kiota` before committing.
+4. Build and test locally before deploying.
 
 ---
 

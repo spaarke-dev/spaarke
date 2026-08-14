@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Move AppligentNDA_Signed.docx → tests/fixtures/compose-corpus/ (LFS) + manifest row</title>
+    <phase>0 Foundations &amp; gates</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New test-fixture surface + Git-LFS wiring; no production code — STANDARD per root §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified fixture move + manifest edit; sonnet default per §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase0-foundations</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only tests/fixtures/compose-corpus/ (fixture + manifest) and .gitattributes; no Services/Compose/ shared source contention.</parallel-reason>
+    <deps>none</deps>
+    <tags>test-fixture</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Move AppligentNDA_Signed.docx from the project notes/ folder into tests/fixtures/compose-corpus/ as a Git-LFS-tracked fixture, and add a feature-coverage row to corpus-manifest.md describing exactly what the NDA breaks (text boxes / mc:AlternateContent / duplicate paraIds). This makes the 422-triggering document a first-class regression fixture consumed by the Phase-1 tests (013) and the fidelity harness (060).</prompt>
+  <role>SPAARKE platform developer. Expertise in the Compose fidelity corpus, Git-LFS, and OOXML feature classification (near-term vs hard tier). Follow ADRs strictly.</role>
+  <goal>AppligentNDA_Signed.docx lives at tests/fixtures/compose-corpus/AppligentNDA_Signed.docx tracked by Git-LFS (matching the existing corpus .docx LFS pattern), removed from projects/spaarkeai-compose-r6/notes/, and corpus-manifest.md carries a new row enumerating its hard-tier breakers and expected round-trip behavior (accept-flatten + warning, never 422).</goal>
+
+  <context>
+    <background>The NDA is the current 422 hard-fail and, per spec FR-08, becomes the harness seed / regression fixture. It currently sits at projects/spaarkeai-compose-r6/notes/AppligentNDA_Signed.docx. The corpus already holds CIPO/Engagement-Letter/synthetic exemplars with a manifest; this task adds the NDA under the same LFS + manifest convention.</background>
+    <relevant-files>
+      <file role="modify">tests/fixtures/compose-corpus/corpus-manifest.md — add the NDA feature-coverage row.</file>
+      <file role="new">tests/fixtures/compose-corpus/AppligentNDA_Signed.docx — moved fixture (LFS-tracked).</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r6/notes/AppligentNDA_Signed.docx — source file to move.</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/corpus-manifest.md — existing rows are the template for the new row's columns/tone.</file>
+      <file role="modify">.gitattributes — confirm/extend the Git-LFS pattern covering tests/fixtures/compose-corpus/*.docx.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks; this task is a prerequisite for 013 and 060.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: track the .docx via Git-LFS matching the existing corpus convention (verify the fixture is stored as an LFS pointer, not a raw binary blob); do not disturb the other corpus fixtures.</constraint>
+    <constraint source="project">Scope: the manifest row MUST name the concrete NDA breakers (text boxes, mc:AlternateContent, duplicate w14:paraId) and the expected render-on-save behavior (accept-flatten + user-visible warning, never 422).</constraint>
+    <constraint source="project">Scope: git-remove the file from projects/spaarkeai-compose-r6/notes/ after the move (use git mv semantics) — do not leave a duplicate copy.</constraint>
+    <constraint source="ADR-038">Scope: this fixture supports seam/regression tests (013) + the fidelity harness (060); it is a MAINTAIN-class asset, not scaffolding — do not classify it for deletion at test-diet.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose fidelity corpus; Git-LFS; OOXML feature tiers</topic>
+    <files>
+      <file>tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Corpus manifest row" location="tests/fixtures/compose-corpus/corpus-manifest.md">Mirror the existing rows' columns (filename, source, feature coverage, expected behavior).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR LEVEL: STANDARD, model-tier sonnet. Confirm the .gitattributes LFS pattern covers tests/fixtures/compose-corpus/*.docx.</step>
+    <step order="1">git mv projects/spaarkeai-compose-r6/notes/AppligentNDA_Signed.docx tests/fixtures/compose-corpus/AppligentNDA_Signed.docx.</step>
+    <step order="2">Verify the moved file is tracked by Git-LFS (git lfs ls-files shows it); if the pattern is missing, add it to .gitattributes.</step>
+    <step order="3">Add a feature-coverage row to corpus-manifest.md naming the NDA breakers (text boxes / mc:AlternateContent / duplicate paraIds) and expected accept-flatten-with-warning behavior.</step>
+    <step order="4">Confirm no duplicate copy remains under notes/.</step>
+    <step order="5">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="6">Document any deviation in projects/spaarkeai-compose-r6/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the repo's Git-LFS is not configured for the corpus directory (fixture would commit as a raw multi-MB binary), STOP and escalate per root §6 rather than committing an un-tracked binary.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">tests/fixtures/compose-corpus/AppligentNDA_Signed.docx</output>
+    <output type="docs">tests/fixtures/compose-corpus/corpus-manifest.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the repo after this task, when git lfs ls-files is run, then tests/fixtures/compose-corpus/AppligentNDA_Signed.docx appears as an LFS-tracked file.</criterion>
+    <criterion testable="true">Given corpus-manifest.md, when read, then it has a new row naming the NDA hard-tier breakers and the expected accept-flatten + warning (never 422) behavior.</criterion>
+    <criterion testable="true">Negative: no copy of AppligentNDA_Signed.docx remains under projects/spaarkeai-compose-r6/notes/.</criterion>
+    <criterion testable="true">Negative: no other corpus fixture or manifest row is altered.</criterion>
+  </acceptance-criteria>
+
+  <notes>Prerequisite for 013 (NDA 422 regression test) and 060 (harness seed). Corpus worst-offender rows 4–8 stay open per owner clarification — this task adds only the NDA row.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -28,6 +28,15 @@ public sealed record NormalizedMessage
     /// <summary>Cc recipients.</summary>
     public IReadOnlyList<string> Cc { get; init; } = Array.Empty<string>();
 
+    /// <summary>
+    /// Bcc recipients. Populated on the inbound capture path from the Graph message's
+    /// <c>bccRecipients</c> (requested in the capture <c>$select</c> and mapped once at the boundary in
+    /// <see cref="Engine.GraphMessageNormalizer"/>). Feeds the recipient-alias rung (FR-A2): a per-record
+    /// intake address (e.g. <c>matter-12345@</c>) is commonly delivered by an Exchange mail-flow rule that
+    /// Bcc's the alias, so Bcc-only delivery MUST associate deterministically.
+    /// </summary>
+    public IReadOnlyList<string> Bcc { get; init; } = Array.Empty<string>();
+
     /// <summary>Subject line.</summary>
     public string? Subject { get; init; }
 

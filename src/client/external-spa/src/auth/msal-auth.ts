@@ -178,6 +178,30 @@ export function acquireActiveBffToken(): Promise<string> {
   return activeBffTokenAcquirer();
 }
 
+/**
+ * Active login SCOPE seam (task 013 dual-plane browser bootstrap).
+ *
+ * `AuthGuard` triggers the browser sign-in redirect (`loginRedirect({ scopes: [...] })`) and MUST
+ * request the BFF scope for the CURRENTLY-SELECTED plane's authority — a CIAM instance cannot
+ * mint a token for the workforce BFF resource and vice-versa. The default is the CIAM BFF scope,
+ * so the CIAM browser path is byte-for-byte unchanged (FR-15): a build that only ever runs CIAM
+ * never calls `setActiveLoginScope`. The standalone workforce browser plane (home-realm discovery →
+ * "My organization") re-points this seam at the workforce BFF scope exactly once at bootstrap,
+ * mirroring how `setActiveBffTokenAcquirer` re-points the acquirer. The Teams host never uses this
+ * (it authenticates during bootstrap; AuthGuard's redirect branch is never reached inside Teams).
+ */
+let activeLoginScope: string = MSAL_BFF_SCOPE;
+
+/** Bootstrap seam: select which BFF scope `AuthGuard` requests on the sign-in redirect. */
+export function setActiveLoginScope(scope: string): void {
+  activeLoginScope = scope;
+}
+
+/** The BFF scope for the currently-selected browser plane's authority (CIAM by default). */
+export function getActiveLoginScope(): string {
+  return activeLoginScope;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────────────────
  * Teams collaboration host — workforce SSO / NAA acquisition (tasks 011/012)
  * ───────────────────────────────────────────────────────────────────────────────────────────

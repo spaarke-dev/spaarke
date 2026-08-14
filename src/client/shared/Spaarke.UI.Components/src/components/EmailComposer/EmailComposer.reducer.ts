@@ -160,6 +160,12 @@ export function initialState(props: IEmailComposerProps): EmailComposerState {
     subject: props.initialSubject ?? '',
     body: props.initialBody ?? '',
     bodyFormat: props.initialBodyFormat ?? 'HTML',
+    // D-5 fix (task 025): seeds `quotedThread` on the PROPS-ONLY path (no
+    // `sourceRecord`) so the in-dialog AI sparkle's re-append (`runAiDraft`,
+    // `EmailComposer.tsx` ~:824) preserves an already-seeded quoted thread instead
+    // of dropping it. Overwritten below by `patch.quotedThread` when `sourceRecord`
+    // IS present (deriveReplyState/deriveForwardState win — unchanged behavior).
+    quotedThread: props.initialQuotedThread,
     attachments: [...wizardAttachments(props), ...initialAttachmentsFor(props)],
     // `sendMode` (host-locked) wins; else `defaultSendMode` seeds an interactive default
     // (item 3 — email surface passes 'user'); else the historical 'sharedMailbox' default.

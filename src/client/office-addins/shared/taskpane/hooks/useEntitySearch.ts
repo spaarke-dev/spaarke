@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
+import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 
 /**
  * Entity types that can be selected as association targets.
@@ -330,15 +331,21 @@ export function useEntitySearch(options: UseEntitySearchOptions = {}): UseEntity
           const token = await getAccessToken();
           const typeParam = filter.length > 0 ? `&type=${filter.join(',')}` : '';
 
-          const response = await fetch(
+          // Task 040 / FR-B0: routed through `authenticatedJsonFetch` for a
+          // single-retry-on-401 (was a raw `fetch` + Bearer literal with no
+          // retry). `getAccessToken` is re-invoked for the retry attempt —
+          // consistent with the per-call-freshness pattern used throughout
+          // this package (see useSaveFlow.ts's D-AUTH-7 notes).
+          const response = await authenticatedJsonFetch(
             `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(searchQuery)}${typeParam}&top=${maxResults}`,
             {
               headers: {
-                Authorization: `Bearer ${token}`,
                 'Content-Type': 'application/json',
               },
               signal: abortControllerRef.current.signal,
-            }
+            },
+            token,
+            { getRetryToken: getAccessToken }
           );
 
           if (!response.ok) {

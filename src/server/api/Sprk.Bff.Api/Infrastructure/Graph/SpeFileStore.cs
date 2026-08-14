@@ -59,6 +59,15 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _uploadManager.UploadSmallAsync(driveId, path, content, ct);
 
+    /// <summary>
+    /// Reads the SPE <c>quickXorHash</c> content identity for a persisted drive item (app-only), for the
+    /// FR-C3 content-dedup detector. <c>virtual</c> so the concrete facade can be substituted at the module
+    /// boundary in tests (the established idiom — cf. <see cref="UploadSmallAsync"/>). Best-effort: returns
+    /// null (never throws) when the hash is unavailable.
+    /// </summary>
+    public virtual Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
+        => _driveItemOps.GetQuickXorHashAsync(driveId, itemId, ct);
+
     public Task<UploadSessionDto?> CreateUploadSessionAsync(
         string containerId,
         string path,
@@ -87,7 +96,8 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.DownloadFileAsync(driveId, itemId, ct);
 
-    public Task<bool> DeleteFileAsync(
+    // `virtual` enables module-boundary test doubles (Moq) of this concrete facade (see UploadSmallAsync).
+    public virtual Task<bool> DeleteFileAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default)
@@ -127,6 +137,15 @@ public class SpeFileStore : ISpeFileOperations
         string itemId,
         CancellationToken ct = default)
         => _driveItemOps.GetCurrentVersionIdAsUserAsync(ctx, driveId, itemId, ct);
+
+    // spaarkeai-compose-r6 task 050 (FR-07): user-context (OBO) full version-history list —
+    // the projection backing GET /api/obo/drives/{driveId}/items/{itemId}/versions. Read-only.
+    public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.ListFileVersionsAsUserAsync(ctx, driveId, itemId, ct);
 
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,

@@ -175,8 +175,9 @@ public sealed class CommunicationRiActionService
             var subject = BuildActionSubject(signal);
 
             // 2) Layer-A seam (ADR-013): create the domain RI action (a follow-up task regarding the
-            //    communication, owned by the responsible user). Never a direct Dataverse write. Degraded
-            //    success (TaskId == Guid.Empty) is logged but does not abort the visibility surface below.
+            //    communication, owned by the responsible user). A Spaarke task is a sprk_event (event type = Task),
+            //    which regards the communication via its typed sprk_regardingcommunication lookup. Never a direct
+            //    Dataverse write. Degraded success (TaskId == Guid.Empty) is logged but does not abort below.
             var taskResult = await _seam.CreateTaskAsync(
                 new CreateTaskRequest
                 {

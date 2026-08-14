@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="spaarkeai-assistant-enhancements-r2">
+  <metadata>
+    <title>Rebuild HistoryOverlay: overflow menu, delete, remove up-arrow, preview + tab summary, grouping + search (FR-D6/D7/D8)</title>
+    <phase>4 D — History &amp; true resume</phase>
+    <gate>blocked until 032</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend component rebuild (Fluent v9)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UX rebuild of one component with an explicit criteria set</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>D-client-b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Edits HistoryOverlay.tsx only — separate file from the ConversationPane spine, runs alongside it</parallel-reason>
+    <deps>032</deps>
+    <tags>react, frontend, fluent-ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Rebuild the history rows so the row body = open (primary) and secondary actions live in a per-row overflow (⋮) menu (Open, Rename, Set related record, Delete); wire the existing DELETE endpoint to a delete control; remove the ambiguous up-arrow; surface a last-message/conversationSummary preview + message count + the tabs the session carried; group by Today/Yesterday/This week and add search.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. React/TypeScript + Fluent UI v9 frontend expertise; disciplined about the Assistant UI element criteria (rows are act-on items) and rebuilding an existing component without adding a new one.</role>
+  <goal>The up-arrow is gone; delete works from the menu; row click opens; rows show a preview + tab summary ("Email · Compose") and are time-grouped with search.</goal>
+  <context>
+    <background>FR-D6/D7/D8 — HistoryOverlay (src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx, exports HistoryMenu) has a single ambiguous up-arrow "Promote" button (:632-642) and title+timestamp rows only (:609-646); the list is fetched via GET /api/ai/chat/sessions?limit=50 (:366). History is unusable: no delete/rename, no preview or tab context. The "Set related record" action logic is task 034 (leave the slot).</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx (up-arrow :632-642; rows :609-646; list fetch :366)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project">Row body opens; secondary actions in a ⋮ overflow menu (Open/Rename/Set related record/Delete); wire the EXISTING DELETE endpoint; remove the up-arrow.</constraint>
+    <constraint source="ADR (ASSISTANT-UI-ELEMENT-CRITERIA)">Follow the Assistant UI element criteria (rows are act-on items; no code in labels; collapse behind a disclosure where needed).</constraint>
+    <constraint source="project">"Set related record" menu entry is wired by task 034 (leave the slot).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r2/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/constraints/pcf.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Replace the up-arrow with a ⋮ overflow menu (Open, Rename, Set related record [wired by 034], Delete).</step>
+    <step order="2">Make the row body open on click.</step>
+    <step order="3">Wire the existing DELETE endpoint to the Delete control.</step>
+    <step order="4">Surface last-message/conversationSummary preview + message count + the tabs the session carried.</step>
+    <step order="5">Group rows Today/Yesterday/This week; add search over title/preview.</step>
+    <step order="6">Build + typecheck.</step>
+    <step order="7">Update TASK-INDEX ✅.</step>
+  </steps>
+  <ui-tests>
+    <test name="History rebuild">
+      <steps>Verify the up-arrow is gone; row click opens; the ⋮ menu shows Open/Rename/Set related record/Delete; delete removes the row; rows show preview + tab summary ("Email · Compose"); rows are time-grouped; search filters by title/preview. Include an ADR-021 dark-mode check.</steps>
+      <expected>Up-arrow gone; row click opens; ⋮ menu has the four actions; delete removes the row; rows show preview + tab summary; rows are time-grouped; search filters by title/preview; no dark-mode regressions.</expected>
+    </test>
+  </ui-tests>
+  <justification>
+    <existing>HistoryOverlay has a single up-arrow 'Promote' button and title+timestamp rows only.</existing>
+    <extension>Yes — rebuild the existing component's row + add a menu; no new component.</extension>
+    <cost-of-doing-nothing>History is unusable — ambiguous up-arrow, no delete/rename, no preview or tab context.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/HistoryOverlay.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Up-arrow gone.</criterion>
+    <criterion testable="true">Row click opens.</criterion>
+    <criterion testable="true">⋮ menu has Open/Rename/Set related record/Delete.</criterion>
+    <criterion testable="true">Delete works via the existing endpoint.</criterion>
+    <criterion testable="true">Rows show preview + message count + tab summary.</criterion>
+    <criterion testable="true">Grouped Today/Yesterday/This week.</criterion>
+    <criterion testable="true">Search filters by title/preview.</criterion>
+  </acceptance-criteria>
+  <notes>FR-D6/D7/D8; the "Set related record" action logic is task 034.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

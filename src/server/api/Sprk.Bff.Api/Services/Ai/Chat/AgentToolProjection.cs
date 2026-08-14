@@ -26,12 +26,27 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// matter). A structural session FACT — never derived from utterance content (ADR-039). Optional with a
 /// <c>false</c> default so existing construction sites (no host record) are unchanged.
 /// </param>
+/// <param name="OpenTabContextTypes">
+/// FR-12 tool-economy fact (task 030): the closed-vocabulary context-types of the workspace tabs
+/// currently OPEN in the session — derived deterministically from the LIVE <c>session.Tabs</c>
+/// (the source-of-record that task 011 re-pointed the awareness block to) by mapping each tab's
+/// <c>widgetType</c> / typed <c>WidgetData.Kind</c> through <see cref="WidgetContextTypeResolver"/>
+/// (the C# mirror of the client widget-registry <c>WidgetMetadata.contextType</c> map, FR-08 / task 022).
+/// Values are the <c>WidgetContextType</c> vocabulary (<c>email</c>, <c>document</c>, <c>compose-doc</c>,
+/// <c>matter-grid</c>, <c>dashboard</c>, <c>calendar</c>). Fed to the PreFilter's tab-economy predicate so a
+/// parity capability (one whose Binding declares <c>sprk_contexttypetags</c>) mounts ONLY while a matching
+/// tab is open. A structural session FACT — reads only tab identity/category, never item content (ADR-015
+/// Path A). <c>null</c> (the default) = the caller supplied NO open-tab awareness, so the tab-economy
+/// predicate stays INERT (every pre-task-030 construction site is byte-identical); an EMPTY (non-null)
+/// set means "tabs known, none open" and DOES scope tab-gated tools out.
+/// </param>
 public sealed record AgentToolFilterContext(
     string Surface,
     bool HasSessionFiles,
     bool HasActiveDocument,
     bool HasAnalysisBinding,
-    bool HasAttachedRecord = false)
+    bool HasAttachedRecord = false,
+    IReadOnlyCollection<string>? OpenTabContextTypes = null)
 {
     /// <summary>The assistant (chat) surface token.</summary>
     public const string AssistantSurface = "assistant";
@@ -58,6 +73,13 @@ public sealed record AgentToolFilterContext(
 ///   future catalog columns declare structural context requirements (e.g.
 ///   requires-attached-record), they are applied HERE against
 ///   <see cref="AgentToolFilterContext"/> facts — never by tool-name lists.</item>
+///   <item>FR-12 tool economy (task 030): a parity capability whose Binding declares
+///   <c>sprk_contexttypetags</c> mounts only while a tab of a matching context-type is
+///   open — a pure set-membership test against
+///   <see cref="AgentToolFilterContext.OpenTabContextTypes"/>, the deterministic open-tab
+///   context-type set (context scoping, the ONLY ADR-039-sanctioned dispatch aid; never a
+///   classifier, ranker, or second dispatch surface). Empty tags = relevant to ANY context
+///   (unaffected).</item>
 /// </list>
 /// <para>
 /// <b>Prompt-cache stability (NFR-04)</b>: the surviving tools are sorted by
@@ -137,6 +159,25 @@ public static class AgentToolProjection
             if (tool is BindingCapabilityTool capabilityTool
                 && capabilityTool.Binding.RequiresNoAttachedRecord
                 && context.HasAttachedRecord)
+            {
+                continue;
+            }
+
+            // FR-12 tool-economy predicate (task 030): a parity capability whose Binding declares
+            // sprk_contexttypetags (tab-scoped relevance) is REMOVED unless at least one currently-open
+            // tab's context-type is in that tag set. Empty tags = relevant to ANY context (never scoped
+            // out — the always-available default). A pure set-membership test over the deterministic
+            // open-tab context-type set (threaded from live session.Tabs) ∩ the Binding's tags — no model
+            // call, no scoring, no tool-name list (ADR-039: deterministic context-scoping pre-filter, the
+            // ONLY sanctioned dispatch aid). Scoped to BindingCapabilityTool — the RefusalCapabilityTool
+            // (no-match handler) is NEVER tab-scoped: it must survive to enforce honest refusal. Inert when
+            // OpenTabContextTypes is null (caller supplied no tab awareness) — preserving every
+            // pre-task-030 construction site byte-for-byte.
+            if (tool is BindingCapabilityTool tabScopedCapability
+                && context.OpenTabContextTypes is { } openTabContextTypes
+                && tabScopedCapability.Binding.ContextTypeTags.Count > 0
+                && !tabScopedCapability.Binding.ContextTypeTags.Any(
+                    tag => openTabContextTypes.Contains(tag, StringComparer.OrdinalIgnoreCase)))
             {
                 continue;
             }

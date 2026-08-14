@@ -345,6 +345,173 @@ public class AgentTurnLoopContractTests
             .Should().Contain(createMatter.Name, "default HasAttachedRecord=false ⇒ no grounding removal");
     }
 
+    // ── FR-12 tool-economy predicate (task 030): OpenTabContextTypes ─────────────────────────
+    // A parity capability whose Binding declares sprk_contexttypetags mounts ONLY while a tab of a
+    // matching context-type is open. A pure set-membership test over the deterministic open-tab
+    // context-type set (threaded from live session.Tabs) — no classifier, no model call, no tool-name
+    // list (ADR-039 context-scoping pre-filter). Empty tags = always-available (unaffected).
+
+    // Helper: the filter context with an explicit set of currently-open tab context-types.
+    private static AgentToolFilterContext ContextWithOpenTabs(params string[] openTabContextTypes) =>
+        new(AgentToolFilterContext.AssistantSurface,
+            HasSessionFiles: false, HasActiveDocument: false, HasAnalysisBinding: false,
+            HasAttachedRecord: false,
+            OpenTabContextTypes: openTabContextTypes);
+
+    [Fact]
+    public void PreFilter_ParityCapability_ContextTypeMatchesOpenTab_IsProjected()
+    {
+        // (a) a capability whose context-type matches an open tab IS projected.
+        var mattersOverview = CreateBindingTool("overview-query", surfaces: null,
+            contextTypeTags: new[] { "matter-grid", "dashboard", "calendar" });
+        // Only the Matters (matter-grid) tab is open.
+        var context = ContextWithOpenTabs("matter-grid");
+
+        AgentToolProjection.PreFilter(new AIFunction[] { mattersOverview }, context)
+            .Select(t => t.Name)
+            .Should().Contain(mattersOverview.Name,
+                "the overview capability's 'matter-grid' tag matches the open matter-grid tab");
+    }
+
+    [Fact]
+    public void PreFilter_ParityCapability_NoOpenTabForContextType_IsExcluded()
+    {
+        // (b) a capability whose context-type has NO open tab is NOT projected.
+        var emailReply = CreateBindingTool("draft-reply", surfaces: null,
+            contextTypeTags: new[] { "email" });
+        var docSummarize = CreateBindingTool("summarize-document", surfaces: null,
+            contextTypeTags: new[] { "document" });
+        // Only the Tasks grid (matter-grid) tab is open — no email tab, no document tab.
+        var context = ContextWithOpenTabs("matter-grid");
+
+        var survivors = AgentToolProjection
+            .PreFilter(new AIFunction[] { emailReply, docSummarize }, context)
+            .Select(t => t.Name)
+            .ToList();
+
+        survivors.Should().NotContain(emailReply.Name,
+            "no email tab is open, so the email per-item capability must not mount");
+        survivors.Should().NotContain(docSummarize.Name,
+            "no document tab is open, so the document per-item capability must not mount");
+    }
+
+    [Fact]
+    public void PreFilter_AlwaysAvailableCapability_EmptyContextTypeTags_UnaffectedByOpenTabs()
+    {
+        // (c) always-available tools (empty context-type tags) are unaffected — even when NO tab is open.
+        var globalCapability = CreateBindingTool("chat-summarize", surfaces: null,
+            contextTypeTags: Array.Empty<string>());
+        var handlerTool = AIFunctionFactory.Create(() => "x", "web_search");
+        var context = ContextWithOpenTabs(/* no tabs open */);
+
+        var survivors = AgentToolProjection
+            .PreFilter(new AIFunction[] { globalCapability, handlerTool }, context)
+            .Select(t => t.Name)
+            .ToList();
+
+        survivors.Should().Contain(globalCapability.Name,
+            "empty sprk_contexttypetags = relevant to ANY context — never scoped out by open tabs");
+        survivors.Should().Contain("web_search",
+            "non-Binding handler tools are never tab-scoped by this predicate");
+    }
+
+    [Fact]
+    public void PreFilter_OpeningAndClosingTab_ChangesProjectedSetDeterministically()
+    {
+        // (d) opening/closing a tab changes the projected set deterministically.
+        var emailReply = CreateBindingTool("draft-reply", surfaces: null,
+            contextTypeTags: new[] { "email" });
+        var tools = new AIFunction[] { emailReply };
+
+        // Tab CLOSED: only matter-grid open → email capability excluded.
+        var closed = AgentToolProjection.PreFilter(tools, ContextWithOpenTabs("matter-grid"))
+            .Select(t => t.Name).ToList();
+        // Tab OPENED: email tab now open → email capability included.
+        var opened = AgentToolProjection.PreFilter(tools, ContextWithOpenTabs("matter-grid", "email"))
+            .Select(t => t.Name).ToList();
+        // Tab CLOSED again → excluded again (deterministic round-trip).
+        var closedAgain = AgentToolProjection.PreFilter(tools, ContextWithOpenTabs("matter-grid"))
+            .Select(t => t.Name).ToList();
+
+        closed.Should().NotContain(emailReply.Name);
+        opened.Should().Contain(emailReply.Name);
+        closedAgain.Should().BeEquivalentTo(closed,
+            "the same open-tab set always yields the same projection (pure set-membership, no state)");
+    }
+
+    [Fact]
+    public void PreFilter_TabEconomy_IsPureSetMembership_NoLlmCall_AndDeterministicAcrossRepeatedCalls()
+    {
+        // (e) NO classifier/LLM call in the filter path — it is pure set membership. AgentToolProjection
+        // is a static class taking only tools + a plain-data filter context (no IChatClient, no service
+        // provider, no async): there is no seam through which a model could be consulted. We prove the
+        // observable consequence: repeated calls with identical inputs are byte-identical (a probabilistic
+        // decider could not guarantee this).
+        var emailReply = CreateBindingTool("draft-reply", surfaces: null, contextTypeTags: new[] { "email" });
+        var docSummarize = CreateBindingTool("summarize-document", surfaces: null, contextTypeTags: new[] { "document" });
+        var tools = new AIFunction[] { emailReply, docSummarize };
+        var context = ContextWithOpenTabs("email");
+
+        var run1 = AgentToolProjection.PreFilter(tools, context).Select(t => t.Name).ToList();
+        var run2 = AgentToolProjection.PreFilter(tools, context).Select(t => t.Name).ToList();
+        var run3 = AgentToolProjection.PreFilter(tools, context).Select(t => t.Name).ToList();
+
+        run1.Should().Equal(run2);
+        run2.Should().Equal(run3);
+        run1.Should().Contain(emailReply.Name).And.NotContain(docSummarize.Name,
+            "only the open email tab's capability survives — a deterministic ∩ of tags and open context-types");
+    }
+
+    [Fact]
+    public void PreFilter_TabEconomy_OneTabOpen_MountsOnlyThatSurfacesParityTools()
+    {
+        // (f) tool-count economy: with only 1 tab open, only that surface's parity tools mount (not all).
+        var mattersOverview = CreateBindingTool("overview-query", surfaces: null,
+            contextTypeTags: new[] { "matter-grid", "dashboard", "calendar" });
+        var emailReply = CreateBindingTool("draft-reply", surfaces: null, contextTypeTags: new[] { "email" });
+        var emailForward = CreateBindingTool("draft-forward", surfaces: null, contextTypeTags: new[] { "email" });
+        var docSummarize = CreateBindingTool("summarize-document", surfaces: null, contextTypeTags: new[] { "document" });
+        var globalCapability = CreateBindingTool("chat-summarize", surfaces: null, contextTypeTags: Array.Empty<string>());
+        var allParityTools = new AIFunction[]
+        {
+            mattersOverview, emailReply, emailForward, docSummarize, globalCapability,
+        };
+
+        // Only the Email tab is open.
+        var survivors = AgentToolProjection
+            .PreFilter(allParityTools, ContextWithOpenTabs("email"))
+            .Select(t => t.Name)
+            .ToList();
+
+        survivors.Should().Contain(emailReply.Name).And.Contain(emailForward.Name,
+            "the open email tab mounts the two email per-item parity tools");
+        survivors.Should().Contain(globalCapability.Name,
+            "always-available (no-tag) capabilities are unaffected");
+        survivors.Should().NotContain(mattersOverview.Name,
+            "no grid/dashboard/calendar tab is open — the overview tool stays unmounted (economy)");
+        survivors.Should().NotContain(docSummarize.Name,
+            "no document tab is open — the document per-item tool stays unmounted (economy)");
+        // Economy proof: with 1 tab open, the tab-scoped survivors are exactly that surface's tools,
+        // not the whole parity catalog.
+        survivors.Count(n => n == emailReply.Name || n == emailForward.Name).Should().Be(2);
+        survivors.Should().HaveCount(3, "2 email parity tools + 1 always-available — NOT all 5 parity rows");
+    }
+
+    [Fact]
+    public void PreFilter_TabEconomy_NullOpenTabContextTypes_IsInert_BackwardCompatible()
+    {
+        // The 5-arg AgentToolFilterContext (no OpenTabContextTypes) defaults it to null — existing
+        // construction sites never tab-scope, so parity capabilities pass through unchanged.
+        var emailReply = CreateBindingTool("draft-reply", surfaces: null, contextTypeTags: new[] { "email" });
+        var context = new AgentToolFilterContext(
+            AgentToolFilterContext.AssistantSurface, false, false, false);
+
+        AgentToolProjection.PreFilter(new AIFunction[] { emailReply }, context)
+            .Select(t => t.Name)
+            .Should().Contain(emailReply.Name,
+                "null OpenTabContextTypes ⇒ tab-economy predicate inert (no tab awareness supplied)");
+    }
+
     [Fact]
     public void Finalize_AnyInputOrder_ProducesOrdinalNameOrderAndBudgetWrap()
     {
@@ -601,7 +768,8 @@ public class AgentTurnLoopContractTests
         string[]? surfaces,
         string? toolDescription = "Maker-authored intent description.",
         string? inputSchemaJson = null,
-        bool requiresNoAttachedRecord = false) => new()
+        bool requiresNoAttachedRecord = false,
+        string[]? contextTypeTags = null) => new()
         {
             BindingId = Guid.NewGuid(),
             ConsumerType = consumerType,
@@ -610,6 +778,7 @@ public class AgentTurnLoopContractTests
             Surfaces = surfaces ?? Array.Empty<string>(),
             InputSchemaJson = inputSchemaJson,
             RequiresNoAttachedRecord = requiresNoAttachedRecord,
+            ContextTypeTags = contextTypeTags ?? Array.Empty<string>(),
         };
 
     private static BindingCapabilityTool CreateBindingTool(
@@ -617,8 +786,9 @@ public class AgentTurnLoopContractTests
         string[]? surfaces,
         string? toolDescription = "Maker-authored intent description.",
         string? inputSchemaJson = null,
-        bool requiresNoAttachedRecord = false) => new(
-            CreateBinding(consumerType, surfaces, toolDescription, inputSchemaJson, requiresNoAttachedRecord),
+        bool requiresNoAttachedRecord = false,
+        string[]? contextTypeTags = null) => new(
+            CreateBinding(consumerType, surfaces, toolDescription, inputSchemaJson, requiresNoAttachedRecord, contextTypeTags),
             new ServiceCollection().BuildServiceProvider(),
             "tenant-1",
             "session-1",
@@ -659,7 +829,7 @@ public class AgentTurnLoopContractTests
         public override Task<ChatSession?> GetSessionAsync(string tenantId, string sessionId, CancellationToken ct = default)
             => Task.FromResult(_session);
 
-        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default, bool awaitCosmosWrite = false)
         {
             PersistedSessions.Add(session);
             return Task.CompletedTask;

@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Deploy + both-plane UAT — polymorphic access-write wave (BFF grant-write + TrackingFieldTrio PCF + entitlement Option-B)</title>
+    <phase>P2b Polymorphic access-write (grant authoring)</phase>
+    <gate>blocked-until:070,071,072</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Deployment + UAT of already-reviewed changes (070/071/072 each FULL); packaging + verification, not new logic. Test-touching only via UAT scripts.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescriptive deploy + verification procedure; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys BFF + a PCF solution to the shared dev environment — coordinate; serial after 070/071/072.</parallel-reason>
+    <deps>070,071,072</deps>
+    <tags>deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Deploy the polymorphic access-write wave and UAT it end-to-end on both identity planes. BFF (grant-write
+    070 + entitlement 072) deploys from the worktree (scripts/Deploy-BffApi.ps1 → spaarke-bff-dev, NOT CI);
+    the TrackingFieldTrio PCF (071) deploys via solution import; the external-spa client (072 tab config)
+    deploys per its pipeline. Then verify the full access loop: an admin grants a Matter (and a standalone
+    Work Assignment) to an external contact via the record's Manage Access modal → the contact sees it in the
+    SPA (task 028 read) with documents/invoices rolling up.
+  </prompt>
+
+  <role>SPAARKE platform engineer performing a coordinated BFF + PCF + SPA deploy and cross-plane UAT. Follows the deploy-from-worktree rule and PCF-DEPLOYMENT-GUIDE.md.</role>
+
+  <goal>
+    All three artifacts live on dev; the polymorphic grant loop verified on both planes: workforce admin grants
+    Matter/WA/Project access from the record; the external partner sees exactly the granted roots + rolled-up
+    children in the SPA; internal + external tab sets match the owner lists; no over-exposure (a non-granted
+    matter/WA never appears).
+  </prompt>
+
+  <context>
+    <background>
+      070 = polymorphic grant-WRITE (BFF). 071 = TrackingFieldTrio PCF + AccessGrantModal polymorphism + side-pane
+      Advanced Lookup. 072 = Tier-1 entitlement Option-B + widgetRegistry tab sets. This task deploys all three +
+      runs both-plane UAT (the live verification task 028 flagged as owner-pending, now covering matter/WA writes).
+      Deploy from worktree, NOT CI (memory deploy-from-worktree-not-ci). Test identities per
+      notes/grid-widget-empty-diagnosis.md.
+    </background>
+    <relevant-files>
+      <file>scripts/Deploy-BffApi.ps1 (BFF → spaarke-bff-dev, from worktree)</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md (TrackingFieldTrio solution import)</file>
+      <file>src/client/external-spa/ (client build + deploy)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/grid-widget-empty-diagnosis.md (test identities + App Insights)</file>
+    </relevant-files>
+    <dependencies>070, 071, 072 complete + reviewed.</dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Deploy BFF from the worktree (scripts/Deploy-BffApi.ps1 → spaarke-bff-dev), NOT CI. PCF via solution import (build:prod). /conflict-check + coordinate shared-Dataverse import timing.</constraint>
+    <constraint source="NFR-08">UAT MUST include negatives: a partner with NO grant of a matter/WA sees NONE of it or its children; a document/invoice whose parents are all outside the accessible sets never appears.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/polymorphic-grant-authoring-enhancement.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/notes/grid-widget-empty-diagnosis.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">/conflict-check; confirm no conflicting Dataverse import in flight.</step>
+    <step order="2">Deploy the BFF from the worktree (scripts/Deploy-BffApi.ps1 → spaarke-bff-dev); health + SHA verify.</step>
+    <step order="3">Import the TrackingFieldTrio PCF solution (version-bumped, build:prod); verify the footer version.</step>
+    <step order="4">Build + deploy the external-spa client (VITE_DEV_MOCK=false); verify load.</step>
+    <step order="5">UAT — workforce admin: from a Matter record's Manage Access, grant an external contact via the side-pane Advanced Lookup; repeat on a standalone Work Assignment and a Project. Confirm grant rows written with the correct typed lookup (read_query).</step>
+    <step order="6">UAT — external partner plane: confirm the granted Matter/WA/Project appear in the SPA with documents/invoices rolling up; tab set = Work Assignments/Projects/Matters/Invoices/Documents. Confirm internal plane tab set = Quick Start/Service Requests/Policy Library.</step>
+    <step order="7">UAT — negatives: revoke and confirm disappearance; a non-granted matter/WA + its children never appear; close-project cascade-revoke actually removes grants (070 fix). Capture App Insights [EXT-MODULE] + grant-write traces.</step>
+    <step order="8">Record the UAT results + deployment record in notes/. Update TASK-INDEX.md (073 ✅). If all green, note the P2b wave complete + ready to merge to master.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Deploy scripts / PowerShell</tool>
+    <tool name="pac">PCF solution import</tool>
+    <tool name="az">App Insights verification</tool>
+    <tool name="mcp__dataverse">Verify grant rows written per root type</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">BFF (070+072) + TrackingFieldTrio PCF (071) + external-spa (072) live on dev</output>
+    <output type="docs">notes/ UAT results + deployment record (both planes, incl. negatives)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A workforce admin grants a Matter, a standalone Work Assignment, and a Project to an external contact from each record's Manage Access modal (side-pane Advanced Lookup) — each writes a grant row with the correct typed lookup.</criterion>
+    <criterion testable="true">The external partner then sees exactly those granted roots in the SPA, with their documents/invoices rolling up (task 028 read), and the outside-counsel tab set.</criterion>
+    <criterion testable="true">Negatives hold: revoke removes access; a non-granted matter/WA + its children never appear; close-project cascade-revoke removes the project's grants.</criterion>
+    <criterion testable="true">Internal + external tab sets match the owner lists; all three artifacts deployed (BFF from worktree, PCF via solution, SPA).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Prescriptive deploy sequence — do not reorder. Deploy BFF from worktree, NOT CI. Capture both-plane UAT (incl. negatives) in notes/ before marking complete.</protocol>
+  </execution>
+</task>

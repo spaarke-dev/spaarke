@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Microsoft.Graph.Models;
-using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
 
@@ -60,6 +60,46 @@ public class GraphMessageNormalizerTests
         // classifier-body-blind fix), so the text-consuming rungs see the content.
         envelope.BodyText.Should().Be("hi");
         envelope.SentAt.Should().Be(DateTimeOffset.Parse("2026-07-15T10:00:00Z"));
+    }
+
+    [Fact]
+    public void Normalize_MapsBccRecipients_FromGraphMessage()
+    {
+        // FR-A2: the capture $select now requests bccRecipients, and the boundary maps them onto the
+        // envelope so the recipient-alias rung can read a Bcc-delivered per-record intake address without a
+        // second Graph round-trip (no plus-addressing tenant setting required).
+        var message = new Message
+        {
+            Subject = "Filed by mail-flow rule",
+            From = new Recipient { EmailAddress = new EmailAddress { Address = "client@acme.com" } },
+            ToRecipients = new List<Recipient>
+            {
+                new() { EmailAddress = new EmailAddress { Address = "counsel@firm.com" } }
+            },
+            BccRecipients = new List<Recipient>
+            {
+                new() { EmailAddress = new EmailAddress { Address = "matter-12345@intake.example.com" } }
+            },
+        };
+
+        var envelope = _normalizer.Normalize(message, CommunicationDirection.Incoming);
+
+        envelope.Bcc.Should().ContainSingle().Which.Should().Be("matter-12345@intake.example.com");
+        envelope.To.Should().ContainSingle().Which.Should().Be("counsel@firm.com");
+    }
+
+    [Fact]
+    public void Normalize_WhenNoBccRecipients_LeavesBccEmpty()
+    {
+        var message = new Message
+        {
+            Subject = "No bcc",
+            From = new Recipient { EmailAddress = new EmailAddress { Address = "sender@acme.com" } },
+        };
+
+        var envelope = _normalizer.Normalize(message, CommunicationDirection.Incoming);
+
+        envelope.Bcc.Should().BeEmpty();
     }
 
     [Fact]

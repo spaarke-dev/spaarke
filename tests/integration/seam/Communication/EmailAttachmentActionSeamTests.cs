@@ -114,14 +114,13 @@ public sealed class EmailAttachmentActionSeamTests
         var config = new ConfigurationBuilder().Build();
 
         return new CommunicationEnrichmentService(
-            enqueuer.Object,
+            EnrichmentScopeFactoryStub.Create(
+                enqueuer.Object, triageAi.Object, proposeAi.Object, createTaskAi),
             entityService,
             config,
             producer.Object,
-            triageAi.Object,
-            proposeAi.Object,
-            createTaskAi,
             actionSeam,
+            TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 

@@ -2,8 +2,10 @@ using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Communication;
@@ -35,21 +37,21 @@ public sealed class EmailTriageSeamTests
 
     private static CommunicationEnrichmentService CreateService(
         IGenericEntityService entityService,
-        ICommunicationTriageAi triageAi)
+        ICommunicationTriageAi triageAi,
+        Sprk.Bff.Api.Services.Communication.Engine.CategoryRoutingGate? routingGate = null)
     {
         var enqueuer = new Mock<IPostUploadIndexingEnqueuer>(MockBehavior.Loose);
         var producer = new Mock<ICommunicationAssessedProducer>(MockBehavior.Loose);
         var config = new ConfigurationBuilder().Build();
 
         return new CommunicationEnrichmentService(
-            enqueuer.Object,
+            EnrichmentScopeFactoryStub.Create(
+                enqueuer.Object, triageAi, new NullCommunicationProposeAi(), new NullCommunicationCreateTaskAi()),
             entityService,
             config,
             producer.Object,
-            triageAi,
-            new NullCommunicationProposeAi(),
-            new NullCommunicationCreateTaskAi(),
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
+            routingGate ?? TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);
     }
 
@@ -99,6 +101,87 @@ public sealed class EmailTriageSeamTests
                 It.IsAny<CancellationToken>()),
             Times.Once,
             "the trigger must feed AiClassificationRung's ALREADY-PRODUCED signal (reconstructed from the persisted provenance) — no second classification call");
+    }
+
+    private static readonly Guid LitigationTeamId = Guid.Parse("aaaaaaaa-1111-2222-3333-444444444444");
+
+    /// <summary>Build the triage-trigger fixture: the provenance read fires the triage step, the triage facade
+    /// returns <paramref name="category"/>, and RetrieveMultiple returns the litigation team for a `team`
+    /// name query (empty for any other lookup). The captured <see cref="Mock{T}"/> lets the caller assert the
+    /// persist <c>UpdateAsync</c>.</summary>
+    private static Mock<IGenericEntityService> RoutingFixture(string category)
+    {
+        var entityService = new Mock<IGenericEntityService>(MockBehavior.Loose);
+        entityService
+            .Setup(s => s.RetrieveAsync(CommunicationEntity, It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(RecordWithProvenance(SamplePersistedProvenanceJson));
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+                q.EntityName == "team"
+                    ? new EntityCollection(new List<Entity> { new("team") { Id = LitigationTeamId } })
+                    : new EntityCollection());
+        return entityService;
+    }
+
+    private static Mock<ICommunicationTriageAi> TriageReturning(string category)
+    {
+        var triageAi = new Mock<ICommunicationTriageAi>(MockBehavior.Loose);
+        triageAi
+            .Setup(t => t.TriageAsync(It.IsAny<CommunicationTriageRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CommunicationTriageResult(category, "Summary.", new[] { "Respond by Friday" }, "Urgent", "Route"));
+        return triageAi;
+    }
+
+    // FR-E7 (task 057) — routing ENABLED + a MAPPED category: the communication is ASSIGNED to the mapped team
+    // (ownerid set on the SAME additive triage UpdateAsync — no second write path, ADR-024). Proves the full
+    // slice: gate resolve → team-name lookup → ownerid set.
+    [Fact]
+    public async Task EnrichAsync_WhenCategoryMappedToTeam_AssignsOwneridToThatTeam()
+    {
+        var entityService = RoutingFixture("Court / Filing");
+        var gate = TestRoutingGate.From(new CategoryRoutingOptions
+        {
+            Enabled = true,
+            CategoryToTeam = { ["Court / Filing"] = "Litigation Team" },
+        });
+        var sut = CreateService(entityService.Object, TriageReturning("Court / Filing").Object, gate);
+
+        await sut.EnrichAsync(Guid.NewGuid(), CommunicationDirection.Incoming, Message(), archivedDocumentId: null, CancellationToken.None);
+
+        entityService.Verify(s => s.UpdateAsync(
+            CommunicationEntity,
+            It.IsAny<Guid>(),
+            It.Is<Dictionary<string, object>>(f =>
+                f.ContainsKey("ownerid")
+                && ((EntityReference)f["ownerid"]).LogicalName == "team"
+                && ((EntityReference)f["ownerid"]).Id == LitigationTeamId),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    // FR-E7 (task 057) — routing ENABLED but the category is UNMAPPED: NO ownerid is set (the communication
+    // lands in the default/unassigned view; never a forced mis-assignment). The triage fields still persist.
+    [Fact]
+    public async Task EnrichAsync_WhenCategoryUnmapped_LeavesOwneridUnset()
+    {
+        var entityService = RoutingFixture("General Correspondence");
+        var gate = TestRoutingGate.From(new CategoryRoutingOptions
+        {
+            Enabled = true,
+            CategoryToTeam = { ["Court / Filing"] = "Litigation Team" }, // does NOT map "General Correspondence"
+        });
+        var sut = CreateService(entityService.Object, TriageReturning("General Correspondence").Object, gate);
+
+        await sut.EnrichAsync(Guid.NewGuid(), CommunicationDirection.Incoming, Message(), archivedDocumentId: null, CancellationToken.None);
+
+        // The triage update still ran, but WITHOUT an ownerid.
+        entityService.Verify(s => s.UpdateAsync(
+            CommunicationEntity,
+            It.IsAny<Guid>(),
+            It.Is<Dictionary<string, object>>(f => !f.ContainsKey("ownerid")),
+            It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
     [Fact]

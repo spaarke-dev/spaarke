@@ -215,6 +215,16 @@ export class SpaarkeAuthProvider {
 
   private _startProactiveRefresh(): void {
     this._refreshInterval = setInterval(async () => {
+      // Proactive refresh must only REFRESH an existing session — never INITIATE
+      // one (2026-08-10). With no cached token there is nothing to refresh, and a
+      // cold acquire here would fall through the strategy's silent chain to an
+      // interactive `acquireTokenPopup` fired from a BACKGROUND timer — out of any
+      // user gesture (violates ADR-028 INV-5) and, with concurrent callers,
+      // colliding as MSAL `interaction_in_progress`. Gate on an existing session:
+      // when one is present, the re-acquire below is refresh-token-backed and stays
+      // silent; when absent, skip until an on-demand (user-driven) acquisition
+      // establishes the session.
+      if (!this.isAuthenticated()) return;
       try {
         this._cache.invalidate();
         await this.getAccessToken();

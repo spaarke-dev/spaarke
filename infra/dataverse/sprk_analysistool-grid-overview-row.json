@@ -1,0 +1,73 @@
+{
+  "_comment_top": "spaarkeai-assistant-enhancements-r3 task 020 (FR-06 — the overview DoD driver) — seed row for the spaarke.grid_overview tool. ONE parameterized configId-driven overview tool (§11 reuse-first): it reuses each surface's EXISTING sprk_gridconfiguration saved query (sprk_fetchxml), NOT N per-grid handlers and NOT model-authored SQL. This is a Spaarke-specific capability, NOT part of the frozen GA Dataverse MCP dataverse.* namespace — hence the spaarke.* tool id.",
+  "_comment_routing": "Runtime invocation routes to GridOverviewHandler via sprk_handlerclass. Auto-discovered (ADR-010). The deterministic ADR-039 PreFilter/catalog projects the LLM-facing function name from sprk_toolid — NO classifier, NO second dispatch surface.",
+  "_comment_obo": "project MUST rule: BOTH the sprk_gridconfiguration read AND the FetchXML execution run through IDataverseUserClient under the calling user's OBO token — the user's security roles + row-level security filter every row (ADR-028 / ADR-015). NO app-only path (the app-only FetchService/ServiceClient DataGrid path is NOT used here).",
+  "_comment_today": "project MUST rule: `today` is injected SERVER-SIDE deterministically (from an injected TimeProvider) into the saved FetchXML's {{today}} / {{today+N}} / {{today-N}} placeholder tokens — the tool NEVER prompts for the date and NEVER trusts a client-supplied date. Derived predicates (overdue = dueDate < today) therefore resolve server-side.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read). The tool only executes a saved read query; it authors no SQL and performs no writes.",
+  "_comment_contrast_read_query": "Contrast with dataverse.read_query, which rejects GETDATE()/COUNT/aggregates — the exact R2 UAT defect (query error + duplicate tab). This tool answers 'how many overdue tasks do I have?' by running the grid's own saved query with today injected.",
+  "_comment_grounding": "ADR-039/ADR-015 grounding: every returned row carries the table primary id; each row has '@citation.path' = tables/{t}/records/{id} and adapter-level citation metadata. Telemetry logs configId + entity + counts + duration only — never FetchXML body, never row content.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Grid Overview",
+  "sprk_toolcode": "SPAARKE-GRID-OVERVIEW",
+  "sprk_toolid": "spaarke.grid_overview",
+  "sprk_namespace": "spaarke",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "standard",
+  "_comment_wiring_r3_021": "spaarkeai-assistant-enhancements-r3 task 021 (FR-07) appended the trailing 'Known configId values' sentence below — keep it byte-equal with GridOverviewHandler.Metadata.Description (guarded by GridOverviewHandlerDescriptionParityTests). The mapping publishes each grid's + Calendar's existing sprk_gridconfiguration id as static tool metadata because the per-tab workspace-state prompt block (task 011, ADR-015) is trimmed to {type,label,active} only and cannot carry a configId. GUIDs mirror ENTITY_VIEW_CONFIG_IDS (register-workspace-widgets.ts) + EVENT_CONFIG_ID (CalendarWorkspaceWidget.tsx) — the SAME rows the grids/Calendar already use to fetch data (§11 reuse; zero new Dataverse rows for grids). Daily Briefing is intentionally NOT in this table — it is a Lane-3 composed-service surface wired by the separate SYS-Daily Briefing Overview row (sprk_analysistool-daily-briefing-overview-row.json).",
+  "sprk_description": "Runs a grid or workspace surface's EXISTING saved view (its configuration's FetchXML), addressed by configId, under the calling user's permissions, and returns an accurate record count plus grid-shaped rows with record-id citations. The current date is injected server-side automatically (overdue/due-today/due-this-week predicates resolve against today with no date needed from you) — do NOT ask the user for the date. This tool runs under the CALLING USER's identity (OBO) automatically — you already know who the user is; NEVER ask the user for their user id, name, or 'who they are' to scope results. Use this instead of dataverse.read_query whenever the user asks 'how many' / a status overview / an overdue-or-upcoming count for a known grid, because this reuses the grid's own saved query (which read_query cannot express: GETDATE(), COUNT, and aggregates are rejected there). It takes ONE required argument, configId (the sprk_gridconfiguration record id for the target grid). Returns { count, rows, entity } — narrate the count and cite the returned record ids; do not invent numbers. Known configId values for the currently-deployed workspace surfaces (reuse these directly — do not guess a GUID): Documents=1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6, Matters=113ad380-9e63-f111-ab0c-70a8a53ec687, Projects=97ee98e7-7a63-f111-ab0c-70a8a53ec687, Invoices=d021827b-9b5e-f111-ab0c-7c1e521545d7, Work Assignments=9c5b0ee7-7a63-f111-ab0c-000d3a4d8152, Communications/Messages=e1826c4c-9575-f111-ab0e-7ced8ddc4a05, My Tasks=ac05e4f1-8d85-f111-8075-7c1e5268570d, Calendar/Events=5294c28a-f078-f111-ab0e-7ced8ddc4a05. For Daily Briefing questions (portfolio counts + narrative), use the daily-briefing overview tool instead — do not pass a Briefing configId here.",
+  "sprk_handlerclass": "GridOverviewHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — this tool exists for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "spaarke.grid_overview Request",
+    "description": "ONE required argument: the sprk_gridconfiguration record id whose saved FetchXML defines the overview to run.",
+    "type": "object",
+    "required": ["configId"],
+    "properties": {
+      "configId": {
+        "type": "string",
+        "format": "uuid",
+        "minLength": 1,
+        "description": "The sprk_gridconfiguration record id (GUID) for the target grid/surface. The tool runs that configuration's saved FetchXML with the current date injected server-side."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "spaarke.grid_overview Result",
+    "type": "object",
+    "required": ["tool", "configId", "entity", "count", "rows", "rowCount"],
+    "properties": {
+      "tool": { "const": "spaarke.grid_overview" },
+      "configId": { "type": "string", "description": "The grid configuration id that was run." },
+      "view": { "type": "string", "description": "The saved view (grid configuration) display name." },
+      "entity": { "type": "string", "description": "Table logical name the saved query targets." },
+      "today": { "type": "string", "description": "The server date (ISO-8601) injected into the saved query — proves server-side date injection." },
+      "count": { "type": "integer", "description": "Accurate matching record count (from returntotalrecordcount) or the returned-row count as a lower bound." },
+      "rowCount": { "type": "integer", "description": "Number of rows returned (capped)." },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "description": "Selected columns plus '@citation.path' (tables/{t}/records/{id}) and the primary id column."
+        }
+      },
+      "citations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "entity": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. configId is supplied per-call by the model (surface-agnostic); task 021 wired the concrete grid + Calendar configIds into sprk_description above (Daily Briefing is a separate tool/row — see sprk_analysistool-daily-briefing-overview-row.json)."
+  }
+}

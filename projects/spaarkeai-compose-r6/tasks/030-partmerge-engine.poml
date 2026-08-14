@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Part-merge engine in Services/Compose (body → firm/matter `.dotx`: styles/numbering/theme/headers/footers/`sectPr`)</title>
+    <phase>3 Template part-merge</phase>
+    <gate>blocked until 020</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New OOXML part-merge component in `.cs` on the `bff-api` hot path (`Services/Compose/`), NEW-surface, architectural blast radius (house-style chrome applied to every document). FULL per root CLAUDE.md §8 (modifying `.cs`, tags include `compose`/BFF, NEW-surface). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Direct OOXML part-merge (not `altChunk`) is the highest-judgment task in Phase 3 — reconciling `styles.xml` / `numbering.xml` / theme / headers-footers / `sectPr` across two packages while preserving the editor body's numbering identity is an architectural interface decision with real fidelity-loss failure modes. Opus per plan.md §5 Phase 3 + Step 3.5.5b (high-blast-radius / architectural).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a new engine inside `Services/Compose/` — the most-contested BFF surface in the repo, actively edited by `spaarkeai-compose-r5` (`ComposeService.cs`/`ComposeWorkspace.tsx`), `spaarkeai-compose-fidelity-r4.5`, `spaarkeai-compose-r1/r2/r3`, `spaarke-ai-architecture-redesign-r2` (sole owner of `Services/Ai/`), and `ai-advanced-capabilities-agreements-r1` / `analysis-hub-r1`. Serialize Compose-file edits; sequential after 020; run `/conflict-check` before the PR. Phase 3 is cross-phase-independent of Phase 4/5 AFTER 020 lands, but still serializes its own Compose edits.</parallel-reason>
+    <deps>020</deps>
+    <tags>bff,compose</tags>
+    <estimated-effort>1.5-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build a NEW OOXML part-merge engine INSIDE `Services/Compose/` that merges the editor's rendered docx BODY into a
+    firm/matter `.dotx` template that supplies `styles.xml` / `numbering.xml` / theme / headers / footers / `sectPr` —
+    via DIRECT OOXML part-merge on `DocumentFormat.OpenXml` 3.5.1, NOT `altChunk` (which merely embeds foreign content
+    without adopting the template's chrome). This is FR-05, LOCKED by the owner (2026-08-05) to part-merge-in-Compose.
+    Do NOT extend the text-only `WordTemplateService` (it does `{{placeholder}}` text-node replacement only and cannot
+    inject a full authored body). Native Dataverse `documenttemplate` is REJECTED (zero existing code). Keep
+    `Services/Compose/` pure (`byte[]`-in / projection-out; no `Microsoft.Graph`, no AI-internal types). This is a
+    NEW component — the `&lt;justification&gt;` block below is mandatory and code-review Step 6.6 verifies it.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF + Compose). Expert in OOXML packaging (`DocumentFormat.OpenXml` 3.5.1) — `MainDocumentPart`, `StyleDefinitionsPart`, `NumberingDefinitionsPart`, `ThemePart`, `HeaderPart`/`FooterPart`, `SectionProperties`, and relationship/`rId` reconciliation across two packages. Understands the R4.5 `NumberingComputationEngine` and the render-from-model precedent in `ComposeDocumentRenderer`. Follow ADRs strictly.</role>
+
+  <goal>
+    A new part-merge engine in `src/server/api/Sprk.Bff.Api/Services/Compose/` that, given (a) the editor's rendered
+    docx body and (b) a firm/matter `.dotx`, produces one merged docx whose `styles.xml` / `numbering.xml` / theme /
+    headers / footers / `sectPr` come from the template and whose body content comes from the editor — with `rId`/part
+    references reconciled so the output opens clean in Word. A seam test (built in 033) will assert the template's
+    chrome provenance (`styles.xml` / `sectPr` / header-footer) on the merged output.
+  </goal>
+
+  <context>
+    <background>
+      FR-05 assembles house-style chrome onto Compose documents. The existing `WordTemplateService`
+      (`Services/Ai/Delivery/WordTemplateService.cs`) is text-only `{{placeholder}}` replacement over `ITemplateEngine`
+      (Handlebars) — it CANNOT inject a full authored body into a style-supplying `.dotx`. The real OOXML part/packaging
+      machinery already lives in `Services/Compose/` on `DocumentFormat.OpenXml` 3.5.1 (see `ComposeDocumentRenderer`
+      `SynthesizeDocument:102` / `AppendSection:142` — both author-not-patch). The owner LOCKED the mechanism to direct
+      part-merge in `Services/Compose` (spec FR-05; Owner Clarifications Template-merge = part-merge-in-Compose; native
+      `documenttemplate` rejected — zero code, placeholder-merge insufficient). This task builds the merge engine; task
+      031 reuses the `template` entity + `ITemplateEngine` for storage/variable rendering; task 032 wires endpoint +
+      client; task 033 adds the provenance tests. Success Criterion 3 depends on this task.
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/ — a NEW part-merge engine (body → firm/matter `.dotx`; styles/numbering/theme/headers/footers/`sectPr` from the template). Exact filename decided in design; stays inside `Services/Compose/`.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs — render-from-model precedent (`SynthesizeDocument:102`, `AppendSection:142`); the OOXML author-not-patch pattern to follow, and the source of the editor body this engine merges.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs — `NumberingComputationEngine:1357` (deterministic `numId`-scoped); the merge must not break numbering identity.</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/WordTemplateService.cs — text-only `{{placeholder}}` replacement; explicitly NOT the place to build part-merge (do not extend it).</file>
+      <file role="reference">projects/spaarkeai-compose-r6/spec.md — FR-05 (LOCKED), §11 New Components (part-merge row), Placement &amp; New Components; design.md §3-Q3 (native `documenttemplate` rejected).</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">The canonical document model — the single hub between every source and the editor; the editor body this engine merges is rendered from that model.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-05">MUST build the OOXML part-merge INSIDE `Services/Compose/` via DIRECT part-merge (adopt the template's `styles.xml`/`numbering.xml`/theme/headers/footers/`sectPr`), NOT `altChunk`. Scope: the merged output carries the template's chrome and the editor's body content; do NOT extend the text-only `WordTemplateService`; do NOT use native `documenttemplate`.</constraint>
+    <constraint source="ADR-007">`Services/Compose/` stays `byte[]`-in / projection-out; no `Microsoft.Graph` types above `SpeFileStore`. Scope: the engine operates on in-memory OOXML packages (`byte[]`/streams), not external stores.</constraint>
+    <constraint source="ADR-013">MUST NOT inject `IOpenAiClient`/`IPlaybookService`/executor/routing into `Services/Compose/`, and MUST NOT fork `Services/Ai/`. Scope: `Services/Compose/` stays pure (Tier-1 NetArchTest green); template storage is reached via the `template` entity + `ITemplateEngine` seam only (task 031).</constraint>
+    <constraint source="ADR-039">Engine frozen — MUST NOT add a new AI dispatch endpoint. Scope: part-merge is pure OOXML packaging, no AI dispatch.</constraint>
+    <constraint source="project / §11">This is genuinely NEW surface (see `&lt;justification&gt;`). Scope: ONE part-merge engine; do NOT duplicate `ComposeDocumentRenderer` rendering nor `WordTemplateService` variable-replacement — reuse them.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); measure compressed publish size and report absolute + delta vs ~49.63 MB baseline (incl. PDBs) — expected ~0 MB (pure OOXML on existing `DocumentFormat.OpenXml` 3.5.1, no new runtime package). Verify no new HIGH CVE. Run `/conflict-check` before the PR. NEVER delete `docxBridge.ts`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML direct part-merge (styles/numbering/theme/headers/footers/sectPr adoption + `rId` reconciliation); render-from-model precedent; BFF hygiene + Compose purity</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+      <file>projects/spaarkeai-compose-r6/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Author-not-patch OOXML precedent" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs (:102, :142)">
+        `SynthesizeDocument`/`AppendSection` build OOXML by authoring parts, never surgically patching inherited bytes. Follow this posture for the part-merge: construct the merged package by copying the template's chrome parts and grafting the editor body, reconciling `rId`s — do not text-search or byte-patch.
+      </pattern>
+      <pattern name="Numbering identity" location="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs (:1357)">
+        `NumberingComputationEngine` is `numId`-scoped and deterministic. When adopting the template's `numbering.xml`, preserve/remap `numId` references so the merged body's list numbering stays identical to what the model computed — do not recompute.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec FR-05 (LOCKED), §10/§11 Placement + New Components, design §3-Q3, ADR-007/013/039/049, `.claude/constraints/bff-extensions.md`.</step>
+    <step order="1" name="Re-grep the surfaces">Confirm `ComposeDocumentRenderer` author surface (`SynthesizeDocument:102`/`AppendSection:142`), `NumberingComputationEngine:1357`, and that `WordTemplateService` is text-only. Confirm `DocumentFormat.OpenXml` 3.5.1 is the pinned package.</step>
+    <step order="2" name="Design the merge">Design the direct part-merge: which parts come from the template (`styles.xml`/`numbering.xml`/theme/`HeaderPart`/`FooterPart`/`sectPr`) vs the editor body; the `rId`/relationship reconciliation strategy; and how `numId` references are preserved so numbering identity survives. Explicitly reject `altChunk`.</step>
+    <step order="3" name="Implement the engine">Implement the part-merge engine in `Services/Compose/` — copy the template package, graft the editor body, reconcile references, emit one merged `byte[]` docx. Reuse `ComposeDocumentRenderer` for body rendering; do not duplicate it.</step>
+    <step order="4" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="5" name="Build + hygiene">Build BFF; run the Compose suite; confirm Tier-1 NetArchTest green (no AI-internal injection, no `Services/Ai/` fork). Run `dotnet publish -c Release` and report compressed size + delta vs ~49.63 MB (incl. PDBs). Run `dotnet list package --vulnerable --include-transitive`. Run `/conflict-check`. State the Placement Justification for the PR.</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-r6/tasks/TASK-INDEX.md`: set task 030 to ✅. Record any deviation in `projects/spaarkeai-compose-r6/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If direct part-merge cannot reconcile the template's `numbering.xml`/`styles.xml` with the editor body without breaking numbering identity or forcing an `altChunk` embed (which FR-05 forbids), STOP and escalate per root CLAUDE.md §6 — do NOT silently fall back to `altChunk` or to extending `WordTemplateService`. Surface the specific OOXML reconciliation conflict (part + `rId`/`numId`) and the options before proceeding.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`WordTemplateService` (`Services/Ai/Delivery/WordTemplateService.cs`) — text-node `{{placeholder}}` replacement over `ITemplateEngine` (Handlebars); NO styles/numbering/theme/`sectPr` merge. Native Dataverse `documenttemplate` = ZERO existing code (verified: no `documenttemplate` OOXML part-merge anywhere in `Services/`). The real OOXML packaging lives in `Services/Compose/` (`ComposeDocumentRenderer`), which authors bodies but does not merge a template's chrome.</existing>
+    <extension>No — `WordTemplateService` cannot inject a full authored body into a style-supplying `.dotx` (it only replaces text nodes), and `ComposeDocumentRenderer` authors a body but does not adopt another package's `styles.xml`/`sectPr`/header-footer. A dedicated part-merge engine is required; it reuses `ComposeDocumentRenderer` for the body and the `template` entity + `ITemplateEngine` (031) for storage/variables — not a parallel subsystem.</extension>
+    <cost-of-doing-nothing>Without it Compose cannot apply house style (headers/footers/styles/numbering/theme/`sectPr`) to inbound or born-in-Spaarke documents — a document rendered through a firm template would NOT carry that template's chrome, and Success Criterion 3 (part-merge provenance) fails outright.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build BFF; run the Compose test suite; `dotnet publish -c Release` for the size check; `dotnet list package --vulnerable`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ — new OOXML part-merge engine (body → firm/matter `.dotx`, chrome from template)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the editor's rendered docx body and a firm/matter `.dotx`, when merged, then the output's `styles.xml`, `numbering.xml`, theme, headers, footers, and `sectPr` come from the template and the body content comes from the editor.</criterion>
+    <criterion testable="true">The merge uses DIRECT OOXML part-merge, NOT `altChunk` — the template's chrome is adopted, not merely embedded as foreign content.</criterion>
+    <criterion testable="true">The merged body's list numbering stays identical to what the canonical model computed (`numId` references preserved/remapped; `NumberingComputationEngine` output not recomputed).</criterion>
+    <criterion testable="true">The merged docx opens clean in Word (relationships/`rId`s reconciled; no repair prompt).</criterion>
+    <criterion testable="true">`Services/Compose/` stays pure — Tier-1 NetArchTest green: no `IOpenAiClient`/executor/routing injected, no `Services/Ai/` fork (ADR-013); no `Microsoft.Graph` above `SpeFileStore` (ADR-007); `byte[]`-in / projection-out.</criterion>
+    <criterion testable="true">Negative: `WordTemplateService` is NOT extended and native `documenttemplate` is NOT used; `docxBridge.ts` is not deleted.</criterion>
+    <criterion testable="true">BFF build + Compose suite green; compressed publish size reported with ~0 MB delta vs ~49.63 MB baseline (≤60 MB ceiling); no new HIGH CVE; `/conflict-check` clean; Placement Justification stated in the PR.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 030 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
+  </acceptance-criteria>
+
+  <completion-note>COMPLETED 2026-08-07. Commits 976cb1057 (engine + DI + 7 tests) + c9c1b24f2
+    (review round: ALL 030 code-review findings fixed — F1 adopted-sectPr rel reconcile, F2 per-hosting-part
+    rel carry for story/numbering content, F3 early story clones in collect/remap, F4 collision-proof id
+    minting, F5 schema-order numbering insertion, F6 lvlPicBulletId carry, F7 unresolvable numbering
+    stripped LOUDLY, F8 fixed-point style/numbering closure, F9 dangling story refs stripped, F10 hyperlink
+    unwrap keeps text, F12 VBA stripped loudly, commentsExtended threading loss warned; +8 carrier-class
+    tests). Design: TEMPLATE-AS-BASE direct part-merge (ChangeDocumentType; template chrome structurally
+    free; NOT altChunk). ComposeTemplatePartMergeEngine.Merge(bodyDocx, templateDotx, warnings) -> byte[];
+    unconditional singleton (ComposeModule). Step 9.5: adr-check PASS all 7 axes zero violations;
+    code-review findings all fixed same-task. Suite 1039/1039; publish 46.98 MB (+0.04 vs 46.94 baseline,
+    ceiling 60); CVE clean; conflict-check clean (no open PR touches Services/Compose). Known deferred:
+    modern comment threading (commentsExtended) not carried (warned); mixed-attribute orphan-rel package
+    bloat on the rare dual-dangling-ref element (cosmetic).</completion-note>
+  <notes>
+    Spec FR-05 (LOCKED, owner 2026-08-05); §11 part-merge component row; Placement &amp; New Components. This is the
+    house-style chrome engine — the flagship Phase 3 output. Reuse `ComposeDocumentRenderer` (body) + the `template`
+    entity + `ITemplateEngine` (031, storage/variables); do NOT rebuild either. Task 032 wires it; task 033 asserts the
+    template chrome provenance. TASK-INDEX.md + current-task.md are owned by the main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

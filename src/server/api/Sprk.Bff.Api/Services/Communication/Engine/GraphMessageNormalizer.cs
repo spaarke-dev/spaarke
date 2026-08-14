@@ -3,7 +3,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Graph.Models;
 using Sprk.Bff.Api.Services.Communication.Models;
 
-namespace Sprk.Bff.Api.Services.Communication.Engine;
+namespace Sprk.Bff.Api.Infrastructure.Graph;
 
 /// <summary>
 /// Maps a channel-specific <see cref="Message"/> (Microsoft Graph) into the channel-neutral
@@ -25,6 +25,7 @@ public sealed class GraphMessageNormalizer
 
         var to = AddressesOf(message.ToRecipients);
         var cc = AddressesOf(message.CcRecipients);
+        var bcc = AddressesOf(message.BccRecipients);
 
         var isHtml = message.Body?.ContentType == BodyType.Html;
         var bodyContent = message.Body?.Content;
@@ -35,6 +36,7 @@ public sealed class GraphMessageNormalizer
             From = message.From?.EmailAddress?.Address,
             To = to,
             Cc = cc,
+            Bcc = bcc,
             Subject = message.Subject,
             // BodyText is the text-consuming rungs' input (AI classification, semantic
             // match). For HTML bodies — the common case — reduce to plain text; leaving

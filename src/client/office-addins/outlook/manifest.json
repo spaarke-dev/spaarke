@@ -90,6 +90,10 @@
             {
               "id": "grantAccess",
               "type": "executeFunction"
+            },
+            {
+              "id": "quickSave",
+              "type": "executeFunction"
             }
           ]
         }
@@ -166,6 +170,30 @@
                         "description": "Create a Spaarke To Do linked to this email (smart-todo-decoupling-r3 FR-27)"
                       },
                       "actionId": "openCreateTodoTaskpane"
+                    },
+                    {
+                      "id": "QuickSaveButton",
+                      "type": "button",
+                      "label": "Quick Save",
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://localhost:3000/assets/save-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://localhost:3000/assets/save-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://localhost:3000/assets/save-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Quick Save to Spaarke",
+                        "description": "File this email to Spaarke's predicted record in one click (FR-B2). If there is no suggestion, the Spaarke pane opens so you can choose where to file."
+                      },
+                      "actionId": "quickSave"
                     }
                   ]
                 }

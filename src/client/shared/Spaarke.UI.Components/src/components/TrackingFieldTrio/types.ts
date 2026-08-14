@@ -27,6 +27,14 @@ export interface ITrackingFieldTrioProps {
   monitor: boolean;
   highPriority: boolean;
   accessPermission: number | null;
+  /** Optional control header title (task 073 UAT #3). When supplied, the
+   * component renders a header ROW (32px tall) with this title on the left
+   * (14px semibold) and the governance icons (person/email) on the right —
+   * the standard PCF header treatment. When OMITTED (the default), no header
+   * is drawn and the governance icons fall back to their prior absolute
+   * top-right placement, so existing consumers (e.g. the reading-pane
+   * `EmailTrackingPanel`) are visually unchanged. */
+  title?: string;
   /** Show field labels above each control. Default true. */
   showTitle?: boolean;
   /** Show a version footer in the bottom-right corner. Default false (hidden). */

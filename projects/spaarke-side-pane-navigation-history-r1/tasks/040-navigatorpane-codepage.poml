@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>NavigatorPane code page — Vite webresource pane, 3-tab scaffold + search bar</title>
+    <phase>4 Navigator core</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New code-page surface (.tsx) hosted as a webresource pane; frontend/fluent-ui; the shell every Navigator tab/feature builds on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>High reuse (mirror CalendarSidePane/EventDetailSidePane code-page pattern + scaledTheme/useUiScale); the scaffold is well-specified with a closed acceptance set.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group C runs alongside task 030 (capture service) — different surfaces (new NavigatorPane code page vs the capture service module), no shared files.</parallel-reason>
+    <deps>011,021</deps>
+    <tags>code-page,frontend,fluent-ui</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Create the NavigatorPane Vite code page under src/solutions/NavigatorPane/, hosted as a pageType:'webresource' pane (CalendarSidePane pattern). Ship the 3-tab scaffold (Recent / Pinned / Views) plus a persistent top-of-pane search-bar placeholder, with theme detection and --sprk-ui-scale wiring, rendering through a shared Navigator body component that registers against SprkSidePaneHost. This is the shell later tasks (041/042/050/051/052/060/070) extend.</prompt>
+  <role>SPAARKE platform developer with Fluent UI v9 + Vite code-page (webresource pane) and Power Apps theme/scale expertise. Follow ADRs strictly.</role>
+  <goal>A new src/solutions/NavigatorPane/ Vite solution that builds to a singlefile bundle, mounts as a pageType:'webresource' pane, shows a 3-tab scaffold (Recent/Pinned/Views) + persistent search-bar placeholder, detects light/dark and honors --sprk-ui-scale, and renders via a shared Navigator body component registered against SprkSidePaneHost. Renders a safe empty state when no Xrm is present.</goal>
+  <context>
+    <background>Per spec FR-01 surface + FR-11 search scaffold and plan.md Phase 4 task 040. The Navigator body is authored as a shared component so a phase-2 dashboard widget can reuse it without rework (NFR-08). Depends on the framework host + registry (011) and the deployed sprk_navitem entity (021). Mirrors the shipping CalendarSidePane / EventDetailSidePane Vite code-page-as-webresource-pane reference impls; theme + scale via scaledTheme/useUiScale (NFR-07).</background>
+    <relevant-files>
+      <file role="new">src/solutions/NavigatorPane/src/main.tsx</file>
+      <file role="new">src/solutions/NavigatorPane/src/NavigatorBody.tsx</file>
+      <file role="new">src/solutions/NavigatorPane/vite.config.ts</file>
+      <file role="new">src/solutions/NavigatorPane/package.json</file>
+      <file role="new">src/solutions/NavigatorPane/__tests__/NavigatorBody.test.tsx</file>
+      <file role="canonical-reference">src/solutions/CalendarSidePane/</file>
+      <file role="canonical-reference">src/solutions/EventDetailSidePane/</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/scaledTheme.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/hooks/useUiScale.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SidePane/SprkSidePaneHost.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">SprkSidePaneHost + sidePaneRegistry — the host the Navigator body registers against and the rail icon it drives.</dependency>
+      <dependency task="021" status="pending">Deployed sprk_navitem entity + security roles — the store the tabs will read/write (scaffold only in this task).</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-006">The pane body ships as a Vite code-page bundle hosted as a pageType:'webresource' pane (CalendarSidePane pattern) — NOT a classic HTML web resource and NOT a per-form handler (Path C comply; flag for adr-check).</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; portal FluentProvider re-wrap; code-page theme detection (prefers-color-scheme + theme URL param); --sprk-ui-scale via scaledTheme/useUiScale (NFR-07).</constraint>
+    <constraint source="ADR-022">Any @spaarke/ui-components code consumed MUST stay React-16/17-safe (no createRoot in the shared lib; JSXElement not JSX.Element). The code page itself is React 19.</constraint>
+    <constraint source="project">Host-context only — no BFF, no plugin, no per-form web resource. All later data access is Xrm.WebApi.</constraint>
+    <constraint source="project">Author the Navigator body as a shared component so a phase-2 dashboard widget can register it without rework (NFR-08); no widget registration ships in r1.</constraint>
+    <constraint source="project">Code page = Vite npm run build (NOT build:prod); cache-clear (rm -rf dist/ node_modules/.vite/ .vite/) + recompile @spaarke/ui-components first; verify a known string in the built HTML.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Vite code-page-as-webresource-pane + Fluent v9 theme detection + --sprk-ui-scale</topic>
+    <files>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code-page-as-webresource-pane" location="src/solutions/CalendarSidePane/">Mirror the Vite singlefile + main.tsx bootstrap + webresource-pane hosting; adapt for the Navigator 3-tab scaffold.</pattern>
+      <pattern name="Theme detection + scale" location="src/client/shared/Spaarke.UI.Components/src/components/SprkModal/scaledTheme.ts">Detect light/dark (prefers-color-scheme + theme URL param) and apply the scaled Fluent theme + useUiScale for NFR-07.</pattern>
+      <pattern name="Register against the host" location="src/client/shared/Spaarke.UI.Components/src/components/SidePane/SprkSidePaneHost.tsx">Render the Navigator body via a sidePaneRegistry entry ({ id, icon, title, order, component }); one entry = one rail icon.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read the CalendarSidePane/EventDetailSidePane reference solutions.</step>
+    <step order="1">Scaffold src/solutions/NavigatorPane/ (package.json, vite.config.ts singlefile, main.tsx) mirroring CalendarSidePane; wire npm install --legacy-peer-deps.</step>
+    <step order="2">Build NavigatorBody.tsx as a shared component: 3-tab layout (Recent / Pinned / Views) + a persistent top-of-pane search-bar placeholder; tabs are scaffold only (no data wiring this task).</step>
+    <step order="3">Add theme detection (prefers-color-scheme + theme URL param) and apply scaledTheme + useUiScale so --sprk-ui-scale is respected; wrap portalled surfaces in their own FluentProvider (ADR-021).</step>
+    <step order="4">Register the Navigator body against SprkSidePaneHost via a sidePaneRegistry entry so it mounts as a webresource pane driving one rail icon.</step>
+    <step order="5">Handle the no-Xrm case: when getXrm() returns undefined (non-MDA surface), render a safe empty state and do not throw.</step>
+    <step order="6">Author __tests__/NavigatorBody.test.tsx: tab scaffold + search-bar placeholder render; light AND dark render correctly; portal FluentProvider re-wrap present (ADR-021); --sprk-ui-scale applies; no-Xrm empty state does not throw.</step>
+    <step order="7">Cache-clear + recompile @spaarke/ui-components, then Vite npm run build; confirm the bundle builds singlefile and a known string is present in the built HTML.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 040 status to completed.</step>
+    <step order="9">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the current UCI build does not host the code page reliably as a pageType:'webresource' pane (mount/theme/scale failing), STOP and escalate (root §6.5 — ties to the FR-00 spike / Path A fallback) rather than forcing a form-handler or BFF workaround that violates the project MUST-NOT rules.</trigger>
+  </escalation>
+  <justification>
+    <existing>src/solutions/CalendarSidePane/ and src/solutions/EventDetailSidePane/ — shipping Vite code pages hosted as webresource panes (chrome + theme + mount pattern).</existing>
+    <extension>Pattern-reuse but not extension: those are distinct EventDetail/Calendar surfaces with their own bodies; NavigatorPane is a separate surface (3-tab Recent/Pinned/Views quick-access) with its own registry entry and body. Mirror their code-page mechanics, do not extend their components.</extension>
+    <cost-of-doing-nothing>Without the NavigatorPane surface there is no docked Navigator shell for the tabs, capture, and search to render into — the core user need (one-gesture cross-device quick-access, spec §1) fails and tasks 041/042/050/051/052/060/070 have nowhere to build.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Tab scaffold + search bar render in light and dark">
+      <steps>
+        <step>Mount NavigatorBody in light theme; confirm Recent/Pinned/Views tabs + search-bar placeholder.</step>
+        <step>Re-mount in dark theme (data-theme=dark / prefers-color-scheme dark).</step>
+      </steps>
+      <expected>All three tabs + the persistent search bar render with Fluent v9 tokens honoring light and dark correctly (no hardcoded colors).</expected>
+    </test>
+    <test name="--sprk-ui-scale applies (ADR-021 portal check)">
+      <steps>
+        <step>Mount with a non-default --sprk-ui-scale value and inspect the applied scaled Fluent theme.</step>
+        <step>Inspect any portalled surface for a FluentProvider re-wrap.</step>
+      </steps>
+      <expected>The scaled theme reflects --sprk-ui-scale; portalled content is wrapped in its own FluentProvider (ADR-021 portal gotcha).</expected>
+    </test>
+    <test name="No-Xrm surface degrades gracefully">
+      <steps>
+        <step>Mount the body where getXrm() returns undefined (non-MDA context).</step>
+      </steps>
+      <expected>A safe empty state renders and the page does not throw.</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components; run Jest render tests; Vite npm run build (cache-clear first).</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/src/main.tsx</output>
+    <output type="code">src/solutions/NavigatorPane/src/NavigatorBody.tsx</output>
+    <output type="test">src/solutions/NavigatorPane/__tests__/NavigatorBody.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the NavigatorPane solution, when built with Vite singlefile, then it produces a singlefile bundle whose built HTML contains a verified known string.</criterion>
+    <criterion testable="true">Given the app pane, when the Navigator body registers against SprkSidePaneHost, then it mounts as a pageType:'webresource' pane driving exactly one rail icon.</criterion>
+    <criterion testable="true">Given the mounted body, when it renders, then the Recent/Pinned/Views tab scaffold and the persistent search-bar placeholder are visible.</criterion>
+    <criterion testable="true">Given light and dark themes, when the body renders, then Fluent v9 tokens honor both correctly with a portal FluentProvider re-wrap (ADR-021).</criterion>
+    <criterion testable="true">Given a non-default --sprk-ui-scale, when the body renders, then the scaled Fluent theme respects it.</criterion>
+    <criterion testable="true">Negative: given no Xrm on the surface, when the body mounts, then it renders a safe empty state and does not throw.</criterion>
+    <criterion testable="true">All render tests pass; Vite build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-01 (surface) + FR-11 (search scaffold) and plan.md Phase 4 task 040. Tabs are scaffold only here; data wiring lands in 041/042 (Recent), 050/051/052 (Pinned), 060 (Views), 070 (search). Body is a shared component for phase-2 dashboard-widget reuse (NFR-08). Run /conflict-check before any @spaarke/ui-components PR.
+
+COMPLETED 2026-08-13 (sonnet, FULL rigor). Escalation trigger did NOT fire. Built src/solutions/NavigatorPane/ (Vite singlefile code page mirroring EventDetailSidePane's simpler vite.config — no resolveSharedLibDeps plugin needed since only @spaarke/ui-components' pre-built dist/ is consumed): main.tsx renders SprkSidePaneHost (task 011) as the pane's root component and registers NavigatorBody as its sole sidePaneRegistry contributor at module-load time — this is how "one contributor = one rail icon" (spec FR-01/FR-13) is satisfied by a single webresource bundle. NavigatorBody.tsx = the 3-tab (Recent/Pinned/Views) + persistent search-bar-placeholder scaffold, authored as a standalone shared component (NFR-08): it resolves its OWN theme (resolveCodePageTheme + useUiScale/scaleTheme) rather than depending on a parent, explicitly re-wraps its one portalled surface (the search-bar info Tooltip) in its own FluentProvider (ADR-021 Option A), and renders a safe empty state when getXrm() is undefined.
+
+Deviations (Path C — pivot to comply, CLAUDE.md §6.5): the task's constraint text says "theme detection (prefers-color-scheme + theme URL param)" — used the codebase's canonical `resolveCodePageTheme()`/`setupCodePageThemeListener()` (localStorage -> URL flags -> navbar DOM) instead of a raw OS `prefers-color-scheme` media query, because ADR-021 + xrmContext.ts + themeStorage.ts all explicitly state OS-level dark-mode detection is NOT consulted (Spaarke theme system controls all surfaces), and every sibling code page (CalendarSidePane, EventDetailSidePane) uses this exact utility. See notes/task-040-navigatorpane-deviations.md.
+
+Self-run code-review (Step 9.5) found one real issue, fixed before completion: the search-bar info Tooltip trigger was a bare, non-focusable `Info16Regular` icon (WCAG 2.1 AA / ADR-021 MUST gap) with `Tooltip relationship="label"` — which would have silently overridden the icon's own aria-label with the (different) tooltip text. Fixed: trigger is now a `Button appearance="transparent"` (keyboard-focusable, matches the SprkSidePaneHost rail-icon precedent) and `relationship="description"` (adds aria-describedby without clobbering the explicit aria-label). Self-run adr-check: 0 violations against ADR-006/021/022.
+
+Build (Vite npm run build, NOT build:prod; cache-cleared rm -rf dist/ node_modules/.vite/ .vite/ before every build; @spaarke/ui-components recompiled first via `npm run build` (tsc) in that package): green. Known-string verified in dist/index.html: `<title>Spaarke Navigator</title>` plus NavigatorBody-source strings ("Navigator is unavailable outside a Dataverse session", "Search wiring lands in a later task") all present post-cache-clear rebuild — proves a fresh bundle, not stale. `npx tsc --noEmit`: clean. `npx jest` (jest.config.cjs, ts-jest + jsdom): 5/5 passing — required adding `@testing-library/dom` (missing peer of `@testing-library/react`), extending `transformIgnorePatterns` to allow the shared lib's transitive ESM deps (d3-force/d3-dispatch/d3-quadtree/d3-timer/marked — mirrors Spaarke.UI.Components' own jest.config.js allow-list), and a `moduleNameMapper` react/react-dom dedupe (this `file:`-referenced package has its OWN un-hoisted node_modules/react, distinct from the consumer's — without forcing single-instance resolution, `useUiScale`'s hooks execute against a react module with no live dispatcher: "Cannot read properties of null (reading 'useState')"). No eslint config exists at this level (matches CalendarSidePane/EventDetailSidePane precedent — lint script present as boilerplate, not enforced per-package).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

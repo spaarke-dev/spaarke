@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarkeai-compose-r6">
+  <metadata>
+    <title>Endpoint + client wiring for template selection/merge</title>
+    <phase>3 Template part-merge</phase>
+    <gate>blocked until 031</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.cs` (Compose endpoint) AND `.tsx` (Compose client) on the `bff-api` + frontend hot path — end-to-end wiring of the template-merge capability across the BFF/client boundary. FULL per root CLAUDE.md §8 (modifying `.cs`/`.tsx`, tags include `compose`/`frontend`). Step 9.5 code-review + adr-check run.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring over a finished engine (030) + storage path (031): add a Compose endpoint that invokes the merge and a client affordance to select/apply a firm/matter template. The hard judgment is upstream; this is well-specified integration. Sonnet per plan.md §5 Phase 3.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `Api/ComposeEndpoints.cs` + `Services/Compose/` + the Compose client (`Spaarke.Compose.Components`) — the most-contested BFF + client surface, actively edited by `spaarkeai-compose-r5` (`ComposeService.cs`/`ComposeWorkspace.tsx`), `r4.5`, `r1/r2/r3`, `spaarke-ai-architecture-redesign-r2`, and `agreements-r1`/`analysis-hub-r1`. Serialize Compose-file edits; sequential after 031; `/conflict-check` before the PR; NEVER delete `docxBridge.ts`.</parallel-reason>
+    <deps>031</deps>
+    <tags>bff,compose,frontend</tags>
+    <estimated-effort>1-1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Wire the Phase 3 template-merge end to end: add a Compose endpoint that invokes the 030 part-merge engine (fed by
+    031's resolved firm/matter `.dotx`), and add a client affordance in the Compose workspace to select a firm/matter
+    template and apply the merge to the current document. Keep `Services/Compose/` pure (ADR-007/013) and the client
+    theme-aware (ADR-021, dark mode via Fluent v9 semantic tokens — zero hardcoded colors). NEVER delete `docxBridge.ts`.
+  </prompt>
+
+  <role>SPAARKE platform developer (BFF + Compose client). Comfortable adding a Compose Minimal-API endpoint (`Api/ComposeEndpoints.cs`) with endpoint-filter auth, and a Fluent v9 client affordance in `Spaarke.Compose.Components` (`ComposeWorkspace.tsx`). Knows the ADR-021 dark-mode / semantic-token rule. Follow ADRs strictly.</role>
+
+  <goal>
+    A Compose endpoint that applies template part-merge (030 + 031) to a document and returns/persists the merged
+    result through the existing save path, plus a Compose-workspace client affordance to select a firm/matter template
+    and trigger the merge — theme-aware (light + dark) via Fluent v9 semantic tokens, with `docxBridge.ts` intact.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 030 (part-merge engine) + 031 (template storage/variable reuse) deliver the capability; this task exposes it.
+      The Compose endpoint surface is `Api/ComposeEndpoints.cs`; the client is `Spaarke.Compose.Components`
+      (`ComposeWorkspace.tsx` / `ComposeEditor.tsx`). Adding the endpoint is additive BFF work under the FR-05 Placement
+      Justification (Path A). The client affordance must obey ADR-021 (Fluent v9 semantic tokens; dark-mode correct).
+      Success Criterion 3 (a document merged through a firm template carries that template's chrome) becomes reachable
+      from the product once this wiring lands.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — add the template-merge endpoint (endpoint-filter auth) invoking the 030 engine via 031's resolved template.</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ — the part-merge path (030/031) the endpoint invokes; persist the merged result via the existing save path.</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — add the firm/matter template-select + apply-merge affordance.</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — the docx↔editor bridge; NEVER delete; reuse for the merged-document round-trip.</file>
+      <file role="reference">projects/spaarkeai-compose-r6/spec.md — FR-05, Placement &amp; New Components (version-history client entry point pattern is the ADR-021 sibling), ADR-021 dark-mode.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">Supplies the resolved firm/matter `.dotx` (from the `template` entity + `ITemplateEngine`) the endpoint feeds to the 030 merge engine.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec / FR-05">The endpoint MUST invoke the 030 part-merge engine (not a re-implementation) and persist through the existing Compose save path; the client affordance selects a firm/matter template and applies the merge. Scope: wiring only — the merge machinery is 030's, the storage is 031's.</constraint>
+    <constraint source="ADR-021">The client affordance MUST use Fluent v9 semantic tokens (zero hardcoded colors) and render correctly in BOTH light and dark themes. Scope: the template-select + apply UI; verified by the dark-mode `&lt;ui-tests&gt;` below.</constraint>
+    <constraint source="ADR-013 / ADR-007">Keep `Services/Compose/` pure — no AI-internal injection, no `Services/Ai/` fork; no `Microsoft.Graph` above `SpeFileStore`; `byte[]`-in / projection-out. Scope: the endpoint stays within the Compose facade boundary.</constraint>
+    <constraint source="ADR-039">Engine frozen — the new endpoint is a Compose endpoint, NOT a new AI dispatch endpoint. Scope: no AI dispatch added.</constraint>
+    <constraint source="project / BFF Hygiene §10">State the Placement Justification in the PR (cite `.claude/constraints/bff-extensions.md`); report compressed publish size + delta vs ~49.63 MB baseline (incl. PDBs) — expected ~0 MB. Verify no new HIGH CVE. Run `/conflict-check` before the PR. NEVER delete `docxBridge.ts`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Compose Minimal-API endpoint + endpoint-filter auth; Fluent v9 client affordance (ADR-021 dark mode); Compose client round-trip via `docxBridge.ts`; BFF hygiene</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>projects/spaarkeai-compose-r6/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Compose endpoint" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">
+        Follow the existing Compose endpoint shape (endpoint-filter auth, `byte[]`-in / projection-out) to add the template-merge endpoint; invoke the 030 engine and persist via the existing save path.
+      </pattern>
+      <pattern name="Theme-aware Compose affordance" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx">
+        Add the template-select + apply-merge affordance using Fluent v9 semantic tokens (no hardcoded colors); reuse `docxBridge.ts` for the merged-document round-trip; never delete it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the FULL rigor-level declaration (🔒 RIGOR LEVEL: FULL / 📋 REASON / 📖 PROTOCOL STEPS). Load spec FR-05 + Placement, ADR-013/007/021/039, `.claude/constraints/bff-extensions.md`.</step>
+    <step order="1" name="Re-grep the surfaces">Confirm the `ComposeEndpoints.cs` endpoint shape + auth filter, the 030/031 entry points, and the `ComposeWorkspace.tsx` affordance seam + `docxBridge.ts` round-trip.</step>
+    <step order="2" name="Add the endpoint">Add the template-merge Compose endpoint (endpoint-filter auth) invoking the 030 engine via 031's resolved template; persist the merged result through the existing save path.</step>
+    <step order="3" name="Add the client affordance">Add the firm/matter template-select + apply-merge affordance in `ComposeWorkspace.tsx` using Fluent v9 semantic tokens (dark-mode correct); reuse `docxBridge.ts`.</step>
+    <step order="4" name="Checkpoint">Run `context-handoff` (silent: "✅ Checkpoint.").</step>
+    <step order="5" name="Build + hygiene + ui-tests">Build BFF + the Compose client (`npm run build`); run the dark-mode `&lt;ui-tests&gt;`. `dotnet publish -c Release` size + delta vs ~49.63 MB. `dotnet list package --vulnerable`. `/conflict-check`. State the Placement Justification.</step>
+    <step order="6" name="Close out">Update `projects/spaarkeai-compose-r6/tasks/TASK-INDEX.md`: set task 032 to ✅. Record any deviation in `projects/spaarkeai-compose-r6/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If wiring the endpoint or client would require re-implementing the merge (rather than invoking 030) or introducing an AI-dispatch endpoint (ADR-039) or a hardcoded-color affordance (ADR-021), STOP and escalate per root CLAUDE.md §6 rather than adapting — surface the boundary conflict and options.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Template select + apply renders in light and dark">
+      <steps>
+        <step>Open the Compose workspace with a document loaded.</step>
+        <step>Open the firm/matter template-select affordance; verify it lists available templates.</step>
+        <step>Toggle the app theme from light to dark (ADR-021).</step>
+        <step>Verify the affordance re-renders using Fluent v9 semantic tokens — no hardcoded colors, correct contrast in both themes, no console errors.</step>
+      </steps>
+      <expected>The template-select + apply-merge affordance is legible and correctly themed in both light and dark; no hardcoded colors; no console errors.</expected>
+    </test>
+    <test name="Apply merge round-trips the document">
+      <steps>
+        <step>Select a firm template and apply the merge.</step>
+        <step>Verify the merged document loads back into the editor via `docxBridge.ts` (no crash; `docxBridge.ts` intact).</step>
+      </steps>
+      <expected>The merged document (template chrome + editor body) round-trips into the editor without error; `docxBridge.ts` is not deleted.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build BFF; `dotnet publish -c Release`; `dotnet list package --vulnerable`.</tool>
+    <tool name="npm">Build the Compose client (`npm run build`) and run the client tests.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — template-merge endpoint</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx — template-select + apply-merge affordance</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a loaded document and a selected firm/matter template, when the merge endpoint is called, then it invokes the 030 part-merge engine (via 031's resolved template) and persists the merged result through the existing Compose save path.</criterion>
+    <criterion testable="true">The client affordance selects a firm/matter template and applies the merge; the merged document round-trips into the editor via `docxBridge.ts` (which is NOT deleted).</criterion>
+    <criterion testable="true">The affordance uses Fluent v9 semantic tokens (zero hardcoded colors) and renders correctly in both light and dark themes (ADR-021).</criterion>
+    <criterion testable="true">Negative: unauthenticated/unauthorized calls to the merge endpoint are rejected by the endpoint-filter auth (not an unhandled error).</criterion>
+    <criterion testable="true">`Services/Compose/` stays pure — Tier-1 NetArchTest green (no AI-internal injection, no `Services/Ai/` fork); no new AI dispatch endpoint (ADR-039).</criterion>
+    <criterion testable="true">BFF + client build green; compressed publish size ~0 MB delta vs ~49.63 MB baseline (≤60 MB ceiling); no new HIGH CVE; `/conflict-check` clean; Placement Justification stated in the PR.</criterion>
+    <criterion testable="true">TASK-INDEX.md shows task 032 as ✅ and any deviation is recorded in projects/spaarkeai-compose-r6/notes/.</criterion>
+  </acceptance-criteria>
+
+  <completion-note>COMPLETED 2026-08-07 (isolated-worktree agent; cherry-picked a1f005033). POST /api/compose/documents/{speId}/apply-template {driveId,templateIdOrName,variables?} -> 200 {templateName,versionId,eTag,mergeWarnings?,contentModel?,contentModelWarnings?} (ADR-040 additive); endpoint mints app-only Dataverse token for the ORG-SHARED template read (CommunicationTemplateEndpoints:95-110 pattern) while document legs stay user-OBO; ComposeService.ApplyTemplateAsync = download -> ComposeTemplatePartMergeEngine.Merge -> ReplaceFileContentAsUserAsync -> re-project. Client: Apply-firm-template affordance in ComposeFormatToolbar (POML said ComposeToolbar - retired; deviation noted) + ComposeApplyTemplateDialog (name/id input v1; PICKER deferred to 052-adjacent - POML ui-test "lists available templates" NOT met as written); dirty/transient guard; warnings fold into saveDegradationWarnings; re-mount via requestLoad (whole-package change - correct existing machinery). 10 server tests + 8 client jest; suite 1104/1104 merged; publish 46.99 MB ~0 delta; CVE clean. Step 9.5 review agent launched on the merged SHAs; triage recorded in notes when returned.</completion-note>
+  <notes>
+    Spec FR-05; Placement &amp; New Components (Path A, additive endpoint). Wiring only — 030 owns the merge, 031 owns
+    storage/variables. The dark-mode `&lt;ui-tests&gt;` satisfy the ADR-021 check required for frontend-tagged tasks.
+    TASK-INDEX.md + current-task.md are owned by the main session.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

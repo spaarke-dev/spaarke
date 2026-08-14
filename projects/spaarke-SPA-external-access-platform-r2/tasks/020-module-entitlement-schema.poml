@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-SPA-external-access-platform-r2">
+  <metadata>
+    <title>Design + create module-entitlement Dataverse schema</title>
+    <phase>P2 Access-control + entitlement</phase>
+    <gate>blocked-until:015</gate>
+    <status>completed</status>
+    <status-note>Resolved to Option B (single Contact-free table) + owner-created the schema on 2026-08-10: sprk_approlemodulemap (sprk_approlename + sprk_modulecode + composite key) + seed rows. See notes/module-entitlement-schema-decision.md. The resolver/widgetRegistry wiring is task 072 (Option-B). No sprk_moduleentitlement external table (Option B drops it — CIAM blanket-entitled in code).</status-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tag `dataverse`; creates NEW schema surface that blocks tasks 021/022/023/026; irreversible-ish (schema changes) — FULL per CLAUDE.md §8 (new file surface + downstream deps).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Schema authoring is well-specified once the shape is decided; the one judgment call (entity vs join) is guarded by an escalation trigger rather than requiring Opus reasoning throughout.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Schema task; downstream tasks 021/022/023/026 depend on the created attributes/entity. Must land before they start.</parallel-reason>
+    <deps>015</deps>
+    <tags>dataverse</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+  <prompt>Design and create the NEW module-entitlement Dataverse schema (Tier-1 entitlement layer) that expresses (a) per-Contact external module entitlement and (b) the App-Role → module mapping for internal entitlement, WITHOUT requiring a Contact to grant internal access. The exact schema shape was deferred by the owner to resource discovery — you decide new-entity vs lightweight-join and confirm with the owner if the choice is non-obvious.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Dataverse schema modeler fluent in Web API metadata creation, option sets, lookups, and polymorphic regarding.</role>
+  <goal>A published module-entitlement schema exists in the dev Dataverse environment: the tables/attributes needed to (1) record a per-Contact entitlement to a named module, and (2) map an App-Role name to a module id for internal entitlement resolution. Schema is documented in notes/ with attribute names, types, and the entity-vs-join decision + rationale. Tasks 021/022/023/026 can build against the created logical names.</goal>
+  <context>
+    <background>FR-07 (two-layer access model): a NEW module-entitlement layer sits ALONGSIDE the existing `sprk_externalrecordaccess` (record participation, 3 access levels, Project-shaped). FR-08: internal module entitlement is resolved from Entra App-Role claims (R2 ships one `FrontDoorUser` role but the schema MUST support per-module roles later without rework). FR-09: external module entitlement is granted per-Contact. NFR: MUST NOT create a Contact merely to grant internal access (entitlement = App Role; Contact = lazy attribution only). The owner deferred the exact shape (new entity vs lightweight join keyed to Contact/App-Role) to resource discovery — this task decides + confirms.</background>
+    <relevant-files>
+      <file>src/... (Dataverse) — existing `sprk_externalrecordaccess` (record participation ONLY; 3 access levels; cannot express self-service submitter or App-Role internal entitlement) — inspect its metadata as the closest neighbor before designing</file>
+      <file>Contact.sprk_externalobjectid — existing oid field (CIAM oid today; broadened to CIAM-or-workforce oid by task 023) — the Contact is the external grantee anchor</file>
+      <file>sprk_servicerequest — STUB entity (name/statecode/regarding only) — NOT the entitlement surface; do not overload it</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md — the schema-creation procedure (Web API + PowerShell; covers what PAC CLI cannot)</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md — FR-07/FR-08/FR-09, NFR-08, New Components table row "Module-entitlement layer"</file>
+    </relevant-files>
+    <dependencies>Task 015 (P1 shell/entitlement scaffold prerequisite) must be complete. This task blocks 021 (resolver), 022 (/me endpoint), 023 (lazy attribution), 026 (admin UI).</dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-024">For any lookup/regarding on the new schema, preserve polymorphic-regarding semantics where a relationship to multiple entity types is needed — do NOT hardcode a single-target lookup where the participation model expects polymorphism. Scope: only the new entitlement schema's relationships.</constraint>
+    <constraint source="spec-NFR">MUST NOT model internal (App-Role) entitlement as a per-Contact row. The App-Role → module mapping MUST be expressible without any Contact record. Scope: internal-entitlement portion of the schema only.</constraint>
+    <constraint source="spec-FR08">Schema MUST support multiple per-module App-Role names later without a shape change (owner: "multiple by module in future — don't foreclose"). Model the role→module mapping as data (rows/option-set), not a single hardcoded `FrontDoorUser` column. Scope: role-mapping portion.</constraint>
+    <constraint source="project">Publishing customizations targets the dev environment only. Use `sprk_` publisher prefix consistent with existing entities. Scope: this task's schema deployment.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/spec.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/design.md</file>
+      <file>projects/spaarke-SPA-external-access-platform-r2/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-schema-creation" location=".claude/skills/dataverse-create-schema/SKILL.md">Create entities/attributes/option-sets/relationships via Web API metadata + PowerShell; publish; verify logical names.</pattern>
+      <pattern name="existing-participation-schema" location="Dataverse sprk_externalrecordaccess">Inspect the existing record-participation entity as the design reference (what it can and cannot express) before choosing the new shape.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Load spec.md FR-07/FR-08/FR-09 + NFR-08 + the New Components "Module-entitlement layer" row. Load the dataverse-create-schema SKILL.</step>
+    <step order="2">Inspect existing metadata for `sprk_externalrecordaccess` and `Contact.sprk_externalobjectid` (via mcp__dataverse describe/read_query) to establish the closest-neighbor baseline and confirm what it cannot express.</step>
+    <step order="3">Decide the schema shape: (a) per-Contact external entitlement — a lightweight join row linking Contact → module-id (string/option-set) + status; (b) App-Role → module mapping — a small config table OR option-set keyed by role-name → module-id, with NO Contact FK. Write the decision + rationale + rejected alternative to notes/module-entitlement-schema-decision.md.</step>
+    <step order="4">ESCALATION GATE: if the entity-vs-join choice is non-obvious (e.g., reuse-vs-new is genuinely balanced, or the App-Role mapping cannot be cleanly separated from the Contact grant), STOP and confirm the shape with the owner per CLAUDE.md §6 before creating anything.</step>
+    <step order="5">Create the schema via Web API metadata + PowerShell (dataverse-create-schema): entities/attributes/option-sets/relationships with `sprk_` prefix. Support: per-Contact external entitlement (Contact lookup + module id + status), and App-Role→module mapping (role-name + module id) with no Contact dependency.</step>
+    <step order="6">Publish customizations to dev. Verify logical names by reading back the metadata (describe) and a smoke read_query.</step>
+    <step order="7">Document the final logical names, types, relationships, and option-set values in notes/module-entitlement-schema-decision.md so tasks 021/022/023/026 can bind to them.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅ completed.</step>
+    <step order="9">Document any deviations in projects/spaarke-SPA-external-access-platform-r2/notes/</step>
+  </steps>
+  <escalation>
+    <trigger>The entity-vs-lightweight-join choice is non-obvious, OR the App-Role→module mapping cannot be modeled without a Contact record — STOP and confirm the schema shape with the owner (§6) before creating any Dataverse component.</trigger>
+  </escalation>
+  <tools>
+    <tool name="dotnet">Build/test .NET</tool>
+    <tool name="terminal">Shell / PowerShell for metadata creation + publish</tool>
+    <tool name="dataverse-mcp">describe / read_query / create_table / update_table for metadata + verification</tool>
+  </tools>
+  <outputs>
+    <output type="code">Dataverse schema (new entity/attributes/option-sets/relationships) published to dev</output>
+    <output type="docs">projects/spaarke-SPA-external-access-platform-r2/notes/module-entitlement-schema-decision.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the published schema, when an external Contact is granted a module, then exactly one entitlement row links that Contact to the named module (verifiable via read_query).</criterion>
+    <criterion testable="true">Given an internal App-Role → module mapping, when it is created, then it exists WITHOUT any Contact record referenced (negative: no Contact row is created to express internal entitlement).</criterion>
+    <criterion testable="true">Given the FR-08 "per-module roles later" requirement, when a second App-Role→module mapping is added, then it requires only a new data row/option-set value — no schema (attribute/entity) change.</criterion>
+    <criterion testable="true">Given the created relationships, when inspected, then polymorphic-regarding semantics are preserved where multi-target is required (ADR-024) and no single-target lookup masks a polymorphic need.</criterion>
+    <criterion testable="true">Given the schema is published, when logical names are read back via describe, then they match the names documented in notes/module-entitlement-schema-decision.md that tasks 021/022/023/026 will bind to.</criterion>
+  </acceptance-criteria>
+  <justification>
+    <existing>`sprk_externalrecordaccess` — record participation only (3 access levels, Project-shaped); grep of Dataverse metadata shows no entity expressing "self-service submitter with no record" or "App-Role → module" internal entitlement. `Contact.sprk_externalobjectid` exists (oid) but is attribution, not entitlement.</existing>
+    <extension>No. Record grants (`sprk_externalrecordaccess`) cannot express App-Role-based internal entitlement (must be Contact-free) nor a self-service submitter with no record; overloading `sprk_servicerequest` (a stub) would conflate intake with entitlement.</extension>
+    <cost-of-doing-nothing>Without it, Front Door users cannot be entitled without a fabricated Project participation grant (violating "no Contact merely to grant internal access"), and the launcher/`/me` has no data source to decide which cards to show.</cost-of-doing-nothing>
+  </justification>
+  <notes>Owner deferred exact shape to resource discovery (spec Unresolved Questions: "Module-entitlement schema shape"). Prefer the lightest shape that satisfies FR-07/08/09 + NFR — a join for external per-Contact entitlement plus a Contact-free role→module mapping. Do NOT create a `sprk_module` catalog entity (Out of Scope: "modules are code-registered in R2"). The role→module mapping is BFF-read config, not a UI-managed catalog.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all knowledge/files before starting; follow task-execute pre-exec checklist; honor the escalation trigger before creating schema.</protocol>
+  </execution>
+</task>

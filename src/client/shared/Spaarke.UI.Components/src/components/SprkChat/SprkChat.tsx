@@ -38,6 +38,7 @@ import {
   IDocumentStatusChatMessage,
   IDocumentStatusMessage,
 } from './types';
+import { thinScrollbarStyle } from '../../theme/scrollbar';
 import { SprkChatMessage, ISprkChatMessageExtendedProps } from './SprkChatMessage';
 import { SprkChatInput } from './SprkChatInput';
 import { SprkChatContextSelector } from './SprkChatContextSelector';
@@ -144,12 +145,28 @@ const useStyles = makeStyles({
   },
   messageList: {
     flexGrow: 1,
+    // D9/QW2 (spaarkeai-assistant-enhancements-r3, 2026-08-13): explicit
+    // `minHeight: 0` on the transcript scroll region. Flex items default to
+    // `min-height: auto`, which — in some embedding hosts (notably the
+    // "Open in Compose" Xrm dialog iframe, shorter than a full tab) —
+    // refuses to shrink this item below its content height even though
+    // `overflowY: 'auto'` is set, so the transcript falls back to
+    // content-height instead of bounding itself to the pane and scrolling
+    // internally (clipped rows + dead whitespace before the composer). See
+    // projects/spaarkeai-assistant-enhancements-r4/notes/
+    // assistant-viewport-clipping-open-in-compose-handoff.md.
+    minHeight: 0,
     overflowY: 'auto',
     display: 'flex',
     flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
     position: 'relative',
+    // FIX 2 (Phase 0, spaarkeai-assistant-enhancements-r2): thin, light-gray,
+    // theme-aware scrollbar — the SAME canonical style ConversationView uses
+    // (owner: "use the shared component we use throughout"). ADR-021 semantic
+    // tokens; see theme/scrollbar.ts for the single definition.
+    ...thinScrollbarStyle,
   },
   emptyState: {
     display: 'flex',
@@ -449,6 +466,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onAttachmentRemoved,
   injectLocalMessage,
   onLocalMessageInjected,
+  // spaarkeai-assistant-enhancements-r2 task 042c-fr-c4 (FR-C4) — one-shot
+  // host→send seam (mirrors injectLocalMessage/onLocalMessageInjected). Both
+  // optional; existing consumers ignore.
+  pendingOutboundMessage,
+  onOutboundConsumed,
   onBeforeSendMessage,
   // R6 Pillar 8 task 097b / TIER-C surface completion — fires whenever the
   // internal messages array changes. Optional; ADR-012 context-agnostic.
@@ -492,6 +514,20 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // Pinned when within 80px of the bottom (tolerant of sub-pixel + fast streams).
     isPinnedToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }, []);
+
+  // spaarkeai-assistant-enhancements-r2 Phase 0 FIX 1 — "pin new user message to
+  // top" scroll behavior (owner request, ChatGPT/Claude pattern). On send, the
+  // NEW user message is scrolled to the top of the viewport (instead of the
+  // legacy scroll-to-bottom) so the full streaming response is readable without
+  // the user scrolling. `lastUserMessageElRef` targets the just-added user
+  // message's wrapper node; `trailingSpacerRef` is sized to the container's
+  // viewport height so a short assistant response can still land at the top
+  // (there is always enough scroll room below); `pendingPinToTopRef` is a plain
+  // ref (not state) armed synchronously inside handleSend and consumed by the
+  // effect below once the new nodes exist in the DOM.
+  const lastUserMessageElRef = React.useRef<HTMLDivElement | null>(null);
+  const trailingSpacerRef = React.useRef<HTMLDivElement | null>(null);
+  const pendingPinToTopRef = React.useRef(false);
 
   // Ref to the root container — passed to QuickActionChips for width-based visibility (NFR-04)
   const rootContainerRef = React.useRef<HTMLDivElement>(null);
@@ -1380,6 +1416,24 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     }
   }, [messages, streamedContent, transcriptFooterSlot]);
 
+  // FIX 1 (Phase 0, spaarkeai-assistant-enhancements-r2): pin the just-sent user
+  // message to the TOP of the scroll container. Runs after `messages` re-renders
+  // with the new user + placeholder-assistant turn (handleSend arms
+  // `pendingPinToTopRef` synchronously). Sizes the trailing spacer to the
+  // container's current viewport height first so the scroll has somewhere to
+  // go even before the assistant response has streamed any content.
+  React.useEffect(() => {
+    if (!pendingPinToTopRef.current) return;
+    const container = messageListRef.current;
+    const target = lastUserMessageElRef.current;
+    if (!container || !target) return;
+    pendingPinToTopRef.current = false;
+    if (trailingSpacerRef.current) {
+      trailingSpacerRef.current.style.minHeight = `${container.clientHeight}px`;
+    }
+    container.scrollTop = target.offsetTop;
+  }, [messages]);
+
   // R6 task 097b / TIER-C — fire onMessagesChange whenever the messages array
   // changes so hosts (ConversationPane / future "summarize conversation"
   // affordances) can maintain a read-only ref of the current conversation.
@@ -1441,6 +1495,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       };
       addMessage(assistantMessage);
       isStreamingRef.current = true;
+
+      // FIX 1: pin the new user message to the top of the viewport instead of
+      // following to the bottom. Turning off the bottom-pin guard here also
+      // means the streaming-token auto-scroll effect above won't yank the
+      // viewport back down while the user reads the response from the top.
+      isPinnedToBottomRef.current = false;
+      pendingPinToTopRef.current = true;
 
       // Start SSE stream — useSseStream re-acquires a fresh token via getAccessToken()
       // at stream-open time (Auth v2 D-AUTH-7), so no token snapshot lives in this closure.
@@ -2437,6 +2498,45 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // Re-subscribe only when handleSend changes (i.e. when the underlying session changes).
   }, [handleSend]);
 
+  // ── task 042c-fr-c4 (FR-C4): one-shot host→send seam ─────────────────────
+  //
+  // When the host transitions `pendingOutboundMessage` from null → a non-null
+  // string, invoke SprkChat's OWN `handleSend` exactly once (the SAME path a
+  // composer click takes — so `onBeforeSendMessage` + `onDecorateOutboundBody`
+  // still run and the turn is a real SendMessage turn), then ack via
+  // `onOutboundConsumed` so the host clears the slot.
+  //
+  // Guards (mirror injectLocalMessage's one-shot + null-reset idiom):
+  //   - `lastOutboundConsumedRef` records the value we last sent so re-renders
+  //     with the same armed value never re-fire; the ref resets to null when
+  //     the slot returns to null, so re-arming with the SAME string (after a
+  //     null) sends again.
+  //   - We do NOT consume (set the ref / call handleSend / ack) while there is
+  //     no session or a stream is in flight — the slot stays pending and the
+  //     effect re-runs when `isStreaming`/`session` change, so a busy component
+  //     never drops the request (and a message is never lost by acking before
+  //     an actual send). This matches handleSend's own `!session || isStreaming`
+  //     early-return guard.
+  const lastOutboundConsumedRef = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!pendingOutboundMessage) {
+      lastOutboundConsumedRef.current = null;
+      return;
+    }
+    if (lastOutboundConsumedRef.current === pendingOutboundMessage) return;
+    // Wait for a ready, idle component — do NOT consume yet.
+    if (!session || isStreaming) return;
+    lastOutboundConsumedRef.current = pendingOutboundMessage;
+    handleSend(pendingOutboundMessage);
+    if (onOutboundConsumed) {
+      try {
+        onOutboundConsumed();
+      } catch {
+        // Host callback errors must not break the send lifecycle.
+      }
+    }
+  }, [pendingOutboundMessage, session, isStreaming, handleSend, onOutboundConsumed]);
+
   // Handle playbook chip selection — switches context to the selected playbook
   const handlePlaybookChipClick = React.useCallback(
     (pb: IPlaybookOption) => {
@@ -2455,6 +2555,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   const displayError = sessionError || streamError || editorRefineError;
   const showPredefinedPrompts = messages.length === 0 && predefinedPrompts.length > 0 && !isSessionLoading;
   const showPlaybookChips = messages.length === 0 && allPlaybooks.length > 1 && !isSessionLoading;
+
+  // FIX 1: index of the most recent User message — the pin-to-top target.
+  const lastUserMessageIndex = React.useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'User') return i;
+    }
+    return -1;
+  }, [messages]);
 
   return (
     <div
@@ -2656,7 +2764,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               }),
           };
 
-          return <SprkChatMessage key={`msg-${index}`} {...msgProps} />;
+          // FIX 1: wrap in a thin ref-bearing div so the just-sent user message
+          // can be targeted for the pin-to-top scroll (SprkChatMessage is a
+          // plain function component, not ref-forwarding). No visual/layout
+          // change — the wrapper is a plain block element inside the existing
+          // flex column.
+          const isPinTarget = msg.role === 'User' && index === lastUserMessageIndex;
+          return (
+            <div key={`msg-${index}`} ref={isPinTarget ? lastUserMessageElRef : undefined}>
+              <SprkChatMessage {...msgProps} />
+            </div>
+          );
         })}
 
         {/* Typing indicator — visible between typing_start and first token arrival */}
@@ -2678,6 +2796,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             visible={!isStreaming && suggestions.length > 0}
           />
         )}
+
+        {/* FIX 1 (Phase 0, spaarkeai-assistant-enhancements-r2): trailing spacer.
+            Sized (imperatively, in the pin-to-top effect above) to the message
+            list's viewport height so a short assistant response still leaves
+            enough scroll room for the pinned user message to reach the top of
+            the viewport. Zero height until the first send; purely presentational. */}
+        {messages.length > 0 && <div ref={trailingSpacerRef} aria-hidden="true" data-testid="chat-trailing-spacer" />}
 
         {/* Highlight-and-refine floating toolbar (local DOM selection + cross-pane bridge selection) */}
         <SprkChatHighlightRefine

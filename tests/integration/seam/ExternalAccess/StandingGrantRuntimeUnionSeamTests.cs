@@ -33,8 +33,11 @@ public sealed class StandingGrantRuntimeUnionSeamTests
     private const string ProjectEntity = "sprk_project";
     private const string ContactEntity = "contact";
     private const string StandingGrantAttribute = "sprk_standinggrant";
-    private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 1;
+    // Reference the SINGLE SOURCE OF TRUTH consts directly (public by design) so a version bump propagates
+    // here automatically instead of drifting. (Previously hardcoded 2, which went stale when task 073 #7
+    // bumped the stored/invalidated key to v3 for the org-grant shape.)
+    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
+    private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     private static readonly Guid ContactId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private const string Tenant = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
@@ -158,21 +161,27 @@ public sealed class StandingGrantRuntimeUnionSeamTests
         TenantId = Tenant,
     };
 
-    /// <summary>Thin real-surface double: overrides only the virtual grant loader (design §5 reuse).</summary>
+    /// <summary>Thin real-surface double: overrides only the virtual grant loader
+    /// (<see cref="ExternalParticipationService.GetGrantSetAsync"/>, task 028 — base
+    /// <c>GetParticipationsAsync</c> delegates to it) (design §5 reuse).</summary>
     private sealed class FakeParticipationService : ExternalParticipationService
     {
-        private readonly IReadOnlyList<ExternalParticipation> _grants;
+        private readonly ExternalGrantSet _grantSet;
 
         public FakeParticipationService(IEnumerable<Guid> projectIds)
             : base(new HttpClient(), cache: null!, configuration: null!, credential: null!,
                    httpContextAccessor: null!, logger: NullLogger<ExternalParticipationService>.Instance)
-            => _grants = projectIds
-                .Select(id => new ExternalParticipation { ProjectId = id, AccessLevel = ExternalAccessLevel.ViewOnly })
-                .ToList();
+            => _grantSet = new ExternalGrantSet
+            {
+                Projects = projectIds
+                    .Select(id => new ExternalParticipation { ProjectId = id, AccessLevel = ExternalAccessLevel.ViewOnly })
+                    .ToList(),
+                Matters = new HashSet<Guid>(),
+                WorkAssignments = new HashSet<Guid>(),
+            };
 
-        public override Task<IReadOnlyList<ExternalParticipation>> GetParticipationsAsync(
-            Guid contactId, CancellationToken ct = default)
-            => Task.FromResult(_grants);
+        public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
+            => Task.FromResult(_grantSet);
     }
 
     private sealed class NoopHttpContextAccessor : Microsoft.AspNetCore.Http.IHttpContextAccessor

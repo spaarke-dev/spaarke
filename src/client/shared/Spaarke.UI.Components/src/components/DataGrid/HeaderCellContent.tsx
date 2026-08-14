@@ -88,20 +88,14 @@ import {
   Dismiss16Regular,
   Filter16Filled,
   Filter20Filled,
-  Filter20Regular,
   FilterDismiss20Regular,
   ArrowAutofitWidth20Regular,
   ArrowUp20Regular,
   ArrowDown20Regular,
 } from '@fluentui/react-icons';
 
-import { TextFilterChip } from './chips/TextFilterChip';
-import { OptionSetMultiFilterChip } from './chips/OptionSetMultiFilterChip';
-import { DateRangeFilterChip, localDateToUtcBounds } from './chips/DateRangeFilterChip';
-import type { UtcDateBounds } from './chips/DateRangeFilterChip';
 import { BoolFilterChip } from './chips/BoolFilterChip';
 import type { BoolFilterValue } from './chips/BoolFilterChip';
-import type { EntityMetadata, OptionSetOption } from '../../services/IDataverseClient';
 
 import type { ChipDescriptor, ChipState, ChipValue } from './filterChips/types';
 
@@ -385,45 +379,6 @@ function setChipValue(state: ChipState, attribute: string, value: ChipValue | un
     next[attribute] = value;
   }
   return next;
-}
-
-/**
- * Build a minimal `EntityMetadata` shim for `OptionSetMultiFilterChip` from
- * the descriptor's `options`. The chip only needs
- * `attributes[X].optionSet` to render options, so when the host doesn't pass
- * full metadata we still get a functional chip from the descriptor alone.
- */
-function buildMetadataShim(descriptor: ChipDescriptor): EntityMetadata {
-  const options: OptionSetOption[] = (descriptor.options ?? []).map(o => ({
-    value: o.value,
-    label: o.label,
-  }));
-  return {
-    primaryIdAttribute: '',
-    primaryNameAttribute: '',
-    attributes: {
-      [descriptor.attribute]: {
-        attributeType: 'Picklist',
-        optionSet: options,
-      },
-    },
-  };
-}
-
-/**
- * Rehydrate a {@link UtcDateBounds} from previously-emitted ISO strings —
- * mirrors the private helper in {@link FilterChipBar}.
- */
-function boundsFromIsoState(from: string | undefined, to: string | undefined): UtcDateBounds | null {
-  if (!from && !to) return null;
-  const startSrc = from ?? to!;
-  const endSrc = to ?? from!;
-  const startDate = new Date(startSrc);
-  const endDate = new Date(endSrc);
-  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-    return null;
-  }
-  return localDateToUtcBounds(startDate, endDate);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

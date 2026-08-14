@@ -111,3 +111,37 @@ r5 has no opinion on the engine's auto-file threshold (server-owned). But note t
 - **Reuse today**: association review UI (ranked/tiered groups + additive confirm), reading pane, `.eml` render, attachments, compose, tracking — all shipped and slot-composed.
 - **Build next (r5)**: proposed-update + proposed-action Copilot cards (states E/F), the "new-vs-related" choice (state D), and the Exceptions Queue surface (Concept 1). All are additive to the slot-based shell — no rework of what shipped.
 - **Resolve jointly before thread-grouping**: the ancestry-vs-`sprk_communicationthread` key (Ask 2) — the one place display and inheritance can silently diverge.
+
+---
+
+## 10. R2 ownership of the reconciliation surfaces — states D/E/F + Exceptions Queue (added 2026-08-05 by `email-communication-intelligence-r2`, FR-E6)
+
+> **Binding ownership statement.** `email-communication-intelligence-r2` (R2) **owns and builds** the Pillar E reconciliation surfaces that §9 listed as r5's "build next" — states **D/E/F** and the **Exceptions Queue** (research Concept 1 / C-3). R2 supersedes r5's deferral of these. **r5 MUST NOT duplicate-build** the reconciliation grid or the reconcile modals; they land once, in the shared `Spaarke.Communication.Components` lib, owned by R2.
+
+**What R2 owns (built in shared `Spaarke.Communication.Components`, extend-never-fork per ADR-045):**
+
+| Surface | Was (this note) | R2 delivery |
+|---|---|---|
+| **State D** — "new-vs-related" intent choice (Create new + link X / File onto X / Link as related) | §4.1 + §9 "build next" | ✅ R2 task 052 — `RelatedToCell` reuses `EmailConnectionsReview` (`applyRegardingSelection`; no second write path) + an **additive `onCreateNewRecord` tile** (gated, backward-compatible — existing r5 callers omit it) |
+| **State E** — proposed-update Copilot card (field old→new, cited source, apply-under-audit) | §9 "build next" | ✅ R2 task 055 — `FieldUpdateReconcileTab`/`FieldUpdateReconcileModal` (`FormModal`; editable-before-Accept; citation→reader). Backed by **055a** (apply-`{overrideValue}`) + **055b** (dismiss) endpoints |
+| **State F** — proposed-action/deadline card (task/event, dates, cited source, attorney-confirm) | §9 "build next" | ✅ R2 task 056 — `TaskReconcileTab`/`TaskReconcileModal` (editable 8-field task form, create-and-complete + ad-hoc "+ New task"). Backed by the Job C apply endpoint (task 034) + **056b** (ad-hoc create) |
+| **Exceptions Queue** (Concept 1 / C-3) | §9 "r5 accepts C-3" | ✅ R2 tasks 050/051/053/054/057 — reconciliation grid (shared `DataGrid` via `overrides.columnRenderers`; `sprk_gridconfiguration` Needs-review + per-team views) + triage columns + browse/reader shell + citation nav + **category→team routing** (ADR-018 `Communication:CategoryRouting` → `ownerid` team). **No new entity** (ADR-045). |
+
+**As-built consumption contract (what r5 WIRES — updated 2026-08-10, R2 Pillar E code-complete through task 057):** the surfaces above shipped in `@spaarke/communication-components`. r5 mounts them; it does NOT re-implement any of them:
+
+- **New BFF endpoints r5 calls** (all extend existing Communication services; caller resolved server-side, fail-closed 403; re-gated server-side):
+  - **055a** `POST /api/communications/proposals/{reviewLogId}/apply` — now accepts an optional `{ "overrideValue": "…" }` body (Accept an edited value; recorded as an `Overriden` audit row).
+  - **055b** `POST /api/communications/proposals/{reviewLogId}/dismiss` — Reject (terminal `Dismissed` audit row; no body).
+  - **056b** `POST /api/communications/{communicationId}/create-task` — ad-hoc "+ New task" (body = subject + regarding + FR-E5 fields; no proposal).
+- **Reconcile-tab exports r5 mounts** (browse-shell `renderTabs` slot + the email record form; the host supplies `regarding` from task 052's `onConfirmed` NFR-10 handshake and **re-supplies it on override**):
+  - `ReconcileTabs/FieldUpdateReconcileTab` + `FieldUpdateReconcileModal` (Fields).
+  - `ReconcileTabs/TaskReconcileTab` + `TaskReconcileModal` (Tasks).
+  - Citation clicks lift to the browse-shell's `activeCitation` (task 054 reader highlight).
+- **Accept-routing r5 must NOT re-implement** (baked into `TaskReconcileTab`): an UNCHANGED create-task proposal → 034 apply; a proposal whose **name/description was edited** → 056b ad-hoc create + a 055b dismiss of the original (the 034 apply body carries no subject/description, so editing them there would be silently dropped — the tab routes around that); "+ New task" → 056b.
+- **Routing config (task 057, operator-managed)**: `Communication:CategoryRouting` (ADR-018) maps a triage category → owning team; a mapped email's `ownerid` is set to that team at triage time; the **per-team `sprk_gridconfiguration`** view (`behavior.membershipFilter` roles=owner/identityTypes=team) scopes each team's grid. No new entity.
+
+**Reuse boundary (R2 consumes r5's shipped surface — does NOT rebuild it):** R2's reconcile surfaces reuse `EmailConnectionsReview` (additive `applyRegardingSelection`/`unlinkRegarding`), the slot-based reading-pane shell (`EmailReadingPaneShell`/`renderConnections`/`renderTracking`), `EmailBodyView`, and `AttachmentList` — exactly the "reuse today" list in §9. The two-layer split (Layer-1 logic shared across the PCF boundary; React-version-agnostic per ADR-022) is honored for any dual-use component.
+
+**`/conflict-check` before EVERY shared-lib PR (binding).** Both projects run `/conflict-check` before opening any PR that touches `Spaarke.Communication.Components`, `@spaarke/ui-components`, or the shared `Services/Communication/**` path — AND before the DataGrid enhancement PR, coordinate with **`spaarke-dataset-grid-framework-r2`** (which owns the `DataGrid` framework task 050 extends). All R2 Pillar E writers are `parallel-safe:false` (sequential, main-session) to avoid clobbering concurrent r5 / dataset-grid edits.
+
+**Still resolve jointly (unchanged):** the ancestry-vs-`sprk_communicationthread` thread-grouping key (§9 Ask 2) remains the one place display and inheritance can silently diverge — converge on one key before either side ships a thread-grouped view.

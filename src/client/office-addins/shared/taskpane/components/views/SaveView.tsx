@@ -72,7 +72,7 @@ export interface SaveViewProps {
  * ```tsx
  * <SaveView
  *   hostAdapter={adapter}
- *   getAccessToken={() => authService.getAccessToken(['user_impersonation'])}
+ *   getAccessToken={() => authService.getAccessToken()}
  *   onComplete={(docId, url) => navigateToDocument(url)}
  *   onQuickCreate={(type, query) => openQuickCreateDialog(type, query)}
  * />

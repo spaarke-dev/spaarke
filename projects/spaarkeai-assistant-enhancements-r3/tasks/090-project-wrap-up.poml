@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-assistant-enhancements-r3">
+  <metadata>
+    <title>Project wrap-up — README status, lessons-learned, /test-diet project-close gate, INDEX row, archive</title>
+    <phase>Wrap-up</phase>
+    <gate>blocked until 080</gate>
+    <status>pending</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation + reconciliation orchestration; /test-diet is read-only (emits git rm/git mv for the reviewer, does not modify tests) so this is not a TEST-MODIFYING task</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Orchestrates existing gate skills (test-diet) + doc updates — no novel implementation</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>Wrap-up</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final sequential task — aggregates the whole project; runs the project-close gate after deploy.</parallel-reason>
+    <deps>080</deps>
+    <tags>documentation, wrap-up</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Close out R3: update the project README status to Complete; create notes/lessons-learned.md; run /test-diet (the BINDING project-close gate — reconcile tests added/modified during R3 against the ADR-038 build-vs-maintain classifier, output notes/test-diet-report.md); update the R3 row in projects/INDEX.md; archive project artifacts. /test-diet is read-only — it emits git rm/git mv for the reviewer, it does not auto-execute.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the Spaarke project-close lifecycle, the ADR-038 test diet, and repo hygiene.</role>
+  <goal>R3 is formally complete: README marked Complete, lessons-learned recorded, /test-diet run with a report cited, projects/INDEX.md R3 row updated, artifacts archived.</goal>
+  <context>
+    <background>Mandatory final task for every project (task-create Step 3.7). Runs the project-close test-diet gate (CLAUDE.md §7): /test-diet reconciles tests added/modified during R3 against the ADR-038 17-ban build-vs-maintain classifier — MAINTAIN-class stay at KEEP path, SCAFFOLDING-class are deleted, AMBIGUOUS require reviewer judgment. The skill is read-only — it emits git rm/git mv commands; it does not auto-execute or modify tests (so this task is NOT TEST-MODIFYING). Output lands at notes/test-diet-report.md. Also updates the active-project registry entry for R3 in projects/INDEX.md.</background>
+    <relevant-files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/README.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/plan.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/notes/lessons-learned.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/notes/test-diet-report.md</file>
+      <file>projects/INDEX.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="project-close gate">Run /test-diet BEFORE marking the project complete (CLAUDE.md §7, ADR-038). It is read-only — emit git rm/git mv for the reviewer; do NOT auto-execute deletions.</constraint>
+    <constraint source="ADR-038" scope="test reconciliation">Reconcile tests added/modified during R3 against the build-vs-maintain classifier; SCAFFOLDING deleted, MAINTAIN kept at its KEEP path, AMBIGUOUS to reviewer judgment.</constraint>
+    <constraint source="project" scope="registry">Update the R3 row in projects/INDEX.md to reflect completion.</constraint>
+    <constraint source="project" scope="wrap-up PR">The wrap-up PR MUST cite the test-diet report or document the skip rationale (HARD WARNING if skipped).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r3/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r3/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Run /test-diet to reconcile tests added/modified during R3 (ADR-038); write notes/test-diet-report.md; surface the emitted git rm/git mv for the reviewer (do NOT auto-execute).</step>
+    <step order="2">Create/append notes/lessons-learned.md (corrections + confirmed non-obvious approaches + why).</step>
+    <step order="3">Update README.md: Status=Complete, Phase=Complete, Progress=100%, Completed Date set, graduation criteria checked.</step>
+    <step order="4">Update plan.md: Status=Complete; mark milestones ✅.</step>
+    <step order="5">Update the R3 row in projects/INDEX.md to Complete.</step>
+    <step order="6">Archive project artifacts; verify all tasks in TASK-INDEX.md are ✅; update this task to ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If /test-diet flags AMBIGUOUS tests that neither clearly maintain nor clearly scaffold, STOP and request reviewer judgment rather than deleting or keeping by default.</trigger>
+  </escalation>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r3/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r3/notes/test-diet-report.md</output>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r3/README.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">/test-diet run; notes/test-diet-report.md written; scaffolding vs maintain reconciled per ADR-038 (git rm/git mv emitted, not auto-executed).</criterion>
+    <criterion testable="true">README + plan marked Complete; graduation criteria checked.</criterion>
+    <criterion testable="true">notes/lessons-learned.md created/updated.</criterion>
+    <criterion testable="true">projects/INDEX.md R3 row marked Complete.</criterion>
+    <criterion testable="true">All tasks ✅ in TASK-INDEX.md; this task ✅.</criterion>
+  </acceptance-criteria>
+  <notes>Project-close test-diet gate is a HARD WARNING if skipped (CLAUDE.md §7). The wrap-up PR must cite the test-diet report. /test-diet is read-only reconciliation — it does not modify tests, so this task stays MINIMAL (not TEST-MODIFYING).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

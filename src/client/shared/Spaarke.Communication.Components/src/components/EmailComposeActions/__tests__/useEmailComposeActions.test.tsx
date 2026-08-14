@@ -166,6 +166,87 @@ describe('useEmailComposeActions — per-mode recipient prefill (FR-09)', () => 
   });
 });
 
+describe('useEmailComposeActions — FR-10 thread-preserving bodyOverride (BINDING invariant)', () => {
+  const AI_DRAFT = '<p>Thanks — I will review and revert by Friday.</p>';
+  // The source record's body (`MULTI_RECIPIENT_RECORD.sprk_body`) is the quoted thread that MUST survive.
+  const THREAD_MARKER = 'Original body';
+
+  it('exposes the imperative openComposer entry point (the seam tasks 025/023 call)', () => {
+    const { result } = renderHook(() => useEmailComposeActions(makeDeps()));
+    expect(typeof result.current.openComposer).toBe('function');
+  });
+
+  it.each(['reply', 'replyAll', 'forward'] as const)(
+    '%s: openComposer({ bodyOverride }) composes [AI draft] + [separator] + [quoted thread] — never a whole-body replace',
+    async mode => {
+      const dataService = makeDataService(MULTI_RECIPIENT_RECORD);
+      const { result } = renderHook(() => useEmailComposeActions(makeDeps({ dataService })));
+
+      act(() => result.current.openComposer(mode, 'comm-1', { bodyOverride: AI_DRAFT }));
+      await waitFor(() => expect(result.current.composerDialog.props.initialBody).toBeDefined());
+
+      const initialBody = result.current.composerDialog.props.initialBody as string;
+      // Draft seeds the authored region (top of the body)...
+      expect(initialBody.startsWith(AI_DRAFT)).toBe(true);
+      // ...and the quoted previous thread is STILL present below it (invariant held).
+      expect(initialBody).toContain(THREAD_MARKER);
+      // DEFECT guard: a whole-body-replace would make the body === the draft (thread dropped).
+      expect(initialBody).not.toBe(AI_DRAFT);
+      expect(initialBody.length).toBeGreaterThan(AI_DRAFT.length);
+    }
+  );
+
+  // D-5 fix (task 025, hand-off from task 024 Step 9.5): the props-only path (no
+  // `sourceRecord`) must ALSO seed `initialQuotedThread` on the rendered composer
+  // element, so the engine's `state.quotedThread` is populated and an in-dialog
+  // re-sparkle after a card-seeded body does not drop the quoted thread.
+  it.each(['reply', 'replyAll', 'forward'] as const)(
+    'D-5: %s: openComposer({ bodyOverride }) ALSO passes initialQuotedThread (non-empty, contained in initialBody)',
+    async mode => {
+      const dataService = makeDataService(MULTI_RECIPIENT_RECORD);
+      const { result } = renderHook(() => useEmailComposeActions(makeDeps({ dataService })));
+
+      act(() => result.current.openComposer(mode, 'comm-1', { bodyOverride: AI_DRAFT }));
+      await waitFor(() => expect(result.current.composerDialog.props.initialBody).toBeDefined());
+
+      const quotedThread = (result.current.composerDialog.props as unknown as { initialQuotedThread?: string })
+        .initialQuotedThread;
+      expect(quotedThread).toBeTruthy();
+      expect(quotedThread).toContain(THREAD_MARKER);
+      // The seeded quotedThread is exactly the tail of the composed initialBody (byte-identical
+      // to what deriveComposerFields already baked into the body — no divergent second copy).
+      expect(result.current.composerDialog.props.initialBody as string).toContain(quotedThread as string);
+    }
+  );
+
+  it('D-5: New (compose) never seeds initialQuotedThread — nothing to preserve', () => {
+    const { result } = renderHook(() => useEmailComposeActions(makeDeps()));
+    act(() => result.current.openComposer('compose', undefined, { bodyOverride: AI_DRAFT }));
+    expect(
+      (result.current.composerDialog.props as unknown as { initialQuotedThread?: string }).initialQuotedThread
+    ).toBeUndefined();
+  });
+
+  it('REGRESSION: openComposer WITHOUT a bodyOverride is byte-identical to the toolbar action (dual-mount parity)', async () => {
+    const dataService = makeDataService(MULTI_RECIPIENT_RECORD);
+
+    const viaOpen = renderHook(() => useEmailComposeActions(makeDeps({ dataService })));
+    act(() => viaOpen.result.current.openComposer('reply', 'comm-1'));
+    await waitFor(() => expect(viaOpen.result.current.composerDialog.props.initialBody).toBeDefined());
+    const openBody = viaOpen.result.current.composerDialog.props.initialBody;
+
+    const viaAction = renderHook(() => useEmailComposeActions(makeDeps({ dataService })));
+    act(() => viaAction.result.current.actions.onReply?.('comm-1'));
+    await waitFor(() => expect(viaAction.result.current.composerDialog.props.initialBody).toBeDefined());
+    const actionBody = viaAction.result.current.composerDialog.props.initialBody;
+
+    // The auto-draft seam and the manual toolbar action derive the SAME body when no draft is injected —
+    // the existing standalone-mount behavior is unchanged.
+    expect(openBody).toBe(actionBody);
+    expect(openBody).toContain(THREAD_MARKER);
+  });
+});
+
 describe('useEmailComposeActions — NEGATIVE: no forked composer', () => {
   it.each(['onReply', 'onReplyAll', 'onForward'] as const)(
     '%s mounts the CANONICAL SendEmailDialog (element identity), never a second composer',

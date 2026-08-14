@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
@@ -43,7 +44,11 @@ namespace Sprk.Bff.Api.Workers.Office;
 public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 {
     private readonly ILogger<UploadFinalizationWorker> _logger;
-    private readonly SpeFileStore _speFileStore;
+    // SpeFileStore and IPostUploadIndexingEnqueuer are Scoped; this worker is a Singleton
+    // BackgroundService/IOfficeJobHandler, so both are resolved per-message from _scopeFactory
+    // at their use-sites (dotnet-10-upgrade task 020, R1) rather than captured on the ctor, so
+    // the graph passes ValidateScopes. Each Service Bus message is an independent unit of work
+    // and both are stateless facades — behavior is unchanged.
     private readonly ITenantCache _cache;
     private readonly ServiceBusClient _serviceBusClient;
     private readonly IServiceScopeFactory _scopeFactory;
@@ -51,10 +56,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     private readonly GraphOptions _graphOptions;
     private readonly IDocumentDataverseService _documentService;
     private readonly IProcessingJobService _processingJobService;
-    private readonly IEmailToEmlConverter _emlConverter;
-    private readonly AttachmentFilterService _attachmentFilterService;
     private readonly JobSubmissionService _jobSubmissionService;
-    private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly IConfiguration _configuration;
 
     private const string QueueName = "office-upload-finalization";
@@ -77,7 +79,6 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
     public UploadFinalizationWorker(
         ILogger<UploadFinalizationWorker> logger,
-        SpeFileStore speFileStore,
         ITenantCache cache,
         ServiceBusClient serviceBusClient,
         IServiceScopeFactory scopeFactory,
@@ -85,14 +86,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         IOptions<GraphOptions> graphOptions,
         IDocumentDataverseService documentService,
         IProcessingJobService processingJobService,
-        IEmailToEmlConverter emlConverter,
-        AttachmentFilterService attachmentFilterService,
         JobSubmissionService jobSubmissionService,
-        IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         IConfiguration configuration)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _serviceBusClient = serviceBusClient ?? throw new ArgumentNullException(nameof(serviceBusClient));
         _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
@@ -100,10 +97,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         _graphOptions = graphOptions?.Value ?? throw new ArgumentNullException(nameof(graphOptions));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
         _processingJobService = processingJobService ?? throw new ArgumentNullException(nameof(processingJobService));
-        _emlConverter = emlConverter ?? throw new ArgumentNullException(nameof(emlConverter));
-        _attachmentFilterService = attachmentFilterService ?? throw new ArgumentNullException(nameof(attachmentFilterService));
         _jobSubmissionService = jobSubmissionService ?? throw new ArgumentNullException(nameof(jobSubmissionService));
-        _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer ?? throw new ArgumentNullException(nameof(postUploadIndexingEnqueuer));
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
     }
 
@@ -636,8 +630,12 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
         try
         {
+            // SpeFileStore is Scoped — resolve it per-operation from a scope (R1).
+            using var scope = _scopeFactory.CreateScope();
+            var speFileStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
+
             // Resolve container to drive ID
-            var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
+            var driveId = await speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
 
             // Build the path
             var path = string.IsNullOrEmpty(folderPath)
@@ -645,7 +643,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 : $"{folderPath.TrimEnd('/')}/{fileName}";
 
             // Upload using SpeFileStore (ADR-007)
-            var result = await _speFileStore.UploadSmallAsync(
+            var result = await speFileStore.UploadSmallAsync(
                 driveId,
                 path,
                 content,
@@ -1030,8 +1028,17 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
         try
         {
+            // SpeFileStore, IEmailToEmlConverter and AttachmentFilterService are Scoped — resolve them
+            // per-operation from one scope (R1 / R8). IEmailToEmlConverter + AttachmentFilterService each
+            // have a Scoped registration that wins over the Singleton one, so they must not be captured
+            // on this Singleton worker.
+            using var scope = _scopeFactory.CreateScope();
+            var speFileStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
+            var emlConverter = scope.ServiceProvider.GetRequiredService<IEmailToEmlConverter>();
+            var attachmentFilterService = scope.ServiceProvider.GetRequiredService<AttachmentFilterService>();
+
             // Download the .eml file from SPE
-            var emlStream = await _speFileStore.DownloadFileAsync(driveId, itemId, cancellationToken);
+            var emlStream = await speFileStore.DownloadFileAsync(driveId, itemId, cancellationToken);
             if (emlStream == null)
             {
                 _logger.LogWarning(
@@ -1044,7 +1051,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             IReadOnlyList<EmailAttachmentInfo> attachments;
             using (emlStream)
             {
-                attachments = _emlConverter.ExtractAttachments(emlStream);
+                attachments = emlConverter.ExtractAttachments(emlStream);
             }
 
             if (attachments.Count == 0)
@@ -1058,7 +1065,7 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 attachments.Count, parentDocumentId);
 
             // Filter out noise (signatures, tracking pixels, etc.)
-            var filteredAttachments = _attachmentFilterService.FilterAttachments(attachments);
+            var filteredAttachments = attachmentFilterService.FilterAttachments(attachments);
             var filteredCount = attachments.Count - filteredAttachments.Count;
 
             // Respect user's attachment selection (if provided)
@@ -1191,7 +1198,11 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // Upload attachment to SPE in a subfolder of the parent email
         var attachmentPath = $"/emails/attachments/{parentDocumentId:N}/{attachment.FileName}";
 
-        var fileHandle = await _speFileStore.UploadSmallAsync(driveId, attachmentPath, attachment.Content, cancellationToken);
+        // SpeFileStore is Scoped — resolve it per-operation from a scope (R1).
+        using var scope = _scopeFactory.CreateScope();
+        var speFileStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
+
+        var fileHandle = await speFileStore.UploadSmallAsync(driveId, attachmentPath, attachment.Content, cancellationToken);
 
         if (fileHandle == null)
         {
@@ -1344,7 +1355,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
 
         // App-only path: Office Add-in finalization uploads files AS MI, so MI can read them
         // (writer-identity rule per sdap-auth-patterns.md Pattern 4).
-        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, cancellationToken);
+        // IPostUploadIndexingEnqueuer is Scoped — resolve it per-operation from a scope (R1).
+        using var scope = _scopeFactory.CreateScope();
+        var postUploadIndexingEnqueuer = scope.ServiceProvider.GetRequiredService<IPostUploadIndexingEnqueuer>();
+        await postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, cancellationToken);
     }
 
     /// <summary>

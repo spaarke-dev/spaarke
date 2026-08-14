@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Microsoft.Graph.Models;
-using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Email;
 using Xunit;
 

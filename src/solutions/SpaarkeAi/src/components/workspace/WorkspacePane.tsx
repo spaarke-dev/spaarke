@@ -65,9 +65,14 @@ import { usePaneCollapseContext, useComposeLaunch, useAnalysisLaunch } from '../
 // `@spaarke/compose-components` barrel) so this workspace-pane module does NOT transitively pull the
 // TipTap editor widgets — mirrors ConversationPane's deep-import rationale. Resolves in Vite + jest.
 import { useComposeVisibility } from '@spaarke/compose-components/context/composeActionBridge';
+// spaarkeai-assistant-enhancements-r3 task 001 — the widget-agnostic active-item conduit. The tab-focus
+// feed below publishes the active single-item tab's thin handle (id/type/label; NEVER bytes — ADR-015)
+// and clears it for multi-item / dashboard / no tab. Additive to the existing composeVisibility flow.
+import { usePublishActiveItem, type ActiveItemHandle } from './activeItemConduit';
 import { WorkspaceTabManager } from './WorkspaceTabManager';
 import type {
   ActiveTabSnapshot,
+  WorkspaceTab,
   WorkspaceTabManagerState,
   WorkspaceTabPersistenceSnapshot,
 } from './WorkspaceTabManager';
@@ -77,6 +82,11 @@ import { WorkspacePaneMenu } from './WorkspacePaneMenu';
 // build the ribbon composeMode=editor launch seed (stored-doc pointer) that the
 // workspace handler's 'compose' branch consumes.
 import type { ComposeWidgetSeed } from './composeWidgetData';
+// spaarkeai-assistant-enhancements-r2 Phase 0 Fix 2 — derive a Compose tab's
+// short display label + full-filename tooltip from the loaded document, so
+// multiple open Compose tabs are distinguishable in the tab strip instead of
+// all reading "Compose".
+import { deriveComposeTabLabel } from './composeTabLabel';
 import {
   logTelemetryError,
   TELEMETRY_TAB_RESTORE_LOAD_FAILURE,
@@ -270,6 +280,101 @@ function composeTabInstanceKey(tab: { widgetData?: unknown }): string | undefine
   return deriveComposeInstanceKey(tab.widgetData);
 }
 
+/**
+ * Derive the widget-agnostic ACTIVE-ITEM handle for a workspace tab (spaarkeai-assistant-enhancements-r3
+ * task 001). Returns `null` for a multi-item / dashboard / non-single-item tab (or no tab) so the conduit
+ * is CLEARED for those — the single-active-item invariant. `compose` (task 001) and `document-viewer`
+ * (task 026, FR-11) are the two TAB-FOCUS single-item types wired here; email (task 012) instead uses
+ * the sibling IN-WIDGET-SELECTION feed (`deriveEmailActiveItemFromPatch` below), because choosing a
+ * different email inside the SAME open Email tab does not change `activeTabId`. The handle is a THIN
+ * identity slice ONLY — id/type/label, NEVER document bytes/content (ADR-015); each branch prefers its
+ * widget's own stable id and falls back to the tab id.
+ */
+export function deriveActiveItemHandle(tab: WorkspaceTab | null): ActiveItemHandle | null {
+  if (!tab) return null;
+  if (tab.widgetType === 'compose') {
+    const compose = (tab.widgetData as { compose?: unknown } | null | undefined)?.compose as
+      | {
+          composeSessionId?: string;
+          upload?: { sessionId?: string; fileName?: string | null };
+          draft?: { sessionId?: string; fileName?: string | null };
+          fileName?: string | null;
+        }
+      | undefined;
+    const id =
+      compose?.composeSessionId ??
+      compose?.upload?.sessionId ??
+      compose?.draft?.sessionId ??
+      tab.id;
+    const label =
+      compose?.fileName ?? compose?.upload?.fileName ?? compose?.draft?.fileName ?? tab.displayName;
+    return { id, type: 'compose', label: label ?? tab.displayName };
+  }
+  if (tab.widgetType === 'document-viewer') {
+    // task 026 (FR-11) — the document-viewer's active item IS the focused tab's document
+    // (tab-focus pattern, FR-04b), generalizing this SAME effect condition from Compose-only.
+    // `documentId` rides on `DocumentViewerWidgetData` (`DocumentViewerWidget.tsx:99-112`) and, at
+    // every current dispatch site that populates it (`WorkspacePane`'s own read-only-preview
+    // fallback, `CreateAnalysisWizardWidget`'s created-file fallback), is set SYNCHRONOUSLY in the
+    // SAME `widget_load` payload that creates the tab — i.e. BEFORE the tab exists, unlike Compose's
+    // `composeSessionId` (which back-fills ASYNCHRONOUSLY after the editor mounts and registers,
+    // the D-3 defer-issue this task verified does NOT recur here: there is no `onDataChange` /
+    // `handleTabDataChange` write-back path for `documentId` on this widget, so the value present
+    // at tab-creation is final for the tab's lifetime — no need to re-run this effect on a
+    // widgetData mutation). A small minority of legacy dispatch sites (the upload wizard's
+    // `documentIds[]` plural payload, the file-preview "toggle workspace" `fileId` payload) never
+    // populate `documentId` at all; those fall back to the tab id, mirroring the Compose branch's
+    // own `?? tab.id` fallback — never a null/undefined active-item id.
+    const doc = (tab.widgetData as { documentId?: string; filename?: string } | null | undefined) ?? undefined;
+    const id = doc?.documentId ?? tab.id;
+    const label = doc?.filename ?? tab.displayName;
+    return { id, type: 'document', label: label ?? tab.displayName };
+  }
+  // Multi-item widgets (grids), dashboards, and every not-yet-wired single-item type → no single handle.
+  return null;
+}
+
+/**
+ * spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — the email widget's IN-WIDGET SELECTION
+ * feed into the active-item conduit. The `activeItemConduit.tsx` docblock reserves TWO feed
+ * patterns: tab-focus (above, `deriveActiveItemHandle` — fires only on tab SWITCH) and in-widget
+ * selection (this helper) — email needs the latter because choosing a different email while the
+ * SAME Email tab stays active does not change `activeTabId`, so the tab-focus effect never re-fires.
+ *
+ * `EmailWorkspaceWidget` (shared `Spaarke.AI.Widgets` package — CANNOT import this
+ * SpaarkeAi-solution conduit per ADR-012's shared-library dependency direction) rides the EXISTING
+ * `onDataChange` widget self-update seam with an extra transient `communicationId` field on the
+ * patch (§11 — redirects the existing emit rather than adding a new selection model). This PURE
+ * helper reads + strips that field so the persisted `widgetData` / BFF `EmailTabWidgetData`
+ * contract never sees it:
+ *   - `communicationId` a non-empty string → the widget selected an email; returns the id handle
+ *     to publish (`{ id, type: 'email', label: subject }` — id/label ONLY, ADR-015) + the patch
+ *     MINUS `communicationId` (safe to persist as-is).
+ *   - `communicationId === null`           → deselect; returns a `null` handle (clears the
+ *     conduit) + an EMPTY persistable patch (nothing to merge — leaves the last persisted Email
+ *     carrier intact, mirroring `EmailWorkspaceWidget`'s own "don't clobber on deselect" contract).
+ *   - `communicationId` absent / not an 'email' widget → not an email active-item signal; returns
+ *     `null` so the caller persists the patch unchanged.
+ */
+export function deriveEmailActiveItemFromPatch(
+  widgetType: string,
+  patch: unknown
+): { handle: ActiveItemHandle | null; persistablePatch: Record<string, unknown> } | null {
+  if (widgetType !== 'email') return null;
+  if (patch === null || typeof patch !== 'object') return null;
+  const raw = patch as Record<string, unknown>;
+  if (!('communicationId' in raw)) return null;
+
+  const communicationId = raw.communicationId;
+  const persistablePatch = Object.fromEntries(Object.entries(raw).filter(([key]) => key !== 'communicationId'));
+
+  if (typeof communicationId === 'string' && communicationId.length > 0) {
+    const subject = typeof raw.subject === 'string' ? raw.subject : '';
+    return { handle: { id: communicationId, type: 'email', label: subject }, persistablePatch };
+  }
+  return { handle: null, persistablePatch };
+}
+
 // ---------------------------------------------------------------------------
 // WorkspacePane
 // ---------------------------------------------------------------------------
@@ -290,6 +395,10 @@ export function WorkspacePane(): React.JSX.Element {
   // Driven from the tab-activation effect below (visible=true when the Compose tab is active,
   // visible=false when a non-compose tab is active) — replacing the removed manual toggle.
   const composeVisibility = useComposeVisibility();
+
+  // spaarkeai-assistant-enhancements-r3 task 001 — the tab-focus feed's stable publisher into the
+  // widget-agnostic active-item conduit. Inert no-op off-shell (no ActiveItemConduitProvider mounted).
+  const publishActiveItem = usePublishActiveItem();
 
   // ---------------------------------------------------------------------------
   // Auth surface — NFR-09 tab persistence (task 065)
@@ -585,6 +694,11 @@ export function WorkspacePane(): React.JSX.Element {
       dispatch('workspace', {
         type: 'active_widget_changed',
         widgetType: snapshot.widgetType,
+        // FR-B1/FR-C3 (task 020): resolve the widget's declared closed
+        // contextType from the registry so subscribers (e.g. the FR-A1 focus
+        // stamp) can scope to the active tab's surface kind. `undefined` for
+        // widgets that declared none (registry lookup miss or omitted field).
+        widgetContextType: getWorkspaceWidgetMetadata(snapshot.widgetType)?.contextType,
         widgetData: snapshot.widgetData,
         tabId: snapshot.tabId,
         displayName: snapshot.displayName ?? snapshot.widgetType,
@@ -635,6 +749,28 @@ export function WorkspacePane(): React.JSX.Element {
 
   const [tabRestoreSettled, setTabRestoreSettled] = React.useState(false);
 
+  // FR-D1 (spaarkeai-assistant-enhancements-r2) — in-place SESSION SWITCH support.
+  //
+  // `lastRestoredSessionIdRef` holds the id of the session whose tabs this manager
+  // currently reflects. It distinguishes the initial cold-load restore (null → first
+  // session — nothing to clear) from a genuine in-place session SWITCH (session A →
+  // session B, i.e. reopening a History entry). On a switch the manager still holds
+  // the PRIOR session's tabs, so the restore effect below must clear them FIRST —
+  // otherwise `restoreFromPersistence()` no-ops (its hasNonHomeTab guard), the prior
+  // tabs stay visible on the reopened session AND get PATCHed onto the reopened
+  // session's /tabs store (the overwrite hazard FR-D1 fixes).
+  const lastRestoredSessionIdRef = React.useRef<string | null>(null);
+
+  // FR-D1: set when a compose `widget_load` ADOPTS a session (the wizard→review
+  // hand-off, or the cold-load compose re-adoption — both carry `composeSessionId`
+  // and drive `ConversationPane.handleSelectHistorySession` to change chatSessionId
+  // to that same session). Those flows intentionally show JUST the adopted document,
+  // not the session's full stored tab set (mirroring the analysis-existing skip
+  // above), so the session-switch clear below must NOT wipe the just-opened compose
+  // tab. This is a precise causal marker written by WorkspacePane's own compose
+  // widget_load handler — not a timing heuristic.
+  const composeAdoptionSessionRef = React.useRef<string | null>(null);
+
   // Task 025 (FR-09): the BFF (chatSessionId-keyed) restore remains the durable,
   // cross-device path once a session exists — UNCHANGED below. It is no longer the
   // ONLY restore path: when there is no session yet (pre-session/ribbon-compose tab)
@@ -655,6 +791,75 @@ export function WorkspacePane(): React.JSX.Element {
     if (analysisLaunch?.mode === 'existing') {
       setTabRestoreSettled(true);
       return;
+    }
+
+    // FR-D1 (spaarkeai-assistant-enhancements-r2) — clear-before-restore on an
+    // in-place SESSION SWITCH (reopening a History entry via
+    // ConversationPane.handleSelectHistorySession → setChatSessionId).
+    //
+    // A switch is chatSessionId changing FROM a previously-restored session TO a
+    // different one. The manager still holds the prior session's tabs;
+    // restoreFromPersistence() (below) is a no-op while any non-Home tab exists, so
+    // without clearing first (a) the prior session's tabs remain visible on the
+    // reopened session and (b) they get PATCHed onto the reopened session's /tabs
+    // store — corrupting it (the overwrite hazard). Clear FIRST so the GET+restore
+    // below repopulates from the reopened session's OWN store.
+    //
+    // EXCLUDED — compose adoption: when the switch's target session was just adopted
+    // by a compose widget_load (composeAdoptionSessionRef), the just-opened compose
+    // tab must survive (the wizard/re-adoption flows show the adopted document, not
+    // the session's full stored set). Same intent as the analysis-existing early
+    // return above.
+    //
+    // ESCALATION (POML <escalation>): compose tabs on a real History switch ARE
+    // cleared. This does NOT silently discard unsaved work: the compose document is
+    // server-authoritative (ADR-049 — OOXML byte-store on the server, TipTap is a
+    // lossy view) and, on the home surface, additionally persisted in localStorage
+    // (composeRunPersistence — removal is explicit-close only). Clearing the TAB
+    // therefore never destroys the document; it is re-restored from the reopened
+    // session's own store. No in-flight UNSAVED artifact is silently lost, so the
+    // "risk losing an in-flight unsaved tab" trigger is evaluated-and-not-fired (the
+    // residual editor-flush-cadence question is surfaced to the orchestrator).
+    const isSessionSwitch =
+      !!chatSessionId &&
+      lastRestoredSessionIdRef.current !== null &&
+      lastRestoredSessionIdRef.current !== chatSessionId;
+    const isComposeAdoption =
+      !!chatSessionId && composeAdoptionSessionRef.current === chatSessionId;
+    if (isSessionSwitch) {
+      const manager = managerRef.current;
+      const priorTabs = manager.getSnapshot().tabs;
+      if (!isComposeAdoption) {
+        // History reopen — FULL clear (incl. any compose tab; the document survives
+        // per the ADR-049 rationale above). Only touch the store if there is
+        // something to clear.
+        if (priorTabs.some((t) => t.kind === 'widget')) {
+          manager.clearAllTabs();
+          // clearAllTabs() just scheduled a debounced PATCH of the now-EMPTY tab set
+          // against the NEW chatSessionId. Cancel it SYNCHRONOUSLY (before any await
+          // below) so an empty set is never written over the reopened session's
+          // stored tabs; the GET+restore below repopulates from that same store.
+          if (persistTimerRef.current !== null) {
+            window.clearTimeout(persistTimerRef.current);
+            persistTimerRef.current = null;
+          }
+          pendingSnapshotRef.current = null;
+          syncState();
+        }
+      } else if (priorTabs.some((t) => t.kind === 'widget' && t.widgetType !== 'compose')) {
+        // Compose adoption (Finding 2 guard): the adoption skips the FULL clear so the
+        // just-opened compose tab survives — but the manager may still hold NON-compose
+        // tabs from the PRIOR session (e.g. the home default layout at a cold-load
+        // re-adoption, or whatever the user had open before an in-session wizard→review
+        // hand-off). Those do NOT belong to the adopted session and would otherwise
+        // ride onto it on the next write-through. Clear them while PRESERVING compose
+        // (the adopted document + any compose work-product) — the same preserve
+        // semantics the exclusive-playbook path uses. The resulting snapshot
+        // ([compose…]) is the correct state for the adopted session, so the debounced
+        // write-through is left in place (NOT cancelled) to record it.
+        manager.clearAllTabs({ preserveWidgetTypes: ['compose'] });
+        syncState();
+      }
     }
 
     let cancelled = false;
@@ -714,6 +919,14 @@ export function WorkspacePane(): React.JSX.Element {
           tabCount: snap.tabs.length,
         });
 
+        // FR-D1: record the session we just settled on so a later chatSessionId
+        // change is recognized as a switch (clear-before-restore above). Consume the
+        // one-shot compose-adoption marker now that this session's restore settled.
+        lastRestoredSessionIdRef.current = chatSessionId ?? null;
+        if (composeAdoptionSessionRef.current === chatSessionId) {
+          composeAdoptionSessionRef.current = null;
+        }
+
         // R3-3: settle on EVERY terminal path (server success, local fallback,
         // no anchor at all, or error) so the auto-install-default + pin
         // auto-open effects below can proceed.
@@ -723,6 +936,18 @@ export function WorkspacePane(): React.JSX.Element {
 
     return () => {
       cancelled = true;
+      // FR-D1 (Finding 1 — leak-proof marker): the compose-adoption marker is a
+      // one-shot consumed at settle (above). If THIS run was a compose adoption whose
+      // restore is CANCELLED before it settles (the user switches again before the
+      // async GET resolves), the settle-consume never runs and the marker would leak —
+      // a later genuine History reopen of this same session would then see
+      // isComposeAdoption===true, SKIP the overwrite clear, and let the prior session's
+      // tabs corrupt it. Reset the marker here (guarded to THIS run's session so a
+      // newer adoption's marker for a DIFFERENT session is never wiped) so a cancelled
+      // adoption can't suppress a later clear.
+      if (composeAdoptionSessionRef.current === chatSessionId) {
+        composeAdoptionSessionRef.current = null;
+      }
     };
     // authenticatedFetch is a stable module-level function from @spaarke/auth
     // (returned by useAiSession() but identical reference across renders).
@@ -1673,6 +1898,18 @@ export function WorkspacePane(): React.JSX.Element {
       // keep the 'workspace' LAYOUT door and flow through the generic addTab
       // path below, unchanged.
       if (effectiveWidgetType === 'compose') {
+        // FR-D1 (spaarkeai-assistant-enhancements-r2): a compose open that ADOPTS a
+        // session (wizard→review hand-off / cold-load compose re-adoption — seed
+        // carries `composeSessionId`) will imminently change chatSessionId to that
+        // session. Mark it so the restore effect's session-switch clear does NOT wipe
+        // this just-opened compose tab (those flows show the adopted document, not the
+        // session's full stored tab set — the analysis-existing skip, applied to the
+        // in-place compose door).
+        {
+          const adoptSid = (widgetData as { compose?: { composeSessionId?: string } } | null)
+            ?.compose?.composeSessionId;
+          if (adoptSid) composeAdoptionSessionRef.current = adoptSid;
+        }
         // FR-34 D-F3 (task 071): a CONTENT-bearing open carries a full-document
         // draft SEED (widgetData.compose.draft.ledgerRef — DEF-08 Part A). When
         // present, the ack is DEFERRED until ComposeWorkspace signals the draft
@@ -1806,7 +2043,16 @@ export function WorkspacePane(): React.JSX.Element {
         // The tab's stable identity is re-derived from its seed on later reuse
         // decisions, so nothing extra is stamped onto widgetData.
         const composeWidgetData = seedFilename ? { ...(widgetData ?? {}), filename: seedFilename } : widgetData;
-        const composeTabId = manager.addTab('compose', composeWidgetData, displayName);
+        // Fix 2 (spaarkeai-assistant-enhancements-r2): every compose entry path
+        // (upload / draft / stored-doc / ribbon-launch) already resolves
+        // `seedFilename` above — derive the short tab label + full-filename
+        // tooltip from it HERE, the single funnel point, instead of touching
+        // each dispatch call site. A seedless/blank open (no filename known —
+        // e.g. the Workspaces-menu "Compose" selection or the welcome-card
+        // blank open) falls back to the plain `displayName` ("Compose"),
+        // identical to the pre-fix behavior.
+        const composeLabel = deriveComposeTabLabel(seedFilename, displayName);
+        const composeTabId = manager.addTab('compose', composeWidgetData, composeLabel.displayName, composeLabel.tooltip);
         syncState();
         // UC-5 truthfulness (task 020 / FR-C1): a NEW compose tab's widget has
         // NOT resolved yet — only the empty shell exists. Acking here would
@@ -1872,6 +2118,74 @@ export function WorkspacePane(): React.JSX.Element {
             }
           : widgetData;
 
+      // ── Fix 1 (spaarkeai-assistant-enhancements-r2, UAT: duplicate tabs) ────
+      // This generic path had NO de-dup guard, unlike the compose branch's
+      // instance-keyed reuse above and the startup-default-layout effect's
+      // layoutId match (~line 960). A second `widget_load` for an already-open
+      // workspace LAYOUT or singleton widget type stacked a duplicate tab
+      // instead of focusing the existing one — e.g. asking "do you see the
+      // daily briefing tab?" opened a SECOND Daily Briefing tab.
+      //
+      // Reuse rule (mirrors the two existing guards' style):
+      //   - widgetType === 'workspace' (a LAYOUT tab) → match an existing
+      //     'workspace' tab by `widgetData.layoutId`. The 'workspace' registry
+      //     entry is itself allowMultiple:true (different LAYOUTS may coexist
+      //     side-by-side — Corporate Workspace + Litigation Workspace), but the
+      //     SAME layoutId must not stack a second tab.
+      //   - any other widgetType → match an existing tab by widgetType alone,
+      //     but ONLY when the registry metadata's `allowMultiple` is falsy (a
+      //     true singleton, e.g. a global dashboard). Widgets registered
+      //     allowMultiple:true (email, document-viewer, analysis, …) keep
+      //     stacking as before — untouched by this guard.
+      const incomingLayoutId =
+        widgetType === 'workspace' ? (widgetData as { layoutId?: string } | null)?.layoutId : undefined;
+      const dedupeSnapshot = manager.getSnapshot();
+      const existingSingletonTab =
+        widgetType === 'workspace'
+          ? incomingLayoutId
+            ? dedupeSnapshot.tabs.find(t => {
+                if (t.widgetType !== 'workspace') return false;
+                const data = t.widgetData as { layoutId?: string } | null;
+                return data?.layoutId === incomingLayoutId;
+              })
+            : undefined
+          : !meta?.allowMultiple
+            ? dedupeSnapshot.tabs.find(t => t.kind === 'widget' && t.widgetType === widgetType)
+            : undefined;
+
+      if (existingSingletonTab) {
+        // Reuse: update the existing tab's data + focus it — no new tab, no
+        // FIFO eviction slot consumed. Mirrors the compose branch's reuse
+        // handling (update then activate) rather than a bare setActiveTab, so
+        // a re-dispatch carrying fresher widgetData (e.g. a changed
+        // workTypeValue) still reaches the mounted widget.
+        manager.updateTab(existingSingletonTab.id, effectiveWidgetData);
+        manager.setActiveTab(existingSingletonTab.id);
+        syncState();
+
+        // Same truthfulness contract as a normal open (UC-5 / FR-C1): the
+        // widget is already resolved+mounted (it was reused, not freshly
+        // created), so acking + the confirmation dispatches are safe here —
+        // no need to wait on resolveWorkspaceWidget() again.
+        if (event.frameId) {
+          sendUiActionAck(event.frameId);
+        }
+
+        const snapshotAfterReuse = manager.getSnapshot();
+        const reuseTabCount = snapshotAfterReuse.tabs.length;
+        dispatch('workspace', {
+          type: 'widget_load',
+          widgetType,
+          tabId: existingSingletonTab.id,
+          ...(reuseTabCount > 0 ? { tabCount: reuseTabCount } : {}),
+        });
+        dispatch('workspace', {
+          type: 'tab_count_change',
+          tabCount: reuseTabCount,
+        });
+        return;
+      }
+
       // Add the tab — this enforces MAX_WORKSPACE_TABS eviction internally.
       const tabId = manager.addTab(widgetType, effectiveWidgetData, displayName);
       syncState();
@@ -1926,6 +2240,30 @@ export function WorkspacePane(): React.JSX.Element {
       if (event.tabId) {
         manager.updateTab(event.tabId, event.widgetData ?? null);
         syncState();
+        // task 042c-fr-c4 (FR-C4) companion focus-stamp fix. `WorkspaceTabManager.updateTab`
+        // fires `_notifyPersistChange` but NOT `_notifyActiveTabChange` (:515-523), so when the
+        // user browses emails WITHIN the active email tab (each pick re-fires `widget_update` with
+        // a fresh `emlDocumentId`), the ConversationPane focus stamp goes stale — the deterministic
+        // "Summarize this email" chip would target the previously-viewed email. When the updated tab
+        // IS the active tab AND its data is an Email payload, re-broadcast `active_widget_changed`
+        // (the EXISTING ADR-030 event — no new type) so the stamp refreshes to the current email.
+        // Both subscribers tolerate the extra broadcast idempotently: `ReviewCompleteToast` only sets
+        // `activeWidgetTypeRef`; ConversationPane's `fireProactiveSuggestion` is once-per-tabId
+        // guarded (so this never causes a proactive-suggest re-fire).
+        const updated = manager.getSnapshot();
+        if (updated.activeTabId === event.tabId) {
+          const activeTab = updated.tabs.find((t) => t.id === event.tabId);
+          const widgetData = activeTab?.widgetData as { kind?: unknown } | null | undefined;
+          if (activeTab && widgetData != null && widgetData.kind === 'Email') {
+            broadcastActiveTabChange({
+              tabId: activeTab.id,
+              widgetType: activeTab.widgetType,
+              widgetData: activeTab.widgetData,
+              displayName: activeTab.displayName,
+              kind: activeTab.kind,
+            });
+          }
+        }
       }
     } else if (event.type === 'widget_action') {
       // Forward widget_action events are handled by the widget itself via
@@ -2049,10 +2387,19 @@ export function WorkspacePane(): React.JSX.Element {
   React.useEffect(() => {
     const activeTab = managerRef.current.getActiveTab();
     composeVisibility?.(activeTab?.widgetType === 'compose');
+    // spaarkeai-assistant-enhancements-r3 task 001 — ADDITIVELY publish the active single-item tab's
+    // widget-agnostic handle (id/type/label; NEVER bytes — ADR-015). `deriveActiveItemHandle` returns
+    // null for multi-item / dashboard / non-single-item tabs (and no tab), which CLEARS the conduit —
+    // the single-active-item invariant + clear-on-tab-switch. Does NOT alter the composeVisibility
+    // bytes flow above (a different layer). 'compose' (task 001) and 'document-viewer' (task 026,
+    // FR-11) are both TAB-FOCUS feeds handled here; 'email' (task 012) instead publishes from the
+    // IN-WIDGET-SELECTION feed in `handleTabDataChange` below (a same-tab selection change doesn't
+    // change `activeTabId`, so this effect alone would miss it).
+    publishActiveItem(deriveActiveItemHandle(activeTab));
     // tabState.activeTabId drives every activation path (click, compose reuse,
     // close-restore, restore-from-persistence, auto-install); composeVisibility
     // re-runs the sync when the editor's handler registers/unregisters.
-  }, [tabState.activeTabId, composeVisibility]);
+  }, [tabState.activeTabId, composeVisibility, publishActiveItem]);
 
   const handleTabClose = React.useCallback(
     (tabId: string): void => {
@@ -2119,6 +2466,21 @@ export function WorkspacePane(): React.JSX.Element {
       const current = manager.getSnapshot().tabs.find(t => t.id === tabId);
       if (!current) return;
 
+      // spaarkeai-assistant-enhancements-r3 task 012 (FR-05) — the email widget's in-widget
+      // selection feed into the active-item conduit. See `deriveEmailActiveItemFromPatch` docblock.
+      const emailActiveItem = deriveEmailActiveItemFromPatch(current.widgetType, patch);
+      if (emailActiveItem) {
+        publishActiveItem(emailActiveItem.handle);
+        if (Object.keys(emailActiveItem.persistablePatch).length === 0) return; // pure clear-signal — nothing to persist
+        const currentData =
+          current.widgetData !== null && typeof current.widgetData === 'object'
+            ? (current.widgetData as Record<string, unknown>)
+            : {};
+        manager.updateTab(tabId, { ...currentData, ...emailActiveItem.persistablePatch });
+        syncState();
+        return;
+      }
+
       const currentData =
         current.widgetData !== null && typeof current.widgetData === 'object'
           ? (current.widgetData as Record<string, unknown>)
@@ -2128,7 +2490,7 @@ export function WorkspacePane(): React.JSX.Element {
       manager.updateTab(tabId, { ...currentData, ...patchData });
       syncState();
     },
-    [syncState]
+    [publishActiveItem, syncState]
   );
 
   // ---------------------------------------------------------------------------

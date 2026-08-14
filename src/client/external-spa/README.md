@@ -1,8 +1,9 @@
-# External SPA — Power Pages Code Page
+# External SPA — Secure External Workspace
 
-Single-file React 18 application deployed as a Power Pages Code Page web resource.
-It is built with Vite and bundled via `vite-plugin-singlefile` into a single
-self-contained `index.html` file that Power Pages serves directly.
+A React 18 application built with Vite and deployed as a static site to **Azure Static
+Web Apps** (`swa-spaarke-external-spa-dev`). It serves external (CIAM) users of the
+Spaarke Secure Project Workspace, and can also run embedded as a Teams tab (workforce
+collaboration host).
 
 ---
 
@@ -11,7 +12,7 @@ self-contained `index.html` file that Power Pages serves directly.
 ```bash
 # 1. Install dependencies
 cd src/client/external-spa
-npm install
+npm install --legacy-peer-deps --no-audit --no-fund
 
 # 2. Copy the example env file and fill in your values
 cp .env.example .env.local
@@ -20,19 +21,22 @@ cp .env.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000 in a browser where you are **already signed in to the
-Power Pages portal** (spaarkedev1.powerappsportals.com or whatever
-`VITE_PORTAL_URL` points to).
+Authentication is handled by MSAL against an Entra External ID (CIAM) tenant — see
+`src/auth/` for the implementation. No portal session or proxy login step is required.
 
 ---
 
 ## Environment Variables
 
-| Variable | Purpose | Default |
-|---|---|---|
-| `VITE_BFF_API_URL` | Spaarke BFF API base URL | `https://spe-api-dev-67e2xz.azurewebsites.net` |
-| `VITE_PORTAL_URL` | Power Pages portal URL (proxy target) | `https://spaarkedev1.powerappsportals.com` |
-| `VITE_PORTAL_CLIENT_ID` | OAuth client ID registered in the portal | *(required)* |
+| Variable | Purpose |
+|---|---|
+| `VITE_BFF_API_URL` | Spaarke BFF API base URL |
+| `VITE_MSAL_AUTHORITY` | Full CIAM authority URL (`https://{subdomain}.ciamlogin.com/{tenant-id}`) |
+| `VITE_MSAL_CLIENT_ID` | SPA public-client app registration ID (registered in the CIAM tenant) |
+| `VITE_MSAL_TENANT_ID` | CIAM external tenant ID |
+| `VITE_MSAL_BFF_SCOPE` | BFF API scope exposed in the CIAM tenant (must match BFF `Ciam:Audience`) |
+| `VITE_TEAMS_MSAL_CLIENT_ID` | Optional — workforce multitenant app client ID (Teams tab host only) |
+| `VITE_TEAMS_MSAL_BFF_SCOPE` | Optional — workforce BFF scope (Teams tab host only) |
 
 Copy `.env.example` to `.env.local` and set real values.
 `.env.local` is gitignored — never commit secrets.
@@ -41,28 +45,10 @@ Copy `.env.example` to `.env.local` and set real values.
 
 ## Dev Server Proxy
 
-The Vite dev server proxies three Power Pages route prefixes to the real portal
-so that the SPA can call the portal APIs while being served from localhost.
-
-| Proxy path | Forwarded to |
-|---|---|
-| `/_api/*` | `VITE_PORTAL_URL` |
-| `/_layout/*` | `VITE_PORTAL_URL` |
-| `/_services/*` | `VITE_PORTAL_URL` |
-
-`changeOrigin: true` rewrites the `Host` header so the portal accepts the
-request.  `cookieDomainRewrite: "localhost"` (applied to `/_api`) rewrites
-`Set-Cookie` domain attributes so the browser stores portal cookies against
-`localhost` and sends them back on subsequent proxied requests — this is what
-makes authentication work through the proxy.
-
-Because the proxy runs server-side, the browser's same-origin policy is not an
-issue.  All you need to do is make sure you have an active portal session in the
-same browser profile before making authenticated API calls.
-
-> Note: the proxy configuration only applies during `npm run dev`.  Production
-> builds are deployed to Power Pages and call the portal APIs directly — no proxy
-> is involved.
+The Vite dev server proxies `/api/*` to the Spaarke BFF API so the SPA can call it
+from `localhost` without hitting browser CORS restrictions (`bffApiCall` uses relative
+`/api/...` paths when `VITE_BFF_API_URL` is empty). See `server.proxy` in
+`vite.config.ts`.
 
 ---
 
@@ -72,18 +58,16 @@ same browser profile before making authenticated API calls.
 npm run build
 ```
 
-Output is a single `dist/index.html` with all JS/CSS inlined.  This file is
-uploaded to Dataverse as a web resource and served by Power Pages.
+Output is `dist/` — an `index.html` plus a predictable `assets/app.js` bundle (IIFE
+format). This is what the deploy workflow uploads to Azure Static Web Apps.
 
 ---
 
 ## Deployment
 
-See the main project docs and the `dataverse-deploy` skill for the full
-deployment procedure.  The short version:
-
-```bash
-# From the repository root
-pac pcf push   # (not applicable — this is a web resource, not a PCF control)
-# Upload dist/index.html via pac or the Power Pages Studio
-```
+Deployment is handled by the `.github/workflows/deploy-external-spa.yml` GitHub Actions
+workflow, which builds the app and uploads `dist/` to Azure Static Web Apps
+(`swa-spaarke-external-spa-dev`) via `Azure/static-web-apps-deploy@v1`.
+`staticwebapp.config.json` (navigation fallback + security headers) is staged into
+`dist/` as part of the build step since SWA only reads it from the deployed content
+root.
