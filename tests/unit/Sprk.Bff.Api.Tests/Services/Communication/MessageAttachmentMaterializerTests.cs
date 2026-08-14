@@ -103,7 +103,10 @@ public class MessageAttachmentMaterializerTests
         created.Should().HaveCount(2);
         var document = created[0];
         document.LogicalName.Should().Be("sprk_document");
-        ((EntityReference)document["sprk_communication"]).Id.Should().Be(CommunicationId);
+        // Production renamed the sprk_document lookup attribute sprk_communication -> sprk_relatedcommunication
+        // (master 0026af5e1); the test's assertion here was left stale (red on master too). Realigned during
+        // the dotnet-10-upgrade-r1 master re-sync (Part A). The intersection below keeps sprk_communication (unchanged).
+        ((EntityReference)document["sprk_relatedcommunication"]).Id.Should().Be(CommunicationId);
         document["sprk_graphitemid"].Should().Be("spe-item-abc");
         document["sprk_graphdriveid"].Should().Be(DriveId);
 
