@@ -4,7 +4,8 @@
     <title>FR-17 — wrap-up: test-diet, doc-drift, INDEX update, r3 handoff note, defer majors</title>
     <phase>P7 Wrap-up</phase>
     <gate>051 complete (dev deploy "go"); 060/061 deferred</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-note>2026-08-14: project closed. /test-diet reconciled (notes/test-diet-report.md — 0 scaffolding added; DiGraphValidationTests = MAINTAIN/KEEP; Plugins.Tests orphan already deleted; no AMBIGUOUS). Doc-drift swept .NET 8→10 across 19 canonical docs + no residual build-target net8. projects/INDEX.md row → ✅ COMPLETE. r3 handoff written (notes/r3-handoff.md — 3 baseline assumptions + Graph6/Kiota2 done + #772/#773). Deferred majors filed #772; deferred prod/demo cutover filed #773. Staging slot deleted. Cutover: master+dev net10 (DOTNETCORE-10.0.9), suite green (BFF 10415/0), zero-CVE, publish 44.96 MB. Also delivered post-cutover: Tier-1 same-major patch pass, Bicep 0.46.1, /worktree-net10-migrate skill. 060/061 prod cutover remain DEFERRED (#773).</completion-note>
     <rigor>STANDARD</rigor>
     <rigor-reason>Project-close wrap-up; touches .claude/ + projects/INDEX.md (main-session-only) + governance docs.</rigor-reason>
     <model-tier>sonnet</model-tier>
