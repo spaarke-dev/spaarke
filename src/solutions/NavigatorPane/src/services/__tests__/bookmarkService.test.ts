@@ -68,6 +68,8 @@ interface FakePageContextInput {
   entityRecordName?: string;
   pageType?: 'entityrecord' | 'entitylist' | 'dashboard' | 'webresource' | 'custom';
   viewId?: string;
+  /** Custom (code) page unique name — UAT fix #3's first-choice weblink-capture display name. */
+  name?: string;
 }
 
 interface BuildFakeXrmOptions {
@@ -264,25 +266,92 @@ describe('bookmarkService', () => {
     expect(result.navItemId).toBe('existing-pin');
   });
 
-  it('pinCurrentPage_NonResolvablePage_Dashboard_ThrowsAndCreatesNoRow', async () => {
-    const fakeXrm = installMockXrm({ pageContext: { pageType: 'dashboard' } });
+  // ───────────────────────────────────────────────────────────────────────
+  // pinCurrentPage — UAT fix #3: non-resolvable pages fall back to a
+  // WEBLINK capture (current top-window URL) with a meaningful name, instead
+  // of throwing. `window.top === window` in jsdom, so `location.href` is the
+  // test env's own `http://localhost/` — the URL VALUE isn't the point of
+  // these tests, the NAME-derivation order and the WebLink shape are.
+  // ───────────────────────────────────────────────────────────────────────
 
-    await expect(pinCurrentPage(OWNER_ID)).rejects.toThrow(BookmarkError);
-    expect(fakeXrm.WebApi.createRecord).not.toHaveBeenCalled();
-  });
+  describe('pinCurrentPage — weblink fallback for non-resolvable pages (UAT fix #3)', () => {
+    const originalTitle = document.title;
 
-  it('pinCurrentPage_EntityListWithoutViewId_ThrowsAndCreatesNoRow', async () => {
-    const fakeXrm = installMockXrm({ pageContext: { pageType: 'entitylist', entityName: 'sprk_matter' } });
+    afterEach(() => {
+      document.title = originalTitle;
+    });
 
-    await expect(pinCurrentPage(OWNER_ID)).rejects.toThrow(BookmarkError);
-    expect(fakeXrm.WebApi.createRecord).not.toHaveBeenCalled();
-  });
+    it('pinCurrentPage_OnCustomCodePage_WithPageNameFromPageContext_UsesThatAsDisplayName', async () => {
+      const fakeXrm = installMockXrm({ pageContext: { pageType: 'custom', name: 'sprk_emailprocessing' } });
+      document.title = 'Some Generic Title - Microsoft Dynamics 365';
 
-  it('pinCurrentPage_EntityRecordWithoutId_ThrowsAndCreatesNoRow', async () => {
-    const fakeXrm = installMockXrm({ pageContext: { pageType: 'entityrecord', entityName: 'sprk_matter' } });
+      const result = await pinCurrentPage(OWNER_ID);
 
-    await expect(pinCurrentPage(OWNER_ID)).rejects.toThrow(BookmarkError);
-    expect(fakeXrm.WebApi.createRecord).not.toHaveBeenCalled();
+      expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+        NAVITEM_ENTITY,
+        expect.objectContaining({
+          sprk_type: NavItemType.Pin,
+          sprk_source: NavItemSource.Captured,
+          sprk_targetlogicalname: null,
+          sprk_targetid: null,
+          sprk_pagetype: NavItemPageType.WebLink,
+          sprk_displayname: 'sprk_emailprocessing',
+        })
+      );
+      expect(typeof fakeXrm.WebApi.createRecord.mock.calls[0][1].sprk_url).toBe('string');
+      expect(result.created).toBe(true);
+    });
+
+    it('pinCurrentPage_OnCustomCodePage_NoPageContextName_FallsBackToCleanedDocumentTitle', async () => {
+      const fakeXrm = installMockXrm({ pageContext: { pageType: 'custom' } });
+      document.title = 'SpaarkeAi - Microsoft Dynamics 365';
+
+      await pinCurrentPage(OWNER_ID);
+
+      expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+        NAVITEM_ENTITY,
+        expect.objectContaining({ sprk_pagetype: NavItemPageType.WebLink, sprk_displayname: 'SpaarkeAi' })
+      );
+    });
+
+    it('pinCurrentPage_OnDashboardPage_NoTitleAvailable_FallsBackToUrlHostname', async () => {
+      const fakeXrm = installMockXrm({ pageContext: { pageType: 'dashboard' } });
+      document.title = '';
+
+      const result = await pinCurrentPage(OWNER_ID);
+
+      expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+        NAVITEM_ENTITY,
+        expect.objectContaining({
+          sprk_source: NavItemSource.Captured,
+          sprk_targetlogicalname: null,
+          sprk_targetid: null,
+          sprk_pagetype: NavItemPageType.WebLink,
+          sprk_displayname: 'localhost',
+        })
+      );
+      expect(result.created).toBe(true);
+    });
+
+    it('pinCurrentPage_EntityListWithoutViewId_CreatesWeblinkFallbackRatherThanThrowing', async () => {
+      const fakeXrm = installMockXrm({ pageContext: { pageType: 'entitylist', entityName: 'sprk_matter' } });
+
+      await expect(pinCurrentPage(OWNER_ID)).resolves.toMatchObject({ created: true });
+      expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+        NAVITEM_ENTITY,
+        expect.objectContaining({ sprk_pagetype: NavItemPageType.WebLink })
+      );
+    });
+
+    it('pinCurrentPage_EntityRecordWithoutId_CreatesWeblinkFallbackRatherThanThrowing', async () => {
+      const fakeXrm = installMockXrm({ pageContext: { pageType: 'entityrecord', entityName: 'sprk_matter' } });
+
+      await expect(pinCurrentPage(OWNER_ID)).resolves.toMatchObject({ created: true });
+      expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+        NAVITEM_ENTITY,
+        expect.objectContaining({ sprk_pagetype: NavItemPageType.WebLink })
+      );
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────
@@ -347,6 +416,65 @@ describe('bookmarkService', () => {
     );
     expect(result.kind).toBe('weblink');
     expect(result.created).toBe(true);
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
+  // addBookmark naming (UAT fix #3) — a better default name than the bare
+  // domain, for both a genuinely external URL and an MDA-shaped URL that
+  // does not match the record/view branches (dashboard/custom/entitylist-
+  // without-etn).
+  // ───────────────────────────────────────────────────────────────────────
+
+  it('addBookmark_ExternalUrlWithPath_UsesHostnamePlusFirstPathSegmentAsDisplayName', async () => {
+    const fakeXrm = installMockXrm();
+    const url = 'https://example.com/kb/some-article';
+
+    await addBookmark(OWNER_ID, url);
+
+    expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+      NAVITEM_ENTITY,
+      expect.objectContaining({ sprk_displayname: 'example.com / kb' })
+    );
+  });
+
+  it('addBookmark_ExternalUrlWithNoPath_UsesBareHostnameAsDisplayName', async () => {
+    const fakeXrm = installMockXrm();
+    const url = 'https://example.com/';
+
+    await addBookmark(OWNER_ID, url);
+
+    expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+      NAVITEM_ENTITY,
+      expect.objectContaining({ sprk_displayname: 'example.com' })
+    );
+  });
+
+  it('addBookmark_MdaCustomPageUrl_UsesTheCustomPageNameAsDisplayName', async () => {
+    const fakeXrm = installMockXrm();
+    const url = 'https://spaarkedev1.crm.dynamics.com/main.aspx?pagetype=custom&name=sprk_reconciliation';
+
+    const result = await addBookmark(OWNER_ID, url);
+
+    expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+      NAVITEM_ENTITY,
+      expect.objectContaining({
+        sprk_pagetype: NavItemPageType.WebLink,
+        sprk_displayname: 'sprk_reconciliation',
+      })
+    );
+    expect(result.kind).toBe('weblink');
+  });
+
+  it('addBookmark_MdaDashboardUrl_UsesTitleCasedPagetypeAsDisplayName', async () => {
+    const fakeXrm = installMockXrm();
+    const url = 'https://spaarkedev1.crm.dynamics.com/main.aspx?pagetype=dashboard&id=11111111-1111-1111-1111-111111111111';
+
+    await addBookmark(OWNER_ID, url);
+
+    expect(fakeXrm.WebApi.createRecord).toHaveBeenCalledWith(
+      NAVITEM_ENTITY,
+      expect.objectContaining({ sprk_displayname: 'Dashboard' })
+    );
   });
 
   it('addBookmark_NonUrlString_ThrowsFriendlyRejectionAndCreatesNoRow', async () => {

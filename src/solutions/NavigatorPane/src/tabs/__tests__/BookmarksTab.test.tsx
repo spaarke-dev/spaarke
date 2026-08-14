@@ -291,6 +291,111 @@ describe('BookmarksTab', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────
+  // Inline rename — hover pencil -> edit -> save (UAT fix #4)
+  // ───────────────────────────────────────────────────────────────────────
+
+  describe('Inline rename (UAT fix #4)', () => {
+    it('click_PencilThenConfirm_CallsUpdateRecordAndShowsTheNewNameInline', async () => {
+      const fakeXrm = installMockXrm();
+      renderBookmarksTab('light');
+      const user = userEvent.setup();
+
+      await waitFor(() => expect(screen.getByTestId('bookmarks-tab-row-rename-pin-matter')).toBeInTheDocument());
+
+      await user.click(screen.getByTestId('bookmarks-tab-row-rename-pin-matter'));
+
+      const input = await screen.findByTestId('bookmarks-tab-row-rename-input-pin-matter');
+      expect(input).toHaveValue('Acme v. Widget Co');
+
+      await user.clear(input);
+      await user.type(input, 'Acme Renamed');
+      await user.click(screen.getByTestId('bookmarks-tab-row-rename-confirm-pin-matter'));
+
+      // Optimistic + confirmed: the row shows the new name immediately.
+      await waitFor(() => {
+        expect(screen.getByTestId('bookmarks-tab-row-pin-matter')).toHaveTextContent('Acme Renamed');
+      });
+      expect(fakeXrm.WebApi.updateRecord).toHaveBeenCalledWith('sprk_navitem', 'pin-matter', {
+        sprk_displayname: 'Acme Renamed',
+      });
+
+      // Clicking the pencil/confirming a rename must not also trigger row-click navigation.
+      expect(fakeXrm.Navigation.navigateTo).not.toHaveBeenCalled();
+    });
+
+    it('keydown_EnterInRenameInput_AlsoConfirmsTheRename', async () => {
+      const fakeXrm = installMockXrm();
+      renderBookmarksTab('light');
+      const user = userEvent.setup();
+
+      await waitFor(() => expect(screen.getByTestId('bookmarks-tab-row-rename-pin-document')).toBeInTheDocument());
+      await user.click(screen.getByTestId('bookmarks-tab-row-rename-pin-document'));
+
+      const input = await screen.findByTestId('bookmarks-tab-row-rename-input-pin-document');
+      await user.clear(input);
+      await user.type(input, 'MSA (final){Enter}');
+
+      await waitFor(() => {
+        expect(fakeXrm.WebApi.updateRecord).toHaveBeenCalledWith('sprk_navitem', 'pin-document', {
+          sprk_displayname: 'MSA (final)',
+        });
+      });
+      expect(screen.queryByTestId('bookmarks-tab-row-rename-input-pin-document')).not.toBeInTheDocument();
+    });
+
+    it('keydown_EscapeInRenameInput_CancelsWithoutCallingUpdateRecord', async () => {
+      const fakeXrm = installMockXrm();
+      renderBookmarksTab('light');
+      const user = userEvent.setup();
+
+      await waitFor(() => expect(screen.getByTestId('bookmarks-tab-row-rename-pin-matter')).toBeInTheDocument());
+      await user.click(screen.getByTestId('bookmarks-tab-row-rename-pin-matter'));
+
+      const input = await screen.findByTestId('bookmarks-tab-row-rename-input-pin-matter');
+      await user.clear(input);
+      await user.type(input, 'Should not save{Escape}');
+
+      expect(screen.queryByTestId('bookmarks-tab-row-rename-input-pin-matter')).not.toBeInTheDocument();
+      expect(screen.getByTestId('bookmarks-tab-row-pin-matter')).toHaveTextContent('Acme v. Widget Co');
+      expect(fakeXrm.WebApi.updateRecord).not.toHaveBeenCalled();
+    });
+
+    it('click_CancelButton_ExitsEditModeWithoutSaving', async () => {
+      const fakeXrm = installMockXrm();
+      renderBookmarksTab('light');
+      const user = userEvent.setup();
+
+      await waitFor(() => expect(screen.getByTestId('bookmarks-tab-row-rename-pin-weblink')).toBeInTheDocument());
+      await user.click(screen.getByTestId('bookmarks-tab-row-rename-pin-weblink'));
+
+      await screen.findByTestId('bookmarks-tab-row-rename-input-pin-weblink');
+      await user.click(screen.getByTestId('bookmarks-tab-row-rename-cancel-pin-weblink'));
+
+      expect(screen.queryByTestId('bookmarks-tab-row-rename-input-pin-weblink')).not.toBeInTheDocument();
+      expect(screen.getByTestId('bookmarks-tab-row-pin-weblink')).toHaveTextContent('External Reference');
+      expect(fakeXrm.WebApi.updateRecord).not.toHaveBeenCalled();
+    });
+
+    it('confirmRename_UpdateRecordFails_RevertsToTheOldNameNonFatally', async () => {
+      const fakeXrm = installMockXrm();
+      fakeXrm.WebApi.updateRecord.mockRejectedValueOnce(new Error('network error'));
+      renderBookmarksTab('light');
+      const user = userEvent.setup();
+
+      await waitFor(() => expect(screen.getByTestId('bookmarks-tab-row-rename-pin-matter')).toBeInTheDocument());
+      await user.click(screen.getByTestId('bookmarks-tab-row-rename-pin-matter'));
+
+      const input = await screen.findByTestId('bookmarks-tab-row-rename-input-pin-matter');
+      await user.clear(input);
+      await user.type(input, 'Will fail to save{Enter}');
+
+      await waitFor(() => {
+        expect(screen.getByTestId('bookmarks-tab-row-pin-matter')).toHaveTextContent('Acme v. Widget Co');
+      });
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────
   // HARD MUST-NOT: sprk_monitor is never read or written by this tab
   // (the Monitored lens moved entirely to MonitoredTab.tsx)
   // ───────────────────────────────────────────────────────────────────────

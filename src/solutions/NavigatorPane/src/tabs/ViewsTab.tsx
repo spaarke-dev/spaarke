@@ -23,14 +23,16 @@
  * extension, not a fork. See
  * `projects/spaarke-side-pane-navigation-history-r1/notes/060-viewservice-extension.md`.
  *
- * Click behavior: `Xrm.Navigation.navigateTo({pageType:'entitylist',
- * entityName, viewId})` opens the entity grid with that view selected. The
- * `viewId` field required widening `PageInput` in `xrmContext.ts` (additive
- * optional field — same pattern as task 010's `webresourceName` widen);
- * mirrors the `pageType:'entitylist', entityName, viewId` shape already used
- * by `LegalWorkspace/WorkspaceGrid.tsx` (there via an untyped `any` Xrm
- * reference — this tab uses the canonical typed `getXrm()` path instead,
- * consistent with RecentTab.tsx/PinnedTab.tsx).
+ * Click behavior (UAT bug fix — see `services/viewNavigation.ts`):
+ * `Xrm.Navigation.navigateTo({pageType:'entitylist', entityName, viewId})`
+ * does NOT reliably honor `viewId` on the current UCI session — Dataverse
+ * silently falls back to the entity's default view. The reliable path is a
+ * `main.aspx` deep-link URL opened via `Xrm.Navigation.openUrl` (see
+ * `viewNavigation.ts`'s `openView`, shared with `QuickSwitcher.tsx`'s
+ * `entitylist` search-result navigation). The `viewId`/`viewType` fields
+ * still on `PageInput` in `xrmContext.ts` (task 060/UAT widen) back the
+ * function's own `navigateTo` FALLBACK path (no clientUrl/appId resolvable —
+ * e.g. some unit-test fakes) and the search-index's stored target shape.
  *
  * Host-context only (project constraint): all data access goes through
  * ViewService, which itself only calls `Xrm.WebApi` under the signed-in
@@ -54,6 +56,7 @@ import * as React from 'react';
 import { Caption1, Spinner, Text, makeStyles, shorthands, tokens } from '@fluentui/react-components';
 import { ViewService, getXrm, type IViewDefinition, type XrmContext } from '@spaarke/ui-components';
 import { setViewSearchEntries, type SearchIndexEntry } from '../services/navigatorSearchIndex';
+import { openView } from '../services/viewNavigation';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entity label helper (local duplicate of RecentTab.tsx's `formatEntityLabel` —
@@ -115,23 +118,14 @@ function groupByEntity(views: IViewDefinition[]): EntityViewGroup[] {
 const USERQUERY_VIEW_TYPE = '4230';
 
 /**
- * Navigate to a view's entity list with that view selected. `viewId` is the
- * `userquery` id — Dataverse's `navigateTo` accepts a personal-view id the
- * same way it accepts a `savedquery` id, but REQUIRES `viewType` to actually
- * honor it instead of silently opening the entity's default view (UAT bug
- * fix — see {@link USERQUERY_VIEW_TYPE}). Takes `xrm` explicitly (rather than
+ * Navigate to a view's entity list with that view ACTUALLY selected — see
+ * `services/viewNavigation.ts`'s module docblock for the URL-based fix + the
+ * `navigateTo` fallback chain. Takes `xrm` explicitly (rather than
  * re-resolving `getXrm()` internally) to match `navigateToRow`'s signature
  * in RecentTab.tsx/BookmarksTab.tsx.
  */
-function navigateToView(xrm: XrmContext, view: IViewDefinition): void {
-  const navigation = xrm.Navigation;
-  if (!navigation) return;
-  void navigation.navigateTo({
-    pageType: 'entitylist',
-    entityName: view.entityLogicalName,
-    viewId: view.id,
-    viewType: USERQUERY_VIEW_TYPE,
-  });
+async function navigateToView(xrm: XrmContext, view: IViewDefinition): Promise<void> {
+  await openView(xrm, view.entityLogicalName, view.id);
 }
 
 /** Maps a loaded view to a `navigatorSearchIndex.ts` entry (task 070, FR-11). `viewType` (UAT bug fix) so Enter/click on a view search result opens the same personal view, not the entity default. */
@@ -268,10 +262,10 @@ export const ViewsTab: React.FC = () => {
     };
   }, []);
 
-  const handleViewClick = React.useCallback((view: IViewDefinition) => {
+  const handleViewClick = React.useCallback(async (view: IViewDefinition) => {
     const xrm = getXrm();
     if (!xrm) return;
-    navigateToView(xrm, view);
+    await navigateToView(xrm, view);
   }, []);
 
   let content: React.ReactElement;
@@ -317,11 +311,11 @@ export const ViewsTab: React.FC = () => {
                     role="listitem"
                     tabIndex={0}
                     data-testid={`views-tab-row-${view.id}`}
-                    onClick={() => handleViewClick(view)}
+                    onClick={() => void handleViewClick(view)}
                     onKeyDown={event => {
                       if (event.key === 'Enter' || event.key === ' ') {
                         event.preventDefault();
-                        handleViewClick(view);
+                        void handleViewClick(view);
                       }
                     }}
                   >

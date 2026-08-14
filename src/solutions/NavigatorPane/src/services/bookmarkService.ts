@@ -10,6 +10,17 @@
  * pages via `viewId`) to build a captured logical target, then writes it via
  * `pinService.pin` with `sprk_source=Captured`.
  *
+ * UAT fix #3: when the current page is NOT resolvable as a logical
+ * entityrecord/entitylist target (a code/custom page, a dashboard, a
+ * webresource, or an entitylist page with no selected view) — previously
+ * `pinCurrentPage` just threw `"This page can't be pinned."`, so "Pin this
+ * page" never worked on the SpaarkeAi/Email/Reconciliation code pages.
+ * Instead, it now falls back to capturing the current TOP-WINDOW URL as a
+ * `WebLink` bookmark (`navItemRepository.createWeblinkPinItem`,
+ * `sprk_source=Captured`) with a MEANINGFUL display name — see
+ * `deriveCurrentPageWeblinkName` — rather than failing or falling back to the
+ * bare domain.
+ *
  * `addBookmark` — "+ Add bookmark": manual. Parses a pasted/typed string via
  * `urlParse.ts` and writes `sprk_source=Manual`: an MDA record URL becomes a
  * labeled record target, an MDA entitylist/view URL becomes a `viewid`
@@ -89,6 +100,13 @@ interface PageContextInput {
   entityRecordName?: string;
   pageType?: 'entityrecord' | 'entitylist' | 'dashboard' | 'webresource' | 'custom';
   viewId?: string;
+  /**
+   * The custom (code) page's unique name — present on a real
+   * `PageInputCustomPage.name` when `pageType === 'custom'`. UAT fix #3's
+   * first-choice display-name source for a weblink capture of a code page
+   * (see {@link deriveCurrentPageWeblinkName}).
+   */
+  name?: string;
 }
 
 interface PageContextResult {
@@ -197,45 +215,177 @@ function deriveCapturedTarget(xrm: XrmContext | undefined): CapturedPageTarget |
   return null; // dashboard/custom/webresource, entityrecord w/o id, entitylist w/o viewid — not resolvable
 }
 
-/**
- * "Pin this page" (task 051, spec FR-08): bookmark the CURRENT page with no
- * typing. Reads `getPageContext()` fresh (never a cached `Xrm` — task-001
- * spike lesson) and writes a `sprk_type=pin`, `sprk_source=Captured`
- * `sprk_navitem` via the same dedupe-before-create path the star gesture
- * uses ({@link pin}). Throws {@link BookmarkError} when the current page is
- * not resolvable — the caller shows a friendly inline message and creates no
- * row.
- *
- * @param ownerId - Current user id (GUID, no braces) — `_ownerid_value`.
- */
-export async function pinCurrentPage(ownerId: string): Promise<PinResult> {
-  const xrm = getXrm();
-  const target = deriveCapturedTarget(xrm);
-  if (!target) {
-    throw new BookmarkError("This page can't be pinned.");
-  }
-
-  return pin(ownerId, {
-    targetLogicalName: target.targetLogicalName,
-    targetId: target.targetId,
-    pageType: target.pageType,
-    displayName: target.displayName,
-    source: NavItemSource.Captured,
-  });
-}
-
 // ---------------------------------------------------------------------------
-// "+ Add bookmark" — manual URL-parse target derivation
+// "Pin this page" — weblink fallback for a non-resolvable (e.g. code) page
+// (UAT fix #3)
 // ---------------------------------------------------------------------------
 
-/** `new URL(url).hostname`, falling back to the raw URL if that somehow throws (already-validated by `urlParse.ts`, so this is defensive only). */
-function formatWeblinkDisplayName(url: string): string {
+/** `new URL(url).hostname`, falling back to the raw URL if that somehow throws. Shared final fallback for both bookmark gestures' name-derivation chains. */
+function safeHostname(url: string): string {
   try {
     const host = new URL(url).hostname;
     return host || url;
   } catch {
     return url;
   }
+}
+
+/**
+ * The current page's TOP-WINDOW URL — NavigatorPane runs in a side-pane
+ * iframe (ADR-006), so `window.location.href` would only ever be the pane's
+ * own `webresource` URL, never the host record/code-page URL the user
+ * actually wants to bookmark. Falls back to this frame's own URL if
+ * `window.top` is cross-origin-inaccessible (defensive only — the pane and
+ * its host are always same-origin in every real Dataverse deployment).
+ */
+function currentTopWindowUrl(): string {
+  try {
+    if (typeof window !== 'undefined' && window.top?.location?.href) {
+      return window.top.location.href;
+    }
+  } catch {
+    // Cross-origin access denied — fall back to this frame's own URL below.
+  }
+  return typeof window !== 'undefined' ? window.location.href : '';
+}
+
+/** Known MDA/Power Platform chrome suffixes appended to `document.title` — stripped so the bookmark name reads as just the page's own name. */
+const DOCUMENT_TITLE_SUFFIX = /\s*[-–]\s*(Microsoft Dynamics 365|Dynamics 365|Power Apps)\s*$/i;
+
+/** Cleans `document.title` per the module docblock's name-derivation order. Returns `null` for a blank/unusable title. */
+function cleanDocumentTitle(rawTitle: string): string | null {
+  const trimmed = rawTitle.trim();
+  if (!trimmed) return null;
+  const stripped = trimmed.replace(DOCUMENT_TITLE_SUFFIX, '').trim();
+  return stripped.length > 0 ? stripped : null;
+}
+
+/**
+ * Derive a MEANINGFUL display name for a "Pin this page" weblink capture
+ * (UAT fix #3), in order:
+ *   (a) the custom page's `name` from `getPageContext().input`, when the
+ *       current page IS a custom page (`pageType === 'custom'`);
+ *   (b) `document.title`, cleaned of MDA chrome suffixes
+ *       ({@link cleanDocumentTitle});
+ *   (c) the URL's hostname.
+ * Never throws.
+ */
+function deriveCurrentPageWeblinkName(input: PageContextInput | undefined, url: string): string {
+  const customPageName = input?.pageType === 'custom' ? input.name?.trim() : undefined;
+  if (customPageName) return customPageName;
+
+  const title = typeof document !== 'undefined' ? cleanDocumentTitle(document.title ?? '') : null;
+  if (title) return title;
+
+  return safeHostname(url);
+}
+
+/**
+ * "Pin this page" (task 051, spec FR-08; UAT fix #3): bookmark the CURRENT
+ * page with no typing. Reads `getPageContext()` fresh (never a cached `Xrm` —
+ * task-001 spike lesson). When the page resolves to a logical
+ * entityrecord/entitylist target ({@link deriveCapturedTarget}), writes a
+ * `sprk_type=pin`, `sprk_source=Captured` `sprk_navitem` via the same
+ * dedupe-before-create path the star gesture uses ({@link pin}). Otherwise
+ * (a code/custom page, dashboard, webresource, or an entitylist page with no
+ * selected view) falls back to capturing the current top-window URL as a
+ * `WebLink` bookmark ({@link deriveCurrentPageWeblinkName} for the name) —
+ * this is the ONLY case where this function does not throw
+ * {@link BookmarkError}; it only throws when even the top-window URL is
+ * unavailable (should not happen in a real browser).
+ *
+ * @param ownerId - Current user id (GUID, no braces) — `_ownerid_value`.
+ */
+export async function pinCurrentPage(ownerId: string): Promise<PinResult> {
+  const xrm = getXrm();
+  const target = deriveCapturedTarget(xrm);
+  if (target) {
+    return pin(ownerId, {
+      targetLogicalName: target.targetLogicalName,
+      targetId: target.targetId,
+      pageType: target.pageType,
+      displayName: target.displayName,
+      source: NavItemSource.Captured,
+    });
+  }
+
+  const url = currentTopWindowUrl();
+  if (!url) {
+    throw new BookmarkError("This page can't be pinned.");
+  }
+
+  const utility = xrm?.Utility as (XrmUtility & XrmUtilityWithPageContext) | undefined;
+  const input = utility?.getPageContext?.()?.input;
+  const displayName = deriveCurrentPageWeblinkName(input, url);
+
+  const created = await createWeblinkPinItem({
+    url,
+    displayName,
+    source: NavItemSource.Captured,
+  });
+  return { navItemId: created.id, created: true };
+}
+
+// ---------------------------------------------------------------------------
+// "+ Add bookmark" — manual URL-parse target derivation
+// ---------------------------------------------------------------------------
+
+/**
+ * Best-effort readable-name hint for an MDA-shaped URL that did NOT match
+ * `urlParse.ts`'s `record`/`view` branches (e.g. a dashboard, custom-page, or
+ * entitylist-without-`etn` deep link) — reads `pagetype`/`etn`/`name` off the
+ * query string directly (this module's own concern, not `urlParse.ts`'s pure
+ * target-SHAPE parser). Returns `null` when nothing recognizable is present,
+ * so the caller falls through to the generic hostname+path fallback.
+ */
+function deriveMdaHintedName(url: URL): string | null {
+  const params = url.searchParams;
+  const pagetype = params.get('pagetype')?.trim();
+  const etn = params.get('etn')?.trim().toLowerCase();
+  const customPageName = params.get('name')?.trim();
+
+  if (pagetype === 'custom' && customPageName) {
+    return customPageName;
+  }
+  if (etn) {
+    const label = formatEntityFallbackLabel(etn);
+    return pagetype === 'entitylist' ? `${label} view` : label;
+  }
+  if (pagetype) {
+    return pagetype.charAt(0).toUpperCase() + pagetype.slice(1);
+  }
+  return null;
+}
+
+/** First non-`.aspx`/`.html`-file path segment — a lightweight stand-in for "the meaningful part of the path" (e.g. `/kb/some-article` -> `kb`). Returns `null` when the path has none. */
+function firstMeaningfulPathSegment(url: URL): string | null {
+  const segments = url.pathname.split('/').filter(Boolean);
+  return segments.find(segment => !/\.(aspx|html?)$/i.test(segment)) ?? null;
+}
+
+/**
+ * "+ Add bookmark"'s raw-weblink display-name derivation (UAT fix #3 — was
+ * previously just the bare hostname): an MDA-shaped URL gets a readable
+ * name via {@link deriveMdaHintedName} (pagetype/etn/custom-page name); any
+ * other URL gets `hostname` (+ ` / firstPathSegment` when the path carries
+ * one meaningful segment, e.g. `example.com / kb`). Best-effort only — the
+ * inline-rename affordance (UAT fix #4) is the fallback for anything still
+ * unreadable.
+ */
+function deriveWeblinkBookmarkName(rawUrl: string): string {
+  let url: URL;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return rawUrl;
+  }
+
+  const hinted = deriveMdaHintedName(url);
+  if (hinted) return hinted;
+
+  const host = url.hostname || rawUrl;
+  const segment = firstMeaningfulPathSegment(url);
+  return segment ? `${host} / ${segment}` : host;
 }
 
 /**
@@ -304,7 +454,7 @@ export async function addBookmark(ownerId: string, rawInput: string): Promise<Ad
   // weblink — no target identity to dedupe on (see createWeblinkPinItem docblock).
   const created = await createWeblinkPinItem({
     url: parsed.url,
-    displayName: formatWeblinkDisplayName(parsed.url),
+    displayName: deriveWeblinkBookmarkName(parsed.url),
     source: NavItemSource.Manual,
   });
   return { navItemId: created.id, created: true, kind: 'weblink' };

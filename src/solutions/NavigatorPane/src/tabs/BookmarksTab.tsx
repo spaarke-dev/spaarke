@@ -12,6 +12,15 @@
  * (`pinService.unpinById`) — a DELETE on `sprk_navitem`, never a write to
  * `sprk_monitor` (project HARD MUST-NOT, see `pinService.ts`).
  *
+ * UAT fix #4 (inline rename): each row shows a hover-revealed (and
+ * keyboard-focusable) pencil (`Edit16Regular`) that turns the row's name
+ * into an inline `Input` — confirm via Enter or the checkmark button, cancel
+ * via Escape or the dismiss button. Confirming calls
+ * `navItemRepository.renameNavItem` (an `UPDATE sprk_displayname` on
+ * `sprk_navitem`) with an optimistic local update that reverts on failure.
+ * Applies to every row (record pins AND weblink bookmarks) — the same flat
+ * list, same row template.
+ *
  * UAT redesign (owner decision): this file supersedes `PinnedTab.tsx`.
  * Changes from the former Pinned tab:
  *   - Renamed tab label "Pinned" -> "Bookmarks" (`NavigatorBody.tsx`).
@@ -67,15 +76,24 @@ import {
   Spinner,
   Text,
   makeStyles,
+  mergeClasses,
   shorthands,
   tokens,
   type InputOnChangeData,
 } from '@fluentui/react-components';
-import { Add16Regular, Pin16Regular, Star16Filled } from '@fluentui/react-icons';
+import {
+  Add16Regular,
+  Checkmark16Regular,
+  Dismiss16Regular,
+  Edit16Regular,
+  Pin16Regular,
+  Star16Filled,
+} from '@fluentui/react-icons';
 import { getXrm, type XrmContext } from '@spaarke/ui-components';
 import {
   NavItemPageType,
   listPinItems,
+  renameNavItem,
   type NavItemRecord,
 } from '@spaarke/ui-components/services/navigator/navItemRepository';
 import { unpinById } from '../services/pinService';
@@ -245,6 +263,12 @@ const useStyles = makeStyles({
     ':focus-visible': {
       ...shorthands.outline('2px', 'solid', tokens.colorStrokeFocus2),
     },
+    // Hover-reveal for the rename pencil (UAT fix #4) — the pencil's own
+    // `:focus-visible` (see `rowPencil` below) reveals it independently for
+    // keyboard users tabbing directly to it.
+    ':hover .navRowPencil': {
+      opacity: 1,
+    },
   },
   rowMain: {
     display: 'flex',
@@ -267,6 +291,27 @@ const useStyles = makeStyles({
     whiteSpace: 'nowrap',
     fontSize: tokens.fontSizeBase300,
     color: tokens.colorNeutralForeground1,
+  },
+  // Inline rename input (UAT fix #4) — replaces `rowName` in edit mode.
+  rowNameInput: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  rowActions: {
+    display: 'flex',
+    alignItems: 'center',
+    flexShrink: 0,
+    ...shorthands.gap(tokens.spacingHorizontalXXS),
+  },
+  // Hidden until the row is hovered (`row`'s `:hover .navRowPencil` above) OR
+  // the pencil itself receives keyboard focus — always accessible via Tab
+  // even though it is visually hidden at rest.
+  rowPencil: {
+    opacity: 0,
+    ':focus-visible': {
+      opacity: 1,
+    },
   },
   // Gesture area — "Pin this page" + "+ Add bookmark", now at the TOP of the tab.
   bookmarkActions: {
@@ -304,6 +349,11 @@ export const BookmarksTab: React.FC = () => {
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
   const [rows, setRows] = React.useState<NavItemRecord[]>([]);
   const [unpinningIds, setUnpinningIds] = React.useState<Set<string>>(new Set());
+
+  // Inline rename state (UAT fix #4) — at most one row edits at a time.
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [editValue, setEditValue] = React.useState('');
+  const [renamingIds, setRenamingIds] = React.useState<Set<string>>(new Set());
 
   // Gesture state.
   const [pinningCurrentPage, setPinningCurrentPage] = React.useState(false);
@@ -399,6 +449,54 @@ export const BookmarksTab: React.FC = () => {
     [unpinningIds]
   );
 
+  // ── Inline rename (UAT fix #4 — pencil on hover) ────────────────────────
+
+  const handleStartRename = React.useCallback((row: NavItemRecord, event: React.SyntheticEvent) => {
+    event.stopPropagation();
+    setEditingId(row.sprk_navitemid);
+    setEditValue(row.sprk_displayname);
+  }, []);
+
+  const handleCancelRename = React.useCallback((event?: React.SyntheticEvent) => {
+    event?.stopPropagation();
+    setEditingId(null);
+    setEditValue('');
+  }, []);
+
+  const handleConfirmRename = React.useCallback(
+    async (row: NavItemRecord, event?: React.SyntheticEvent) => {
+      event?.stopPropagation();
+      const trimmed = editValue.trim();
+      setEditingId(null);
+
+      if (!trimmed || trimmed === row.sprk_displayname) {
+        return; // blank/unchanged — no-op, keep the old name.
+      }
+
+      const previousName = row.sprk_displayname;
+      // Optimistic — the row shows the new name immediately.
+      setRows(prev =>
+        prev.map(r => (r.sprk_navitemid === row.sprk_navitemid ? { ...r, sprk_displayname: trimmed } : r))
+      );
+      setRenamingIds(prev => new Set(prev).add(row.sprk_navitemid));
+      try {
+        await renameNavItem(row.sprk_navitemid, trimmed);
+      } catch {
+        // Non-fatal — revert to the old name; user can retry.
+        setRows(prev =>
+          prev.map(r => (r.sprk_navitemid === row.sprk_navitemid ? { ...r, sprk_displayname: previousName } : r))
+        );
+      } finally {
+        setRenamingIds(prev => {
+          const next = new Set(prev);
+          next.delete(row.sprk_navitemid);
+          return next;
+        });
+      }
+    },
+    [editValue]
+  );
+
   // ── Gesture handlers ─────────────────────────────────────────────────────
 
   const handlePinCurrentPageClick = React.useCallback(async () => {
@@ -458,42 +556,117 @@ export const BookmarksTab: React.FC = () => {
   }, [bookmarkInput, addingBookmark, loadPins]);
 
   const renderRow = React.useCallback(
-    (row: NavItemRecord) => (
-      <div
-        key={row.sprk_navitemid}
-        className={styles.row}
-        role="listitem"
-        tabIndex={0}
-        data-testid={`bookmarks-tab-row-${row.sprk_navitemid}`}
-        onClick={() => handleRowClick(row)}
-        onKeyDown={event => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
+    (row: NavItemRecord) => {
+      const isEditing = editingId === row.sprk_navitemid;
+
+      return (
+        <div
+          key={row.sprk_navitemid}
+          className={styles.row}
+          role="listitem"
+          tabIndex={0}
+          data-testid={`bookmarks-tab-row-${row.sprk_navitemid}`}
+          onClick={() => {
+            if (isEditing) return;
             handleRowClick(row);
-          }
-        }}
-      >
-        <div className={styles.rowMain}>
-          <span className={styles.rowIcon} data-testid={`bookmarks-tab-row-icon-${row.sprk_navitemid}`}>
-            {rowIconFor({ pageType: row.sprk_pagetype, logicalName: row.sprk_targetlogicalname })}
-          </span>
-          <Text className={styles.rowName} title={row.sprk_displayname}>
-            {row.sprk_displayname}
-          </Text>
+          }}
+          onKeyDown={event => {
+            if (isEditing) return;
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              handleRowClick(row);
+            }
+          }}
+        >
+          <div className={styles.rowMain}>
+            <span className={styles.rowIcon} data-testid={`bookmarks-tab-row-icon-${row.sprk_navitemid}`}>
+              {rowIconFor({ pageType: row.sprk_pagetype, logicalName: row.sprk_targetlogicalname })}
+            </span>
+            {isEditing ? (
+              <Input
+                className={styles.rowNameInput}
+                size="small"
+                value={editValue}
+                onClick={event => event.stopPropagation()}
+                onChange={(_event, data) => setEditValue(data.value)}
+                onKeyDown={event => {
+                  event.stopPropagation();
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void handleConfirmRename(row);
+                  } else if (event.key === 'Escape') {
+                    event.preventDefault();
+                    handleCancelRename();
+                  }
+                }}
+                autoFocus
+                aria-label={`Rename ${row.sprk_displayname}`}
+                data-testid={`bookmarks-tab-row-rename-input-${row.sprk_navitemid}`}
+              />
+            ) : (
+              <Text className={styles.rowName} title={row.sprk_displayname}>
+                {row.sprk_displayname}
+              </Text>
+            )}
+          </div>
+          {isEditing ? (
+            <div className={styles.rowActions}>
+              <Button
+                appearance="transparent"
+                size="small"
+                icon={<Checkmark16Regular />}
+                aria-label={`Save name for ${row.sprk_displayname}`}
+                disabled={renamingIds.has(row.sprk_navitemid)}
+                data-testid={`bookmarks-tab-row-rename-confirm-${row.sprk_navitemid}`}
+                onClick={event => void handleConfirmRename(row, event)}
+              />
+              <Button
+                appearance="transparent"
+                size="small"
+                icon={<Dismiss16Regular />}
+                aria-label="Cancel rename"
+                data-testid={`bookmarks-tab-row-rename-cancel-${row.sprk_navitemid}`}
+                onClick={event => handleCancelRename(event)}
+              />
+            </div>
+          ) : (
+            <div className={styles.rowActions}>
+              <Button
+                appearance="transparent"
+                size="small"
+                icon={<Edit16Regular />}
+                aria-label={`Rename ${row.sprk_displayname}`}
+                className={mergeClasses(styles.rowPencil, 'navRowPencil')}
+                data-testid={`bookmarks-tab-row-rename-${row.sprk_navitemid}`}
+                onClick={event => handleStartRename(row, event)}
+              />
+              <Button
+                appearance="transparent"
+                size="small"
+                icon={<Star16Filled />}
+                aria-label={`Unpin ${row.sprk_displayname}`}
+                aria-pressed={true}
+                disabled={unpinningIds.has(row.sprk_navitemid)}
+                data-testid={`bookmarks-tab-row-star-${row.sprk_navitemid}`}
+                onClick={event => void handleUnpinClick(row, event)}
+              />
+            </div>
+          )}
         </div>
-        <Button
-          appearance="transparent"
-          size="small"
-          icon={<Star16Filled />}
-          aria-label={`Unpin ${row.sprk_displayname}`}
-          aria-pressed={true}
-          disabled={unpinningIds.has(row.sprk_navitemid)}
-          data-testid={`bookmarks-tab-row-star-${row.sprk_navitemid}`}
-          onClick={event => void handleUnpinClick(row, event)}
-        />
-      </div>
-    ),
-    [handleRowClick, handleUnpinClick, styles, unpinningIds]
+      );
+    },
+    [
+      editingId,
+      editValue,
+      handleCancelRename,
+      handleConfirmRename,
+      handleRowClick,
+      handleStartRename,
+      handleUnpinClick,
+      renamingIds,
+      styles,
+      unpinningIds,
+    ]
   );
 
   let listContent: React.ReactElement;

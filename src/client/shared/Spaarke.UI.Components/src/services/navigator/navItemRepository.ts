@@ -435,6 +435,29 @@ export async function deleteNavItem(navItemId: string): Promise<void> {
 }
 
 /**
+ * Rename a `sprk_navitem` — updates `sprk_displayname` only (UAT fix #4,
+ * spaarke-side-pane-navigation-history-r1: `BookmarksTab.tsx`'s inline
+ * pencil-to-rename affordance on a hover-revealed row). Generic by design
+ * (not `renamePinItem`) for the same reason {@link deleteNavItem} is generic
+ * — the primitive applies to any `sprk_navitem` row, pin or history; only its
+ * caller (`BookmarksTab.tsx`, bookmark rows only today) is pin-specific.
+ * Same error-handling shape as every other write in this module —
+ * {@link NavItemRepositoryError} on any `Xrm.WebApi` failure.
+ *
+ * @param navItemId - The row's `sprk_navitemid`.
+ * @param displayName - The new `sprk_displayname`. Caller is responsible for
+ *   trimming/validating non-blank — this function writes whatever it is given.
+ */
+export async function renameNavItem(navItemId: string, displayName: string): Promise<void> {
+  const webApi = requireWebApi();
+  try {
+    await webApi.updateRecord(ENTITY, navItemId, { sprk_displayname: displayName });
+  } catch (err) {
+    throw new NavItemRepositoryError(parseWebApiError(err), err);
+  }
+}
+
+/**
  * Delete the current user's `history` `sprk_navitem` rows whose
  * `sprk_lastvisited` is strictly older than `cutoff` (retention prune-on-write,
  * task 031, spec FR-05 / OQ-2). The OData filter always ANDs together

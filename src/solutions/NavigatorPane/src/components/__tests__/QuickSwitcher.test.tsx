@@ -78,7 +78,7 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
   });
 
   const navigateTo = jest.fn(async () => undefined);
-  const openUrl = jest.fn(async () => undefined);
+  const openUrl = jest.fn((_url: string, _options?: unknown) => undefined);
 
   const getEntityMetadata = jest.fn(async () => ({ PrimaryNameAttribute: 'name' }));
 
@@ -92,7 +92,14 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
     },
     Navigation: { navigateTo, openUrl, openForm: jest.fn() },
     Utility: {
-      getGlobalContext: () => ({ userSettings: { userId: 'user-1' } }),
+      // `getClientUrl`/`getCurrentAppProperties` back `viewNavigation.ts`'s
+      // `openView` (UAT fix #5) — the `entitylist` target's URL-open path.
+      getGlobalContext: () => ({
+        userSettings: { userId: 'user-1' },
+        getClientUrl: () => 'https://spaarkedev1.crm.dynamics.com',
+        getCurrentAppUrl: () => 'https://spaarkedev1.crm.dynamics.com/main.aspx?appid=app-guid-1',
+        getCurrentAppProperties: () => Promise.resolve({ appId: 'app-guid-1' }),
+      }),
       getEntityMetadata,
     },
   };
@@ -349,7 +356,7 @@ describe('QuickSwitcher', () => {
     expect(window.open).toHaveBeenCalledWith('https://example.com/reference', '_blank', 'noopener');
   });
 
-  it('click_ResultRow_NavigatesToClickedTarget', async () => {
+  it('click_ResultRow_ViewTarget_OpensTheMainAspxDeepLinkUrl', async () => {
     const fakeXrm = installMockXrm();
     setViewSearchEntries([
       {
@@ -369,14 +376,16 @@ describe('QuickSwitcher', () => {
     await user.type(screen.getByTestId('navigator-quickswitcher-input'), 'open matters');
     await user.click(await screen.findByTestId('navigator-quickswitcher-result-view-1'));
 
-    // `viewType` (BUG FIX) threads through to `navigateTo` so a personal view
-    // opens correctly rather than falling back to the entity default view.
-    expect(fakeXrm.Navigation.navigateTo).toHaveBeenCalledWith({
-      pageType: 'entitylist',
-      entityName: 'sprk_matter',
-      viewId: 'uq-1',
-      viewType: '4230',
-    });
+    // UAT fix #5 — reuses `viewNavigation.ts`'s `openView`, the SAME
+    // `main.aspx`-URL-based open ViewsTab.tsx uses, rather than the
+    // unreliable plain `navigateTo` path.
+    await waitFor(() => expect(fakeXrm.Navigation.openUrl).toHaveBeenCalledTimes(1));
+    const url = fakeXrm.Navigation.openUrl.mock.calls[0][0] as string;
+    expect(url).toBe(
+      'https://spaarkedev1.crm.dynamics.com/main.aspx?appid=app-guid-1&pagetype=entitylist' +
+        '&etn=sprk_matter&viewid=%7buq-1%7d&viewtype=4230'
+    );
+    expect(fakeXrm.Navigation.navigateTo).not.toHaveBeenCalled();
   });
 
   // ───────────────────────────────────────────────────────────────────────

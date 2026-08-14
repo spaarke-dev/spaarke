@@ -91,6 +91,7 @@ import {
   type SearchIndexEntry,
 } from '../services/navigatorSearchIndex';
 import { liveSearch } from '../services/liveSearchService';
+import { openView } from '../services/viewNavigation';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config
@@ -153,11 +154,12 @@ function filterLocalEntries(entries: SearchIndexEntry[], query: string): SearchI
 
 /**
  * Navigate to a result's target. Logical (Dataverse) targets go through
- * `Xrm.Navigation` (never a raw URL — project MUST); `weblink` is the sole
- * exception (`window.open(url, '_blank', 'noopener')`). Mirrors
- * `PinnedTab.tsx`'s `navigateToRow`.
+ * `Xrm.Navigation` (never a raw URL — project MUST, except see the
+ * `entitylist` branch below); `weblink` is the sole raw-URL exception
+ * (`window.open(url, '_blank', 'noopener')`). Mirrors `PinnedTab.tsx`'s
+ * `navigateToRow`.
  */
-function navigateToTarget(xrm: XrmContext, target: SearchEntryTarget | null): void {
+async function navigateToTarget(xrm: XrmContext, target: SearchEntryTarget | null): Promise<void> {
   if (!target) return;
 
   if (target.type === 'weblink') {
@@ -169,7 +171,7 @@ function navigateToTarget(xrm: XrmContext, target: SearchEntryTarget | null): vo
   if (!navigation) return;
 
   if (target.type === 'entityrecord') {
-    void navigation.navigateTo({
+    await navigation.navigateTo({
       pageType: 'entityrecord',
       entityName: target.entityLogicalName,
       entityId: target.entityId,
@@ -177,15 +179,21 @@ function navigateToTarget(xrm: XrmContext, target: SearchEntryTarget | null): vo
     return;
   }
 
-  // entitylist — `viewType` (UAT bug fix, xrmContext.ts widen) disambiguates a
-  // personal `userquery` id from a system `savedquery` id sharing the same
-  // GUID space; `undefined` here is a no-op for entries that don't know it.
-  void navigation.navigateTo({
-    pageType: 'entitylist',
-    entityName: target.entityLogicalName,
-    viewId: target.viewId,
-    viewType: target.viewType,
-  });
+  // entitylist — UAT bug fix (see `services/viewNavigation.ts`): plain
+  // `navigateTo` does not reliably honor `viewId` on the current UCI
+  // session, so this reuses the SAME `main.aspx`-URL-based open ViewsTab.tsx
+  // uses (falls back to `navigateTo` internally when no `viewId` is known,
+  // e.g. an entitylist bookmark parsed without one).
+  if (!target.viewId) {
+    await navigation.navigateTo({
+      pageType: 'entitylist',
+      entityName: target.entityLogicalName,
+      viewId: target.viewId,
+      viewType: target.viewType,
+    });
+    return;
+  }
+  await openView(xrm, target.entityLogicalName, target.viewId);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -316,7 +324,7 @@ export const QuickSwitcher: React.FC = () => {
   const handleSelect = React.useCallback((entry: SearchIndexEntry) => {
     const xrm = getXrm();
     if (!xrm) return;
-    navigateToTarget(xrm, entry.target);
+    void navigateToTarget(xrm, entry.target);
     setQuery('');
   }, []);
 

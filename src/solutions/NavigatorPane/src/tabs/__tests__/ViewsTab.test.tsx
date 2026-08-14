@@ -7,10 +7,15 @@
  *   - Given a user with saved userquery views, the Views tab lists them
  *     grouped by entity (`returnedtypecode`), each entity-group heading on a
  *     subtle gray background band.
- *   - Clicking a listed view calls `Xrm.Navigation.navigateTo` with
- *     `pageType:'entitylist'`, the correct `entityName` + `viewId`, AND
- *     `viewType: '4230'` (BUG FIX — without it, `navigateTo` silently opened
- *     the entity's DEFAULT view instead of the selected personal view).
+ *   - Clicking a listed view opens the REAL `main.aspx` deep-link URL via
+ *     `Xrm.Navigation.openUrl` (UAT fix #5 — `viewNavigation.ts`'s
+ *     `openView`): `pagetype=entitylist&etn={entity}&viewid=%7b{guid}%7d&
+ *     viewtype=4230&appid={appId}`. Plain `navigateTo` does not reliably
+ *     honor `viewId` on the current UCI session, silently opening the
+ *     entity's DEFAULT view instead.
+ *   - When no `appId`/`clientUrl` is resolvable (e.g. a minimal `Xrm.Utility`
+ *     fake), falls back to `Xrm.Navigation.navigateTo({pageType:'entitylist',
+ *     viewId, viewType:'userquery'})` — the STRING form, not `'4230'`.
  *   - System `savedquery` views are never shown by default (opt-in / pin-only
  *     per FR-10) — this tab never even queries `savedquery`.
  *   - Negative: a user with zero userqueries sees a benign empty state, not
@@ -85,10 +90,13 @@ const SAVED_QUERIES = [
 
 interface FakeXrmOptions {
   userQueries?: typeof USER_QUERIES;
+  /** Whether `Xrm.Utility.getGlobalContext()` resolves a `clientUrl`/`appId` (UAT fix #5's URL-open path). Default `true`. */
+  withAppContext?: boolean;
 }
 
 function buildFakeXrm(options: FakeXrmOptions = {}) {
   const userQueries = options.userQueries ?? USER_QUERIES;
+  const withAppContext = options.withAppContext ?? true;
 
   const retrieveMultipleRecords = jest.fn(async (entity: string, _query?: string) => {
     if (entity === 'userquery') {
@@ -102,8 +110,9 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
   });
 
   const navigateTo = jest.fn(async () => undefined);
+  const openUrl = jest.fn();
 
-  return {
+  const xrm: Record<string, unknown> = {
     WebApi: {
       retrieveMultipleRecords,
       retrieveRecord: jest.fn(),
@@ -111,8 +120,22 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
       updateRecord: jest.fn(),
       deleteRecord: jest.fn(),
     },
-    Navigation: { navigateTo, openUrl: jest.fn(), openForm: jest.fn() },
-  } as {
+    Navigation: { navigateTo, openUrl, openForm: jest.fn() },
+  };
+
+  if (withAppContext) {
+    xrm.Utility = {
+      getGlobalContext: jest.fn(() => ({
+        userSettings: { userId: 'user-1', userName: 'Test User', languageId: 1033 },
+        getClientUrl: () => 'https://spaarkedev1.crm.dynamics.com',
+        getCurrentAppUrl: () => 'https://spaarkedev1.crm.dynamics.com/main.aspx?appid=app-guid-1',
+        getVersion: () => '9.2',
+        getCurrentAppProperties: () => Promise.resolve({ appId: 'app-guid-1' }),
+      })),
+    };
+  }
+
+  return xrm as {
     WebApi: {
       retrieveMultipleRecords: jest.Mock;
       retrieveRecord: jest.Mock;
@@ -194,10 +217,10 @@ describe('ViewsTab', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────
-  // Click opens the entity list with the view selected
+  // Click opens the REAL view via a main.aspx deep-link URL (UAT fix #5)
   // ───────────────────────────────────────────────────────────────────────
 
-  it('click_ViewRow_InvokesNavigateToWithEntityListPageTypeAndViewId', async () => {
+  it('click_ViewRow_OpensMainAspxDeepLinkUrlWithViewIdAndViewType4230', async () => {
     const fakeXrm = installMockXrm();
     renderViewsTab('light');
     const user = userEvent.setup();
@@ -206,15 +229,17 @@ describe('ViewsTab', () => {
 
     await user.click(screen.getByTestId('views-tab-row-uq-document-1'));
 
-    expect(fakeXrm.Navigation.navigateTo).toHaveBeenCalledWith({
-      pageType: 'entitylist',
-      entityName: 'sprk_document',
-      viewId: 'uq-document-1',
-      viewType: '4230',
-    });
+    await waitFor(() => expect(fakeXrm.Navigation.openUrl).toHaveBeenCalledTimes(1));
+    const url = fakeXrm.Navigation.openUrl.mock.calls[0][0] as string;
+    expect(url).toBe(
+      'https://spaarkedev1.crm.dynamics.com/main.aspx?appid=app-guid-1&pagetype=entitylist' +
+        '&etn=sprk_document&viewid=%7buq-document-1%7d&viewtype=4230'
+    );
+    // The old, unreliable path must never fire alongside the URL-open.
+    expect(fakeXrm.Navigation.navigateTo).not.toHaveBeenCalled();
   });
 
-  it('keydown_EnterOnViewRow_AlsoInvokesNavigateTo', async () => {
+  it('keydown_EnterOnViewRow_AlsoOpensTheMainAspxDeepLinkUrl', async () => {
     const fakeXrm = installMockXrm();
     renderViewsTab('light');
     const user = userEvent.setup();
@@ -224,12 +249,33 @@ describe('ViewsTab', () => {
     screen.getByTestId('views-tab-row-uq-matter-1').focus();
     await user.keyboard('{Enter}');
 
-    expect(fakeXrm.Navigation.navigateTo).toHaveBeenCalledWith({
-      pageType: 'entitylist',
-      entityName: 'sprk_matter',
-      viewId: 'uq-matter-1',
-      viewType: '4230',
-    });
+    await waitFor(() => expect(fakeXrm.Navigation.openUrl).toHaveBeenCalledTimes(1));
+    const url = fakeXrm.Navigation.openUrl.mock.calls[0][0] as string;
+    expect(url).toContain('pagetype=entitylist');
+    expect(url).toContain('etn=sprk_matter');
+    expect(url).toContain('viewid=%7buq-matter-1%7d');
+    expect(url).toContain('viewtype=4230');
+    expect(url).toContain('appid=app-guid-1');
+  });
+
+  it('click_ViewRow_NoAppContextResolvable_FallsBackToNavigateToWithStringUserqueryViewType', async () => {
+    const fakeXrm = installMockXrm({ withAppContext: false });
+    renderViewsTab('light');
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId('views-tab-row-uq-document-1')).toBeInTheDocument());
+
+    await user.click(screen.getByTestId('views-tab-row-uq-document-1'));
+
+    await waitFor(() =>
+      expect(fakeXrm.Navigation.navigateTo).toHaveBeenCalledWith({
+        pageType: 'entitylist',
+        entityName: 'sprk_document',
+        viewId: 'uq-document-1',
+        viewType: 'userquery',
+      })
+    );
+    expect(fakeXrm.Navigation.openUrl).not.toHaveBeenCalled();
   });
 
   // ───────────────────────────────────────────────────────────────────────
