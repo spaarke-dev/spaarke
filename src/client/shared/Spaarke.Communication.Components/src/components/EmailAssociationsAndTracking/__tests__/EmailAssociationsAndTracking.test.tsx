@@ -362,6 +362,84 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
   });
 });
 
+describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-08-13)', () => {
+  beforeEach(() => {
+    _resetNavPropCacheForTests();
+    global.fetch = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE) as unknown as typeof fetch;
+  });
+
+  it('item 3: the per-card commit button reads "Select" (not "Confirm")', () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps({ variant: 'reconcile' })} />);
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    expect(screen.getByRole('button', { name: 'Select' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+  });
+
+  it('item 4: "Look up another record" is a labelled field that opens the record-type menu', async () => {
+    renderWithProvider(<EmailConnectionsReview {...baseProps({ variant: 'reconcile' })} />);
+    expect(screen.getByText('Look up another record')).toBeInTheDocument();
+    // The default variant's card tile with the "Link another record" label is NOT rendered.
+    expect(screen.queryByRole('button', { name: /Link another record/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('link-another-record'));
+    const items = await screen.findAllByRole('menuitem');
+    expect(items.length).toBeGreaterThan(0);
+  });
+
+  it('item 5: "New record" is a full-width button that still fires the additive create-and-file path', async () => {
+    const onLaunchCreateRecord = jest
+      .fn()
+      .mockResolvedValue({ id: 'mtr-new', entityType: 'sprk_matter', name: 'New Matter 42' });
+    const props = baseProps({ variant: 'reconcile', onLaunchCreateRecord });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByTestId('create-new-record'));
+    await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+  });
+
+  it('item 6: a confirmed primary shows the "Filed to …" success banner', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          variant: 'reconcile',
+          associationStatus: STATUS_RESOLVED,
+          associationProvenanceJson: provenance([
+            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, {
+              number: 'MAT-1',
+              written: true,
+            }),
+          ]),
+          filedAssociations: [{ entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v Beta' }],
+        })}
+      />
+    );
+    const banner = screen.getByTestId('association-filed-banner');
+    expect(banner).toBeInTheDocument();
+    expect(banner).toHaveTextContent(/Filed to/i);
+    expect(banner).toHaveTextContent(/Acme v Beta/);
+  });
+
+  it('the default variant does NOT render the filed banner (email-form layout unchanged)', () => {
+    renderWithProvider(
+      <EmailConnectionsReview
+        {...baseProps({
+          associationStatus: STATUS_RESOLVED,
+          associationProvenanceJson: provenance([
+            cand('sprk_regardingmatter', 'sprk_matter', 'mtr-1', 'Acme v Beta', 0.95, {
+              number: 'MAT-1',
+              written: true,
+            }),
+          ]),
+          filedAssociations: [{ entityType: 'sprk_matter', recordId: 'mtr-1', recordName: 'Acme v Beta' }],
+        })}
+      />
+    );
+    expect(screen.queryByTestId('association-filed-banner')).not.toBeInTheDocument();
+    // Default confirmed state still shows the "Link another record" card tile.
+    expect(screen.getByRole('button', { name: /Link another record/i })).toBeInTheDocument();
+  });
+});
+
 describe('EmailTrackingPanel', () => {
   const ACCESS_OPTIONS = [
     { value: 100000000, label: 'Standard' },

@@ -81,6 +81,17 @@ export interface EmailConnectionsReviewProps {
   resolveDisplayName?: (entity: string, id: string) => string | undefined;
   /** Hide every write affordance (Confirm/Change/Remove/Link another) — review-only display. */
   readOnly?: boolean;
+  /**
+   * Presentation variant (owner UAT round-3 2026-08-13). Default `'default'` keeps
+   * the email-form reading-pane layout unchanged (per-card "Confirm", "Link another
+   * record" + "New record" card tiles, no filed banner). `'reconcile'` renders the
+   * reconciliation-browse layout that matches the Pillar E prototype: the per-card
+   * button reads "Select", the manual lookup is a labelled "Look up another record"
+   * field, "New record" is a full-width button, and a success "Filed to …" banner
+   * shows once a primary is confirmed (the reconciliation browse tab renders no
+   * confirmed chip of its own, so the banner is the only filed-state feedback).
+   */
+  variant?: 'default' | 'reconcile';
   /** Called after ANY successful write (confirm/change/remove/link-another) so the host can refetch the record's provenance/filed-associations. */
   onAssociationsChanged?: () => void;
   /**
