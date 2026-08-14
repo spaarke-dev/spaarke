@@ -215,6 +215,11 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          # LFS smudge required: tests/fixtures/compose-corpus/*.docx are git-LFS pointers
+          # (.gitattributes: *.docx filter=lfs). Without this the ComposeNumbering/Projection
+          # seam tests parse pointer files → ~30 Compose tests fail. Mirrors the sdap-ci.yml
+          # build-test fix (email-communication-intelligence-r2, 2026-08-13).
+          lfs: true
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6

@@ -144,6 +144,46 @@ export class ViewService {
   }
 
   /**
+   * Get ALL of the signed-in user's personal `userquery` views, across every
+   * entity — no `entityLogicalName` filter. Unlike `getViews()` (always
+   * scoped to one entity, matching its DatasetGrid view-picker origin), this
+   * answers "give me every view this user owns" for consumers that must
+   * group/aggregate across entities without knowing entity names up front
+   * (the Navigator Views tab, spec FR-10 — see
+   * spaarke-side-pane-navigation-history-r1 task 060, which added this
+   * method as an additive extension of ViewService rather than a parallel
+   * view-querying service, per root CLAUDE.md §11).
+   *
+   * System `savedquery` views are intentionally NOT included — a caller that
+   * also wants system views combines this with per-entity `getViews()`
+   * calls.
+   *
+   * Not cached: the existing `viewCache` is keyed by `entityLogicalName`,
+   * which does not apply to a cross-entity query.
+   *
+   * @returns Promise resolving to the user's userquery views, sorted by
+   *   entity then name (server-side `$orderby=returnedtypecode,name`).
+   */
+  async getAllUserQueries(): Promise<IViewDefinition[]> {
+    try {
+      const filter = [
+        'statecode eq 0', // Active only
+        'querytype eq 0', // Main query type
+      ].join(' and ');
+
+      const result = await this.xrm.WebApi.retrieveMultipleRecords(
+        'userquery',
+        `?$select=userqueryid,name,returnedtypecode,fetchxml,layoutxml&$filter=${filter}&$orderby=returnedtypecode,name`
+      );
+
+      return result.entities.map(record => this.mapUserQueryToViewDefinition(record));
+    } catch (error) {
+      console.error('[ViewService] Failed to fetch all user queries:', error);
+      return [];
+    }
+  }
+
+  /**
    * Get a specific view by ID
    * @param viewId - View ID (savedqueryid or sprk_gridconfigurationid)
    * @param entityLogicalName - Entity the view belongs to
@@ -235,20 +275,28 @@ export class ViewService {
         `?$select=userqueryid,name,returnedtypecode,fetchxml,layoutxml&$filter=${filter}&$orderby=name`
       );
 
-      return result.entities.map(record => ({
-        id: record.userqueryid as string,
-        name: record.name as string,
-        entityLogicalName: record.returnedtypecode as string,
-        fetchXml: record.fetchxml as string,
-        layoutXml: record.layoutxml as string,
-        isDefault: false,
-        viewType: 'userquery' as ViewType,
-        sortOrder: 200, // Personal views after system views
-      }));
+      return result.entities.map(record => this.mapUserQueryToViewDefinition(record));
     } catch (error) {
       console.error('[ViewService] Failed to fetch user queries:', error);
       return [];
     }
+  }
+
+  /**
+   * Map a userquery record to IViewDefinition. Shared by `fetchUserQueries`
+   * (entity-scoped) and `getAllUserQueries` (cross-entity, task 060).
+   */
+  private mapUserQueryToViewDefinition(record: Record<string, unknown>): IViewDefinition {
+    return {
+      id: record.userqueryid as string,
+      name: record.name as string,
+      entityLogicalName: record.returnedtypecode as string,
+      fetchXml: record.fetchxml as string,
+      layoutXml: record.layoutxml as string,
+      isDefault: false,
+      viewType: 'userquery' as ViewType,
+      sortOrder: 200, // Personal views after system views
+    };
   }
 
   /**

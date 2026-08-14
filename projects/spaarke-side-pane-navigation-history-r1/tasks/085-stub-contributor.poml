@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Stub contributor — prove the framework: register a second contributor with only {id, icon, title, component}</title>
+    <phase>9 Framework-proof, deploy, UI test</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Small new stub contributor + render test proving FR-13; exercises the framework seam, no host/architecture change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified framework-proof stub with a closed acceptance set; the whole point is that no host code changes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds a self-contained stub + one registry entry; Phase F peers (070/080/081) touch different surfaces — no shared-file contention.</parallel-reason>
+    <deps>011</deps>
+    <tags>frontend,testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Prove the side-pane framework (G5 / FR-13): register a second, stub contributor against SprkSidePaneHost supplying only { id, icon, title, component }. The stub must appear as its own right-rail icon and render, with NO changes to host code — demonstrating that a new contributor is purely additive.</prompt>
+  <role>SPAARKE platform developer with Fluent UI v9 + shared-component registry expertise. Follow ADRs strictly.</role>
+  <goal>A minimal stub contributor registered in sidePaneRegistry with only { id, icon, title, component } that renders its own rail icon + component, proving the framework is extension-by-registration only — verified by a render test and by the absence of any host-code diff.</goal>
+  <context>
+    <background>Per spec FR-13 + Success Criterion 11 + plan.md Phase 9 task 085. FR-01 established that one registry entry = one rail icon = one job; this task proves it by adding a throwaway stub contributor and confirming it needs zero host changes.</background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SidePane/__stub__/StubContributor.tsx</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/SidePane/__tests__/stubContributor.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SidePane/SprkSidePaneHost.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SidePane/sidePaneRegistry.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">SprkSidePaneHost + sidePaneRegistry the stub registers against.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Adding the stub MUST require NO changes to SprkSidePaneHost or any host code — extension is by registry entry only (FR-13). If a host edit is needed, the framework failed its proof — escalate.</constraint>
+    <constraint source="project">The stub registers with ONLY { id, icon, title, component } — no extra registry surface, no privileged hooks.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; honor light/dark + --sprk-ui-scale; portal FluentProvider re-wrap for any portalled surface.</constraint>
+    <constraint source="ADR-022">@spaarke/ui-components code MUST stay React-16/17-safe: no createRoot; use JSXElement not JSX.Element.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Static contributor registry extension-by-registration (FR-13 framework proof)</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>.claude/patterns/ui/fluent-v9-portal-gotcha.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Register a contributor" location="src/client/shared/Spaarke.UI.Components/src/components/SidePane/sidePaneRegistry.ts">Add one registry entry { id, icon, title, component }; the host renders the rail icon + component with no host edits.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (STANDARD) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read SprkSidePaneHost + sidePaneRegistry.</step>
+    <step order="1">Author a minimal StubContributor.tsx component (renders a trivial identifiable body, Fluent v9 tokens).</step>
+    <step order="2">Register it in sidePaneRegistry with only { id, icon, title, component } — no other changes.</step>
+    <step order="3">Confirm via git diff that SprkSidePaneHost / host code is unmodified (only the stub file + the one registry entry changed).</step>
+    <step order="4">Author a render test: the stub appears as its own rail icon and renders; removing the stub entry removes exactly its rail icon; light AND dark with portal re-wrap (ADR-021).</step>
+    <step order="5">Recompile @spaarke/ui-components + run tests; confirm green.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: set task 085 status to completed.</step>
+    <step order="7">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If registering the stub requires ANY change to SprkSidePaneHost or host code, STOP and escalate (root §6.5) — the framework failed its FR-13 extension-by-registration proof and the host seam needs rework before shipping.</trigger>
+  </escalation>
+  <justification>
+    <existing>No stub contributor exists; SprkSidePaneHost + sidePaneRegistry (011) are the framework being proven.</existing>
+    <extension>No — the stub is a deliberately new, throwaway contributor whose existence IS the FR-13 proof that a second tenant is purely additive; it does not extend an existing contributor.</extension>
+    <cost-of-doing-nothing>Without a second registered contributor, FR-13 / Success Criterion 11 (framework extends by registration with no host edits) is unverified, and a latent host-coupling bug in the registry seam ships undetected.</cost-of-doing-nothing>
+  </justification>
+  <ui-tests>
+    <test name="Stub appears as its own rail icon and renders (light and dark)">
+      <steps>
+        <step>Register the stub and mount SprkSidePaneHost in light theme; select the stub's rail icon.</step>
+        <step>Re-mount in dark theme (data-theme=dark / prefers-color-scheme dark).</step>
+      </steps>
+      <expected>The stub has its own rail icon and its component renders; Fluent v9 tokens honor light and dark; portal FluentProvider re-wrap present (ADR-021).</expected>
+    </test>
+    <test name="No host code change; removing the stub removes exactly its rail icon">
+      <steps>
+        <step>Inspect git diff for host-code changes.</step>
+        <step>Remove the stub registry entry and re-render.</step>
+      </steps>
+      <expected>No host code changed to add the stub; removing the entry removes exactly the stub's rail icon (no others).</expected>
+    </test>
+  </ui-tests>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run Jest render tests.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SidePane/__stub__/StubContributor.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/SidePane/__tests__/stubContributor.test.tsx</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a stub registered with only { id, icon, title, component }, when the host renders, then the stub appears as its own rail icon and renders.</criterion>
+    <criterion testable="true">Given the stub was added, when git diff is inspected, then NO host code was changed to add it.</criterion>
+    <criterion testable="true">Negative: given the stub registry entry is removed, when the host re-renders, then exactly the stub's rail icon is removed (no others).</criterion>
+    <criterion testable="true">All render tests pass; shared-lib build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-13 + Success Criterion 11 + plan.md Phase 9 task 085. The proof is the absence of host-code changes — extension by registry entry only.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

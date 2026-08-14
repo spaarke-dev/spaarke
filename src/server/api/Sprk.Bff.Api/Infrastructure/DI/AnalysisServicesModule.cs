@@ -464,6 +464,26 @@ public static class AnalysisServicesModule
         // resolves templates to not-found (clean 404), never a DI 500.
         services.AddSingleton<IComposeTemplateSource, Sprk.Bff.Api.Services.Ai.PublicContracts.NullComposeTemplateSource>();
 
+        // §F.1 — IEmailTemplateService compound-OFF peer (email-communication-intelligence-r2 UAT).
+        // POST /api/communications/template/render (CommunicationTemplateEndpoints) maps UNCONDITIONALLY,
+        // but the real EmailTemplateService registers in AddDeliveryServices (compound-ON only). Without
+        // this peer a compound-OFF host CRASHES AT STARTUP — AuthorizationPolicyCache eagerly enumerates
+        // endpoints and RequestDelegateFactory throws "Failure to infer one or more parameters"
+        // (emailTemplateService). Null peer resolves renders to a failed result → the endpoint's clean
+        // 404/400 path. Same LATENT-BUG shape as the NullComposeTemplateSource peer above.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService,
+            Sprk.Bff.Api.Services.Ai.Delivery.NullEmailTemplateService>();
+
+        // §F.1 — IEmailDraftAi compound-OFF peer (email-communication-intelligence-r2 UAT).
+        // POST /api/communications/draft (CommunicationDraftEndpoints) maps UNCONDITIONALLY. IEmailDraftAi
+        // registers ONLY inside AddAiModule — which is itself called inside the compound gate
+        // (AnalysisServicesModule ~L202) — so AddAiModule's own gate-off else (NullEmailDraftAi) is
+        // UNREACHABLE when the compound gate is off (AddAiModule never runs). Register the same existing
+        // NullEmailDraftAi here so the facade is resolvable on the compound-OFF path (same crash shape as
+        // emailTemplateService above).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi,
+            Sprk.Bff.Api.Services.Ai.PublicContracts.NullEmailDraftAi>();
+
         // Task 040 (spaarkeai-compose-r6, FR-06) — IComposePdfIntakeSource compound-OFF peer (§F.1):
         // the Compose load endpoint maps unconditionally; real impl registers in the compound-ON
         // branch (beside AddAiModule — it wraps DocumentParserRouter). Null peer resolves every parse

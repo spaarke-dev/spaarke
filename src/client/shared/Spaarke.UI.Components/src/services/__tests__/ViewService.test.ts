@@ -255,6 +255,68 @@ describe('ViewService', () => {
     });
   });
 
+  describe('getAllUserQueries', () => {
+    it('should fetch userquery views across all entities with no entity filter', async () => {
+      const mockUserQueries = [
+        {
+          userqueryid: 'uq-1',
+          name: 'My Matters',
+          returnedtypecode: 'sprk_matter',
+          fetchxml: "<fetch><entity name='sprk_matter'/></fetch>",
+          layoutxml: '',
+        },
+        {
+          userqueryid: 'uq-2',
+          name: 'My Documents',
+          returnedtypecode: 'sprk_document',
+          fetchxml: "<fetch><entity name='sprk_document'/></fetch>",
+          layoutxml: '',
+        },
+      ];
+
+      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({
+        entities: mockUserQueries,
+      });
+
+      const views = await service.getAllUserQueries();
+
+      expect(views).toHaveLength(2);
+      expect(views[0]).toMatchObject({ id: 'uq-1', name: 'My Matters', entityLogicalName: 'sprk_matter', viewType: 'userquery' });
+      expect(views[1]).toMatchObject({ id: 'uq-2', name: 'My Documents', entityLogicalName: 'sprk_document', viewType: 'userquery' });
+
+      // No `returnedtypecode eq` clause — this is the cross-entity query.
+      const [, query] = (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];
+      expect(query).not.toContain('returnedtypecode eq');
+      expect(query).toContain('statecode eq 0');
+      expect(query).toContain('$orderby=returnedtypecode,name');
+    });
+
+    it('should never query savedquery (system views excluded by construction)', async () => {
+      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({ entities: [] });
+
+      await service.getAllUserQueries();
+
+      expect(mockXrm.WebApi.retrieveMultipleRecords).toHaveBeenCalledWith('userquery', expect.any(String));
+      expect(mockXrm.WebApi.retrieveMultipleRecords).not.toHaveBeenCalledWith('savedquery', expect.any(String));
+    });
+
+    it('should handle API errors gracefully (returns empty array, never throws)', async () => {
+      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockRejectedValueOnce(new Error('API Error'));
+
+      const views = await service.getAllUserQueries();
+
+      expect(views).toEqual([]);
+    });
+
+    it('should return an empty array when the user has zero userquery views', async () => {
+      (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValueOnce({ entities: [] });
+
+      const views = await service.getAllUserQueries();
+
+      expect(views).toEqual([]);
+    });
+  });
+
   describe('clearCache', () => {
     it('should clear cache for specific entity', async () => {
       (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mockResolvedValue({

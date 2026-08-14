@@ -19,7 +19,7 @@
 | 014 | `RecipientAliasRung` + Bcc plumbing | 1·A | ✅ | 011 | sonnet·high | ✅ true (A-rungs) |
 | 015 | Formalize external-reply self-association + test | 1·A | ✅ | — | sonnet·high | ❌ false |
 | 016 | `AffinityRung` + `sprk_affinity` store | 1·A | ✅ | 011 | **opus·high** | ✅ true (A-rungs) |
-| 017 | Pillar A BFF deploy (size/CVE) | 1·A | 🔲 | 010–016 | sonnet·med | ❌ false |
+| 017 | Pillar A BFF deploy (size/CVE) | 1·A | ✅ | 010–016 | sonnet·med | ❌ false |
 | 020 | Alternate key on `sprk_communication.sprk_internetmessageid` | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
 | 021 | Canonical message-id dedup — race-proof create + SB idempotency | 2·C | ✅ | 020 | **opus·xhigh** | ❌ false |
 | 022 | Context-merge on duplicate | 2·C | ✅ | 021 | sonnet·high | ❌ false |
@@ -29,19 +29,19 @@
 | 027 | `sprk_document.sprk_canonicaldocument` self-lookup (FR-C3 graduate-on-divergence) — schema (operator-created, verified live) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
 | 028 | `sprk_communication.sprk_deliveredmailboxes` + `sprk_savedbyusers` memo (FR-C2 context-merge) — schema (operator-created, verified live) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
 | 029 | FR-C4 cross-path reconciliation — **RESOLVED BY REUSE** of existing `sprk_document.sprk_relatedcommunication` (no new column; code rewired) | 2·C | ✅ | — | sonnet·high | ✅ true (schema-c) |
-| 026 | Pillar C BFF deploy (size/CVE) | 2·C | 🔲 | 021,022,023,024,025,027,028,029 | sonnet·med | ❌ false |
+| 026 | Pillar C BFF deploy (size/CVE) | 2·C | ✅ | 021,022,023,024,025,027,028,029 | sonnet·med | ❌ false |
 | 030 | Fix FR-06 RAG grounding — ParentEntity tagging (both sites) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |
 | 031 | Batched identifier query (≈175→≤7) | 3·D | ✅ | — | sonnet·high | ✅ true (D-indep) |
 | 032 | Golden regression suite (+ absorbs A3 test) | 3·D | ✅ | 015 | sonnet·high | ✅ true (D-indep) |
 | 033 | Job B allow-list seed (`sprk_emailupdatefield`) | 3·D | ✅ | — | sonnet·med | ✅ true (D-indep) |
 | 034 | Job C apply endpoint + create-task queue-feed discriminator | 3·D | ✅ | — | **opus·high** | ❌ false |
-| 035 | Pillar D BFF deploy (size/CVE) | 3·D | 🔲 | 030,031,034 | sonnet·med | ❌ false |
+| 035 | Pillar D BFF deploy (size/CVE) | 3·D | ✅ | 030,031,034 | sonnet·med | ❌ false |
 | 040 | Add-in realignment (FR-B0 a–d) — **code ✅** (401-retry routing, Word-manifest parity, cleanup; new `authenticatedJsonFetch` §11-justified); runtime NAA sign-in + dark-mode live-render **operator-gated** (needs live Office host; deploys paused) | 4·B | ✅-code | 004 | sonnet·high | ✅ true (PB-a) |
 | 041 | Real Spaarke intake folder — re-scoped (mech-1 = config, documented; mech-2 → 043) | 4·B | ✅ | — | sonnet·high | ✅ true (PB-a) |
 | 042 | Drag-to-matter + engine pre-select + ribbon quick-save | 4·B | ✅ | 041 | **opus·high (Option B)** | ✅ true (PB-b) |
 | 043 | Unify user-upload with capture (engine + dedup) — absorbs FR-B1 add-in drag-target (from 041) | 4·B | ✅ | 021,024 | sonnet·high | ❌ false |
 | 044 | Deploy Pillar B add-in (Azure SWA) | 4·B | 🔲 | 040,042 | sonnet·med | ❌ false |
-| 045 | Pillar B BFF deploy (size/CVE) | 4·B | 🔲 | 041,043 | sonnet·med | ❌ false |
+| 045 | Pillar B BFF deploy (size/CVE) | 4·B | ✅ | 041,043 | sonnet·med | ❌ false |
 | 050 | Reconciliation grid — **`ReconciliationGrid` + Needs-review config (NO DataGrid-framework edit — all seams already shipped; zero dataset-grid-r2 contention)** | 5·E | ✅ | — | sonnet·high | ❌ false (shared lib) |
 | 051 | Triage as grid columns — **`triageColumnRenderers.tsx` (category/priority/summary/RI-conf/review-outcome) merged into `ReconciliationGrid` via columnRenderers seam; config default-sort = `sprk_triagepriority` asc; null→placeholder** | 5·E | ✅ | 050 | sonnet·high | ❌ false |
 | 052 | Related-to card-picker — **`RelatedToCell` (requires-review/chip states) opens reused `EmailConnectionsReview` in `SprkModal`; single write path (`applyRegardingSelection`, hostRecordId===commId); `ReconciliationGrid.relatedTo` binding; NFR-10 `onConfirmed`. §6.5 reuse-by-extension: wired r5's already-declared `onCreateNewRecord` prop into a gated create-new tile (backward-compat) — 058 coordination note, notes/052** | 5·E | ✅ | 050 | sonnet·high | ❌ false |
@@ -61,7 +61,7 @@
 | 064 | **E1b/E1c Quick Start "+ New record" + .eml pre-load** — E1b: injected `onLaunchCreateRecord` → host mounts `QuickStartModal` (additive `onRecordCreated` awaiting `launchSurface` outcome) → created ref re-enters `applyRegardingSelection` as confirmed regarding; modal-on-modal. E1c (**BFF resolver, decided**): new BFF endpoint materializes archived `.eml` (sprk_document) as a **chat-session document → `{sessionId,fileId}`** (wizard fetch is session-scoped) → host passes as `QuickStartModal.getFileContext` → wizard AI-pre-populates. §10 governance + **/conflict-check BFF+SpaarkeAi**. Explicit plan **§9**. Build LAST. | 5·E-mount | 🔲 | 052,062 | **opus·high** | ❌ false (SpaarkeAi+BFF+shared hot-path) |
 | 065 | **E2b/E2c Fields typed controls + Update-other-fields** — E2b: self-resolve `getXrmForPicker().Utility.getEntityMetadata` (local extended Xrm type + defensive parse) → DateTime/Number→typed Input · Picklist/State/Status→`<Select>`(metadata options) · Lookup→`lookupObjects`(Targets)+name · else text; graceful text fallback non-MDA. E2c: full-width "+ Update other fields" → self-resolved `Navigation.navigateTo({pageType:entityrecord,…})` (confirmed record form), reload on close. OOB self-resolve, **NO BFF, no host prop**; `{overrideValue}` contract unchanged. tsc 0-err; jest 15/15 (+4) & 47/47 reconcile suites; Step 9.5 clean. notes/065. | 5·E-mount | ✅ | 055,063 | **opus·high** | ❌ false (shared lib) |
 | 066 | **E3b New-task Assigned-to OOB advanced-lookup** — `TaskReconcileTab` Assigned-to → `getXrmForPicker().Utility.lookupObjects({entityTypes:['systemuser','team']})` (reuse EmailConnectionsReview:157-176; guarded non-MDA keeps editable text fallback; picked name shown, normalized id in payload). Shared lib only, no BFF. tsc 0-err, jest 15/15 (+2 E3b), Step 9.5 clean. notes/066. | 5·E-mount | ✅ | 056,063 | sonnet·high | ❌ false (shared lib) |
-| 059 | Deploy Pillar E — code page + SpaarkeAi widget (seed needs-review + per-team `sprk_gridconfiguration`, set `NEEDS_REVIEW_CONFIG_ID`, code-page-deploy + rebuild SpaarkeAi + Deploy-AllDataGridConsumers) | 5·E | 🔲 | 061,062 | sonnet·med | ❌ false |
+| 059 | Deploy Pillar E — code page + SpaarkeAi widget (seed needs-review + per-team `sprk_gridconfiguration`, set `NEEDS_REVIEW_CONFIG_ID`, code-page-deploy + rebuild SpaarkeAi + Deploy-AllDataGridConsumers) | 5·E | ✅ | 061,062 | sonnet·med | ❌ false |
 | 090 | Project wrap-up (test-diet, lessons, doc-drift, size) | 6 | 🔲 | all | sonnet·high | ❌ false |
 
 ## Parallel Execution Groups (waves)

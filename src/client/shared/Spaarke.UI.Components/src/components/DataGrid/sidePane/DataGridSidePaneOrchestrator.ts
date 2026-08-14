@@ -1,11 +1,28 @@
 /**
  * DataGridSidePaneOrchestrator — generalized side-pane lifecycle for any
- * Custom Page hosting `<DataGrid>`.
+ * Custom Page hosting `<DataGrid>` OR any other Fluent v9 host that needs
+ * `Xrm.App.sidePanes` lifecycle management.
  *
  * Lifted from `src/solutions/EventsPage/src/calendarPaneOrchestrator.ts` in
  * task 035 UAT iteration 5 and made pane-agnostic. The same orchestrator now
  * powers ANY side-pane type — calendar, advanced filter, saved filters, AI
  * assistant, geographic, etc. — driven by `SidePaneSpec` at registration time.
+ *
+ * spaarke-side-pane-navigation-history-r1 task 011 reuses this class (rather
+ * than forking a parallel implementation, per root CLAUDE.md §11 + the task's
+ * NFR-08 reuse mandate) as the pane-lifecycle core for `SprkSidePaneHost` —
+ * the app-wide, multi-contributor docked side-pane framework. That consumer
+ * is SELF-HOSTED (it IS the pane's content, not a separate webresource being
+ * opened INTO a pane the way EventsPage opens a detail pane), so two fields
+ * were added additively:
+ *  - `webResourceName` is now OPTIONAL — when omitted, `registerPane` skips
+ *    the `pane.navigate(...)` call (there is nothing to navigate to; the
+ *    caller's own React tree is already the pane's content).
+ *  - `alwaysRender` is a new optional passthrough to `createPane` (spec MUST
+ *    rule / NFR-05 for `SprkSidePaneHost`'s pane). Existing callers (e.g.
+ *    EventsPage) that never set it see unchanged `createPane` behavior.
+ * Both changes are additive/backward-compatible — no existing consumer
+ * behavior changes.
  *
  * Responsibilities:
  *  - `Xrm.App.sidePanes.createPane` registration (idempotent — repeat registration
@@ -25,9 +42,18 @@
  * @see useSidePaneFilter (filter message subscription)
  * @see SidePaneFilterChannel (the underlying transport)
  * @see docs/guides/DATAGRID-CODE-PAGE-HOST-CONTRACT.md §5
+ * @see SprkSidePaneHost (../../SidePane/SprkSidePaneHost.tsx) — the
+ *      self-hosted, multi-contributor consumer added by task 011.
  */
 
-import { getXrm } from '../../../services/xrmGlobal';
+// Task 011 wires the orchestrator to the WIDENED `xrmContext.ts` `getXrm()`
+// (task 010: typed 3-frame window→parent→top walk, `SidePanesApi.getPane`,
+// `SidePane.select()`, `CreatePaneOptions.alwaysRender`) instead of the
+// untyped `services/xrmGlobal.ts` walker it previously used. Runtime
+// semantics are equivalent (both walk window→parent→top and require
+// `WebApi` to consider a frame's `Xrm` usable); this only gains type
+// coverage for the `xrm.App.sidePanes.*` calls below.
+import { getXrm } from '../../../utils/xrmContext';
 
 /**
  * Declaration of a side pane that the orchestrator should manage.
@@ -37,8 +63,14 @@ export interface SidePaneSpec {
   paneId: string;
   /** Title shown in the pane's chrome. */
   title: string;
-  /** Name of the web resource to navigate to (e.g. `'sprk_calendarsidepane.html'`). */
-  webResourceName: string;
+  /**
+   * Name of the web resource to navigate to (e.g. `'sprk_calendarsidepane.html'`).
+   * OPTIONAL (task 011) — omit when the caller's own React tree IS the pane's
+   * content (a self-hosted pane, e.g. `SprkSidePaneHost`) and there is nothing
+   * to navigate to. When omitted, `registerPane` skips the `pane.navigate(...)`
+   * call entirely.
+   */
+  webResourceName?: string;
   /** Pane width in pixels. Default 340. */
   width?: number;
   /** Optional MDA icon reference (e.g. `'WebResources/sprk_calendarline_24'`). */
@@ -47,6 +79,12 @@ export interface SidePaneSpec {
   canClose?: boolean;
   /** Whether the pane is initially selected (focused). Default `true`. */
   isSelected?: boolean;
+  /**
+   * Passthrough to `Xrm.App.sidePanes.createPane`'s `alwaysRender` option
+   * (task 011 — added for `SprkSidePaneHost`'s spec MUST rule / NFR-05).
+   * Default `undefined` (platform default) — existing callers are unaffected.
+   */
+  alwaysRender?: boolean;
   /**
    * Pane IDs that should be CLOSED when this pane opens. Implements mutual
    * exclusivity (e.g. opening an Event Detail pane closes the Calendar pane).
@@ -100,8 +138,14 @@ export class DataGridSidePaneOrchestrator {
         width: spec.width ?? 340,
         isSelected: spec.isSelected ?? true,
         imageSrc: spec.iconName,
+        alwaysRender: spec.alwaysRender,
       });
-      await pane.navigate({ pageType: 'webresource', webresourceName: spec.webResourceName });
+      // Self-hosted panes (task 011, e.g. SprkSidePaneHost) omit webResourceName —
+      // the caller's own React tree is already the pane's content, so there is
+      // nothing to navigate to.
+      if (spec.webResourceName) {
+        await pane.navigate({ pageType: 'webresource', webresourceName: spec.webResourceName });
+      }
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(`[DataGridSidePaneOrchestrator] register '${spec.paneId}' failed:`, error);

@@ -48,15 +48,16 @@ import {
   AppInsightsService,
   XrmDataverseClient,
   getXrm,
+  ensureNavigatorSidePane,
   CreateRecordChooserModal,
   type ChooserFileArgs,
 } from '@spaarke/ui-components';
 import { resolveRuntimeConfig, getAuthProvider } from '@spaarke/auth';
 import {
   ReconciliationWorkspace,
-  derivePrimaryReview,
-  type EmailConnectionsReviewProps,
-  type ReconcileRegarding,
+  RECONCILIATION_VIEWS,
+  buildResolveReview,
+  resolveRegarding,
   type EmailWorkspaceWebApi,
   type CreatedRecordRef,
   type EmlSource,
@@ -72,7 +73,6 @@ if (_appInsightsKey) {
   AppInsightsService.initialize(_appInsightsKey);
 }
 
-const COMMUNICATION_ENTITY = 'sprk_communication';
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
 
 const useStyles = makeStyles({
@@ -93,15 +93,6 @@ const useStyles = makeStyles({
 function str(record: Record<string, unknown>, field: string): string | null {
   const v = record[field];
   return typeof v === 'string' ? v : v == null ? null : String(v);
-}
-
-/** Read a numeric field off an untyped grid row (option-set value). */
-function num(record: Record<string, unknown>, field: string): number | null {
-  const v = record[field];
-  if (typeof v === 'number') return v;
-  if (v == null || v === '') return null;
-  const n = Number(v);
-  return Number.isNaN(n) ? null : n;
 }
 
 /**
@@ -133,62 +124,11 @@ function buildXrmWebApi(): EmailWorkspaceWebApi {
   };
 }
 
-/**
- * Row → `EmailConnectionsReview` props (052 Related-to picker). Built exactly
- * like `EmailWorkspace`'s inline `EmailConnectionsReview` wiring — the reused
- * ADR-024 single write path. `webApi` is the Xrm.WebApi-backed bridge; both the
- * additive `writeContext` and the `pickerWebApi` point at it.
- */
-function buildResolveReview(
-  webApi: EmailWorkspaceWebApi,
-  onChanged: () => void
-): (record: Record<string, unknown>) => EmailConnectionsReviewProps {
-  return record => {
-    const id = str(record, PRIMARY_ID_FIELD) ?? '';
-    return {
-      communicationId: id,
-      associationStatus: num(record, 'sprk_associationstatus'),
-      associationProvenanceJson: str(record, 'sprk_associationprovenance'),
-      regardingRecordName: str(record, 'sprk_regardingrecordname'),
-      regardingRecordNumber: str(record, 'sprk_regardingrecordnumber'),
-      regardingRecordType: str(record, 'sprk_regardingrecordtypename'),
-      writeContext: {
-        webApi,
-        hostEntity: COMMUNICATION_ENTITY,
-        hostRecordId: id,
-      },
-      pickerWebApi: webApi,
-      onAssociationsChanged: onChanged,
-    };
-  };
-}
-
-/**
- * Row → CONFIRMED `ReconcileRegarding | null` (NFR-10 gate). Reuses the shipped
- * pure `derivePrimaryReview` reducer over the row's provenance JSON +
- * association status + denorm regarding fields — the SAME logic the resolver
- * body uses to decide the single confirmed primary. Only a green (Resolved)
- * primary with a resolvable typed entity + id enables the Fields/Tasks tabs;
- * anything else stays gated.
- */
-function resolveRegarding(record: Record<string, unknown>): ReconcileRegarding | null {
-  const model = derivePrimaryReview(
-    str(record, 'sprk_associationprovenance'),
-    num(record, 'sprk_associationstatus'),
-    undefined,
-    {
-      recordName: str(record, 'sprk_regardingrecordname'),
-      recordNumber: str(record, 'sprk_regardingrecordnumber'),
-      entityType: null,
-      recordTypeLabel: str(record, 'sprk_regardingrecordtypename'),
-    }
-  );
-  const primary = model.state === 'confirmed' ? model.primary : undefined;
-  if (primary && primary.entity && primary.targetId) {
-    return { entityType: primary.entity, recordId: primary.targetId };
-  }
-  return null;
-}
+// `buildResolveReview` (row → EmailConnectionsReview props, ADR-024 write path) and
+// `resolveRegarding` (row → confirmed ReconcileRegarding | null, NFR-10 gate) were
+// extracted to `@spaarke/communication-components` (UAT Fix #6) so this code page, the
+// SpaarkeAi widget, AND the LegalWorkspace `reconciliation` section share ONE copy.
+// Imported above; only the host-specific `buildXrmWebApi` bridge stays here.
 
 /**
  * Bootstrap auth (config + MSAL + tenant ID). `ReconciliationWorkspace` waits on
@@ -244,13 +184,18 @@ function Root() {
   const [ready, setReady] = React.useState(false);
   const [bootstrapError, setBootstrapError] = React.useState<unknown>(null);
   const [attempt, setAttempt] = React.useState(0);
-  // Bumped after an association is confirmed so the grid re-loads and
-  // `resolveRegarding` reflects the new association (the prop's documented
-  // "host refreshes the grid" contract). Used as a React `key` remount signal.
-  const [refreshKey, setRefreshKey] = React.useState(0);
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
+  }, []);
+
+  // Global Navigator side pane (spaarke-side-pane-navigation-history-r1):
+  // register the app-level Navigator pane on mount so it docks whenever a user
+  // lands on this code page (modern UCI has no global app-load hook, so every
+  // code-page host registers it). Idempotent + never throws — the shared
+  // ensureNavigatorSidePane() no-ops if the pane already exists.
+  React.useEffect(() => {
+    ensureNavigatorSidePane();
   }, []);
 
   React.useEffect(() => {
@@ -276,7 +221,11 @@ function Root() {
   // resolves the concrete implementations).
   const dataverseClient = React.useMemo(() => new XrmDataverseClient(), []);
   const webApi = React.useMemo(() => buildXrmWebApi(), []);
-  const handleAssociationsChanged = React.useCallback(() => setRefreshKey(n => n + 1), []);
+  // UAT Fix #3: association-confirm no longer remounts the workspace (which closed the
+  // browse shell). ReconciliationWorkspace now refreshes the confirmed row in-place
+  // (targeted re-fetch via `dataverseClient`), so the host callback is a no-op — kept only
+  // to satisfy the review/workspace `onAssociationsChanged` contract.
+  const handleAssociationsChanged = React.useCallback(() => {}, []);
   const resolveReview = React.useMemo(
     () => buildResolveReview(webApi, handleAssociationsChanged),
     [webApi, handleAssociationsChanged]
@@ -374,7 +323,7 @@ function Root() {
       // placeholder (task 059 seeds the real gridconfiguration record + sets it).
       <>
         <ReconciliationWorkspace
-          key={refreshKey}
+          views={RECONCILIATION_VIEWS}
           dataverseClient={dataverseClient}
           authenticatedFetch={authenticatedFetch}
           resolveReview={resolveReview}

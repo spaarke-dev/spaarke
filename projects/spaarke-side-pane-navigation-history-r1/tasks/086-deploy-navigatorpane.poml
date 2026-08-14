@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="086" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Deploy NavigatorPane — Vite build (cache-clear) + package as webresource + wire Path B bootstrap</title>
+    <phase>9 Framework-proof, deploy, UI test</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Build + package + environment deploy of a code page + app-startup bootstrap; no new logic authored, but irreversible-in-environment steps require the prescriptive sequence.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy follows the code-page-deploy skill with a closed acceptance set; the human/environment gate handles risk.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Deploy</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Build + deploy to a shared environment — must run serially, not alongside other tasks touching the same solution/environment.</parallel-reason>
+    <deps>040,041,042,050,051,052,060,070,080</deps>
+    <tags>code-page,deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Build, package, and deploy the NavigatorPane as a Dataverse webresource, and wire the Path B app-startup bootstrap (from task 001) so the docked pane auto-creates at app load. Build with Vite (npm run build, NOT build:prod), after a full cache-clear (rm -rf dist/ node_modules/.vite/ .vite/) and recompiling @spaarke/ui-components FIRST, and verify a known string in the built HTML so a stale dist is never shipped.</prompt>
+  <role>SPAARKE platform developer with Vite code-page build + Dataverse webresource deployment expertise (code-page-deploy skill). Follow ADRs strictly.</role>
+  <goal>A freshly-built NavigatorPane bundle (verified known-string in the HTML) deployed as a Dataverse webresource, with the Path B app-startup bootstrap wired so the docked pane appears at app load without user action — and a stale dist provably not shipped (cache-clear verified).</goal>
+  <context>
+    <background>Per spec FR-02 + deploy + plan.md Phase 9 task 086. The NavigatorPane ships as a code-page-as-webresource pane (CalendarSidePane pattern); the single global JS is the app-startup bootstrap (Path B) that createPane's the app-level Navigator pane with canClose:false + alwaysRender:true. Depends on the full Navigator feature set (040-080).</background>
+    <relevant-files>
+      <file role="modify">src/solutions/NavigatorPane/</file>
+      <file role="canonical-reference">src/solutions/CalendarSidePane/</file>
+      <file role="canonical-reference">src/solutions/EventDetailSidePane/</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/SidePaneManager.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">NavigatorPane code page + tab scaffold + theme wiring.</dependency>
+      <dependency task="041" status="pending">Recent (Viewed) tab.</dependency>
+      <dependency task="042" status="pending">Recent (Edited) derivation + toggle.</dependency>
+      <dependency task="050" status="pending">Pin gesture (Pinned Records).</dependency>
+      <dependency task="051" status="pending">Bookmarks ("Pin this page" + "+ Add bookmark").</dependency>
+      <dependency task="052" status="pending">Monitored lens.</dependency>
+      <dependency task="060" status="pending">Views tab.</dependency>
+      <dependency task="070" status="pending">Search / quick-switcher.</dependency>
+      <dependency task="080" status="pending">Read-time security trimming.</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="project">Code page MUST build with Vite npm run build (NOT build:prod); MUST cache-clear (rm -rf dist/ node_modules/.vite/ .vite/) AND recompile @spaarke/ui-components FIRST; MUST verify a known string in the built HTML so a stale dist is never shipped.</constraint>
+    <constraint source="project">The app pane MUST be created via Xrm.App.sidePanes.createPane with canClose:false + alwaysRender:true; the bootstrap is idempotent (singleton guard) and uses the 3-frame getXrm() (FR-02).</constraint>
+    <constraint source="ADR-006">Ships as a pageType:'webresource' pane (CalendarSidePane pattern) + one global app-startup bootstrap — NOT a classic HTML web resource and NOT a per-form handler (Path C comply; flagged for adr-check).</constraint>
+    <constraint source="project">Node install: npm install --legacy-peer-deps --no-audit --no-fund (avoid npm ci for Vite solutions — root §12).</constraint>
+    <constraint source="project">Host-context only — no BFF, no plugin, no per-form web resource.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Vite code-page build + Dataverse webresource deploy + Path B app-startup bootstrap</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-006-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Code-page-as-webresource-pane" location="src/solutions/CalendarSidePane/">Mirror the Vite singlefile build + webresource packaging + pageType:'webresource' pane deploy.</pattern>
+      <pattern name="Path B bootstrap" location="projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/SidePaneManager.ts">Productionize the recovered Code Page-injection bootstrap (per task 001 verdict) to createPane the Navigator pane at app load, idempotently.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor (STANDARD) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the code-page-deploy skill + the task 001 spike verdict/bootstrap approach.</step>
+    <step order="1">Recompile @spaarke/ui-components FIRST (its dist must be current before the code page bundles it).</step>
+    <step order="2">Cache-clear the NavigatorPane: rm -rf dist/ node_modules/.vite/ .vite/ (never ship a stale dist).</step>
+    <step order="3">Install deps with npm install --legacy-peer-deps --no-audit --no-fund; run Vite npm run build (NOT build:prod).</step>
+    <step order="4">Verify a known string in the built HTML (confirms the fresh bundle, not a stale artifact).</step>
+    <step order="5">Package + deploy the NavigatorPane as a Dataverse webresource per the code-page-deploy skill.</step>
+    <step order="6">Wire the Path B app-startup bootstrap (from task 001) so the pane createPane's at app load with canClose:false + alwaysRender:true, idempotently (singleton guard) via the 3-frame getXrm().</step>
+    <step order="7">Confirm at app load the docked pane appears without user action; confirm re-entry does not create duplicates.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set task 086 status to completed.</step>
+    <step order="9">Document the deploy + known-string evidence + any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If the built HTML lacks the expected known-string check, or the pane does not appear at app load after wiring the bootstrap, STOP and report (root §6) — do not ship a stale/unverified bundle or a non-functioning bootstrap.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components, cache-clear, Vite npm run build the NavigatorPane, verify known-string.</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/solutions/NavigatorPane/dist/</output>
+    <output type="doc">projects/spaarke-side-pane-navigation-history-r1/notes/086-deploy-evidence.md</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given a fresh Vite build after cache-clear, when the built HTML is inspected, then the expected known-string is present.</criterion>
+    <criterion testable="true">Given the packaged bundle, when deployed, then it is registered as a Dataverse webresource.</criterion>
+    <criterion testable="true">Given app load, when the app starts, then the docked Navigator pane appears without user action and re-entry creates no duplicate.</criterion>
+    <criterion testable="true">Negative: given a prior dist/ existed, when the deploy runs, then a stale dist is NOT shipped (cache-clear verified before build).</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec FR-02 + deploy + plan.md Phase 9 task 086. Human/environment gate (parallel-safe:false). Vite npm run build (NOT build:prod); cache-clear + recompile @spaarke/ui-components first; verify known-string. adr-check confirms ADR-006 Path C.</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

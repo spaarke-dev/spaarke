@@ -919,7 +919,7 @@ public sealed class IncomingCommunicationProcessor
                         ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
                         ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
                         ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
-                        ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                        ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
                         ["sprk_graphitemid"] = fileHandle.Id,
                         ["sprk_graphdriveid"] = driveId,
                     };
@@ -1025,7 +1025,7 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_filename"] = emlResult.FileName, // e.g., "email-2026-03-12.eml" — AI analyzer reads this for file type
             ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
             ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
-            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
             ["sprk_graphitemid"] = fileHandle?.Id,
             ["sprk_graphdriveid"] = driveId,
             ["sprk_isemailarchive"] = true,

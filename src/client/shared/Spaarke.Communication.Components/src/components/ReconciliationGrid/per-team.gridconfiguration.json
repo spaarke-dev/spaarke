@@ -2,7 +2,7 @@
   "_version": "1.0",
   "source": {
     "type": "inline",
-    "fetchXml": "<fetch><entity name=\"sprk_communication\"><attribute name=\"sprk_communicationid\" /><attribute name=\"sprk_subject\" /><attribute name=\"sprk_triagepriority\" /><attribute name=\"sprk_reviewoutcome\" /><attribute name=\"sprk_riconfidence\" /><attribute name=\"sprk_triagecategory\" /><attribute name=\"sprk_triagesummary\" /><attribute name=\"sprk_associationstatus\" /><attribute name=\"sprk_receiveddate\" /><attribute name=\"sprk_from\" /><attribute name=\"sprk_to\" /><attribute name=\"ownerid\" /><filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\" /><condition attribute=\"sprk_communicationtype\" operator=\"eq\" value=\"100000000\" /><filter type=\"or\"><condition attribute=\"sprk_associationstatus\" operator=\"ne\" value=\"100000000\" /><condition attribute=\"sprk_associationstatus\" operator=\"null\" /></filter></filter><order attribute=\"sprk_triagepriority\" descending=\"false\" /><order attribute=\"sprk_receiveddate\" descending=\"true\" /></entity></fetch>",
+    "fetchXml": "<fetch><entity name=\"sprk_communication\"><attribute name=\"sprk_communicationid\" /><attribute name=\"sprk_subject\" /><attribute name=\"sprk_triagepriority\" /><attribute name=\"sprk_reviewoutcome\" /><attribute name=\"sprk_riconfidence\" /><attribute name=\"sprk_triagecategory\" /><attribute name=\"sprk_triagesummary\" /><attribute name=\"sprk_associationstatus\" /><attribute name=\"sprk_associationprovenance\" /><attribute name=\"sprk_regardingrecordname\" /><attribute name=\"sprk_regardingrecordnumber\" /><attribute name=\"sprk_regardingrecordtypename\" /><attribute name=\"sprk_receiveddate\" /><attribute name=\"sprk_from\" /><attribute name=\"sprk_to\" /><attribute name=\"ownerid\" /><filter type=\"and\"><condition attribute=\"statecode\" operator=\"eq\" value=\"0\" /><condition attribute=\"sprk_communicationtype\" operator=\"eq\" value=\"100000000\" /><filter type=\"or\"><condition attribute=\"sprk_associationstatus\" operator=\"ne\" value=\"100000000\" /><condition attribute=\"sprk_associationstatus\" operator=\"null\" /></filter></filter><order attribute=\"sprk_receiveddate\" descending=\"true\" /><order attribute=\"sprk_triagepriority\" descending=\"false\" /></entity></fetch>",
     "layoutXml": "<grid name=\"resultset\" object=\"10000\" jump=\"sprk_subject\" select=\"1\" icon=\"1\" preview=\"1\"><row name=\"result\" id=\"sprk_communicationid\"><cell name=\"sprk_subject\" width=\"260\" isfirstcell=\"true\" /><cell name=\"sprk_triagepriority\" width=\"100\" /><cell name=\"sprk_reviewoutcome\" width=\"110\" /><cell name=\"sprk_riconfidence\" width=\"90\" /><cell name=\"sprk_triagecategory\" width=\"160\" /><cell name=\"sprk_triagesummary\" width=\"300\" /><cell name=\"sprk_associationstatus\" width=\"140\" /><cell name=\"sprk_receiveddate\" width=\"130\" /><cell name=\"sprk_from\" width=\"200\" /><cell name=\"sprk_to\" width=\"200\" /></row></grid>"
   },
   "display": {
@@ -28,7 +28,7 @@
     "sprk_triagecategory": { "label": "Category" },
     "sprk_triagesummary": { "label": "Summary" },
     "sprk_associationstatus": { "label": "Status" },
-    "sprk_receiveddate": { "label": "Date", "renderer": "date" },
+    "sprk_receiveddate": { "label": "Received", "renderer": "datetime" },
     "sprk_from": { "label": "From" },
     "sprk_to": { "label": "To" }
   },
