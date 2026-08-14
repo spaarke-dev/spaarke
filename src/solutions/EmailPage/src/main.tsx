@@ -42,6 +42,7 @@ import {
   searchUsersAndContacts,
   XrmDataverseClient,
   getXrm,
+  ensureNavigatorSidePane,
   type OpenEmailComposeMode,
 } from '@spaarke/ui-components';
 import { resolveRuntimeConfig, getAuthProvider } from '@spaarke/auth';
@@ -369,6 +370,15 @@ function Root() {
 
   React.useEffect(() => {
     return setupCodePageThemeListener(() => setTheme(resolveCodePageTheme()));
+  }, []);
+
+  // Global Navigator side pane (spaarke-side-pane-navigation-history-r1):
+  // register the app-level Navigator pane on mount so it docks whenever a user
+  // lands on this code page (modern UCI has no global app-load hook, so every
+  // code-page host registers it). Idempotent + never throws — the shared
+  // ensureNavigatorSidePane() no-ops if the pane already exists.
+  React.useEffect(() => {
+    ensureNavigatorSidePane();
   }, []);
 
   React.useEffect(() => {

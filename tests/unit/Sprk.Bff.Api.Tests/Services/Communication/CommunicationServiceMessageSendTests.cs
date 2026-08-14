@@ -158,7 +158,6 @@ public class CommunicationServiceMessageSendTests
             comm,
             entityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!,  // SpeFileStore — not exercised on the message path
             null!,  // CommunicationAccountService — not exercised on the message path
             null!,  // JobSubmissionService — not exercised on the message path
             enrichment ?? Mock.Of<ICommunicationEnrichmentService>(),

@@ -20,7 +20,7 @@ Before starting deployment, ensure the following are in place:
 | **M365 tenant** | With Microsoft 365 Copilot licenses assigned to target users |
 | **Azure CLI** | Installed and authenticated (`az login`) |
 | **Power Platform environment** | With Copilot enabled in admin center settings |
-| **.NET 8 SDK** | For building the BFF API (`dotnet --version` should return 8.x) |
+| **.NET 10 SDK** | For building the BFF API (`dotnet --version` should return 10.x) |
 | **Node.js 18+** | Required if using Teams Agents Toolkit for local development |
 | **Entra ID permissions** | Ability to create app registrations and grant admin consent |
 | **Teams Admin access** | To upload custom apps to the org catalog |

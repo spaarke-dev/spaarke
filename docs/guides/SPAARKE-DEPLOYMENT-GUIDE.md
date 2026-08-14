@@ -74,7 +74,7 @@ Each Spaarke deployment consists of:
 | Entra ID app registrations | Per environment | BFF API identity + Dataverse S2S |
 | Dataverse environment | Per customer | Tables, plugins, security roles, solutions |
 | SharePoint Embedded | Per environment | Container type + containers |
-| BFF API deployment | Per environment | .NET 8 Minimal API code |
+| BFF API deployment | Per environment | .NET 10 Minimal API code |
 
 ### Build Once, Deploy Anywhere
 

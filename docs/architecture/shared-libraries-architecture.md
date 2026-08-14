@@ -12,7 +12,7 @@
 
 The Spaarke backend uses two shared libraries to avoid duplication and enforce separation of concerns. **Spaarke.Core** provides authorization, caching, and utilities that are independent of any specific data store. **Spaarke.Dataverse** provides the Dataverse Web API client, entity models, and domain-specific service interfaces following the Interface Segregation Principle (ISP).
 
-The dependency direction is strictly one-way: `Spaarke.Core` depends on `Spaarke.Dataverse` (for `IAccessDataSource` and `AccessSnapshot`), and the BFF API depends on both. There are no circular references. Both target .NET 8.0.
+The dependency direction is strictly one-way: `Spaarke.Core` depends on `Spaarke.Dataverse` (for `IAccessDataSource` and `AccessSnapshot`), and the BFF API depends on both. There are no circular references. Both target .NET 10.0.
 
 ## Component Structure
 
@@ -86,7 +86,7 @@ The dependency direction is strictly one-way: `Spaarke.Core` depends on `Spaarke
 
 | Decision | Choice | Rationale | ADR |
 |----------|--------|-----------|-----|
-| REST client over ServiceClient | `DataverseWebApiClient` (raw HTTP) | Avoids `System.ServiceModel` dependency that conflicts with .NET 8 minimal hosting | — |
+| REST client over ServiceClient | `DataverseWebApiClient` (raw HTTP) | Avoids `System.ServiceModel` dependency that conflicts with .NET 10 minimal hosting | — |
 | ISP for Dataverse interfaces | 9 focused interfaces composed into `IDataverseService` | Consumers depend on narrowest interface needed; reduces coupling | — |
 | Fail-closed authorization | Default Deny on errors and no-rule-match | Security compliance: access is never accidentally granted | — |
 | Static OperationAccessPolicy | Pure static class, no DI | Performance (no allocation per request); thread-safe; operations are compile-time constants | ADR-010 |

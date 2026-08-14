@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>Retarget all tests/** to net10; clean solution build + publish (P0 exit gate)</title>
+    <phase>P0 Retarget + build-green</phase>
+    <gate>004 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** csproj + achieves the P0 exit gate (whole-solution build + publish); test-modifying.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical retarget of test projects; bounded.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial P0 chain; the exit-gate build/publish must run after all src retargets.</parallel-reason>
+    <deps>004</deps>
+    <tags>dotnet, migration, testing, bff-api</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Retarget all ~7 test projects under `tests/**` (unit + integration + arch) from net8.0 to net10.0, bump their runtime-tied test packages (e.g. `Microsoft.AspNetCore.Mvc.Testing` to the 10.0.x line) as needed to restore, and achieve a clean whole-solution `dotnet build -c Release` plus `dotnet publish -c Release` of the BFF. This is the P0 exit gate: the entire in-scope tree compiles and publishes on net10, with the `net462` plugin untouched. (Test PASS/green is task 030 — this task only proves BUILD + publish.)</prompt>
+  <role>SPAARKE platform developer. Expert in xUnit/.NET test project structure, Mvc.Testing host, and multi-project solution builds. Follow ADRs strictly.</role>
+  <goal>All `tests/**` csproj target `net10.0`; `dotnet build -c Release` for the full solution is green; `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` succeeds framework-dependent; `Spaarke.Dataverse.CustomApiProxy.csproj` remains `net462` (verified by diff).</goal>
+
+  <context>
+    <background>design §3.1 lists the ~7 test projects (Spaarke.ArchTests, Spe.Integration.Tests, Sprk.Bff.Api.IntegrationTests, RecordSyncJob.IsolatedTests, Spaarke.Core.Tests, Spaarke.Plugins.Tests, Spaarke.Scheduling.Tests, Sprk.Bff.Api.Tests). They move with the code they cover. `Spaarke.Plugins.Tests` tests the net462 plugin but is itself a normal test project — retarget it to net10 while the plugin-under-test stays net462. `TimeProvider` has no net9/10 break (ADR-038). The net462 plugin csproj MUST NOT change.</background>
+    <relevant-files>
+      <file role="modify">tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj</file>
+      <file role="modify">tests/integration/Spe.Integration.Tests/Spe.Integration.Tests.csproj</file>
+      <file role="modify">tests/integration/Sprk.Bff.Api.IntegrationTests/Sprk.Bff.Api.IntegrationTests.csproj</file>
+      <file role="modify">tests/unit/Spaarke.Core.Tests/Spaarke.Core.Tests.csproj</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+      <file role="modify">tests/unit/Spaarke.Plugins.Tests/Spaarke.Plugins.Tests.csproj</file>
+      <file role="modify">tests/unit/Spaarke.Scheduling.Tests/Spaarke.Scheduling.Tests.csproj</file>
+      <file role="modify">tests/unit/RecordSyncJob.IsolatedTests/RecordSyncJob.IsolatedTests.csproj</file>
+      <file role="canonical-reference">src/dataverse/plugins/Spaarke.CustomApiProxy/Plugins/Spaarke.Dataverse.CustomApiProxy/Spaarke.Dataverse.CustomApiProxy.csproj</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">BFF + all src libs on net10, build green.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Test projects move with their code; `TimeProvider`/`FakeTimeProvider` unaffected. Do NOT delete or exclude a test to force a green BUILD — build failures are fixed, not silenced.</constraint>
+    <constraint source="ADR-002">The net462 `Spaarke.Dataverse.CustomApiProxy` plugin csproj MUST NOT be retargeted (NFR-05). `Spaarke.Plugins.Tests` (the test project) DOES move to net10.</constraint>
+    <constraint source="ADR-029">Publish stays framework-dependent linux-x64 into `deploy/api-publish/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Test-project retarget + whole-solution build/publish on net10</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="framework-dependent-publish" location=".claude/constraints/azure-deployment.md">Publish & Packaging rules — no self-contained; publish to deploy/api-publish/.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-01/FR-11 + ADR-038. Declare RIGOR: FULL.</step>
+    <step order="1">Set `<TargetFramework>net10.0</TargetFramework>` on every `tests/**` csproj (note `Sprk.Bff.Api.Tests` uses `<TargetFramework>` singular — same edit).</step>
+    <step order="2">Bump runtime-tied test packages to restore (e.g. `Microsoft.AspNetCore.Mvc.Testing` 8.0.11 → 10.0.x); align any test-only Extensions references.</step>
+    <step order="3">Run whole-solution `dotnet build -c Release`; fix compilation errors (do NOT exclude tests to force green).</step>
+    <step order="4">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; confirm success and framework-dependent output.</step>
+    <step order="5">`git diff` the plugin csproj to confirm it is untouched (still `net462`).</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 005 status to ✅. This closes P0.</step>
+    <step order="7">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a test project cannot be made to BUILD on net10 without deleting/excluding tests, STOP and surface per CLAUDE.md §6 — silently dropping a test to force a green build violates ADR-038 and NFR-01.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + publish whole solution</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">tests/**/*.csproj (8 projects retargeted)</output>
+    <output type="artifact">deploy/api-publish/ (net10 framework-dependent publish output)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all retargets, when whole-solution `dotnet build -c Release` runs, then it succeeds with zero errors.</criterion>
+    <criterion testable="true">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` succeeds and is framework-dependent (no `runtimes/` self-contained tree).</criterion>
+    <criterion testable="true">`Spaarke.Dataverse.CustomApiProxy.csproj` diff is empty — still `net462`.</criterion>
+    <criterion testable="true">Negative: no test was deleted or excluded to achieve the build (git diff shows only TFM + package version edits in tests/**).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-01 (build acceptance). Test PASS/green (running the suite) is FR-11 / task 030 — this task proves BUILD + publish only. P0 exit gate.
+
+  COMPLETION (2026-08-11): all 8 tests/** csproj retargeted net8.0 → net10.0. Whole-solution `dotnet build -c Release Spaarke.sln` GREEN (0 errors). `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` succeeds framework-dependent (no runtime DLLs / no runtimes/ tree; 183 files/136M uncompressed — compressed re-baseline is task 031). net462 plugin csproj diff EMPTY. Test-package alignment (NU1605 fixes): Sprk.Bff.Api.Tests Cosmos 3.47.0→3.62.1 + MimeKit/MimeKitLite 4.15.1→4.17.0; Spaarke.Scheduling.Tests Logging.Abstractions 8.0.3→10.0.1; Spe.Integration.Tests Jwt 8.15.0→8.22.0. Removed framework-superseded System.Text.RegularExpressions 4.3.1 pin from 4 test projects (NU1510; Sprk.Bff.Api.Tests had TWAE→error). ZERO .cs changes, ZERO tests deleted/excluded → escalation trigger did NOT fire; ADR-038 clean. Step 9.5 (binding override for test-modifying): adr-check PASSED (ADR-038/002/029 compliant, 0 violations); code-review N/A on pure TFM/version diff. **P0 CLOSED.**
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

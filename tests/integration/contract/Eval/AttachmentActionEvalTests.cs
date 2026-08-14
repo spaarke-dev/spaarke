@@ -165,7 +165,11 @@ public class AttachmentActionEvalTests
             "CommunicationEnrichmentService.cs"));
 
         enrichmentSource.Should().Contain("RunEmailAttachmentActionAsync", "the FR-13 step exists");
-        enrichmentSource.Should().Contain("_createTaskAi.ExtractAsync",
+        // dotnet-10-upgrade-r1 task 020 (H2 R3) resolved ICommunicationCreateTaskAi from a per-operation
+        // service scope (local `createTaskAi`) instead of a constructor-injected field (`_createTaskAi`) to
+        // fix a captive-dependency (singleton→scoped) — behavior-preserving, verified by task 021. The FR-13
+        // facade reuse is unchanged; only the accessor form changed field→scoped-local.
+        enrichmentSource.Should().Contain("createTaskAi.ExtractAsync",
             "FR-13 REUSES the create-task-from-email extraction facade — no new extraction facade");
         enrichmentSource.Should().Contain("_actionSeam.CreateTaskAsync",
             "FR-13 REUSES the shipped IActionSeam create leg — no forked create mechanism");

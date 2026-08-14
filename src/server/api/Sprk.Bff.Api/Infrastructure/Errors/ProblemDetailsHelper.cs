@@ -1,4 +1,3 @@
-using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Infrastructure.Errors;
@@ -7,31 +6,32 @@ namespace Sprk.Bff.Api.Infrastructure.Errors;
 /// Helper for creating RFC 7807 Problem Details responses with Graph error differentiation.
 /// Updated for Microsoft.Graph SDK v5.x (Phase 7).
 /// </summary>
+/// <remarks>
+/// <see cref="FromGraphException"/> takes extracted primitives (status code, error code, message,
+/// request id) rather than the raw Graph SDK <c>ODataError</c> so this type stays Graph-free per
+/// ADR-007 §1 (only <c>Infrastructure.Graph</c>/<c>SpeFileStore</c> may reference Microsoft.Graph
+/// types on their member/signature surface). Callers holding an <c>ODataError</c> (typically in a
+/// <c>catch</c> block — a local variable, so the catch site itself stays ADR-007-clean) extract the
+/// fields before calling. Renamed extraction responsibility, zero behavior change.
+/// </remarks>
 public static class ProblemDetailsHelper
 {
-    public static IResult FromGraphException(ODataError ex)
+    /// <summary>
+    /// Builds a ProblemDetails response for a Graph API failure from its extracted fields.
+    /// </summary>
+    /// <param name="responseStatusCode">The Graph SDK <c>ODataError.ResponseStatusCode</c> (0/negative treated as unknown → 500).</param>
+    /// <param name="errorCode">The Graph SDK <c>ODataError.Error?.Code</c>.</param>
+    /// <param name="errorMessage">The Graph SDK <c>ODataError.Error?.Message</c>.</param>
+    /// <param name="graphRequestId">Optional Graph <c>request-id</c>/<c>client-request-id</c> response header value, if the caller extracted one.</param>
+    public static IResult FromGraphException(int responseStatusCode, string? errorCode, string? errorMessage, string? graphRequestId = null)
     {
-        var status = ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 500;
+        var status = responseStatusCode > 0 ? responseStatusCode : 500;
         var title = status == 403 ? "forbidden" : status == 401 ? "unauthorized" : "error";
-        var code = GetErrorCode(ex);
+        var code = GetErrorCode(errorCode, status);
         var detail = (status == 403 && code.Contains("Authorization_RequestDenied", StringComparison.OrdinalIgnoreCase))
             ? "missing graph app role (filestoragecontainer.selected) for the api identity."
             : status == 403 ? "api identity lacks required container-type permission for this operation."
-            : ex.Error?.Message ?? "Graph API error";
-
-        string? graphRequestId = null;
-        try
-        {
-            // Graph SDK v5.x: ResponseHeaders is now Dictionary<string, IEnumerable<string>>
-            graphRequestId = ex.ResponseHeaders?
-                .Where(h => h.Key == "request-id" || h.Key == "client-request-id")
-                .SelectMany(h => h.Value)
-                .FirstOrDefault();
-        }
-        catch
-        {
-            // Ignore header access errors
-        }
+            : errorMessage ?? "Graph API error";
 
         return Results.Problem(
             title: title,
@@ -71,16 +71,15 @@ public static class ProblemDetailsHelper
         );
     }
 
-    private static string GetErrorCode(ODataError ex)
+    private static string GetErrorCode(string? errorCode, int status)
     {
         // Graph SDK v5.x: Error codes are in ex.Error.Code property
-        var errorCode = ex.Error?.Code ?? "";
-        var status = ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 500;
+        var code = errorCode ?? "";
 
-        return errorCode == "Authorization_RequestDenied" ? "Authorization_RequestDenied" :
-               errorCode == "activityLimitReached" ? "TooManyRequests" :
-               errorCode == "accessDenied" ? "Forbidden" :
-               !string.IsNullOrEmpty(errorCode) ? errorCode :
+        return code == "Authorization_RequestDenied" ? "Authorization_RequestDenied" :
+               code == "activityLimitReached" ? "TooManyRequests" :
+               code == "accessDenied" ? "Forbidden" :
+               !string.IsNullOrEmpty(code) ? code :
                status.ToString();
     }
 

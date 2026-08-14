@@ -2,7 +2,7 @@
 
 > **Project**: `spaarkeai-compose-r6` · **Branch**: `work/spaarkeai-compose-r6`
 > **Source**: [`../plan.md`](../plan.md) · [`../spec.md`](../spec.md) · Governing ADR-049 (Path-B amendment = task 001)
-> **Status**: 30 tasks / 8 phases (0–7) — scaffolded, not started. Execute via `task-execute` (root CLAUDE.md §4).
+> **Status**: ✅ **PROJECT COMPLETE** (2026-08-13) — 30/30 tasks ✅ across 8 phases. All 6 Success Criteria met (see README). Test-diet: zero scaffolding (`../notes/test-diet-report.md`). Defer register → `projects/spaarkeai-compose-r7/notes/r6-defer-register-consolidated.md`.
 
 ## Legend
 🔲 not-started · 🔄 in-progress/needs-retry · ✅ complete · ⛔ blocked
@@ -46,7 +46,7 @@ Overlapping worktrees: `spaarkeai-compose-r5` (active on `ComposeService.cs`/`Co
 | 052 | Version-history tests — open v3 after v4 = exact bytes (+ authz negative) | 5 | 050, 051 | P5 | false | FULL | sonnet/high | ✅ |
 | 060 | Round-trip fidelity harness — fail on hard-fail/regression | 6 | 027, 004 | none | false | FULL | sonnet/high | ✅ |
 | 061 | Wire fidelity harness into CI as a release gate | 6 | 060 | none | false | FULL | sonnet/high | ✅ |
-| 090 | Project wrap-up — anti-clobber deploy, ADR-049 amendment, /test-diet, 6 criteria | 7 | 014,027,033,042,052,061 | none | false | STANDARD | sonnet/high | 🔲 |
+| 090 | Project wrap-up — anti-clobber deploy, ADR-049 amendment, /test-diet, 6 criteria | 7 | 014,027,033,042,052,061 | none | false | STANDARD | sonnet/high | ✅ |
 
 ## Critical path (RE-SEQUENCED 2026-08-05 — model-first)
 `001 → 020 → {011, 021–026} → 010 → 012 → {013, 027} → 014 → 060 → 061 → 090`

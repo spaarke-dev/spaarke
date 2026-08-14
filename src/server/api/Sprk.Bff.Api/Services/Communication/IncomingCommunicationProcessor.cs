@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
@@ -36,11 +37,13 @@ public sealed class IncomingCommunicationProcessor
     private readonly CommunicationAccountService _accountService;
     private readonly IncomingAssociationResolver _associationResolver;
     private readonly GraphMessageNormalizer _messageNormalizer;
-    private readonly IEmailAttachmentProcessor _attachmentProcessor;
     private readonly GraphMessageToEmlConverter _emlConverter;
-    private readonly SpeFileStore _speFileStore;
+    // SpeFileStore and IPostUploadIndexingEnqueuer are Scoped; this processor is a Singleton, so
+    // both are resolved per-message from _scopeFactory at their use-sites (dotnet-10-upgrade task
+    // 020, R4) rather than captured on the ctor, so the graph passes ValidateScopes. Each processed
+    // message is an independent unit of work and both are stateless facades — behavior is unchanged.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly JobSubmissionService _jobSubmissionService;
-    private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
     private readonly NotificationService _notificationService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
     private readonly IThreadResolver? _threadResolver;
@@ -67,11 +70,9 @@ public sealed class IncomingCommunicationProcessor
         CommunicationAccountService accountService,
         IncomingAssociationResolver associationResolver,
         GraphMessageNormalizer messageNormalizer,
-        IEmailAttachmentProcessor attachmentProcessor,
         GraphMessageToEmlConverter emlConverter,
-        SpeFileStore speFileStore,
+        IServiceScopeFactory scopeFactory,
         JobSubmissionService jobSubmissionService,
-        IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
         NotificationService notificationService,
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
@@ -89,11 +90,9 @@ public sealed class IncomingCommunicationProcessor
         _accountService = accountService;
         _associationResolver = associationResolver;
         _messageNormalizer = messageNormalizer;
-        _attachmentProcessor = attachmentProcessor;
         _emlConverter = emlConverter;
-        _speFileStore = speFileStore;
+        _scopeFactory = scopeFactory;
         _jobSubmissionService = jobSubmissionService;
-        _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
         _notificationService = notificationService;
         _enrichmentService = enrichmentService;
         _threadResolver = threadResolver;
@@ -882,6 +881,12 @@ public sealed class IncomingCommunicationProcessor
         var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
             _genericEntityService, communicationId, _logger, ct);
 
+        // SpeFileStore + IEmailAttachmentProcessor are Scoped — resolve them once per message from
+        // one scope (R4 / R10); shared across this message's attachments (stateless per unit of work).
+        using var scope = _scopeFactory.CreateScope();
+        var speFileStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
+        var attachmentProcessor = scope.ServiceProvider.GetRequiredService<IEmailAttachmentProcessor>();
+
         foreach (var attachment in fileAttachments)
         {
             var fileName = attachment.Name ?? $"attachment_{processedCount + 1}";
@@ -889,7 +894,7 @@ public sealed class IncomingCommunicationProcessor
             var sizeBytes = attachment.ContentBytes?.Length ?? 0;
 
             // Use EmailAttachmentProcessor's filter logic to skip signature images etc.
-            if (_attachmentProcessor.ShouldFilterAttachment(fileName, sizeBytes, contentType))
+            if (attachmentProcessor.ShouldFilterAttachment(fileName, sizeBytes, contentType))
             {
                 _logger.LogDebug(
                     "Filtered attachment '{FileName}' ({Size} bytes) for communication {CommunicationId}",
@@ -902,7 +907,7 @@ public sealed class IncomingCommunicationProcessor
                 // Upload attachment to SPE
                 var spePath = $"/communications/{communicationId:N}/attachments/{fileName}";
                 using var stream = new MemoryStream(attachment.ContentBytes!);
-                var fileHandle = await _speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
+                var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
 
                 // Create sprk_document record for the attachment (mirrors outbound pattern)
                 Guid? attachmentDocumentId = null;
@@ -914,7 +919,7 @@ public sealed class IncomingCommunicationProcessor
                         ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
                         ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
                         ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
-                        ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                        ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
                         ["sprk_graphitemid"] = fileHandle.Id,
                         ["sprk_graphdriveid"] = driveId,
                     };
@@ -998,7 +1003,10 @@ public sealed class IncomingCommunicationProcessor
 
         var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
         using var emlStream = new MemoryStream(emlResult.Content);
-        var fileHandle = await _speFileStore.UploadSmallAsync(driveId, spePath, emlStream, ct);
+        // SpeFileStore is Scoped — resolve it per-operation from a scope (R4).
+        using var scope = _scopeFactory.CreateScope();
+        var speFileStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
+        var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, emlStream, ct);
 
         _logger.LogInformation(
             "Archived incoming communication .eml to SPE | CommunicationId: {CommunicationId}, Path: {Path}",
@@ -1017,7 +1025,7 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_filename"] = emlResult.FileName, // e.g., "email-2026-03-12.eml" — AI analyzer reads this for file type
             ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
             ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
-            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
             ["sprk_graphitemid"] = fileHandle?.Id,
             ["sprk_graphdriveid"] = driveId,
             ["sprk_isemailarchive"] = true,
@@ -1140,7 +1148,10 @@ public sealed class IncomingCommunicationProcessor
 
         // App-only path: Email-to-Document uploads inbound mail attachments AS MI, so MI can
         // read them (writer-identity rule per sdap-auth-patterns.md Pattern 4).
-        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct);
+        // IPostUploadIndexingEnqueuer is Scoped — resolve it per-operation from a scope (R4).
+        using var scope = _scopeFactory.CreateScope();
+        var postUploadIndexingEnqueuer = scope.ServiceProvider.GetRequiredService<IPostUploadIndexingEnqueuer>();
+        await postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct);
     }
 
     /// <summary>

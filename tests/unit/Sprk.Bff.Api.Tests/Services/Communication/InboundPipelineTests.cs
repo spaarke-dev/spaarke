@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
@@ -231,11 +232,9 @@ public class InboundPipelineTests
                 AssociationTestSupport.Mapper(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
-            _attachmentProcessorMock.Object,
             new GraphMessageToEmlConverter(),
-            null!, // SpeFileStore — not used when ArchiveContainerId is null
+            Mock.Of<IServiceScopeFactory>(), // SpeFileStore + IPostUploadIndexingEnqueuer now resolved per-message via scope (R4); unused when ArchiveContainerId is null
             CreateMockJobSubmissionService(),
-            Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),

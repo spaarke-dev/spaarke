@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Spaarke.Core</AssemblyName>
@@ -10,18 +10,22 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.1" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
 
-    <!-- Security: Override vulnerable transitive dependencies -->
-    <!-- CVE-2024-38095 (HIGH): System.Formats.Asn1 6.0.0 → 8.0.1 -->
-    <PackageReference Include="System.Formats.Asn1" Version="8.0.1" />
-    <!-- CVE-2024-30105 (HIGH): System.Text.Json 7.0.3 → 8.0.5 -->
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
-    <!-- CVE-2023-29331 (HIGH): System.Security.Cryptography.Pkcs 6.0.1 → 8.0.1 -->
-    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="8.0.1" />
-    <!-- CVE-2019-0820 (HIGH): System.Text.RegularExpressions 4.3.0 → 4.3.1 -->
-    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <!-- net10 retarget (task 003): System.Formats.Asn1 / System.Text.Json / System.Text.RegularExpressions
+         CVE pins REMOVED — NU1510 confirmed the net10 framework supersedes them (framework version ≥ the
+         CVE-fixed pin). System.Security.Cryptography.Pkcs is NOT framework-pruned (no NU1510) so its pin is
+         retained until the transitive graph is confirmed ≥ 8.0.1. Evidence: notes/pin-removals.md. -->
+    <!-- CVE-2023-29331 (HIGH): System.Security.Cryptography.Pkcs 6.0.1 → 8.0.1; bumped to 10.0.11 (task 004)
+         to match the S.S.C.Xml 10.0.11 pin below, which drags Pkcs >= 10.0.11 (would otherwise NU1605). -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="10.0.11" />
+    <!-- net10 retarget (task 004): pin System.Security.Cryptography.Xml to a non-vulnerable 10.0.x.
+         The transitive 8.0.2 (via Dataverse.Client/MSAL) carries 8 HIGH advisories that NoWarn=NU1903
+         was silently masking. This lib is non-web so the framework does NOT prune S.S.C.Xml (no NU1510) —
+         an explicit override is required. 10.0.11 clears all 8 advisories. This let NoWarn=NU1903 be
+         deleted. Owner-approved Option 1, 2026-08-11. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>

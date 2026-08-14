@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Microsoft.Graph.Models;
-using Sprk.Bff.Api.Services.Communication.Engine;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
 

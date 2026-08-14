@@ -39,7 +39,7 @@ Authorization is enforced at the endpoint level via endpoint filters (ADR-008) â
 |-----------|------|---------------|
 | `GraphClientFactory` | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` | Creates Graph clients via OBO (`ForUserAsync`) or app-only (`ForApp`). OBO tokens cached in Redis. App-only client cached as Lazy singleton. |
 | `IGraphClientFactory` | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/IGraphClientFactory.cs` | Contract: `ForUserAsync(HttpContext, CancellationToken)` and `ForApp()` |
-| `SimpleTokenCredential` | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SimpleTokenCredential.cs` | Wraps a pre-acquired OBO access token as `TokenCredential` for Graph SDK v5 |
+| `SimpleTokenCredential` | `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SimpleTokenCredential.cs` | Wraps a pre-acquired OBO access token as `TokenCredential` for Graph SDK v6 |
 | `GraphTokenCache` | `src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs` | Redis cache for OBO tokens. SHA256-hashed keys. 55-min TTL. Graceful degradation on cache failure. |
 | `TokenHelper` | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/TokenHelper.cs` | Extracts bearer token from `Authorization` header. Throws `UnauthorizedAccessException` if missing. |
 | `AuthorizationService` | `src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs` | Chain-of-responsibility rule evaluator. Queries Dataverse for access snapshot, evaluates `IAuthorizationRule` chain, fail-closed on error. |

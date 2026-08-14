@@ -34,7 +34,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private readonly ICommunicationDataverseService _communicationService;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IDocumentDataverseService _documentService;
-    private readonly SpeFileStore _speFileStore;
+    // SpeFileStore is Scoped; this service is a Singleton (consumed by singleton callers such as
+    // RegistrationEmailService / DemoProvisioningService), so it is resolved per-operation from
+    // _scopeFactory at each SPE use-site (dotnet-10-upgrade task 020, R9) rather than captured on
+    // the ctor. The scope spans the whole operation (incl. any downloaded-stream consumption), so a
+    // fresh instance per unit of work is behavior-preserving.
     private readonly CommunicationAccountService _accountService;
     private readonly JobSubmissionService _jobSubmissionService;
     private readonly ICommunicationEnrichmentService _enrichmentService;
@@ -82,7 +86,6 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         ICommunicationDataverseService communicationService,
         IGenericEntityService genericEntityService,
         IDocumentDataverseService documentService,
-        SpeFileStore speFileStore,
         CommunicationAccountService accountService,
         JobSubmissionService jobSubmissionService,
         ICommunicationEnrichmentService enrichmentService,
@@ -101,7 +104,6 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
         _documentService = documentService;
-        _speFileStore = speFileStore;
         _accountService = accountService;
         _jobSubmissionService = jobSubmissionService;
         _enrichmentService = enrichmentService;
@@ -468,7 +470,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
                     ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
                     ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
-                    ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                    ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
                     ["sprk_graphitemid"] = itemId,
                     ["sprk_graphdriveid"] = driveId,
                 };
@@ -2058,7 +2060,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
 
         using var stream = new MemoryStream(emlResult.Content);
-        var fileHandle = await _speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
+        // SpeFileStore is Scoped — resolve it per-operation (R9); scope lives to method end.
+        using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
+            "IServiceScopeFactory is required to resolve SpeFileStore for SPE archival.")).CreateScope();
+        var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+        var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
 
         _logger.LogInformation(
             "Archived communication .eml to SPE | CommunicationId: {CommunicationId}, Path: {Path}",
@@ -2073,7 +2079,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ["sprk_filename"] = emlResult.FileName, // AI analyzer reads this for file type detection
             ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
             ["sprk_sourcetype"] = new OptionSetValue(659490003), // Email Archive
-            ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+            ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
             ["sprk_graphitemid"] = fileHandle?.Id,
             ["sprk_graphdriveid"] = driveId,
             ["sprk_isemailarchive"] = true,
@@ -2144,7 +2150,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             try
             {
-                await using var content = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+                // SpeFileStore is Scoped — resolve per-attachment (R9); scope spans the stream copy below.
+                using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
+                    "IServiceScopeFactory is required to resolve SpeFileStore for .eml embed download.")).CreateScope();
+                var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+                await using var content = await speFileStore.DownloadFileAsync(driveId, itemId, ct);
                 if (content is null)
                 {
                     _logger.LogWarning(
@@ -2247,7 +2257,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
                     ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
                     ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
-                    ["sprk_communication"] = new EntityReference("sprk_communication", communicationId),
+                    ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
                     ["sprk_graphitemid"] = speItemId,
                     ["sprk_graphdriveid"] = driveId,
                 };
@@ -2359,6 +2369,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var attachments = new List<ChannelAttachment>(attachmentDocumentIds.Length);
         long totalSize = 0;
 
+        // SpeFileStore is Scoped — resolve once for this whole download operation (R9); the scope
+        // spans every attachment's metadata + content download and the consumption of those streams.
+        using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
+            "IServiceScopeFactory is required to resolve SpeFileStore for attachment download.")).CreateScope();
+        var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+
         for (var i = 0; i < attachmentDocumentIds.Length; i++)
         {
             var sprkDocumentId = attachmentDocumentIds[i];
@@ -2431,7 +2447,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             FileHandleDto? metadata;
             try
             {
-                metadata = await _speFileStore.GetFileMetadataAsync(driveId, itemId, ct);
+                metadata = await speFileStore.GetFileMetadataAsync(driveId, itemId, ct);
             }
             catch (Exception ex)
             {
@@ -2491,7 +2507,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             Stream? contentStream;
             try
             {
-                contentStream = await _speFileStore.DownloadFileAsync(driveId, itemId, ct);
+                contentStream = await speFileStore.DownloadFileAsync(driveId, itemId, ct);
             }
             catch (Exception ex)
             {

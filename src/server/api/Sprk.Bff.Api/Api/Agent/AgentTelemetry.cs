@@ -1,14 +1,17 @@
 using System.Diagnostics;
-using Microsoft.ApplicationInsights;
-using Microsoft.ApplicationInsights.DataContracts;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
 /// <summary>
 /// Structured telemetry for the M365 Copilot agent gateway.
 ///
-/// Logs interaction metrics, playbook invocations, handoff events, and errors
-/// using both ILogger (structured logs) and Application Insights (custom events/metrics).
+/// Logs interaction metrics, playbook invocations, handoff events, and errors via
+/// ILogger structured logs, which are exported through the OpenTelemetry → Azure
+/// Monitor pipeline (Program.cs UseAzureMonitor()). The classic Application Insights
+/// SDK (TelemetryClient custom events/metrics) was removed in dotnet-10-upgrade-r1
+/// task 014 (FR-06 telemetry consolidation): those calls had been inert no-ops since
+/// TelemetryClient stopped being registered (redis-cache-remediation-r1 R7-S7), so
+/// removing them drops no live signal. See notes/fr06-telemetry-carveout.md.
 ///
 /// ADR-015: MUST NOT log document content, prompts, or model output.
 /// Logs ONLY: identifiers, sizes, timings, outcome codes.
@@ -17,7 +20,6 @@ namespace Sprk.Bff.Api.Api.Agent;
 public sealed class AgentTelemetry
 {
     private readonly ILogger<AgentTelemetry> _logger;
-    private readonly TelemetryClient? _telemetryClient;
 
     /// <summary>
     /// Known interaction types for the agent gateway.
@@ -32,10 +34,9 @@ public sealed class AgentTelemetry
         public const string Handoff = "handoff";
     }
 
-    public AgentTelemetry(ILogger<AgentTelemetry> logger, TelemetryClient? telemetryClient = null)
+    public AgentTelemetry(ILogger<AgentTelemetry> logger)
     {
         _logger = logger;
-        _telemetryClient = telemetryClient;
     }
 
     /// <summary>
@@ -50,19 +51,6 @@ public sealed class AgentTelemetry
         _logger.LogInformation(
             "AgentInteraction: Type={InteractionType} DurationMs={DurationMs} Success={Success} CorrelationId={CorrelationId}",
             interactionType, durationMs, success, correlationId);
-
-        _telemetryClient?.TrackEvent("AgentInteraction", new Dictionary<string, string>
-        {
-            ["InteractionType"] = interactionType,
-            ["Success"] = success.ToString(),
-            ["CorrelationId"] = correlationId ?? string.Empty
-        }, new Dictionary<string, double>
-        {
-            ["DurationMs"] = durationMs
-        });
-
-        _telemetryClient?.GetMetric("Agent.Interaction.Duration", "InteractionType", "Success")
-            .TrackValue(durationMs, interactionType, success.ToString());
     }
 
     /// <summary>
@@ -78,23 +66,6 @@ public sealed class AgentTelemetry
         _logger.LogInformation(
             "PlaybookInvocation: PlaybookId={PlaybookId} Strategy={Strategy} DurationMs={DurationMs} Success={Success} CorrelationId={CorrelationId}",
             playbookId, strategy, durationMs, success, correlationId);
-
-        _telemetryClient?.TrackEvent("AgentPlaybookInvocation", new Dictionary<string, string>
-        {
-            ["PlaybookId"] = playbookId,
-            ["Strategy"] = strategy,
-            ["Success"] = success.ToString(),
-            ["CorrelationId"] = correlationId ?? string.Empty
-        }, new Dictionary<string, double>
-        {
-            ["DurationMs"] = durationMs
-        });
-
-        _telemetryClient?.GetMetric("Agent.Playbook.Duration", "Strategy", "Success")
-            .TrackValue(durationMs, strategy, success.ToString());
-
-        _telemetryClient?.GetMetric("Agent.Playbook.Count", "PlaybookId")
-            .TrackValue(1, playbookId);
     }
 
     /// <summary>
@@ -109,17 +80,6 @@ public sealed class AgentTelemetry
         _logger.LogInformation(
             "AgentHandoff: Destination={Destination} DocumentId={DocumentId} AnalysisId={AnalysisId} CorrelationId={CorrelationId}",
             destination, documentId, analysisId, correlationId);
-
-        _telemetryClient?.TrackEvent("AgentHandoff", new Dictionary<string, string>
-        {
-            ["Destination"] = destination,
-            ["HasDocumentId"] = (documentId.HasValue).ToString(),
-            ["HasAnalysisId"] = (analysisId.HasValue).ToString(),
-            ["CorrelationId"] = correlationId ?? string.Empty
-        });
-
-        _telemetryClient?.GetMetric("Agent.Handoff.Count", "Destination")
-            .TrackValue(1, destination);
     }
 
     /// <summary>
@@ -133,16 +93,6 @@ public sealed class AgentTelemetry
         _logger.LogWarning(
             "AgentError: ErrorType={ErrorType} InteractionType={InteractionType} CorrelationId={CorrelationId}",
             errorType, interactionType, correlationId);
-
-        _telemetryClient?.TrackEvent("AgentError", new Dictionary<string, string>
-        {
-            ["ErrorType"] = errorType,
-            ["InteractionType"] = interactionType ?? string.Empty,
-            ["CorrelationId"] = correlationId ?? string.Empty
-        });
-
-        _telemetryClient?.GetMetric("Agent.Error.Count", "ErrorType")
-            .TrackValue(1, errorType);
     }
 
     /// <summary>
@@ -156,18 +106,6 @@ public sealed class AgentTelemetry
         _logger.LogInformation(
             "AgentSession: DurationMs={SessionDurationMs} InteractionCount={InteractionCount} CorrelationId={CorrelationId}",
             sessionDurationMs, interactionCount, correlationId);
-
-        _telemetryClient?.TrackEvent("AgentSessionEnd", new Dictionary<string, string>
-        {
-            ["CorrelationId"] = correlationId ?? string.Empty
-        }, new Dictionary<string, double>
-        {
-            ["DurationMs"] = sessionDurationMs,
-            ["InteractionCount"] = interactionCount
-        });
-
-        _telemetryClient?.GetMetric("Agent.Session.Duration")
-            .TrackValue(sessionDurationMs);
     }
 
     /// <summary>

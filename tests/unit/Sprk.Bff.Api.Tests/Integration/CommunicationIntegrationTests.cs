@@ -5,6 +5,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
@@ -195,7 +196,6 @@ public class CommunicationIntegrationTests
             Mock.Of<ICommunicationDataverseService>(),
             resolvedEntityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!, // SpeFileStore - not used when ArchiveToSpe=false
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
@@ -1257,11 +1257,9 @@ public class CommunicationIntegrationTests
                 Sprk.Bff.Api.Tests.Services.Communication.AssociationTestSupport.Mapper(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
-            Mock.Of<IEmailAttachmentProcessor>(),
             new GraphMessageToEmlConverter(),
-            null!, // SpeFileStore - ArchiveContainerId not configured in tests, so archival path is skipped
+            Mock.Of<IServiceScopeFactory>(), // SpeFileStore + IPostUploadIndexingEnqueuer now resolved per-message via scope (R4); archival path skipped when ArchiveContainerId unset
             jobSubmissionService,
-            Mock.Of<Sprk.Bff.Api.Services.Ai.IPostUploadIndexingEnqueuer>(),
             new NotificationService(Mock.Of<Spaarke.Dataverse.IGenericEntityService>(), Mock.Of<ILogger<NotificationService>>()),
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),

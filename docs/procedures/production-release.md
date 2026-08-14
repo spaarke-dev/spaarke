@@ -27,7 +27,7 @@ A production release deploys across three tracks:
 | Track | What | Deployed Via | When |
 |-------|------|-------------|------|
 | **Track 1: Dataverse** | SpaarkeMaster solution (schema, web resources, PCFs, security roles, env vars, MDA app) | `pac solution export` → `pac solution import` | Every release |
-| **Track 2: Azure** | BFF API (.NET 8), Office Add-ins | `Deploy-BffApi.ps1`, `Deploy-OfficeAddins.ps1` | Every release (BFF); if changed (Add-ins) |
+| **Track 2: Azure** | BFF API (.NET 10), Office Add-ins | `Deploy-BffApi.ps1`, `Deploy-OfficeAddins.ps1` | Every release (BFF); if changed (Add-ins) |
 | **Track 2.5: Reference Data** | Playbook definitions, chat context mappings, Copilot agent config | `Deploy-NotificationPlaybooks.ps1`, `Deploy-ChatContextMappings.ps1`, `Deploy-CopilotAgent.ps1` | Every release (idempotent upserts) |
 | **Track 3: Infrastructure** | Azure resources (App Service, OpenAI, AI Search, Key Vault, Power BI) | `Deploy-Platform.ps1`, Bicep templates, `Deploy-ReportingReports.ps1` | Only when infra changes |
 
@@ -341,7 +341,7 @@ Test-Path ./deploy/SpaarkeMaster.zip
 
 ## Phase 2: Deploy BFF API
 
-Deploy the .NET 8 BFF API to Azure App Service. For production environments, **always use staging slot deployment** with zero-downtime swap.
+Deploy the .NET 10 BFF API to Azure App Service. For production environments, **always use staging slot deployment** with zero-downtime swap.
 
 **CRITICAL**: The BFF API must be built and deployed from the **master branch** in the main repository (not a worktree or feature branch). This ensures the deployed API matches the released code.
 

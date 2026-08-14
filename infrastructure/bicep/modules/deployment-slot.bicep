@@ -19,7 +19,7 @@ param location string = resourceGroup().location
 param slotName string = 'staging'
 
 @description('Runtime stack')
-param runtimeStack string = 'DOTNETCORE|8.0'
+param runtimeStack string = 'DOTNETCORE|10.0'
 
 @description('Health check path for the staging slot')
 param healthCheckPath string = '/healthz'
