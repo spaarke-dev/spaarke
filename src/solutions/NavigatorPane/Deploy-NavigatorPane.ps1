@@ -51,8 +51,9 @@ $headers = @{
 
 # web resources to upsert: name (EXACT), type (1=HTML,3=JScript), file, displayname
 $resources = @(
-    @{ name = 'sprk_NavigatorPane.html'; type = 1; file = 'dist/index.html';                 display = 'Navigator (code page)' },
-    @{ name = 'sprk_SidePaneManager';    type = 3; file = 'bootstrap/sprk_SidePaneManager.js'; display = 'Spaarke Side-Pane Manager (bootstrap)' }
+    @{ name = 'sprk_NavigatorPane.html'; type = 1;  file = 'dist/index.html';                 display = 'Navigator (code page)' },
+    @{ name = 'sprk_SidePaneManager';    type = 3;  file = 'bootstrap/sprk_SidePaneManager.js'; display = 'Spaarke Side-Pane Manager (bootstrap)' },
+    @{ name = 'sprk_navigatorstar.svg';  type = 11; file = 'bootstrap/sprk_navigatorstar.svg';  display = 'Navigator rail icon (star)' }
 )
 
 $publishIds = @()

@@ -81,6 +81,7 @@ export function ensureNavigatorPane(): void {
         .createPane?.({
           paneId: PANE_ID,
           title: PANE_TITLE,
+          imageSrc: "WebResources/sprk_navigatorstar.svg", // rail launcher icon (star)
           canClose: false, // always-available docked pane (spec MUST)
           width: PANE_WIDTH,
           isSelected: false, // start collapsed; alwaysRender keeps capture alive

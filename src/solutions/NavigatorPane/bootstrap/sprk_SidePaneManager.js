@@ -87,6 +87,7 @@
       .createPane({
         paneId: PANE_ID,
         title: PANE_TITLE,
+        imageSrc: "WebResources/sprk_navigatorstar.svg", // rail launcher icon (star)
         canClose: false,      // spec MUST rule — always-available docked pane
         width: PANE_WIDTH,
         isSelected: false,    // start collapsed; alwaysRender keeps the capture poll alive
