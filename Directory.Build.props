@@ -20,15 +20,15 @@
                 Obsolete-marker says "Will be removed after DemoExpirationService
                 migration." Suppression honors the planned-removal contract. (Was
                 mislabeled "7x"; the refactor is a tracked follow-on remediation project.)
-        CS8601: possible null-reference assignments (real NRE risk).
-        CS8604: possible null-reference arguments (same NRE-risk class).
-                CS8601/CS8604 are being driven to zero site-by-site; they stay allowlisted
-                only until the last live instance is fixed, then are removed here too.
-
       REMOVED from the allowlist 2026-08-15 (quality-r3-followups):
         CS0109 — the single test site (UploadIntegrationTests.cs, unnecessary `new`) was
-                 FIXED; 0 instances remain, so the suppression is dead. Re-arms the gate.
+                 FIXED; 0 instances remain. Re-arms the gate.
         CS1998 — 0 instances solution-wide (already remediated); dead suppression removed.
+        CS8601 + CS8604 — the NRE-risk nullable class. All 8 production sites (AgentEndpoints
+                 optional Description, CommunicationService attachment name, SignalRDelivery
+                 negotiate fail-loud guard, TodoGeneration guarded _dataverse!) + 3 test sites
+                 were FIXED (not suppressed); 0 instances remain solution-wide, so the
+                 suppression is dead and the gate is now armed against new null-reference warnings.
 
       NU1903 NoWarn REMOVED 2026-08-11 (dotnet-10-upgrade-r1 task 004, owner-approved Option 1).
       The original comment claimed NU1903 only masked the already-fixed Kiota 1.21.2 CVE — that was FALSE:
@@ -38,6 +38,6 @@
       now pin System.Security.Cryptography.Xml 10.0.11 (non-vulnerable). Verified: clean restore reports
       ZERO NU1903 with the suppression gone. Graph 5->6 / Kiota 1->2 is the separate task 033.
     -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0618;CS8601;CS8604</WarningsNotAsErrors>
+    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS0618</WarningsNotAsErrors>
   </PropertyGroup>
 </Project>

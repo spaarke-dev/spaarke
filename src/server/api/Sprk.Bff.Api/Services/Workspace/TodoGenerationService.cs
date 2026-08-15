@@ -788,7 +788,10 @@ public sealed class TodoGenerationService : BackgroundService
     /// </remarks>
     private async Task<IEnumerable<MatterScanRecord>> QueryMattersOverBudgetAsync(CancellationToken ct)
     {
-        var serviceClient = _dataverse.UnwrapServiceClient(nameof(TodoGenerationService));
+        // _dataverse is lazily resolved (nullable field) but these private query helpers only run after
+        // the pass-level `if (_dataverse is null) return;` guard — non-null here (matches the _dataverse!
+        // pattern already used in this class after the same guard).
+        var serviceClient = _dataverse!.UnwrapServiceClient(nameof(TodoGenerationService));
 
         var query = new QueryExpression("sprk_matter")
         {
@@ -820,7 +823,10 @@ public sealed class TodoGenerationService : BackgroundService
     /// </remarks>
     private async Task<IEnumerable<InvoiceScanRecord>> QueryPendingInvoicesAsync(CancellationToken ct)
     {
-        var serviceClient = _dataverse.UnwrapServiceClient(nameof(TodoGenerationService));
+        // _dataverse is lazily resolved (nullable field) but these private query helpers only run after
+        // the pass-level `if (_dataverse is null) return;` guard — non-null here (matches the _dataverse!
+        // pattern already used in this class after the same guard).
+        var serviceClient = _dataverse!.UnwrapServiceClient(nameof(TodoGenerationService));
 
         var query = new QueryExpression("sprk_invoice")
         {
@@ -851,7 +857,10 @@ public sealed class TodoGenerationService : BackgroundService
     /// </remarks>
     private async Task<IEnumerable<TaskScanRecord>> QueryAssignedTasksAsync(CancellationToken ct)
     {
-        var serviceClient = _dataverse.UnwrapServiceClient(nameof(TodoGenerationService));
+        // _dataverse is lazily resolved (nullable field) but these private query helpers only run after
+        // the pass-level `if (_dataverse is null) return;` guard — non-null here (matches the _dataverse!
+        // pattern already used in this class after the same guard).
+        var serviceClient = _dataverse!.UnwrapServiceClient(nameof(TodoGenerationService));
 
         var query = new QueryExpression("sprk_event")
         {
