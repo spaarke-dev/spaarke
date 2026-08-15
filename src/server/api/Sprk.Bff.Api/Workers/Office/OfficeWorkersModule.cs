@@ -28,7 +28,11 @@ public static class OfficeWorkersModule
     public static IServiceCollection AddOfficeWorkers(this IServiceCollection services, IConfiguration configuration)
     {
         // Register worker dependencies
-        services.AddSingleton<IEmailToEmlConverter, EmailToEmlConverter>();
+        // NOTE: IEmailToEmlConverter is registered (Scoped) in EmailServicesModule
+        // (Infrastructure/DI) as the single canonical registration. The former Singleton
+        // registration here was removed (code-quality-and-assurance-r3 task 022) — it
+        // conflicted with the Scoped one, which the worker resolves per-operation from a
+        // created scope in ProcessEmailAttachmentsAsync.
         services.AddSingleton<AttachmentFilterService>();
 
         // Register job handlers as singleton (stateless handlers)

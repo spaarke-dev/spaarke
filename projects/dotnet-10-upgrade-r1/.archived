@@ -1,0 +1,15 @@
+Archived: 2026-08-14
+Final status: Completed
+Closing PR: none — merged to master via fast-forward (final master commit d701128eb)
+Worktree: c:/code_files/spaarke-wt-dotnet-10-upgrade-r1 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/dotnet-10-upgrade-r1 (still on origin, fully merged to master)
+Portfolio Issue: NONE — this project was never registered on the DevOps Project board (portfolio sync was a no-op throughout). No tracking Issue to close.
+
+Deferred-work trackers (intentionally left OPEN — NOT this project's tracker, do not close on archive):
+  - #772 — Deferred package major upgrades post-.NET 10 (owned by code-quality-and-assurance-r3)
+  - #773 — Deferred net10 production/demo cutover (fires when demo/prod re-provisioned)
+
+Outcome: .NET 8 → .NET 10 (LTS) backend retarget shipped. master + dev on DOTNETCORE-10.0.9;
+full suite green (BFF 10,415/0); zero-CVE; publish 44.96 MB incl-PDB (down from 49.63).
+Graph 6.5 / Kiota 2.0 done (Kiota HIGH CVE closed). 060/061 prod/demo cutover deferred (#773).
+Handoff to code-quality-and-assurance-r3: projects/dotnet-10-upgrade-r1/notes/r3-handoff.md

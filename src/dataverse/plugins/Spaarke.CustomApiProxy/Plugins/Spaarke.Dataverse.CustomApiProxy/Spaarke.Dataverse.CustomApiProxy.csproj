@@ -14,6 +14,12 @@
     <PackageReference Include="Microsoft.CrmSdk.CoreAssemblies" Version="9.0.2.56" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="System.Net.Http" Version="4.3.4" />
+    <!-- CVE-2024-43485 (HIGH): pin the transitive System.Text.Json (floated to 6.0.8 via
+         Microsoft.CrmSdk.CoreAssemblies) up to the fixed 6.0.x patch. This net462 plugin graph is
+         outside Spaarke.sln / CI / the net10-scoped task-032 CVE gate, so the fix is pinned here
+         explicitly. Scoped to this net462 island ONLY — do NOT re-pin STJ on the net10 graph
+         (framework-provided, NU1510). See workstreams/plugins/design.md D8-01 (r3 task 032). -->
+    <PackageReference Include="System.Text.Json" Version="6.0.11" />
   </ItemGroup>
 
 </Project>

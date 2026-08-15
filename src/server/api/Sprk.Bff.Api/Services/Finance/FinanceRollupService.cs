@@ -82,7 +82,7 @@ public sealed class FinanceRollupService
             parentEntityName, parentId);
 
         // Get ServiceClient for QueryExpression support
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinanceRollupService));
 
         // Step 1: Parallel queries — invoices and budgets
         var invoiceTask = QueryInvoicesAsync(serviceClient, parentId, invoiceLookupField, ct);
@@ -219,19 +219,5 @@ public sealed class FinanceRollupService
 
         var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
         return results.Entities.Sum(e => e.GetAttributeValue<Money>(Budget_TotalBudget)?.Value ?? 0m);
-    }
-
-    /// <summary>
-    /// Get the underlying ServiceClient from IDataverseService for QueryExpression support.
-    /// Same pattern as FinancialCalculationToolHandler.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverseService is ServiceClient sc)
-            return sc;
-
-        throw new InvalidOperationException(
-            "FinanceRollupService requires IDataverseService resolved as ServiceClient " +
-            "for QueryExpression support.");
     }
 }

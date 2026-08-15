@@ -130,6 +130,18 @@ public static class AnalysisServicesModule
         // unconditional registration (pattern precedent: EventRulesTelemetry above).
         services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
 
+        // task 024 (ADR-013 / BFF §10 bullet 3) — IFileSummarizeAi PublicContracts facade.
+        // TRULY UNCONDITIONAL, mirroring the always-mapped
+        // WorkspaceFileEndpoints.MapWorkspaceFileEndpoints (the non-AI /api/workspace/files/summarize
+        // endpoint now injects THIS facade instead of IActionResolver/IActionRunner directly, A-1).
+        // FileSummarizeAi wraps those Linear AI Consumer primitives, whose registrations are
+        // symmetric (real ActionResolver/ActionRunner under the compound AI gate via
+        // AddLinearConsumers; Null peers in AddNullObjectsForCompoundOff). So the facade's ctor
+        // resolves on BOTH the AI-ON path (real primitives) and the AI-OFF path (Null peers →
+        // FeatureDisabledException → the endpoint's 503 SSE-error pattern). Scoped to match
+        // IActionResolver's scoped lifetime (§F.1 asymmetric-registration rule, CLAUDE.md §10 F.1).
+        services.AddScoped<IFileSummarizeAi, FileSummarizeAi>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
@@ -165,15 +177,21 @@ public static class AnalysisServicesModule
             // PromptSchemaRenderer, IScopeResolverService, AnalysisDocumentLoader,
             // ITextExtractor, IRagService).
             //
-            // §F.1 asymmetric-registration audit (static scan run 2026-07-05):
-            //  - IActionResolver/IActionRunner — consumed by WorkspaceFileEndpoints.HandleSummarize
-            //    (MapWorkspaceFileEndpoints is UNCONDITIONAL) → Null executor-primitive peers
-            //    registered in AddNullObjectsForCompoundOff (P3 subclass).
+            // §F.1 asymmetric-registration audit (static scan run 2026-07-05; refreshed task 024):
+            //  - IActionResolver/IActionRunner — consumed by the IFileSummarizeAi facade
+            //    (FileSummarizeAi, registered UNCONDITIONALLY above) behind
+            //    WorkspaceFileEndpoints.HandleSummarize (MapWorkspaceFileEndpoints is
+            //    UNCONDITIONAL). Per task 024 (ADR-013 / BFF §10 bullet 3) the endpoint no longer
+            //    injects the primitives directly — the facade does. The Null executor-primitive
+            //    peers in AddNullObjectsForCompoundOff (P3 subclass) are STILL required so the
+            //    unconditional facade resolves on the compound-OFF path (→ FeatureDisabledException
+            //    → the endpoint's 503 SSE-error pattern).
             //  - the document-profile pipeline — consumed only by AnalysisEndpoints
             //    (MapAnalysisEndpoints is INSIDE the same compound gate) → symmetric; no peer.
-            //  - IActionResolver / IActionRunner — consumed by Matter/ProjectPreFillService as
-            //    OPTIONAL nullable ctor params (= null default) → ADR-032 "optional-via-null-
-            //    tolerance" exemption; no peer.
+            //  - IActionResolver / IActionRunner — Matter/ProjectPreFillService NO LONGER inject
+            //    these (task 024, A-2/A-3): they route the linear path through
+            //    IWorkspacePrefillAi.RunPrefillActionAsync (which has its own P3 Null peer,
+            //    NullWorkspacePrefillAi) → covered by that facade's symmetry; no separate peer.
             //  - IDocumentTextSource / ISessionFileTextSource — transitively conditional
             //    (consumed only by gated LinearConsumers services + compound-ON
             //    the dispatch seam) → no peer.

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Scaffold the living SCORECARD.md (D1–D11 columns, BFF row seeded)</title>
+    <phase>0 Program Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Simple new-file scaffold (a table + convention note); no code, no tests, no hot-path — MINIMAL per task-create Step 3.5.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical scaffold copying an existing verified scorecard into a table; Sonnet default.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>docs,quality</tags>
+  </metadata>
+
+  <prompt>Create projects/code-quality-and-assurance-r3/notes/SCORECARD.md — one living scorecard with a D1–D11 column header, the BFF row seeded from the verified BFF cleanliness scorecard (workstreams/bff-api/design.md §0), and a documented "append one row per surface at assessment/wrap-up" convention.</prompt>
+  <role>SPAARKE platform developer. Follow the rubric authored in task 001. Precise, literal scaffolding.</role>
+  <goal>notes/SCORECARD.md exists with a D1–D11 header row, a seeded BFF row reflecting the BFF design §0 grades, and an append-per-surface convention note; no aggregate grade published yet.</goal>
+
+  <context>
+    <background>spec.md FR-03: one living scorecard; each surface appends its verified per-dimension row at assessment/wrap-up → program aggregate view. The BFF surface is already assessed (bff design §0 has a verified cleanliness scorecard with per-area grades) so its row can be seeded now. No aggregate is published until every surface is scored (FR-04, enforced by task 016).</background>
+    <relevant-files>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/SCORECARD.md</file>
+      <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Defines the D1–D11 dimensions + A–F scale that this scorecard's columns mirror.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope: columns MUST be exactly D1–D11 from the rubric (task 001); the BFF row MUST be seeded from bff design §0's verified per-area grades (map its areas onto D1–D11).</constraint>
+    <constraint source="spec">Scope: do NOT publish any program aggregate grade in this task — that is task 016's gated output (FR-04). Include an explicit "aggregate: pending Phase-0 completion" placeholder.</constraint>
+    <constraint source="project">Scope (this file only): one new markdown file under projects/code-quality-and-assurance-r3/notes/; no code touched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Living scorecard</topic>
+    <files>
+      <file>docs/standards/CODE-QUALITY-RUBRIC.md</file>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (MINIMAL + reason). Read task-001 rubric dimensions and bff design §0 scorecard.</step>
+    <step order="1">Create the scorecard table with a header row of D1–D11 (plus surface-name + overall-surface-grade columns).</step>
+    <step order="2">Seed the BFF row by mapping bff design §0's per-area grades (DI A–, publish size A, endpoint/facade B, auth B–, redundancy C+, dead code C, repo hygiene D) onto D1–D11 dimensions; cite bff design §0 as the source.</step>
+    <step order="3">Add the append-per-surface convention note (each surface appends its verified row at assessment/wrap-up; aggregate is published only after all surfaces scored — task 016).</step>
+    <step order="4">Add an explicit "Aggregate: PENDING — no aggregate until Phase 0 completes (supersedes March 95/100)" line.</step>
+    <step order="5">Update TASK-INDEX.md: set task 002 status to ✅.</step>
+    <step order="6">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/SCORECARD.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the file, the header row lists exactly D1–D11 and the BFF row is populated from bff design §0.</criterion>
+    <criterion testable="true">Given the file, the append-per-surface convention is documented.</criterion>
+    <criterion testable="true">Negative: no program aggregate grade is present; an explicit "aggregate pending Phase-0" placeholder is shown instead.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-03. Rows for surfaces 2–6 are appended by their assessment tasks (010–015); task 016 rebaselines and publishes the aggregate.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

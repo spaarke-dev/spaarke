@@ -74,6 +74,13 @@ $ErrorActionPreference = "Stop"
 $GraphServicePrincipalId = "00000003-0000-0000-c000-000000000000"
 
 # Application permission IDs (from Microsoft Graph permission reference)
+#
+# CANONICAL SOURCE OF TRUTH for the BFF's expected Graph APPLICATION (app-only) roles:
+#   src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs
+# PowerShell cannot import the C# constant, so keep these three self-service-registration-subsystem
+# entries in sync with the GraphAppRoles.All entries whose OwningModule = "Self-Service Registration"
+# (the Name + Id values below MUST byte-match GraphAppRoles Value + AppRoleId). Adding/removing a role
+# here without updating GraphAppRoles.cs (and vice-versa) reintroduces the drift this constant closes.
 $PermissionsToAdd = @(
     @{ Name = "User.ReadWrite.All";        Id = "741f803b-c850-494e-b5df-cde7c675a1ca"; Type = "Role" }
     @{ Name = "GroupMember.ReadWrite.All";  Id = "dbaae8cf-10b5-4b86-a4a1-f871c94c6571"; Type = "Role" }

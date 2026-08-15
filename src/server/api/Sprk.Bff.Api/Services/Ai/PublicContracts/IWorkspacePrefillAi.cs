@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 
 namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -49,5 +50,41 @@ public interface IWorkspacePrefillAi
     IAsyncEnumerable<PlaybookStreamEvent> ExecutePlaybookAsync(
         PlaybookRunRequest request,
         HttpContext httpContext,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Resolve + run the Linear AI Consumer Action bound to <paramref name="consumerType"/>
+    /// against uploaded document text, returning the Action's raw structured JSON output.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per refined ADR-013 (2026-05-20) / BFF §10 bullet 3, workspace pre-fill consumers
+    /// (<c>MatterPreFillService</c>, <c>ProjectPreFillService</c>) MUST consume the
+    /// prompted-executor "resolve Binding → run linear Action" capability through THIS facade
+    /// rather than injecting the Linear AI Consumer primitives (<c>IActionResolver</c> /
+    /// <c>IActionRunner</c>) directly. Internally the facade resolves the Action via the SAME
+    /// primitives — the boundary intent is identical to <c>ExecutePlaybookAsync</c>, only the
+    /// wrapped surface differs (a single linear Action vs a multi-node playbook).
+    /// </para>
+    /// <para>
+    /// The caller owns request validation, text truncation, the 45 s timeout (pass its linked
+    /// token as <paramref name="cancellationToken"/>), confidence extraction, and response
+    /// parsing — this method only performs the resolve + run. Behavior is identical to the
+    /// former inline <c>IActionResolver.ResolveAsync</c> + <c>IActionRunner.RunAsync</c> pair.
+    /// </para>
+    /// </remarks>
+    /// <param name="consumerType">The routing consumer-type constant (e.g. <c>ConsumerTypes.MatterPreFill</c>).</param>
+    /// <param name="extractedText">The extracted document text to feed the Action.</param>
+    /// <param name="fileName">Display file name carried on the document operand.</param>
+    /// <param name="tenantId">Tenant id for model-deployment resolution (may be null).</param>
+    /// <param name="correlationId">Correlation id for run-context tracing (may be null).</param>
+    /// <param name="cancellationToken">Cancellation token; pair with the caller's timeout.</param>
+    /// <returns>The Action's raw structured-output <see cref="JsonElement"/>.</returns>
+    Task<JsonElement> RunPrefillActionAsync(
+        string consumerType,
+        string extractedText,
+        string fileName,
+        string? tenantId,
+        string? correlationId,
         CancellationToken cancellationToken = default);
 }

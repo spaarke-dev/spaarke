@@ -36,7 +36,7 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 
 | Secret | Status | When safe to delete |
 |---|---|---|
-| `Dataverse-ClientSecret` | No longer consumed by production code when `Graph__ManagedIdentity__Enabled=true` (BFF MI is the Dataverse Application User per ADR-028) | After the MI cutover is verified by smoke test ([`auth-deployment-setup.md`](auth-deployment-setup.md) §9c). Keep for local-dev environments only. |
+| `Dataverse-ClientSecret` | ⚠️ **STILL REQUIRED (corrected 2026-08-13)** — AUTHV2-042 migrated only the `Services/Ai` raw-HTTP camp; the shared-lib Dataverse path (`DataverseWebApiService`/`DataverseOptions` `[Required]`+`ValidateOnStart`, `DataverseServiceClientImpl`) still hard-requires the secret backing `Dataverse:ClientSecret` regardless of the MI flag | ⚠️ **NOT yet — removing it crashes the BFF at startup.** Gated on the #3b shared-lib `ClientSecret`→MI migration (project `code-quality-and-assurance-r3` task 011 / NG1). See `projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md`. |
 | `Email-WebhookSecret` | Superseded by `Email-WebhookSigningKey` (HMAC-SHA256 per Phase C) | After verifying Dataverse Service Endpoint is re-registered with the HMAC key |
 | `communication-webhook-secret` (HMAC pre-v2) | Superseded by `communication-webhook-signing-key` (HMAC-SHA256 per Phase C) | After verifying Graph subscription is re-registered with the HMAC key |
 
@@ -55,7 +55,6 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 | Azure-managed SSL certificates | App Service (api.spaarke.com) | Auto-renewed by Azure |
 | Managed identity credentials | App Service system-assigned identity | Auto-rotated by Azure (no manual action) |
 | GitHub Actions secrets | GitHub repository settings | Manual — see [Manual Procedures](#manual-procedures) |
-| Dataverse S2S app secret | sprk-platform-{env}-kv (`Dataverse-S2S-ClientSecret`) | Automated (`Rotate-Secrets.ps1 -SecretType EntraId` after adding to platform orchestration) |
 
 ---
 
@@ -236,26 +235,12 @@ GitHub Actions secrets are used in CI/CD workflows and cannot be rotated by `Rot
    ```
 6. Monitor the workflow run for success.
 
-### Rotate Dataverse S2S Client Secret
-
-If the Dataverse S2S app registration (`spaarke-dataverse-s2s-prod`) is not included in the platform Entra ID rotation, rotate manually:
-
-1. Go to **Azure Portal > Entra ID > App registrations > spaarke-dataverse-s2s-prod**.
-2. Navigate to **Certificates & secrets > Client secrets**.
-3. Click **New client secret**, set expiry to 12 months.
-4. Copy the new secret value immediately (it will not be shown again).
-5. Update Key Vault:
-   ```powershell
-   az keyvault secret set `
-       --vault-name sprk-platform-prod-kv `
-       --name "Dataverse-S2S-ClientSecret" `
-       --value "<new-secret-value>"
-   ```
-6. Restart the App Service:
-   ```powershell
-   az webapp restart --name spaarke-bff-prod --resource-group rg-spaarke-platform-prod
-   ```
-7. Verify health: `curl https://api.spaarke.com/healthz`
+<!-- The "Rotate Dataverse S2S Client Secret" procedure was removed 2026-08-14
+     (code-quality-and-assurance-r3 task 060). The separate spaarke-dataverse-s2s-*
+     app registration + its Dataverse-S2S-* Key Vault secrets had zero code consumers
+     and were dropped; Dataverse S2S access consolidated onto the BFF app registration
+     credential (BFF-API-ClientSecret) on 2026-01-07. Rotating BFF-API-ClientSecret
+     (see the BFF API section above) now covers the Dataverse service path. -->
 
 ---
 

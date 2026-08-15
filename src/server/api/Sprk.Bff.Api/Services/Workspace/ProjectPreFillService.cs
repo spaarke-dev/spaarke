@@ -7,7 +7,6 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -35,11 +34,10 @@ public sealed class ProjectPreFillService
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<ProjectPreFillService> _logger;
 
-    // R7 Wave 12 Phase D + Wave 12.3 — Linear AI Consumer dependencies. See
-    // MatterPreFillService for the parallel implementation. Nullable to keep existing
-    // constructor callers compiling.
-    private readonly IActionResolver? _linearActionResolver;
-    private readonly IActionRunner? _linearActionRunner;
+    // R7 Wave 12 Phase D + Wave 12.3 — Linear AI Consumer dispatch via the
+    // IWorkspacePrefillAi.RunPrefillActionAsync PublicContracts facade (ADR-013 / BFF §10
+    // bullet 3). See MatterPreFillService for the parallel implementation — no AI-internal
+    // primitive is injected into this CRUD service.
 
     // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the sprk_playbookconsumer
     // Binding routing table — queried through
@@ -86,9 +84,7 @@ public sealed class ProjectPreFillService
         IConsumerRoutingService consumerRouting,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<ProjectPreFillService> logger,
-        IWorkspacePrefillAi? prefillAi = null,
-        IActionResolver? linearActionResolver = null,
-        IActionRunner? linearActionRunner = null)
+        IWorkspacePrefillAi? prefillAi = null)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
@@ -97,8 +93,6 @@ public sealed class ProjectPreFillService
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
-        _linearActionResolver = linearActionResolver;
-        _linearActionRunner = linearActionRunner;
     }
 
     /// <summary>
@@ -186,8 +180,9 @@ public sealed class ProjectPreFillService
             "Text extraction complete. TotalChars={TotalChars}. RequestId={RequestId}",
             combinedText.Length, requestId);
 
-        // R7 Wave 12 Phase D: Linear AI Consumer dispatch (see MatterPreFillService).
-        var linearActionId = (_linearActionResolver != null && _linearActionRunner != null)
+        // R7 Wave 12 Phase D: Linear AI Consumer dispatch via the IWorkspacePrefillAi facade
+        // (see MatterPreFillService).
+        var linearActionId = (_prefillAi != null)
             ? await _consumerRouting.ResolveActionAsync(ConsumerTypes.ProjectPreFill, cancellationToken: cancellationToken)
                 .ConfigureAwait(false)
             : null;
@@ -201,8 +196,10 @@ public sealed class ProjectPreFillService
 
     /// <summary>
     /// R7 Wave 12 Phase D — Linear AI Consumer path for Project Prefill. Mirrors
-    /// MatterPreFillService.ExtractFieldsViaLinearAsync. Feeds the raw structured
-    /// output through the existing ParseAiResponse so wizard fallback logic is preserved.
+    /// MatterPreFillService.ExtractFieldsViaLinearAsync: resolves + runs the bound Action via
+    /// the <see cref="IWorkspacePrefillAi.RunPrefillActionAsync"/> PublicContracts facade
+    /// (ADR-013 / BFF §10 bullet 3). Feeds the raw structured output through the existing
+    /// ParseAiResponse so wizard fallback logic is preserved.
     /// </summary>
     private async Task<ProjectPreFillResponse> ExtractFieldsViaLinearAsync(
         string documentText,
@@ -224,29 +221,20 @@ public sealed class ProjectPreFillService
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
 
-            var action = await _linearActionResolver!.ResolveAsync(ConsumerTypes.ProjectPreFill, timeoutCts.Token);
-
             var tenantId = httpContext.User?.FindFirst("tid")?.Value
                 ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
-            var docText = new DocumentText
-            {
-                DocumentId = null,
-                FileName = "project-prefill-input",
-                ExtractedText = documentText,
-            };
-            var runContext = new LinearRunContext
-            {
-                ConsumerType = ConsumerTypes.ProjectPreFill,
-                CorrelationId = httpContext.TraceIdentifier,
-                TenantId = tenantId,
-            };
-
             _logger.LogInformation(
-                "Invoking Linear Project Prefill action. ActionId={ActionId}, TextLength={TextLength}, RequestId={RequestId}",
-                action.Id, documentText.Length, requestId);
+                "Invoking Linear Project Prefill action. TextLength={TextLength}, RequestId={RequestId}",
+                documentText.Length, requestId);
 
-            var jsonElement = await _linearActionRunner!.RunAsync(action, docText, runContext, timeoutCts.Token);
+            var jsonElement = await _prefillAi!.RunPrefillActionAsync(
+                ConsumerTypes.ProjectPreFill,
+                documentText,
+                "project-prefill-input",
+                tenantId,
+                httpContext.TraceIdentifier,
+                timeoutCts.Token);
             var preFillJson = jsonElement.GetRawText();
 
             var confidence = 0.0;

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Horizontal: repo-wide security / auth-consistency sweep (@spaarke/auth, ADR-028)</title>
+    <phase>3 Horizontals</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Repo-wide security sweep producing findings + tasks (assessment-style); its remediations are separate tasks — STANDARD.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security reasoning across auth/token/secret/XSS/injection/CORS boundaries; Opus for security-sensitive judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>security,auth</tags>
+  </metadata>
+
+  <prompt>Run a repo-wide auth-consistency sweep centered on @spaarke/auth (ADR-028): token handling, secrets in Key Vault, XSS/injection boundaries, CORS. Absorb any @spaarke/auth web-resource gap surfaced by task 023 and fix it everywhere it recurs. Track findings as tasks + notes; no data path may lack auth.</prompt>
+  <role>SPAARKE platform developer with security + @spaarke/auth (ADR-028) expertise. Follow ADR-028. Escalate security-sensitive findings per CLAUDE.md §6.</role>
+  <goal>A security sweep report exists in notes/ with all findings tracked to tasks; any @spaarke/auth web-resource gap from task 023 is fixed everywhere it recurs; no audited data path lacks auth.</goal>
+
+  <context>
+    <background>spec.md FR-17 / design.md §8. The BFF pass found real auth gaps; this horizontal generalizes the check. Owner directive: @spaarke/auth is the canonical path (ADR-028); if task 023 surfaces a web-resource gap, this horizontal fixes it everywhere. Findings become tracked work, not a doc that rots.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="canonical-reference">.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/security-sweep-report.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="pending">May surface a @spaarke/auth web-resource gap this horizontal absorbs (FR-17).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: auth consistency is measured against @spaarke/auth; flag every client→BFF path not routed through it; no anonymous data path.</constraint>
+    <constraint source="project">Scope: sweep = token handling + secrets-in-KV + XSS/injection boundaries + CORS across the repo; produce findings + tracked tasks. Remediation of each finding is a separate task (this sweep does not fix everything inline, except the recurring @spaarke/auth web-resource gap from task 023).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Repo-wide security / auth sweep</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/standards/CODE-QUALITY-RUBRIC.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Load ADR-028 + any task-023 gap note.</step>
+    <step order="1">Sweep token handling + auth routing (every client→BFF path) against @spaarke/auth; flag anonymous/data paths.</step>
+    <step order="2">Sweep secrets: confirm production secrets are in Key Vault; flag any inline/committed secret.</step>
+    <step order="3">Sweep XSS/injection boundaries + CORS config.</step>
+    <step order="4">If task 023 surfaced a @spaarke/auth web-resource gap, fix it everywhere it recurs (this is the one inline-fix scope of the sweep).</step>
+    <step order="5">Write notes/security-sweep-report.md; file each remaining finding as a tracked task (via /project-defer-issue-tracking where appropriate).</step>
+    <step order="6">Update TASK-INDEX.md: set task 030 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the sweep finds a security-sensitive issue (auth bypass, secret exposure, injection) whose fix is ambiguous or breaking, STOP and escalate per CLAUDE.md §6 (security-sensitive) rather than fixing silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/security-sweep-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the sweep, notes/security-sweep-report.md exists with every finding tracked to a task/Issue.</criterion>
+    <criterion testable="true">Given the audit, no audited data path lacks auth (measured against @spaarke/auth / ADR-028).</criterion>
+    <criterion testable="true">Negative: any @spaarke/auth web-resource gap from task 023 is fixed everywhere it recurs, not just at the one Finance site.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-17 / design.md §8. Absorbs the FR-09 web-resource gap horizontally.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,6 +1,5 @@
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.SpeAdmin;
-using Sprk.Bff.Api.Endpoints.SpeAdmin;
 
 namespace Sprk.Bff.Api.Api;
 

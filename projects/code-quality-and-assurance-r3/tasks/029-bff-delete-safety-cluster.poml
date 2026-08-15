@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF Tranche B: delete the dead Safety cluster (Services/Ai) + update its 2 test files</title>
+    <phase>2 BFF Remediation</phase>
+    <tranche>B</tranche>
+    <gate>quiet-window (after Tranche A)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes 6 src + updates 2 test files (~840 prod / ~831 test LOC) in the most-contested Services/Ai area → TEST-MODIFYING; code-review + adr-check unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical deletion + test updates against a verified inventory; Sonnet default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Services/Ai is the single most-contested BFF area (many AI worktrees); quiet-window PR; /conflict-check first.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,dead-code,testing,tranche-b</tags>
+  </metadata>
+
+  <prompt>Delete the dead Safety cluster (bff design §3.1) — Services/Ai/Chat/Middleware/SafetyPipelineMiddleware.cs + Services/Ai/Safety/{ConfidenceScoringService.cs, IConfidenceScoringService.cs, ConfidenceScoringRequest.cs, ConfidenceScoringResult.cs, ConfidenceLevel.cs} (~840 prod LOC) — plus the 2 test files (~831 test LOC) that reference it; fix the 3 stale &lt;see cref&gt; (CS1574) at SideEffectGateAIFunction.cs:153 + PromptShieldChatMiddleware.cs:30 and :67. It is unwired and superseded by PromptShieldChatMiddleware. Verify against src/ AND tests/ before deleting. This is Tranche B because Services/Ai is heavily contested.</prompt>
+  <role>SPAARKE platform developer with BFF/AI cleanup expertise. Follow root CLAUDE.md §10 + ADR-032. Delete &gt; deprecate; behavior-preserving.</role>
+  <goal>The Safety cluster (6 src + 2 test files) is removed with zero dangling references (grep-verified src/ and tests/), the 3 stale crefs fixed, dotnet build + full dotnet test green, publish-size delta reported.</goal>
+
+  <context>
+    <background>spec.md FR-06. Split from task 020 into Tranche B because the Safety cluster lives in Services/Ai — the most-contested BFF area (many AI worktrees) — so it lands in a quiet window. The cluster is unwired and superseded by PromptShieldChatMiddleware (bff design §3.1). It exposes internals to test assemblies, so the 2 referencing test files must be updated/removed in the same PR.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/SafetyPipelineMiddleware.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ConfidenceScoringService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/IConfidenceScoringService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ConfidenceScoringRequest.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ConfidenceScoringResult.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ConfidenceLevel.cs</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed; Safety cluster verified dead + superseded by PromptShieldChatMiddleware.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (Safety cluster only): delete exactly the 6 src files + update/remove the 2 referencing test files; fix the 3 stale crefs. Do NOT touch PromptShieldChatMiddleware or any other Services/Ai code.</constraint>
+    <constraint source="project">Scope: verify against src/ AND tests/ (InternalsVisibleTo to 3 test assemblies) before deleting — grep both trees; abort if any live consumer is found.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check against active AI worktrees before the PR; land in a quiet window.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF dead-code removal (Safety cluster)</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING). Read bff design §3.1 Safety cluster row.</step>
+    <step order="1">Run /conflict-check against active AI worktrees; confirm a quiet window on Services/Ai before proceeding.</step>
+    <step order="2">grep src/ AND tests/ to confirm the cluster is unwired and superseded by PromptShieldChatMiddleware; identify the 2 referencing test files.</step>
+    <step order="3">Delete the 6 src files; update/remove the 2 test files; fix the 3 stale &lt;see cref&gt; (CS1574) references.</step>
+    <step order="4">dotnet build src/server/api/Sprk.Bff.Api/ + full dotnet test green.</step>
+    <step order="5">Run dotnet publish -c Release, record absolute + delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89) in notes/publish-size-report.md.</step>
+    <step order="6">Update TASK-INDEX.md: set task 029 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If grep finds ANY live consumer of the Safety cluster (src/ or tests/ beyond the 2 known test files), STOP and escalate — it is not dead (the BFF pass already found 2 false positives among "dead" items).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (Safety cluster removed)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deletions, grep of src/ AND tests/ returns zero dangling references to the Safety cluster types.</criterion>
+    <criterion testable="true">Given the build, dotnet build is clean (2 CS1574 crefs fixed) and full dotnet test is green.</criterion>
+    <criterion testable="true">PromptShieldChatMiddleware and all other Services/Ai code are untouched.</criterion>
+    <criterion testable="true">Publish size reported ≤ 60 MB compressed with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package added.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-06 / bff design §3.1 (Safety cluster row), Phase 1. **Tranche B** (contested Services/Ai — quiet window). Split from task 020.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
