@@ -4,7 +4,7 @@
     <title>BFF: uniform fail-fast configuration validation — [Required] + IValidateOptions + ValidateOnStart (refactor ask #2)</title>
     <phase>6 Deployment &amp; Configuration Hygiene</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches config registration across the whole BFF (startup behavior change) and adds/updates tests — TEST-MODIFYING override → code-review + adr-check unconditionally.</rigor-reason>
     <model-tier>opus</model-tier>

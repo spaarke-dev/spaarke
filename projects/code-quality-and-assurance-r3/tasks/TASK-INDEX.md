@@ -43,7 +43,7 @@
 | 041 | Forcing-function: mechanical baseline | 4 Forcing-Functions | STANDARD | sonnet | high | none | P4 | 🔲 |
 | 042 | Forcing-function: CI gates | 4 Forcing-Functions | STANDARD | sonnet | high | 040 | none | 🔲 |
 | 060 | Drop vestigial Dataverse S2S app-reg (#3a, scripts/docs/KV) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | ✅ |
-| 061 | Uniform fail-fast config validation (#2) | 6 Deployment & Config | FULL | opus | high | none | none | 🔲 |
+| 061 | Uniform fail-fast config validation (#2) | 6 Deployment & Config | FULL | opus | high | none | none | ✅ |
 | 062 | Graph app-role single-source constants (#4) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | ✅ |
 | 063 | Resource/secret naming standard + conformance CI gate | 6 Deployment & Config | STANDARD | sonnet | high | 017 | none | 🔲 |
 | 090 | Project wrap-up | 9 Wrap-up | STANDARD | sonnet | medium | prior | none | 🔲 |

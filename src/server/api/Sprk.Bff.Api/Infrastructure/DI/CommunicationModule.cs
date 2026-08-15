@@ -35,50 +35,85 @@ public static class CommunicationModule
     {
         // ── Options (kill-switches / thresholds; IOptionsMonitor — a flag/threshold flip takes effect WITHOUT redeploy) ──
 
-        // Bind CommunicationOptions from "Communication" section
+        // Bind CommunicationOptions from "Communication" section.
+        // EXEMPT from ValidateOnStart (task 061 fail-fast sweep): this class carries 4 top-level
+        // [Required] members (WebhookNotificationUrl, WebhookClientState, WebhookSigningKey, ApprovedSenders)
+        // that are only present when the Graph-webhook comms feature is provisioned. Test fixtures seed at
+        // most 2 of the 4, and no full-boot fixture seeds them all — so ValidateOnStart would crash the test
+        // host and any deployment that has not turned the webhook feature on. Kept as a deferred bind;
+        // required-when-provisioned validation stays at the webhook use-sites. See task-061 exemption list.
         services.Configure<CommunicationOptions>(configuration.GetSection(CommunicationOptions.SectionName));
 
         // Auto-file kill-switch + threshold (ADR-018 / FR-11). Bound from "Communication:AutoFile" and
         // consumed via IOptionsMonitor so a flag/threshold flip takes effect WITHOUT redeploy.
-        services.Configure<AutoFileOptions>(configuration.GetSection(AutoFileOptions.SectionName));
+        // task 061: ValidateOnStart is behavior-neutral — the only annotation is [Range] on Threshold whose
+        // default (0.85) is in range, so an absent section binds valid defaults and boots.
+        services.AddOptions<AutoFileOptions>()
+            .Bind(configuration.GetSection(AutoFileOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Category→team reconciliation routing (ADR-018 / FR-E7, task 057). Bound from
         // "Communication:CategoryRouting"; operator adds/removes a mapping or flips routing off with NO redeploy.
-        services.Configure<CategoryRoutingOptions>(configuration.GetSection(CategoryRoutingOptions.SectionName));
+        services.AddOptions<CategoryRoutingOptions>()
+            .Bind(configuration.GetSection(CategoryRoutingOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Tracking-footer config (ADR-018 / FR-A1). Bound from "Communication:TrackingFooter"; operator
         // flips enable / edits the disclosure template with NO redeploy. Carries only the Key Vault secret
         // NAME of the HMAC key, never the key (ADR-028 / NFR-07).
-        services.Configure<TrackingFooterOptions>(configuration.GetSection(TrackingFooterOptions.SectionName));
+        services.AddOptions<TrackingFooterOptions>()
+            .Bind(configuration.GetSection(TrackingFooterOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Semantic-match (rung 4 / FR-14) options. Bound from "Communication:SemanticMatch"; the Enabled
         // flag is an operational kill-switch for the semantic rung (no redeploy).
-        services.Configure<SemanticMatchOptions>(configuration.GetSection(SemanticMatchOptions.SectionName));
+        services.AddOptions<SemanticMatchOptions>()
+            .Bind(configuration.GetSection(SemanticMatchOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // AI extract+classify (rung 5 / FR-15) options. Bound from "Communication:AiClassification"; the
         // Enabled flag is an operational kill-switch for the AI-classify rung (no redeploy).
-        services.Configure<AiClassificationOptions>(configuration.GetSection(AiClassificationOptions.SectionName));
+        services.AddOptions<AiClassificationOptions>()
+            .Bind(configuration.GetSection(AiClassificationOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Record-name/number match (rung 3.5) options. Bound from "Communication:RecordNameMatch"; the Enabled
         // flag is an operational kill-switch (no redeploy). Deterministic exact-name matcher (email-r4 UAT).
-        services.Configure<RecordNameMatchOptions>(configuration.GetSection(RecordNameMatchOptions.SectionName));
+        services.AddOptions<RecordNameMatchOptions>()
+            .Bind(configuration.GetSection(RecordNameMatchOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Contact-name match (rung 3.6) options. Bound from "Communication:ContactNameMatch"; the Enabled flag
         // is an operational kill-switch (no redeploy). Deterministic exact full-name→contact matcher, suggest-only
         // (email-r4 UAT R2 B1).
-        services.Configure<ContactNameMatchOptions>(configuration.GetSection(ContactNameMatchOptions.SectionName));
+        services.AddOptions<ContactNameMatchOptions>()
+            .Bind(configuration.GetSection(ContactNameMatchOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Affinity / deterministic-learning rung (FR-A4) options. Bound from "Communication:Affinity"; the
         // Enabled flag is a per-tenant operational kill-switch (IOptionsMonitor — no redeploy, ADR-018). The
         // rung surfaces a learned SUGGEST-ONLY candidate from the per-tenant sprk_affinity store; it never
         // auto-files (excluded from the mapper's auto-file/deterministic-write sets).
-        services.Configure<AffinityOptions>(configuration.GetSection(AffinityOptions.SectionName));
+        services.AddOptions<AffinityOptions>()
+            .Bind(configuration.GetSection(AffinityOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Attachment-text match signal (Phase 2) options. Bound from "Communication:AttachmentMatch"; the
         // Enabled flag is an operational kill-switch (no redeploy). The inbound processor extracts bounded
         // attachment text (ITextExtractor) into the envelope before association so records named only in an
         // attachment still match.
-        services.Configure<AttachmentMatchOptions>(configuration.GetSection(AttachmentMatchOptions.SectionName));
+        services.AddOptions<AttachmentMatchOptions>()
+            .Bind(configuration.GetSection(AttachmentMatchOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // ── Core services (singleton: all dependencies are singleton or options) ──
         services.AddSingleton<CommunicationAccountService>();
@@ -138,7 +173,10 @@ public static class CommunicationModule
         // LoggingCommunicationAssessedProducer; the enrichment step-5 emit point is unchanged. No outbox write, no
         // IEventRulesService.FireAsync (RI action execution is task 042, downstream of authorize). Concrete
         // singletons (ADR-010); all deps (IGenericEntityService, IOptions) are singletons.
-        services.Configure<CommsPolicyOptions>(configuration.GetSection(CommsPolicyOptions.SectionName));
+        services.AddOptions<CommsPolicyOptions>()
+            .Bind(configuration.GetSection(CommsPolicyOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddSingleton<CommunicationRuleGate>();
 
         // Comms-RI action orchestrator (spaarke-notification-spine-r1 task 042 / FR-13). Executes the RI action
@@ -367,7 +405,10 @@ public static class CommunicationModule
         // handshake + topic-origin allow-list (+ optional shared secret), enqueue, return fast; task 031's job
         // handler consumes IncomingMessagingJobPayload and owns normalize + persist + dedupe + DLQ. AllowedTopics
         // is the fail-closed origin control (SECURITY BOUNDARY — an unvalidated/spoofed payload never enqueues).
-        services.Configure<AcsEventGridIngressOptions>(configuration.GetSection(AcsEventGridIngressOptions.SectionName));
+        services.AddOptions<AcsEventGridIngressOptions>()
+            .Bind(configuration.GetSection(AcsEventGridIngressOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddSingleton<AcsEventGridIngressService>();
 
         // Inbound ACS-event normalizer (messaging-communication-app-r1 task 031 / FR-02). The ACS analog of
@@ -585,7 +626,10 @@ public static class CommunicationModule
         // discovery (no new authorization engine). Registered UNCONDITIONALLY (ADR-010); the sweep is
         // self-gated by an options flag at runtime (not a DI gate → no asymmetric registration).
         services.TryAddSingleton(TimeProvider.System); // task 041 (idempotent — matches other modules)
-        services.Configure<MembershipReconcileOptions>(configuration.GetSection(MembershipReconcileOptions.SectionName)); // task 041
+        services.AddOptions<MembershipReconcileOptions>() // task 041
+            .Bind(configuration.GetSection(MembershipReconcileOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         // task 043 — Direct 1:1 thread access mechanics (find-or-create, explicit two-party read, per-message
         // GrantAccess). POA-based (owner ∪ POA share), NOT a new grant table (owner decision 2026-07-16,
         // notes/access-model-decision.md). IDataverseAccessGrantService is the ADR-010 testing seam over the

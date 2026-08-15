@@ -36,9 +36,17 @@ public static class EmailServicesModule
         // RAG telemetry
         services.AddSingleton<Sprk.Bff.Api.Telemetry.RagTelemetry>();
 
-        // Email Processing configuration
-        services.Configure<Sprk.Bff.Api.Configuration.EmailProcessingOptions>(
-            configuration.GetSection(Sprk.Bff.Api.Configuration.EmailProcessingOptions.SectionName));
+        // Email Processing configuration.
+        // task 061 fail-fast sweep: bound under the canonical AddOptions chain with ValidateOnStart.
+        // Behavior-neutral — the options class carries NO DataAnnotations. WebhookSigningKey is a nullable
+        // secret whose "required-when-webhook-enabled" semantics stay at the webhook use-site (a fail-closed
+        // 401 when unset): the class defaults Enabled=true / EnableWebhook=true, so a bare [Required] or an
+        // Enabled→key IValidateOptions with ValidateOnStart would fail every test-host boot (no fixture seeds
+        // the "EmailProcessing" section) — that would break valid config, not just misconfig. See task-061 notes.
+        services.AddOptions<Sprk.Bff.Api.Configuration.EmailProcessingOptions>()
+            .Bind(configuration.GetSection(Sprk.Bff.Api.Configuration.EmailProcessingOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Email-to-EML converter \u2014 live dependency of Workers/Office/UploadFinalizationWorker.
         services.AddHttpClient<Sprk.Bff.Api.Services.Email.EmailToEmlConverter>();

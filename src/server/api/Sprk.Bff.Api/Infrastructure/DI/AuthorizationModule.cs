@@ -163,8 +163,16 @@ public static class AuthorizationModule
         // an unmapped/ambiguous/malformed/absent `tid` is DENIED — never defaulted to any environment.
         // Singleton: the mapping is deploy-time static config, precomputed once into a tid lookup.
         // No Graph SDK / AI-internal types injected (BFF §10 / broker-only).
-        services.Configure<TenantEnvironmentRoutingOptions>(
-            configuration.GetSection(TenantEnvironmentRoutingOptions.SectionName));
+        // task 061 fail-fast sweep: bind under the canonical AddOptions chain with ValidateOnStart.
+        // Behavior-neutral — the options class carries NO DataAnnotations (deny-by-design: an empty/absent
+        // Tenants list denies every request at resolution time, so an absent "TenantRouting" section binds an
+        // empty-but-valid object and boots). Wiring ValidateOnStart here makes any FUTURE annotation fail-fast
+        // and brings the registration into the uniform standard (task 040 allowlist consumes the exemption list;
+        // this type is NOT exempt — it validates on start).
+        services.AddOptions<TenantEnvironmentRoutingOptions>()
+            .Bind(configuration.GetSection(TenantEnvironmentRoutingOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddSingleton<ITenantEnvironmentRouter, TenantEnvironmentRouter>();
 
         // Authorization policies - granular operation-level policies matching SPE/Graph API operations
