@@ -337,8 +337,8 @@ export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}
         // pdfjs-dist v4+ REQUIRES `GlobalWorkerOptions.workerSrc` to be set
         // or `getDocument` throws "No GlobalWorkerOptions.workerSrc specified".
         // The previous "leave unset, let consumers configure" approach worked
-        // up to v3 but breaks v4/v5 (observed in R5 SC-18 walkthrough cycle 6,
-        // 2026-06-05 — pdfjs-dist 5.7.x installed via npm).
+        // up to v3 but breaks v4/v5/v6 (observed in R5 SC-18 walkthrough cycle 6,
+        // 2026-06-05 — pdfjs-dist bumped 5.7.x → 6.2.108 for CVE, task 032).
         //
         // Default behavior: if a consumer-supplied workerSrc isn't already
         // populated (consumers CAN set it before this code runs by importing
@@ -353,7 +353,7 @@ export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}
           version?: string;
         };
         if (modAny.GlobalWorkerOptions && !modAny.GlobalWorkerOptions.workerSrc) {
-          const version = modAny.version ?? '5.7.76';
+          const version = modAny.version ?? '6.2.108';
           modAny.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
         }
         return mod as unknown as PdfJsModule;

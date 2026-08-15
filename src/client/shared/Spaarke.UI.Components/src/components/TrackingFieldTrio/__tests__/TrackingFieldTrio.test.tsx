@@ -56,8 +56,11 @@ describe('TrackingFieldTrio', () => {
     it('renders injected monitor/high-priority/access-permission values', () => {
       renderWithTheme(<TrackingFieldTrio {...makeProps({ monitor: true, highPriority: true })} />);
 
-      expect(screen.getByRole('radio', { name: 'Standard' })).toHaveAttribute('aria-checked', 'true');
-      expect(screen.getByRole('radio', { name: 'Limited' })).toHaveAttribute('aria-checked', 'false');
+      // Access Permission is a single PILL showing the selected value; the other
+      // options live in a menu (not rendered until opened).
+      expect(screen.getByText('Standard')).toBeInTheDocument();
+      expect(screen.queryByText('Limited')).not.toBeInTheDocument();
+      expect(screen.queryByText('Restricted')).not.toBeInTheDocument();
       // Two switches: Monitor + High Priority, both checked (label "Yes").
       const switches = screen.getAllByRole('switch');
       expect(switches).toHaveLength(2);
@@ -86,11 +89,13 @@ describe('TrackingFieldTrio', () => {
       expect(onHighPriorityChange).toHaveBeenCalledWith(true);
     });
 
-    it('fires onAccessPermissionChange with the selected segment value when a segment is picked', () => {
+    it('fires onAccessPermissionChange with the picked value when a menu option is chosen', async () => {
       const onAccessPermissionChange = jest.fn();
       renderWithTheme(<TrackingFieldTrio {...makeProps({ accessPermission: 100000000, onAccessPermissionChange })} />);
 
-      fireEvent.click(screen.getByRole('radio', { name: 'Restricted' }));
+      // Open the pill's menu, then pick "Restricted".
+      fireEvent.click(screen.getByRole('button', { name: 'Access Permission' }));
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Restricted' }));
 
       expect(onAccessPermissionChange).toHaveBeenCalledTimes(1);
       expect(onAccessPermissionChange).toHaveBeenCalledWith(100000002);
@@ -98,7 +103,7 @@ describe('TrackingFieldTrio', () => {
   });
 
   describe('Entity-agnostic (options injected, FR-14)', () => {
-    it('renders a NON-sprk_communication option set faithfully with no leaked sprk_communication data', () => {
+    it('renders a NON-sprk_communication option set faithfully with no leaked sprk_communication data', async () => {
       renderWithTheme(
         <TrackingFieldTrio
           {...makeProps({
@@ -109,14 +114,16 @@ describe('TrackingFieldTrio', () => {
         />
       );
 
-      expect(screen.getByRole('radio', { name: 'Public' })).toBeInTheDocument();
-      expect(screen.getByRole('radio', { name: 'Confidential' })).toHaveAttribute('aria-checked', 'true');
+      // The pill shows the selected value ("Confidential", value 2).
+      expect(screen.getByText('Confidential')).toBeInTheDocument();
       // No sprk_communication-specific labels leak through.
       expect(screen.queryByText('Standard')).not.toBeInTheDocument();
       expect(screen.queryByText('Limited')).not.toBeInTheDocument();
       expect(screen.queryByText('Restricted')).not.toBeInTheDocument();
-      // Only the injected 2 segments render (no hardcoded 3rd segment).
-      expect(screen.getAllByRole('radio')).toHaveLength(2);
+      // The menu offers exactly the injected 2 options (no hardcoded 3rd).
+      fireEvent.click(screen.getByRole('button', { name: 'Visibility' }));
+      expect(await screen.findByRole('menuitem', { name: 'Public' })).toBeInTheDocument();
+      expect(screen.getAllByRole('menuitem')).toHaveLength(2);
     });
 
     it('renders field display labels from injected props, not hardcoded strings', () => {
@@ -142,11 +149,10 @@ describe('TrackingFieldTrio', () => {
       renderWithTheme(<TrackingFieldTrio {...makeProps({ monitor: true, highPriority: false })} />, webDarkTheme);
 
       expect(screen.getAllByRole('switch')).toHaveLength(2);
-      expect(screen.getAllByRole('radio')).toHaveLength(3);
-      // Selected segment style uses computed rgba()/token values (Griffel-
-      // resolved custom properties), never raw hardcoded hex baked into JSX.
-      const selected = screen.getByRole('radio', { name: 'Standard' });
-      expect(selected).toHaveAttribute('aria-checked', 'true');
+      // Access Permission renders as a single pill (no radios); the selected
+      // value shows, tinted via Griffel-resolved tokens, never raw hex in JSX.
+      expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+      expect(screen.getByText('Standard')).toBeInTheDocument();
     });
   });
 });

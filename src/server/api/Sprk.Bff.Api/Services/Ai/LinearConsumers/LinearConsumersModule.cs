@@ -25,7 +25,13 @@ public static class LinearConsumersModule
         // Primitives — Singleton where stateless; Scoped where an OBO HttpContext
         // is required transitively (DocumentTextSource → AnalysisDocumentLoader
         // → IHttpContextAccessor).
-        services.AddSingleton<IActionResolver, ActionResolver>();
+        // ActionResolver is Scoped (dotnet-10-upgrade task 020, R5): it captures the
+        // Scoped IConsumerRoutingService and is consumed EXCLUSIVELY by Scoped services
+        // (CommunicationTriage/Propose/CreateTaskAi, AssistantSuggestionService) and
+        // per-request endpoint params — never by a singleton — so demotion is the
+        // behavior-preserving fix under ValidateScopes. The compound-OFF NullActionResolver
+        // peer (AnalysisServicesModule) is demoted symmetrically per ADR-032.
+        services.AddScoped<IActionResolver, ActionResolver>();
         services.AddScoped<IDocumentTextSource, DocumentTextSource>();
         services.AddScoped<ISessionFileTextSource, SessionFileTextSource>();
         services.AddSingleton<IActionRunner, ActionRunner>();

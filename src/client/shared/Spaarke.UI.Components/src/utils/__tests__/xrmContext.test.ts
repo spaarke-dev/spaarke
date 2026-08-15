@@ -12,21 +12,39 @@ import {
   getClientUrl,
   getCurrentUserId,
   getCurrentUserName,
+  type SidePane,
+  type SidePanesApi,
+  type PageInput,
 } from '../xrmContext';
+
+/**
+ * jsdom marks `window.top` `[LegacyUnforgeable]` (configurable: false), so it
+ * cannot be reassigned via `Object.defineProperty` (unlike `window.parent`,
+ * which jsdom implements as a plain replaceable property). jsdom's getter
+ * (`get top() { return window._top; }`) reads a plain internal `_top` field,
+ * so tests mock the frame by assigning that field directly. This is a jsdom
+ * implementation detail, not public API — scoped to this test file only.
+ */
+function setWindowTop(value: unknown): void {
+  (window as unknown as { _top: unknown })._top = value;
+}
 
 describe('xrmContext', () => {
   // Save original window properties
   const originalXrm = (window as any).Xrm;
   const originalParent = window.parent;
+  const originalTop = window.top;
 
   beforeEach(() => {
     // Reset window.Xrm before each test
     delete (window as any).Xrm;
-    // Reset window.parent to window (same-origin default)
+    // Reset window.parent / window.top to window (same-origin default —
+    // matches an un-nested MDA host where window/parent/top are the same frame)
     Object.defineProperty(window, 'parent', {
       value: window,
       writable: true,
     });
+    setWindowTop(window);
   });
 
   afterEach(() => {
@@ -40,6 +58,7 @@ describe('xrmContext', () => {
       value: originalParent,
       writable: true,
     });
+    setWindowTop(originalTop);
   });
 
   describe('getXrm', () => {
@@ -120,6 +139,92 @@ describe('xrmContext', () => {
       const result = getXrm();
 
       expect(result).toBeUndefined();
+    });
+
+    // --- 3-frame walk (task 010): window -> parent -> top -------------------
+
+    it('should return top.Xrm when neither window.Xrm nor parent.Xrm is available', () => {
+      const mockTopXrm = {
+        WebApi: {
+          retrieveMultipleRecords: jest.fn(),
+          source: 'top',
+        },
+      };
+
+      // window.parent left at default (=== window, no Xrm); only top has Xrm —
+      // simulates the side-pane host nested one level deeper than a single iframe.
+      setWindowTop({ Xrm: mockTopXrm });
+
+      const result = getXrm();
+
+      expect((result?.WebApi as any).source).toBe('top');
+    });
+
+    it('should prefer parent.Xrm over top.Xrm when both are available', () => {
+      const mockParentXrm = {
+        WebApi: { retrieveMultipleRecords: jest.fn(), source: 'parent' },
+      };
+      const mockTopXrm = {
+        WebApi: { retrieveMultipleRecords: jest.fn(), source: 'top' },
+      };
+
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: mockParentXrm },
+        writable: true,
+      });
+      setWindowTop({ Xrm: mockTopXrm });
+
+      const result = getXrm();
+
+      expect((result?.WebApi as any).source).toBe('parent');
+    });
+
+    it('should prefer window.Xrm over parent.Xrm and top.Xrm when all three are available', () => {
+      const mockWindowXrm = {
+        WebApi: { retrieveMultipleRecords: jest.fn(), source: 'window' },
+      };
+      const mockParentXrm = {
+        WebApi: { retrieveMultipleRecords: jest.fn(), source: 'parent' },
+      };
+      const mockTopXrm = {
+        WebApi: { retrieveMultipleRecords: jest.fn(), source: 'top' },
+      };
+
+      (window as any).Xrm = mockWindowXrm;
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: mockParentXrm },
+        writable: true,
+      });
+      setWindowTop({ Xrm: mockTopXrm });
+
+      const result = getXrm();
+
+      expect((result?.WebApi as any).source).toBe('window');
+    });
+
+    it('should return undefined (never throw) when none of window/parent/top has Xrm', () => {
+      // Simulate a nested iframe stack where window, parent, and top are all
+      // distinct frames but none carries Xrm (e.g. a non-MDA embed).
+      Object.defineProperty(window, 'parent', {
+        value: { /* no Xrm */ },
+        writable: true,
+      });
+      setWindowTop({ /* no Xrm */ });
+
+      expect(() => getXrm()).not.toThrow();
+      expect(getXrm()).toBeUndefined();
+    });
+
+    it('should be safe to call repeatedly (no caching) — re-acquires fresh each call', () => {
+      // Task 001 spike lesson: consumers must re-read Xrm every poll rather
+      // than caching a stale reference. getXrm() itself does no memoization,
+      // so back-to-back calls reflect the current frame state.
+      expect(getXrm()).toBeUndefined();
+
+      const mockXrm = { WebApi: { retrieveMultipleRecords: jest.fn(), source: 'late-injected' } };
+      (window as any).Xrm = mockXrm;
+
+      expect((getXrm()?.WebApi as any).source).toBe('late-injected');
     });
   });
 
@@ -303,6 +408,72 @@ describe('xrmContext', () => {
       const result = getCurrentUserName();
 
       expect(result).toBeUndefined();
+    });
+  });
+
+  // --- Task 010: widened SidePanesApi / PageInput typed surface -------------
+
+  describe('SidePanesApi typed surface (getPane + pane.select)', () => {
+    it('exposes getPane(paneId) returning a SidePane, and pane.select()', () => {
+      const mockPane: SidePane = {
+        paneId: 'sprk-navigator',
+        title: 'Navigator',
+        navigate: jest.fn().mockResolvedValue(undefined),
+        close: jest.fn(),
+        select: jest.fn(),
+      };
+
+      const mockSidePanes: SidePanesApi = {
+        createPane: jest.fn().mockResolvedValue(mockPane),
+        getSelectedPane: jest.fn().mockReturnValue(mockPane),
+        getAllPanes: jest.fn().mockReturnValue([mockPane]),
+        getPane: jest.fn().mockReturnValue(mockPane),
+      };
+
+      const found = mockSidePanes.getPane('sprk-navigator');
+
+      expect(found).toBe(mockPane);
+
+      found?.select();
+
+      expect(mockPane.select).toHaveBeenCalledTimes(1);
+    });
+
+    it('getPane returns undefined when no pane with that id has been created', () => {
+      const mockSidePanes: SidePanesApi = {
+        createPane: jest.fn(),
+        getSelectedPane: jest.fn(),
+        getAllPanes: jest.fn().mockReturnValue([]),
+        getPane: jest.fn().mockReturnValue(undefined),
+      };
+
+      expect(mockSidePanes.getPane('does-not-exist')).toBeUndefined();
+    });
+  });
+
+  describe('PageInput webresource contract', () => {
+    it('uses webresourceName (not webresource) for pageType: "webresource"', () => {
+      const input: PageInput = {
+        pageType: 'webresource',
+        webresourceName: 'sprk_navigatorsidepane.html',
+        data: 'entityType=account&entityId=00000000-0000-0000-0000-000000000000',
+      };
+
+      expect(input.pageType).toBe('webresource');
+      expect(input.webresourceName).toBe('sprk_navigatorsidepane.html');
+      // No legacy `webresource` field on the type — additive-only widening.
+      expect((input as Record<string, unknown>).webresource).toBeUndefined();
+    });
+
+    it('still supports Record-shaped data for entityrecord/entitylist page inputs', () => {
+      const input: PageInput = {
+        pageType: 'entityrecord',
+        entityName: 'account',
+        entityId: '00000000-0000-0000-0000-000000000000',
+        data: { someParam: 'value' },
+      };
+
+      expect(input.data).toEqual({ someParam: 'value' });
     });
   });
 });

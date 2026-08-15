@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Horizontal: doc-drift audit across .claude/ + docs/</title>
+    <phase>3 Horizontals</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation drift audit (read + fix stale refs or file tasks); no code/tests — MINIMAL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Runs the doc-drift-audit skill and applies mechanical fixes; Sonnet default.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>P3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs,doc-drift</tags>
+  </metadata>
+
+  <prompt>Run doc-drift-audit across .claude/ + docs/; fix stale references inline where mechanical, or file them as tasks. Note: sub-agents cannot write to .claude/ paths (root CLAUDE.md §3) — fixes to .claude/ files are applied in the main session.</prompt>
+  <role>SPAARKE platform developer. Follow root CLAUDE.md §3 (sub-agent .claude/ write boundary) + §16.</role>
+  <goal>The doc-drift audit is clean or each drift is filed as a task; stale references in .claude/ + docs/ are fixed or tracked.</goal>
+
+  <context>
+    <background>spec.md FR-21 / design.md §8. Run doc-drift-audit across .claude/ + docs/ and fix stale references. Because this project removes/renames code (BFF cleanup, folder migration, handler rename), doc drift is likely.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/</file>
+      <file role="canonical-reference">docs/</file>
+      <file role="output">projects/code-quality-and-assurance-r3/notes/doc-drift-report.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Best run late (after BFF renames/moves land) but independent.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§3">Scope: sub-agents CANNOT write to .claude/ paths — if run via sub-agent, return .claude/ fixes as findings for the main session to apply; docs/ fixes may be applied directly.</constraint>
+    <constraint source="project">Scope: fix mechanical stale refs inline; file structural drift as tracked tasks. Do NOT rewrite doc content beyond drift correction.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Doc-drift audit</topic>
+    <files>
+      <file>docs/standards/CODE-QUALITY-RUBRIC.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (MINIMAL + reason).</step>
+    <step order="1">Run the doc-drift-audit skill across .claude/ + docs/.</step>
+    <step order="2">Fix mechanical stale references inline (docs/ directly; .claude/ in the main session per §3).</step>
+    <step order="3">File structural drift as tracked tasks.</step>
+    <step order="4">Write notes/doc-drift-report.md.</step>
+    <step order="5">Update TASK-INDEX.md: set task 034 status to ✅.</step>
+    <step order="6">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/doc-drift-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the audit, it is clean OR every drift is filed as a tracked task.</criterion>
+    <criterion testable="true">Given .claude/ fixes, they were applied in the main session (not by a sub-agent) per §3.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-21 / design.md §8. Known drift (verification addendum MF-2): `.claude/patterns/webresource/subgrid-parent-rollup.md` mandates the AllowAnonymous anti-pattern; its rewrite is OWNED by task 023 (lands with the auth fix). This audit VERIFIES it was corrected (not re-introduced), rather than re-fixing it.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

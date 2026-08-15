@@ -51,6 +51,7 @@ import {
 import { getBffBaseUrl } from "./config/runtimeConfig";
 import { useAuthProbe } from "./hooks/useAuthProbe";
 import { ThreePaneShell } from "./components/shell/ThreePaneShell";
+import { ensureNavigatorPane } from "./ensureNavigatorPane";
 // spaarkeai-compose-r1 task 092 (Phase 7 three-pane pivot, supersedes task 046's
 // Path A shortcut per spec-supplement-2026-07-01-three-pane-pivot.md FR-S1):
 // When the modal is launched with `?composeMode=editor&…`, we NO LONGER render
@@ -299,6 +300,15 @@ export const App: React.FC<AppProps> = (props) => {
   React.useEffect(() => {
     document.documentElement.style.setProperty("--sprk-ui-scale", String(uiScale));
   }, [uiScale]);
+
+  // Global Navigator side pane (spaarke-side-pane-navigation-history-r1 task 086):
+  // SpaarkeAi is the universal home page, so it registers the app-level Navigator
+  // pane on mount (host-launch pattern, like EventsPage → CalendarSidePane). The
+  // pane persists across all navigation (Xrm.App.sidePanes are app-level).
+  // Idempotent + never throws — see ensureNavigatorPane.ts.
+  React.useEffect(() => {
+    ensureNavigatorPane();
+  }, []);
 
   return (
     <FluentProvider theme={scaledTheme}>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>FR-15 — deploy net10 to spaarke-dev + full smoke + recorded go/no-go (project completion gate)</title>
+    <phase>P5 Dev cutover (OPERATOR-DRIVEN)</phase>
+    <gate>050 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Runtime cutover of the only live environment on real net10; the completion gate; deployment-critical.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Execute the deploy + record smoke evidence; well-specified but high-stakes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>OPERATOR-DRIVEN — needs Azure credentials + the live dev App Service; exclusive BFF-deploy window.</parallel-reason>
+    <deps>050</deps>
+    <tags>deployment, dotnet, auth, background-jobs, observability, migration</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>OPERATOR-DRIVEN. Deploy the net10 framework-dependent build to `spaarke-bff-dev` (the ONLY live environment) on `DOTNETCORE|10.0`, from the worktree via `/bff-deploy` + `az` (NOT via CI — the `push:master` auto-deploy was removed). If the App Service has a staging slot (per task 050) use the slot-swap runbook; otherwise deploy directly (brief dev downtime is acceptable). Run the full smoke: all four auth paths (OBO, MI app-only, named API-key), SSE chat streaming, a real Service Bus job, a real background-worker tick, and FR-06 telemetry (requests/deps/exceptions + 12 Meters + Redis instrumentation appear in App Insights). Record the evidence and an EXPLICIT go/no-go. This is the project's deploy completion gate (there is no production cutover in scope — that's deferred to tasks 060/061 when demo/prod are re-provisioned on net10).</prompt>
+  <role>SPAARKE release engineer + platform developer. Expert in App Service deploys, OBO/MI auth, SSE streaming, Service Bus jobs, and App Insights validation. Follow ADRs strictly.</role>
+  <goal>The net10 build runs on `spaarke-bff-dev`; every smoke check passes on the actual net10 stack; `notes/dev-smoke.md` records the evidence per check + an explicit recorded go/no-go. On "go", this is the project's deploy done (production/demo cutover deferred).</goal>
+
+  <context>
+    <background>Environment reality (owner 2026-08-11): only `spaarke-dev` is live; demo/prod decommissioned for budget, to be re-provisioned on net10 later. So this dev deploy is the near-term cutover and the project's completion gate; the production slot-swap machinery is DEFERRED (tasks 060/061 parked; procedure preserved in the 042 runbook). This is where FR-06 telemetry is proven live (task 014 proved wiring), H3/ADR-028 auth paths are smoke-tested, and H1 workers are exercised via a real worker tick + Service Bus job — all on the real `DOTNETCORE|10.0` stack. Deploy from the worktree, NOT CI (the `push:master` auto-deploy trigger was removed 2026-08-11).</background>
+    <relevant-files>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/dev-runtime-evidence.md</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/dev-smoke.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Dev runtime + slot presence confirmed.</dependency>
+      <dependency task="014" status="pending">Telemetry consolidation wired (validated live here).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">OPERATOR-DRIVEN: real dev App Service + credentials. Deploy from the worktree (`/bff-deploy` + `az`), NOT via CI. Exclusive BFF-deploy window — no other project deploys to `spaarke-bff-dev` during the smoke.</constraint>
+    <constraint source="ADR-028">Smoke ALL FOUR auth paths (OBO, MI app-only, named API-key) — auth is the highest-consequence surface.</constraint>
+    <constraint source="NFR-01">Any behavior delta observed on net10 (beyond the FR-06 telemetry carve-out) is a defect → no-go until resolved.</constraint>
+    <constraint source="project">The go/no-go MUST be explicit and recorded. On "go", the project's deploy is complete; do NOT attempt a production cutover (production is decommissioned — deferred to 060/061).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dev cutover smoke on net10</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="dev-smoke" location="projects/dotnet-10-upgrade-r1/design.md">design §9 — smoke auth + SSE + job + worker + telemetry on the real net10 stack.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load spec FR-15 + design §9 + the runbook + the environment-reality note. Declare RIGOR: FULL. Confirm operator + dev Azure auth + exclusive BFF-deploy window.</step>
+    <step order="1">Deploy the net10 framework-dependent build to `spaarke-bff-dev` from the worktree (slot-swap if a slot exists per 050; else direct deploy). Confirm the runtime is `DOTNETCORE|10.0`.</step>
+    <step order="2">Smoke all four auth paths (OBO, MI app-only, named API-key); record pass/fail per path.</step>
+    <step order="3">Smoke SSE chat streaming, a real Service Bus job, and a real background-worker tick (exercises H1).</step>
+    <step order="4">Confirm FR-06 telemetry: requests/deps/exceptions + 12 Meters + Redis instrumentation appear in App Insights.</step>
+    <step order="5">Record all evidence in `notes/dev-smoke.md`; write an EXPLICIT go/no-go decision.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 051 status to ✅ on "go" (on "no-go" record the blocker + reopen the owning task).</step>
+    <step order="7">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any smoke failure (an auth path, SSE, job, worker tick, or a telemetry signal not appearing) is a NO-GO: STOP, record the blocker, and route back to the owning task per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Publish + deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/dev-smoke.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All four auth paths (OBO, MI app-only, named API-key), SSE streaming, a real Service Bus job, and a real worker tick pass on `spaarke-bff-dev` running net10.</criterion>
+    <criterion testable="true">FR-06 telemetry (requests/deps/exceptions + 12 Meters + Redis) appears in App Insights.</criterion>
+    <criterion testable="true">`notes/dev-smoke.md` records per-check evidence + an explicit recorded go/no-go.</criterion>
+    <criterion testable="true">Negative: the deploy was performed from the worktree (not CI); no other project deployed to `spaarke-bff-dev` during the window.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-15, reframed for dev-only reality (owner 2026-08-11). OPERATOR-DRIVEN. On "go" the project's active deploy is complete; production/demo cutover is deferred (tasks 060/061).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

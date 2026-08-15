@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using Microsoft.Graph.Models.ODataErrors;
 using Sprk.Bff.Api.Models;
 
 namespace Sprk.Bff.Api.Infrastructure.Graph;
@@ -9,6 +10,17 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 /// Handles DriveItem operations for SharePoint Embedded files and folders.
 /// Responsible for listing, downloading, deleting, and metadata retrieval.
 /// </summary>
+/// <remarks>
+/// dotnet-10-upgrade-r1 task 033 (2026-08-13): all exception handling in this file was re-anchored
+/// from <c>Microsoft.Graph.ServiceException</c> to <see cref="ODataError"/>. The Kiota-based Graph
+/// SDK has thrown <see cref="ODataError"/> (never <c>ServiceException</c>) since the v4→v5 rewrite this
+/// codebase already absorbed, so every <c>catch (ServiceException ...)</c> here was dead code — Graph
+/// 404/403/429 responses fell through to the generic <c>catch (Exception)</c> and surfaced as opaque
+/// errors instead of the typed null/UnauthorizedAccessException/InvalidOperationException outcomes the
+/// call sites in this file were written to produce. Fixed in passing per
+/// notes/graph6-kiota2-break-assessment.md §4 (behavior-preserving — this restores the handling that
+/// was always intended to run, matching the pattern already correct in UploadSessionManager).
+/// </remarks>
 public class DriveItemOperations
 {
     private readonly IGraphClientFactory _factory;
@@ -101,17 +113,17 @@ public class DriveItemOperations
 
             return items;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning("Drive {DriveId} or item {ItemId} not found", driveId, itemId);
             return new List<FileHandleDto>();
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
         {
             _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
             throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error listing children: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to list children: {ex.Message}", ex);
@@ -151,17 +163,17 @@ public class DriveItemOperations
             _logger.LogInformation("Successfully downloaded file {ItemId}", itemId);
             return stream;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
         {
             _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
             throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error downloading file: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to download file: {ex.Message}", ex);
@@ -204,17 +216,17 @@ public class DriveItemOperations
 
             return true;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
             return false;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
         {
             _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
             throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error deleting file: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to delete file: {ex.Message}", ex);
@@ -286,17 +298,17 @@ public class DriveItemOperations
 
             return metadata;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
         {
             _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
             throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error getting file metadata: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to get file metadata: {ex.Message}", ex);
@@ -390,20 +402,20 @@ public class DriveItemOperations
 
             return new ListingResponse(items, nextLink);
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
         {
             _logger.LogWarning("Container or drive not found: {ContainerId}", containerId);
             return new ListingResponse(new List<DriveItemDto>(), null);
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
         {
             _logger.LogWarning("Access denied to container {ContainerId}: {Error}", containerId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to container {containerId}", ex);
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 429)
         {
             _logger.LogWarning("Graph API throttling for container {ContainerId}, retry after {RetryAfter}s",
-                containerId, ex.ResponseHeaders?.RetryAfter?.Delta?.TotalSeconds ?? 60);
+                containerId, GetRetryAfterSeconds(ex));
             throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
         }
         catch (Exception ex)
@@ -535,17 +547,17 @@ public class DriveItemOperations
                 TotalSize: totalSize
             );
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
         {
             _logger.LogWarning("Item not found: {ItemId}", itemId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
         {
             _logger.LogWarning("Access denied to item {ItemId}: {Error}", itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 416)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 416)
         {
             _logger.LogWarning("Range not satisfiable for item {ItemId}", itemId);
             return null;
@@ -636,12 +648,12 @@ public class DriveItemOperations
                 Folder: updatedItem.Folder != null ? new FolderDto(updatedItem.Folder.ChildCount) : null
             );
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
         {
             _logger.LogWarning("Item not found: {ItemId}", itemId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
         {
             _logger.LogWarning("Access denied updating item {ItemId}: {Error}", itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
@@ -694,12 +706,12 @@ public class DriveItemOperations
 
             return true;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
         {
             _logger.LogWarning("Item not found (may already be deleted): {ItemId}", itemId);
             return false;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
         {
             _logger.LogWarning("Access denied deleting item {ItemId}: {Error}", itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to item {itemId}", ex);
@@ -756,17 +768,17 @@ public class DriveItemOperations
                 item.WebUrl,
                 item.ParentReference?.DriveId);
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
             _logger.LogWarning("Access denied getting metadata for file {ItemId}: {Error}", itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error getting file metadata: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to get file metadata: {ex.Message}", ex);
@@ -811,17 +823,17 @@ public class DriveItemOperations
             _logger.LogInformation("Successfully downloaded file {ItemId} (OBO)", itemId);
             return stream;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning("File {ItemId} not found in drive {DriveId}", itemId, driveId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
             _logger.LogWarning("Access denied downloading file {ItemId}: {Error}", itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error downloading file: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to download file: {ex.Message}", ex);
@@ -877,21 +889,21 @@ public class DriveItemOperations
                 versionId, itemId);
             return stream;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning(
                 "Version {VersionId} of file {ItemId} not found in drive {DriveId}",
                 versionId, itemId, driveId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
             _logger.LogWarning(
                 "Access denied downloading version {VersionId} of file {ItemId}: {Error}",
                 versionId, itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error downloading file version: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to download file version: {ex.Message}", ex);
@@ -937,21 +949,21 @@ public class DriveItemOperations
 
             return current.Id;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning(
                 "Drive-item {ItemId} not found in drive {DriveId} when resolving current version id",
                 itemId, driveId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
             _logger.LogWarning(
                 "Access denied resolving current version id for file {ItemId}: {Error}",
                 itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error resolving current version id: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to resolve current version id: {ex.Message}", ex);
@@ -1012,19 +1024,19 @@ public class DriveItemOperations
                 "Listed {Count} versions of file {ItemId} (OBO)", mapped.Count, itemId);
             return mapped;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
             _logger.LogWarning(
                 "File {ItemId} not found in drive {DriveId} when listing versions", itemId, driveId);
             return null;
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.Forbidden)
         {
             _logger.LogWarning(
                 "Access denied listing versions of file {ItemId}: {Error}", itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "Graph API error listing file versions: {Error}", ex.Message);
             throw new InvalidOperationException($"Failed to list file versions: {ex.Message}", ex);
@@ -1084,19 +1096,19 @@ public class DriveItemOperations
                 ContentType: null // Will be enriched from Document metadata
             );
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
         {
             _logger.LogWarning("[{CorrelationId}] File not found: {DriveId}/{ItemId}",
                 correlationId ?? "N/A", driveId, itemId);
             throw new FileNotFoundException($"File {itemId} not found in drive {driveId}", ex);
         }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        catch (ODataError ex) when (ex.ResponseStatusCode == 403)
         {
             _logger.LogWarning("[{CorrelationId}] Access denied to file {ItemId}: {Error}",
                 correlationId ?? "N/A", itemId, ex.Message);
             throw new UnauthorizedAccessException($"Access denied to file {itemId}", ex);
         }
-        catch (ServiceException ex)
+        catch (ODataError ex)
         {
             _logger.LogError(ex, "[{CorrelationId}] Graph API error getting preview URL: {Error}",
                 correlationId ?? "N/A", ex.Message);
@@ -1272,5 +1284,25 @@ public class DriveItemOperations
                 itemId, driveId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// Reads the Retry-After seconds from an <see cref="ODataError"/>, defaulting to 60.
+    /// dotnet-10-upgrade-r1 task 033 behavior observation: unlike the legacy
+    /// <c>Microsoft.Graph.ServiceException.ResponseHeaders</c> (a strongly-typed
+    /// <c>HttpResponseHeaders</c> exposing <c>.RetryAfter.Delta</c>), <see cref="ODataError"/>.<c>ResponseHeaders</c>
+    /// under Kiota 2.0 is a plain <c>IDictionary&lt;string, IEnumerable&lt;string&gt;&gt;</c> — there is no
+    /// <c>.RetryAfter</c> member, so the header must be read by key.
+    /// </summary>
+    private static double GetRetryAfterSeconds(ODataError ex)
+    {
+        if (ex.ResponseHeaders is not null
+            && ex.ResponseHeaders.TryGetValue("Retry-After", out var values)
+            && double.TryParse(values.FirstOrDefault(), out var seconds))
+        {
+            return seconds;
+        }
+
+        return 60;
     }
 }

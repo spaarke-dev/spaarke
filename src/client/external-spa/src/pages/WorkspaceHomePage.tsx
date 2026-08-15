@@ -75,7 +75,8 @@ export const WorkspaceHomePage: React.FC<WorkspaceHomePageProps> = ({ teamsHost 
   // per-render result object), keeping useCallback memoization effective.
   const { widgetTabs, activeTabId, selectTab, openTab, closeTab } = useWorkspaceTabs();
 
-  // /me entitlements (task 012) — real `teamsHost` signal + mocked entitlements pending task 022.
+  // /me entitlements — live BFF call (task 073) to GET /api/v1/external/me/entitlements, with a
+  // plane-derived fallback on failure (see me-client.ts). `teamsHost` seeds the fallback plane.
   const [me, setMe] = React.useState<MeEntitlementsResponse | null>(null);
   const [meError, setMeError] = React.useState<string | null>(null);
   React.useEffect(() => {

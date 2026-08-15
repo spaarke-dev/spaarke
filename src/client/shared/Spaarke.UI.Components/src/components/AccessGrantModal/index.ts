@@ -4,6 +4,8 @@ export type {
   IAccessGrantCandidate,
   IAccessGrantRecord,
   IContactSearchResult,
+  IOrganizationPick,
+  ExternalGrantRootType,
   IAccessLevelOption,
   AccessPermissionState,
 } from './types';

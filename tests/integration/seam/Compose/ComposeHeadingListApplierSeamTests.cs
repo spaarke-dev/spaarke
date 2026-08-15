@@ -79,7 +79,7 @@ public sealed class ComposeHeadingListApplierSeamTests
         var listParaId = FirstParagraphWithDirectNumPr(original);
         listParaId.Should().NotBeNull("multilevel-1-1-1 must have a direct-numbered paragraph to clear");
 
-        var log = OneOp(new SetBlockAttrOperation { ParaId = listParaId, Attr = ComposeBlockAttr.Style, Value = "Normal" });
+        var log = OneOp(new SetBlockAttrOperation { ParaId = listParaId!, Attr = ComposeBlockAttr.Style, Value = "Normal" });
         var patched = _engine.Apply(original, log, author: "Seam", timestamp: When);
 
         using var doc = OpenRead(patched);

@@ -74,13 +74,18 @@ public static class ConfigurationModule
             .ValidateDataAnnotations();
 
         // Agent Service options (AIPU-061) — gated on AgentService:Enabled kill switch (ADR-018).
-        // Validation deferred (no ValidateOnStart): Endpoint/AgentId are [Required] but only
-        // needed when Enabled=true. App starts cleanly with Enabled=false and no Foundry config.
-        // AgentServiceClient.GuardEnabled() enforces the kill switch at call time.
+        // task 061 fail-fast sweep: the Enabled→Endpoint/AgentId "required-WHEN-enabled" invariant is now
+        // enforced AT STARTUP via AgentServiceOptionsValidator (IValidateOptions) + ValidateOnStart, instead
+        // of deferring to the first agent call. This is SAFE for the Enabled=false boot path: the validator
+        // short-circuits to Success when disabled, and Endpoint/AgentId are NOT bare [Required] on the class
+        // (so DataAnnotations pass regardless of Enabled — no eager-.Value 2026-06-09 BingGrounding regression).
+        // App still starts cleanly with Enabled=false and no Foundry config; a misconfigured Enabled=true
+        // (missing Endpoint/AgentId) now fails startup naming the keys.
         services
             .AddOptions<AgentServiceOptions>()
             .Bind(configuration.GetSection(AgentServiceOptions.SectionName))
-            .ValidateDataAnnotations();
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Code Interpreter options (AIPU-070) — gated on CodeInterpreter:Enabled kill switch (ADR-018).
         // Validation deferred (no ValidateOnStart) so the app starts cleanly when disabled.
@@ -125,6 +130,8 @@ public static class ConfigurationModule
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
+        // task 061: Enabled→Endpoint cross-property invariant for the gated Foundry Agent option.
+        services.AddSingleton<IValidateOptions<AgentServiceOptions>, AgentServiceOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();

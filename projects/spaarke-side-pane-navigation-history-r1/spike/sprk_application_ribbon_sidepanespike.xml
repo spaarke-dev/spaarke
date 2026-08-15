@@ -1,0 +1,71 @@
+<!--
+  Task 001 SPIKE — Stage 2 global (Application) ribbon RibbonDiffXml.
+  Adapted from the recovered git 7d80565a6^:src/client/webresources/ribbon/sprk_application_ribbon_sprkchat.xml
+  (the proven Mscrm.GlobalTab enable-rule bootstrap pattern).
+
+  Purpose: prove TRUE auto-create-at-app-load. The EnableRule's CustomRule
+  (Spaarke.SidePaneSpike.enable) fires on every command-bar evaluation (i.e. every
+  navigation), and its side-effect registers the spike pane — so the docked pane
+  appears with NO user action. The button itself is a convenience to open/focus.
+
+  CANNOT be pushed via the Web API — must be landed via SOLUTION IMPORT
+  (pac solution pack/import) or the ribbon-edit skill. See the runbook in
+  notes/task-001-spike-report.md §Stage 2.
+
+  Requires web resource: sprk_sidepanespikebootstrap.js (deploy it FIRST via Deploy-SidePaneSpike.ps1).
+-->
+<RibbonDiffXml>
+  <CustomActions>
+    <CustomAction Id="sprk.Global.SidePaneSpike.OpenButton.CustomAction"
+                  Location="Mscrm.GlobalTab.MainTab.Actions.Controls._children"
+                  Sequence="510">
+      <CommandUIDefinition>
+        <Button Id="sprk.Global.SidePaneSpike.OpenButton"
+                Command="sprk.Global.SidePaneSpike.Open.Command"
+                LabelText="$LocLabels:sprk.SidePaneSpike.Button.Label"
+                Alt="$LocLabels:sprk.SidePaneSpike.Button.Alt"
+                ToolTipTitle="$LocLabels:sprk.SidePaneSpike.Button.Label"
+                ToolTipDescription="$LocLabels:sprk.SidePaneSpike.Button.Tooltip"
+                TemplateAlias="o1"
+                ModernImage="Link" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+
+  <CommandDefinitions>
+    <CommandDefinition Id="sprk.Global.SidePaneSpike.Open.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.Global.SidePaneSpike.Open.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_sidepanespikebootstrap.js"
+                            FunctionName="Spaarke.SidePaneSpike.openPane" />
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+
+  <RuleDefinitions>
+    <EnableRules>
+      <!-- Side-effect bootstrap: enable() registers the pane, then returns true. -->
+      <EnableRule Id="sprk.Global.SidePaneSpike.Open.EnableRule">
+        <CustomRule Library="$webresource:sprk_sidepanespikebootstrap.js"
+                    FunctionName="Spaarke.SidePaneSpike.enable"
+                    Default="true">
+        </CustomRule>
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+
+  <LocLabels>
+    <LocLabel Id="sprk.SidePaneSpike.Button.Label">
+      <Titles><Title languagecode="1033" description="Spike Pane" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SidePaneSpike.Button.Alt">
+      <Titles><Title languagecode="1033" description="Open the Path B side-pane spike" /></Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.SidePaneSpike.Button.Tooltip">
+      <Titles><Title languagecode="1033" description="Open/focus the diagnostic spike pane. Its enable rule also auto-registers the pane at app load." /></Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

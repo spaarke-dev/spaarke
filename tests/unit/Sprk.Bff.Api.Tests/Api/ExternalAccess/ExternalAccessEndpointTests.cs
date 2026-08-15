@@ -97,24 +97,26 @@ public class ExternalAccessEndpointTests
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         (request.ContactId == Guid.Empty).Should().BeTrue(
             "handler returns 400 when ContactId is empty GUID");
     }
 
     [Fact]
-    public void GrantAccess_EmptyProjectId_ShouldFailValidation()
+    public void GrantAccess_NoRootProvided_FailsClosed()
     {
+        // Task 070: ProjectId alone is no longer independently required. A grant with NO root at all
+        // (no recordType/recordId AND no legacy projectId) is rejected fail-closed by ResolveGrantRoot.
         var request = new GrantAccessRequest(
             ContactId: Guid.NewGuid(),
             ProjectId: Guid.Empty,
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
-        (request.ProjectId == Guid.Empty).Should().BeTrue(
-            "handler returns 400 when ProjectId is empty GUID");
+        GrantExternalAccessEndpoint.ResolveGrantRoot(request).Ok.Should().BeFalse(
+            "a grant with no project/matter/work-assignment root must be rejected (no unscoped row)");
     }
 
     [Fact]
@@ -145,7 +147,7 @@ public class ExternalAccessEndpointTests
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.Collaborate,
             ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)),
-            AccountId: Guid.NewGuid());
+            OrganizationId: Guid.NewGuid());
 
         (request.ContactId == Guid.Empty).Should().BeFalse();
         (request.ProjectId == Guid.Empty).Should().BeFalse();
@@ -155,16 +157,16 @@ public class ExternalAccessEndpointTests
     [Fact]
     public void GrantAccess_OptionalFieldsAreNullable()
     {
-        // ExpiryDate and AccountId are optional — should accept null without error.
+        // ExpiryDate and OrganizationId are optional — should accept null without error.
         var request = new GrantAccessRequest(
             ContactId: Guid.NewGuid(),
             ProjectId: Guid.NewGuid(),
             AccessLevel: ExternalAccessLevel.ViewOnly,
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         request.ExpiryDate.Should().BeNull();
-        request.AccountId.Should().BeNull();
+        request.OrganizationId.Should().BeNull();
     }
 
     #endregion
@@ -280,15 +282,18 @@ public class ExternalAccessEndpointTests
     }
 
     [Fact]
-    public void RevokeAccess_EmptyProjectId_ShouldFailValidation()
+    public void RevokeAccess_EmptyProjectId_IsAllowed_RevokeIsRootAgnostic()
     {
+        // Task 070: revoke deactivates by AccessRecordId and no longer requires ProjectId — it works for
+        // a project/matter/work-assignment grant alike. Only AccessRecordId + ContactId are required.
         var request = new RevokeAccessRequest(
             AccessRecordId: Guid.NewGuid(),
             ContactId: Guid.NewGuid(),
             ProjectId: Guid.Empty,
             ContainerId: null);
 
-        (request.ProjectId == Guid.Empty).Should().BeTrue();
+        (request.AccessRecordId == Guid.Empty).Should().BeFalse(
+            "revoke requires only a valid AccessRecordId; ProjectId is no longer gated (task 070)");
     }
 
     [Fact]
@@ -385,15 +390,17 @@ public class ExternalAccessEndpointTests
             FirstName: null,
             LastName: "Doe",
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
         string.IsNullOrWhiteSpace(request.Email).Should().BeTrue(
             "handler returns 400 when Email is empty");
     }
 
     [Fact]
-    public void InviteExternalUser_EmptyProjectId_ShouldFailValidation()
+    public void InviteExternalUser_EmptyProjectId_IsAllowed_InviteOnlyOnboards()
     {
+        // Task 070: /invite only onboards (resolve-or-create Contact + CIAM account) and writes NO grant,
+        // so ProjectId is no longer required. Only Email is mandatory.
         var request = new InviteExternalUserRequest(
             Email: "user@example.com",
             ProjectId: Guid.Empty,
@@ -401,10 +408,10 @@ public class ExternalAccessEndpointTests
             FirstName: null,
             LastName: "Doe",
             ExpiryDate: null,
-            AccountId: null);
+            OrganizationId: null);
 
-        (request.ProjectId == Guid.Empty).Should().BeTrue(
-            "handler returns 400 when ProjectId is empty GUID");
+        string.IsNullOrWhiteSpace(request.Email).Should().BeFalse(
+            "invite requires only Email; ProjectId is no longer gated (task 070)");
     }
 
     [Fact]
@@ -417,7 +424,7 @@ public class ExternalAccessEndpointTests
             FirstName: "Jane",
             LastName: "Doe",
             ExpiryDate: DateOnly.FromDateTime(DateTime.UtcNow.AddDays(14)),
-            AccountId: null);
+            OrganizationId: null);
 
         string.IsNullOrWhiteSpace(request.Email).Should().BeFalse();
         (request.ProjectId == Guid.Empty).Should().BeFalse();

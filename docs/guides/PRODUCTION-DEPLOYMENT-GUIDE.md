@@ -302,12 +302,15 @@ az keyvault show --name sprk-platform-prod-kv --query "{name:name, location:loca
 .\scripts\Register-EntraAppRegistrations.ps1
 ```
 
-This creates two registrations in tenant `a221a95e-6abc-4434-aecc-e48338a1b2f2`:
+This creates the BFF API registration in tenant `a221a95e-6abc-4434-aecc-e48338a1b2f2`:
 
 | App Name | Purpose | API Permissions |
 |----------|---------|-----------------|
-| `spaarke-bff-api-prod` | BFF API identity | Graph: Files.Read.All, FileStorageContainer.Selected, Sites.Read.All; Dynamics CRM: user_impersonation |
-| `spaarke-dataverse-s2s-prod` | Dataverse S2S | Dynamics CRM: user_impersonation |
+| `spaarke-bff-api-prod` | BFF API identity (also the single Dataverse Application User) | Graph: Files.Read.All, FileStorageContainer.Selected, Sites.Read.All; Dynamics CRM: user_impersonation |
+
+> **Note (2026-08-14, task 060):** the separate `spaarke-dataverse-s2s-prod` app registration
+> was removed (zero code consumers; Dataverse S2S access consolidated onto the BFF app
+> registration credential on 2026-01-07).
 
 The script:
 - Creates app registrations with correct permissions
@@ -322,7 +325,6 @@ The script:
 1. Navigate to **Azure Portal > Entra ID > App registrations**
 2. Select `spaarke-bff-api-prod`
 3. Go to **API permissions** > Click **Grant admin consent for [tenant]**
-4. Repeat for `spaarke-dataverse-s2s-prod`
 
 ### 4.3 Register Dataverse Application User
 
@@ -330,7 +332,7 @@ The script:
 
 1. Navigate to **Power Platform Admin Center > Environments > [prod env] > Settings > Users**
 2. Click **+ New app user**
-3. Select the `spaarke-dataverse-s2s-prod` app registration
+3. Select the `spaarke-bff-api-prod` app registration
 4. Assign **System Administrator** security role
 
 ### 4.4 Verify Registrations
@@ -393,9 +395,9 @@ az keyvault secret set --vault-name $kvName --name "AzureAd--TenantId" --value "
 az keyvault secret set --vault-name $kvName --name "AzureAd--ClientId" --value "<bff-api-client-id>"
 az keyvault secret set --vault-name $kvName --name "AzureAd--ClientSecret" --value "<bff-api-secret>"
 
-# Dataverse S2S
-az keyvault secret set --vault-name $kvName --name "Dataverse--ClientId" --value "<s2s-client-id>"
-az keyvault secret set --vault-name $kvName --name "Dataverse--ClientSecret" --value "<s2s-secret>"
+# Dataverse (uses the BFF app registration — the separate S2S app-reg was removed 2026-08-14, task 060)
+az keyvault secret set --vault-name $kvName --name "Dataverse--ClientId" --value "<bff-api-client-id>"
+az keyvault secret set --vault-name $kvName --name "Dataverse--ClientSecret" --value "<bff-api-secret>"
 
 # Azure OpenAI (from deployment outputs)
 $openaiKey = az cognitiveservices account keys list -g rg-spaarke-platform-prod -n spaarke-openai-prod --query "key1" -o tsv
@@ -1021,8 +1023,7 @@ param openAiLocation = 'westus3'
 
 | App Name | Purpose |
 |----------|---------|
-| `spaarke-bff-api-prod` | BFF API identity (Graph, SPE, Dataverse) |
-| `spaarke-dataverse-s2s-prod` | Server-to-server Dataverse access |
+| `spaarke-bff-api-prod` | BFF API identity (Graph, SPE, Dataverse) — the single Dataverse Application User |
 
 ---
 
@@ -1308,7 +1309,15 @@ pac solution export --name SpaarkeCore --managed true --path ./exports/
 
 ### GitHub Actions: PAC CLI Authentication
 
-PAC CLI can authenticate via service principal in CI/CD:
+> **Note (2026-08-14, task 060):** the live deploy workflows authenticate to Azure/Dataverse
+> via **OIDC federated login** (`azure/login@v2`); no workflow references a `DATAVERSE_CLIENT_ID`
+> / `DATAVERSE_CLIENT_SECRET` GitHub secret (verified 2026-08-14 — the repo has no such secret).
+> The separate `spaarke-dataverse-s2s-*` app registration these examples referenced was removed.
+> The client-secret examples below are retained only as a fallback pattern; if used, point
+> `DATAVERSE_CLIENT_ID` at the **BFF app registration** (the single Dataverse Application User),
+> not a separate S2S app.
+
+PAC CLI can authenticate via service principal in CI/CD (fallback pattern — prefer OIDC):
 
 ```yaml
 - name: Authenticate PAC CLI
@@ -1320,12 +1329,12 @@ PAC CLI can authenticate via service principal in CI/CD:
       --clientSecret ${{ secrets.DATAVERSE_CLIENT_SECRET }}
 ```
 
-**Required GitHub secrets for Dataverse CI/CD:**
+**GitHub secrets for the client-secret fallback pattern:**
 
 | Secret | Purpose |
 |--------|---------|
-| `DATAVERSE_CLIENT_ID` | `spaarke-dataverse-s2s-{env}` app registration |
-| `DATAVERSE_CLIENT_SECRET` | Client secret for the S2S app |
+| `DATAVERSE_CLIENT_ID` | BFF app registration (the single Dataverse Application User) — the separate S2S app-reg was removed |
+| `DATAVERSE_CLIENT_SECRET` | Client secret for that app registration |
 | `AZURE_TENANT_ID` | Entra ID tenant (same as Azure) |
 
 **Required GitHub variables:**
@@ -1651,7 +1660,7 @@ All scripts are in the `scripts/` directory:
 | `Deploy-Platform.ps1` | Deploy shared platform Bicep | `-EnvironmentName`, `-WhatIf` |
 | `Deploy-BffApi.ps1` | Deploy BFF API with zero-downtime | `-Environment`, `-UseSlotDeploy`, `-SkipBuild` |
 | `Deploy-DataverseSolutions.ps1` | Import 10 managed solutions in order | `-Environment` |
-| `Register-EntraAppRegistrations.ps1` | Create Entra ID app registrations | `-DryRun`, `-SkipBffApi`, `-SkipDataverseS2S` |
+| `Register-EntraAppRegistrations.ps1` | Create Entra ID app registrations | `-DryRun`, `-SkipBffApi` |
 | `Test-EntraAppRegistrations.ps1` | Verify app registrations | (none) |
 | `Configure-CustomDomain.ps1` | Custom domain + SSL setup | `-ShowDnsInstructions`, `-SkipDnsCheck`, `-SkipSsl` |
 | `Test-CustomDomain.ps1` | Verify custom domain | (none) |

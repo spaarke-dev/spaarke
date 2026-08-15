@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>FR-14 — adapt /bff-deploy for net10 + author the slot-swap runbook</title>
+    <phase>P4 CI/CD + deploy plumbing</phase>
+    <gate>041 complete</gate>
+    <status>completed</status>
+    <completion-note>2026-08-13: (1) De-net8'd .claude/skills/bff-deploy/SKILL.md — added net10 runtime banner (DOTNETCORE|10.0 pipe / DOTNETCORE:10.0 colon, mismatch=503, ~45 MB net10 publish, no ASPNETCORE_URLS/RuntimeFrameworkVersion pin, runbook pointer); corrected stale net8 package sizes (~61→~45 MB, 55-65→40-50, <40→<30). (2) Authored notes/slot-swap-runbook.md with Section A (NEAR-TERM active: direct worktree deploy to spaarke-bff-dev via Deploy-BffApi.ps1 + az, explicitly NOT via CI since push:master removed) + Section B (FUTURE deferred prod/demo: create slot → set net10 on slot only → deploy → validate in isolation → atomic swap → rollback-by-swap). Baked in pipe/colon forms, port-8080, no-RuntimeFrameworkVersion, Linux-no-auto-swap. Escalation valve did NOT fire — skill deploys to dev (Section A), not prod. Main-session write succeeded (.claude/skills/). Includes task-041 Core Tools v4.7.0 caveat + task-040 pipeline cross-check.</completion-note>
+    <rigor>FULL</rigor>
+    <rigor-reason>Writes .claude/skills/ (main-session-only) + the deploy runbook that governs the production cutover.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Skill + runbook authoring with exact az commands; well-specified by design §7.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes `.claude/skills/bff-deploy/**` — MAIN-SESSION-ONLY per root §3 sub-agent write boundary.</parallel-reason>
+    <deps>041</deps>
+    <tags>deployment, skill-directives, dotnet, migration</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Adapt the `/bff-deploy` skill so it no longer encodes the 8.0 runtime, and author a runbook with TWO sections. (A) NEAR-TERM — the active path: **direct worktree deploy to `spaarke-bff-dev`** (the only live environment) via `/bff-deploy` + `az` on `DOTNETCORE|10.0`, NOT via CI (the `push:master` auto-deploy was removed) — exact commands, health check, and a note that brief dev downtime is acceptable (or use a slot if `spaarke-bff-dev` has one, per task 050). (B) FUTURE — the deferred prod/demo playbook: the zero-downtime staging-slot swap (create/refresh slot, set `linuxFxVersion` `DOTNETCORE|10.0` pipe on the slot only, deploy, validate, swap atomic, rollback-by-swap) for when demo/prod are re-provisioned on net10. Note the colon form `DOTNETCORE:10.0` for `create`/`list-runtimes`, port-8080/no-hardcoded-ASPNETCORE_URLS, and Linux-no-auto-swap. MAIN-SESSION-ONLY write (`.claude/skills/`).</prompt>
+  <role>SPAARKE platform developer + release engineer. Expert in Azure App Service staging slots, zero-downtime swaps, and Spaarke's /bff-deploy skill. Follow ADRs strictly.</role>
+  <goal>`.claude/skills/bff-deploy/**` no longer encodes 8.0; a runbook at `projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md` has (A) a NEAR-TERM `spaarke-bff-dev` direct-deploy section (the active path, worktree/`az`, not CI) and (B) a FUTURE prod/demo staging-slot-swap section (deploy → validate → swap → rollback-by-swap) with the pipe/colon forms, port-8080, and Linux-no-auto-swap facts baked in.</goal>
+
+  <context>
+    <background>spec FR-14 + design §7. `/bff-deploy` currently encodes 8.0 assumptions. Design §7 gives the 6-step zero-downtime path + the hard facts (pipe vs colon; mismatch = 503; don't hardcode ASPNETCORE_URLS/UseUrls; don't pin RuntimeFrameworkVersion; auto-swap unsupported on Linux). The runbook is the operator's script for tasks 050/051/060/061. Writing `.claude/skills/` requires the main session (root §3).</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/bff-deploy/SKILL.md</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="041" status="pending">IaC runtime strings updated (the runbook references DOTNETCORE|10.0).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MAIN-SESSION-ONLY: edits `.claude/skills/bff-deploy/**` — a sub-agent CANNOT write there (root §3).</constraint>
+    <constraint source="project">The runbook MUST include the exact `az` commands with the PIPE form (`DOTNETCORE|10.0`) for `linux-fx-version`/`config set` and the COLON form (`DOTNETCORE:10.0`) for `create`/`list-runtimes`; MUST document rollback = swap-back.</constraint>
+    <constraint source="ADR-029">Deploy stays framework-dependent linux-x64 from `deploy/api-publish/`; MUST NOT hardcode `ASPNETCORE_URLS`/`UseUrls()` or pin `RuntimeFrameworkVersion`.</constraint>
+    <constraint source="NFR-04">Runtime + binary change atomically via the swap; the runbook must make this explicit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Zero-downtime App Service slot-swap deploy for net10</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="slot-swap-sequence" location="projects/dotnet-10-upgrade-r1/design.md">design §7 — the 6-step zero-downtime path + hard facts.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-14 + design §7. Declare RIGOR: FULL. Confirm MAIN SESSION for the `.claude/skills/` write.</step>
+    <step order="1">Update `/bff-deploy` SKILL.md: replace any 8.0 runtime assumption with net10; reference the runbook.</step>
+    <step order="2">Author `notes/slot-swap-runbook.md`: the 6-step sequence with exact `az` commands (staging slot create/refresh; `az webapp config set --slot staging --linux-fx-version "DOTNETCORE|10.0"`; deploy; validate; swap; rollback-by-swap).</step>
+    <step order="3">Bake in the hard facts: pipe vs colon; mismatch = 503; port 8080 / no hardcoded ASPNETCORE_URLS; no RuntimeFrameworkVersion pin; auto-swap unsupported on Linux (manual/CLI/pipeline).</step>
+    <step order="4">Cross-check the runbook against `deploy-bff-api.yml` (task 040) so the pipeline + manual path agree.</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 042 status to ✅.</step>
+    <step order="6">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the current /bff-deploy skill encodes a deploy mechanism incompatible with the slot-swap path (e.g. deploys directly to production), STOP and surface per CLAUDE.md §6 — the cutover safety depends on the slot path; do not paper over an incompatible skill.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">n/a (docs/skill)</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">.claude/skills/bff-deploy/SKILL.md</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/bff-deploy` no longer encodes the 8.0 runtime string.</criterion>
+    <criterion testable="true">Section A (near-term) gives the exact worktree/`az` direct-deploy sequence to `spaarke-bff-dev` on `DOTNETCORE|10.0`, explicitly NOT via CI.</criterion>
+    <criterion testable="true">Section B (future prod/demo) contains the exact `az` slot-swap sequence with the pipe form for `linux-fx-version` and the colon form for `create`/`list-runtimes`, plus rollback-by-swap.</criterion>
+    <criterion testable="true">The runbook documents port-8080/no-hardcoded-ASPNETCORE_URLS, no-RuntimeFrameworkVersion-pin, and Linux-no-auto-swap.</criterion>
+    <criterion testable="true">Negative: authored in the main session (not a sub-agent) — the `.claude/skills/` write succeeded.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-14. Main-session-only per root §3. The runbook is executed by the operator in tasks 050/051/060/061.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

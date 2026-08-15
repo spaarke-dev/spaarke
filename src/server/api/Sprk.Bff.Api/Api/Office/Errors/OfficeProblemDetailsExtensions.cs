@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.Graph.Models.ODataErrors;
 
 namespace Sprk.Bff.Api.Api.Office.Errors;
 
@@ -309,45 +308,43 @@ public static class OfficeProblemDetailsExtensions
     }
 
     /// <summary>
-    /// Creates a Graph API error from an ODataError exception.
+    /// Creates a Graph API error from extracted Graph SDK <c>ODataError</c> fields.
     /// </summary>
+    /// <remarks>
+    /// Takes extracted primitives rather than the raw Graph SDK <c>ODataError</c> so this type stays
+    /// Graph-free per ADR-007 §1 (only <c>Infrastructure.Graph</c>/<c>SpeFileStore</c> may reference
+    /// Microsoft.Graph types on their member/signature surface). Callers holding an <c>ODataError</c>
+    /// (typically in a <c>catch</c> block — a local variable, so the catch site itself stays
+    /// ADR-007-clean) extract <c>ResponseStatusCode</c>, <c>Error?.Code</c>, <c>Error?.Message</c>,
+    /// and optionally the <c>request-id</c>/<c>client-request-id</c> response header before calling.
+    /// Zero behavior change vs. the prior <c>ODataError</c>-typed overload.
+    /// </remarks>
     public static IResult FromGraphException(
-        ODataError ex,
+        int responseStatusCode,
+        string? errorCode,
+        string? errorMessage,
         string correlationId,
-        string instance = "/office")
+        string instance = "/office",
+        string? graphRequestId = null)
     {
-        string? graphRequestId = null;
-        try
-        {
-            graphRequestId = ex.ResponseHeaders?
-                .Where(h => h.Key.Equals("request-id", StringComparison.OrdinalIgnoreCase) ||
-                            h.Key.Equals("client-request-id", StringComparison.OrdinalIgnoreCase))
-                .SelectMany(h => h.Value)
-                .FirstOrDefault();
-        }
-        catch
-        {
-            // Ignore header access errors
-        }
-
         // Determine if this is an auth error that should return 403
-        var status = ex.ResponseStatusCode > 0 ? ex.ResponseStatusCode : 502;
-        var errorCode = ex.Error?.Code ?? "unknown";
+        var status = responseStatusCode > 0 ? responseStatusCode : 502;
+        var code = errorCode ?? "unknown";
 
         if (status is 401 or 403)
         {
             return AccessDenied(
                 "Microsoft Graph API",
                 correlationId,
-                ex.Error?.Message,
+                errorMessage,
                 instance);
         }
 
         return GraphApiError(
             correlationId,
             graphRequestId,
-            errorCode,
-            ex.Error?.Message,
+            code,
+            errorMessage,
             instance);
     }
 

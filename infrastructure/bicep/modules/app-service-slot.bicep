@@ -36,7 +36,7 @@ resource slot 'Microsoft.Web/sites/slots@2023-01-01' = {
     serverFarmId: appServicePlanId
     httpsOnly: true
     siteConfig: {
-      linuxFxVersion: 'DOTNETCORE|8.0'
+      linuxFxVersion: 'DOTNETCORE|10.0'
       alwaysOn: true
       http20Enabled: true
       minTlsVersion: '1.2'

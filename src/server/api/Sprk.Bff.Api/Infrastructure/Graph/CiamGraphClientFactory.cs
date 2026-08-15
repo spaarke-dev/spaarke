@@ -164,7 +164,9 @@ public sealed class CiamGraphClientFactory
             // EphemeralKeySet: keep the private key in memory only (no on-disk key persistence).
             // Target runtime is Linux App Service; ephemeral RSA signing is supported there and on
             // modern Windows for local dev.
-            return new X509Certificate2(pfxBytes, (string?)null, X509KeyStorageFlags.EphemeralKeySet);
+            // X509CertificateLoader.LoadPkcs12 replaces the obsolete X509Certificate2(byte[], string?,
+            // X509KeyStorageFlags) constructor (SYSLIB0057, .NET 9+); semantics/flags unchanged.
+            return X509CertificateLoader.LoadPkcs12(pfxBytes, (string?)null, X509KeyStorageFlags.EphemeralKeySet);
         }
         catch (FormatException ex)
         {

@@ -104,8 +104,8 @@ spaarke/
 
 | Subdirectory | Technology | Purpose |
 |--------------|------------|---------|
-| `api/Sprk.Bff.Api/` | .NET 8, Minimal API | Backend-for-Frontend, Graph/Dataverse integration |
-| `shared/` | .NET 8 | Shared .NET libraries |
+| `api/Sprk.Bff.Api/` | .NET 10, Minimal API | Backend-for-Frontend, Graph/Dataverse integration |
+| `shared/` | .NET 10 | Shared .NET libraries |
 
 **BFF API Structure (`src/server/api/Sprk.Bff.Api/`):**
 

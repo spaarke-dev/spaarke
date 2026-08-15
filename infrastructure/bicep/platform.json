@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.41.2.15936",
-      "templateHash": "15221658056153645417"
+      "version": "0.46.1.21595",
+      "templateHash": "18031162875131300882"
     }
   },
   "parameters": {
@@ -126,7 +126,8 @@
     "docIntelligenceName": "[format('spaarke-docintel-{0}', parameters('environmentName'))]",
     "appInsightsName": "[format('sprk-platform-{0}-insights', parameters('environmentName'))]",
     "logAnalyticsName": "[format('sprk-platform-{0}-logs', parameters('environmentName'))]",
-    "keyVaultName": "[format('sprk-platform-{0}-kv', parameters('environmentName'))]"
+    "keyVaultName": "[format('sprk-platform-{0}-kv', parameters('environmentName'))]",
+    "cosmosAccountName": "[format('spaarke-cosmos-{0}', parameters('environmentName'))]"
   },
   "resources": [
     {
@@ -169,8 +170,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "18030714684819009343"
+              "version": "0.46.1.21595",
+              "templateHash": "12399857838656520760"
             }
           },
           "parameters": {
@@ -312,8 +313,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "7100247261354352306"
+              "version": "0.46.1.21595",
+              "templateHash": "2671676354241670631"
             }
           },
           "parameters": {
@@ -375,7 +376,70 @@
               "metadata": {
                 "description": "Tags for the resource"
               }
+            },
+            "enableNetworkRestrictions": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Enable network restrictions (VNet rules + deny by default)"
+              }
+            },
+            "allowedSubnetIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Subnet IDs allowed to access Key Vault (e.g., snet-app for App Service)"
+              }
+            },
+            "allowedIpRanges": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Specific IP addresses or CIDR ranges allowed (e.g., developer IPs for debugging)"
+              }
+            },
+            "appServicePrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the App Service managed identity (granted Key Vault Secrets User)"
+              }
+            },
+            "adminPrincipalIds": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Principal IDs granted Key Vault Administrator role (deployment pipelines, admins)"
+              }
+            },
+            "logAnalyticsWorkspaceId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Log Analytics workspace ID for audit logs (empty to skip)"
+              }
             }
+          },
+          "variables": {
+            "copy": [
+              {
+                "name": "vnetRules",
+                "count": "[length(parameters('allowedSubnetIds'))]",
+                "input": {
+                  "id": "[parameters('allowedSubnetIds')[copyIndex('vnetRules')]]",
+                  "ignoreMissingVnetServiceEndpoint": false
+                }
+              },
+              {
+                "name": "ipRules",
+                "count": "[length(parameters('allowedIpRanges'))]",
+                "input": {
+                  "value": "[parameters('allowedIpRanges')[copyIndex('ipRules')]]"
+                }
+              }
+            ],
+            "keyVaultSecretsUserRoleId": "4633458b-17de-408a-b874-0445c86b69e6",
+            "keyVaultAdministratorRoleId": "00482a5a-887f-4fb3-b363-3b7fe8e74483"
           },
           "resources": [
             {
@@ -409,11 +473,82 @@
                 "softDeleteRetentionInDays": "[parameters('softDeleteRetentionDays')]",
                 "enablePurgeProtection": "[parameters('enablePurgeProtection')]",
                 "enableRbacAuthorization": true,
-                "networkAcls": {
-                  "defaultAction": "Allow",
-                  "bypass": "AzureServices"
-                }
+                "networkAcls": "[if(parameters('enableNetworkRestrictions'), createObject('defaultAction', 'Deny', 'bypass', 'AzureServices', 'virtualNetworkRules', variables('vnetRules'), 'ipRules', variables('ipRules')), createObject('defaultAction', 'Allow', 'bypass', 'AzureServices'))]"
               }
+            },
+            {
+              "condition": "[not(empty(parameters('appServicePrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), parameters('appServicePrincipalId'), variables('keyVaultSecretsUserRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('keyVaultSecretsUserRoleId'))]",
+                "principalId": "[parameters('appServicePrincipalId')]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+              ]
+            },
+            {
+              "copy": {
+                "name": "adminRoleAssignments",
+                "count": "[length(parameters('adminPrincipalIds'))]"
+              },
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[guid(resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName')), parameters('adminPrincipalIds')[copyIndex()], variables('keyVaultAdministratorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('keyVaultAdministratorRoleId'))]",
+                "principalId": "[parameters('adminPrincipalIds')[copyIndex()]]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+              ]
+            },
+            {
+              "condition": "[not(equals(parameters('logAnalyticsWorkspaceId'), ''))]",
+              "type": "Microsoft.Insights/diagnosticSettings",
+              "apiVersion": "2021-05-01-preview",
+              "scope": "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]",
+              "name": "[format('{0}-diagnostics', parameters('keyVaultName'))]",
+              "properties": {
+                "workspaceId": "[parameters('logAnalyticsWorkspaceId')]",
+                "logs": [
+                  {
+                    "categoryGroup": "audit",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "enabled": true,
+                      "days": 90
+                    }
+                  },
+                  {
+                    "categoryGroup": "allLogs",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "enabled": true,
+                      "days": 30
+                    }
+                  }
+                ],
+                "metrics": [
+                  {
+                    "category": "AllMetrics",
+                    "enabled": true,
+                    "retentionPolicy": {
+                      "enabled": true,
+                      "days": 30
+                    }
+                  }
+                ]
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.KeyVault/vaults', parameters('keyVaultName'))]"
+              ]
             }
           ],
           "outputs": {
@@ -469,8 +604,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "13211811214260217412"
+              "version": "0.46.1.21595",
+              "templateHash": "8557251117036345452"
             }
           },
           "parameters": {
@@ -618,8 +753,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "17172741113647559143"
+              "version": "0.46.1.21595",
+              "templateHash": "8559426252354135825"
             }
           },
           "parameters": {
@@ -644,7 +779,7 @@
             },
             "runtimeStack": {
               "type": "string",
-              "defaultValue": "DOTNETCORE|8.0",
+              "defaultValue": "DOTNETCORE|10.0",
               "metadata": {
                 "description": "Runtime stack"
               }
@@ -670,6 +805,13 @@
                 "description": "Enable managed identity"
               }
             },
+            "vnetIntegrationSubnetId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Subnet ID for VNet integration (outbound traffic). Leave empty to disable."
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {},
@@ -690,6 +832,8 @@
               "properties": {
                 "serverFarmId": "[parameters('appServicePlanId')]",
                 "httpsOnly": true,
+                "virtualNetworkSubnetId": "[if(not(empty(parameters('vnetIntegrationSubnetId'))), parameters('vnetIntegrationSubnetId'), null())]",
+                "vnetRouteAllEnabled": "[not(empty(parameters('vnetIntegrationSubnetId')))]",
                 "siteConfig": {
                   "copy": [
                     {
@@ -796,8 +940,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "2446708661057223463"
+              "version": "0.46.1.21595",
+              "templateHash": "4394705819286327160"
             }
           },
           "parameters": {
@@ -868,8 +1012,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "8239104444613799528"
+              "version": "0.46.1.21595",
+              "templateHash": "17742556906861375636"
             }
           },
           "parameters": {
@@ -928,7 +1072,7 @@
                 "serverFarmId": "[parameters('appServicePlanId')]",
                 "httpsOnly": true,
                 "siteConfig": {
-                  "linuxFxVersion": "DOTNETCORE|8.0",
+                  "linuxFxVersion": "DOTNETCORE|10.0",
                   "alwaysOn": true,
                   "http20Enabled": true,
                   "minTlsVersion": "1.2",
@@ -994,8 +1138,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "746446933199905703"
+              "version": "0.46.1.21595",
+              "templateHash": "296065090631483571"
             }
           },
           "parameters": {
@@ -1019,6 +1163,20 @@
                 "description": "SKU for Azure OpenAI"
               }
             },
+            "disablePublicNetworkAccess": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Disable public network access (enable after private endpoint validation)"
+              }
+            },
+            "allowedIpRanges": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "Allowed IP ranges when public access is enabled (empty = allow all when public)"
+              }
+            },
             "deployments": {
               "type": "array",
               "defaultValue": [
@@ -1035,6 +1193,12 @@
                   "capacity": 200
                 },
                 {
+                  "name": "spaarke-gpt4o-mini",
+                  "model": "gpt-4o-mini",
+                  "version": "2024-07-18",
+                  "capacity": 30
+                },
+                {
                   "name": "text-embedding-3-large",
                   "model": "text-embedding-3-large",
                   "version": "1",
@@ -1042,7 +1206,7 @@
                 }
               ],
               "metadata": {
-                "description": "Model deployments to create"
+                "description": "Model deployments to create. Capacity is in thousands of tokens per minute (TPM)."
               }
             },
             "tags": {
@@ -1056,7 +1220,7 @@
           "resources": [
             {
               "type": "Microsoft.CognitiveServices/accounts",
-              "apiVersion": "2023-10-01-preview",
+              "apiVersion": "2024-10-01",
               "name": "[parameters('openAiName')]",
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
@@ -1066,9 +1230,18 @@
               },
               "properties": {
                 "customSubDomainName": "[parameters('openAiName')]",
-                "publicNetworkAccess": "Enabled",
+                "publicNetworkAccess": "[if(parameters('disablePublicNetworkAccess'), 'Disabled', 'Enabled')]",
                 "networkAcls": {
-                  "defaultAction": "Allow"
+                  "copy": [
+                    {
+                      "name": "ipRules",
+                      "count": "[length(parameters('allowedIpRanges'))]",
+                      "input": {
+                        "value": "[parameters('allowedIpRanges')[copyIndex('ipRules')]]"
+                      }
+                    }
+                  ],
+                  "defaultAction": "[if(parameters('disablePublicNetworkAccess'), 'Deny', if(empty(parameters('allowedIpRanges')), 'Allow', 'Deny'))]"
                 }
               }
             },
@@ -1080,7 +1253,7 @@
                 "batchSize": 1
               },
               "type": "Microsoft.CognitiveServices/accounts/deployments",
-              "apiVersion": "2023-10-01-preview",
+              "apiVersion": "2024-10-01",
               "name": "[format('{0}/{1}', parameters('openAiName'), parameters('deployments')[copyIndex()].name)]",
               "sku": {
                 "name": "Standard",
@@ -1110,11 +1283,15 @@
             },
             "openAiEndpoint": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('openAiName')), '2023-10-01-preview').endpoint]"
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('openAiName')), '2024-10-01').endpoint]"
+            },
+            "publicNetworkAccess": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('openAiName')), '2024-10-01').publicNetworkAccess]"
             },
             "openAiKey": {
               "type": "string",
-              "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', parameters('openAiName')), '2023-10-01-preview').key1]"
+              "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', parameters('openAiName')), '2024-10-01').key1]"
             }
           }
         }
@@ -1162,8 +1339,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "7777048588860026583"
+              "version": "0.46.1.21595",
+              "templateHash": "4254127578021255885"
             }
           },
           "parameters": {
@@ -1314,8 +1491,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "14762438589967726736"
+              "version": "0.46.1.21595",
+              "templateHash": "11165900765059154597"
             }
           },
           "parameters": {
@@ -1394,6 +1571,409 @@
       "dependsOn": [
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
       ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "platform-cosmosdb",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "accountName": {
+            "value": "[variables('cosmosAccountName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "databaseName": {
+            "value": "spaarke-ai"
+          },
+          "appServicePrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'platform-bffapi'), '2025-04-01').outputs.appServicePrincipalId.value]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "3037118070529064507"
+            }
+          },
+          "parameters": {
+            "accountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Cosmos DB account"
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the Cosmos DB account"
+              }
+            },
+            "databaseName": {
+              "type": "string",
+              "defaultValue": "spaarke-ai",
+              "metadata": {
+                "description": "Name of the database to create"
+              }
+            },
+            "appServicePrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the App Service managed identity (granted Cosmos DB Built-in Data Contributor)"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags for the resource"
+              }
+            }
+          },
+          "variables": {
+            "cosmosDataContributorRoleId": "00000000-0000-0000-0000-000000000002"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts",
+              "apiVersion": "2024-05-15",
+              "name": "[parameters('accountName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "GlobalDocumentDB",
+              "properties": {
+                "databaseAccountOfferType": "Standard",
+                "capabilities": [
+                  {
+                    "name": "EnableServerless"
+                  }
+                ],
+                "consistencyPolicy": {
+                  "defaultConsistencyLevel": "Session"
+                },
+                "locations": [
+                  {
+                    "locationName": "[parameters('location')]",
+                    "failoverPriority": 0,
+                    "isZoneRedundant": false
+                  }
+                ],
+                "publicNetworkAccess": "Enabled",
+                "disableLocalAuth": false,
+                "minimalTlsVersion": "Tls12",
+                "backupPolicy": {
+                  "type": "Continuous",
+                  "continuousModeProperties": {
+                    "tier": "Continuous7Days"
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', parameters('accountName'), parameters('databaseName'))]",
+              "properties": {
+                "resource": {
+                  "id": "[parameters('databaseName')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'sessions')]",
+              "properties": {
+                "resource": {
+                  "id": "sessions",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 7776000,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'prompts')]",
+              "properties": {
+                "resource": {
+                  "id": "prompts",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 7776000,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'audit')]",
+              "properties": {
+                "resource": {
+                  "id": "audit",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": -1,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'audit-partitioned')]",
+              "properties": {
+                "resource": {
+                  "id": "audit-partitioned",
+                  "partitionKey": {
+                    "paths": [
+                      "/partitionKey"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": -1,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'memory')]",
+              "properties": {
+                "resource": {
+                  "id": "memory",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 7776000,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'memory-items')]",
+              "properties": {
+                "resource": {
+                  "id": "memory-items",
+                  "partitionKey": {
+                    "paths": [
+                      "/subjectId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": -1,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'feedback')]",
+              "properties": {
+                "resource": {
+                  "id": "feedback",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": -1,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('appServicePrincipalId')))]",
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', parameters('accountName'), guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName')), parameters('appServicePrincipalId'), variables('cosmosDataContributorRoleId')))]",
+              "properties": {
+                "roleDefinitionId": "[format('{0}/sqlRoleDefinitions/{1}', resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName')), variables('cosmosDataContributorRoleId'))]",
+                "principalId": "[parameters('appServicePrincipalId')]",
+                "scope": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "accountName": {
+              "type": "string",
+              "value": "[parameters('accountName')]"
+            },
+            "accountId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+            },
+            "accountEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName')), '2024-05-15').documentEndpoint]"
+            },
+            "databaseName": {
+              "type": "string",
+              "value": "[parameters('databaseName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'platform-bffapi')]",
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+      ]
     }
   ],
   "outputs": {
@@ -1468,6 +2048,18 @@
     "logAnalyticsWorkspaceId": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'platform-monitoring'), '2025-04-01').outputs.logAnalyticsWorkspaceId.value]"
+    },
+    "cosmosAccountName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'platform-cosmosdb'), '2025-04-01').outputs.accountName.value]"
+    },
+    "cosmosEndpoint": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'platform-cosmosdb'), '2025-04-01').outputs.accountEndpoint.value]"
+    },
+    "cosmosDatabaseName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'platform-cosmosdb'), '2025-04-01').outputs.databaseName.value]"
     }
   }
 }

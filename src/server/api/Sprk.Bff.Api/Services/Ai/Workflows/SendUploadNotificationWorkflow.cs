@@ -86,6 +86,6 @@ public sealed class SendUploadNotificationWorkflow : ICodedWorkflow
             },
         };
 
-        return Task.FromResult(result);
+        return Task.FromResult<object?>(result);
     }
 }

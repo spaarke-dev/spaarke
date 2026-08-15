@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>FR-17 — wrap-up: test-diet, doc-drift, INDEX update, r3 handoff note, defer majors</title>
+    <phase>P7 Wrap-up</phase>
+    <gate>051 complete (dev deploy "go"); 060/061 deferred</gate>
+    <status>completed</status>
+    <completion-note>2026-08-14: project closed. /test-diet reconciled (notes/test-diet-report.md — 0 scaffolding added; DiGraphValidationTests = MAINTAIN/KEEP; Plugins.Tests orphan already deleted; no AMBIGUOUS). Doc-drift swept .NET 8→10 across 19 canonical docs + no residual build-target net8. projects/INDEX.md row → ✅ COMPLETE. r3 handoff written (notes/r3-handoff.md — 3 baseline assumptions + Graph6/Kiota2 done + #772/#773). Deferred majors filed #772; deferred prod/demo cutover filed #773. Staging slot deleted. Cutover: master+dev net10 (DOTNETCORE-10.0.9), suite green (BFF 10415/0), zero-CVE, publish 44.96 MB. Also delivered post-cutover: Tier-1 same-major patch pass, Bicep 0.46.1, /worktree-net10-migrate skill. 060/061 prod cutover remain DEFERRED (#773).</completion-note>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project-close wrap-up; touches .claude/ + projects/INDEX.md (main-session-only) + governance docs.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Run the close-out skills + author the handoff note; well-specified.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes projects/INDEX.md + reads/updates .claude/ — MAIN-SESSION-ONLY (root §3).</parallel-reason>
+    <deps>051</deps>
+    <tags>wrap-up, testing, docs, skill-directives, migration</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the project (FR-17): run `/test-diet` to reconcile tests added/modified during the migration against the ADR-038 build-vs-maintain classifier; run a doc-drift audit; update the `projects/INDEX.md` row (status → complete, last-touched); write the r3 handoff note capturing the net10 baseline assumptions (do NOT re-pin the superseded CVE packages; H1/H2 already fixed; publish-size baseline moved); and file the 6 deferred optional majors (design §6.4) as follow-on issues via `/project-defer-issue-tracking`. This is a MAIN-SESSION-ONLY write task (`.claude/` + `projects/INDEX.md`).</prompt>
+  <role>SPAARKE platform developer. Expert in project close-out, test-diet reconciliation, doc-drift auditing, and cross-project handoffs. Follow ADRs strictly.</role>
+  <goal>`/test-diet` report exists; doc-drift audit run; `projects/INDEX.md` row updated to complete; the r3 handoff note exists at `projects/dotnet-10-upgrade-r1/notes/`; the 5 remaining deferred majors are filed as issues via `/project-defer-issue-tracking`.</goal>
+
+  <context>
+    <background>spec FR-17 + design §11 (r3 relationship). The r3 handoff is the load-bearing deliverable: r3 re-plans on the net10 baseline and MUST NOT re-pin the CVE packages this project removed, MUST build on the H1/H2 fixes, and MUST note the publish baseline moved. It MUST also record that the **Kiota HIGH CVE (GHSA-7j59-v9qr-6fq9) was CLOSED** by this project AND that the **Graph v6 / Kiota 2.0 major was DONE** here (task 033 — owner fold-in 2026-08-11; Graph 6.5 + transitive Kiota 2.0.x, all 7 direct pins + `NoWarn=NU1903` deleted — see `notes/kiota-cve-finding.md` + `notes/graph6-kiota2-break-assessment.md`), so r3 does NOT re-accept the CVE as risk and does NOT re-defer Graph v6. `/test-diet` at project-close is a BINDING gate (root CLAUDE.md §7). The **5 remaining** deferred majors (Search v12, AppInsights 3.x, PowerBI v5, Azure.AI.Projects 2.x, Agents.AI GA — plus Http.Polly→Http.Resilience) are logged with concrete reasons (design §4 principle 6: defer nothing silently). Graph v6/Kiota 2.0 has come OFF the deferred list (done in 033).</background>
+    <relevant-files>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/r3-handoff.md</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/test-diet-report.md</file>
+      <file role="modify">projects/dotnet-10-upgrade-r1/README.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="051" status="pending">Dev deploy to `spaarke-bff-dev` recorded "go" (completion gate; 060/061 production cutover deferred).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MAIN-SESSION-ONLY: writes `projects/INDEX.md` + reads/updates `.claude/`-adjacent governance — run in the main session (root §3).</constraint>
+    <constraint source="ADR-038">`/test-diet` is a BINDING project-close gate: MAINTAIN-class tests stay at KEEP path, SCAFFOLDING-class deleted; the skill is read-only (emits `git rm`/`git mv` for the reviewer). Cite the report in the wrap-up PR.</constraint>
+    <constraint source="project">The r3 handoff note MUST state the three baseline assumptions (no re-pin of superseded CVE packages; H1/H2 fixed; publish baseline moved) per design §11.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out + r3 handoff</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="r3-relationship" location="projects/dotnet-10-upgrade-r1/design.md">design §11 — the boundary + handoff obligation to code-quality-and-assurance-r3.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-17 + design §11 + ADR-038. Declare RIGOR: STANDARD. Confirm MAIN SESSION.</step>
+    <step order="1">Run `/test-diet`; write `notes/test-diet-report.md`; apply the reviewer-approved git rm/mv.</step>
+    <step order="2">Run a doc-drift audit over docs/ + `.claude/` for stale net8 references (build commands, runtime strings); fix or log.</step>
+    <step order="3">Update `projects/INDEX.md`: flip this project's row to complete + last-touched date.</step>
+    <step order="4">Write `notes/r3-handoff.md` with the three baseline assumptions (no re-pin; H1/H2 fixed; publish baseline moved) + any deferred-work pointers.</step>
+    <step order="5">File the 5 remaining deferred optional majors (NOT Graph v6/Kiota 2.0 — done in 033) as follow-on issues via `/project-defer-issue-tracking`.</step>
+    <step order="6">Refresh `README.md` status to complete; update `tasks/TASK-INDEX.md`: set 090 status to ✅ and mark the project complete.</step>
+    <step order="7">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `/test-diet` flags AMBIGUOUS tests requiring reviewer judgment, STOP and surface them per CLAUDE.md §6 rather than auto-deleting/keeping — the skill is advisory, the reviewer decides.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">n/a (close-out)</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/r3-handoff.md</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/test-diet-report.md</output>
+    <output type="doc">projects/INDEX.md (row updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/test-diet` report exists and is cited; doc-drift audit run; `projects/INDEX.md` row flipped to complete.</criterion>
+    <criterion testable="true">`notes/r3-handoff.md` states the three net10-baseline assumptions for code-quality-and-assurance-r3.</criterion>
+    <criterion testable="true">The 5 remaining deferred optional majors are filed as follow-on issues via `/project-defer-issue-tracking`; Graph v6/Kiota 2.0 is NOT among them (closed in task 033) and the r3 handoff records it as done.</criterion>
+    <criterion testable="true">Negative: no MAINTAIN-class test was deleted and no SCAFFOLDING-class test was kept without the reviewer's call.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-17. Main-session-only. Closes the project on the DEV deploy "go" (task 051) — production/demo cutover (tasks 060/061, FR-16/NFR-04/NFR-06) is DEFERRED to when those environments are re-provisioned on net10 (owner 2026-08-11). ALSO file that deferred prod/demo net10 cutover as a tracked follow-on via `/project-defer-issue-tracking` (alongside the 6 deferred optional majors), so it isn't lost. r3 is re-planned on the net10 baseline afterward (design §11) — on a Graph-6/Kiota-2 baseline (task 033), so r3 must NOT assume Graph 5.x.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

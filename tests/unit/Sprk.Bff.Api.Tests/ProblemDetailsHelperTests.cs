@@ -39,7 +39,7 @@ public class ProblemDetailsHelperTests
             ResponseStatusCode = 403
         };
 
-        var result = ProblemDetailsHelper.FromGraphException(ex);
+        var result = ProblemDetailsHelper.FromGraphException(ex.ResponseStatusCode, ex.Error?.Code, ex.Error?.Message);
         var (status, json) = await ExecuteResultAsync(result);
 
         status.Should().Be(403);
@@ -60,7 +60,7 @@ public class ProblemDetailsHelperTests
             ResponseStatusCode = 403
         };
 
-        var result = ProblemDetailsHelper.FromGraphException(ex);
+        var result = ProblemDetailsHelper.FromGraphException(ex.ResponseStatusCode, ex.Error?.Code, ex.Error?.Message);
         var (status, json) = await ExecuteResultAsync(result);
 
         status.Should().Be(403);

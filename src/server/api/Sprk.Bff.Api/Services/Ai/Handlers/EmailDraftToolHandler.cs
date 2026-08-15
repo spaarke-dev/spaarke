@@ -638,7 +638,7 @@ public sealed class EmailDraftToolHandler : IToolHandler
         // degradation state (email-r5 task 033), not an error — a failed lookup leaves the id null.
         string? emlDocumentId = null;
         var docFilter = Uri.EscapeDataString(
-            $"_sprk_communication_value eq {communicationId:D} and sprk_isemailarchive eq true");
+            $"_sprk_relatedcommunication_value eq {communicationId:D} and sprk_isemailarchive eq true");
         var docResponse = await _dataverse.GetAsync(
             $"{DocumentEntitySet}?$select=sprk_documentid&$filter={docFilter}&$top=1",
             cancellationToken).ConfigureAwait(false);

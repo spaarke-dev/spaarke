@@ -376,6 +376,8 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                   to={record.recordState?.to ?? null}
                   cc={record.recordState?.cc ?? null}
                   bcc={record.recordState?.bcc ?? null}
+                  receivedDate={record.recordState?.receivedDate ?? record.recordState?.sentAt ?? null}
+                  dateLabel={record.recordState?.receivedDate ? 'Received' : 'Sent'}
                 />
               </div>
 

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Forcing-function: expand Spaarke.ArchTests into fitness functions</title>
+    <phase>4 Forcing-Functions</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds enforced architectural fitness tests (touches tests/**) — TEST-MODIFYING override → code-review + adr-check unconditionally.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Encoding architectural invariants as fitness functions (facade, downcast, layer-dependency, God-class thresholds) requires ADR-precise judgment; Opus.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>testing,archtests,fitness</tags>
+  </metadata>
+
+  <prompt>Expand Spaarke.ArchTests into real fitness functions: "no non-AI code injects AI-internal types" (ADR-013), "no IDataverseService as/is ServiceClient casts outside the shared extension", layer-dependency rules, and God-class LOC/ctor-dep thresholds. PLUS three deployment-refactor rules (accepted 2026-08-13): (a) every customer-critical IOptions&lt;T&gt; registered in DI is [Required]-annotated + ValidateOnStart (enforces #2 / task 061; allowlist = 061's gated-options exemption list), (b) the Graph app-role list has a single source of truth in GraphAppRoles.cs (enforces #4 / task 062), (c) [TRACKING FLAG — report-only until its owning migration lands] the remaining secret-based Dataverse credential path: the shared-lib app-only path (DataverseServiceClientImpl/DataverseWebApiService) is STILL ClientSecretCredential-based (assessment §Addendum 2026-08-13). Author rule (c) as a [Skip]-until reporting rule OWNED BY the NG1 shared-lib ClientSecret→MI migration (#3b, decided by task 011's design) — NOT task 060 (which drops only the vestigial separate Dataverse S2S app-reg, no code migration). When #3b lands, rule (c) becomes enforcing: no ClientSecretCredential/AuthType=ClientSecret for Dataverse scopes outside the ADR-028:24 allowlist. Rules (a)/(b) MUST fail on a seeded violation and pass on clean code.</prompt>
+  <role>SPAARKE platform developer with architecture-fitness-test expertise (ArchUnitNET or equivalent). Follow ADR-013 + ADR-010. These rules lock in the R3 remediations so the grade holds.</role>
+  <goal>Spaarke.ArchTests carries the new fitness functions; each rule demonstrably fails on a seeded violation and passes on current clean code; build + full test green.</goal>
+
+  <context>
+    <background>spec.md FR-14 / design.md §9. A+ is sustained, not achieved once — convert findings into enforced invariants. These rules make the BFF remediations (facade compliance task 024, downcast consolidation task 021) permanent, plus general layer + God-class guards. Extends the existing Spaarke.ArchTests project (archived-R3 item #8 God-class audit becomes the LOC/ctor-dep threshold rule). EXPANDED 2026-08-13 (deployment-complexity refactor ask, project CLAUDE.md decision): rules (a)/(b)/(c) lock in tasks 061 (uniform config validation — allowlist for kill-switch-gated deferred options comes from 061's exemption list in notes/), 062 (GraphAppRoles.cs single source — rule fails if a second hardcoded Graph app-role list appears in src/ or if the constant is absent while consumers reference it), and the NG1 #3(b) credential migration (rule c — no ClientSecretCredential/AuthType=ClientSecret for Dataverse scopes outside the documented allowlist: SpeAdmin per-tenant, OBO/ConfidentialClient, DataverseAccessDataSource user-context, flag-gated local-dev fallbacks — per ADR-028:24; task 060 does NOT own this, it drops the vestigial app-reg only). Sequencing: rule (a) owner = 061, (b) = 062, (c) = the NG1 #3(b) migration (task 011's design). If an owner has not executed, author its rule against the TARGET state as [Skip]-until-owner-lands with the owning task cited — never water a rule down to pass on the unremediated state.</background>
+    <relevant-files>
+      <file role="new">tests/**/Spaarke.ArchTests/ (new fitness-function tests + seeded-violation fixtures)</file>
+      <file role="canonical-reference">.claude/adr/ADR-013-ai-architecture.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-010-di-minimalism.md</file>
+      <file role="canonical-reference">docs/standards/TEST-ARCHITECTURE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Extends the existing Spaarke.ArchTests project.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: add fitness functions for (1) no non-AI code injects AI-internal types, (2) no IDataverseService as/is ServiceClient casts outside the shared extension, (3) layer-dependency rules, (4) God-class LOC/ctor-dep thresholds, (5) [rule a] every customer-critical IOptions&lt;T&gt; registered in DI carries [Required] on critical props + ValidateOnStart, exempting only 061's documented gated-options allowlist, (6) [rule b] GraphAppRoles.cs is the only Graph app-role list in src/ (no second hardcoded role-GUID list), (7) [rule c] no ClientSecretCredential / AuthType=ClientSecret construction for Dataverse scopes outside the ADR-028 allowlist (SpeAdmin per-tenant, OBO, DataverseAccessDataSource user-context, flag-gated local-dev fallback). Each rule MUST fail on a seeded violation AND pass on current clean code (or be [Skip]-until its owning task lands — 061 for (a), 062 for (b), the NG1 #3(b) migration for (c) — never weakened to pass dirty state).</constraint>
+    <constraint source="ADR-038">Scope: these are fitness tests (KEEP category — architectural invariants), not scaffolding; behavior over mocks.</constraint>
+    <constraint source="project">Scope: extend Spaarke.ArchTests only; do not add a new test project.</constraint>
+    <constraint source="net10-2026-08-14">Build on the net10 ArchTests state (handback `notes/r3-handoff.md`): `Spaarke.ArchTests` is GREEN with 28 tests; the ADR-010 1:1-interface ceiling is **153** (re-armed from 76 — legit seams; `IsRecordType` now detects record structs). Your new rules (a/b/c) must coexist — do NOT lower the 153 ceiling or fight the existing rules. The net10 H2 guard test **`DiGraphValidationTests`** (asserts a clean DI graph, `ValidateOnBuild`/`ValidateScopes` on) is MAINTAIN/KEEP — do NOT delete/weaken/duplicate it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Architecture fitness functions</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING reason). Load ADR-013/ADR-010 + TEST-ARCHITECTURE.</step>
+    <step order="1">Add the facade rule: no non-AI namespace may reference/inject IActionResolver/IActionRunner/IPlaybookLookupService (ADR-013).</step>
+    <step order="2">Add the downcast rule: no IDataverseService as/is ServiceClient cast outside the shared Spaarke.Dataverse extension.</step>
+    <step order="3">Add layer-dependency rules and God-class LOC/ctor-dep threshold rules.</step>
+    <step order="3a">Add rule (a) IOptions-validated-on-start: enumerate DI-registered options (AddOptions + Configure&lt;&gt;), assert customer-critical ones are [Required]-annotated + ValidateOnStart; consume 061's gated-options exemption list from projects/code-quality-and-assurance-r3/notes/ as the allowlist (if 061 not yet landed, author against target state + [Skip]-until with owning task cited).</step>
+    <step order="3b">Add rule (b) GraphAppRoles single-source: no second hardcoded Graph app-role GUID list in src/; the constant exists once task 062 lands ([Skip]-until if not).</step>
+    <step order="3c">Add rule (c) as a [Skip]-until TRACKING flag for the remaining secret-based Dataverse path (shared-lib DataverseServiceClientImpl/DataverseWebApiService per assessment §Addendum 2026-08-13): no ClientSecretCredential/AuthType=ClientSecret for Dataverse scopes outside the ADR-028:24 allowlist. Owner = the NG1 #3(b) migration (task 011's design), NOT task 060. Report-only (Skip) until #3b lands, then flip to enforcing.</step>
+    <step order="4">For each rule, add a seeded-violation fixture proving the rule fails, then confirm the rule passes on current clean code (or is [Skip]-until its owning task lands).</step>
+    <step order="5">dotnet build + full dotnet test green.</step>
+    <step order="6">Update TASK-INDEX.md: set task 040 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Spaarke.ArchTests already exists (R1 forcing-function layer) but lacks the facade / downcast / layer / God-class rules.</existing>
+    <extension>Yes — this extends the existing ArchTests project with new rules; no new test project is created.</extension>
+    <cost-of-doing-nothing>Without these fitness functions, the R3 remediations (facade compliance, downcast collapse) silently re-drift as the codebase grows — exactly the grade-drift that made R3 necessary.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/**/Spaarke.ArchTests/ (new fitness functions + seeded-violation fixtures)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each new rule, it FAILS on its seeded violation and PASSES on current clean code.</criterion>
+    <criterion testable="true">Given the suite, dotnet build + full dotnet test are green with the new rules active.</criterion>
+    <criterion testable="true">Negative: no new test project was created (Spaarke.ArchTests extended in place).</criterion>
+    <criterion testable="true">Rules (a)/(b)/(c) exist: (a) a seeded DI-registered customer-critical options class WITHOUT ValidateOnStart fails the rule while 061's exempted gated options do not; (b) a seeded second hardcoded Graph app-role GUID list fails the rule; (c) rule (c) exists as a [Skip]-until tracking flag that detects a seeded ClientSecretCredential-for-Dataverse outside the ADR-028 allowlist; it stays report-only until the NG1 #3(b) migration (task 011's design) lands, then flips to enforcing — owner is the NG1 migration, not task 060.</criterion>
+    <criterion testable="true">Negative: no rule was weakened/tuned to pass on unremediated state — any rule whose owning task (060/061/062) has not landed is [Skip]-until with the owning task cited, not deleted or diluted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-14 / design.md §9 + archived-R3 item #8. Gate for task 042 (CI wiring). EXPANDED 2026-08-13: rule (a) enforces task 061 (#2), rule (b) enforces task 062 (#4), rule (c) is a report-only tracking flag for the remaining secret-based Dataverse path owned by the NG1 #3(b) migration (task 011's design) — task 060 is the #3a vestigial-app-reg drop only. Per the accepted r1 ask (notes/deployment-refactors-assessment-2026-08-12.md §3 + §Addendum 2026-08-13).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

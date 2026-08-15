@@ -1,0 +1,88 @@
+<task>
+  <metadata>
+    <id>064</id>
+    <title>E1b create-new-via-Quick-Start → confirmable candidate + E1c .eml auto-load into wizard AI-prepopulate</title>
+    <phase>5 Pillar E — Reconciliation UI (UAT round-2, last behavior)</phase>
+    <tags>pcf react fluent-ui frontend bff-api api spaarke-ai ai testing</tags>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (net-new BFF endpoint) + .ts/.tsx (shared lib, QuickStartModal SpaarkeAi hot-path, both hosts); BFF §10 governance; 4 layers; TEST-MODIFYING.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>BFF §10 net-new endpoint on the Services/Ai/Chat hot-path + SpaarkeAi-hot-path glue; project CLAUDE.md pins the E-shell/reader integration glue to opus.</model-tier-reason>
+    <effort>high</effort>
+    <steps-mode>directional</steps-mode>
+  </metadata>
+
+  <goal>
+    Deliver the two remaining UAT round-2 behaviors for the reconciliation Related-to flow:
+    (E1b) "New record" in the Related-to review creates a record via the shipped Quick Start /
+    Create*Wizard surface-launch, and the created record becomes the CONFIRMED regarding of the
+    email (NFR-10) — no second write path. (E1c) When that wizard opens, its AI-prepopulate file
+    step is auto-seeded with the reconciled email's archived .eml content (parity with the
+    Assistant's "open a wizard from the current file" flow), so the maker does not re-upload it.
+    Operator decision 2026-08-11: build BOTH E1b + E1c in r2 now (r3 is completed; not a work
+    destination). E1c requires a NET-NEW BFF ingest endpoint — the full investigation confirmed no
+    reuse path exists; compose the existing reusable primitives (eml text extraction, session-store
+    write, sprk_document→driveItem resolution) rather than duplicate them.
+  </goal>
+
+  <justification>
+    <existing>
+      NEW BFF surface (E1c ingest endpoint): closest neighbors — POST /api/ai/chat/sessions/{id}/documents
+      (raw multipart only; mints its own GUID; rejects .eml) and GET .../documents/{id}/eml-render
+      (returns sanitized HTML, not attachable bytes). Neither converts an external sprk_document into a
+      session-readable document. NEW client contract (E1b onLaunchCreateRecord): closest neighbor is the
+      existing fire-and-forget onCreateNewRecord tile on EmailConnectionsReviewProps (no return, does not
+      re-enter confirm). Verified by two independent Explore investigations (2026-08-11).
+    </existing>
+    <extension>
+      No — the multipart upload endpoint cannot be extended to take a document reference without changing
+      its contract + allow-list; onCreateNewRecord cannot be repurposed without breaking existing
+      EmailWorkspace consumers. Both additions are strictly additive alongside the existing surfaces.
+    </extension>
+    <cost-of-doing-nothing>
+      Without E1c the wizard opens empty and the maker must manually re-locate + re-upload the same email
+      the reconciliation surface already holds (the concrete UAT complaint). Without E1b "New record" is a
+      dead-end tile that opens a wizard but never files the created record as the email's regarding, so the
+      Fields/Tasks tabs stay gated (NFR-10) and the reviewer must re-open the record and link it by hand.
+    </cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="§10-BFF">The new endpoint states a Placement Justification in the PR; publish-size ≤60 MB compressed + report delta vs ~49.63 MB baseline; no new HIGH CVE (dotnet list package --vulnerable --include-transitive); seam test under an ADR-038 KEEP path; tests added in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+    <constraint source="§11">Compose the reusable building blocks the investigation names (eml text extraction service, session-store write helper, sprk_document→GraphDriveId/ItemId resolution via GetDocumentAsync) — do NOT re-implement MimeKit extraction or the doc-upload-binary write inline if a reusable method exists.</constraint>
+    <constraint source="ADR-013/NFR-05">The endpoint lives in the Documents/Chat domain and reuses IDocumentDataverseService + SpeFileStore + the chat-session store; it MUST NOT reach AI internals except via existing PublicContracts. No new AI-internal injection.</constraint>
+    <constraint source="ADR-012">Shared-lib additions (onLaunchCreateRecord, EmlSource, CreatedRecordRef) stay context-agnostic — no direct Xrm; the host supplies the launcher. QuickStartModal stays a SpaarkeAi component (never imported into the shared lib).</constraint>
+    <constraint source="NFR-04">The .eml materialize + session ingest is best-effort/non-fatal on the client seeding path — a failure to pre-load MUST NOT block opening the wizard or filing the created record (the wizard still opens empty; E1b still confirms).</constraint>
+    <constraint source="NFR-10">The created record is filed via the SAME additive applyRegardingSelection/confirmCandidate path as a picked record — no new write path — and becomes the confirmed regarding that ungates Fields/Tasks.</constraint>
+    <constraint source="back-compat">onLaunchCreateRecord + onRecordCreated are OPTIONAL/additive — existing EmailWorkspace + Assistant QuickStartModal callers compile and behave unchanged when omitted.</constraint>
+    <constraint source="deploy-pause">Deploys are PAUSED — the BFF endpoint ships with the next BFF release on operator go-ahead; the code merges behind that gate. Do NOT deploy.</constraint>
+    <constraint source="hot-path">/conflict-check BFF AND SpaarkeAi before the PR; update projects/INDEX.md; file an r3 coordination note (r3 owns the adjacent Services/Ai/Chat surface, now merged).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>E1c BFF: a new POST ingest endpoint takes a sprk_document id (the archived .eml), resolves GraphDriveId/GraphItemId via the existing GetDocumentAsync, downloads via SpeFileStore, materializes the .eml as the format the wizard consumption path accepts (per the wizard-consumption investigation), writes it to the chat-session document store under a session fileId, and returns { sessionId, fileId, fileName }.</criterion>
+    <criterion>E1c BFF: caller auth + AI-authorization filtered exactly like the sibling chat-document endpoints; 404 when the sprk_document is missing/not an email archive; best-effort text extraction (empty body still ingests a stub, never 500s the reconciliation UI).</criterion>
+    <criterion>E1c client: useHandoffFileLeg accepts the materialized type end-to-end so the fetched content actually drives AI-prepopulate (allow-list widened per investigation; the existing 3 types unchanged).</criterion>
+    <criterion>E1b shared lib: EmailConnectionsReviewProps gains onLaunchCreateRecord?: () => Promise&lt;CreatedRecordRef | null&gt;; when set, the "New record" tile awaits it and on a non-null ref calls confirmCandidate({ entity, targetId, targetName }) via the existing applyRegardingSelection path. onCreateNewRecord remains the untouched fallback for existing consumers.</criterion>
+    <criterion>E1b shared lib: ReconciliationWorkspaceProps gains onLaunchCreateRecord?: (ctx: { emlSource?: EmlSource }) =&gt; Promise&lt;CreatedRecordRef | null&gt; and resolveEmlSource?: (record) =&gt; EmlSource | undefined; the workspace binds the current row's emlSource and injects a zero-arg launcher into BOTH the grid RelatedToCell and the browse Related-to tab review props; on a created ref the confirm re-scopes Fields/Tasks (forceRescope + onAssociationsChanged).</criterion>
+    <criterion>E1b QuickStartModal (SpaarkeAi): additive onRecordCreated?(ref: { id, entityType }); the create-record cards await the previously-voided launchSurface outcome and, on result.committed, fire onRecordCreated({ id: result.recordId, entityType }) mapped per card. All existing callers unaffected.</criterion>
+    <criterion>E1b hosts: the code-page host (sprk_communicationreconciliation) and the SpaarkeAi widget host (communications-reconciliation) implement onLaunchCreateRecord — mount QuickStartModal, bridge the promise via onRecordCreated (null on cancel), and seed getFileContext from the E1c endpoint for the row's emlSource.</criterion>
+    <criterion>Tests: shared-lib RTL (New record → mocked launcher → confirmCandidate called with the ref; workspace threads onLaunchCreateRecord into both entry points); QuickStartModal (await outcome → onRecordCreated fires only on committed); BFF seam test for the .eml→session-document ingest (happy path + missing-doc 404 + non-fatal empty body).</criterion>
+    <criterion>Step 9.5 code-review + adr-check clean; §10 publish-size + CVE reported; jest + dotnet test green; /conflict-check BFF+SpaarkeAi clean; INDEX.md + r3 coordination note updated.</criterion>
+    <criterion>Negative/authorization: unauthenticated call to the new endpoint 401s; a caller without AI-authorization for the session is filtered exactly as the sibling endpoints; a non-MDA/dev host (no launcher wired) renders the existing "New record" fire-and-forget tile with zero behavior change.</criterion>
+  </acceptance-criteria>
+
+  <steps>
+    <step>Confirm the two Explore investigations' verdicts (reuse building blocks + wizard consumption path). Finalize: (a) reusable eml-text extraction method, (b) reusable session-store write helper, (c) sprk_document→driveItem resolver, (d) the materialization format the wizard actually consumes.</step>
+    <step>E1c BFF: add the ingest endpoint composing (a)+(b)+(c); seam test.</step>
+    <step>E1c client: widen useHandoffFileLeg allow-list for the materialized type.</step>
+    <step>E1b shared lib: add contracts + EmailConnectionsReview handler + ReconciliationWorkspace threading + tests.</step>
+    <step>E1b QuickStartModal: additive onRecordCreated await-outcome + tests.</step>
+    <step>E1b hosts: wire onLaunchCreateRecord + getFileContext from the E1c endpoint in both 062 hosts.</step>
+    <step>Governance: §10 publish-size + CVE; Step 9.5 (code-review + adr-check); /conflict-check BFF+SpaarkeAi; INDEX.md + r3 coordination note; PR.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the wizard-consumption investigation shows a materialized .txt/.docx does NOT drive AI-prepopulate end-to-end (server extraction rejects it), STOP and escalate the materialization-format choice (root CLAUDE.md §6) rather than shipping an endpoint whose output the wizard silently ignores.</trigger>
+  </escalation>
+</task>

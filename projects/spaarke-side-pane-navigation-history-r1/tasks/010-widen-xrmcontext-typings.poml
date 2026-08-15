@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-side-pane-navigation-history-r1">
+  <metadata>
+    <title>Widen xrmContext.ts typings — getPane/pane.select, webresourceName, 3-frame getXrm()</title>
+    <phase>1 Framework</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared-lib .ts (@spaarke/ui-components) consumed by multiple surfaces; frontend tag; foundational typings the whole framework builds on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified typing widening against a known file with a closed acceptance set; no architectural blast radius beyond the typed surface.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Group A runs alongside task 020 (Dataverse schema) — different surfaces (xrmContext.ts vs schema doc), no shared files.</parallel-reason>
+    <deps>001</deps>
+    <tags>shared-lib,frontend</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Widen the typed Xrm plumbing in src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts: add getPane(paneId) + pane.select() to the SidePanesApi interface, fix PageInput.webresource to use webresourceName, and extend getXrm() to a 3-frame walk (window → parent → top). Keep the code React-16/17-safe per ADR-022. Add co-located unit tests.</prompt>
+  <role>SPAARKE platform developer with TypeScript + Power Apps Xrm client-API typing expertise. Follow ADRs strictly.</role>
+  <goal>A modified src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts whose SidePanesApi exposes getPane + pane.select and whose PageInput uses webresourceName, with getXrm() walking window→parent→top; plus a co-located __tests__/xrmContext.test.ts. Existing callers still compile and all unit tests pass.</goal>
+  <context>
+    <background>Per spec Affected Areas + plan.md Phase 1 task 010, the framework host (task 011) and the app-startup bootstrap (FR-02) need typed access to getPane/pane.select, the correct webresourceName field on the pane page input, and a getXrm() that finds Xrm across nested frames (the code page runs inside a pane iframe). This widens the existing typed Xrm.App.sidePanes iface rather than adding a parallel one (NFR-08 reuse).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/utils/__tests__/xrmContext.test.ts</file>
+      <file role="canonical-reference">projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/SidePaneManager.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Spike go/no-go verdict + productionized bootstrap approach (confirms getXrm frame-walk + createPane usage the typings must support).</dependency>
+    </dependencies>
+  </context>
+  <constraints>
+    <constraint source="ADR-022">xrmContext.ts is @spaarke/ui-components code and MUST stay React-16/17-safe: no createRoot, use JSXElement not JSX.Element. (No React here, but keep the shared-lib rule if any JSX types are touched.)</constraint>
+    <constraint source="project">MODIFY-ONLY: widen the existing SidePanesApi / PageInput types and getXrm(); do NOT introduce a parallel Xrm abstraction (NFR-08 reuse).</constraint>
+    <constraint source="project">Host-context only — the typings describe Xrm.App.sidePanes / Xrm.Utility; no BFF, no server-side types.</constraint>
+    <constraint source="project">getXrm() MUST degrade safely: when no Xrm exists on any of the three frames it returns undefined (never throws), so callers on non-MDA surfaces do not crash.</constraint>
+  </constraints>
+  <knowledge>
+    <topic>Power Apps Xrm client API typings — Xrm.App.sidePanes, page inputs, frame context</topic>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>projects/spaarke-side-pane-navigation-history-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Frame-walk getXrm" location="src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts">Extend the existing getXrm() to check window, then parent, then top for a defined Xrm; return the first found or undefined.</pattern>
+      <pattern name="SidePanesApi typing" location="projects/spaarke-side-pane-navigation-history-r1/notes/retired-sidepane-code/SidePaneManager.ts">Reference for which sidePanes members (getPane, pane.select) the bootstrap/host will call.</pattern>
+    </patterns>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor (FULL) + model-tier (sonnet) + effort (high) per task-execute Step 0.5; load the knowledge files and read xrmContext.ts in full.</step>
+    <step order="1">Add getPane(paneId: string) and a pane.select() method to the typed SidePanesApi interface, matching the real Xrm.App.sidePanes surface the host (011) and bootstrap (FR-02) call.</step>
+    <step order="2">Fix the PageInput type so the webresource pane page input uses webresourceName (not webresource), matching the pageType:'webresource' contract used by CalendarSidePane.</step>
+    <step order="3">Extend getXrm() to a 3-frame walk: check window, then parent, then top; return the first defined Xrm, else undefined (no throw).</step>
+    <step order="4">Verify existing callers of xrmContext.ts still compile (grep imports of getXrm / SidePanesApi / PageInput across the repo; adjust only if a rename breaks them).</step>
+    <step order="5">Author co-located unit tests in __tests__/xrmContext.test.ts: getPane/pane.select present on the typed surface; PageInput uses webresourceName; getXrm finds Xrm on window, on parent, on top; and returns undefined when none of the three frames has Xrm.</step>
+    <step order="6">Run the shared-lib unit tests + typecheck; confirm green.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set task 010 status to completed.</step>
+    <step order="8">Document any deviation in projects/spaarke-side-pane-navigation-history-r1/notes/.</step>
+  </steps>
+  <escalation>
+    <trigger>If widening PageInput to webresourceName breaks existing callers in a way that cannot be resolved by a non-breaking additive change, STOP and escalate (root §6 — breaking change to a shared-lib contract) rather than silently altering consumer code outside this task's scope.</trigger>
+  </escalation>
+  <tools>
+    <tool name="npm">Recompile @spaarke/ui-components + run its unit tests (Jest).</tool>
+  </tools>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/utils/__tests__/xrmContext.test.ts</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Given the widened typings, when a caller uses SidePanesApi, then getPane(paneId) and pane.select() are available on the typed surface.</criterion>
+    <criterion testable="true">Given the pane page input type, when constructing a webresource pane, then the field is webresourceName (not webresource).</criterion>
+    <criterion testable="true">Given getXrm() runs, when Xrm exists on window, parent, or top, then it returns that Xrm (walking window→parent→top in order).</criterion>
+    <criterion testable="true">Given existing consumers of xrmContext.ts, when the shared lib is recompiled, then they still compile with no changes required.</criterion>
+    <criterion testable="true">Negative: given no Xrm on any of the three frames, when getXrm() runs, then it returns undefined and does not throw.</criterion>
+    <criterion testable="true">All unit tests pass; shared-lib typecheck/build green.</criterion>
+  </acceptance-criteria>
+  <notes>Maps to spec Affected Areas (xrmContext.ts widen) + plan.md Phase 1 task 010. NFR-08 reuse: widen the existing typed Xrm.App.sidePanes iface + getXrm(), no parallel implementation. Task 011 (host) depends on these typings.
+
+COMPLETED 2026-08-13 (Sonnet 5, FULL rigor). Summary:
+- SidePanesApi widened with getPane(paneId): SidePane | undefined; SidePane widened with select(): void — matches real Xrm.App.sidePanes surface confirmed against sprk_openSprkChatPane.js / sprk_event_sidepane_form.js usage.
+- PageInput widened additively with webresourceName?: string (no prior `webresource` field existed to rename, so this was purely additive — no breaking change, escalation trigger did NOT fire). Also widened `data` to `Record&lt;string, any&gt; | string` to match the real pane.navigate({pageType:'webresource', data: &lt;query-string&gt;}) contract observed in the canonical reference notes/retired-sidepane-code/SidePaneManager.ts — flagged in code-review as a minor beyond-the-letter addition, judged in-scope (additive, directly evidenced by the cited reference).
+- getXrm() extended to a 3-frame walk (window -&gt; parent -&gt; top), each frame try/catch-guarded, never throws; returns first frame with a WebApi-bearing Xrm, else undefined. Doc comment encodes the task-001 spike lesson (never cache Xrm; safe/cheap to call every poll).
+- Verified zero breaking changes: full-project `npm run build` (tsc) across @spaarke/ui-components compiled clean with no consumer changes needed (14 existing importers of xrmContext.ts, none required edits).
+- Co-located tests extended in __tests__/xrmContext.test.ts (28 tests, all passing): 3-frame precedence (window &gt; parent &gt; top), undefined-no-throw negative case, repeated-call/no-caching behavior, SidePanesApi.getPane + pane.select typed-surface exercise, PageInput.webresourceName contract. Test-env note: jsdom marks `window.top` non-configurable ([LegacyUnforgeable]), so tests mock it via the internal `window._top` backing field (documented inline) rather than Object.defineProperty (which works for window.parent but throws for window.top).
+- Build/test commands + results: `npm install --legacy-peer-deps --no-audit --no-fund` (Spaarke.UI.Components + sibling Spaarke.Auth + Spaarke.SdapClient, whose dist/ was pre-req for the shared-lib tsc build — pre-existing repo build-order gap, unrelated to this task, resolved by building the two siblings first); `npm run build` (tsc) → 0 errors; `npx eslint src/utils/xrmContext.ts src/utils/__tests__/xrmContext.test.ts` → clean; `npx jest --ci --maxWorkers=2` → 2565 passed / 20 failed across 208 suites — all 20 failures are pre-existing and unrelated (TimelineComposeBox, recordHeader.integration, ConversationView.forward, XrmDataverseClient, EntityCreationService.cascade, toolbarLaunchDefaults, buildDynamicWorkspaceConfig, surfaceLaunchRegistry, RichFilePreview — none import xrmContext.ts; confirmed via `git status --porcelain` scoping to only the 2 files this task touched). xrmContext.test.ts itself: 28/28 passing.
+- Quality gates (Step 9.5): code-review — 0 critical/warning findings, 2 suggestions (jsdom `_top` mock fragility note; PageInput.data widening visibility note), both non-blocking. adr-check — 0 violations; ADR-022 confirmed compliant (zero React/JSX surface in this file).
+- Escalation trigger did not fire (no breaking change to PageInput or any other type).</notes>
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

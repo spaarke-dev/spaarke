@@ -45,7 +45,7 @@ public static class OBOEndpoints
             {
                 return ex.ToProblemDetails();
             }
-        }).RequireRateLimiting("graph-read");
+        }).RequireRateLimiting("graph-read").RequireAuthorization();
 
 
         // PUT: small upload (as user). Post-upload RAG indexing is triggered by the
@@ -99,7 +99,7 @@ public static class OBOEndpoints
                     statusCode: 500
                 );
             }
-        }).RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write").RequireAuthorization();
 
 
         // POST: create upload session (as user)
@@ -135,7 +135,7 @@ public static class OBOEndpoints
             {
                 return ex.ToProblemDetails();
             }
-        }).RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write").RequireAuthorization();
 
         // PUT: upload chunk (as user)
         app.MapPut("/api/obo/upload-session/chunk", async (
@@ -199,7 +199,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Problem(statusCode: 500, title: "Upload chunk failed");
             }
-        }).RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write").RequireAuthorization();
 
         // PATCH: update item (rename/move)
         app.MapPatch("/api/obo/drives/{driveId}/items/{itemId}", async (
@@ -238,7 +238,7 @@ public static class OBOEndpoints
             {
                 return ex.ToProblemDetails();
             }
-        }).RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write").RequireAuthorization();
 
 
         // GET: download content with range support (enhanced)
@@ -309,7 +309,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Problem(statusCode: 500, title: "Download failed");
             }
-        }).RequireRateLimiting("graph-read");
+        }).RequireRateLimiting("graph-read").RequireAuthorization();
 
         // DELETE: delete item (as user)
         app.MapDelete("/api/obo/drives/{driveId}/items/{itemId}", async (
@@ -338,7 +338,7 @@ public static class OBOEndpoints
             {
                 return TypedResults.Problem(statusCode: 500, title: "Delete failed");
             }
-        }).RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write").RequireAuthorization();
 
         return app;
     }

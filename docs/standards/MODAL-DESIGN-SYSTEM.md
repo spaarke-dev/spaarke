@@ -99,6 +99,18 @@ The shell's `dismiss` prop (default `light`) gates both the Fluent `Dialog`'s `m
 - **Light/dark parity** — every rule above applies unchanged under `webDarkTheme`; nothing in the shell hard-codes a light-mode assumption.
 - **Transform-robust centering** — the Fluent `Dialog` portal mounts above a CSS-transformed ancestor, so the modal centers correctly even when hosted inside a scaled/transformed container. This is the invariant the whole system rests on; do not replace the `Dialog`/`DialogSurface` envelope with a hand-rolled `position:fixed` overlay (that is the exact anti-pattern this project retires — three prior overlays did this and broke centering).
 
+### The canonical thin scrollbar (`thinScrollbarStyle`)
+
+The "thin, light-gray, theme-aware" scrollbar is **one shared mixin** — `thinScrollbarStyle` ([`theme/scrollbar.ts`](../../src/client/shared/Spaarke.UI.Components/src/theme/scrollbar.ts)), exported from `@spaarke/ui-components`. It is the single source of truth for that bar across the app (email reading pane, conversation lists, data grids, chat input). Semantic tokens only (`colorNeutralStroke1` / `colorNeutralStroke1Hover` thumb, transparent track), so it resolves correctly under light **and** dark themes; `scrollbarWidth`/`scrollbarColor` cover Firefox and the `::-webkit-scrollbar*` pseudo-elements cover Chromium/Edge/Safari.
+
+- **Inside a modal you get it for free** — `SprkModal`'s default `bodyScroll="native"` already applies the thin scrollbar to the body. Do nothing (`AccessGrantModal` is the reference consumer). `bodyScroll="arrows"` (the `ModalScrollArea` chevron pager) is the opt-in exception, not the default.
+- **Any scroll region outside a modal** (a widget list, a side pane, a custom body) — import the mixin and spread it into the scrollable `makeStyles` slot rather than re-declaring the rules:
+  ```ts
+  import { thinScrollbarStyle } from '@spaarke/ui-components';
+  const useStyles = makeStyles({ scrollArea: { overflowY: 'auto', ...thinScrollbarStyle } });
+  ```
+- **Do not** hand-roll `scrollbarWidth` / `::-webkit-scrollbar` fragments inline — the per-copy drift (different widths, radii, stroke tokens) is exactly what this mixin retired. New call sites spread `thinScrollbarStyle`.
+
 ---
 
 ## 7. Component names

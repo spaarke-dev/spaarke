@@ -27,7 +27,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.Middleware;
 ///
 /// <para>
 /// <b>§11 Component Justification.</b>
-/// (1) <i>Existing</i> — <see cref="SafetyPipelineMiddleware"/> already contains this pre-LLM scan, but
+/// (1) <i>Existing</i> — <c>SafetyPipelineMiddleware</c> already contains this pre-LLM scan, but
 /// it is a two-phase perimeter that ALSO runs post-LLM groundedness + citation verification + confidence
 /// scoring + compliance audit on every turn. F-8 needs ONLY the pre-LLM injection block + the fail-open
 /// signal. (2) <i>Extension</i> — that class is sealed and hardcodes the post-LLM phase; adding a
@@ -64,7 +64,7 @@ public sealed class PromptShieldChatMiddleware : ISprkChatAgent
 
     /// <summary>
     /// User-facing message emitted when an injection is detected. ADR-015: must not disclose which
-    /// document / pattern triggered the block. Mirrors <see cref="SafetyPipelineMiddleware"/>'s copy.
+    /// document / pattern triggered the block. Mirrors <c>SafetyPipelineMiddleware</c>'s copy.
     /// </summary>
     internal const string InjectionBlockedMessage =
         "Your message could not be processed due to a security policy violation. " +

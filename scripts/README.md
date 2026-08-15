@@ -294,7 +294,7 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ## Entra ID & Identity Scripts
 
 ### `Register-EntraAppRegistrations.ps1`
-**Purpose:** Create production Entra ID app registrations (BFF API + Dataverse S2S) and store credentials in Key Vault
+**Purpose:** Create the production Entra ID app registration (BFF API) and store credentials in Key Vault
 **Usage:** 🔴 One-time - Production environment setup
 **Lifecycle:** ✅ Maintained
 **Dependencies:** Azure CLI (`az login`), Entra ID admin permissions, Key Vault access
@@ -311,17 +311,18 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 # Preview what will be created
 .\Register-EntraAppRegistrations.ps1 -DryRun
 
-# Create both registrations
+# Create the BFF API registration
 .\Register-EntraAppRegistrations.ps1
-
-# Create only Dataverse S2S (BFF already done)
-.\Register-EntraAppRegistrations.ps1 -SkipBffApi
 ```
 
 **Creates:**
-- `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions
-- `spaarke-dataverse-s2s-prod` — Dataverse server-to-server authentication
-- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-ClientSecret, BFF-API-Audience, Dataverse-S2S-ClientId, Dataverse-S2S-ClientSecret
+- `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions (this app registration is also the single Dataverse Application User)
+- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-ClientSecret, BFF-API-Audience
+
+> **Note (2026-08-14, code-quality-and-assurance-r3 task 060):** the separate
+> `spaarke-dataverse-s2s-*` app registration + its `Dataverse-S2S-*` Key Vault secrets
+> were removed. They had zero code consumers; Dataverse server-to-server access
+> consolidated onto the BFF app registration credential (`API_CLIENT_SECRET`) on 2026-01-07.
 
 ---
 
@@ -345,9 +346,6 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 # Test with explicit credentials
 .\Test-EntraAppRegistrations.ps1 -BffApiClientId "abc123" -BffApiClientSecret "secret"
-
-# Test with Dataverse token acquisition
-.\Test-EntraAppRegistrations.ps1 -DataverseOrgUrl "https://spaarke-demo.crm.dynamics.com"
 ```
 
 ---

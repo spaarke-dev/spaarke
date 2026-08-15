@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>H3 — migrate obsolete X509Certificate2 ctor to X509CertificateLoader.LoadPkcs12</title>
+    <phase>P1 Hit-site remediation</phase>
+    <gate>005 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches auth (CIAM cert loading, ADR-028); tags include auth/bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single well-specified API migration at a known line; bounded.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits BFF auth code on the critical path; keep serial to avoid conflicting with 013/014 BFF edits.</parallel-reason>
+    <deps>005</deps>
+    <tags>dotnet, bff-api, auth, migration</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the obsolete `X509Certificate2` constructor (SYSLIB0057) at `CiamGraphClientFactory.cs:167` — `new X509Certificate2(pfxBytes, (string?)null, EphemeralKeySet)` — with `X509CertificateLoader.LoadPkcs12(...)`, preserving the `EphemeralKeySet` semantics. Verify the CIAM cert-load path (ADR-028 auth) still works via unit/integration coverage. Zero behavior change to certificate loading.</prompt>
+  <role>SPAARKE platform developer. Expert in X.509 certificate loading, the .NET 9+ `X509CertificateLoader` API, and CIAM/Graph auth. Follow ADRs strictly.</role>
+  <goal>`CiamGraphClientFactory.cs:167` uses `X509CertificateLoader.LoadPkcs12` with equivalent key-storage flags; no SYSLIB0057 warning; the CIAM cert-load path is exercised by a test and passes.</goal>
+
+  <context>
+    <background>design §5 H3. The BFF has `TreatWarningsAsErrors=false`, so SYSLIB0057 is a warning not an error there — but it should still be fixed cleanly. `X509CertificateLoader.LoadPkcs12(ReadOnlySpan&lt;byte&gt;, ReadOnlySpan&lt;char&gt;, X509KeyStorageFlags)` is the replacement; preserve `EphemeralKeySet`. ADR-028 makes this an auth-path change — smoke it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/CiamGraphClientFactory.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/** (add/adjust a CIAM cert-load test if one exists; else note coverage)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">BFF builds on net10.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">The CIAM cert-load path is auth-sensitive: preserve `EphemeralKeySet` and the exact loading semantics; do not change how the cert is sourced or its lifetime.</constraint>
+    <constraint source="project">Scope: the single H3 hit-site (+ its test). Do NOT sweep other SYSLIB items here — those are task 013.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>X509CertificateLoader.LoadPkcs12 migration (SYSLIB0057)</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="x509-loader" location="projects/dotnet-10-upgrade-r1/design.md">design §5 H3 — exact replacement + preserve EphemeralKeySet.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-09 + design §5 H3 + ADR-028. Declare RIGOR: FULL.</step>
+    <step order="1">Read `CiamGraphClientFactory.cs` around line 167; confirm the current ctor + flags.</step>
+    <step order="2">Replace with `X509CertificateLoader.LoadPkcs12(pfxBytes, null, X509KeyStorageFlags.EphemeralKeySet)` (matching the current flags/semantics).</step>
+    <step order="3">Build BFF; confirm no SYSLIB0057 warning remains at this site.</step>
+    <step order="4">Add or adjust a unit/integration test exercising the CIAM cert-load path; if no test harness exists for it, document the coverage gap + manual verification in notes.</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 012 status to ✅.</step>
+    <step order="6">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `LoadPkcs12` cannot reproduce the exact `EphemeralKeySet` behavior the CIAM path relies on, STOP and surface per CLAUDE.md §6 — an auth cert-loading behavior change is not in scope for a retarget.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + test BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/CiamGraphClientFactory.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** (CIAM cert-load coverage)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`CiamGraphClientFactory.cs:167` uses `X509CertificateLoader.LoadPkcs12` with equivalent flags; no SYSLIB0057 warning at that site.</criterion>
+    <criterion testable="true">The CIAM cert-load path is exercised by a test that passes (or the coverage gap + manual verification is documented).</criterion>
+    <criterion testable="true">Negative: the certificate source, lifetime, and `EphemeralKeySet` semantics are unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-09. ADR-028 auth path — OBO/MI smoke happens holistically in task 051, but the cert-load unit coverage lives here.
+
+  COMPLETION (2026-08-12): executed by sonnet subagent (`fix-h3`) in parallel with task 011. Single-line change at `CiamGraphClientFactory.cs:167`: `new X509Certificate2(pfxBytes, (string?)null, X509KeyStorageFlags.EphemeralKeySet)` → `X509CertificateLoader.LoadPkcs12(pfxBytes, (string?)null, X509KeyStorageFlags.EphemeralKeySet)`. `byte[]`→`ReadOnlySpan<byte>` implicit; password (null) + `EphemeralKeySet` preserved EXACTLY → cert source/lifetime/key-storage semantics unchanged (negative criterion met). `using System.Security.Cryptography.X509Certificates;` already present. BFF build GREEN (0 errors; warning count 22→21 — **SYSLIB0057 for this file GONE**, verified by log grep). Test coverage gap documented in `notes/h3-x509-loader.md` (LoadCertificateAsync is private + live-SecretClient-dependent; no existing unit exercises it; holistic OBO/MI/CIAM smoke is task 051 — acceptance-criterion escape hatch taken). Scope: ONLY CiamGraphClientFactory.cs changed. Step 9.5: adr-check ADR-028 — cert-load path semantics preserved, no auth-flow change (retarget only), PASS.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

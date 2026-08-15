@@ -104,10 +104,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.x'
+          dotnet-version: '10.x'
 
       - name: Restore
         run: dotnet restore --verbosity minimal
@@ -215,11 +215,16 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          # LFS smudge required: tests/fixtures/compose-corpus/*.docx are git-LFS pointers
+          # (.gitattributes: *.docx filter=lfs). Without this the ComposeNumbering/Projection
+          # seam tests parse pointer files → ~30 Compose tests fail. Mirrors the sdap-ci.yml
+          # build-test fix (email-communication-intelligence-r2, 2026-08-13).
+          lfs: true
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.x'
+          dotnet-version: '10.x'
 
       - name: Cache NuGet
         uses: actions/cache@v5
@@ -281,10 +286,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.x'
+          dotnet-version: '10.x'
 
       - name: Restore
         run: dotnet restore --verbosity minimal
@@ -464,10 +469,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup .NET 8
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '8.x'
+          dotnet-version: '10.x'
 
       - name: Setup .NET Framework targeting pack
         shell: pwsh

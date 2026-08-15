@@ -528,16 +528,37 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
         return Task.FromResult<Guid?>(Guid.TryParse(contact, out var id) ? id : Guid.NewGuid());
     }
 
-    public override Task<IReadOnlyList<ExternalParticipation>> GetParticipationsAsync(Guid contactId, CancellationToken ct = default)
+    public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
     {
         var raw = Header("X-Test-Projects");
-        IReadOnlyList<ExternalParticipation> result = string.IsNullOrWhiteSpace(raw)
+        IReadOnlyList<ExternalParticipation> projects = string.IsNullOrWhiteSpace(raw)
             ? Array.Empty<ExternalParticipation>()
             : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                  .Where(p => Guid.TryParse(p, out _))
                  .Select(p => new ExternalParticipation { ProjectId = Guid.Parse(p), AccessLevel = ExternalAccessLevel.FullAccess })
                  .ToList();
-        return Task.FromResult(result);
+
+        // Optional matter / work-assignment grants for polymorphic tests (task 028).
+        var matters = ParseGuidHeader("X-Test-Matters");
+        var was = ParseGuidHeader("X-Test-WorkAssignments");
+
+        return Task.FromResult(new ExternalGrantSet
+        {
+            Projects = projects,
+            Matters = matters,
+            WorkAssignments = was,
+        });
+    }
+
+    private IReadOnlySet<Guid> ParseGuidHeader(string name)
+    {
+        var raw = Header(name);
+        return string.IsNullOrWhiteSpace(raw)
+            ? new HashSet<Guid>()
+            : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                 .Where(v => Guid.TryParse(v, out _))
+                 .Select(Guid.Parse)
+                 .ToHashSet();
     }
 }
 

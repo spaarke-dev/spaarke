@@ -97,9 +97,12 @@ public static class TodoSyncModule
             ? sp.GetRequiredService<NotImplementedTodoSyncBackfiller>()
             : sp.GetRequiredService<NullTodoSyncBackfiller>());
 
-        Console.WriteLine(enabled
-            ? "⚠ Todo Graph sync ENABLED (Spaarke:Graph:TodoSync:Enabled=true) — placeholder impls throw NotImplementedException until Phase 7 (tasks 061/062/063/065)"
-            : "✓ Todo Graph sync disabled (Spaarke:Graph:TodoSync:Enabled=false) — Null-Object impls registered (ADR-032 P2)");
+        // D9-01 (config-deployment): removed Console.WriteLine startup echo that bypassed the
+        // ILogger/OTel pipeline (pre-host-build registration context). When enabled, the
+        // NotImplemented* placeholder impls throw loudly at call time; when disabled the ADR-032 P2
+        // Null-Object impls are registered above (the registrations are the source of truth).
+        // If an operator-visible enabled/disabled signal is wanted, surface it via
+        // StartupDiagnostics (post-host-build, real ILogger→OTel) — deferred to the D9-01 tranche-B task.
 
         return services;
     }

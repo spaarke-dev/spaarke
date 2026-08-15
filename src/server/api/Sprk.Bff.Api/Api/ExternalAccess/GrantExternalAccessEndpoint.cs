@@ -26,11 +26,14 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 public static class GrantExternalAccessEndpoint
 {
     private const string EntitySet = "sprk_externalrecordaccesses";
-    // Resource identifier for ITenantCache (FR-05). Tenant scope is derived from the caller's
-    // 'tid' claim. The cached value is a list of active participations per Contact — not an
-    // authorization decision.
-    private const string ExternalAccessResource = "external-access-grant";
-    private const int CacheVersion = 1;
+    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
+    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
+    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so grant
+    // invalidation never actually cleared the cache (it relied on the 60s TTL). Tenant scope is derived
+    // from the caller's 'tid' claim; the cached value is per-Contact participation data, not an authz
+    // decision (ADR-009).
+    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
+    private const int CacheVersion = ExternalParticipationService.CacheVersion;
 
     /// <summary>
     /// Registers the grant endpoint on the external-access group.
@@ -66,11 +69,20 @@ public static class GrantExternalAccessEndpoint
         CancellationToken ct)
     {
         // ── Validation ───────────────────────────────────────────────────────
-        if (request.ContactId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ContactId is required and must be a valid GUID.");
+        // Grantee kind (task 073 #7): a normal grant names a Contact; an ORGANIZATION grant names an
+        // Organization with NO ContactId — every ACTIVE member of that org then inherits access at
+        // check time (AccessibleRecordSetService Term 3). Exactly one grantee kind is required; an
+        // empty ContactId is only valid when an OrganizationId is supplied.
+        var isOrgGrant = request.ContactId == Guid.Empty;
+        if (isOrgGrant && !request.OrganizationId.HasValue)
+            return ProblemDetailsHelper.ValidationError(
+                "ContactId is required, unless granting to an Organization (supply OrganizationId with no ContactId).");
 
-        if (request.ProjectId == Guid.Empty)
-            return ProblemDetailsHelper.ValidationError("ProjectId is required and must be a valid GUID.");
+        // Resolve the polymorphic grant root (project|matter|workassignment) or the legacy ProjectId
+        // shorthand. Fail-closed: a missing/unknown root is rejected 400 and NO row is written.
+        var root = ResolveGrantRoot(request);
+        if (!root.Ok)
+            return ProblemDetailsHelper.ValidationError(root.Error!);
 
         if (!Enum.IsDefined(typeof(ExternalAccessLevel), request.AccessLevel))
             return ProblemDetailsHelper.ValidationError(
@@ -80,20 +92,20 @@ public static class GrantExternalAccessEndpoint
         var callerSystemUserId = ResolveCallerSystemUserId(httpContext);
 
         logger.LogInformation(
-            "[EXT-GRANT] Granting {AccessLevel} access to Contact {ContactId} for Project {ProjectId}",
-            request.AccessLevel, request.ContactId, request.ProjectId);
+            "[EXT-GRANT] Granting {AccessLevel} access to Contact {ContactId} for {RootType} {RootId}",
+            request.AccessLevel, request.ContactId, root.Type, root.Id);
 
         // ── Create the access record (Dataverse) + invalidate cache ──────────
         Guid accessRecordId;
         try
         {
-            accessRecordId = await CreateGrantAsync(request, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
+            accessRecordId = await CreateGrantAsync(request, root.Type, root.Id, callerSystemUserId, dataverseClient, cache, httpContext, logger, ct);
         }
         catch (Exception ex)
         {
             logger.LogError(ex,
-                "[EXT-GRANT] Failed to create Dataverse access record for Contact {ContactId} / Project {ProjectId}",
-                request.ContactId, request.ProjectId);
+                "[EXT-GRANT] Failed to create Dataverse access record for Contact {ContactId} / {RootType} {RootId}",
+                request.ContactId, root.Type, root.Id);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
@@ -117,25 +129,42 @@ public static class GrantExternalAccessEndpoint
     /// </summary>
     internal static async Task<Guid> CreateGrantAsync(
         GrantAccessRequest request,
-        string? callerSystemUserId,
+        ExternalGrantRootType rootType,
+        Guid rootId,
+        string? callerOid,
         DataverseWebApiClient dataverseClient,
         ITenantCache cache,
         HttpContext httpContext,
         ILogger logger,
         CancellationToken ct)
     {
-        var payload = BuildGrantPayload(request, callerSystemUserId);
+        // sprk_grantedby is a systemuser lookup — its target is a Dataverse systemuserid, which is
+        // DISTINCT from the caller's Azure AD object id (oid). Resolve the systemuserid from the oid;
+        // if the caller has no matching systemuser, omit grantedby (an audit field must never 400 the grant).
+        var grantedBySystemUserId = await ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct);
+
+        var payload = BuildGrantPayload(request, rootType, rootId, grantedBySystemUserId);
         var accessRecordId = await dataverseClient.CreateAsync(EntitySet, payload, ct);
 
         logger.LogInformation(
-            "[EXT-GRANT] Created access record {AccessRecordId} for Contact {ContactId} / Project {ProjectId}",
-            accessRecordId, request.ContactId, request.ProjectId);
+            "[EXT-GRANT] Created access record {AccessRecordId} for Contact {ContactId} / {RootType} {RootId}",
+            accessRecordId, request.ContactId, rootType, rootId);
 
         // Invalidate Redis participation cache (non-fatal).
         try
         {
             var tenantId = ExtractTenantId(httpContext);
-            if (!string.IsNullOrEmpty(tenantId))
+            if (request.ContactId == Guid.Empty)
+            {
+                // Organization grant (task 073 #7): there is no single grantee contact to invalidate —
+                // every active member's participation set is affected. We deliberately DO NOT fan out an
+                // invalidation per member here (that would need a members-of-org read on the write path);
+                // members pick up the new org grant within the 60s participation-cache TTL. (An org-scoped
+                // cache key is a possible future optimization — see the org-grant design note.)
+                logger.LogDebug(
+                    "[EXT-GRANT] Organization grant — no per-contact cache to invalidate; members refresh within the participation TTL.");
+            }
+            else if (!string.IsNullOrEmpty(tenantId))
             {
                 await cache.RemoveAsync(
                     tenantId, ExternalAccessResource, request.ContactId.ToString(), CacheVersion, ct: ct);
@@ -158,39 +187,150 @@ public static class GrantExternalAccessEndpoint
         return accessRecordId;
     }
 
-    /// <summary>Resolves the caller's systemuser id (oid) for the audited <c>sprk_grantedby</c>.</summary>
+    /// <summary>
+    /// Resolves the caller's Azure AD object id (<c>oid</c>) — the input to
+    /// <see cref="ResolveGrantedBySystemUserIdAsync"/>, which maps it to the Dataverse systemuserid the
+    /// audited <c>sprk_grantedby</c> lookup requires. NOTE: the oid is NOT itself a systemuserid.
+    /// </summary>
     internal static string? ResolveCallerSystemUserId(HttpContext httpContext)
         => httpContext.User.FindFirst("oid")?.Value
             ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>
+    /// Maps the caller's Azure AD object id (<paramref name="callerOid"/>) to their Dataverse
+    /// <c>systemuserid</c> for the audited <c>sprk_grantedby</c> lookup. The systemuserid is DISTINCT
+    /// from the AAD oid — binding the raw oid as a systemuserid fails Dataverse validation (400).
+    /// Returns <c>null</c> when the oid is absent/unparseable or has no matching active systemuser, in
+    /// which case <c>sprk_grantedby</c> is omitted (an audit field must never block the grant).
+    /// </summary>
+    internal static async Task<string?> ResolveGrantedBySystemUserIdAsync(
+        DataverseWebApiClient dataverseClient, string? callerOid, ILogger logger, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(callerOid) || !Guid.TryParse(callerOid, out _))
+            return null;
+
+        try
+        {
+            var rows = await dataverseClient.QueryAsync<SystemUserRow>(
+                "systemusers",
+                filter: $"azureactivedirectoryobjectid eq {callerOid}",
+                select: "systemuserid",
+                top: 1,
+                cancellationToken: ct);
+
+            return rows.Count > 0 ? rows[0].systemuserid?.ToString() : null;
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: grantedby is audit metadata. Log and omit rather than fail the grant.
+            logger.LogWarning(ex,
+                "[EXT-GRANT] Failed to resolve grantedby systemuser for oid {Oid} — omitting the audit field.",
+                callerOid);
+            return null;
+        }
+    }
+
+    private sealed class SystemUserRow
+    {
+        public Guid? systemuserid { get; set; }
+    }
 
     // =========================================================================
     // Helpers
     // =========================================================================
 
-    private static object BuildGrantPayload(GrantAccessRequest request, string? callerSystemUserId)
+    /// <summary>
+    /// Result of resolving the polymorphic grant root from a <see cref="GrantAccessRequest"/>.
+    /// <c>Ok == false</c> carries a caller-safe validation <see cref="Error"/> (→ 400, no write).
+    /// </summary>
+    internal readonly record struct GrantRootResolution(bool Ok, ExternalGrantRootType Type, Guid Id, string? Error);
+
+    /// <summary>
+    /// Resolves the ONE grant root a request targets. Precedence: an explicit
+    /// <c>RecordType</c> + <c>RecordId</c> wins; otherwise the legacy <c>ProjectId</c> shorthand maps to a
+    /// project root. Fail-closed (NFR-08): an unknown <c>RecordType</c>, an explicit <c>RecordType</c> with
+    /// an empty <c>RecordId</c>, or no root at all (incl. a bare <c>RecordId</c> without <c>RecordType</c>)
+    /// returns <c>Ok == false</c> — the caller rejects 400 and writes NO row.
+    /// </summary>
+    internal static GrantRootResolution ResolveGrantRoot(GrantAccessRequest request)
     {
+        // Explicit polymorphic root takes precedence over the legacy shorthand.
+        if (!string.IsNullOrWhiteSpace(request.RecordType))
+        {
+            if (!ExternalGrantRoot.TryParse(request.RecordType, out var type))
+                return new GrantRootResolution(false, default, Guid.Empty,
+                    "RecordType must be one of: project, matter, workassignment.");
+
+            var explicitId = request.RecordId ?? Guid.Empty;
+            if (explicitId == Guid.Empty)
+                return new GrantRootResolution(false, default, Guid.Empty,
+                    "RecordId is required and must be a valid GUID when RecordType is specified.");
+
+            return new GrantRootResolution(true, type, explicitId, null);
+        }
+
+        // Legacy shorthand: a bare ProjectId maps to the project root (back-compat until task 071).
+        if (request.ProjectId != Guid.Empty)
+            return new GrantRootResolution(true, ExternalGrantRootType.Project, request.ProjectId, null);
+
+        // Fail-closed: no usable root (also covers RecordId supplied without RecordType).
+        return new GrantRootResolution(false, default, Guid.Empty,
+            "A grant root is required: provide recordType + recordId, or the legacy projectId.");
+    }
+
+    /// <summary>
+    /// Builds the <c>sprk_externalrecordaccess</c> create payload. Internal (not private) so the test
+    /// assembly (<c>InternalsVisibleTo("Sprk.Bff.Api.Tests")</c>) can assert the typed-lookup bind
+    /// contract directly — a wrong <c>@odata.bind</c> key silently breaks the grant.
+    /// </summary>
+    internal static object BuildGrantPayload(
+        GrantAccessRequest request, ExternalGrantRootType rootType, Guid rootId, string? grantedBySystemUserId)
+    {
+        // Bind exactly ONE typed root lookup per record type (never two). Nav property is PascalCase
+        // (sprk_Project / sprk_Matter / sprk_WorkAssignment), verified live — see ExternalGrantRoot.
+        var (navigationProperty, entitySet) = ExternalGrantRoot.BindFor(rootType);
+
+        // @odata.bind nav-property names are PascalCase (sprk_Contact / sprk_GrantedBy / sprk_Project…),
+        // verified live against sprk_externalrecordaccess $metadata (task 070). The lowercase *id forms
+        // teams-app-r1 used were wrong and 400'd every grant.
         var payload = new Dictionary<string, object?>
         {
-            ["sprk_contactid@odata.bind"] = $"/contacts({request.ContactId})",
-            ["sprk_projectid@odata.bind"] = $"/sprk_projects({request.ProjectId})",
+            [$"{navigationProperty}@odata.bind"] = $"/{entitySet}({rootId})",
             ["sprk_accesslevel"] = (int)request.AccessLevel,
             ["sprk_granteddate"] = DateTime.UtcNow.ToString("o")
         };
 
-        if (!string.IsNullOrEmpty(callerSystemUserId) &&
-            Guid.TryParse(callerSystemUserId, out var systemUserId))
+        // Grantee: bind the Contact for a per-contact grant; OMIT it for an ORGANIZATION grant (task 073
+        // #7 — an empty ContactId + a bound sprk_Organization identifies the grantee, and every active
+        // org member inherits at check time). A row with NO sprk_Contact is exactly how the read path
+        // (AccessibleRecordSetService Term 3) distinguishes an org grant from a per-contact grant, so this
+        // omission is load-bearing, not cosmetic.
+        if (request.ContactId != Guid.Empty)
         {
-            payload["sprk_grantedby@odata.bind"] = $"/systemusers({systemUserId})";
+            payload["sprk_Contact@odata.bind"] = $"/contacts({request.ContactId})";
+        }
+
+        // grantedBySystemUserId is already a resolved Dataverse systemuserid (see
+        // ResolveGrantedBySystemUserIdAsync) — NOT the caller's raw AAD oid. Omitted when unresolved.
+        if (!string.IsNullOrEmpty(grantedBySystemUserId) &&
+            Guid.TryParse(grantedBySystemUserId, out var systemUserId))
+        {
+            payload["sprk_GrantedBy@odata.bind"] = $"/systemusers({systemUserId})";
         }
 
         if (request.ExpiryDate.HasValue)
         {
-            payload["sprk_expirydate"] = request.ExpiryDate.Value.ToString("o");
+            // Bug fix (task 070): the grant table's expiry field is sprk_expiresdate (verified live via
+            // describe), NOT sprk_expirydate — the prior name would 400 any grant that carries an expiry.
+            payload["sprk_expiresdate"] = request.ExpiryDate.Value.ToString("o");
         }
 
-        if (request.AccountId.HasValue)
+        // Firm/org association (task 070, owner steer 2026-08-11): bind the grantee's sprk_organization —
+        // NOT the OOB `account`. Nav property is PascalCase sprk_Organization (lookup added to
+        // sprk_externalrecordaccess in this project); value uses the plural set /sprk_organizations({id}).
+        if (request.OrganizationId.HasValue)
         {
-            payload["sprk_accountid@odata.bind"] = $"/accounts({request.AccountId.Value})";
+            payload["sprk_Organization@odata.bind"] = $"/sprk_organizations({request.OrganizationId.Value})";
         }
 
         return payload;

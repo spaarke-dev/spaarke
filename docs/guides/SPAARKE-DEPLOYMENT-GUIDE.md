@@ -71,10 +71,10 @@ Each Spaarke deployment consists of:
 |-----------|-------|---------|
 | Shared Azure platform | Per environment | App Service, OpenAI, AI Search, Doc Intelligence, Key Vault |
 | Per-customer Azure resources | Per customer | Storage, Key Vault, Service Bus, Redis |
-| Entra ID app registrations | Per environment | BFF API identity + Dataverse S2S |
+| Entra ID app registrations | Per environment | BFF API identity (also the single Dataverse Application User) |
 | Dataverse environment | Per customer | Tables, plugins, security roles, solutions |
 | SharePoint Embedded | Per environment | Container type + containers |
-| BFF API deployment | Per environment | .NET 8 Minimal API code |
+| BFF API deployment | Per environment | .NET 10 Minimal API code |
 
 ### Build Once, Deploy Anywhere
 
@@ -448,12 +448,15 @@ Invoke-RestMethod -Uri "{dataverse-url}/api/data/v9.2/organizations($orgId)" -Me
 .\scripts\Register-EntraAppRegistrations.ps1
 ```
 
-This creates two registrations in your tenant:
+This creates the BFF API registration in your tenant:
 
 | App Name | Purpose | API Permissions |
 |----------|---------|-----------------|
-| `spaarke-bff-api-{env}` | BFF API identity | Graph: Sites.Read.All, User.Read.All, FileStorageContainer.Selected, FileStorageContainer.ReadWrite.All; SharePoint: Container.Selected, Sites.ReadWrite.All; Dynamics CRM: user_impersonation |
-| `spaarke-dataverse-s2s-{env}` | Dataverse S2S | Dynamics CRM: user_impersonation |
+| `spaarke-bff-api-{env}` | BFF API identity (also the single Dataverse Application User) | Graph: Sites.Read.All, User.Read.All, FileStorageContainer.Selected, FileStorageContainer.ReadWrite.All; SharePoint: Container.Selected, Sites.ReadWrite.All; Dynamics CRM: user_impersonation |
+
+> **Note (2026-08-14, task 060):** the separate `spaarke-dataverse-s2s-{env}` app registration
+> was removed (zero code consumers; Dataverse S2S access consolidated onto the BFF app
+> registration credential on 2026-01-07).
 
 The script:
 - Creates app registrations with correct permissions
@@ -553,7 +556,6 @@ MSYS_NO_PATHCONV=1 az rest --method PATCH \
 1. Navigate to **Azure Portal > Entra ID > App registrations**
 2. Select `spaarke-bff-api-{env}`
 3. Go to **API permissions** > Click **Grant admin consent for [tenant]**
-4. Repeat for `spaarke-dataverse-s2s-{env}`
 
 ### 5.4 Register Dataverse Application User
 
@@ -564,7 +566,6 @@ MSYS_NO_PATHCONV=1 az rest --method PATCH \
 3. Select the `spaarke-bff-api-{env}` app registration
 4. Business unit: Root
 5. Assign **System Administrator** security role
-6. Repeat for `spaarke-dataverse-s2s-{env}`
 
 > **Without this step**, the BFF API crashes on startup with: `DataverseConnectionException: The user is not a member of the organization`
 
@@ -1625,6 +1626,13 @@ See [GitHub Environment Protection](./GITHUB-ENVIRONMENT-PROTECTION.md) for setu
 
 ### 18.3 PAC CLI Service Principal Auth
 
+> **Note (2026-08-14, task 060):** the live deploy workflows use **OIDC federated login**
+> (`azure/login@v2`); no workflow references a `DATAVERSE_CLIENT_ID` / `DATAVERSE_CLIENT_SECRET`
+> GitHub secret (verified 2026-08-14 — the repo has no such secret). The separate
+> `spaarke-dataverse-s2s-*` app registration these examples referenced was removed. The
+> client-secret example below is a fallback only; if used, `DATAVERSE_CLIENT_ID` should be the
+> **BFF app registration** (the single Dataverse Application User).
+
 ```yaml
 - name: Authenticate PAC CLI
   run: |
@@ -1635,7 +1643,7 @@ See [GitHub Environment Protection](./GITHUB-ENVIRONMENT-PROTECTION.md) for setu
       --clientSecret ${{ secrets.DATAVERSE_CLIENT_SECRET }}
 ```
 
-Required secrets: `DATAVERSE_CLIENT_ID`, `DATAVERSE_CLIENT_SECRET`, `AZURE_TENANT_ID`
+Fallback-pattern secrets: `DATAVERSE_CLIENT_ID` (BFF app registration), `DATAVERSE_CLIENT_SECRET`, `AZURE_TENANT_ID`
 Required vars: `DATAVERSE_URL_DEV`, `DATAVERSE_URL_PROD`
 
 ### 18.4 Microsoft Power Platform GitHub Actions
@@ -1988,8 +1996,7 @@ All settings required for the BFF API App Service. Values use Key Vault referenc
 
 | App Name | Purpose |
 |----------|---------|
-| `spaarke-bff-api-{env}` | BFF API identity (Graph, SPE, Dataverse) |
-| `spaarke-dataverse-s2s-{env}` | Server-to-server Dataverse access |
+| `spaarke-bff-api-{env}` | BFF API identity (Graph, SPE, Dataverse) — the single Dataverse Application User |
 | `spaarke-ui-{env}` | UI MSAL (public SPA client) |
 
 ---
@@ -2005,7 +2012,7 @@ All scripts are in the `scripts/` directory:
 | `Deploy-AllIndexes.ps1` | Unified catalog-driven deployer for ALL 7 canonical Spaarke AI Search indexes (Phase 1.5 — §4.6). Idempotent; per-index post-deploy invariant verifier (vector dim, key field, required-filterable fields, schema property policy). Reads admin key from KV secret `AiSearch--AdminKey`. Replaces all retired per-index deploy scripts per FR-07 of `spaarke-ai-azure-setup-dev-r1`. | `-Environment` (dev/staging/prod/demo), `-Indexes <subset>` (defaults to all 7), `-WhatIf` (via `SupportsShouldProcess`), `-DryRun`, `-VerifyOnly`, `-CutoverBffSettings`, `-Force` (required for prod/demo per NFR-05). Lifecycle: ACTIVE. Last-used: 2026-06-26. Location: `scripts/ai-search/Deploy-AllIndexes.ps1`. Cross-links: [`docs/architecture/AI-SEARCH-INDEX-CATALOG.md`](../architecture/AI-SEARCH-INDEX-CATALOG.md), [`docs/guides/ai-search-azure-setup.md`](ai-search-azure-setup.md). |
 | `Deploy-BffApi.ps1` | Deploy BFF API with zero-downtime | `-Environment`, `-UseSlotDeploy`, `-SkipBuild` |
 | `Deploy-DataverseSolutions.ps1` | Import 10 managed solutions in order | `-EnvironmentUrl`, `-TenantId`, `-ClientId`, `-ClientSecret`, `-SolutionPath` |
-| `Register-EntraAppRegistrations.ps1` | Create Entra ID app registrations | `-DryRun`, `-SkipBffApi`, `-SkipDataverseS2S` |
+| `Register-EntraAppRegistrations.ps1` | Create Entra ID app registrations | `-DryRun`, `-SkipBffApi` |
 | `Test-EntraAppRegistrations.ps1` | Verify app registrations | (none) |
 | `Configure-CustomDomain.ps1` | Custom domain + SSL setup | `-ShowDnsInstructions`, `-SkipDnsCheck`, `-SkipSsl` |
 | `Test-CustomDomain.ps1` | Verify custom domain | (none) |
