@@ -150,7 +150,7 @@ public sealed class SideEffectGateAIFunction : AIFunction
     /// producer is the per-turn <see cref="Safety.PromptShieldResult.FailedOpen"/> verdict computed by
     /// the pre-LLM perimeter. The F-8 follow-up wired that producer as
     /// <see cref="Middleware.PromptShieldChatMiddleware"/> (the focused pre-LLM injection perimeter,
-    /// distinct from the two-phase <see cref="Middleware.SafetyPipelineMiddleware"/>), added OUTERMOST
+    /// distinct from the two-phase <c>SafetyPipelineMiddleware</c>), added OUTERMOST
     /// by <c>SprkChatAgentFactory.WrapWithMiddleware</c> and threaded to this probe via a shared
     /// per-turn <see cref="Middleware.SafetyPerimeterSignal"/> — but ONLY when
     /// <c>AiSafety:PromptShield:ChatPipelineEnabled</c> is true. When the shield is disabled (the

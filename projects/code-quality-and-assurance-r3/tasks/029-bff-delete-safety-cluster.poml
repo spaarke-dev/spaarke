@@ -5,7 +5,7 @@
     <phase>2 BFF Remediation</phase>
     <tranche>B</tranche>
     <gate>quiet-window (after Tranche A)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Deletes 6 src + updates 2 test files (~840 prod / ~831 test LOC) in the most-contested Services/Ai area → TEST-MODIFYING; code-review + adr-check unconditionally.</rigor-reason>
     <model-tier>sonnet</model-tier>

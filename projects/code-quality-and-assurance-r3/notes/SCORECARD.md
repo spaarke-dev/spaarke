@@ -24,6 +24,8 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 | **Config-deployment (#1 KV federation)** | B– | D+ | **F** | A– | C | C+ | C+ | A | B+ | D+ | C | **F** | 2026-08-14 (Fable-verified) | [`workstreams/config-deployment/design.md`](../workstreams/config-deployment/design.md) |
 | **AGGREGATE (8 surfaces)** | — | — | **F**² | — | — | — | — | — | — | — | — | **F**² · maintainability mean **C+** | 2026-08-14 (task 016) | supersedes March "A (95/100)" |
 
+> **▶ Remediation progress (2026-08-14).** **BFF task 023 has LANDED** — the anonymous Finance Dataverse-write endpoint (the program's D3=F root cause) now requires `@spaarke/auth` authorization; the 3 healthz `ex.Message` leaks are scrubbed; OBO(7)+User(2) require auth. The **gating F is closed server-side** (web-resource token flow pending live-Dataverse validation + app-reg prereqs — see `notes/task-023-notes.md`). Under the rubric, BFF D3 and config-deployment D3 both lift out of F (→ residual ~B–/C+); the **program aggregate un-gates from F toward the C+ maintainability mean.** Also landed: 020 (dead code −1,639 LOC), 021 (Bug-1 invoice cast), 022 (Bug-2 .eml), 027 (tarballs −31.8 MB), 060 (#3a app-reg refs). Formal re-score at wrap-up (task 090).
+
 ## Task 016 — Aggregate Re-baseline (2026-08-14)
 
 **This supersedes the March "A (95/100)".** Eight surfaces scored against the standing rubric (D1–D11), each Fable-verified (NFR-05). The honest picture has two numbers, and both are true:
