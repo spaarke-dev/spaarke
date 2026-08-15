@@ -22,6 +22,15 @@
  * - Retry logic: 3 attempts with exponential backoff (0s, 1s, 2s)
  * - User-friendly error dialog via Xrm.Navigation.openAlertDialog on final failure
  *
+ * AUTH (task 030 / spec FR-17): the BFF recalculate-grades endpoint requires an Azure AD bearer
+ * token (@spaarke/auth, ADR-028). This caller acquires it via the shared `Spaarke.BffAuth` helper
+ * (sprk_/scripts/bff_auth.js). That library MUST be registered on the KPI Assessment Quick Create
+ * form and ORDERED BEFORE this one. `credentials: "include"` was REMOVED — a cross-origin cookie is
+ * insufficient for an AAD-authenticated endpoint; a Bearer token is required. If the helper is
+ * missing or a token can't be acquired, the call is skipped gracefully (form save is never blocked).
+ * ⚠ Silent-SSO cannot be validated offline — needs a live signed-in Dataverse session + the BFF
+ * app-reg SPA-redirect + user_impersonation consent prereqs (see sprk_bff_auth.js header).
+ *
  * @see projects/matter-performance-KPI-r1/spec-r1.md (FR-07)
  * @see projects/matter-performance-KPI-r1/tasks/014-create-web-resource-trigger.poml
  */
@@ -63,7 +72,7 @@ Spaarke.KpiAssessment.Config = {
     retryBaseDelay: 1000,
 
     /** Version for console logging */
-    version: "1.2.0"
+    version: "2.0.0" // 2.0.0 — @spaarke/auth Bearer via shared Spaarke.BffAuth (task 030 / FR-17)
 };
 
 // =============================================================================
@@ -266,14 +275,31 @@ Spaarke.KpiAssessment._callCalculatorApi = async function (entityType, entityId)
 
     console.log("[KPI Assessment] Calling calculator API: POST " + apiUrl);
 
+    // Task 030 / FR-17: acquire an Azure AD bearer token via the shared Spaarke.BffAuth helper
+    // (sprk_/scripts/bff_auth.js, registered before this library on the form). Acquire once, up
+    // front, then reuse across retry attempts. If the helper is missing or no token is available,
+    // skip gracefully — the record is already saved and an unauthenticated request would just 401.
+    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken) {
+        console.error("[KPI Assessment] Spaarke.BffAuth helper not loaded (register sprk_/scripts/bff_auth.js " +
+            "before this library on the form). Skipping recalculate call.");
+        return;
+    }
+
+    var bffToken = await Spaarke.BffAuth.getToken(Spaarke.KpiAssessment.Config.apiBaseUrl);
+    if (!bffToken) {
+        console.warn("[KPI Assessment] No BFF token acquired; skipping recalculate call for " +
+            entityType + ": " + entityId + ".");
+        return;
+    }
+
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
             var response = await fetch(apiUrl, {
                 method: "POST",
-                credentials: "include",
                 headers: {
                     "Content-Type": "application/json",
-                    "Accept": "application/json"
+                    "Accept": "application/json",
+                    "Authorization": "Bearer " + bffToken
                 }
             });
 

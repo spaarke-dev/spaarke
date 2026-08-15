@@ -4,7 +4,7 @@
     <title>Horizontal: repo-wide security / auth-consistency sweep (@spaarke/auth, ADR-028)</title>
     <phase>3 Horizontals</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Repo-wide security sweep producing findings + tasks (assessment-style); its remediations are separate tasks — STANDARD.</rigor-reason>
     <model-tier>opus</model-tier>
