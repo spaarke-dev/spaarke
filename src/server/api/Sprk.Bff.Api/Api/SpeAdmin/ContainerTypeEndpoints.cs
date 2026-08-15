@@ -3,7 +3,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
-namespace Sprk.Bff.Api.Endpoints.SpeAdmin;
+namespace Sprk.Bff.Api.Api.SpeAdmin;
 
 /// <summary>
 /// Endpoints for listing, retrieving, creating, and registering SharePoint Embedded container types.

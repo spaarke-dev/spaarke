@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Sprk.Bff.Api.Infrastructure.Errors;
 
-namespace Sprk.Bff.Api.Endpoints.Filters;
+namespace Sprk.Bff.Api.Api.Filters;
 
 /// <summary>
 /// Extension methods for adding RegistrationAuthorizationFilter to endpoints.

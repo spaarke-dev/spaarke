@@ -1,7 +1,7 @@
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
-namespace Sprk.Bff.Api.Endpoints.SpeAdmin;
+namespace Sprk.Bff.Api.Api.SpeAdmin;
 
 /// <summary>
 /// Endpoint for updating SharePoint Embedded container type settings via the Graph API.

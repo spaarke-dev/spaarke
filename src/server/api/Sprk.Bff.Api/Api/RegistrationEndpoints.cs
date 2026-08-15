@@ -1,10 +1,10 @@
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Endpoints.Filters;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Registration;
 using Sprk.Bff.Api.Services.Registration;
 
-namespace Sprk.Bff.Api.Endpoints;
+namespace Sprk.Bff.Api.Api;
 
 /// <summary>
 /// Registration endpoints following ADR-001 (Minimal API) and ADR-008 (endpoint filters).

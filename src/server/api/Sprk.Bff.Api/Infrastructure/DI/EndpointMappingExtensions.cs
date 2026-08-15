@@ -14,7 +14,6 @@ using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
-using Sprk.Bff.Api.Endpoints;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 

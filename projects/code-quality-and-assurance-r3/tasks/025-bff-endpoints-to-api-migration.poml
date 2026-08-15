@@ -5,7 +5,7 @@
     <phase>2 BFF Remediation</phase>
     <tranche>B</tranche>
     <gate>quiet-window (after Tranche A)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Behavior-neutral namespace-only move (zero route change); not a bug/auth/test-modifying change — STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

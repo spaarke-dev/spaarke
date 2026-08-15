@@ -1,6 +1,6 @@
 using Sprk.Bff.Api.Services.SpeAdmin;
 
-namespace Sprk.Bff.Api.Endpoints.SpeAdmin;
+namespace Sprk.Bff.Api.Api.SpeAdmin;
 
 /// <summary>
 /// Dashboard metrics endpoints for the SPE Admin application.
