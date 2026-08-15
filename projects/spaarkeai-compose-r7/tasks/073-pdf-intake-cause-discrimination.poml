@@ -4,7 +4,7 @@
     <title>PDF-intake cause discrimination — discriminated facade result (LOW-10 / FR-11)</title>
     <phase>7 Accepted Defers + Hardening</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs in Services/Ai; consumes PublicContracts; behavior + typed-result change.</rigor-reason>
     <model-tier>sonnet</model-tier>
