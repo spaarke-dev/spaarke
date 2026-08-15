@@ -72,7 +72,9 @@ public static class TelemetryModule
         // Resilient Search Client
         services.AddSingleton<Sprk.Bff.Api.Infrastructure.Resilience.IResilientSearchClient,
             Sprk.Bff.Api.Infrastructure.Resilience.ResilientSearchClient>();
-        Console.WriteLine("\u2713 Circuit breaker registry enabled");
+        // D9-01 (config-deployment): removed Console.WriteLine startup echo that bypassed the
+        // ILogger/OTel pipeline. This runs at service-registration time (pre-host-build) where no
+        // ILogger is available; the registration itself is the source of truth, so the echo was noise.
 
         // Health Checks - Redis availability monitoring
         var redisEnabled = configuration.GetValue<bool>("Redis:Enabled");

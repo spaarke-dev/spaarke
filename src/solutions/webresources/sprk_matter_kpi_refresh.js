@@ -19,6 +19,13 @@
  *   Library: sprk_/scripts/matter_kpi_refresh.js
  *   Function: Spaarke.MatterKpi.onLoad
  *   Pass execution context: Yes
+ *
+ * AUTH (task 030 / spec FR-17): the BFF recalculate-grades endpoint requires an Azure AD bearer
+ * token (@spaarke/auth, ADR-028). This caller acquires it via the shared `Spaarke.BffAuth` helper
+ * (sprk_/scripts/bff_auth.js). That library MUST be registered on the Matter main form and ORDERED
+ * BEFORE this one. If it is not loaded, the recalculate call is skipped gracefully (the form never
+ * breaks). ⚠ Silent-SSO cannot be validated offline — needs a live signed-in Dataverse session +
+ * the BFF app-reg SPA-redirect + user_impersonation consent prereqs (see sprk_bff_auth.js header).
  */
 
 /* eslint-disable no-undef */
@@ -68,7 +75,7 @@ Spaarke.MatterKpi._refreshTimer = null;
 /**
  * Version for console logging.
  */
-Spaarke.MatterKpi._version = "1.0.0";
+Spaarke.MatterKpi._version = "2.0.0"; // 2.0.0 — @spaarke/auth Bearer via shared Spaarke.BffAuth (task 030 / FR-17)
 
 // =============================================================================
 // ENVIRONMENT VARIABLE RESOLUTION
@@ -270,27 +277,45 @@ Spaarke.MatterKpi._recalculateAndRefresh = function (formContext, matterId) {
 
     console.log("[Matter KPI] Calling calculator API: POST " + apiUrl);
 
-    fetch(apiUrl, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-    }).then(function (response) {
-        if (response.ok) {
-            console.log("[Matter KPI] Calculator API succeeded. Refreshing form in " +
-                Spaarke.MatterKpi._refreshDelayMs + "ms...");
+    // Task 030 / FR-17: the endpoint requires an Azure AD bearer token. Acquire it via the shared
+    // Spaarke.BffAuth helper (sprk_/scripts/bff_auth.js, registered before this library on the form)
+    // and attach it. If the helper is missing or a token can't be acquired, skip gracefully — an
+    // unauthenticated request would just 401.
+    if (typeof Spaarke.BffAuth === "undefined" || !Spaarke.BffAuth.getToken) {
+        console.error("[Matter KPI] Spaarke.BffAuth helper not loaded (register sprk_/scripts/bff_auth.js " +
+            "before this library on the form). Skipping recalculate call.");
+        return;
+    }
 
-            // Wait for Dataverse to commit, then refresh form data
-            Spaarke.MatterKpi._refreshTimer = setTimeout(function () {
-                Spaarke.MatterKpi._refreshTimer = null;
-                Spaarke.MatterKpi._refreshFormData(formContext);
-            }, Spaarke.MatterKpi._refreshDelayMs);
-        } else {
-            console.warn("[Matter KPI] Calculator API returned " + response.status);
+    Spaarke.BffAuth.getToken(Spaarke.MatterKpi._apiBaseUrl).then(function (token) {
+        if (!token) {
+            console.warn("[Matter KPI] No BFF token acquired; skipping recalculate call.");
+            return;
         }
-    }).catch(function (error) {
-        console.warn("[Matter KPI] Calculator API call failed:", error);
+
+        fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": "Bearer " + token
+            }
+        }).then(function (response) {
+            if (response.ok) {
+                console.log("[Matter KPI] Calculator API succeeded. Refreshing form in " +
+                    Spaarke.MatterKpi._refreshDelayMs + "ms...");
+
+                // Wait for Dataverse to commit, then refresh form data
+                Spaarke.MatterKpi._refreshTimer = setTimeout(function () {
+                    Spaarke.MatterKpi._refreshTimer = null;
+                    Spaarke.MatterKpi._refreshFormData(formContext);
+                }, Spaarke.MatterKpi._refreshDelayMs);
+            } else {
+                console.warn("[Matter KPI] Calculator API returned " + response.status);
+            }
+        }).catch(function (error) {
+            console.warn("[Matter KPI] Calculator API call failed:", error);
+        });
     });
 };
 

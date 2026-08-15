@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Author the Code Quality Rubric (D1–D11 standing standard)</title>
+    <phase>0 Program Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New standing standard doc (new file, no code); STANDARD per task-create Step 3.5.5 (new-file creation, no tests/, no hot-path code).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Authoring the program's foundational scoring contract — every subsequent surface is measured against it; architectural-judgment doc warrants Opus.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs,standards,quality</tags>
+  </metadata>
+
+  <prompt>Publish docs/standards/CODE-QUALITY-RUBRIC.md — the single standing scoring contract with dimensions D1–D11 (copied verbatim from design.md §5) plus an explicit A–F per-dimension → per-surface → aggregate scale. This is the ruler every later assessment (tasks 010–016) and every SCORECARD row is measured against.</prompt>
+  <role>SPAARKE platform developer with senior-architect breadth across web apps, Power Apps custom development, and enterprise .NET. Follow ADRs strictly. Author for durability — this is a standing standard, not a project note.</role>
+  <goal>docs/standards/CODE-QUALITY-RUBRIC.md exists, containing all 11 dimensions D1–D11 with an explicit "what A+ looks like" criterion for each, and an A–F scoring scale that composes per-dimension → per-surface → program-aggregate grades.</goal>
+
+  <context>
+    <background>R3 is a standing quality program (spec.md FR-01). R1 shipped an informal scorecard; this task formalizes it into a fixed, comparable ruler so surface grades are comparable and progress is measurable. design.md §5 holds the canonical D1–D11 table to copy; §2 explains the honest-re-baseline intent that the scale must support (supersede the stale March "95/100").</background>
+    <relevant-files>
+      <file role="new">docs/standards/CODE-QUALITY-RUBRIC.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/design.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks — this is the program's first foundation deliverable.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope: the rubric MUST define exactly the 11 dimensions D1–D11 from design.md §5 (Architecture, Correctness, Security, Performance, DRY/dead-code, Consistency, Testability, Dependency hygiene, Observability, ALM/build hygiene, Doc accuracy) — do not invent extra dimensions or rename them.</constraint>
+    <constraint source="spec">Scope: each dimension MUST carry an explicit "what A+ looks like" criterion (spec.md FR-01 acceptance) and the A–F scale MUST compose per-dimension → surface → aggregate.</constraint>
+    <constraint source="project">Scope (this doc only): behavior-preserving — creates one new markdown file under docs/standards/; touches no source code and no other doc.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code quality scoring standard</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r3/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing standards doc shape" location="docs/standards/">Match the heading/structure conventions of sibling docs/standards/*.md files.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read design.md §5 (rubric table) and §2 (re-baseline intent); read spec.md FR-01.</step>
+    <step order="1">Copy the D1–D11 dimension table verbatim from design.md §5 into the new doc, preserving each dimension's "What A+ looks like" column.</step>
+    <step order="2">Add an explicit A–F scoring scale: define what each letter means per dimension, how per-dimension letters roll up to a surface grade, and how surface grades roll up to a program aggregate.</step>
+    <step order="3">Add a short "How to use this rubric" section pointing at the quality-assessment workflow (task 003) and notes/SCORECARD.md (task 002) as the consumers.</step>
+    <step order="4">Add a front-matter block (status, created date, purpose) matching sibling docs/standards/*.md conventions.</step>
+    <step order="5">Verify the file renders (no broken markdown tables) and that all 11 dimensions are present with A+ criteria.</step>
+    <step order="6">Update TASK-INDEX.md: set task 001 status to ✅.</step>
+    <step order="7">Document any deviation from this plan in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>R1 shipped an informal scorecard (project code-quality-and-assurance-r1); no standing rubric doc exists under docs/standards/ (grep of docs/standards for "rubric" returns none).</existing>
+    <extension>No — R1's scorecard is a project artifact, not a reusable standard; this formalizes it into a standing docs/standards/ ruler referenced by every future assessment.</extension>
+    <cost-of-doing-nothing>Without a fixed rubric, surface grades are not comparable and program progress is unmeasurable — the honest re-baseline (task 016) has no ruler to supersede the stale March "95/100".</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">docs/standards/CODE-QUALITY-RUBRIC.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the published file, all 11 dimensions D1–D11 are present, each with an explicit "what A+ looks like" criterion.</criterion>
+    <criterion testable="true">Given the scoring section, an A–F scale is defined that composes per-dimension → surface → aggregate grades.</criterion>
+    <criterion testable="true">Negative: the doc does NOT publish any aggregate program grade or per-surface score (scoring happens in tasks 010–016, not here).</criterion>
+    <criterion testable="true">Markdown renders cleanly (no malformed tables); front-matter present.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-01. The rubric is the anchor for FR-02 (workflow), FR-03 (scorecard), FR-04 (re-baseline). Copy design.md §5 table exactly; do not paraphrase from memory.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

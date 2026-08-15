@@ -3,6 +3,7 @@ using FluentAssertions;
 using Sprk.Bff.Api.Api.Workspace;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Workspace;
@@ -31,33 +32,39 @@ namespace Sprk.Bff.Api.Tests.Api.Workspace;
 /// </remarks>
 public class WorkspaceFileEndpointsTests
 {
-    #region FR-P3-05 — Executor-Only Execution Contract
+    #region Facade Boundary Execution Contract (ADR-013 / BFF §10 bullet 3 — task 024)
 
     [Fact]
-    public void HandleSummarize_AcceptsExecutorPrimitives_FRP305()
+    public void HandleSummarize_AcceptsFileSummarizeFacade_ADR013()
     {
-        // FR-P3-05: the endpoint composes the prompted-executor primitives directly (the
-        // wrapper class was absorbed). Their presence on the delegate signature pins the
-        // binding — no wrapper, no engine, no playbook lookup.
+        // Task 024 (ADR-013 / BFF §10 bullet 3): the non-AI endpoint composes the prompted
+        // executor through the IFileSummarizeAi PublicContracts facade — it MUST NOT inject the
+        // Linear AI Consumer primitives (IActionResolver / IActionRunner) directly (that was the
+        // A-1 violation). The facade wraps those primitives and preserves the SSE chunk + 503
+        // contract byte-for-byte.
         var handler = GetPrivateStaticMethod("HandleSummarize");
         handler.Should().NotBeNull(
             "the workspace summarize handler must exist on WorkspaceFileEndpoints");
 
         var parameterTypes = handler!.GetParameters().Select(p => p.ParameterType).ToList();
-        parameterTypes.Should().Contain(typeof(IActionResolver),
-            "FR-P3-05 — HandleSummarize MUST resolve the summarize-file Binding row's Action " +
-            "via IActionResolver (the ONLY routing surface, ADR-039)");
-        parameterTypes.Should().Contain(typeof(IActionRunner),
-            "FR-P3-05 — HandleSummarize MUST execute via IActionRunner (the prompted executor)");
+        parameterTypes.Should().Contain(typeof(IFileSummarizeAi),
+            "ADR-013 — HandleSummarize MUST resolve + run the summarize-file Action via the " +
+            "IFileSummarizeAi PublicContracts facade, not the AI-internal primitives");
+        parameterTypes.Should().NotContain(typeof(IActionResolver),
+            "task 024 A-1 — IActionResolver MUST NOT be injected into the non-AI endpoint " +
+            "(it now lives behind the IFileSummarizeAi facade)");
+        parameterTypes.Should().NotContain(typeof(IActionRunner),
+            "task 024 A-1 — IActionRunner MUST NOT be injected into the non-AI endpoint " +
+            "(it now lives behind the IFileSummarizeAi facade)");
     }
 
     [Fact]
-    public void HandleSummarize_HasNoEngineOrLookupOrConfigParameter_FRP305()
+    public void HandleSummarize_HasNoEngineOrLookupOrConfigParameter()
     {
-        // FR-P3-05 hard cutover — the engine fall-through and the playbook lookup were
-        // DELETED (NFR-08: no shims). The handler may not carry the frozen-engine facade,
-        // a playbook lookup, or a config-options dependency; the Action catalog is the
-        // only execution source.
+        // FR-P3-05 hard cutover (still binding) — the engine fall-through and the playbook lookup
+        // were DELETED (NFR-08: no shims). The handler may not carry the frozen-engine facade,
+        // a playbook lookup, or a config-options dependency; the Action catalog is the only
+        // execution source.
         var handler = GetPrivateStaticMethod("HandleSummarize");
         handler.Should().NotBeNull();
         handler!.GetParameters().Should().NotContain(
@@ -72,23 +79,19 @@ public class WorkspaceFileEndpointsTests
     }
 
     [Fact]
-    public void WorkspaceFileEndpoints_Source_ExecutesOnActionResolverWithConstant_FRP305()
+    public void WorkspaceFileEndpoints_Source_DelegatesToFileSummarizeFacade_ADR013()
     {
-        // FR-P3-05 + code-review S-5: the endpoint MUST resolve via
-        // IActionResolver.ResolveAsync with the ConsumerTypes.SummarizeFile compile-time
-        // constant (never a literal string), and no engine dispatch or config fallback may
-        // remain, comments included (NFR-08 hard cutover).
+        // Task 024: the endpoint MUST delegate to IFileSummarizeAi.SummarizeAsync and MUST NOT
+        // itself resolve/run the primitives or carry any engine/config surface (NFR-08).
         var source = File.ReadAllText(LocateWorkspaceFileEndpointsSource());
-        source.Should().Contain("ConsumerTypes.SummarizeFile",
-            "code-review S-5 — endpoint MUST use the ConsumerTypes.SummarizeFile constant, " +
-            "not a literal string");
-        source.Should().Contain("actionResolver.ResolveAsync(",
-            "FR-P3-05 — endpoint MUST resolve the Action via IActionResolver");
-        source.Should().Contain("actionRunner.RunAsync(",
-            "FR-P3-05 — endpoint MUST execute via IActionRunner");
+        source.Should().Contain("fileSummarizeAi.SummarizeAsync(",
+            "ADR-013 — endpoint MUST stream via the IFileSummarizeAi facade");
+        source.Should().NotContain("actionResolver.ResolveAsync(",
+            "task 024 A-1 — resolve moved behind the facade; the endpoint no longer calls it");
+        source.Should().NotContain("actionRunner.RunAsync(",
+            "task 024 A-1 — run moved behind the facade; the endpoint no longer calls it");
         source.Should().NotContain("SummarizePlaybookId",
-            "FR-P3-01 — no reference to the deleted config property may remain, " +
-            "comments included (NFR-08 hard cutover)");
+            "FR-P3-01 — no reference to the deleted config property may remain");
         source.Should().NotContain("WorkspaceOptions",
             "FR-P3-01 — the WorkspaceOptions config surface was deleted entirely");
         source.Should().NotContain("PlaybookRunRequest",
@@ -96,16 +99,34 @@ public class WorkspaceFileEndpointsTests
     }
 
     [Fact]
-    public void WorkspaceFileEndpoints_Source_SurfacesResolutionFailureAsErrorChunk_FRP305()
+    public void FileSummarizeAi_Source_ExecutesOnActionResolverWithConstant_ADR013()
     {
-        // FR-04 / NFR-02 fail-fast contract preserved through the cutover: when the Action
-        // cannot be resolved (missing Binding row / no Action target), the endpoint MUST
+        // Task 024 + FR-P3-05 + code-review S-5: the facade MUST resolve via
+        // IActionResolver.ResolveAsync with the ConsumerTypes.SummarizeFile compile-time constant
+        // (never a literal string) and run via IActionRunner.RunAsync.
+        var source = File.ReadAllText(LocateFileSummarizeAiSource());
+        source.Should().Contain("ConsumerTypes.SummarizeFile",
+            "code-review S-5 — facade MUST use the ConsumerTypes.SummarizeFile constant, " +
+            "not a literal string");
+        source.Should().Contain("_actionResolver.ResolveAsync(",
+            "FR-P3-05 — facade MUST resolve the Action via IActionResolver");
+        source.Should().Contain("_actionRunner.RunAsync(",
+            "FR-P3-05 — facade MUST execute via IActionRunner");
+    }
+
+    [Fact]
+    public void Summarize_SurfacesResolutionFailureAsErrorChunk_ADR032()
+    {
+        // FR-04 / NFR-02 fail-fast contract preserved through the facade relocation: when the
+        // Action cannot be resolved (missing Binding row / no Action target), the facade MUST
         // surface an SSE error chunk (not a silent no-op) — and the kill-switch
         // FeatureDisabledException MUST propagate to the endpoint's 503 pattern.
-        var source = File.ReadAllText(LocateWorkspaceFileEndpointsSource());
-        source.Should().Contain("Failed to resolve action",
+        var facadeSource = File.ReadAllText(LocateFileSummarizeAiSource());
+        facadeSource.Should().Contain("Failed to resolve action",
             "FR-04 — a resolution miss MUST surface as an actionable SSE error chunk");
-        source.Should().Contain("catch (FeatureDisabledException)",
+
+        var endpointSource = File.ReadAllText(LocateWorkspaceFileEndpointsSource());
+        endpointSource.Should().Contain("catch (FeatureDisabledException",
             "ADR-032 — the kill-switch exception must propagate to the endpoint's 503 pattern");
     }
 
@@ -116,7 +137,13 @@ public class WorkspaceFileEndpointsTests
             name,
             BindingFlags.NonPublic | BindingFlags.Static);
 
-    private static string LocateWorkspaceFileEndpointsSource()
+    private static string LocateWorkspaceFileEndpointsSource() =>
+        LocateRepoSource("Api", "Workspace", "WorkspaceFileEndpoints.cs");
+
+    private static string LocateFileSummarizeAiSource() =>
+        LocateRepoSource("Services", "Ai", "PublicContracts", "FileSummarizeAi.cs");
+
+    private static string LocateRepoSource(params string[] relativeUnderProject)
     {
         var assemblyPath = typeof(WorkspaceFileEndpointsTests).Assembly.Location;
         var dir = new DirectoryInfo(Path.GetDirectoryName(assemblyPath)!);
@@ -127,11 +154,11 @@ public class WorkspaceFileEndpointsTests
         }
 
         dir.Should().NotBeNull("repo root must be locatable from the test assembly path");
-        var source = Path.Combine(
-            dir!.FullName,
-            "src", "server", "api", "Sprk.Bff.Api",
-            "Api", "Workspace", "WorkspaceFileEndpoints.cs");
-        File.Exists(source).Should().BeTrue($"WorkspaceFileEndpoints.cs must exist at '{source}'");
+        var segments = new[] { dir!.FullName, "src", "server", "api", "Sprk.Bff.Api" }
+            .Concat(relativeUnderProject)
+            .ToArray();
+        var source = Path.Combine(segments);
+        File.Exists(source).Should().BeTrue($"source must exist at '{source}'");
         return source;
     }
 }

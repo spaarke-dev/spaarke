@@ -106,7 +106,7 @@ public sealed class MetadataService
 
     private async Task<EntityMetadata> FetchEntityMetadataAsync(string entityLogicalName, CancellationToken ct)
     {
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(MetadataService));
 
         var request = new RetrieveEntityRequest
         {
@@ -289,21 +289,4 @@ public sealed class MetadataService
         }
     }
 
-    /// <summary>
-    /// Unwrap the underlying <see cref="ServiceClient"/> from <see cref="IDataverseService"/>.
-    /// Follows the same pattern used in <see cref="Services.Workspace.TodoGenerationService"/> +
-    /// <see cref="Services.Finance.SpendSnapshotService"/> for generic SDK operations not exposed on
-    /// the <see cref="IDataverseService"/> interface.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverseService is DataverseServiceClientImpl impl)
-        {
-            return impl.OrganizationService;
-        }
-
-        throw new InvalidOperationException(
-            $"MetadataService requires IDataverseService to be backed by DataverseServiceClientImpl. " +
-            $"Actual type: {_dataverseService?.GetType().Name ?? "null"}.");
-    }
 }

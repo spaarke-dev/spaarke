@@ -31,11 +31,11 @@
 | 040 | CI setup-dotnet → 10.x / @v6 across 7 workflows | P4 | FR-13 | sonnet/xhigh | 032 | false | ✅ |
 | 041 | App Service Bicep DOTNETCORE\|10.0 (+ platform.json) + Functions | P4 | FR-14 | sonnet/xhigh | 032 | false | ✅ |
 | 042 | Adapt /bff-deploy + slot-swap runbook 🔒 | P4 | FR-14 | sonnet/high | 041 | false | ✅ |
-| 050 | Confirm `spaarke-dev` runs net10 (runtime + slot evidence) 🛠️ | P5 | FR-15 | sonnet/high | 042 | false | 🔲 |
-| 051 | **Deploy net10 to `spaarke-bff-dev`** + full smoke + **go/no-go** (completion gate) 🛠️ | P5 | FR-15 | sonnet/high | 050 | false | 🔲 |
+| 050 | Confirm `spaarke-dev` runs net10 (runtime + slot evidence) 🛠️ | P5 | FR-15 | sonnet/high | 042 | false | ✅ |
+| 051 | **Deploy net10 to `spaarke-bff-dev`** + full smoke + **go/no-go** (completion gate) 🛠️ | P5 | FR-15 | sonnet/high | 050 | false | ✅ |
 | 060 | ⏸ *(deferred)* Rehearse rollback (swap-back) 🛠️ | P6 | NFR-06 | sonnet/high | future demo/prod | false | ⏸ |
 | 061 | ⏸ *(deferred)* Production slot swap to net10 🛠️ | P6 | FR-16 | sonnet/high | 060 | false | ⏸ |
-| 090 | Wrap-up: test-diet, doc-drift, INDEX, r3 handoff, defer majors 🔒 | P7 | FR-17 | sonnet/high | 051 | false | 🔲 |
+| 090 | Wrap-up: test-diet, doc-drift, INDEX, r3 handoff, defer majors 🔒 | P7 | FR-17 | sonnet/high | 051 | false | ✅ |
 
 🔒 = writes root `CLAUDE.md` / `.claude/` / `projects/INDEX.md` → **main-session-only** (root §3).
 🛠️ = **OPERATOR-DRIVEN** — needs Azure credentials + a recorded human go/no-go; not run autonomously.

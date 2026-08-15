@@ -284,7 +284,7 @@ public static class AgentEndpoints
                             {
                                 PlaybookId = pb.Id,
                                 Name = pb.Name,
-                                Description = pb.Description
+                                Description = pb.Description ?? string.Empty
                             });
                         }
                     }
@@ -307,7 +307,7 @@ public static class AgentEndpoints
                         {
                             PlaybookId = pb.Id,
                             Name = pb.Name,
-                            Description = pb.Description
+                            Description = pb.Description ?? string.Empty
                         });
                     }
                 }

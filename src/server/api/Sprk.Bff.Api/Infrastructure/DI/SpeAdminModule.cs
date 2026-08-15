@@ -31,7 +31,13 @@ public static class SpeAdminModule
     {
         // Bind SpeAdmin configuration from "SpeAdmin" section (appsettings.json).
         // Phase 1 uses app-only tokens; Phase 3 adds OBO via SpeAdminTokenProvider.
-        services.Configure<SpeAdminOptions>(configuration.GetSection(SpeAdminOptions.SectionName));
+        // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. Behavior-neutral — the
+        // only annotations are [Range] on DashboardSyncIntervalMinutes (15) and MaxContainersPerPage (100),
+        // both in range by default, so an absent "SpeAdmin" section binds valid defaults and boots.
+        services.AddOptions<SpeAdminOptions>()
+            .Bind(configuration.GetSection(SpeAdminOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // Azure Key Vault SecretClient — used by SpeAdminGraphService to fetch per-config client secrets.
         // Singleton: SecretClient is thread-safe and designed for reuse.

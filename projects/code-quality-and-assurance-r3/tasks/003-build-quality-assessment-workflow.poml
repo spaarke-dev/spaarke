@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Build the reusable quality-assessment multi-agent Workflow</title>
+    <phase>0 Program Foundation</phase>
+    <gate>blocked until 001</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New tooling artifact (workflow script) with defined constraints; not code that ships in a hot path and not test-modifying — STANDARD per task-create Step 3.5.5.</rigor-reason>
+    <model-tier>fable</model-tier>
+    <model-tier-reason>Authoring the adversarial-verification-centric assessment engine — the design of the mandatory Fable verify stage is best specified by Fable itself; design.md §6 locks the engine as a Workflow.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>tooling,workflow,quality</tags>
+  </metadata>
+
+  <prompt>Author a reusable multi-agent Workflow ("quality-assessment") that every surface assessment (tasks 010–015) runs: parallel read-only finder agents (one per rubric dimension/cluster) returning file:line evidence → a MANDATORY Fable adversarial-verification stage (verify each finding, check test-only consumers + data-driven dispatch, refute false positives) → a synthesized prioritized remediation design.md. Save the workflow script under projects/code-quality-and-assurance-r3/notes/ and document the "use a workflow" per-run operator opt-in.</prompt>
+  <role>SPAARKE platform developer + workflow author. You designed the proven BFF assessment pass (6 parallel read-only investigations + 3-agent Fable verification); extract that method into one repeatable Workflow. Follow ADRs strictly.</role>
+  <goal>A reusable quality-assessment workflow script exists under notes/ (e.g. quality-assessment.workflow.js), encoding fan-out-per-dimension → mandatory Fable verify → synthesized remediation design.md, with the per-run "use a workflow" opt-in documented and manual fan-out named as the fallback.</goal>
+
+  <context>
+    <background>design.md §6 locks the assessment engine as a multi-agent Workflow (owner Q1): parallel finders per dimension, per-finding adversarial verification, synthesized report. spec.md FR-02 requires it run end-to-end on one surface producing a verified design; NFR-05 makes the Fable verification pass non-negotiable (it caught 2 real BFF bugs and corrected 2 false-positive dead-code claims). The Workflow tool requires operator per-run opt-in ("use a workflow"); manual agent fan-out is the documented fallback only.</background>
+    <relevant-files>
+      <file role="new">projects/code-quality-and-assurance-r3/notes/quality-assessment.workflow.js</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+      <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Rubric D1–D11 — the fan-out finders are one-per-dimension, so the workflow encodes the rubric dimensions.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope: the workflow MUST encode three phases — (1) parallel READ-ONLY finders one-per-rubric-dimension returning file:line evidence, (2) a MANDATORY Fable adversarial-verification stage that verifies each finding + checks test-only consumers + data-driven dispatch + refutes false positives, (3) a synthesized prioritized remediation design.md with severity/LOC/effort/risk + tranche split.</constraint>
+    <constraint source="spec">Scope: finders are READ-ONLY (NFR-03) — the workflow MUST NOT modify any src/ file; its only output is a design.md + SCORECARD row inputs.</constraint>
+    <constraint source="project">Scope: the Fable verification stage is non-negotiable (NFR-05) — the workflow MUST NOT be able to synthesize a remediation design that skips it.</constraint>
+    <constraint source="project">Scope (this file only): the script lives under projects/code-quality-and-assurance-r3/notes/; document the "use a workflow" per-run opt-in and the manual-fan-out fallback in the same folder.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Multi-agent assessment workflow</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r3/design.md</file>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+      <file>docs/standards/CODE-QUALITY-RUBRIC.md</file>
+    </files>
+    <patterns>
+      <pattern name="Proven BFF assessment pass" location="projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md">6 parallel read-only investigations + 3-agent Fable verification; extract this exact shape into the reusable workflow.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read design.md §6, spec.md FR-02/NFR-05, and the bff design assessment method.</step>
+    <step order="1">Define the fan-out stage: one read-only finder agent per rubric dimension (or documented dimension cluster), each returning structured findings with file:line evidence.</step>
+    <step order="2">Define the mandatory Fable adversarial-verification stage: verify each finding's file:line, check test-only consumers (InternalsVisibleTo) + data-driven dispatch (sprk_* rows), and refute false positives; emit a verified/refuted verdict per finding.</step>
+    <step order="3">Define the synthesis stage: produce a prioritized remediation design.md (severity, LOC, effort, risk, tranche split) plus the per-dimension SCORECARD row inputs.</step>
+    <step order="4">Wire the phases so synthesis cannot run on unverified findings (the verify stage is a hard gate).</step>
+    <step order="5">Write the operator-facing usage note: the "use a workflow" per-run opt-in requirement and the manual agent fan-out fallback; save alongside the script under notes/.</step>
+    <step order="6">Dry-validate the workflow shape against the BFF pass (does it reproduce the 6-investigation + verify structure?); if it cannot be expressed as one workflow, invoke the escalation trigger.</step>
+    <step order="7">Update TASK-INDEX.md: set task 003 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the fan-out → mandatory-Fable-verify → synthesize shape CANNOT be expressed as a single Workflow (tool limitation), STOP and surface per CLAUDE.md §6 — do not silently drop the verify gate. The documented manual agent fan-out (as used on the BFF pass) is the accepted fallback, but the choice to fall back is an operator decision, not an autonomous one.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The one-off BFF assessment fan-out exists only as a narrative in workstreams/bff-api/design.md (manual, not reusable); no reusable workflow script exists (grep of notes/ + scripts/ for "workflow" assessment returns none).</existing>
+    <extension>No — the BFF pass was manual and un-encoded; this task extracts that method into a reusable, operator-invokable Workflow so every surface runs the identical fan-out+verify.</extension>
+    <cost-of-doing-nothing>Without it, each surface (010–015) re-improvises fan-out + verification, producing inconsistent, error-prone assessments and risking a skipped Fable stage (which previously caught 2 real bugs + 2 false positives).</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="tooling">projects/code-quality-and-assurance-r3/notes/quality-assessment.workflow.js</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/ (usage + fallback note)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the workflow script, it encodes all three stages (parallel read-only finders per dimension → mandatory Fable verify → synthesized remediation design.md).</criterion>
+    <criterion testable="true">Given the script, the Fable verification stage is a hard gate — synthesis cannot proceed on unverified findings.</criterion>
+    <criterion testable="true">Given the usage note, the "use a workflow" per-run opt-in and the manual-fan-out fallback are both documented.</criterion>
+    <criterion testable="true">Negative: the workflow performs no src/ modifications (read-only assessment only).</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-02. design.md §6 is the locked engine decision. Consumed by tasks 010–015.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

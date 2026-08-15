@@ -408,6 +408,8 @@ Once `Graph__ManagedIdentity__Enabled=true`, the BFF's outbound Graph calls auth
 
 Managed identities don't appear in the *App registrations* blade — you cannot grant their permissions through the portal UI in the same way. Use the Microsoft Graph API directly (Azure CLI script below).
 
+> **Authoritative expected-role list (single source of truth):** `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs` (`GraphAppRoles.All`) is the canonical, machine-consumable list of the app-only Graph roles the BFF identity must hold — role value + owning module + why-required + module-conditional flag (GUIDs populated where confirmed; others pending a live Step 5a enumeration). Treat **Step 5a below as the live cross-check** against that constant, not as an independent list. Adding a capability that needs a new Graph role = add one `GraphAppRoles.cs` entry, then grant it here.
+
 ### Step 5a — Enumerate the BFF app registration's current Graph application permissions
 
 ```bash
@@ -444,7 +446,7 @@ For a baseline Spaarke deployment, the BFF app reg typically holds Graph applica
 - `Mail.Send` (if BFF sends mail app-only) — **also requires §7 Exchange ApplicationAccessPolicy**
 - `MailboxSettings.Read` (if Email module reads mailbox settings) — **also requires §7 Exchange ApplicationAccessPolicy**
 
-**The dev cutover on 2026-05-19 granted 11 Graph + SharePoint app role assignments to the MI.** The exact list is environment-dependent (some permissions are only needed if the corresponding module is enabled), so the canonical source is always **what the BFF app registration currently has** — Step 5a above.
+**The dev cutover on 2026-05-19 granted 11 Graph + SharePoint app role assignments to the MI.** The exact list is environment-dependent (some permissions are only needed if the corresponding module is enabled). The canonical expected set now lives in code — `GraphAppRoles.All` in `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs` (baseline bullets above mirror it) — and the live grant on the BFF app registration (Step 5a) is the cross-check that must reconcile with it. The BFF Auth Surface Map (task 019, §C GAP #4) resolves the **grant target** as the User-Assigned Managed Identity SP (`mi-bff-api-{env}`), not the app registration and not the retired `56ae2188…` principal.
 
 ### Step 5c — Grant each permission to the MI
 

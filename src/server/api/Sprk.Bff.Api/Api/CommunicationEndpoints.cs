@@ -77,6 +77,18 @@ public static class CommunicationEndpoints
             .Produces<CommunicationStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
+        // GET /{id}/attachments/text — re-extracted, normalized text for each of a communication's file
+        // attachments, for the reconciliation browse reader's folds (email-communication-intelligence-r2 B2.1).
+        // Text is a transient pipeline artifact (never persisted), so it is re-extracted on demand from SPE via
+        // the shared cache-aware ITextExtractor. Download is OBO (caller's token) so SPE enforces file access;
+        // the auth filter also gates on an authenticated caller identity.
+        group.MapGet("/{id:guid}/attachments/text", GetCommunicationAttachmentTextAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("GetCommunicationAttachmentText")
+            .WithDescription("Get re-extracted, normalized text for a communication's file attachments (reconciliation reader folds)")
+            .Produces<CommunicationAttachmentTextResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // POST /threads/direct — start (or reuse) a 1:1 direct thread with another Spaarke user (task 043 / FR-09).
         // Not anchored to a record (no ADR-024 regarding); membership is the EXPLICIT two-party list (thread
         // ownership + a POA "Manage access" share to the other participant) — see IDirectThreadAccessService.
@@ -695,6 +707,24 @@ public static class CommunicationEndpoints
     {
         var sinceValue = ParseSince(since);
         var result = await readService.ReadThreadAsync(threadId, context.User, sinceValue, top, ct);
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>
+    /// Re-extracted attachment text for the reconciliation browse reader (email-communication-intelligence-r2 B2.1).
+    /// Delegates to the Scoped read model, which lists the communication's file attachments and re-extracts each
+    /// one's text from SPE via the shared cache-aware ITextExtractor (OBO download → SPE enforces the caller's
+    /// access). Always 200 with a (possibly empty) list; per-attachment failures degrade to Extractable=false
+    /// (never an error — the reader shows a "not available as text" fold).
+    /// </summary>
+    private static async Task<IResult> GetCommunicationAttachmentTextAsync(
+        Guid id,
+        CommunicationAttachmentTextService attachmentTextService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        // context.User → impersonated Dataverse reads (NFR-06 no-leak); context → OBO SPE download.
+        var result = await attachmentTextService.GetAttachmentTextAsync(id, context.User, context, ct);
         return TypedResults.Ok(result);
     }
 

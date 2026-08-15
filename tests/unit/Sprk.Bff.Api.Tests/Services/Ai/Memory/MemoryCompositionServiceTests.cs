@@ -212,8 +212,8 @@ public sealed class MemoryCompositionServiceTests
         capturedMid.Should().NotBeNull();
         // Mid window for 20 msgs with recentN=10, midEnd=50: [max(0,-30), 10) = [0, 10).
         capturedMid!.Should().HaveCount(10);
-        capturedMid.First().SequenceNumber.Should().Be(1);
-        capturedMid.Last().SequenceNumber.Should().Be(10);
+        capturedMid!.First().SequenceNumber.Should().Be(1);
+        capturedMid!.Last().SequenceNumber.Should().Be(10);
     }
 
     [Fact]

@@ -2556,7 +2556,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             attachments.Add(new ChannelAttachment
             {
                 Name = metadata.Name ?? "attachment",
-                ContentType = InferContentType(metadata.Name),
+                ContentType = InferContentType(metadata.Name ?? "attachment"),
                 Content = contentBytes
             });
 

@@ -39,7 +39,8 @@
  * (Fluent v9 tokens, light + dark), ADR-022 (React-version-agnostic).
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text } from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Button } from '@fluentui/react-components';
+import { Open16Regular } from '@fluentui/react-icons';
 import { SprkModal, PreviewModal, PanelSplitter } from '@spaarke/ui-components';
 import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
 import { EmailReadingHeader } from '../EmailReadingHeader';
@@ -117,11 +118,27 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalS,
   },
-  bodySubject: {
-    paddingInline: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalXS,
+  // TRIAGE panel (prototype parity, owner UAT 2026-08-14) — the AI triage summary + optional
+  // priority/category, in a subtle boxed band above the body. Semantic tokens only (ADR-021).
+  triageBox: {
+    marginInline: tokens.spacingHorizontalM,
+    marginTop: tokens.spacingVerticalS,
+    padding: tokens.spacingHorizontalM,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
   },
+  triageLabel: {
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    letterSpacing: '0.04em',
+    color: tokens.colorNeutralForeground3,
+  },
+  triageText: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground1 },
+  triageMeta: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
+  openOriginalRow: { paddingInline: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalXS },
   emptyState: {
     display: 'flex',
     alignItems: 'center',
@@ -247,6 +264,7 @@ function toAttachmentItem(att: ReconciliationAttachmentContent): IAttachmentItem
 export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps> = ({
   open,
   onClose,
+  onSave,
   queue,
   initialIndex = 0,
   onIndexChange,
@@ -299,7 +317,18 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
         layout="landscape"
         padded={false}
         uiScale={uiScale}
+        dismiss="explicit"
         nav={{ index, total: queue.length, onNavigate: handleNavigate }}
+        footerStart={
+          <Button appearance="secondary" onClick={onClose} data-testid="reconciliation-browse-close">
+            Close
+          </Button>
+        }
+        footer={
+          <Button appearance="primary" onClick={onSave ?? onClose} data-testid="reconciliation-browse-save">
+            Save
+          </Button>
+        }
       >
         {current ? (
           <div className={s.twoPane} data-testid="reconciliation-browse-two-pane" ref={containerRef}>
@@ -325,17 +354,40 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
                         to={current.to ?? null}
                         cc={current.cc}
                         bcc={current.bcc}
+                        receivedDate={current.receivedDate}
+                        dateLabel={current.outbound ? 'Sent' : 'Received'}
                       />
                     </div>
-                    <Text
-                      as="h2"
-                      className={s.bodySubject}
-                      data-testid="reconciliation-browse-subject"
-                      truncate
-                      wrap={false}
-                    >
-                      {current.subject || '(no subject)'}
-                    </Text>
+                    {current.emlDocumentId ? (
+                      <div className={s.openOriginalRow}>
+                        <Button
+                          appearance="subtle"
+                          size="small"
+                          icon={<Open16Regular />}
+                          data-testid="reconciliation-open-original-eml"
+                          onClick={() =>
+                            setOverlayAttachment({
+                              attachmentId: 'eml-archive',
+                              name: `${current.subject || 'email'}.eml`,
+                              documentId: current.emlDocumentId ?? null,
+                            })
+                          }
+                        >
+                          Open original email (.eml)
+                        </Button>
+                      </div>
+                    ) : null}
+                    {current.triageSummary || current.triagePriority || current.triageCategory ? (
+                      <div className={s.triageBox} data-testid="reconciliation-browse-triage">
+                        <Text className={s.triageLabel}>TRIAGE</Text>
+                        {current.triagePriority || current.triageCategory ? (
+                          <Text className={s.triageMeta}>
+                            {[current.triagePriority, current.triageCategory].filter(Boolean).join(' · ')}
+                          </Text>
+                        ) : null}
+                        {current.triageSummary ? <Text className={s.triageText}>{current.triageSummary}</Text> : null}
+                      </div>
+                    ) : null}
                     <EmailBodyView
                       selectedId={current.id}
                       emlDocumentId={current.emlDocumentId}

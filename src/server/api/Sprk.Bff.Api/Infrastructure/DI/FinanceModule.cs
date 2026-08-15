@@ -21,7 +21,13 @@ public static class FinanceModule
         // Provides: ClassificationConfidenceThreshold, BudgetWarningPercentage,
         //           VelocitySpikePct, FinanceSummaryCacheTtlMinutes,
         //           ClassificationDeploymentName, ExtractionDeploymentName
-        services.Configure<FinanceOptions>(configuration.GetSection(FinanceOptions.SectionName));
+        // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. Behavior-neutral —
+        // FinanceOptions carries NO DataAnnotations (all members have safe defaults; InvoiceExtractionPlaybookId
+        // is intentionally empty in lower envs, so it is NOT marked [Required]).
+        services.AddOptions<FinanceOptions>()
+            .Bind(configuration.GetSection(FinanceOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
 
         // ============================================================================
         // Invoice Analysis Service (ADR-013: AI via BFF, ADR-014: Playbook prompts)

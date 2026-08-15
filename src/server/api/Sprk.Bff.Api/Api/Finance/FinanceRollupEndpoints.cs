@@ -10,8 +10,11 @@ namespace Sprk.Bff.Api.Api.Finance;
 /// </summary>
 /// <remarks>
 /// Follows ScorecardCalculatorEndpoints pattern exactly:
-///   - AllowAnonymous (web resources cannot acquire Azure AD tokens)
-///   - RequireRateLimiting("dataverse-query") for abuse protection
+///   - RequireAuthorization() — Azure AD bearer token required (ADR-028 / ADR-008).
+///     These endpoints WRITE derived financial fields to Dataverse under the BFF app
+///     identity, so they MUST NOT be anonymous. The web-resource caller
+///     (sprk_subgrid_parent_rollup.js) acquires a token via @spaarke/auth (MSAL silent SSO).
+///   - RequireRateLimiting("dataverse-query") for additional abuse protection
 ///   - ProblemDetails for error responses (ADR-019)
 /// </remarks>
 public static class FinanceRollupEndpoints
@@ -19,14 +22,15 @@ public static class FinanceRollupEndpoints
     public static void MapFinanceRollupEndpoints(this WebApplication app)
     {
         // Matter rollup endpoints
-        // NOTE: AllowAnonymous because Dataverse web resources cannot acquire
-        // Azure AD tokens for the BFF API. Rate limiting provides abuse protection.
+        // Requires authentication via Azure AD bearer token (ADR-028 / ADR-008 compliant) —
+        // these endpoints write derived financial fields to Dataverse. Rate limiting
+        // provides additional abuse protection.
         var matterGroup = app.MapGroup("/api/finance/matters")
             .WithTags("FinanceRollup")
-            .RequireRateLimiting("dataverse-query");
+            .RequireRateLimiting("dataverse-query")
+            .RequireAuthorization();
 
         matterGroup.MapPost("/{matterId:guid}/recalculate", RecalculateMatterAsync)
-            .AllowAnonymous()
             .WithName("RecalculateMatterFinance")
             .WithSummary("Recalculate financial rollup fields for a matter")
             .WithDescription(
@@ -34,16 +38,18 @@ public static class FinanceRollupEndpoints
                 "computes all denormalized financial fields (total spend, budget utilization, " +
                 "velocity, timeline), and writes them back to the Matter record.")
             .Produces<RecalculateFinanceResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         // Project rollup endpoints
+        // Requires authentication via Azure AD bearer token (ADR-028 / ADR-008 compliant).
         var projectGroup = app.MapGroup("/api/finance/projects")
             .WithTags("FinanceRollup")
-            .RequireRateLimiting("dataverse-query");
+            .RequireRateLimiting("dataverse-query")
+            .RequireAuthorization();
 
         projectGroup.MapPost("/{projectId:guid}/recalculate", RecalculateProjectAsync)
-            .AllowAnonymous()
             .WithName("RecalculateProjectFinance")
             .WithSummary("Recalculate financial rollup fields for a project")
             .WithDescription(
@@ -51,6 +57,7 @@ public static class FinanceRollupEndpoints
                 "computes all denormalized financial fields (total spend, budget utilization, " +
                 "velocity, timeline), and writes them back to the Project record.")
             .Produces<RecalculateFinanceResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
     }

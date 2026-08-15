@@ -37,7 +37,7 @@
     "lexical": "^0.42.0",
     "mammoth": "^1.12.0",
     "marked": "^17.0.5",
-    "pdfjs-dist": "^5.7.284",
+    "pdfjs-dist": "^6.2.108",
     "react-window": "^1.8.11",
     "rollup": "^4.60.3",
     "scheduler": "^0.27.0"

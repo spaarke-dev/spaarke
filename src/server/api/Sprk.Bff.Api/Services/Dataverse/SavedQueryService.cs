@@ -88,7 +88,7 @@ internal sealed class SavedQueryService
         _logger.LogDebug("SavedQuery cache MISS for {SavedQueryId}; fetching from Dataverse", savedQueryId);
 
         var sw = Stopwatch.StartNew();
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.TryUnwrapServiceClient(nameof(SavedQueryService), _logger);
         if (serviceClient is null)
         {
             return null;
@@ -164,7 +164,7 @@ internal sealed class SavedQueryService
         _logger.LogDebug("SavedQueries cache MISS for entity {Entity}; fetching from Dataverse", normalised);
 
         var sw = Stopwatch.StartNew();
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.TryUnwrapServiceClient(nameof(SavedQueryService), _logger);
         if (serviceClient is null)
         {
             return Array.Empty<SavedQuerySummaryDto>();
@@ -212,26 +212,6 @@ internal sealed class SavedQueryService
         await TrySetInCacheAsync(cacheKey, summaries, ct);
 
         return summaries;
-    }
-
-    private ServiceClient? GetServiceClient()
-    {
-        if (_dataverseService is not DataverseServiceClientImpl impl)
-        {
-            _logger.LogError(
-                "SavedQueryService: IDataverseService is not DataverseServiceClientImpl (actual: {Type})",
-                _dataverseService.GetType().FullName);
-            return null;
-        }
-
-        var client = impl.OrganizationService;
-        if (client is null || !client.IsReady)
-        {
-            _logger.LogError("SavedQueryService: ServiceClient is not ready");
-            return null;
-        }
-
-        return client;
     }
 
     private async Task<T?> TryGetFromCacheAsync<T>(string cacheKey, CancellationToken ct) where T : class

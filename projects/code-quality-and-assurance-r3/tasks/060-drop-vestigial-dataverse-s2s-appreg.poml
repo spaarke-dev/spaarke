@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Drop the vestigial separate Dataverse S2S app-registration + KV secrets from provisioning (refactor ask #3a — clean, scripts/docs/KV only)</title>
+    <phase>6 Deployment &amp; Configuration Hygiene</phase>
+    <gate>startable (independent of BFF code; coordinate with r1 provisioning)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Auth-provisioning + docs/KV hygiene; removes a vestigial app-reg with ZERO code consumers — no BFF source change. STANDARD (not FULL): no tests/** touch, no BFF publish surface. Care warranted because it is auth-adjacent.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical scripts/docs/KV cleanup against an exact grounded reference list; Sonnet default.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches shared provisioning scripts (Register-/Test-EntraAppRegistrations.ps1) + auth docs; coordinate with customer-provisioning-orchestration-r1 (which provisions app-regs); /conflict-check before the PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>auth,deployment,provisioning,hygiene</tags>
+  </metadata>
+
+  <prompt>Drop the vestigial SEPARATE Dataverse S2S app-registration (`spaarke-dataverse-s2s-*`) + its `Dataverse-S2S-ClientId`/`Dataverse-S2S-ClientSecret` Key Vault secrets + rotation ceremony from provisioning/deploy/docs. GROUNDED 2026-08-13: this app-reg has ZERO code consumers (grep `Dataverse-S2S|DATAVERSE_CLIENT_ID` across `src/` → none; consolidated to `API_CLIENT_SECRET` on 2026-01-07 per docs/architecture/auth-azure-resources.md:407) — it survives only in provisioning scripts + docs + KV. This delivers r1's literal "2 app-regs → 1" ask with NO BFF code change. **NOT in scope here**: migrating the BFF's OWN shared-lib Dataverse path (`DataverseServiceClientImpl`/`DataverseWebApiService`) from `ClientSecret` (the BFF app-reg's `API_CLIENT_SECRET`) to managed identity — that is #3(b), an identity-attribution change entangled with the two access stacks, deferred to the NG1 / task-011 assess-then-decide track (see notes/deployment-refactors-assessment-2026-08-12.md §Addendum 2026-08-13).</prompt>
+  <role>SPAARKE platform developer with auth v2 / ADR-028 + Entra provisioning expertise. Remove dead auth infrastructure only; do NOT change any BFF credential code path in this task. Follow ADR-028; preserve OBO + SpeAdmin per-tenant secrets verbatim.</role>
+  <goal>The separate `spaarke-dataverse-s2s-*` app-reg is no longer created/tested by provisioning, its `Dataverse-S2S-*` KV secrets + rotation are removed from scripts + docs, and the stale "MI rejected for Dataverse" doc claim is corrected — with a re-grounding safety check proving zero code consumers first, and OBO + the BFF's own (still-secret) Dataverse path left untouched.</goal>
+
+  <context>
+    <background>Refactor ask #3 (notes/deployment-complexity-refactors-ask-2026-08-12.md) accepted 2026-08-13, SPLIT by owner decision: #3(a) = this task (clean vestigial-app-reg drop); #3(b) = the shared-lib ClientSecret→MI migration, routed to the NG1/task-011 track (the assessment doc §Addendum 2026-08-13 carries the full (b) grounding). Grounded facts for (a): the separate S2S app-reg (`spaarke-dataverse-s2s-prod` etc.) has ZERO code consumers — `grep Dataverse-S2S|DATAVERSE_CLIENT_ID` across src/ returns nothing; it was consolidated to `API_CLIENT_SECRET` on 2026-01-07 (auth-azure-resources.md:407). It survives only in: scripts/Register-EntraAppRegistrations.ps1 (:8,:42-43,:71,:81,:435-509,:629,:639-640 — creates the app-reg + writes Dataverse-S2S-* KV secrets), scripts/Test-EntraAppRegistrations.ps1 (:8,:268-277,:330-331), scripts/README.md (:323-324), docs/guides/SECRET-ROTATION-PROCEDURES.md (:58,:239-251), docs/architecture/auth-azure-resources.md (:825-852), docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md (:153,:186,:349), docs/guides/INCIDENT-RESPONSE.md (:564), PRODUCTION-/SPAARKE-DEPLOYMENT-GUIDE, and the stale docs/guides/DATAVERSE-AUTHENTICATION-GUIDE.md:1007 ("Managed Identity: Rejected — doesn't work for Dataverse S2S"), which contradicts ADR-028:24 + the live auth-deployment-setup.md §9c smoke test. ADR-028 needs NO amendment (ADR-028:24 already mandates MI for the Dataverse service identity).</background>
+    <relevant-files>
+      <file role="modify">scripts/Register-EntraAppRegistrations.ps1 (:8,:42-43,:71,:81,:435-509,:629,:639-640 — drop S2S app-reg creation + Dataverse-S2S-* KV writes)</file>
+      <file role="modify">scripts/Test-EntraAppRegistrations.ps1 (:8,:268-277,:330-331 — drop the S2S test block)</file>
+      <file role="modify">scripts/README.md (:323-324 — S2S references)</file>
+      <file role="modify">docs/guides/SECRET-ROTATION-PROCEDURES.md (:58,:239-251 — drop S2S rotation schedule)</file>
+      <file role="modify">docs/architecture/auth-azure-resources.md (:825-852 — S2S app-reg section)</file>
+      <file role="modify">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md (:153,:186,:349) + docs/guides/INCIDENT-RESPONSE.md (:564) + PRODUCTION-DEPLOYMENT-GUIDE.md + SPAARKE-DEPLOYMENT-GUIDE.md — S2S references</file>
+      <file role="modify">docs/guides/DATAVERSE-AUTHENTICATION-GUIDE.md (:1007 — correct the stale "MI Rejected" claim to ADR-028:24; note the shared-lib migration is tracked on the NG1/task-011 track)</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md (§Addendum 2026-08-13 — the split + the #3(b) grounding for task 011)</file>
+      <file role="canonical-reference">docs/architecture/auth-azure-resources.md:407 (the 2026-01-07 consolidation to API_CLIENT_SECRET)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent of BFF code + of task 023 — this removes dead provisioning infra only.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (provisioning/docs/KV ONLY): drop the separate `spaarke-dataverse-s2s-*` app-reg creation/testing + `Dataverse-S2S-ClientId`/`Dataverse-S2S-ClientSecret` KV writes + rotation from the enumerated scripts/docs. Do NOT edit any BFF source file. Do NOT touch the BFF's own Dataverse credential path (that is #3(b) / task 011).</constraint>
+    <constraint source="ADR-028">DO NOT remove or alter `BFF-API-ClientSecret` / `API_CLIENT_SECRET` (used by OBO AND, until #3(b) lands, the shared-lib Dataverse path) or `Dataverse-ClientSecret`. Only the `Dataverse-S2S-*` secrets of the vestigial separate app-reg are dropped. Preserve SpeAdmin per-tenant container-type app-reg secrets (ADR-028:24 exception 1) verbatim.</constraint>
+    <constraint source="project">Scope (safety gate, prescriptive): re-run the zero-consumer grep FIRST. If ANY code (src/) or live runtime config references the separate S2S app-reg / `Dataverse-S2S-*` / `DATAVERSE_CLIENT_ID`, STOP (escalation) — it is not vestigial and this task's premise is wrong.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: no BFF publish-size impact (no Sprk.Bff.Api source/appsettings change) — state this explicitly. Run /conflict-check before the PR (shared provisioning scripts). Coordinate with customer-provisioning-orchestration-r1 (it provisions app-regs; its design drops the S2S app-reg from §9.1 after this lands).</constraint>
+    <constraint source="auth-gate">GATED on the BFF Auth Surface Map (task 019 → notes/bff-auth-surface-map.md). Before deleting any secret/app-reg, confirm against the map's secret/identity→consumer dependency graph that the target (`Dataverse-S2S-*` / the separate S2S app-reg) has NO consumers — the map is the authoritative "safe-to-remove" verdict, not just this task's grep.</constraint>
+    <constraint source="auth-map-2026-08-13">Map riders (extend the safety gate + doc scope): (1) BEFORE deleting the S2S app-registration itself, re-grep `.github/workflows/` for a `DATAVERSE_CLIENT_ID` GitHub secret used by CI `pac` pipelines (SPAARKE-DEPLOYMENT-GUIDE.md:1634-1638) — if a live workflow consumes it, STOP/escalate. **Verified 2026-08-13: CLEARED — no workflow references `DATAVERSE_CLIENT_ID`/`DATAVERSE_CLIENT_SECRET`, no such repo secret exists, and deploy workflows use OIDC federated login (`azure/login@v2`); the deployment-guide reference is stale. Re-verify at execution (things change), but there is currently no CI consumer.** (2) While editing auth-azure-resources.md, ALSO fix its stale identity claims: :274-284 says "system-assigned" but the MI is a **UAMI** (`mi-bff-api-dev` clientId 5967251e…/`mi-bff-api-demo` b0ce4ca4…; `56ae2188…` is a RETIRED principal), and :705-708 contradicts :349 on which secret is in KV `BFF-API-ClientSecret` (**RESOLVED 2026-08-13 via config/environments.json:22,26 — `BFF-API-ClientSecret` holds the BFF app-reg `1e40baad-…` secret; the `170c98e1-…` in :705-708 is the SDAP-PCF-CLIENT SPA/`msalClient`, NOT the BFF secret — fix :705-708 to say `1e40baad`. Dev vault = `spaarke-spekvcert`; demo/prod = `sprk-platform-prod-kv`**). Do NOT touch `BFF-API-ClientSecret`/`Dataverse-ClientSecret` (map: one KV secret, 5 config keys, 9 consumers — never-remove; the Dataverse-app-only consumers only disappear after the #3b migration on the task-011 track).</constraint>
+    <constraint source="net10-2026-08-14">Environment reality (handback `notes/r3-handoff.md`): **only `spaarke-dev` is live** — demo/prod were decommissioned for budget. Any "in BOTH spaarkedev1 + spaarke-demo" verification is **dev-only for now**; demo/prod cleanup is DEFERRED until those envs are re-provisioned on net10 (a separate follow-on, not this task).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Vestigial Dataverse S2S app-reg removal (provisioning hygiene)</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>docs/guides/SECRET-ROTATION-PROCEDURES.md</file>
+      <file>projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + auth-adjacent reason). Load ADR-028 + the assessment §Addendum 2026-08-13; run /conflict-check on the scripts.</step>
+    <step order="1" name="Safety gate — re-ground zero consumers">grep `Dataverse-S2S|DATAVERSE_CLIENT_ID|spaarke-dataverse-s2s` across src/ AND live runtime config. Expect ZERO in src/. If any live consumer exists, STOP and escalate — do not remove a still-used app-reg.</step>
+    <step order="2" name="Provisioning">Remove the S2S app-reg creation + `Dataverse-S2S-*` KV writes from Register-EntraAppRegistrations.ps1; remove the S2S test block from Test-EntraAppRegistrations.ps1.</step>
+    <step order="3" name="Rotation + docs">Drop the S2S rotation schedule from SECRET-ROTATION-PROCEDURES.md; remove S2S app-reg references from scripts/README.md, auth-azure-resources.md, AZURE-RESOURCE-NAMING-CONVENTION.md, INCIDENT-RESPONSE.md, PRODUCTION-/SPAARKE-DEPLOYMENT-GUIDE.md.</step>
+    <step order="4" name="Fix stale doc">Correct DATAVERSE-AUTHENTICATION-GUIDE.md:1007 — MI is mandated for the Dataverse service identity per ADR-028:24; note the shared-lib ClientSecret→MI migration (#3(b)) is tracked on the NG1/task-011 track (not this task).</step>
+    <step order="5" name="Operator KV note">Record an operator KV-deletion checklist in task notes naming ONLY `Dataverse-S2S-ClientId` + `Dataverse-S2S-ClientSecret` (explicitly NOT `BFF-API-ClientSecret`/`Dataverse-ClientSecret`, which the OBO + shared-lib Dataverse paths still use).</step>
+    <step order="6">Update TASK-INDEX.md: set task 060 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>STOP and escalate per CLAUDE.md §6 if the safety-gate grep finds ANY live code or runtime-config consumer of the separate Dataverse S2S app-reg / `Dataverse-S2S-*` / `DATAVERSE_CLIENT_ID` — the "vestigial, zero-consumer" premise would be false and dropping it could break a live app-only Dataverse path.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="config">scripts/Register-EntraAppRegistrations.ps1 + Test-EntraAppRegistrations.ps1 (S2S sections removed)</output>
+    <output type="doc">docs updates (SECRET-ROTATION-PROCEDURES, auth-azure-resources, naming convention, incident-response, deployment guides, DATAVERSE-AUTHENTICATION-GUIDE) + operator KV-deletion checklist in project notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Safety gate: grep of src/ for `Dataverse-S2S|DATAVERSE_CLIENT_ID|spaarke-dataverse-s2s` returns zero (recorded in notes) BEFORE any removal.</criterion>
+    <criterion testable="true">Register-EntraAppRegistrations.ps1 + Test-EntraAppRegistrations.ps1 no longer create/test the separate Dataverse S2S app-reg or write `Dataverse-S2S-*` KV secrets; SECRET-ROTATION-PROCEDURES.md no longer schedules their rotation.</criterion>
+    <criterion testable="true">Repo-wide grep for `Dataverse-S2S` / `spaarke-dataverse-s2s` in scripts/ + docs/guides/ + docs/architecture/ returns no live-procedure references (historical project notes exempt).</criterion>
+    <criterion testable="true">Negative (untouched): `BFF-API-ClientSecret`/`API_CLIENT_SECRET`/`Dataverse-ClientSecret` are unchanged; no Sprk.Bff.Api source or appsettings edited; the BFF still boots and serves Dataverse via its existing (still-secret) path; SpeAdmin per-tenant secrets untouched.</criterion>
+    <criterion testable="true">DATAVERSE-AUTHENTICATION-GUIDE.md:1007 no longer claims MI is rejected for Dataverse; it points to ADR-028:24 + the NG1/task-011 migration track.</criterion>
+    <criterion testable="true">Operator KV-deletion checklist names ONLY `Dataverse-S2S-*` (not the OBO/shared-lib secrets); no BFF publish-size impact stated.</criterion>
+  </acceptance-criteria>
+
+  <notes>Refactor ask #3(a) — clean vestigial-app-reg drop; delivers r1's "2 app-regs → 1". #3(b) (shared-lib ClientSecret→MI migration; identity-attribution change; the two-access-stack files) is DEFERRED to the NG1 / task-011 assess-then-decide track — full grounding in notes/deployment-refactors-assessment-2026-08-12.md §Addendum 2026-08-13; flagged by task 040 rule (c) until 011's design lands it. Correction of record: my 2026-08-12 assessment wrongly said the credential half was fully landed — only the Services/Ai raw-HTTP camp was (AUTHV2-042); the shared-lib camp is still secret-based.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

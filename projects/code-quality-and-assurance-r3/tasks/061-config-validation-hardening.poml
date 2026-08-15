@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: uniform fail-fast configuration validation — [Required] + IValidateOptions + ValidateOnStart (refactor ask #2)</title>
+    <phase>6 Deployment &amp; Configuration Hygiene</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches config registration across the whole BFF (startup behavior change) and adds/updates tests — TEST-MODIFYING override → code-review + adr-check unconditionally.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Judgment-heavy sweep: per-option classification (customer-critical vs kill-switch-gated deferred) has a known failure mode (the 2026-06-09 BingGrounding startup crash) — needs careful reasoning, not literal application.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches many DI module files across the BFF (CommunicationModule, AnalysisServicesModule, etc.) that are hot-path contested; /conflict-check before the PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,config,validation,deployment</tags>
+  </metadata>
+
+  <prompt>Bring the BFF's PARTIAL fail-fast config discipline to UNIFORM coverage (refactor ask #2, accepted 2026-08-13): [Required] on customer-critical IOptions properties, IValidateOptions&lt;T&gt; for cross-property invariants ("if Feature.Enabled=true then Endpoint present"), and .ValidateDataAnnotations().ValidateOnStart() on registration — so a fresh BFF missing a required setting crashes AT STARTUP with the offending keys named, not at first request. Grounded gap (2026-08-13): 29 AddOptions&lt;T&gt; chains but only 17 ValidateOnStart, PLUS 37 services.Configure&lt;T&gt;() registrations that bypass validation entirely. Preserve the deliberate kill-switch-gated deferred-validation exceptions.</prompt>
+  <role>SPAARKE platform developer with .NET options-validation expertise. ConfigurationModule.cs is the canonical pattern; the BingGrounding 2026-06-09 lesson (eager .Value evaluation crashing startup on a "deferred" option) is the trap to avoid. Follow ADR-010 (DI minimalism — no new abstraction layers, just the standard options pipeline).</role>
+  <goal>Every customer-critical options registration in Sprk.Bff.Api validates data annotations on start; cross-property invariants are enforced via IValidateOptions&lt;T&gt;; kill-switch-gated options keep deferred validation with an explicit documented exemption list; a BFF missing a required setting fails startup with a clear aggregated list of missing/invalid keys; existing valid config still boots; build + full test green.</goal>
+
+  <context>
+    <background>Refactor ask #2 (notes/deployment-complexity-refactors-ask-2026-08-12.md) — r1's silent-fail traps T1/T2/T3 surface at first request instead of at startup/health-probe. Grounded 2026-08-13 against src/server/api/Sprk.Bff.Api: the canonical pattern EXISTS at Infrastructure/DI/ConfigurationModule.cs:24-34 (.AddOptions&lt;T&gt;().Bind(...).ValidateDataAnnotations().ValidateOnStart()) with IValidateOptions validators at :126-127 (GraphOptionsValidator, DocumentIntelligenceOptionsValidator) and a StartupValidationService hosted service at :130. Coverage is inconsistent: (a) AddOptions camp — 29 chains, 17 ValidateOnStart; gaps: AnalysisServicesModule.cs (5 AddOptions, 0 ValidateOnStart), InsightsModule.cs (2/0), TodoSyncModule.cs (1/0), WorkspaceModule.cs (1/0), AgentModule.cs (2/1), RegistrationModule.cs (2/1). (b) Configure camp — 37 services.Configure&lt;T&gt;() registrations bypass validation entirely, e.g. CommunicationModule.cs:27-444 (~12: CommunicationOptions, AutoFileOptions, TrackingFooterOptions, SemanticMatchOptions, AiClassificationOptions, RecordNameMatchOptions, ContactNameMatchOptions, AttachmentMatchOptions, AcsEventGridIngressOptions, CommsPolicyOptions, MembershipReconcileOptions), AnalysisServicesModule.cs (:105,:120,:650,:656,:755,:1210,:1575), EmailServicesModule.cs:40 (EmailProcessingOptions — carries the customer-critical webhook signing key), AuthorizationModule.cs:166 (TenantEnvironmentRoutingOptions). (c) DELIBERATE exceptions that MUST stay deferred: ConfigurationModule.cs:68-74 PowerBiOptions, :76-83 AgentServiceOptions, :85-91 CodeInterpreterOptions, :93-103 BingGroundingOptions — all kill-switch-gated (app must boot with Enabled=false and no config); the :93-99 comment records the 2026-06-09 startup crash that removing [Required] fixed.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ConfigurationModule.cs (the pattern to copy: :24-34 chain, :126-127 validators, :130 hosted service)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs (:27-59,:141,:252,:444 Configure&lt;&gt; sites)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs (AddOptions + Configure&lt;&gt; sites)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EmailServicesModule.cs (:40) + AuthorizationModule.cs (:166) + InsightsModule.cs + TodoSyncModule.cs + WorkspaceModule.cs + AgentModule.cs + RegistrationModule.cs (remaining gap sites)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/ (options classes gaining [Required] on customer-critical properties)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (startup-validation tests; fixtures seeding config contracts)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Standalone; lands independently. Enforcement forcing-function lives in tasks 040 (ArchTest rule a) + 042 (CI gate) — this task creates the uniform state those rules lock in. Task 017's KV-federation design sequences its remediation AFTER this task.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (classification, binding): every options registration is classified into exactly one of (1) customer-critical → [Required] on critical props + ValidateDataAnnotations + ValidateOnStart (+ IValidateOptions for cross-property invariants), (2) kill-switch-gated → deferred validation, listed in an explicit exemption list with the gating flag named, or (3) optional-with-safe-defaults → ValidateDataAnnotations without [Required]. The classification table goes in the PR description. No registration may remain unclassified.</constraint>
+    <constraint source="project">Scope (the BingGrounding trap): do NOT add [Required] to a property of a kill-switch-gated option class (ConfigurationModule.cs:93-99 lesson — DataAnnotation evaluation triggers eagerly on .Value even without ValidateOnStart). Required-when-Enabled semantics belong in IValidateOptions&lt;T&gt; or use-site guards, never bare [Required] on gated classes. The app MUST still boot with every kill switch off and no corresponding config sections present.</constraint>
+    <constraint source="project">Scope (mechanics): migrate services.Configure&lt;T&gt;() sites to the AddOptions chain ONLY where validation is being added; behavior-preserving otherwise — no option class renames, no section renames, no default-value changes. Startup failure output must aggregate ALL missing/invalid keys (OptionsValidationException semantics), not fail on the first.</constraint>
+    <constraint source="ADR-038">Scope (tests): startup-validation tests are MAINTAIN-class (architectural invariant); test that a missing required key fails startup naming the key, and that the full valid fixture config boots. Fixture configs (CustomWebAppFactory.cs etc.) must be updated in lockstep per docs/procedures/test-fixture-contracts.md (§F.2 fixture-config-FIRST when a test breaks).</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages (Microsoft.Extensions.Options.DataAnnotations is already referenced). Run /conflict-check before the PR (DI module files are hot-path contested). Verify impact against src/ AND tests/.</constraint>
+    <constraint source="auth-gate">GATED on the BFF Auth Surface Map (task 019 → notes/bff-auth-surface-map.md). When adding [Required]/ValidateOnStart to auth-related IOptions (client secrets, scheme config, credential settings), align with the map's secrets inventory — do NOT mark [Required] a secret the map shows is being removed (e.g. Dataverse ClientSecret on the #3b track) or a kill-switch-gated optional setting.</constraint>
+    <constraint source="auth-map-2026-08-13">Map specifics: (1) do NOT touch `DataverseOptions.ClientSecret [Required]` — it stays until the #3b migration relaxes it (task 011 track); adding/removing validation there is out of scope here. (2) The `Ciam` external-scheme config has NO options class and registers UNCONDITIONALLY — any validation you add for it MUST be kill-switch-gated (same trap shape as the BingGrounding/gated options at ConfigurationModule.cs:68-103). (3) `TenantEnvironmentRoutingOptions` is a bare `Configure<>` target (no validation today) — a candidate to bring under validation, but confirm it is customer-critical first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Options validation / fail-fast configuration</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/procedures/test-fixture-contracts.md</file>
+      <file>docs/guides/CONFIGURATION-MATRIX.md</file>
+      <file>projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical validation chain" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/ConfigurationModule.cs:24-34">AddOptions().Bind().ValidateDataAnnotations().ValidateOnStart() + IValidateOptions validators (:126-127).</pattern>
+      <pattern name="Kill-switch deferred exception" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/ConfigurationModule.cs:68-103">Gated options validate lazily; :93-99 documents why [Required] is forbidden on gated classes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING reason). Load ConfigurationModule + CONFIGURATION-MATRIX; run /conflict-check on the DI module files.</step>
+    <step order="1">Census: enumerate ALL 29 AddOptions + 37 Configure&lt;&gt; registrations (re-run the greps at head); build the classification table (customer-critical / kill-switch-gated / optional-with-defaults) with the gating flag or criticality evidence per row.</step>
+    <step order="2">Apply tier 1: add [Required] to customer-critical props, migrate their registrations to the canonical chain with ValidateOnStart; add IValidateOptions&lt;T&gt; validators for cross-property invariants (Enabled→Endpoint class).</step>
+    <step order="3">Apply tiers 2/3: record the exemption list for gated options (no [Required] on their classes); ValidateDataAnnotations-only where safe defaults exist.</step>
+    <step order="4">Tests: missing-required-key startup failure names the key(s) and aggregates multiples; full valid fixture boots; all-kill-switches-off with absent sections boots. Update fixture configs in lockstep.</step>
+    <step order="5">dotnet build + full dotnet test green; dotnet publish, record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
+    <step order="6">Update TASK-INDEX.md: set task 061 status to ✅.</step>
+    <step order="7">Document the classification table + exemption list in projects/code-quality-and-assurance-r3/notes/ (task 040 rule (a) consumes the exemption list as its allowlist).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If classifying an option as customer-critical vs kill-switch-gated is ambiguous (no Enabled flag but the module is conditionally mapped, or a [Required] addition would break the Enabled=false boot path in a way IValidateOptions cannot express), STOP and escalate per CLAUDE.md §6 with the specific option class — do not guess: a wrong [Required] is a customer-facing startup outage (the 2026-06-09 BingGrounding incident class).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/*.cs (validated registrations) + Configuration/*.cs option classes + IValidateOptions validators</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (startup-validation tests + fixture updates)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/ (classification table + gated-options exemption list — the task-040 allowlist)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Negative: a BFF started with a customer-critical required setting missing FAILS AT STARTUP (not first request) with the offending key(s) named; multiple missing keys are aggregated in one failure.</criterion>
+    <criterion testable="true">Given the full valid fixture/template config, the BFF boots — no false-positive validation failure.</criterion>
+    <criterion testable="true">Negative: with every kill switch off (PowerBi, AgentService, CodeInterpreter, BingGrounding, TodoSync, plus any newly-classified gated options) and their config sections ABSENT, the BFF boots (no eager [Required] regression of the 2026-06-09 class).</criterion>
+    <criterion testable="true">Given the census, every one of the 29 AddOptions + 37 Configure&lt;&gt; registrations appears in the classification table with a tier; the gated exemption list is written to notes/ for task 040's ArchTest allowlist.</criterion>
+    <criterion testable="true">At least one IValidateOptions&lt;T&gt; cross-property invariant of the Enabled→Endpoint class is added and covered by a test (both directions: invalid combination fails, valid combination passes).</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package; /conflict-check run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>Refactor ask #2 — accepted 2026-08-13; r3 owns it with ArchTest+CI rigor (r1 drops its Phase E / D20 absorption and references this task as prerequisite). The forcing-function that KEEPS coverage uniform lives in task 040 (ArchTest rule a: every DI-registered customer-critical IOptions is annotated + validated-on-start, allowlist = this task's exemption list) + task 042 (CI gate). Soft prerequisite for task 017's KV-federation remediation ("validate KV-sourced config before dropping tokens").</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

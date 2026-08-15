@@ -169,7 +169,7 @@ public sealed class ComposeBaselineParaIdStamper
                 return baseline.ToArray();
             }
 
-            doc.MainDocumentPart!.Document.Save();
+            doc.MainDocumentPart!.Document!.Save();
         }
 
         return buffer.ToArray();
@@ -281,7 +281,7 @@ public sealed class ComposeBaselineParaIdStamper
                 return new ComposeIngestParaIdResult(source.ToArray(), parsed.Entries, Mutated: false);
             }
 
-            doc.MainDocumentPart!.Document.Save();
+            doc.MainDocumentPart!.Document!.Save();
         }
 
         return new ComposeIngestParaIdResult(buffer.ToArray(), parsed.Entries, Mutated: true);
