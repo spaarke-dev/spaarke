@@ -1,11 +1,12 @@
 # Customer Provisioning & Deployment Orchestration — Design Specification
 
-> **Status**: **Draft v3.1 — PAUSED pending [`code-quality-and-assurance-r3`](../code-quality-and-assurance-r3/) assessment of the D20 refactor ask** ([ask doc](../code-quality-and-assurance-r3/notes/deployment-complexity-refactors-ask-2026-08-12.md)). r1 resumes once r3 completes; will confirm/update D20 + Phase B/E accordingly, then run `/design-to-spec` → `/project-pipeline`.
+> **Status**: **Draft v3.2 — post-r3-completion refresh, Fable-verified, pending owner review** ([r3 handoff](notes/r3-handoff.md) 2026-08-14 confirmed r3 tasks 060/061/062/017 landed on master; net10 baseline merged 2026-08-15). Ready for `/design-to-spec` after owner review — no further external dependencies blocking.
 > **Created**: 2026-06-15
 > **Revised**:
 > - 2026-06-16 (feedback round 1: resource inventory, identity spec, config capture, Q1–Q6 resolved)
 > - 2026-08-12 (v3: D3 rewritten for two tiers, TF Power Platform provider adoption, H12 promoted to first-class config-seed manifest, silent-failure trap catalog, Cosmos DB provisioning added, SPE confidential-client fix, resolved v2 open items B1–B3/I1–I3/I5–I6)
 > - 2026-08-12 (v3.1: D20 fail-fast config + Graph role constants added as PENDING per r3 handoff; sourced pricing research; D3 rewritten in place; §3A reframed as rationale not amendment)
+> - 2026-08-15 (v3.2: r3 handoff resolved — D20 LANDED (tasks 060/061/062/017); Fable-adversarial review corrections (H-1 Deploy-AllIndexes path, H-2 AI Search catalog, H-3 UAMI vs system-assigned reality); dropped vestigial Dataverse S2S app-reg (r3 task 060); added Phase G naming compliance + Phase H #1 KV federation remediation per r3 handoff §4a/§4b; added §4C rollback semantics + §4.2 handler execution model + Model 1/2 handler-behavior differences + H0 quota preflight; Redis moved per Q-E FR-12; TF adoption deferred to first-customer engagement; dev-only baseline with new trial environment for Phase F E2E)
 > **Author**: Ralph Schroeder / Claude Code
 > **Project**: customer-provisioning-orchestration-r1
 > **Supersedes**: `projects/spaarke-environment-factory-r1/design.md`
@@ -70,7 +71,7 @@ These are inputs, not proposals. The design conforms to them. D1-D11 from `disco
 | D17 | **Decommission out of scope.** Existing `Decommission-Customer.ps1` remains operational as-is. Registry-aware teardown handlers deferred to r2. | No decommission handlers in this project. |
 | D18 | **(v3, 2026-08-12) BFF doubles as consent-capture onboarding client.** For Model 2 customer-tenant deploys, the BFF exposes a consent callback endpoint that captures the customer admin's `tid` on consent grant and triggers the provisioning pipeline. Closes the "self-service" gap where admin consent is the one irreducible customer-tenant action. | New BFF endpoint + handler H0.5 (consent-capture) that seeds the run parameters. |
 | D19 | **(v3, 2026-08-12) Per-tenant token-metering layer is a no-regret investment.** Build regardless of D3 outcome. Powers pricing (§3A) under any tenancy model — usage-passthrough for dedicated (D3), fair billing for shared trial tier. Implementation: APIM gateway with per-tenant token attribution OR app-level custom App-Insights metric keyed on `tenantId`. | New non-handler capability tracked in fast-follow list; not on the H0–H14 critical path but ships in r1. |
-| D20 | **(v3 refinement, 2026-08-12) Fail-fast configuration validation + code-constant Graph role enforcement — PENDING r3 assessment.** Intent: all BFF `IOptions<T>` classes carry `[Required]` on customer-critical properties, registered with `.ValidateDataAnnotations().ValidateOnStart()`; Graph app-role parity between BFF app-reg and UAMI service principal enforced via a compile-time constant in code (list of role GUIDs + display names + owning module), not a runbook-verified script. **r1 is pausing pending [`code-quality-and-assurance-r3`](../../projects/code-quality-and-assurance-r3/) assessment** ([ask doc](../../projects/code-quality-and-assurance-r3/notes/deployment-complexity-refactors-ask-2026-08-12.md)). r3 owns the decision on where this discipline lands (r1 Phase E, r3 forcing-functions task 040/042, or a mix). r1 resumes once r3 completes; §14 phasing + §17 placement justification update accordingly. | Silent-fail traps T1 (`keyVaultReferenceIdentity`), T2 (MI as Dataverse App User), T3 (MI Graph role parity) surface at BFF startup and fail the `/health` probe — hard deploy failure instead of runtime-first-use failure. Whichever project lands the discipline, r1 H4 + H10 verification queries become redundant post-r3 (r1's verification remains a safety net until r3 forcing-functions active). |
+| D20 | **(v3 landed, v3.2 confirmed 2026-08-15) Fail-fast configuration validation + code-constant Graph role enforcement — LANDED via r3.** r3 shipped: task 061 (`.ValidateDataAnnotations().ValidateOnStart()` on 24 Tier-1 customer-critical `IOptions<T>` classes; 17 Tier-2 kill-switch-gated exemption list authored; test coverage green — see `projects/code-quality-and-assurance-r3/notes/task-061-config-validation-classification.md`), task 062 (`src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs` — 14 role entries; **10 of 14 `AppRoleId` GUIDs pending live enumeration per class remarks — r1 H10 completion obligation**), task 060 (vestigial Dataverse S2S app-reg dropped — zero code consumers), task 017 (KV federation assessment complete — r1 owns remediation per Phase G + H below). r3 forcing-functions gate (task 042 ArchTests) enforces validation-on-start + no-secret-Dataverse across future BFF PRs; nightly Graph-app-role parity check queued behind CI-workflow wiring coordination with `ci-cd-unit-test-remediation-r1`. | r1's Phase B + Phase E no longer carry conditional D20 absorption. r1's remaining D20-adjacent work: (a) H10 grants the 14 roles enumerated in `GraphAppRoles.cs` onto UAMI SP + verifies parity against the constant; (b) H10 escalation: complete the 10 missing GUIDs via `az` enumeration of the Graph resource SP; (c) H4 gets lighter — silent-fail traps T1/T2/T3 now fail deploy verification (`/health` probe) via r3-shipped ValidateOnStart instead of first-user runtime. Legacy H4/H10 verification queries kept as belt-and-suspenders safety net until r3 CI wiring is live. |
 
 ---
 
@@ -108,7 +109,7 @@ The provisioning pipeline is a **hybrid** stack. No single IaC/tool covers both 
 | **Azure stamp** (per-customer resource stamp: RG, App Service Plan/App Service, KV, Storage, Service Bus, Redis, OpenAI, AI Search, Doc Intel, App Insights, **Cosmos DB**, optional SignalR) | **Bicep** (26 tuned modules + `platform.bicep` / `customer.bicep` / `model1-shared.bicep` / `model2-full.bicep`) | Deep Azure integration, existing production-hardened modules, matches ADR-020 model-pinning discipline. | H2a (infra) |
 | **Dataverse environment lifecycle** (create/hydrate env, application-user registration, tenant-scoped SP admin) | **Terraform Power Platform provider** (Microsoft first-party) | The only IaC that covers Dataverse env lifecycle. Fully closes v2 D14 semi-auto gap. TF plan/state model gives us drift-detection. | H5 (env creation), H10 (app user) |
 | **Managed solution import** (386 components across ~10 managed solutions) | **Package Deployer** (invoked from PS) + existing `Deploy-DataverseSolutions.ps1` | Package Deployer is the supported ALM tool for managed solution deploy with dependency ordering; existing script already handles ordering. | H6 |
-| **AI Search indexes** (7 indexes, 3072-dim vectors) | Existing `infrastructure/ai-search/Deploy-AllIndexes.ps1` (PowerShell + Azure SDK) | Bicep can't author AI Search index schema; PS + SDK is the shortest path; script already exists. | H2b (indexes, sub-step of H2) |
+| **AI Search indexes** (7 indexes, 3072-dim vectors) | Existing `scripts/ai-search/Deploy-AllIndexes.ps1` (PowerShell + Azure SDK) | Bicep can't author AI Search index schema; PS + SDK is the shortest path; script already exists. | H2b (indexes, sub-step of H2) |
 | **Config-seed layer** (§9 of INVENTORY: type-lookups, actions, tools, playbooks, consumers, grid/field-mapping/workspace-layout configs, env-var values, AI model deployment records) | Existing PowerShell seeders (`Deploy-All-AI-SeedData.ps1`, `Seed-PlaybookConsumers.ps1`, `Deploy-SystemWorkspaceLayouts.ps1`, `Deploy-*ChartDefinitions.ps1`) invoked from a **declarative config-seed manifest** | Handles the drift between `scripts/seed-data/*.json` (2026-01 MVP) vs `infra/dataverse/**` (R7 current) via a single manifest that names the authoritative source per artifact. | H12a / H12b / H12c |
 | **Web-resource / code-page deploy** | Existing `Deploy-Release.ps1` (hardened per Gap 2 — remove hardcoded `spaarkedev1`) | Existing pipeline; needs `customerId` parameter added. | H9 sub-step |
 | **SPE container-type + container provisioning** | Existing `Create-NewContainerType.ps1`, `Register-*.ps1`, `New-BusinessUnitContainer.ps1` **switched to confidential-client (app-only) token** per SPE 403 fix | Delegated token now 403s ("public client not allowed"). Confidential-client + KV-stored cert is the current supported pattern. | H8 |
@@ -130,38 +131,85 @@ Provisioning steps implemented as idempotent handlers. Each handler is a self-co
 
 | # | Handler | Source logic | Gate | Idempotency key |
 |---|---------|-------------|------|-----------------|
-| H0 | Preflight / validate inputs | Step 1 + runbook checklist | — | `preflight-{customerId}-{paramHash}` |
-| **H0.5 (v3)** | **Consent-capture callback** (Model 2 self-service only) | BFF `/api/onboarding/consent-callback` endpoint (D18) captures `tid` on admin consent, seeds run parameters | — | `consent-{customerId}-{tid}` |
+| H0 | Preflight / validate inputs **+ lead-time quota checks (v3.2)** — Azure OpenAI regional TPM (150+200+30+350 per model deployment ≤ subscription quota in target region); Dataverse env-creation rate (per-tenant ≤4/hour typical); Subscription vCPU + storage quota for the target region; SPE container-type replication lead-time (fail fast if new tenant with no cert-bootstrap done) | Step 1 + runbook checklist + new `az cognitiveservices ...`, `pac admin quota`, `az vm list-usage` calls | **All quota checks pass** (blocks the run before H1; §9 north-star lead-time items surfaced BEFORE pipeline starts, not after 30-min Bicep) | `preflight-{customerId}-{paramHash}` |
+| **H0.5 (v3)** | **Consent-capture callback** (Model 2 self-service only) — **v3.2 re-consent semantics**: if `sprk_dataverseenvironment` row exists with same `tid` + status ∈ {Ready, Running, WaitingOnGate}, no-op with 200 + link to existing run; if Failed/Cancelled, restart from H0 | BFF `/api/onboarding/consent-callback` endpoint (D18) captures `tid` on admin consent, seeds run parameters, checks re-consent | — | `consent-{customerId}-{tid}` |
 | H1 | Subscription readiness | NEW (D4) — ARM verification | **Lighthouse delegation** (CustomerOwned) | `subready-{customerId}` |
-| **H2a (was H2)** | Resource group + Azure infra (per-customer Bicep) — includes **Cosmos DB** (v3, BFF prereq), Redis, KV, App Service, OpenAI, AI Search, Doc Intel, App Insights, optional SignalR | Steps 2–3, `customer.bicep` + modules (or `model1-shared.bicep` per §3A A1) | — | `infra-{customerId}-{bicepVer}` |
-| **H2b (v3, new)** | **AI Search index provisioning** (7 indexes; 3072-dim vectors) | Existing `infrastructure/ai-search/Deploy-AllIndexes.ps1` — invoked after H2a completes | — | `aisearch-{customerId}-{indexVer}` |
-| H3 | Entra app registrations (per-customer, ~11 permission grants) | `Register-EntraAppRegistrations.ps1` (D2) — hardened to idempotent + tenant-aware (Model 1 vs Model 2) | **Admin consent granted** (Graph query) | `appreg-{customerId}-{tenantId}` |
-| H4 | Key Vault secrets population + **`keyVaultReferenceIdentity` PATCH to UAMI** (silent-fail trap; see §4B) | Step 4 + PATCH; secrets stored as KV URI refs (B3) | — | `kv-{customerId}-{secretsVer}` |
-| **H5 (v3, TF-driven)** | Dataverse environment creation | **TF Power Platform provider** (D14 v3) — `powerplatform_environment` resource; drift-detected | — | `dvenv-{customerId}` |
+| **H2a (v3, was H2 · v3.2 corrected scope)** | Resource group + Azure infra (per-customer Bicep). **6 additions vs current `Provision-Customer.ps1` step 3** (which only does Storage+KV+ServiceBus): **Cosmos DB** (BFF prereq, R11), **OpenAI**, **AI Search**, **Document Intelligence**, **App Insights + Log Analytics**, **optional SignalR**. **Redis REMOVED per Q-E FR-12** (v3.2 M-1 reconciliation — Redis is per-environment, deployed via `scripts/Deploy-RedisCache.ps1`, NOT per-customer). **UAMI first-class** via new `uami.bicep` module + `app-service.bicep` refactor (Phase C — v3.2 A3 correction of v3.1's "already done" claim). | Steps 2–3, `customer.bicep` + modules (or `model1-shared.bicep` per §3A A1) — 6 new module invocations vs today | — | `infra-{customerId}-{bicepVer}` |
+| **H2b (v3, new · v3.2 path corrected)** | **AI Search index provisioning** (7 canonical indexes per FR-07 catalog — `spaarke-files-index`, `spaarke-discovery-index`, `spaarke-records-index`, `spaarke-rag-references`, `spaarke-insights-index`, `spaarke-session-files`, `spaarke-invoices-index`; `spaarke-playbook-embeddings` RETIRED per spaarke-ai-architecture-redesign-r1 task 035 / FR-P2-06; `spaarke-knowledge-index` archived under `_archive/`; 3072-dim vectors) | **`scripts/ai-search/Deploy-AllIndexes.ps1`** (v3.2 path fix — v3.1 said `infrastructure/ai-search/`; that dir has only the schema JSONs). Runs post-H2a; script is catalog-driven + PUT-idempotent. | — | `aisearch-{customerId}-{indexVer}` |
+| H3 | Entra app registrations (per-customer, **~14 permission grants per `GraphAppRoles.cs`** — v3.2 corrected from v3.1's "~11") + BFF app-reg only. **v3.2 (r3 task 060)**: vestigial Dataverse S2S app-reg DROPPED — zero code consumers; do not provision. | `Register-EntraAppRegistrations.ps1` (D2) — hardened to idempotent + tenant-aware (Model 1 vs Model 2) | **Admin consent granted** (Graph query) | `appreg-{customerId}-{tenantId}` |
+| H4 | Key Vault secrets population + **`keyVaultReferenceIdentity` PATCH to UAMI** (T1) + **canonical naming applied at seed time** (v3.2 Phase G — per r3 task 063 standard: `sprk-{env}-kv` vault + env-agnostic secret names + `spaarke-spekvcert` DO-NOT-RENAME dev exception) | Step 4 + PATCH; secrets stored as KV URI refs (B3); seeder driven by **canonical secret-catalog manifest** (Phase H per r3 KV federation design Phase 3b) | — | `kv-{customerId}-{secretsVer}` |
+| **H5 (v3 design intent, v3.2 deferred exec)** | Dataverse environment creation — **design target = TF Power Platform provider (D14)**, but implementation deferred to first-customer engagement per v3.2 M-10 (dev-only reality, no customer volume). **Interim (Phase A/B)**: continue with `pac admin create-environment` PS invocation + gate-verified. When first customer signs, TF migration lands as its own task chain. | Interim: `pac admin`; target: TF `powerplatform_environment` resource | — | `dvenv-{customerId}` |
 | H6 | Solution export/fix (managed) + Package Deployer import (~10 solutions, dependency-ordered) | Export (D1) + `Deploy-DataverseSolutions.ps1` + Package Deployer | — | `solimport-{customerId}-{solutionVer}` |
-| H7 | 7 Dataverse env-var values + BFF app-settings (deploy-time token substitution) | Step 8 + `appsettings.template.json` token substitution + KV refs | — | `envvars-{customerId}-{configVer}` |
-| **H8 (v3, confidential-client)** | SPE container type + root container | Existing scripts + **switch to confidential-client (app-only) token** — delegated token now 403s (`public client not allowed`). Cert bootstrapped from KV. | Container-type replication (up to 24h — **lead-time item, not in-pipeline wait**; see §9 north star) | `spe-{customerId}` |
+| H7 | 7 Dataverse env-var values + BFF app-settings — **v3.2 (Phase H)**: token substitution pattern superseded by canonical secret-catalog manifest + KV federation reader (BFF startup reads from KV directly with SDK caching); `#{TOKEN}#` substitution retained during transition | Step 8 + template evolution per Phase H | — | `envvars-{customerId}-{configVer}` |
+| **H8 (v3, confidential-client)** | SPE container type + root container | Existing scripts + **switch to confidential-client (app-only) token** — delegated token now 403s (`public client not allowed`). Cert bootstrapped from KV. | Container-type replication (up to 24h — **lead-time item, not in-pipeline wait**; §9 north star; H0 preflight checks cert-bootstrap done) | `spe-{customerId}` |
 | H9 | BFF deploy + app settings + **`Deploy-Release.ps1` Phase 4 hardened** (Gap 2 — `customerId`-driven, no `spaarkedev1` hardcode) | `Deploy-BffApi.ps1` + `auth-deployment-setup.md` + hardened Phase 4 | — | `bff-{customerId}-{buildId}` |
-| **H10 (v3, TF-driven)** | Dataverse Application User (MI + BFF app-reg) + **MI Graph app-role parity** (silent-fail trap; see §4B) | **TF Power Platform provider** `powerplatform_user` resource; **replaces v2 semi-automated PPAC fallback**. Post-step: replicate ~11 Graph app-role grants onto MI service principal. | — | `appuser-{customerId}` |
+| **H10 (v3 design intent, v3.2 deferred exec · Graph-parity from code constant)** | Dataverse Application User (BFF app-reg + UAMI) + **Graph app-role parity from `GraphAppRoles.cs` constant** (T3 v3.2). Design target = TF `powerplatform_user`; implementation deferred with H5 to first-customer engagement per M-10. Interim: PPAC UI fallback + verification query. **Escalation gate**: 10/14 GUIDs in `GraphAppRoles.cs` are null — must be completed via `az` enumeration of the Graph resource SP BEFORE first production customer provisioning. | Interim: PPAC UI + Graph SDK for role sync; target: TF `powerplatform_user` | — | `appuser-{customerId}` |
 | H11 | User provisioning (identity preset) | r1 registration flow (D6) | **B2B consent** (B2BGuest only) | `users-{customerId}` |
 | **H12a (v3, PROMOTED from thin)** | **AI seed chain**: type-lookups → actions → tools → knowledge → skills → playbooks → output-types → **playbook consumers** (single AI routing surface, ADR-039) | Existing `scripts/seed-data/Deploy-All-AI-SeedData.ps1` + `Seed-PlaybookConsumers.ps1`; **authoritative source per artifact declared in seed manifest** (resolves the `scripts/seed-data` MVP vs `infra/dataverse` R7 drift per INVENTORY §9) | — | `aiseed-{customerId}-{seedVer}` |
-| **H12b (v3, PROMOTED)** | **App-config seed**: DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions | Existing per-module PS seeders + Web-API seeding recipes (per `FIELD-MAPPING-ADMIN-GUIDE.md`); declarative manifest | — | `configseed-{customerId}-{configSeedVer}` |
+| **H12b (v3, PROMOTED · v3.2 DAG-parallel with H12a)** | **App-config seed**: DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions | Existing per-module PS seeders + Web-API seeding recipes (per `FIELD-MAPPING-ADMIN-GUIDE.md`); declarative manifest. **No dependency on H12a** — grid/field-mapping/workspace-layout seeds don't need AI seed to be complete first. | — | `configseed-{customerId}-{configSeedVer}` |
 | **H12c (v3, PROMOTED)** | **Runtime references**: AI model deployment records (`sprk_aimodeldeployment`) point to this customer's Azure OpenAI deployment | Env-specific; runs after H2a (OpenAI deployed) + H12a (aitype lookups seeded) | — | `runtimerefs-{customerId}-{modelVer}` |
-| H13 | End-to-end acceptance gate (Gap 4) | Extended `Validate-DeployedEnvironment.ps1` — asserts effects, not intentions (R7); checks BFF `/health`, sample analysis, sample document upload+index, workspace-layout render, wizard field-map | **Validation passed → registry `Ready`** | `validate-{customerId}-{buildId}` |
-| **H14 (v3, enumerated)** | **Post-deploy integration wiring** (I1 resolved) — enumerated: (a) **two Exchange ApplicationAccessPolicies** (BFF app-reg + MI, both — silent-fail trap; §4B), (b) Graph webhook subscriptions per Communication/Email module (with HMAC signing keys from H4), (c) service endpoint webhooks (Dataverse → BFF), (d) S2S consent flows for the Dataverse S2S app registration | New scripting; each sub-step idempotent | — | `integrations-{customerId}-{integrationVer}` |
+| H13 | End-to-end acceptance gate (Gap 4) | Extended `Validate-DeployedEnvironment.ps1` — asserts effects, not intentions (R7); checks BFF `/health`, sample analysis, sample document upload+index, workspace-layout render, wizard field-map, **all 6 §4B silent-fail traps cleared** | **Validation passed → registry `Ready`** | `validate-{customerId}-{buildId}` |
+| **H14 (v3.2, S2S sub-step removed per r3 task 060)** | **Post-deploy integration wiring** (I1 resolved) — enumerated: (a) **two Exchange ApplicationAccessPolicies** (BFF app-reg + UAMI — T4 with action semantics: create-if-missing then verify), (b) Graph webhook subscriptions per Communication/Email module (with HMAC signing keys from H4), (c) service endpoint webhooks (Dataverse → BFF). **v3.2**: sub-step (d) S2S consent flows REMOVED (r3 task 060 dropped the S2S app-reg). Sub-steps (a)/(b)/(c) are **DAG-parallel** — no cross-dependencies given H4/H10/H12 outputs available. | New scripting; each sub-step idempotent | — | `integrations-{customerId}-{integrationVer}` |
 
-**Handler dependencies** (DAG, not just sequence):
+**Handler dependencies** (DAG, v3.2 parallelism corrected):
 ```
-H0 → H1 → H2a → { H2b, H4, H5 (TF) }
+H0 → H1 → H2a → { H2b (indexes), H4 (KV), H5 (dv-env) }  # 3-way parallel post-Bicep
               ↓
-              H4 → H3 (needs KV for secrets storage) → { H8, H9 }
+              H4 → H3 (needs KV for secrets storage) → { H8 (SPE), H9 (BFF deploy) }
                                                        ↓
-H5 → H6 (solutions) → H7 → H10 (TF app-user, needs H6 solutions) → H11
+H5 → H6 (solutions) → H7 → H10 (app-user, needs H6 solutions) → H11
                                     ↓
-                            H12a → H12b → H12c → H14 → H13 (final gate)
+                            { H12a (AI seed), H12b (config seed) }  # v3.2: parallel — H12b doesn't need H12a
+                                    ↓
+                            H12c (runtime refs — needs both H12a + H12b + H2a OpenAI)
+                                    ↓
+                            H14 { (a) Exchange×2, (b) Graph webhooks, (c) service-endpoint webhooks }  # sub-steps parallel
+                                    ↓
+                            H13 (final gate)
 ```
 
-**Model 2 self-service branch**: `H0.5 (consent-capture) → H0 → …` — the pipeline starts on consent-callback rather than operator-initiated.
+**Model 2 self-service branch**: `H0.5 (consent-capture) → H0 → …` — the pipeline starts on consent-callback rather than operator-initiated. **Re-consent (v3.2)**: H0.5 no-ops on active/completed runs; only restarts from H0 on failed/cancelled state.
+
+### 4.1a Model 1 vs Model 2 handler behavior differences (added v3.2)
+
+Handlers execute the same code but with different inputs and post-conditions depending on `tenancyModel`. This table enumerates what changes; handlers not listed behave identically across tiers.
+
+| Handler | Model 2 (dedicated) | Model 1 (shared trial/SMB) |
+|---|---|---|
+| **H0 preflight** | Full per-customer quota check (subscription vCPU, OpenAI regional TPM headroom for dedicated deployment) | Verify per-tenant token budget (`tokenBudgetMonthlyUSD` per D19); confirm shared-platform OpenAI quota has capacity for +1 tenant |
+| **H2a Bicep composition** | `customer.bicep` (or `model2-full.bicep` stack) — full dedicated stamp; new UAMI, KV, Cosmos, Storage; **dedicated App Service Plan + AI Search + OpenAI** | `model1-shared.bicep` stack — dedicated KV/Cosmos/Storage/UAMI **only**; **shares platform App Service Plan + AI Search + OpenAI** (per §3A A1) |
+| **H2b AI Search indexes** | 7 canonical indexes on customer's dedicated AI Search service; per-customer index storage | 7 canonical indexes ALREADY exist on shared platform AI Search service — H2b **verifies** presence and provisions per-tenant `tenantId`-filter query template (does NOT re-create indexes) |
+| **H4 KV secrets** | Customer's dedicated KV (`sprk-{customerId}-{env}-kv` per Phase G naming standard) | Customer's dedicated KV (naming: still per-customer since KV is 🔴 dedicated per §3A A1) |
+| **H7 env-var values + BFF app-settings** | Points at customer's dedicated OpenAI/AI Search/App Insights endpoints | Points at shared platform OpenAI/AI Search endpoints; per-tenant metering headers set via D19 token-metering layer |
+| **H10 Dataverse App User** | UAMI registered as System Administrator on customer's dedicated Dataverse env | UAMI registered on customer's dedicated Dataverse env (Dataverse remains 🔴 dedicated per §3A A1) |
+| **H12c runtime refs** | `sprk_aimodeldeployment` rows point at customer's dedicated OpenAI deployment | `sprk_aimodeldeployment` rows point at shared platform OpenAI deployment with per-tenant metering attribution |
+| **H13 acceptance** | Full E2E + verifies dedicated resource isolation (no cross-customer data visible in sample queries) | Full E2E + verifies **`tenantId`-filter enforcement** on every AI Search query + verifies token metering attribution works |
+
+**Trial-environment provisioning (v3.2 per H-6 decision)**: Phase F Acceptance stands up a fresh **`trial-{yyyymmdd}` customer stamp** using Model 1 profile (`spaarke-hosted-model1-trial`) for E2E validation. Independent of demo/prod (decommissioned for budget per r3 handoff). Cleanup after acceptance is discretionary.
+
+### 4C. Rollback semantics on partial failure (added v3.2)
+
+Idempotency + resumability (D11) covers the happy path where a failed handler can be re-run to completion. This section covers the different case: a handler completes but its output leaves the environment in a state that a downstream handler cannot proceed from, OR the operator abandons the run.
+
+**Handler failure classification**:
+
+| Class | Definition | Example | Recovery |
+|---|---|---|---|
+| **Resumable** | Handler failed before writing any external side effect (or wrote to Cosmos only) | H0 preflight fails on missing quota; H3 fails on 429 from Graph | Cosmos run marked `Failed`; operator resolves external precondition; `POST /api/runs/{id}/resume` restarts the failed handler |
+| **Retryable-with-cleanup** | Handler wrote a partial external side effect that its own idempotency key handles (upsert or check-first) | H6 imports 3 of 10 solutions then Package Deployer throws on solution 4 | Re-run H6 — Package Deployer skips already-imported solutions by version; resumes at solution 4 |
+| **Quarantine-required** | Handler wrote a partial external side effect that is NOT self-healing on re-run and cannot proceed to next handler | H2a Bicep deploys 12 of 16 resources then fails on OpenAI quota; a corrupt Dataverse env state that TF cannot import back | Cosmos run marked `Quarantined`; environment is NOT torn down (decommission out of scope per D17) but NOT usable; operator must manually resolve OR mark for `Decommission-Customer.ps1` teardown; new run against same `customerId` blocked until quarantine cleared |
+| **Successful-but-drifted** | Handler completed successfully but downstream config drift (e.g., human edited KV/App Service between runs) invalidates the state | Rare; H7 wrote env vars, human edited App Service settings, H9 verify fails | H13 acceptance detects; operator re-runs affected phases with `resumeFromPhase` param |
+
+**Cosmos state transitions on failure**:
+- `Running` → `Failed` (handler threw, retryable)
+- `Running` → `Quarantined` (handler wrote un-recoverable partial state)
+- `Failed` → `Running` (operator called `resume_run`)
+- `Quarantined` → `Cancelled` (operator explicitly abandons, may follow with decommission)
+- `Cancelled` → clears `sprk_currentrunid` on registry row; environment record marked `SetupStatus=Failed` (Dataverse choice)
+
+**Cross-customer serialization on quarantine**: `sprk_currentrunid` stays set on the `sprk_dataverseenvironment` row while status is `Quarantined` — blocks new runs against the same customer until the operator explicitly clears (via new `POST /api/runs/{id}/clear-quarantine` endpoint). Cross-customer runs unaffected.
+
+**What's explicitly NOT in scope (per D17)**: automated rollback that re-creates a pristine state. Rollback = quarantine + operator decision (repair or teardown). This matches Terraform semantics (`terraform destroy` is a separate operator action, not automatic on `apply` failure).
 
 ### 4B. Silent-failure trap catalog (added v3, 2026-08-12)
 
@@ -169,11 +217,11 @@ Six known-issue guardrails baked into handlers as **verified post-conditions**, 
 
 | # | Trap | Where it bites | Handler that owns the fix | Verification |
 |---|---|---|---|---|
-| **T1** | **`keyVaultReferenceIdentity` not PATCHed to UAMI** — App Service resolves `@Microsoft.KeyVault(...)` refs with the wrong identity → all KV-ref settings become `null` at runtime | H4 completes but BFF startup fails resolving `Dataverse:ClientSecret` etc. | H4 | ARM read: App Service `keyVaultReferenceIdentity` == UAMI resource ID. **Post-D20**: fail-fast config validation catches this at BFF startup (`/health` probe fails → deploy fails visibly) instead of at first Dataverse call. |
-| **T2** | **MI not registered as Dataverse Application User** in the target env | Every BFF → Dataverse call 403s → surfaces as 500 to callers; Communication/Email module fails silently on subscription setup | H10 (was semi-auto in v2; TF-driven in v3) | Dataverse query: `systemusers?$filter=applicationid eq {mi-app-id}` returns 1. **Post-D20**: BFF startup smoke-tests a Dataverse call via UAMI; missing App User surfaces as `/health` failure. |
-| **T3** | **MI Graph app-role parity broken** — the ~11 Graph app-roles granted on the BFF app-reg are NOT replicated onto the MI service principal | App-only Graph calls from BFF (SPE, mail, groups) 403 despite delegated flow working | H10 (post-step) | Graph query: MI SP `appRoleAssignments` includes all 11 role IDs. **Post-D20**: expected role list is compile-time constant; H10 syncs UAMI SP against constant + ArchTest enforces "no new Graph role added without constant update." |
-| **T4** | **Only one Exchange ApplicationAccessPolicy** created (BFF app-reg, missing MI) — app-only mail calls scope-fail | Email/Communication module ingestion 403s despite delegated Mail.Send working | H14 (v3 enumerated) | Exchange `Get-ApplicationAccessPolicy` returns 2 entries (both principals) |
-| **T5** | **Staging slot MI differs from prod slot MI** — KV RBAC granted only to prod slot → staging deploys can't resolve KV refs → cold-start failures on slot swap | Production deploy triggers a 503 window post-swap | H4 (extended) | ARM read of BOTH slots' MI object IDs; KV RBAC check for both |
+| **T1** | **`keyVaultReferenceIdentity` not PATCHed to UAMI** — App Service resolves `@Microsoft.KeyVault(...)` refs with the wrong identity → all KV-ref settings become `null` at runtime | H4 completes but BFF startup fails resolving `Dataverse:ClientSecret` etc. | H4 | ARM read: App Service `keyVaultReferenceIdentity` == UAMI resource ID. **Post-D20 (r3 task 061)**: fail-fast config validation (`ValidateDataAnnotations().ValidateOnStart()` on 24 Tier-1 IOptions classes) catches missing KV-resolved settings at BFF startup — `/health` probe fails → deploy fails visibly instead of first Dataverse call. **Requires Phase C UAMI migration** — see T5. |
+| **T2** | **MI not registered as Dataverse Application User** in the target env | Every BFF → Dataverse call 403s → surfaces as 500 to callers; Communication/Email module fails silently on subscription setup | H10 (Phase C TF-driven per D14) | Dataverse query: `systemusers?$filter=applicationid eq {mi-app-id}` returns 1. **Post-D20 (r3 task 061)**: DataverseOptions `[Required]` on ClientSecret + ValidateOnStart surfaces missing config at boot; MI-App-User missing is a runtime 403 that r3's fail-fast doesn't cover directly, so **H10 verification query stays as primary defense**; r3 lighter safety net. |
+| **T3** | **UAMI Graph app-role parity broken** — the **14** Graph app-roles required per `Infrastructure/Auth/GraphAppRoles.cs` (r3 task 062 constant) are NOT all replicated onto the UAMI service principal | App-only Graph calls from BFF (SPE, mail, groups, Teams) 403 despite delegated flow working | H10 (post-step, code-constant driven) | Graph query: UAMI SP `appRoleAssignments` includes all 14 role IDs from `GraphAppRoles.cs`. **Post-D20 (r3 task 062)**: expected role list IS the compile-time constant `GraphAppRoles.cs`; H10 reads the constant + syncs UAMI SP + fails deploy on parity mismatch. **⚠️ Class currently has 10 of 14 `AppRoleId` GUIDs = null pending live enumeration of Graph resource SP** — r1 H10 escalation obligation: complete the constant before first production customer provisioning. Nightly parity check queued behind CI-workflow wiring per r3 `task-042-063-ci-gate-wiring-deferral.md` (coordinated PR with `ci-cd-unit-test-remediation-r1`). |
+| **T4** | **Only one Exchange ApplicationAccessPolicy** created (BFF app-reg, missing UAMI) — app-only mail calls scope-fail | Email/Communication module ingestion 403s despite delegated Mail.Send working | H14 (enumerated, action-and-verify) | Exchange `Get-ApplicationAccessPolicy` returns 2 entries (both principals). **H14 action semantics (v3.2)**: on 0 or 1 policies present, H14 CREATES the missing policy (not verify-only); on 2+ present, H14 verifies AppIds match expected principals or fails with drift diagnostic. |
+| **T5** | **Slot-per-slot System-Assigned MI parity** — System-Assigned MI is intrinsically per-slot, so KV RBAC granted only to prod slot → staging deploys can't resolve KV refs → cold-start failures on slot swap. **Design v3.1 wrongly asserted UAMI adoption was already done — v3.2 correction**: current pattern IS System-Assigned per `infrastructure/bicep/modules/app-service.bicep` (`identity: enableManagedIdentity`), no `uami.bicep` module exists yet | Production deploy triggers a 503 window post-swap | H4 (interim: RBAC-both-slots) + **Phase C UAMI migration (structural fix)** | **Interim**: ARM read of BOTH slots' MI object IDs; KV RBAC check for both — same fix works because both slots' System-Assigned MIs are distinct principals. **Structural fix (Phase C)**: new `uami.bicep` module + `app-service.bicep` refactor to consume UAMI + bind to both slots → T5 becomes intrinsically impossible (single UAMI spans both slots). |
 | **T6** | **SPE container creation on delegated token 403s** (`public client not allowed`) | H8 fails on fresh customer with unhelpful auth error; blocks the whole pipeline | H8 (v3, confidential-client) | Container-type creation uses confidential-client cert from KV; no `az login`-style delegated flow |
 
 **Additional latent traps tracked but not currently baked in** (fast-follow per PROJECT-UPDATE §6): two-source AI seed drift (H12a manifest resolves); hardcoded `spaarkedev1` in `Deploy-Release.ps1` Phase 4 (H9 hardened); Cosmos DB provisioning absence (H2a includes Cosmos).
@@ -196,6 +244,17 @@ The orchestration layer that sequences handlers, manages run state, enforces gat
 
 **Crash recovery (I6 resolved v3)**: On startup, L2 scans Cosmos for `status ∈ {Running, WaitingOnGate}` runs older than 2× median-handler-duration. For each orphaned run, L2 emits an `IJobHandler` job to resume from `currentPhase`. Handlers are idempotent (three-level: MessageId dedup + Redis idempotency lock + deterministic idempotency key per §4.1), so a duplicate-resume post-crash is safe.
 
+**Handler execution model (v3.2 added — Fable M-9 resolution)**: App Service's default 230s HTTP request timeout means L2 REST endpoints CANNOT synchronously invoke handlers like H2a (10–20 min Bicep deploy), H5 (15–30 min Dataverse env creation), or H6 (5–15 min solution import). The execution model is **fire-and-forget via Service Bus + state-reconciler background worker in L2**:
+
+1. **HTTP endpoint** (e.g., `POST /api/runs/{id}/resume`) validates the request, writes intent to Cosmos, **enqueues a Service Bus message** for the next handler in the DAG, returns 202 Accepted with the run ID. Total roundtrip: <100ms.
+2. **Handler execution** happens in the BFF's existing `IJobHandler` infrastructure (ADR-004) — a dedicated worker consumes the Service Bus queue, runs the handler (which may take 30+ min), updates Cosmos on completion/failure. Each handler emits its status via existing Job telemetry (ADR-017).
+3. **State-reconciler background worker** in L2 (a `BackgroundService` hosted alongside the API) polls Cosmos every 5 seconds for runs where `completedPhases` last-updated + median-handler-duration < now, checks if the DAG allows the next handler(s) to run, and enqueues them. This is what advances the pipeline through the DAG without blocking any HTTP request.
+4. **Client polling** (L3 skill, future fleet UI): `GET /api/runs/{id}` returns current status; skill polls every 15–30s for interactive UX.
+
+**Why not Durable Functions**: ADR-004 rejects them; the state-machine-in-Cosmos + IJobHandler-workers pattern is proven at scale (13 production handlers). Trade-off: L2 must actively poll Cosmos for DAG advancement rather than a workflow runtime doing it; acceptable at provisioning cadence (single-digit runs/day).
+
+**Concurrency safety in the reconciler**: multiple L2 instances (scaled out) each run the reconciler; Cosmos optimistic-concurrency on `sprk_currentrunid` (§6.1) prevents duplicate enqueuing. The reconciler is idempotent: enqueuing the same handler twice results in Service Bus MessageId dedup + Redis idempotency lock catching the duplicate.
+
 **API surface** (REST endpoints, all AAD-protected):
 
 | Method + Path | Auth role | Purpose |
@@ -208,6 +267,7 @@ The orchestration layer that sequences handlers, manages run state, enforces gat
 | `GET /api/runs/{id}/phases/{phaseId}/logs` | Reader | Return logs/output for a specific phase |
 | `POST /api/runs/{id}/cancel` | Operator | Cancel an in-progress run |
 | `POST /api/onboarding/consent-callback` | Anonymous (HMAC-verified) | **NEW v3 (D18)** — Model 2 self-service consent capture; validates `tid` on admin consent grant + kicks pipeline |
+| `POST /api/runs/{id}/clear-quarantine` | Operator | **NEW v3.2 (§4C)** — Explicitly clear a `Quarantined` run so a new run can start against the same customerId. Requires reason in body; audit-logged. |
 
 ### 4.3 Layer 3 — Swappable Front Ends (D16)
 
@@ -255,6 +315,23 @@ Per-handler job status (ADR-017) governs individual handler outcomes. The **Prov
 ### 5.4 What You'd Do Differently Without the ADRs
 
 Only one thing: you might use Azure Durable Functions or Temporal for the control plane instead of building a custom state machine. Everything else (no plugins, Minimal API, ProblemDetails) correctly guides the design. The state-machine approach is more work but avoids infrastructure sprawl, and `Provision-Customer.ps1`'s state-file pattern already proves it works.
+
+### 5.5 Inherited gates from r3-era master merge (added v3.2 per Fable M-6)
+
+The 2026-08-15 merge of `origin/master` into this branch (commit `41bacbdae`) brought in r3-era forcing-functions + net10 cutover consequences that r1's new BFF code (H0.5 consent-callback endpoint, `DemoExpirationService` migration, `uami.bicep` Phase C work, extended `Validate-DeployedEnvironment.ps1`) MUST comply with. r3 handoff §6 details the full checklist; this section captures what applies to r1:
+
+| Gate | Source | Applies to r1 how |
+|---|---|---|
+| **Analyzers-as-errors** (`TreatWarningsAsErrors=true` in `Directory.Build.props`; CS8601/CS8604 nullable are errors; CS0109/CS1998 removed) | r3 task 041 + net10 stricter analyzers | Every new r1 BFF code file must have zero warnings; H0.5 consent-callback endpoint + `DemoExpirationService` refactor cannot ship with any warning |
+| **God-class ratchet** (`GodClassGuardTests`: no NEW `src/server` file > 2,000 LOC; 14 existing large files frozen at their LOC +100 grace) | r3 task 040 pattern | H0.5 consent-callback should be small (single controller + verification helper); `DemoExpirationService` refactor is a modification of an existing frozen file — must respect +100 LOC grace |
+| **4 new ArchTests** (Dataverse downcast; ADR-013 `IActionResolver`/`IActionRunner` injection; layer violation) | r3 task 040 | H0.5 endpoint MUST NOT inject `IActionResolver`/`IActionRunner` directly (use `PublicContracts/` facade); MUST NOT downcast `IDataverseService` (use `UnwrapServiceClient` extension per r3 task 028) |
+| **Config fail-fast at boot** (`ValidateDataAnnotations().ValidateOnStart()` on 24 Tier-1 IOptions classes) | r3 task 061 | If H0.5 adds any new `IOptions<T>` for onboarding config, it must be classified per Tier 1/2/3 (see `task-061-config-validation-classification.md`) and either validated-on-start (Tier 1) or added to the Tier-2 exemption list |
+| **Publish size ≤60 MB compressed** (baseline 44.96 MB incl PDBs on net10) | CLAUDE.md §10 NFR-01 | H0.5 endpoint + Phase E migration + `uami.bicep` Phase C add ~0.1–0.3 MB combined; must report absolute + delta on every BFF-touching task per §17 placement justification |
+| **Zero HIGH CVE** (`dotnet list --vulnerable --include-transitive` = zero, current net10 baseline) | r3 task 032 + net10 cutover | H0.5 must not introduce any new NuGet package; `uami.bicep` is IaC-only (no NuGet impact); r3 owns the deferred-package-majors backlog (#772) — do not touch |
+| **Graph v6 / Kiota 2.0 error type** (`ODataError` not `ServiceException`; `ResponseStatusCode` is int; `ResponseHeaders` is dict) | net10 cutover r3-handback | H10 Graph SDK calls (Graph role parity via `GraphAppRoles.cs`) must catch `ODataError` in any new code |
+| **Naming-conformance gate** (`scripts/naming-conformance-check.ps1` advisory-until-remediated) | r3 task 063 | H4 canonical-secret population + Phase G naming remediation must produce a clean pass per §7.9 |
+
+**Enforcement**: These gates run inside `dotnet test tests/Spaarke.ArchTests` (already in the tier-1 blocking CI job). r1's every BFF PR must pass. `/conflict-check` before every BFF PR per r3 handoff §7 (19 active BFF worktrees at present).
 
 ---
 
@@ -308,24 +385,32 @@ One execution of the pipeline against a target. Multiple runs per environment ov
 
 ## 7. Azure Resource Specification (Per-Customer)
 
-Every Model 2 customer environment deploys a dedicated, isolated set of Azure resources per D3. Model 1 (trial/SMB per §3A A1) deploys the same resources except the three fixed-floor items (App Service Plan, OpenAI, AI Search) share the Spaarke platform tier.
+Every Model 2 customer environment deploys a dedicated, isolated set of Azure resources per D3. Model 1 (trial/SMB per §3A A1) deploys the same resources except the three fixed-floor items (App Service Plan, OpenAI, AI Search) share the Spaarke platform tier. **Redis is per-environment (shared across customers within an env) per Q-E FR-12** — deployed via `scripts/Deploy-RedisCache.ps1`, NOT per-customer (v3.2 M-1 correction).
 
 > **v3 note**: [`COMPONENT-INVENTORY.md`](COMPONENT-INVENTORY.md) §7 is the **authoritative** BOM (with per-resource disposition, RBAC provisioning steps, and shared-vs-dedicated matrix). This section captures the *design* decisions — naming, catalog, and deployment order — that H2a's Bicep composition depends on. When the two disagree, INVENTORY wins.
 
 **v3 additions to the v2 catalog**:
-- **Cosmos DB (serverless)** — required by BFF runtime (AI sessions, prompts, audit, memory, feedback) per INVENTORY §7. v2 omitted this; BFF will not start without it. Partition by `/tenantId`. Per-customer in Model 2; shared with per-tenant partition in Model 1.
+- **Cosmos DB (serverless)** — required by BFF runtime (AI sessions, prompts, audit, memory, feedback) per INVENTORY §7. v2 omitted this; BFF will not start without it. Partition by `/tenantId`. **Per-customer in both Model 1 and Model 2** (v3.2 correction: Model 1 also gets a dedicated Cosmos account for runtime data isolation — only fixed-floor levers per §3A A1 are shared, and Cosmos serverless has no fixed floor).
 - **SignalR (optional / Null-Object)** — notifications spine realtime per ADR-034. Feature-gated; deploys only if `Notifications:SignalRSpine:Enabled=true`.
 - **Two model stacks made first-class** — `model1-shared.bicep` (trial tier) alongside `model2-full.bicep` (dedicated). Not stack drift; deliberate composition per §3A A1.
+
+**v3.2 corrections to v3**:
+- **Redis REMOVED from per-customer stamp** (Q-E FR-12; `Provision-Customer.ps1` step 3 header comment authoritative). Redis is a per-environment shared resource; H2a does NOT provision Redis; BFF app-settings still reference the per-env Redis via canonical KV secret.
+- **UAMI is aspirational, not yet built** — v3.1 asserted UAMI provisioned by `uami.bicep`; that module does NOT exist and `app-service.bicep` currently uses System-Assigned MI (`identity: enableManagedIdentity`). **Phase C** adds new `uami.bicep` module + refactors `app-service.bicep` to consume UAMI + bind to both slots (structural fix for T5). Until Phase C lands, H4 grants KV RBAC to both slots' distinct System-Assigned MI principals (interim T5 mitigation).
+- **`cosmos.bicep` module name corrected** — actual filename is `cosmos-db.bicep`.
+- **Bicep module count** — 25 `.bicep` modules (v3.1 said 26; discrepancy was a `.json` lifecycle policy counted as a module).
 
 ### 7.1 Resource Naming Convention
 
 | Resource Type | Pattern | Example (`customerId=acme`, `env=prod`) |
 |---|---|---|
 | Resource Group | `rg-spaarke-{customerId}-{env}` | `rg-spaarke-acme-prod` |
+| **UAMI** (v3.2 Phase C) | `mi-spaarke-{customerId}-{env}` | `mi-spaarke-acme-prod` |
 | Storage Account | `sprk{customerId}{env}sa` | `sprkacmeprodsa` |
-| Key Vault | `sprk-{customerId}-{env}-kv` | `sprk-acme-prod-kv` |
+| Key Vault (canonical per r3 task 063) | `sprk-{env}-kv` (Model 1 shared) OR `sprk-{customerId}-{env}-kv` (Model 2 dedicated); dev exception: `spaarke-spekvcert` (DO-NOT-RENAME) | Model 1: `sprk-prod-kv`; Model 2: `sprk-acme-prod-kv`; Dev: `spaarke-spekvcert` |
 | Service Bus | `spaarke-{customerId}-{env}-sbus` | `spaarke-acme-prod-sbus` |
-| Redis Cache | `spaarke-{customerId}-{env}-cache` | `spaarke-acme-prod-cache` |
+| ~~Redis Cache~~ | ~~per-customer~~ | **REMOVED v3.2 (Q-E FR-12)** — Redis is per-env, not per-customer |
+| Cosmos DB (v3.2 added) | `cosmos-spaarke-{customerId}-{env}` | `cosmos-spaarke-acme-prod` |
 | App Service Plan | `sprk-{customerId}-{env}-plan` | `sprk-acme-prod-plan` |
 | App Service (BFF) | `sprk-{customerId}-{env}-api` | `sprk-acme-prod-api` |
 | OpenAI | `sprk-{customerId}-{env}-openai` | `sprk-acme-prod-openai` |
@@ -333,35 +418,37 @@ Every Model 2 customer environment deploys a dedicated, isolated set of Azure re
 | Document Intelligence | `sprk-{customerId}-{env}-docintel` | `sprk-acme-prod-docintel` |
 | App Insights | `sprk-{customerId}-{env}-insights` | `sprk-acme-prod-insights` |
 | Log Analytics | `sprk-{customerId}-{env}-logs` | `sprk-acme-prod-logs` |
+| SignalR (optional) | `sprk-{customerId}-{env}-signalr` | `sprk-acme-prod-signalr` |
 
 ### 7.2 Resource Catalog
 
 | # | Resource | Bicep Module | Default SKU | Key Configuration |
 |---|----------|-------------|-------------|-------------------|
 | 1 | **Resource Group** | (subscription-level) | — | Tags: customer, environment, application, managedBy |
-| 2 | **User-Assigned Managed Identity** | `uami.bicep` | — | Server-outbound identity (Graph app-only, Dataverse, Cosmos, KV). See §9.2 for RBAC + Graph roles. **INVENTORY §7 T1/T2/T3/T5 traps apply.** |
-| 3 | **Key Vault** | `key-vault.bicep` | Standard | RBAC auth, soft delete 90d, purge protection, UAMI gets Secrets User role. **App Service `keyVaultReferenceIdentity` PATCHed to UAMI** (silent-fail T1). |
+| 2 | **User-Assigned Managed Identity** *(v3.2 target — new `uami.bicep` module in Phase C)* | `uami.bicep` *(NEW — does not exist yet; Phase C creates)* | — | Server-outbound identity (Graph app-only, Dataverse, Cosmos, KV). See §9.2 for RBAC + Graph roles. **INVENTORY §7 T1/T2/T3/T5 traps apply.** **Interim state (pre-Phase C)**: `app-service.bicep` uses System-Assigned MI; H4 grants KV RBAC to both slots. |
+| 3 | **Key Vault** | `key-vault.bicep` | Standard | RBAC auth, soft delete 90d, purge protection, UAMI gets Secrets User role. **App Service `keyVaultReferenceIdentity` PATCHed to UAMI** (silent-fail T1). **v3.2 Phase G**: vault name is `sprk-{env}-kv` per canonical naming standard (`spaarke-spekvcert` DO-NOT-RENAME dev exception codified); bicep accepts vault name as a **parameter**, not hardcoded. |
 | 4 | **Storage Account** | `storage-account.bicep` | Standard_LRS | TLS 1.2, blob public access disabled, 3 containers (see 7.3) |
 | 5 | **Service Bus** | `service-bus.bicep` | Standard | TLS 1.2, 4 queues + 1 membership topic (see 7.3), 5-min lock, 14-day TTL, DLQ enabled |
-| 6 | **Redis Cache** | `redis.bicep` | Basic C0 (no VNet) / Premium P1 (VNet) | TLS-only (port 6380), allkeys-lru eviction |
-| 7 | **Cosmos DB (serverless)** *(v3 added)* | `cosmos.bicep` | Serverless | AI sessions, prompts, audit, memory, feedback; partition `/tenantId`; UAMI granted **Cosmos DB Built-in Data Contributor**. **BFF will not start without this.** |
-| 8 | **App Service Plan** | `app-service-plan.bicep` | S1 (Standard) | Linux |
-| 9 | **App Service (BFF)** | `app-service.bicep` | — | .NET 8.0, HTTPS-only, always-on, HTTP/2, UAMI, health check `/health`. **Staging slot MI parity** (silent-fail T5). |
-| 10 | **Azure OpenAI** | `openai.bicep` | S0 (`kind=AIServices`) | 4 model deployments (see 7.4). UAMI granted **Cognitive Services User** (wildcard; narrower OpenAI-User role insufficient for `kind=AIServices`). |
-| 11 | **AI Search** | `ai-search.bicep` | Standard | Semantic search enabled, **7 indexes** (see Section 8; index creation is handler **H2b** via `Deploy-AllIndexes.ps1`, not Bicep) |
-| 12 | **Document Intelligence** | `doc-intelligence.bicep` | S0 | prebuilt-layout model (see 7.5) |
-| 13 | **App Insights + Log Analytics** | `monitoring.bicep` | PerGB2018 | 90-day retention, resource permissions enabled |
-| 14 | **SignalR** (optional / Null-Object) *(v3 added)* | `signalr.bicep` | Free F1 / Standard S1 | Notifications spine realtime per ADR-034. Feature-gated (`Notifications:SignalRSpine:Enabled`). |
-| 15 | **Content Safety** (optional) | `content-safety.bicep` | S0 | West US 2 or East US 2 only (Prompt Shields requirement) |
-| 16 | **AI Foundry Hub + Project** (optional) | `ai-foundry-hub.bicep` | Basic | Prompt Flow orchestration, attached to storage + KV + insights |
+| ~~6~~ | ~~**Redis Cache**~~ | — | — | **REMOVED v3.2 (M-1 / Q-E FR-12)**: Redis is per-environment (shared across customers within an env), NOT per-customer. Deployed via `scripts/Deploy-RedisCache.ps1` at env-provisioning time; H2a does not touch Redis; BFF app-settings reference the per-env Redis via canonical KV secret. |
+| 6 | **Cosmos DB (serverless)** *(v3 added)* | `cosmos-db.bicep` *(v3.2 name corrected)* | Serverless | AI sessions, prompts, audit, memory, feedback; partition `/tenantId`; UAMI granted **Cosmos DB Built-in Data Contributor**. **BFF will not start without this.** |
+| 7 | **App Service Plan** | `app-service-plan.bicep` | S1 (Standard) | Linux |
+| 8 | **App Service (BFF)** | `app-service.bicep` | — | **.NET 10.0** (v3.2 net10 baseline per 2026-08-14 cutover), HTTPS-only, always-on, HTTP/2, UAMI (post-Phase C) or System-Assigned MI (interim), health check `/health`. **Staging slot MI parity** (silent-fail T5 — structurally fixed by Phase C UAMI). |
+| 9 | **Azure OpenAI** | `openai.bicep` | S0 (`kind=AIServices`) | 4 model deployments (see 7.4). UAMI granted **Cognitive Services User** (wildcard; narrower OpenAI-User role insufficient for `kind=AIServices`). |
+| 10 | **AI Search** | `ai-search.bicep` | Standard | Semantic search enabled, **7 canonical indexes** (see Section 8; index creation is handler **H2b** via `scripts/ai-search/Deploy-AllIndexes.ps1` per FR-07 — v3.2 path correction — not Bicep) |
+| 11 | **Document Intelligence** | `doc-intelligence.bicep` | S0 | prebuilt-layout model (see 7.5) |
+| 12 | **App Insights + Log Analytics** | `monitoring.bicep` | PerGB2018 | 90-day retention, resource permissions enabled |
+| 13 | **SignalR** (optional / Null-Object) *(v3 added)* | `signalr.bicep` | Free F1 / Standard S1 | Notifications spine realtime per ADR-034. Feature-gated (`Notifications:SignalRSpine:Enabled`). |
+| 14 | **Content Safety** (optional) | `content-safety.bicep` | S0 | West US 2 or East US 2 only (Prompt Shields requirement) |
+| 15 | **AI Foundry Hub + Project** (optional) | `ai-foundry-hub.bicep` | Basic | Prompt Flow orchestration, attached to storage + KV + insights |
 
-**Shared-vs-dedicated disposition** (per §3A A1 + INVENTORY §11):
+**Shared-vs-dedicated disposition** (per §3A A1 + INVENTORY §11 + v3.2 Redis correction):
 
 | Category | Resources | Model 1 (trial) | Model 2 (dedicated, D3) |
 |---|---|---|---|
-| 🔴 Always dedicated (cheap / customer-owned) | Dataverse, SPE, KV secrets, Storage, UAMI, Entra app config, Cosmos runtime data | dedicated | dedicated |
+| 🔴 Always dedicated (cheap / customer-owned) | Dataverse, SPE, KV secrets, Storage, UAMI, Entra app config, **Cosmos runtime data (v3.2 correction: dedicated in both models)** | dedicated | dedicated |
 | 🟡 Fixed-floor levers (§3A A1 amendment) | App Service Plan, Azure OpenAI, AI Search | **shared** (metered per D19) | dedicated |
 | 🟢 Safely shareable | Service Bus, App Insights/Log Analytics, Content Safety, Doc Intelligence, SignalR | shared | dedicated |
+| 🔵 Per-environment (v3.2, was miscategorized as per-customer in v3.1) | Redis Cache (per Q-E FR-12 — `scripts/Deploy-RedisCache.ps1` deploys once per env; all customers within that env share) | shared | shared |
 
 ### 7.3 Sub-Resource Configuration
 
@@ -412,58 +499,65 @@ Model version pinning per ADR-020. Embedding model change requires full AI Searc
 
 **Limits**: Max file size 10 MB, max input tokens 100K, max concurrent streams 3, timeout 30s, circuit breaker 3 failures / 60s break.
 
-### 7.6 Deployment Order (v3 updated)
+### 7.6 Deployment Order (v3.2 updated)
 
 1. Resource Group
-2. **UAMI** (created early so RBAC can be assigned against downstream resources by principalId)
+2. **UAMI** *(v3.2 Phase C target — new `uami.bicep`; interim uses System-Assigned MI at step 13)*
 3. Log Analytics + App Insights (monitoring, referenced by others)
-4. Key Vault (secrets storage, created early so other modules can store outputs; UAMI → Secrets User)
+4. Key Vault (secrets storage, created early so other modules can store outputs; UAMI → Secrets User; **v3.2 Phase G: vault name is a parameter, canonical form `sprk-{env}-kv` per r3 task 063**)
 5. Storage Account (UAMI → Blob Data Contributor)
 6. Service Bus
-7. Redis Cache
-8. **Cosmos DB (serverless)** *(v3 added)* — BFF prereq; UAMI → Data Contributor
+7. **Cosmos DB (serverless)** — BFF prereq; UAMI → Data Contributor
+8. ~~Redis Cache~~ — **REMOVED v3.2 (Q-E FR-12)** — deployed per-env via `scripts/Deploy-RedisCache.ps1`, not per-customer
 9. App Service Plan
 10. OpenAI Service (`kind=AIServices`; UAMI → Cognitive Services User)
-11. AI Search (**index creation is H2b, not part of this Bicep phase**)
+11. AI Search (**index creation is H2b via `scripts/ai-search/Deploy-AllIndexes.ps1`, not part of this Bicep phase**)
 12. Document Intelligence
-13. **SignalR** (optional) *(v3 added)*
-14. App Service (BFF, depends on plan + KV + all AI/data service endpoints; **`keyVaultReferenceIdentity` PATCHed to UAMI as post-deploy step per T1**)
+13. **SignalR** (optional)
+14. App Service (BFF, .NET 10, depends on plan + KV + all AI/data service endpoints; **`keyVaultReferenceIdentity` PATCHed to UAMI as post-deploy step per T1**)
 15. Content Safety (optional)
 16. AI Foundry Hub + Project (optional)
 
-**Then, after Bicep completes** (post-H2a): H2b (7 AI Search indexes via `Deploy-AllIndexes.ps1`), H4 (KV secrets population + `keyVaultReferenceIdentity` PATCH per T1), then H3 onward.
+**Then, after Bicep completes** (post-H2a): H2b (7 canonical AI Search indexes via `scripts/ai-search/Deploy-AllIndexes.ps1`), H4 (KV secrets population via canonical secret-catalog manifest per Phase H + `keyVaultReferenceIdentity` PATCH per T1), then H3 onward per DAG.
 
-### 7.7 Key Vault Secrets (Populated by H4)
+### 7.7 Key Vault Secrets (Populated by H4 — canonical names per r3 task 063 standard)
+
+**v3.2 changes**:
+- Names comply with the canonical naming standard (R1: env-agnostic; R2: one canonical casing; R3: `sprk-{env}-kv` vault; §7.9)
+- **Dataverse-S2S-* secrets DROPPED** — r3 task 060 dropped the vestigial S2S app-reg; secrets have zero consumers
+- **`redis-connection-string` DROPPED** — Redis is per-env now; BFF app-settings reference the per-env Redis secret in the platform KV, not per-customer
+- Secrets are seeded from a **canonical secret-catalog manifest** (Phase H per r3 KV federation design Phase 3b) — one authoritative source generates seeder + Configure script + tokens doc + Bicep KV secret set
 
 **Infrastructure secrets (from Bicep outputs):**
 
-| Secret Name | Source | Purpose |
+| Secret Name (canonical) | Source | Purpose |
 |-------------|--------|---------|
-| `redis-connection-string` | Redis deployment output | Cache access |
 | `servicebus-connection-string` | Service Bus deployment output | Queue access |
 | `storage-connection-string` | Storage deployment output | Blob access |
+| `AiSearch--AdminKey` *(v3.2 canonical per r3 task 063 — was `aisearch-admin-key` + 2 aliases)* | AI Search deployment output | Index management |
+| `ai-search-endpoint` | AI Search deployment output | Search endpoint |
 | `openai-api-key` | OpenAI deployment output | AI model access (fallback when MI auth unavailable per ADR-028 E-2) |
 | `ai-openai-endpoint` | OpenAI deployment output | AI model endpoint |
-| `aisearch-admin-key` | AI Search deployment output | Index management |
-| `ai-search-endpoint` | AI Search deployment output | Search endpoint |
 | `ai-docintel-endpoint` | Doc Intelligence deployment output | Document processing endpoint |
 | `ai-docintel-key` | Doc Intelligence deployment output | Document processing access |
 | `AppInsights-ConnectionString` | App Insights deployment output | Telemetry |
+| `cosmos-endpoint` *(v3.2 added)* | Cosmos DB deployment output | BFF Cosmos connection endpoint |
 
 **Auth secrets (from H3 Entra app registration):**
 
-| Secret Name | Source | Purpose |
+| Secret Name (canonical) | Source | Purpose |
 |-------------|--------|---------|
 | `BFF-API-ClientId` | App registration | BFF app registration client ID |
-| `BFF-API-ClientSecret` | App registration credential | OBO flow client secret (24-month expiry) |
+| `BFF-API-ClientSecret` | App registration credential | OBO flow client secret (24-month expiry) — **NEVER-REMOVE** per r3 handoff (BFF's Dataverse camp still secret-based pending task 011 #3b) |
 | `BFF-API-Audience` | `api://{bff-app-id}` | JWT audience validation |
-| `Dataverse-S2S-ClientId` | S2S app registration | Dataverse service-to-service client ID |
-| `Dataverse-S2S-ClientSecret` | S2S app registration credential | S2S authentication (24-month expiry) |
+| `Dataverse-ServiceUrl` *(v3.2 canonical per r3 task 063 — was `SPRK-DEV-DATAVERSE-URL` with env token baked in)* | Dataverse environment | Cross-reference; env token lives in the value + vault, never the name |
+| ~~`Dataverse-S2S-ClientId`~~ | ~~S2S app registration~~ | **DROPPED v3.2 (r3 task 060)** — vestigial S2S app-reg had zero code consumers |
+| ~~`Dataverse-S2S-ClientSecret`~~ | ~~S2S app registration credential~~ | **DROPPED v3.2 (r3 task 060)** |
 | `TenantId` | Customer Entra tenant | MSAL authority |
 
 **Integration secrets:**
 
-| Secret Name | Source | Purpose |
+| Secret Name (canonical) | Source | Purpose |
 |-------------|--------|---------|
 | `communication-webhook-signing-key` | Generated (48-byte base64) | HMAC-SHA256 for Graph subscription webhooks |
 | `Email-WebhookSigningKey` | Generated (48-byte base64) | HMAC-SHA256 for Dataverse service endpoint webhooks |
@@ -485,36 +579,82 @@ When VNet isolation is enabled (typically production):
 
 **3 NSGs** with hardened rules per subnet.
 
+### 7.9 KV-Secret & Resource Naming Compliance (added v3.2 per r3 task 063 handoff §4a)
+
+r3 published the canonical naming standard in [`docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md` §"KV-Secret & Resource Naming Standard (Conformance-Gated)"](../../docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md#kv-secret--resource-naming-standard-conformance-gated) and the read-only gate at `scripts/naming-conformance-check.ps1`. **r1 owns applying canonical names at provisioning time** (Phase G) + is the driver for the durable fix (Phase H canonical secret-catalog manifest).
+
+**The four load-bearing rules (r3 authoritative)**:
+
+1. **R1 — Env-agnostic secret names**: no `DEV/DEMO/PROD/UAT/TEST/STAGING/SANDBOX/QA` token as a delimited segment of a KV-secret name. Env difference lives in the value + vault, never the name.
+2. **R2 — One canonical casing per logical secret**: kebab-case for new secrets (`communication-webhook-signing-key`); existing PascalCase live secrets grandfathered but MUST NOT gain a second casing. Never two casings for one value.
+3. **R3 — Canonical vault name**: `sprk-{env}-kv`. **Codified legacy exception (DO-NOT-RENAME)**: `spaarke-spekvcert` — the only live dev vault; bicep accepts vault name as a **parameter** rather than hardcoding.
+4. **No orphan / duplicate secrets** — every secret the template/app reads is provisioned by the seeder under exactly the canonical name.
+
+**Reference syntax** (single form): `@Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=<Canonical-Name>)`. Do not mix `#{KEY_VAULT_NAME}#` / SecretUri token schemes for the same value.
+
+**r1 remediation obligations per r3 task 063 handoff §4a rename map**:
+
+| Current (drift) | Canonical | r1 action |
+|---|---|---|
+| `SPRK-DEV-DATAVERSE-URL` (env-token-in-name) | `Dataverse-ServiceUrl` | Bake canonical into H4 seed; Bicep param the vault name |
+| AI-Search key: 3 aliases / 3 casings | `AiSearch--AdminKey` | ⚠ Dataverse + live App-Service pre-check FIRST before removing aliases |
+| `BFF-API-ClientSecret` vs `bff-api-client-secret` (Office add-in path) | single canonical casing `BFF-API-ClientSecret` | grandfather ONE casing; H4 only ever writes canonical |
+| Vault `sprk-platform-prod-kv`, `kv-sdap-{env}`, `spaarke-kv-dev`, `sprkshareddev-kv` | `sprk-{env}-kv` + codified `spaarke-spekvcert` dev exception | make bicep vault name a PARAM; do NOT recreate live vault (dev is authoritative) |
+| platform.bicep flat keys `openai-api-key`/`aisearch-admin-key`/`docintel-key` (0 code binds) | canonical names + `__` app-setting keys, or delete redundant settings | H2a bicep alignment; delete orphan flat keys |
+| 6 template-referenced secrets never seeded (orphan refs) | Add to canonical secret-catalog manifest (Phase H) OR document out-of-band | Phase H manifest closure |
+| Webhook secrets: `communication-webhook-signing-key` vs `compose-webhook-signingkey` (inconsistent separation) | consistent kebab separation | env-coordinate; prod currently decommissioned → cheap window |
+
+**BINDING pre-check** (per r3 task 063 handoff): before removing any alias/fallback spelling, pre-check LIVE App Service settings + KV + Dataverse-persisted config. **Never delete** `Dataverse-ClientSecret` / `BFF-API-ClientSecret` (OBO + shared-lib Dataverse still depend on them; #3b credential migration is task 011, not r1).
+
+**Owner directive #3 (2026-08-15) applied**: r1 does NOT fix live dev drift as a maintenance-window activity. r1 DOES bake canonical naming into all provisioning paths (H4, Bicep param-ization, H2a modules) so that **new** customer environments are compliant from day one. This satisfies "accurate KV setup to support Model 1 and Model 2 approach" without spending cycles on dev remediation for an env that works.
+
+**Verification**: `scripts/naming-conformance-check.ps1` runs advisory-until-remediated per surface. Success criterion #17 (§15) requires exit 0 on r1-owned surfaces post-provisioning.
+
 ---
 
 ## 8. AI Search Index Specification
 
-> **v3 note (2026-08-12)**: [`COMPONENT-INVENTORY.md`](COMPONENT-INVENTORY.md) §9 references the current 7-index catalog and its deployment script (`infrastructure/ai-search/Deploy-AllIndexes.ps1`). This section captures the *design* — naming standard + field-level shape (audit-reference, may drift from JSON schemas; Phase A verifies). Handler **H2b** invokes `Deploy-AllIndexes.ps1` after H2a Bicep completes.
+> **v3 note (2026-08-12)**: [`COMPONENT-INVENTORY.md`](COMPONENT-INVENTORY.md) §9 references the current 7-index catalog and its deployment script (`scripts/ai-search/Deploy-AllIndexes.ps1`). This section captures the *design* — naming standard + field-level shape (audit-reference, may drift from JSON schemas; Phase A verifies). Handler **H2b** invokes `Deploy-AllIndexes.ps1` after H2a Bicep completes.
 
 ### 8.1 Index Naming Standard
 
 **Convention**: `spaarke-{subject}-{qualifier}` where `{subject}` identifies the data domain and `{qualifier}` distinguishes index variants when needed.
 
-### 8.2 Active Index Inventory (7 Indexes) — v3 corrected
+### 8.2 Active Index Inventory (7 canonical indexes per FR-07) — v3.2 rewritten from Deploy-AllIndexes.ps1 catalog
 
-All production indexes use **3072-dimensional vectors** with `text-embedding-3-large`, HNSW algorithm (m=4, efConstruction=400, efSearch=500, cosine metric), and semantic ranking. **v3 change**: was "8 indexes" — the `discovery-index` (1536-dim prototype) is deprecated/unused; current authoritative count is 7 per INVENTORY §9 & `Deploy-AllIndexes.ps1`.
+**Authoritative source (v3.2)**: `scripts/ai-search/Deploy-AllIndexes.ps1` catalog (lines 197–264) + `docs/architecture/AI-SEARCH-INDEX-CATALOG.md` §4. This section MIRRORS that catalog; the script is the source of truth. All indexes use **3072-dimensional vectors** with `text-embedding-3-large`, HNSW algorithm (m=4, efConstruction=400, efSearch=500, cosine metric), and semantic ranking.
 
-| # | Index Name | Purpose | Module | Tenant Isolation | Schema Location |
+**v3.2 corrections vs v3.1** (per Fable H-2):
+- `spaarke-file-index` → **`spaarke-files-index`** (plural; matches catalog + JSON filename)
+- `spaarke-discovery-index` is **ACTIVE** in the catalog (v3.1 wrongly said "dropped")
+- `spaarke-playbook-embeddings` **RETIRED** per spaarke-ai-architecture-redesign-r1 task 035 / FR-P2-06 (dispatcher stack retirement — noted explicitly in Deploy-AllIndexes.ps1 header)
+- `spaarke-knowledge-index` **RETIRED / archived** — JSON only under `infrastructure/ai-search/_archive/`; not in the deployer catalog
+- All Schema Location paths corrected to `infrastructure/ai-search/*.json` (verified on disk)
+
+| # | Index Name (canonical) | Purpose | Vector Fields | Tenant Isolation | Schema Location |
 |---|-----------|---------|--------|-----------------|-----------------|
-| 1 | `spaarke-file-index` | Chunked document content from SPE files | RagService, FileIndexingService | `tenantId` filter | `infrastructure/ai-search/spaarke-file-index.json` |
-| 2 | `spaarke-insights-index` | Observations and Precedents (discriminated by `artifactType`) | ObservationIndexUpserter, IndexRetrieveNode | `tenantId` filter | `infra/insights/schemas/spaarke-insights-index.index.json` |
-| 3 | `spaarke-invoices-index` | Invoice chunks for financial analysis | InvoiceSearchService, InvoiceIndexingJobHandler | `tenantId` filter | `infrastructure/ai-search/invoice-index-schema.json` |
-| 4 | `spaarke-playbook-embeddings` | Playbook descriptions for semantic discovery | PlaybookEmbeddingService | N/A (global) | `infrastructure/ai-search/playbook-embeddings.json` |
-| 5 | `spaarke-knowledge-index` | Knowledge base documents | RagService (legacy path) | `tenantId` + `privilege_group_ids` | `infrastructure/ai-search/spaarke-knowledge-index-v2.json` |
-| 6 | `spaarke-rag-references` | Golden reference knowledge (curated enterprise knowledge) | ReferenceRetrievalService | `tenantId` filter | `infrastructure/ai-search/spaarke-rag-references.json` |
-| 7 | `spaarke-records-index` | Dataverse entity records (Matter, Project, Invoice, etc.) | RecordSearchService, DataverseIndexSyncService | Dataverse-layer (no `tenantId` field) | `infrastructure/ai-search/spaarke-records-index.json` |
-| 8 | `spaarke-session-files` | Session-scoped chat uploads (per ADR-014) | RagService (session mode), SessionFilesCleanupJob | `tenantId` + `sessionId` dual filter | `infrastructure/ai-search/spaarke-session-files.json` |
+| 1 | `spaarke-files-index` | Chunked document content from SPE files | `contentVector3072` + `documentVector3072` | `tenantId` + `privilege_group_ids` filter | `infrastructure/ai-search/spaarke-files-index.json` |
+| 2 | `spaarke-discovery-index` | Discovery-workflow document indexing | `contentVector3072` + `documentVector3072` | `tenantId` + `privilege_group_ids` filter | `infrastructure/ai-search/spaarke-discovery-index.json` |
+| 3 | `spaarke-records-index` | Dataverse entity records (Matter, Project, Invoice, etc.) | `contentVector` | `tenantId` + `recordType` + `dataverseRecordId` + `dataverseEntityName` + `privilege_group_ids` | `infrastructure/ai-search/spaarke-records-index.json` |
+| 4 | `spaarke-rag-references` | Golden reference knowledge (curated enterprise knowledge; **FR-17 semantic config → `documentType`, NOT `domain`**) | `contentVector3072` | `tenantId` + `documentType` + `knowledgeSourceId` | `infrastructure/ai-search/spaarke-rag-references.json` |
+| 5 | `spaarke-insights-index` | Observations and Precedents (discriminated by `artifactType`) | `contentVector` | `tenantId` + `artifactType` filter | `infrastructure/ai-search/spaarke-insights-index.json` |
+| 6 | `spaarke-session-files` | Session-scoped chat uploads (per ADR-014 — strict per-session tenant isolation) | `contentVector3072` + `documentVector3072` | `tenantId` + `sessionId` (dual filter — canonical ADR-014 invariant) | `infrastructure/ai-search/spaarke-session-files.json` |
+| 7 | `spaarke-invoices-index` | Invoice chunks for financial analysis | `contentVector` | `tenantId` + `invoiceId` + `matterId` + `projectId` | `infrastructure/ai-search/spaarke-invoices-index.json` |
 
-**Deprecated / removed from active catalog**: `spaarke-knowledge-index-v2` (dual-vector 1536+3072) — replaced by `spaarke-knowledge-index` with 3072-only vectors. `discovery-index` (1536-dim prototype) — dropped in v3 count.
+**Retired / archived (do NOT provision — v3.2 accurate list)**:
+- `spaarke-playbook-embeddings` — retired by spaarke-ai-architecture-redesign-r1 task 035 / FR-P2-06 with dispatcher stack
+- `spaarke-knowledge-index` — archived under `infrastructure/ai-search/_archive/`; superseded by `spaarke-files-index` + `spaarke-rag-references` split
+- `spaarke-knowledge-index-v2` (dual-vector 1536+3072) — never went active
+
+**Per-index invariant verification**: `Deploy-AllIndexes.ps1` verifier (NFR-02) asserts required filterable fields + vector field presence + forbidden field absence (e.g., no `domain` field on `spaarke-rag-references` per FR-17). H2b runs the deployer + verifier; H13 acceptance re-runs verifier as a smoke test.
 
 ### 8.3 Index Field Specifications
 
-**v3 note**: field-level schemas live in the JSON files under `infrastructure/ai-search/` — those are the source of truth deployed by H2b. The tables below are the v2 audit-reference snapshot; a Phase A field-by-field diff against the current JSON schemas is a Phase A verification item (per INVENTORY §12).
+**v3.2 note**: field-level schemas live in the JSON files under `infrastructure/ai-search/` — those are the source of truth deployed by H2b via `Deploy-AllIndexes.ps1`. The tables below are the v2 audit-reference snapshot for the 5 indexes that remain in the canonical set (`spaarke-files-index`, `spaarke-insights-index`, `spaarke-invoices-index`, `spaarke-rag-references`, `spaarke-records-index`, `spaarke-session-files`). **v3.2 explicit corrections**:
+- The `spaarke-file-index` section below is actually the audit for `spaarke-files-index` (plural) — the singular v3.1 naming was wrong
+- **DO NOT reference** the `spaarke-playbook-embeddings` field table below OR the `spaarke-knowledge-index` field table below — both retired/archived per §8.2
+
+A field-by-field diff against the current JSON schemas + `Deploy-AllIndexes.ps1` catalog invariants is a Phase A verification item (per INVENTORY §12 + Fable H-2). The verified catalog invariants (required filterable fields, vector fields, forbidden fields) live in the Deploy script — treat those as binding, not the tables below.
 
 #### spaarke-file-index
 
@@ -650,27 +790,36 @@ All production indexes use **3072-dimensional vectors** with `text-embedding-3-l
 | tags, metadata | string | Yes | — | — |
 | createdAt, updatedAt | DateTimeOffset | — | Yes | — |
 
-### 8.4 Index Configuration (AiSearchOptions)
+### 8.4 Index Configuration (AiSearchOptions) — v3.2 reconciled
 
-BFF configuration maps (`src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs`):
+BFF configuration maps (`src/server/api/Sprk.Bff.Api/Configuration/AiSearchOptions.cs`) — reconciled against `Deploy-AllIndexes.ps1` catalog:
 
-| Config Key | Index Name | Notes |
+| Config Key | Index Name (canonical) | Notes |
 |-----------|-----------|-------|
-| `AiSearch:FilesIndexName` | `spaarke-file-index` | Primary document search |
+| `AiSearch:FilesIndexName` | `spaarke-files-index` *(v3.2 plural)* | Primary document search |
 | `AiSearch:InsightsIndexName` | `spaarke-insights-index` | Observations + Precedents |
-| `AiSearch:RagReferencesIndexName` | `spaarke-rag-references` | Golden references |
-| `AiSearch:SessionFilesIndexName` | `spaarke-session-files` | Session-scoped uploads |
-| `AiSearch:KnowledgeIndexName` | `spaarke-knowledge-index` | Knowledge base |
-| `AiSearch:DiscoveryIndexName` | (deprecated) | Legacy discovery |
+| `AiSearch:RagReferencesIndexName` | `spaarke-rag-references` | Golden references (FR-17: `documentType` not `domain`) |
+| `AiSearch:SessionFilesIndexName` | `spaarke-session-files` | Session-scoped uploads (ADR-014 dual filter) |
+| `AiSearch:RecordsIndexName` | `spaarke-records-index` | Dataverse entity records |
+| `AiSearch:InvoicesIndexName` | `spaarke-invoices-index` | Invoice chunks |
+| `AiSearch:DiscoveryIndexName` | `spaarke-discovery-index` *(v3.2 ACTIVE — v3.1 wrongly marked deprecated)* | Discovery workflow indexing |
+| ~~`AiSearch:KnowledgeIndexName`~~ | ~~`spaarke-knowledge-index`~~ | **RETIRED v3.2** — archived under `_archive/`; superseded by files-index + rag-references split |
+| ~~(playbook-embeddings)~~ | ~~`spaarke-playbook-embeddings`~~ | **RETIRED v3.2** — dispatcher-stack retirement per spaarke-ai-architecture-redesign-r1 task 035 / FR-P2-06 |
 | `AiSearch:AllowedIndexes` | Operator-configured allow-list | Per-environment index access |
 
-Invoice and playbook indexes are configured via their respective options classes (`FinanceOptions`, `PlaybookEmbeddingService` factory).
+**Phase A audit**: reconcile `AiSearchOptions.cs` binding names against the 7 canonical index names above. Retire the `KnowledgeIndexName` binding + any code paths that reference it.
 
-### 8.5 Index Provisioning — **Handler H2b (v3, standalone handler)**
+### 8.5 Index Provisioning — **Handler H2b (v3.2 path corrected)**
 
-After H2a Bicep completes, handler **H2b** invokes `infrastructure/ai-search/Deploy-AllIndexes.ps1` which applies each index JSON schema definition via the Azure Search REST API. The 7 JSON schema files in `infrastructure/ai-search/` are the source of truth. Idempotency key `aisearch-{customerId}-{indexVer}` where `{indexVer}` = git SHA of `infrastructure/ai-search/`.
+After H2a Bicep completes, handler **H2b** invokes **`scripts/ai-search/Deploy-AllIndexes.ps1`** (v3.2 path fix per Fable H-1 — v3.1 said `infrastructure/ai-search/`; that directory contains only the schema JSONs + delete/index/test utility scripts, not the deployer). The 7 JSON schema files in `infrastructure/ai-search/` remain the source-of-truth for schema; the script is the source-of-truth for the catalog (which 7 are canonical) + invariants. Idempotency key `aisearch-{customerId}-{indexVer}` where `{indexVer}` = git SHA of `infrastructure/ai-search/` + `scripts/ai-search/Deploy-AllIndexes.ps1`.
 
-**Action item for Phase A** (per INVENTORY §12 verification backlog): Audit the 7 JSON schema files against current BFF service field usage. Confirm field-level alignment. Standardize any naming inconsistencies (e.g., the dev-only `spaarke-invoices-dev` suffix per §18 item 5).
+**Action items for Phase A** (per INVENTORY §12 verification backlog + Fable H-2):
+1. Verify all 7 canonical JSON schemas exist on disk (`spaarke-{files,discovery,records,rag-references,insights,session-files,invoices}-index.json`) and match `Deploy-AllIndexes.ps1` `$Catalog` variable
+2. Confirm `spaarke-knowledge-index-v2.json` in `_archive/` is not referenced by any live code
+3. Confirm `spaarke-playbook-embeddings.json` is fully deleted (retired per FR-P2-06); verify no `PlaybookEmbeddingService` code remains
+4. Cross-check field-level schemas against current BFF service field usage
+5. Standardize any naming inconsistencies (e.g., the dev-only `spaarke-invoices-dev` suffix per §18 item 5)
+6. **Complete the `GraphAppRoles.cs` GUID population** (r3 task 062 constant has 10 of 14 `AppRoleId` = null) via `az` enumeration of the Graph resource SP — REQUIRED before first production customer provisioning
 
 ---
 
@@ -703,24 +852,32 @@ After H2a Bicep completes, handler **H2b** invokes `infrastructure/ai-search/Dep
 | Microsoft Graph | Mail.Send | Delegated | `e383f46e-2787-4529-855e-0e479a3ffac0` |
 | Dynamics CRM | user_impersonation | Delegated | `78ce3f0f-a1ce-49c2-8cde-64b5c0896db4` |
 
-#### Dataverse S2S App Registration
+#### ~~Dataverse S2S App Registration~~ **REMOVED v3.2 (r3 task 060 dropped the vestigial app-reg)**
 
-| Property | Value |
-|----------|-------|
-| Display Name | `spaarke-dataverse-s2s-{customerId}-{env}` |
-| Sign-in Audience | AzureADMyOrg |
-| Platform | Service-to-service (no redirect URIs) |
-| Client Secret Expiry | 24 months |
+The vestigial Dataverse S2S app registration and its associated KV secrets (`Dataverse-S2S-ClientId`, `Dataverse-S2S-ClientSecret`) were dropped by **r3 task 060** because they had **zero code consumers** — the BFF's Dataverse access uses the single Dataverse Application User (registered as the BFF app-reg + UAMI SP). Reference: [`../code-quality-and-assurance-r3/notes/r3-handoff.md`](../code-quality-and-assurance-r3/notes/r3-handoff.md) §1.
 
-**API Permissions (1):**
+r1 H3 provisions **ONE** Entra app registration per customer: the BFF API app-reg. Do NOT re-introduce the S2S app-reg. The BFF's shared-lib Dataverse camp ClientSecret migration (r3 handoff labels this "#3b") is a separate architecture project owned by task 011 (Idea #742, NG1) — NOT r1's scope.
 
-| API | Permission | Type | GUID |
-|-----|-----------|------|------|
-| Dynamics CRM | user_impersonation | Delegated | `78ce3f0f-a1ce-49c2-8cde-64b5c0896db4` |
+### 9.2 Managed Identity — v3.2 correction: UAMI migration is aspirational, Phase C work
 
-### 9.2 Managed Identity
+**Current reality (as of 2026-08-15 net10 baseline)**: BFF App Service uses **System-Assigned Managed Identity** — `infrastructure/bicep/modules/app-service.bicep` sets `identity: enableManagedIdentity ? {...}` (a System-Assigned MI pattern). **No `uami.bicep` module exists yet.** v3.1's claim "UAMI provisioned by `uami.bicep`" was aspirational and got merged as if done — v3.2 corrects the record per Fable H-3.
 
-**Type (v3 corrected)**: **User-Assigned Managed Identity (UAMI)** provisioned by Bicep `uami.bicep`, then bound to App Service (both prod + staging slots per T5). v2 said "system-assigned" — INVENTORY §7 confirms current pattern is UAMI (needed for slot-swap parity and cross-resource RBAC assignment before App Service exists).
+**Design target (Phase C — this project's remaining work)**:
+
+1. **New Bicep module `infrastructure/bicep/modules/uami.bicep`** — creates a User-Assigned Managed Identity per customer environment
+2. **Refactor `app-service.bicep`** — accept a UAMI resource ID as a param, set `identity: { type: 'UserAssigned', userAssignedIdentities: {...} }`, bind to BOTH the production slot AND the staging slot
+3. **Migrate all RBAC assignments** (KV Secrets User, Storage Blob Data Contributor, Cognitive Services User, Cosmos DB Data Contributor) from the System-Assigned MI principal ID to the UAMI principal ID
+4. **Migrate Graph app-role grants** onto the UAMI service principal (per T3 constant `GraphAppRoles.cs`)
+5. **Migrate Dataverse Application User registration** from the System-Assigned MI app ID to the UAMI app ID
+6. **`keyVaultReferenceIdentity` PATCH** to the UAMI resource ID (per T1)
+
+**Why UAMI over System-Assigned MI (rationale for Phase C investment)**:
+- **T5 structurally solved**: single UAMI binds to both slots; slot-swap no longer changes the identity → no cold-start KV-ref failures. Currently with System-Assigned MI, each slot has a distinct MI principal, requiring RBAC to be granted twice (per T5 interim mitigation).
+- **Cross-resource RBAC before App Service exists**: UAMI can be created first + RBAC-assigned to KV/Cosmos/Storage before the App Service is deployed. With System-Assigned MI, the identity doesn't exist until the App Service is created, forcing a two-phase deploy (create app service → grant RBAC → restart to pick up).
+- **Slot-swap parity**: Production and staging slots consume the same identity → identical behavior; no per-slot config divergence.
+- **Migration to task 011 (#3b)**: the eventual shared-lib `ClientSecret`→MI migration for the Dataverse camp requires a stable MI identity that outlives any single App Service — UAMI is the pre-requisite.
+
+**Interim state (until Phase C lands)**: H4 grants KV RBAC to BOTH slots' distinct System-Assigned MI principals; T5 verification query enumerates both. This works but is fragile — Phase C is scheduled for early implementation to close T5 structurally.
 
 **Environment variable bindings (5):**
 
@@ -928,30 +1085,32 @@ Verified against the codebase 2026-06-15 (v2) + refreshed 2026-08-12 (v3) — fu
 
 | Asset | Path | Disposition | Notes |
 |---|---|---|---|
-| `Provision-Customer.ps1` | `scripts/` | **PORT** | 13 steps → handler catalog. State-file resume → ProvisioningRun record. **v3: add Cosmos DB provisioning step** (missing from current 13, but BFF prereq per INVENTORY §7). |
+| `Provision-Customer.ps1` | `scripts/` | **PORT + MAJOR EXTEND** | 13 steps → handler catalog. State-file resume → ProvisioningRun record. **v3.2 (Fable M-2 honesty)**: current step 3 only provisions Storage+KV+ServiceBus. H2a expansion adds SIX new module invocations: **Cosmos DB** (R11), **OpenAI**, **AI Search**, **Document Intelligence**, **App Insights + Log Analytics**, **optional SignalR** — NOT just Cosmos. Header comment already states "per-customer Redis is DEPRECATED (Q-E FR-12)" — v3.2 removes Redis from H2a scope. |
+| `Deploy-RedisCache.ps1` *(v3.2 added)* | `scripts/` | **REUSE (per-env)** | Deploys Redis per environment per Q-E FR-12 (NOT per-customer). Consumed once per env during platform bootstrap; H2a does NOT invoke. |
 | `Build-SpaarkeMaster.ps1` | `scripts/` | **REUSE (authoritative)** | Machine composition of 386-component solution. INVENTORY §0 source of truth. |
 | `Deploy-DataverseSolutions.ps1` | `scripts/` | **REUSE + EXTEND** | Called by H6. **v3**: extend to Package Deployer invocation for dependency-ordered import per INVENTORY §1 (~10 managed solutions). |
 | `Deploy-BffApi.ps1` | `scripts/` | **REUSE** | Called by H9. |
 | `Deploy-Release.ps1` | `scripts/` | **REUSE + HARDEN (Gap 2)** | Called by H9. **v3**: Phase 4 must be `customerId`-driven; remove `spaarkedev1` hardcode. |
-| `Validate-DeployedEnvironment.ps1` | `scripts/` | **REUSE + EXTEND (Gap 4)** | Called by H13. **v3**: extend to end-to-end acceptance gate — sample analysis, sample document upload+index, workspace-layout render, wizard field-map. |
+| `Validate-DeployedEnvironment.ps1` | `scripts/` | **REUSE + EXTEND (Gap 4)** | Called by H13. **v3.2**: extend to end-to-end acceptance gate — sample analysis, sample document upload+index, workspace-layout render, wizard field-map, **all 6 §4B silent-fail traps cleared**, `naming-conformance-check.ps1` exits 0. |
 | `Test-Deployment.ps1` | `scripts/` | **REUSE** | Smoke-test handler. |
-| `Register-EntraAppRegistrations.ps1` | `scripts/` | **PORT (Gap 3)** | Basis for H3. **v3**: needs full idempotency for ~11 permission grants (INVENTORY §7 T3, not v2's stated 5); admin consent handled via H0.5 consent-callback for Model 2. |
+| `Register-EntraAppRegistrations.ps1` | `scripts/` | **PORT (Gap 3)** | Basis for H3. **v3.2**: needs full idempotency for **~14 permission grants** (v3.1 said ~11; corrected against `GraphAppRoles.cs` r3 task 062 constant); **only ONE app-reg** (BFF API) — r3 task 060 dropped the Dataverse S2S app-reg; admin consent handled via H0.5 consent-callback for Model 2. |
 | `Create-NewContainerType.ps1` + `Register-*.ps1` + `New-BusinessUnitContainer.ps1` | `scripts/` | **PORT + FIX (T6)** | Basis for H8. **v3**: switch to **confidential-client (app-only) token** — delegated token 403s (`public client not allowed`) per INVENTORY §10. Cert bootstrapped from KV via `Import-And-Register.ps1`. |
 | `Deploy-All-AI-SeedData.ps1` + `Seed-PlaybookConsumers.ps1` + `Deploy-*` (seed layer) | `scripts/seed-data/` + `infra/dataverse/**` | **PORT (Gap 1)** | Basis for H12a/b/c. **v3**: resolve two-source drift (`scripts/seed-data` MVP vs `infra/dataverse` R7) via declarative seed manifest. |
-| `Deploy-AllIndexes.ps1` | `infrastructure/ai-search/` | **REUSE** | Invoked by H2b — 7 indexes. |
+| `Deploy-AllIndexes.ps1` | **`scripts/ai-search/`** *(v3.2 path corrected — v3.1 said `infrastructure/ai-search/` which only has the JSON schemas)* | **REUSE** | Invoked by H2b — 7 canonical indexes per FR-07. `spaarke-playbook-embeddings` retired; `spaarke-knowledge-index` archived. |
+| `naming-conformance-check.ps1` *(v3.2 added, r3 task 063)* | `scripts/` | **CONSUME (advisory-until-remediated)** | H13 acceptance gate invokes; must exit 0 on r1-owned surfaces post-Phase G naming remediation. |
 | `Decommission-Customer.ps1` | `scripts/` | **OUT OF SCOPE** (D17) | Remains operational as-is. Registry-aware teardown deferred to r2. |
 | `/deploy-new-release` | `.claude/skills/` | **REUSE as-is** | Out of scope. Reference model for L3 skill UX. |
 
-### 11.2 Infrastructure-as-Code (v3 updated)
+### 11.2 Infrastructure-as-Code (v3.2 updated)
 
 | Asset | Path | Disposition | Notes |
 |---|---|---|---|
-| `customer.bicep` | `infrastructure/bicep/` | **REUSE + EXTEND** | Extend for dedicated OpenAI/Search/DocIntel/AppInsights per D3/D12 **+ Cosmos DB (v3, BFF prereq) + optional SignalR (v3)**. |
-| `platform.bicep` | `infrastructure/bicep/` | **REBUILD** | Shrinks to control-plane-only: L2 App Service (v3, B2), Cosmos DB (control-plane `spaarke-provisioning`), platform KV (parameter secrets), monitoring (D12). |
-| **26 Bicep modules** *(v3 count corrected, was 18)* | `infrastructure/bicep/modules/` | **REUSE** | Composable building blocks (INVENTORY §7 confirms 26). |
-| `model1-shared.bicep` + `model1-customer.bicep` + `model2-full.bicep` | `infrastructure/bicep/stacks/` | **REUSE (all three first-class per v3 §3A A1)** | `model2-full` = D3 default dedicated; `model1-shared` = trial tier (§3A A1). |
-| **NEW: Terraform Power Platform provider** | `infrastructure/terraform/dataverse/` *(new dir)* | **NEW** | v3 D14 — hybrid tooling per §4A. Manages Dataverse env lifecycle + application users. |
-| **NEW: L2 control-plane Bicep** | `infrastructure/bicep/platform-controlplane.bicep` *(new)* | **NEW** | App Service (v3 B2) + Cosmos DB + platform KV for the L2 orchestrator. |
+| `customer.bicep` | `infrastructure/bicep/` | **REUSE + EXTEND** | Extend for dedicated OpenAI/Search/DocIntel/AppInsights per D3/D12 **+ Cosmos DB (BFF prereq) + optional SignalR**. **v3.2**: remove Redis (Q-E FR-12); vault-name parameter (Phase G); UAMI param post-Phase C. |
+| `platform.bicep` | `infrastructure/bicep/` | **REBUILD** | Shrinks to control-plane-only: L2 App Service (B2), Cosmos DB (control-plane `spaarke-provisioning`), platform KV (parameter secrets), monitoring (D12). |
+| **25 Bicep modules** *(v3.2 count corrected — v3 said 26; 1 was a `.json` lifecycle policy)* | `infrastructure/bicep/modules/` | **REUSE + ADD `uami.bicep` (Phase C)** | Composable building blocks. **v3.2 additions**: new `uami.bicep` module (Phase C) + refactor `app-service.bicep` to consume UAMI + fix `cosmos-db.bicep` name (v3.1 said `cosmos.bicep`). |
+| `model1-shared.bicep` + `model1-customer.bicep` + `model2-full.bicep` | `infrastructure/bicep/stacks/` | **REUSE (all three first-class per §3A A1)** | `model2-full` = D3 default dedicated; `model1-shared` = trial tier. |
+| **NEW: L2 control-plane Bicep** | `infrastructure/bicep/platform-controlplane.bicep` *(new)* | **NEW** | App Service (B2) + Cosmos DB + platform KV for the L2 orchestrator. |
+| **DEFERRED: Terraform Power Platform provider** *(v3.2 deferred per M-10)* | `infrastructure/terraform/dataverse/` *(future)* | **DEFERRED to first-customer engagement** | v3 D14 hybrid tooling per §4A remains the design intent. Interim: H5 uses `pac admin` PS invocation; H10 uses PPAC UI + Graph SDK. TF migration lands as its own task chain once customer volume justifies the ops cost. |
 
 ### 11.3 BFF Job Handler Ecosystem
 
@@ -995,16 +1154,16 @@ INVENTORY §4 documents 33 PCF folders in the repo; only **7** are in-use and sh
 
 ---
 
-## 12. Risk Register (v3 refreshed 2026-08-12)
+## 12. Risk Register (v3.2 refreshed 2026-08-15)
 
-Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12 assessment findings. v3 additions R10–R15.
+Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12 assessment findings + r3 handoff (2026-08-14) + Fable adversarial review (2026-08-15). v3 added R10–R16; v3.2 adds R17–R21 + updates R2/R15/R4 for r3-shipped changes.
 
 | ID | Risk / known issue | Source | Design must... |
 |---|---|---|---|
 | R1 | SPE container-type creation — `westus` billing requirement + up-to-24h replication delay. | ENV-GUIDE + INVENTORY §10 | **v3**: replication delay is **lead-time** (§9 north star), not in-pipeline wait. H8 initiates; lead-time item on customer prereq checklist. |
-| R2 | Dataverse application user creation — v2 said PPAC-UI-only. | v2 finding | **v3 RESOLVED**: TF Power Platform provider `powerplatform_user` resource — fully automated (D14 v3). |
+| R2 | Dataverse application user creation — v2 said PPAC-UI-only. | v2 finding | **v3 design target**: TF Power Platform provider `powerplatform_user` resource — fully automated (D14 v3). **v3.2 (M-10) interim**: PPAC UI + Graph SDK for role sync; TF migration deferred to first-customer engagement per dev-only reality. |
 | R3 | Solution export/fix pipeline is 8 manual sed-style steps; managed-vs-unmanaged changes it (D1). | ENV-GUIDE §6 | H6 scripts export→fix→pack-managed→verify + Package Deployer; no manual edits. |
-| R4 | Entra app reg — **~11 permission GUIDs** granted by hand *(v3 corrected: was 5)*; no recovery script. | ENV-GUIDE §4 + INVENTORY §7 T3 | H3 scripts grants idempotently; admin-consent is a verified gate for Model 2 (D18 consent-callback). |
+| R4 | Entra app reg — **14 permission GUIDs** per `GraphAppRoles.cs` (v3.2 corrected from v3's "~11") granted by hand; no recovery script. | ENV-GUIDE §4 + INVENTORY §7 T3 + `Infrastructure/Auth/GraphAppRoles.cs` | H3 scripts grants idempotently against the code constant; admin-consent is a verified gate for Model 2 (D18 consent-callback). **v3.2 additional obligation**: complete the 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` via `az` enumeration BEFORE first production customer. |
 | R5 | `DemoExpirationService` still binds `[Obsolete]` `DemoProvisioningOptions.Environments`/`DefaultEnvironment`; blocks deleting Azure config. | r1 lessons | Carry-over: migrate to registry lookup. Not critical path but tracked (Phase E). |
 | R6 | Doc drift across 4 overlapping master guides (11+ deployment guides), stale env-var counts, hardcoded env names. | r1 lessons + PROJECT-UPDATE §6 Gap 4 | Consolidate to one authoritative guide + one validated env-var/app-setting manifest reconciled to BFF code `[Required]`. |
 | R7 | "Validated but not wired" defect class (r1 FR-11: license parsed, never applied). | r1 lessons | Every handler's acceptance asserts value reaches its consumer. H13 checks effects, not intentions. |
@@ -1015,8 +1174,13 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 | **R12 (v3)** | **`keyVaultReferenceIdentity` not PATCHed to UAMI** — all `@Microsoft.KeyVault(...)` refs resolve to null at App Service runtime; BFF fails silently. | INVENTORY §7 + auth-deployment-setup.md | **T1 (§4B)**: H4 post-step PATCHes `keyVaultReferenceIdentity` on both prod + staging slots. |
 | **R13 (v3)** | **Config-seed layer decoupled from provisioning** (biggest gap) — solutions ship definitions, not rows → fresh env is non-functional (blank grids, unmapped wizards, dark AI, no workspace). | INVENTORY §9 + PROJECT-UPDATE §6 Gap 1 | H12 promoted from thin to H12a/b/c first-class handlers with declarative seed manifest. |
 | **R14 (v3)** | **Two-source AI seed drift**: `scripts/seed-data/*.json` (2026-01 MVP) vs `infra/dataverse/**` (R7 current). | INVENTORY §9 | H12a seed manifest declares authoritative source per artifact; Phase A resolves the drift. |
-| **R15 (v3)** | **TF Power Platform provider maturity**: SPs can't create `Developer`-type envs (Sandbox/Production only); SP must be admin-bootstrapped via BAP API once per tenant. | §4A + PROJECT-UPDATE §8 | Preflight H0 asserts SP is BAP-bootstrapped; profile defaults exclude `Developer` type. |
+| **R15 (v3)** | **TF Power Platform provider maturity**: SPs can't create `Developer`-type envs (Sandbox/Production only); SP must be admin-bootstrapped via BAP API once per tenant. | §4A + PROJECT-UPDATE §8 | **v3.2 deferred**: TF adoption pushed to first-customer engagement per M-10; interim H5/H10 use PPAC + PS. Preflight H0 will assert SP BAP-bootstrapped when TF migrates. |
 | **R16 (v3)** | **Hardcoded `spaarkedev1` in `Deploy-Release.ps1` Phase 4** — code-page deploy targets dev env regardless of `customerId`. | PROJECT-UPDATE §6 Gap 2 | H9 uses hardened Phase 4 (`customerId`-driven). |
+| **R17 (v3.2)** | **KV-secret + resource naming drift** — 4 vault-naming conventions, 3 AI-Search key aliases in 3 casings, env-token baked into replicated names, 6 orphan template references, 2 KV-reference syntaxes. r3 gate (`scripts/naming-conformance-check.ps1`) runs advisory-until-remediated. | r3 task 063 handoff §4a + r3 KV federation design §2.6 D6-01/D6-02/D6-04/D6-08 | **v3.2 Phase G** (naming remediation at provisioning) + **Phase H** (canonical secret-catalog manifest per Phase 3b) — apply canonical names in H4 seed + `sprk-{env}-kv` vault param in Bicep; codify `spaarke-spekvcert` DO-NOT-RENAME dev exception. H13 acceptance runs `naming-conformance-check.ps1` — exit 0 required for `Setup Status = Ready`. |
+| **R18 (v3.2)** | **Dev-only baseline** — demo/prod environments decommissioned for budget per r3 CLAUDE.md 2026-08-14. E2E acceptance can no longer regress-test against demo/prod. Trial-environment strategy required. | r3 CLAUDE.md `Only spaarke-dev is live` note | Phase F stands up a fresh `trial-{yyyymmdd}` customer stamp (Model 1 profile) as the E2E acceptance target. No dependency on demo/prod. Cleanup after acceptance is discretionary. |
+| **R19 (v3.2)** | **Cross-customer concurrency limits at resource layer** — Azure OpenAI regional TPM quota (150/200/30/350 per model per region) is a **regional** quota; Dataverse env-creation rate limits (~4/hour per tenant typical); Graph API throttling; subscription vCPU/SKU quotas. Two concurrent Model 2 provisions in the same region can fail on quota clash. | Fable §6 item 2 | H0 preflight (v3.2 extended) queries: `az cognitiveservices` for OpenAI TPM headroom; `pac admin quota` for Dataverse env quota; `az vm list-usage` for subscription vCPU. **Fails run before H1 starts** if any headroom insufficient for the +1 provisioning target. |
+| **R20 (v3.2)** | **Handler execution model under App Service HTTP timeout** — App Service 230s default request timeout is fatal for 30-min handlers (H2a Bicep, H5 Dataverse env, H6 solution import). | Fable M-9 | **§4.2 (v3.2) handler execution model**: L2 REST endpoints ENQUEUE handlers via Service Bus + return 202 Accepted; state-reconciler `BackgroundService` in L2 polls Cosmos every 5s to advance the DAG. Handlers run in existing BFF `IJobHandler` infrastructure (ADR-004). No handler runs synchronously in the HTTP request path. |
+| **R21 (v3.2)** | **UAMI migration debt** — v3.1 asserted UAMI provisioned by `uami.bicep`; actual is System-Assigned MI (no `uami.bicep` module). T5 slot-swap failure mode intrinsic to System-Assigned MI persists until UAMI Phase C lands. | Fable H-3 + `infrastructure/bicep/modules/app-service.bicep` inspection | **Phase C** (new): create `uami.bicep` module + refactor `app-service.bicep` to consume UAMI + bind both slots → T5 structurally impossible. Interim H4 grants KV RBAC to both slots' System-Assigned MI principals separately. |
 
 ---
 
@@ -1052,8 +1216,18 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 19. **`customer.bicep` extension** — add per-customer OpenAI + AI Search + Doc Intelligence + App Insights + **Cosmos + optional SignalR** (v3)
 20. **`model1-shared.bicep` as first-class stack** (§3A A1 trial-tier)
 
+**New v3.2 scope (per r3 handoff + owner directive #3 + Fable review)**:
+22. **Phase G — Canonical naming compliance at provisioning** (per r3 task 063 handoff §4a): apply canonical KV secret names + `sprk-{env}-kv` vault + `spaarke-spekvcert` DO-NOT-RENAME dev exception in H4 + Bicep param-ization. Owner directive #3: bake into new-customer provisioning; skip live-dev remediation.
+23. **Phase H — #1 KV federation remediation** (per r3 task 017 handoff §4b): canonical secret-catalog manifest (Phase 3b of r3 KV federation design) generates seeder + Configure script + tokens doc + Bicep KV secret set. External-spa + code-pages runtime `/config.json` fetch to close bake-at-build-time pattern. Full scope per owner directive #3 "not deferred; done in the context of THIS project."
+24. **Phase C — UAMI migration** (v3.2 A3 correction of v3.1 aspirational claim): new `uami.bicep` module + `app-service.bicep` refactor + RBAC migration + Graph app-role migration + Dataverse App User re-registration on UAMI app ID. Structural fix for T5.
+25. **§4C rollback semantics** (Fable §6-1): failure classification (Resumable / Retryable-with-cleanup / Quarantine-required / Successful-but-drifted); Cosmos state machine additions (`Quarantined`); new `POST /api/runs/{id}/clear-quarantine` endpoint.
+26. **§4.2 handler execution model** (Fable M-9): fire-and-forget via Service Bus + state-reconciler `BackgroundService` in L2 App Service — spelled out; not just implied.
+27. **H0 preflight quota checks** (Fable §6-2): OpenAI regional TPM headroom, Dataverse env-creation rate, subscription vCPU. Blocks the run before H1 starts.
+28. **§4.1a Model 1 vs Model 2 handler behavior differences** (Fable §6-7): enumerated table — H0/H2a/H2b/H4/H7/H10/H12c/H13 differ per tier; other handlers behave identically.
+29. **`GraphAppRoles.cs` completion** (Fable H-3): complete 10 of 14 null `AppRoleId` GUIDs via `az` enumeration; escalation gate before first production customer.
+
 **Acceptance:**
-21. **E2E dry run** — stand up one brand-new environment using only the new pipeline; reach `Setup Status = Ready`; validate all silent-fail traps cleared
+30. **E2E dry run** — stand up a fresh **`trial-{yyyymmdd}` customer stamp** (Model 1 profile per H-6 decision) using only the new pipeline; reach `Setup Status = Ready`; validate all silent-fail traps cleared; naming-conformance-check exits 0.
 
 ### Out of Scope (v3 confirmed by owner 2026-08-12)
 
@@ -1074,20 +1248,22 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 
 ---
 
-## 14. Phasing (v3 refreshed 2026-08-12)
+## 14. Phasing (v3.2 refreshed 2026-08-15)
 
 | Phase | Content | Depends on | Notes |
 |---|---|---|---|
-| **A** | Doc consolidation (Gap 4 — one authoritative guide + env-var/app-setting manifest) + AI Search index schema audit (R9) + INVENTORY §12 verification backlog (33-vs-7 PCF, 87-entity roster export, two-source AI seed drift resolution, managed-solution export coverage) + doc-drift fixes (R6) | — | Parallel with B |
-| **B** | Gap automation scripts — hardened & idempotent (Entra apps 11-grant H3 per R4, SPE H8 confidential-client per T6, solution export/fix managed H6, `Deploy-Release.ps1` Phase 4 hardening per Gap 2, Cosmos DB provisioning added per R11) + **conditionally** #4 Graph app-role parity via code constant (per D20; if r3 hasn't landed the discipline first) | — | Parallel with A. **D20 conditional**: if r3 owns #4 as ArchTest, this phase's H10 constant work is skipped; r1 references r3's constant instead. |
-| **B'** *(v3, new)* | TF Power Platform provider adoption — SP BAP bootstrap (per R15), TF module for `powerplatform_environment` + `powerplatform_user`, integration tests against Sandbox env | — | Parallel with A + B; unlocks H5 + H10 |
-| **C** | Registry schema extension (9 columns per §6.1) + ProvisioningRun data model (Cosmos, shapes per §6.2) + `customer.bicep` extension (Cosmos + SignalR + `model1-shared.bicep` first-class) + `platform.bicep` rebuild (L2 App Service + Cosmos + platform KV) + **L2 control-plane** (REST API + AAD per B1, App Service per B2, concurrency per I5, crash-recovery per I6) integrating all 19 handlers | A, B, B' | Core build phase |
-| **C'** *(v3, new)* | H12a/b/c config-seed manifest implementation — declarative seed authoritative-source table resolving R14 drift; all seeders idempotent + resumable; H14 integration wiring (2× Exchange policies per T4, Graph webhooks, S2S consent) | A (drift resolution), C | Highest functional payoff (Gap 1) |
+| **A** | Doc consolidation (Gap 4) + AI Search index schema audit vs `Deploy-AllIndexes.ps1` catalog (7 canonical incl. `spaarke-discovery-index`, EXCL. retired `spaarke-playbook-embeddings`/`spaarke-knowledge-index`) + INVENTORY §12 verification backlog (33-vs-7 PCF, 87-entity roster, two-source AI seed drift, managed-solution export coverage) + doc-drift fixes (R6) + **`GraphAppRoles.cs` GUID completion** (10 of 14 null per Fable H-3 — via `az` enumeration of Graph resource SP) | — | Parallel with B / G |
+| **B** | Gap automation scripts — hardened & idempotent (Entra apps 14-grant H3 per R4 v3.2, SPE H8 confidential-client per T6, solution export/fix managed H6, `Deploy-Release.ps1` Phase 4 hardening per Gap 2, Cosmos DB provisioning added per R11) + **H10 Graph app-role grant from `GraphAppRoles.cs` constant** (r3 task 062 landed) | A (for GraphAppRoles.cs GUID completion) | Parallel with A / G. **v3.2**: D20 conditional dropped — r3 owns constant, r1 owns grant. |
+| ~~**B' (v3)**~~ | ~~TF Power Platform provider adoption~~ | — | **DEFERRED v3.2 (M-10)** — dev-only reality + 0 customers pending. TF migration lands as its own task chain when first paying customer signs. |
+| **C** | Registry schema extension (9 columns) + ProvisioningRun data model (Cosmos, enumerated shapes) + `customer.bicep` extension (Cosmos + optional SignalR; **Redis REMOVED per Q-E FR-12**) + **NEW `uami.bicep` module + `app-service.bicep` UAMI refactor + slot binding + RBAC migration** (v3.2 A3 — structural T5 fix) + `platform.bicep` rebuild (L2 App Service + Cosmos + platform KV) + **L2 control-plane** (REST + AAD B1, App Service B2, concurrency I5, crash-recovery I6, **fire-and-forget + state-reconciler §4.2 v3.2**) integrating all 19 handlers | A, B, G | Core build phase. Includes UAMI migration. |
+| **C'** | H12a/b/c config-seed manifest implementation — declarative seed authoritative-source table resolving R14 drift; all seeders idempotent + resumable; H14 integration wiring (2× Exchange policies per T4 with action-and-verify semantics, Graph webhooks, service-endpoint webhooks — S2S consent step REMOVED per r3 task 060). **H12a/b DAG-parallel** per v3.2. | A (drift resolution), C | Highest functional payoff (Gap 1) |
 | **D** | `/provision-environment` operator skill + L2 REST API integration + Model 2 consent-capture landing (BFF endpoint per D18) + per-tenant token-metering layer (D19) | C | L3 + fast-follow |
-| **E** | `DemoExpirationService` migration + Azure legacy-config deletion + verification + **conditionally** #2 fail-fast config validation (per D20; if r3 hasn't landed the discipline first — `[Required]` annotations on 26 `IOptions<T>` classes + `.ValidateDataAnnotations().ValidateOnStart()`) | — | Parallel; BFF task, FULL rigor (per CLAUDE.md §10 BFF Hygiene checklist). **D20 conditional**: if r3 owns #2 as CI gate, this phase's IOptions annotation work is skipped; r1 verifies r3's discipline is active as a Phase F prerequisite. |
-| **F** | E2E dry run: new environment end-to-end (Model 2 + Model 1 trial both verified) + all silent-fail traps cleared + r1 live sign-off items + wrap-up | C, C', D, E | Acceptance |
+| **E** | `DemoExpirationService` migration + Azure legacy-config deletion + verification | — | Parallel; BFF task, FULL rigor (per CLAUDE.md §10 BFF Hygiene checklist per §5.5 inherited gates). **v3.2**: D20 conditional dropped — r3 task 061 landed `ValidateOnStart` on 24 Tier-1 IOptions; Phase E VERIFIES that discipline is active as a Phase F prerequisite (does not re-implement). |
+| **G (v3.2 NEW)** | **Canonical naming compliance at provisioning** (per r3 task 063 handoff §4a — see §7.9). Apply canonical KV secret names in H4 seed; `sprk-{env}-kv` vault as Bicep param; codify `spaarke-spekvcert` DO-NOT-RENAME dev exception in Bicep + config. `naming-conformance-check.ps1` invocation added to H13. **Per owner directive #3**: bake into new-customer provisioning; do NOT remediate live-dev drift. | — | Parallel with A / B; blocks C (bicep vault param needs to exist before H2a builds) |
+| **H (v3.2 NEW)** | **#1 KV federation remediation full** (per r3 task 017 assessment §4b + owner directive #3 "not deferred; done in the context of THIS project"). Deliverables: (1) **canonical secret-catalog manifest** (single generated source for seeder + Configure script + tokens doc + Bicep KV secrets) — r3 Phase 3b; (2) **alias collapse** for AI Search key etc. (with §4-mandated Dataverse + live-App-Service pre-check FIRST); (3) **IaC alignment** — bicep secret names + app-setting keys canonical; (4) **runtime `/config.json` fetch** for external-spa + code-pages (closes bake-at-build-time pattern). Coordinate with `ci-cd-unit-test-remediation-r1` for `.github/workflows` gate wiring per r3 `task-042-063-ci-gate-wiring-deferral.md`. | G, C | Substantial scope; adds external-spa + code-pages touch |
+| **F** | E2E dry run: fresh **`trial-{yyyymmdd}` customer stamp** (Model 1 profile per H-6) provisioned end-to-end using only the new pipeline; reach `Setup Status = Ready`; validate all 6 §4B silent-fail traps cleared; `naming-conformance-check.ps1` exits 0; Model 1 vs Model 2 differences verified per §4.1a table (both tiers dry-run if reasonable) | C, C', D, E, G, H | Acceptance. Trial-env baseline used because demo/prod decommissioned per R18. |
 
-**Parallelism**: A, B, B', E can start immediately in parallel. C waits on {A, B, B'}. C' waits on {A drift resolution, C}. D waits on C. F is acceptance.
+**Parallelism**: A, B, E, G can start immediately in parallel. C waits on {A, B, G}. C' waits on {A drift resolution, C}. H waits on {G, C}. D waits on C. F is acceptance.
 
 ---
 
@@ -1104,13 +1280,19 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 7. `DemoProvisioning__Environments__*` and `__DefaultEnvironment` deleted from Azure; expiration flow verified working (R5)
 8. `/provision-environment` skill executes the full flow with confirmation gates and produces a handoff report
 9. ProvisioningRun records in Cosmos are queryable for fleet status (how many environments, in what state); `sprk_currentrunid` visible on `sprk_dataverseenvironment`
-10. All **7** AI Search indexes (v3 corrected) created per customer with standardized naming and verified field alignment (Phase A audit item cleared)
+10. All **7 canonical** AI Search indexes (v3.2 authoritative per `scripts/ai-search/Deploy-AllIndexes.ps1` FR-07: files/discovery/records/rag-references/insights/session-files/invoices) created per customer with per-index invariant verifier passing; `spaarke-playbook-embeddings` + `spaarke-knowledge-index` NOT provisioned (retired)
 11. All **7** per-customer Dataverse environment variables set and validated (no hardcoded URL fallbacks); reconciled with INVENTORY §9
-12. **Model 2** (dedicated per D3): per-customer AI resources (OpenAI, AI Search, Doc Intelligence, Cosmos) deployed isolated
-13. **Model 1** (trial/SMB per D3 v3): shared fixed-floor tier deployed via `model1-shared.bicep`; per-tenant token-metering layer (D19/A2) enforces `tokenBudgetMonthlyUSD` and blocks pipeline calls when exceeded; per-tenant AI Search filter on every query verified in H13
-14. **Cost envelope conforms to pricing model** ([`notes/pricing-research-2026-08-12.md`](notes/pricing-research-2026-08-12.md)): Model 2 empty-environment Azure floor ≤$400/mo (dev-Redis) or ≤$800/mo (prod-P1); Model 1 marginal per-customer ≤$430/mo (5–10 users, capped tokens); shared platform floor for Model 1 ≤$400/mo — deviations >20% flagged in H13 as cost drift
-15. **BFF publish size** ≤60 MB compressed (CLAUDE.md §10 NFR-01); Phase E DemoExpirationService migration verifies ~0 MB delta
-16. **D20 fail-fast config discipline active** — either r3 has landed #2 (`[Required]` + `ValidateOnStart()`) + #4 (Graph role code constant) as ArchTests/CI gates OR r1 Phase E absorbed them. Verified: (a) BFF misconfig causes `/health` startup failure not runtime failure; (b) adding a new Graph role without updating the constant fails ArchTest/CI; (c) silent-fail traps T1/T2/T3 verification queries in H4/H10 remain as safety nets but are no longer the primary defense
+12. **Model 2** (dedicated per D3): per-customer AI resources (OpenAI, AI Search, Doc Intelligence, Cosmos) deployed isolated; Redis NOT per-customer (v3.2 Q-E FR-12 correction)
+13. **Model 1** (trial/SMB per D3): shared fixed-floor tier deployed via `model1-shared.bicep`; per-tenant token-metering layer (D19/A2) enforces `tokenBudgetMonthlyUSD` and blocks pipeline calls when exceeded; per-tenant AI Search filter on every query verified in H13
+14. **Cost envelope conforms to pricing model** ([`notes/pricing-research-2026-08-12.md`](notes/pricing-research-2026-08-12.md)) — v3.2 targets updated for Redis-removal: Model 2 empty-environment Azure floor ≤$400/mo (Redis now per-env, so no per-customer P1 delta); Model 1 marginal per-customer ≤$430/mo (5–10 users, capped tokens); shared platform floor for Model 1 ≤$400/mo — deviations >20% flagged in H13 as cost drift
+15. **BFF publish size** ≤60 MB compressed (CLAUDE.md §10 NFR-01; net10 baseline 44.96 MB incl PDBs per r3 handoff); Phase E DemoExpirationService migration + Phase C UAMI refactor + H0.5 consent-callback endpoint combined deltas < ~0.5 MB verified per PR
+16. **D20 fail-fast config discipline active (r3-landed)** — r3 tasks 060/061/062/017 all landed on master. Verified: (a) BFF misconfig causes `/health` startup failure not runtime failure (r3 task 061); (b) `GraphAppRoles.cs` constant with all 14 GUIDs populated (r3 task 062 + r1 Phase A completion); (c) ArchTests block new IOptions without validation (r3 task 040/042); (d) legacy H4/H10 verification queries retained as safety net
+17. **Naming compliance (v3.2 new)**: `scripts/naming-conformance-check.ps1` exits 0 on r1-owned surfaces post-Phase G; canonical vault + secret naming applied at all provisioning entry points (H4 + Bicep param); `spaarke-spekvcert` DO-NOT-RENAME dev exception codified
+18. **#1 KV federation Phase H landed (v3.2 new)**: canonical secret-catalog manifest is the single source generating seeder + Configure script + tokens doc + Bicep KV secret set; alias collapse complete (with pre-check evidence in task notes per §7.9 pre-check protocol); external-spa + code-pages consume `/config.json` runtime endpoint (no bake-at-build-time BFF host)
+19. **H0 preflight quota check (v3.2 new)**: preflight fails the run BEFORE H1 starts if OpenAI regional TPM, Dataverse env-creation rate, subscription vCPU, or SPE cert-bootstrap show insufficient headroom
+20. **§4.2 handler execution model verified (v3.2 new)**: L2 REST endpoint enqueue-and-return-202 confirmed under load test (≥30-min handler completes without HTTP timeout); state-reconciler BackgroundService correctly advances DAG
+21. **UAMI structural fix landed (Phase C, v3.2 A3)**: `uami.bicep` module created; `app-service.bicep` refactored to consume UAMI + bind to both slots; T5 slot-parity trap intrinsically eliminated (verified by slot-swap smoke test producing no cold-start KV-ref failures)
+22. **§5.5 inherited r3-era gates green** (v3.2 M-6): every r1 BFF PR passes analyzers-as-errors + god-class ratchet + 4 new ArchTests + config fail-fast + naming-conformance + Graph-app-role parity ArchTest
 
 ---
 
@@ -1198,7 +1380,7 @@ These items require detailed verification during Phase A (doc consolidation + au
 - `scripts/Deploy-Release.ps1` + `Deploy-Platform.ps1` + `Deploy-BffApi.ps1` + `Decommission-Customer.ps1` + `Validate-DeployedEnvironment.ps1` — release/platform/BFF/teardown/validate
 - `scripts/seed-data/Deploy-All-AI-SeedData.ps1` + `Seed-PlaybookConsumers.ps1` + module seeders (H12a/b/c basis)
 - `infrastructure/bicep/**` (26 modules + `platform.bicep` / `customer.bicep` / `model1-shared.bicep` / `model2-full.bicep`)
-- `infrastructure/ai-search/Deploy-AllIndexes.ps1` (H2b — 7 indexes)
+- `scripts/ai-search/Deploy-AllIndexes.ps1` (H2b — 7 indexes)
 
 **Guides to consolidate into one authoritative** (Gap 4 / Phase A):
 - `docs/guides/SPAARKE-DEPLOYMENT-GUIDE.md`
@@ -1222,6 +1404,57 @@ These items require detailed verification during Phase A (doc consolidation + au
 ---
 
 ## 20. CHANGELOG
+
+### v3.2 — 2026-08-15 (post-r3-completion + Fable-verified + net10 baseline)
+
+**Trigger**: r3 completed 2026-08-14 (tasks 060/061/062/017 all landed on master + net10 cutover); this branch merged `origin/master` (commit `41bacbdae`) resolving MEMORY.md conflict + inheriting all r3-era forcing-functions. Owner directed a Fable-model adversarial review to ensure customer provisioning process is solid + 100% accurate + efficient before proceeding.
+
+**r3-handoff resolutions**:
+- **D20 PENDING → LANDED**: r3 tasks 060 (S2S drop) / 061 (ValidateOnStart) / 062 (`GraphAppRoles.cs`) / 017 (KV federation assessment) all landed. §14 Phase B + E conditionals dropped. r1 residual work is (a) H10 grants roles from `GraphAppRoles.cs` constant + syncs UAMI SP; (b) complete 10 of 14 null `AppRoleId` GUIDs; (c) H4 leverages r3 ValidateOnStart as primary defense (H4 verification queries retained as safety net).
+- **§9.1 Dataverse S2S App Reg REMOVED** (r3 task 060 dropped it — zero code consumers)
+- **§7.7 KV secrets** — dropped `Dataverse-S2S-ClientId` + `Dataverse-S2S-ClientSecret`; added `AiSearch--AdminKey` canonical (was 3 aliases); added `Dataverse-ServiceUrl` canonical (was `SPRK-DEV-DATAVERSE-URL` with env token baked in); added `cosmos-endpoint`
+- **§4.1 H3** — 14 grants (not "~11"); ONE app-reg only (not 2); consent-callback for Model 2 self-service
+- **§4.1 H14** — sub-step (d) S2S consent removed; (a)/(b)/(c) marked DAG-parallel with action-and-verify semantics per T4
+- **§4B T3** — updated to reference `GraphAppRoles.cs` as source of truth; noted 10/14 GUID gap as r1 completion obligation
+- **NEW Phase G**: Canonical naming compliance at provisioning (per r3 task 063 handoff §4a; owner directive #3 — bake into new provisioning, skip live-dev remediation)
+- **NEW Phase H**: #1 KV federation remediation full — canonical secret-catalog manifest (r3 Phase 3b as r1 deliverable), alias collapse with pre-check protocol, IaC alignment, external-spa + code-pages runtime `/config.json` fetch (owner directive #3 — "not deferred; done in the context of THIS project")
+- **NEW §7.9**: KV-Secret & Resource Naming Compliance section — the 4 canonical rules + reference syntax + r1 rename map from r3 task 063 handoff
+- **NEW §5.5**: Inherited gates from r3-era master — analyzers-as-errors, god-class ratchet, 4 new ArchTests, config fail-fast, publish size, Graph v6/Kiota 2.0 error types
+
+**Fable-verified corrections** (Fable H-1, H-2, H-3, M-1, M-3, M-4, M-7):
+- **H-1 fixed**: `Deploy-AllIndexes.ps1` path corrected to `scripts/ai-search/` (was `infrastructure/ai-search/` in 5+ places)
+- **H-2 fixed**: §8.2 rewritten from `Deploy-AllIndexes.ps1` `$Catalog` variable (authoritative). 7 canonical: files/discovery/records/rag-references/insights/session-files/invoices. `spaarke-playbook-embeddings` explicitly retired; `spaarke-knowledge-index` archived; `spaarke-discovery-index` ACTIVE (v3.1 wrongly said "dropped"); `spaarke-files-index` plural (was singular). Retired index sections in §8.3 flagged as DO-NOT-REFERENCE.
+- **H-3 corrected**: §9.2 rewritten — UAMI is aspirational (no `uami.bicep` module exists); current pattern is System-Assigned MI. Phase C absorbs the migration (new module + `app-service.bicep` refactor + RBAC migration + Graph app-role migration + Dataverse App User re-registration). §7.2 UAMI row marked as Phase C target with interim caveat.
+- **M-1 fixed (Q-E FR-12)**: Redis is per-environment, not per-customer. Removed from §7 catalog (row 6 → REMOVED); removed from §7.1 naming table; removed from H2a scope in §4.1 handler catalog; added `Deploy-RedisCache.ps1` to §11.1 as REUSE (per-env).
+- **M-2 acknowledged**: §11.1 `Provision-Customer.ps1` disposition changed from "PORT" to "PORT + MAJOR EXTEND" with the 6 new module invocations enumerated (not just "add Cosmos")
+- **M-3 fixed**: `cosmos.bicep` → `cosmos-db.bicep` (actual filename)
+- **M-4 fixed**: 26 → 25 Bicep modules (the 26th was a `.json` lifecycle policy)
+- **M-7 fixed**: All Dataverse S2S artifact references removed across §9.1, §7.7, §4.1 H3, §4.1 H14
+
+**Missing scenarios absorbed** (Fable §6 items 1/2/3/7 per owner decision):
+- **§4C NEW — Rollback semantics on partial failure**: 4-class failure taxonomy (Resumable / Retryable-with-cleanup / Quarantine-required / Successful-but-drifted); Cosmos state transitions incl. `Quarantined`; new `POST /api/runs/{id}/clear-quarantine` endpoint
+- **§4.2 handler execution model spelled out (Fable M-9)**: fire-and-forget via Service Bus + state-reconciler `BackgroundService` in L2; addresses App Service 230s HTTP timeout vs 30-min handlers
+- **§4.1 H0 quota preflight extended**: OpenAI regional TPM + Dataverse env-creation rate + subscription vCPU + SPE cert-bootstrap checks; blocks the run before H1 starts (surfaces §9 north-star lead-time items UP-FRONT)
+- **§4.1a NEW — Model 1 vs Model 2 handler behavior differences table**: 8 handler rows enumerating per-tier differences (H0/H2a/H2b/H4/H7/H10/H12c/H13); trial-environment strategy (Model 1 `trial-{yyyymmdd}` for Phase F E2E per H-6)
+
+**Deferrals per v3.2**:
+- **M-10 TF Power Platform provider adoption DEFERRED** to first-customer engagement — dev-only reality, 0 customers pending; H5/H10 use interim `pac admin` + PPAC + Graph SDK path. D14 remains the design target.
+- **Phase F acceptance target**: trial-environment (Model 1) provisioned via r1 pipeline (per H-6 decision) — not demo/prod re-provisioning (demo/prod decommissioned for budget per r3 CLAUDE.md)
+
+**Handler catalog additions**:
+- **H0 (extended)**: quota preflight checks
+- **H0.5 (extended)**: re-consent semantics for existing environments
+- **H2a (major-extend)**: 6 new module invocations (Cosmos + OpenAI + AI Search + Doc Intel + App Insights + optional SignalR); Redis removed; UAMI via Phase C
+- **H4 (extended)**: canonical naming applied at seed; consumes Phase H manifest
+- **H14**: sub-step (d) S2S removed; sub-steps (a)/(b)/(c) parallelized with action-and-verify semantics
+
+**Risk register additions**: R17 (KV naming drift), R18 (dev-only baseline), R19 (cross-customer concurrency limits), R20 (handler execution model + HTTP timeout), R21 (UAMI migration debt)
+
+**Success criteria**: 22 total (was 16); new #17 (naming compliance), #18 (KV federation Phase H landed), #19 (H0 quota preflight), #20 (execution model verified), #21 (UAMI structural fix), #22 (§5.5 inherited gates green)
+
+**Scope**: 30 in-scope items (was 21); adds Phase G (naming), Phase H (KV federation), Phase C (UAMI), §4C (rollback), §4.2 (execution model), H0 (quota preflight), §4.1a (M1/M2 differences), `GraphAppRoles.cs` completion
+
+**Ready for `/design-to-spec`**: no further external blocking dependencies. Owner review of v3.2 recommended before running spec pipeline.
 
 ### v3.1 — 2026-08-12 (D20 + r3 handoff for #1/#3)
 
