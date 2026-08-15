@@ -149,11 +149,22 @@ Bff__Secret    = @Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=BFF-
 
 if (-not $Path -or $Path.Count -eq 0) {
     $repoRoot = Split-Path -Parent $PSScriptRoot
-    $Path = @(
+    # Curated canonical secret-name sources...
+    $explicit = @(
         (Join-Path $repoRoot 'src/server/api/Sprk.Bff.Api/appsettings.template.json'),
         (Join-Path $repoRoot 'src/server/api/Sprk.Bff.Api/appsettings.tokens.md'),
-        (Join-Path $repoRoot 'scripts/Seed-ProductionKeyVault.ps1')
-    ) | Where-Object { Test-Path $_ }
+        (Join-Path $repoRoot 'scripts/Seed-ProductionKeyVault.ps1'),
+        (Join-Path $repoRoot 'config/environments.json')
+    )
+    # ...PLUS the IaC that also declares vault + secret names (bicep). Scanning these closes the
+    # "env-baked name authored in a Bicep file the gate never saw" gap (naming-review 2026-08-15).
+    $bicep = @()
+    $infraDir = Join-Path $repoRoot 'infrastructure/bicep'
+    if (Test-Path $infraDir) {
+        $bicep = Get-ChildItem -Path $infraDir -Recurse -Filter '*.bicep' -File -ErrorAction SilentlyContinue |
+                 ForEach-Object { $_.FullName }
+    }
+    $Path = @($explicit + $bicep) | Where-Object { Test-Path $_ }
 }
 
 $fileToText = @{}
