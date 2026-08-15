@@ -788,7 +788,7 @@ public sealed class TodoGenerationService : BackgroundService
     /// </remarks>
     private async Task<IEnumerable<MatterScanRecord>> QueryMattersOverBudgetAsync(CancellationToken ct)
     {
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverse.UnwrapServiceClient(nameof(TodoGenerationService));
 
         var query = new QueryExpression("sprk_matter")
         {
@@ -820,7 +820,7 @@ public sealed class TodoGenerationService : BackgroundService
     /// </remarks>
     private async Task<IEnumerable<InvoiceScanRecord>> QueryPendingInvoicesAsync(CancellationToken ct)
     {
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverse.UnwrapServiceClient(nameof(TodoGenerationService));
 
         var query = new QueryExpression("sprk_invoice")
         {
@@ -851,7 +851,7 @@ public sealed class TodoGenerationService : BackgroundService
     /// </remarks>
     private async Task<IEnumerable<TaskScanRecord>> QueryAssignedTasksAsync(CancellationToken ct)
     {
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverse.UnwrapServiceClient(nameof(TodoGenerationService));
 
         var query = new QueryExpression("sprk_event")
         {
@@ -874,20 +874,6 @@ public sealed class TodoGenerationService : BackgroundService
     // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// Get the underlying ServiceClient from the IDataverseService implementation.
-    /// Required for generic SDK operations (QueryExpression) not exposed on the interface.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverse is DataverseServiceClientImpl impl)
-            return impl.OrganizationService;
-
-        throw new InvalidOperationException(
-            $"TodoGenerationService requires IDataverseService to be backed by DataverseServiceClientImpl. " +
-            $"Actual type: {_dataverse?.GetType().Name ?? "null"}.");
-    }
 
     /// <summary>
     /// Calculates the delay until the next configured start-hour UTC.

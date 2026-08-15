@@ -128,7 +128,7 @@ public class SpendSnapshotService : ISpendSnapshotService
             "Generating spend snapshots for matter {MatterId}, CorrelationId: {CorrelationId}",
             matterId, correlationId ?? "none");
 
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(SpendSnapshotService));
         var generatedAt = DateTime.UtcNow;
         var effectiveCorrelationId = correlationId ?? Guid.NewGuid().ToString("N");
 
@@ -341,7 +341,7 @@ public class SpendSnapshotService : ISpendSnapshotService
             "Generating spend snapshots for project {ProjectId}, CorrelationId: {CorrelationId}",
             projectId, correlationId ?? "none");
 
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(SpendSnapshotService));
         var generatedAt = DateTime.UtcNow;
         var effectiveCorrelationId = correlationId ?? Guid.NewGuid().ToString("N");
 
@@ -808,26 +808,6 @@ public class SpendSnapshotService : ISpendSnapshotService
             action,
             snapshot.GetAttributeValue<string>(Snapshot_PeriodKey),
             snapshot.KeyAttributes.ContainsKey(Snapshot_Matter) ? snapshot.KeyAttributes[Snapshot_Matter] : "unknown");
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // ServiceClient Access
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Get the underlying ServiceClient from the IDataverseService implementation.
-    /// Required for generic SDK operations (QueryExpression, UpsertRequest) not exposed
-    /// on the IDataverseService interface.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverseService is DataverseServiceClientImpl impl)
-            return impl.OrganizationService;
-
-        throw new InvalidOperationException(
-            $"SpendSnapshotService requires IDataverseService to be backed by DataverseServiceClientImpl. " +
-            $"Actual type: {_dataverseService.GetType().Name}. " +
-            $"For unit testing, mock IDataverseService and use the internal static aggregation methods directly.");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

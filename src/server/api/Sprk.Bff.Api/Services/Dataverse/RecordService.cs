@@ -112,7 +112,7 @@ internal sealed class RecordService
     /// </summary>
     private async Task<string[]> ResolveDefaultColumnsAsync(string entityLogicalName, CancellationToken ct)
     {
-        var serviceClient = GetServiceClientOrThrow();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(RecordService));
 
         var request = new RetrieveEntityRequest
         {
@@ -197,28 +197,6 @@ internal sealed class RecordService
         AliasedValue alias => UnwrapAttributeValue(alias.Value),
         _ => value
     };
-
-    /// <summary>
-    /// Casts the composite <see cref="IDataverseService"/> to the concrete
-    /// <see cref="DataverseServiceClientImpl"/> to access the underlying <see cref="ServiceClient"/>.
-    /// Matches the pattern established by <c>UserPrivilegeChecker</c> (task 011).
-    /// </summary>
-    private ServiceClient GetServiceClientOrThrow()
-    {
-        if (_dataverseService is not DataverseServiceClientImpl impl)
-        {
-            throw new InvalidOperationException(
-                $"RecordService requires IDataverseService to be DataverseServiceClientImpl (actual: {_dataverseService.GetType().FullName}); cannot access ServiceClient for metadata lookup.");
-        }
-
-        var serviceClient = impl.OrganizationService;
-        if (serviceClient is null || !serviceClient.IsReady)
-        {
-            throw new InvalidOperationException("Dataverse ServiceClient is not ready for metadata lookup.");
-        }
-
-        return serviceClient;
-    }
 
     /// <summary>
     /// Detects "record does not exist" error patterns surfaced by the Dataverse SDK.

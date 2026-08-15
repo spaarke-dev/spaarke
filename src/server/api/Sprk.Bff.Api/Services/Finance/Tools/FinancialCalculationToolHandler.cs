@@ -55,34 +55,6 @@ public class FinancialCalculationToolHandler : IAiToolHandler
     }
 
     /// <summary>
-    /// Resolve the underlying app-only <see cref="ServiceClient"/> from <see cref="IDataverseService"/>
-    /// for QueryExpression support. The sole registered impl (<see cref="DataverseServiceClientImpl"/>)
-    /// WRAPS a ServiceClient and exposes it via
-    /// <see cref="DataverseServiceClientImpl.OrganizationService"/> — it does NOT derive from
-    /// ServiceClient, so a direct <c>as ServiceClient</c> cast always returns null and throws at runtime
-    /// (Bug-1). Unwrap via the concrete impl, mirroring FinanceSummaryService / SpendSnapshotService.
-    /// Fails loud with the actual runtime type when the service is not the expected impl.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverseService is not DataverseServiceClientImpl impl)
-        {
-            throw new InvalidOperationException(
-                $"FinancialCalculationToolHandler requires IDataverseService to be backed by " +
-                $"DataverseServiceClientImpl for QueryExpression support (actual: {_dataverseService.GetType().FullName}).");
-        }
-
-        var serviceClient = impl.OrganizationService;
-        if (serviceClient is null || !serviceClient.IsReady)
-        {
-            throw new InvalidOperationException(
-                "FinancialCalculationToolHandler requires a ready Dataverse ServiceClient for QueryExpression support.");
-        }
-
-        return serviceClient;
-    }
-
-    /// <summary>
     /// Executes financial calculations for a matter or project.
     /// Queries all invoices and retrieves budget amount from Budget entity (direct lookup).
     /// </summary>
@@ -165,7 +137,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         CancellationToken ct)
     {
         // Resolve to ServiceClient for QueryExpression support (Bug-1: unwrap the concrete impl).
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinancialCalculationToolHandler));
 
         // Query all invoices for this matter
         var invoiceQuery = new QueryExpression(InvoiceEntity)
@@ -225,7 +197,7 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         CancellationToken ct)
     {
         // Resolve to ServiceClient for QueryExpression support (Bug-1: unwrap the concrete impl).
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinancialCalculationToolHandler));
 
         // Query all invoices for this project
         var invoiceQuery = new QueryExpression(InvoiceEntity)

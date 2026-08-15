@@ -32,7 +32,7 @@
 | 024 | BFF-B: AI-facade compliance | 2 BFF Remediation | FULL | opus | high | none | B | 🔲 |
 | 025 | BFF-B: Endpoints/→Api/ migration | 2 BFF Remediation | STANDARD | sonnet | medium | none | B | 🔲 |
 | 026 | BFF-B: DI decompose (✅) + Finance rename (⏸️ deferred — Dataverse pre-check) | 2 BFF Remediation | STANDARD | sonnet | high | none | B | ✅ |
-| 028 | BFF-B: 13→1 downcast consolidation | 2 BFF Remediation | FULL | opus | xhigh | 021 | B | 🔲 |
+| 028 | BFF-B: 13→1 downcast consolidation | 2 BFF Remediation | FULL | opus | xhigh | 021 | B | ✅ |
 | 029 | BFF-B: delete dead Safety cluster (Services/Ai) | 2 BFF Remediation | FULL | sonnet | high | none | B | ✅ |
 | 030 | Horizontal: security sweep | 3 Horizontals | STANDARD | opus | high | none | P3 | 🔲 |
 | 031 | Horizontal: test-quality sweep | 3 Horizontals | FULL | sonnet | high | none | none | 🔲 |

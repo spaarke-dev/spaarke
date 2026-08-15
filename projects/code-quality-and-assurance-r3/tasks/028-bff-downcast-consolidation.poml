@@ -5,7 +5,7 @@
     <phase>2 BFF Remediation</phase>
     <tranche>B</tranche>
     <gate>quiet-window (after Tranche A; deps 021)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds a shared extension consumed across 17 call sites with a focused test (touches tests/) — FULL; wide blast radius.</rigor-reason>
     <model-tier>opus</model-tier>

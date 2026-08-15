@@ -98,7 +98,7 @@ internal sealed class GridConfigurationService
             normalised);
 
         var sw = Stopwatch.StartNew();
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.TryUnwrapServiceClient(nameof(GridConfigurationService), _logger);
         if (serviceClient is null)
         {
             return Array.Empty<GridConfigurationSummaryDto>();
@@ -161,26 +161,6 @@ internal sealed class GridConfigurationService
         await TrySetInCacheAsync(cacheKey, summaries, ct);
 
         return summaries;
-    }
-
-    private ServiceClient? GetServiceClient()
-    {
-        if (_dataverseService is not DataverseServiceClientImpl impl)
-        {
-            _logger.LogError(
-                "GridConfigurationService: IDataverseService is not DataverseServiceClientImpl (actual: {Type})",
-                _dataverseService.GetType().FullName);
-            return null;
-        }
-
-        var client = impl.OrganizationService;
-        if (client is null || !client.IsReady)
-        {
-            _logger.LogError("GridConfigurationService: ServiceClient is not ready");
-            return null;
-        }
-
-        return client;
     }
 
     private async Task<T?> TryGetFromCacheAsync<T>(string cacheKey, CancellationToken ct) where T : class

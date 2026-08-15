@@ -82,7 +82,7 @@ public sealed class FinanceRollupService
             parentEntityName, parentId);
 
         // Get ServiceClient for QueryExpression support
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinanceRollupService));
 
         // Step 1: Parallel queries — invoices and budgets
         var invoiceTask = QueryInvoicesAsync(serviceClient, parentId, invoiceLookupField, ct);
@@ -219,31 +219,5 @@ public sealed class FinanceRollupService
 
         var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
         return results.Entities.Sum(e => e.GetAttributeValue<Money>(Budget_TotalBudget)?.Value ?? 0m);
-    }
-
-    /// <summary>
-    /// Get the underlying ServiceClient from IDataverseService for QueryExpression support.
-    /// The sole registered impl (<see cref="DataverseServiceClientImpl"/>) WRAPS a ServiceClient and
-    /// exposes it via <see cref="DataverseServiceClientImpl.OrganizationService"/> — it does NOT derive
-    /// from ServiceClient, so a direct <c>is/as ServiceClient</c> check always fails at runtime (Bug-1).
-    /// Unwrap via the concrete impl, mirroring FinanceSummaryService / SpendSnapshotService / RecordService.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverseService is not DataverseServiceClientImpl impl)
-        {
-            throw new InvalidOperationException(
-                $"FinanceRollupService requires IDataverseService to be backed by DataverseServiceClientImpl " +
-                $"for QueryExpression support (actual: {_dataverseService.GetType().FullName}).");
-        }
-
-        var serviceClient = impl.OrganizationService;
-        if (serviceClient is null || !serviceClient.IsReady)
-        {
-            throw new InvalidOperationException(
-                "FinanceRollupService requires a ready Dataverse ServiceClient for QueryExpression support.");
-        }
-
-        return serviceClient;
     }
 }

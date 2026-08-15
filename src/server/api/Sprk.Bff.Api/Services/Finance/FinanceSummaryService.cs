@@ -236,7 +236,7 @@ public class FinanceSummaryService : IFinanceSummaryService
     {
         _logger.LogInformation("Generating finance summary for matter {MatterId}", matterId);
 
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinanceSummaryService));
 
         // Query latest ToDate snapshot
         var snapshot = await QueryLatestToDateSnapshotAsync(serviceClient, matterId, ct);
@@ -436,21 +436,6 @@ public class FinanceSummaryService : IFinanceSummaryService
         Severity_Critical => "Critical",
         _ => "Unknown"
     };
-
-    /// <summary>
-    /// Get the underlying ServiceClient from the IDataverseService implementation.
-    /// Required for QueryExpression operations not exposed on the IDataverseService interface.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverseService is DataverseServiceClientImpl impl)
-            return impl.OrganizationService;
-
-        throw new InvalidOperationException(
-            $"FinanceSummaryService requires IDataverseService to be backed by DataverseServiceClientImpl. " +
-            $"Actual type: {_dataverseService.GetType().Name}. " +
-            $"For unit testing, mock IFinanceSummaryService directly.");
-    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Internal Data Transfer Types
