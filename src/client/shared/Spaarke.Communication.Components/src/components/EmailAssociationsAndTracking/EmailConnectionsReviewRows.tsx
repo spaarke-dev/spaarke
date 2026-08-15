@@ -35,7 +35,7 @@ export function CandidateCard({
   selected,
   tone,
   showConfirm,
-  confirmLabel = 'Confirm',
+  compact = false,
   busy,
   readOnly,
   onSelect,
@@ -47,8 +47,13 @@ export function CandidateCard({
   /** `'primary'` → green auto-matched card; `'select'` → brand-blue when picked. */
   tone: 'select' | 'primary';
   showConfirm: boolean;
-  /** Label for the per-card commit button. Default `'Confirm'`; the reconcile variant passes `'Select'`. */
-  confirmLabel?: string;
+  /**
+   * Reconcile variant (owner UAT 2026-08-14): the prototype's COMPACT single-row card
+   * — `{name}` + `{type} · {n}% match` on the left, an always-visible inline "Confirm"
+   * button on the right, no 72px floor. Default (`false`) keeps the email-form's taller
+   * 2-line select-then-confirm card unchanged.
+   */
+  compact?: boolean;
   busy: boolean;
   readOnly: boolean;
   onSelect: () => void;
@@ -56,6 +61,40 @@ export function CandidateCard({
   s: ConnectionsReviewStyles;
 }): React.ReactElement {
   const selectedClass = tone === 'primary' ? s.cardPrimary : s.cardSelected;
+
+  // ── Compact (reconcile) — one row: meta on the left, inline Confirm on the right ──
+  if (compact) {
+    const type = candidate.entity ? entityLabel(candidate.entity) : 'Record';
+    return (
+      <div className={s.cardCell}>
+        <div
+          className={mergeClasses(s.candCompact, selected && selectedClass)}
+          aria-label={`${candidate.recordNumber ? candidate.recordNumber + ' ' : ''}${candidate.targetName}`}
+        >
+          <div className={s.compactMeta} onClick={() => !readOnly && onSelect()}>
+            <Text className={s.compactName} title={candidate.targetName}>
+              {candidate.recordNumber ? `${candidate.recordNumber} : ${candidate.targetName}` : candidate.targetName}
+            </Text>
+            <Text className={s.compactScore}>
+              {type} · {pct(candidate.confidence)} match
+            </Text>
+          </div>
+          {!readOnly ? (
+            <Button
+              appearance="primary"
+              size="small"
+              icon={<Checkmark16Filled />}
+              disabled={busy}
+              onClick={onConfirm}
+            >
+              Confirm
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={s.cardCell}>
       <div
@@ -91,7 +130,7 @@ export function CandidateCard({
       {showConfirm && !readOnly ? (
         <div className={s.confirmSlot}>
           <Button appearance="primary" size="small" icon={<Checkmark16Filled />} disabled={busy} onClick={onConfirm}>
-            {confirmLabel}
+            Confirm
           </Button>
         </div>
       ) : null}

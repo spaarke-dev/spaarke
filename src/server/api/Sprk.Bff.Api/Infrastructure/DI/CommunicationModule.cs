@@ -225,6 +225,18 @@ public static class CommunicationModule
         // consumer). Consumed by the messaging inbound/file-share wiring (task 031 / 060), not registered here.
         services.AddScoped<MessageAttachmentMaterializer>(); // task 070
 
+        // Reconciliation reader attachment-text read model (email-communication-intelligence-r2 Batch 2 / B2.1).
+        // Re-extracts a communication's file-attachment text on demand for the browse reader's folds (the text is
+        // a transient pipeline artifact, never persisted). Both Dataverse reads are IMPERSONATED via the shared
+        // IImpersonatedCommunicationQuery seam (MSCRMCallerID = caller) so Dataverse enforces row-level access
+        // natively — no filename/document-id leaks cross-user (NFR-06, code-review 2026-08-14); the SPE download is
+        // OBO on top. Reuses the shared SPE download + cache-aware ITextExtractor primitives (§11, ADR-007/ADR-009 —
+        // the extractor owns its own 24h Redis cache), adding only the attachment→document join + rich per-attachment
+        // mapping. SCOPED, because it consumes the Scoped ICallerSystemUserResolver + Scoped ISpeFileOperations (the
+        // Singleton IImpersonatedCommunicationQuery composes safely). Registered UNCONDITIONALLY (ADR-010/ADR-032 —
+        // the GET /{id}/attachments/text endpoint maps unconditionally).
+        services.AddScoped<CommunicationAttachmentTextService>();
+
         // BFF read-path internal-only / privilege enforcement (messaging-communication-app-r1 task 042, REWORKED to
         // the impersonation model 2026-07-16 / FR-08 / NFR-06). RECORD-LEVEL read access is now Dataverse's job:
         // task 050's thread-read + unread endpoints issue the sprk_communication query IMPERSONATED (MSCRMCallerID =
