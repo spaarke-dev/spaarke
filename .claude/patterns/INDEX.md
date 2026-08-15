@@ -20,7 +20,7 @@
 | [dataverse/](dataverse/INDEX.md) | 5 | Plugins, Web API, entity CRUD, relationships, polymorphic resolver | 2026-04-05 | Verified |
 | [pcf/](pcf/INDEX.md) | 7 | Control lifecycle, errors, themes, queries, dialogs, **Fluent v9 modern theming**, **Canvas-vs-MDA disabled** | 2026-05-26 | Verified + 2 Current |
 | [ai/](ai/INDEX.md) | 3 | Streaming endpoints, text extraction, analysis scopes | 2026-04-05 | Verified |
-| [testing/](testing/INDEX.md) | 3 | Unit tests, mocking, integration/arch tests | 2026-04-05 | Verified |
+| [testing/](testing/INDEX.md) | 4 | Unit tests, mocking, integration/arch tests, god-class ratchet | 2026-08-15 | Verified |
 | [webresource/](webresource/INDEX.md) | 4 | Code Pages, wizard wrappers, custom dialogs, subgrid rollup | 2026-04-05 | Verified |
 | [ui/](ui/INDEX.md) | 7 | Choice dialog + **Fluent v9 component authoring / theming / portal-gotcha / React-version boundaries / host-visual-fit / embedded-widget-sizing** | 2026-06-09 | Verified + 6 Current |
 

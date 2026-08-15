@@ -23,6 +23,10 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-08-15 — God-class ratchet documentation · code-quality-and-assurance-r3 followups)
+
+- **Added — [`.claude/patterns/testing/god-class-ratchet.md`](patterns/testing/god-class-ratchet.md)** + root `CLAUDE.md` §17 pointer + patterns INDEX entries. Documents the `GodClassGuardTests` server file-size gate (**no new `src/server/**/*.cs` > 2,000 lines; 14 existing large files frozen at LOC +100 grace**) so an editor/agent knows BEFORE growing a large file. On failure: decompose (preferred) or re-baseline the file's waiver with a PR reason — never silence. Redesigned the guard from an arbitrary single ceiling (4,950→2,700, which left actively-edited files ~24 lines of headroom) to a per-file freeze + grace.
+
 ### Added (2026-08-14 — worktree-net10-migrate skill · dotnet-10-upgrade-r1 cutover)
 
 - **Added — [`.claude/skills/worktree-net10-migrate/SKILL.md`](skills/worktree-net10-migrate/SKILL.md)** + exemplar [`scripts/Update-WorktreeToNet10.ps1`](../scripts/Update-WorktreeToNet10.ps1) — one-command, **non-destructive** migrator to bring any worktree onto the net10 baseline (SDK check → dirty-tree guard → `git merge origin/master` → **net8-clobber guard** [every `src/server` csproj must be `net10.0`] → build; interprets NETSDK1045 + Graph 6.5/Kiota 2.0 errors). Registered in `.claude/skills/INDEX.md`. Addresses the live IDE-clobber failure mode (open VS/Rider autosaving stale net8 csproj over a merge → 503 on deploy).
