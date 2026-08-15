@@ -558,7 +558,7 @@ public class UploadTestFixture : IntegrationTestFixture
         });
     }
 
-    public new HttpClient CreateAuthenticatedClient(string tenantId, string? userId = null)
+    public HttpClient CreateAuthenticatedClient(string tenantId, string? userId = null)
     {
         var client = CreateClient();
         var token = GenerateTestJwt(tenantId, userId ?? Guid.NewGuid().ToString());
