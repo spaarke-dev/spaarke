@@ -6,11 +6,22 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Sprk.Bff.Api</AssemblyName>
     <RootNamespace>Sprk.Bff.Api</RootNamespace>
-    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <!-- task 041 (r3 mechanical baseline): BFF surface opts IN to the root Directory.Build.props
+         TreatWarningsAsErrors=true gate. Non-curated nullable warnings (CS8602/CS8619/CS8625/CS8766)
+         were FIXED (not suppressed); the curated WarningsNotAsErrors allowlist (CS0618 deferred-NG4
+         obsolete usage, CS8601/CS8604 per-site nullable, CS1998, CS0109) remains the documented policy. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <UserSecretsId>cbc576fa-6ea6-485a-bb2a-d96130f21f20</UserSecretsId>
     <!-- FR-A1: framework-dependent linux-x64 publish (App Service is Linux). Trims multi-platform native RIDs. -->
     <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
     <SelfContained>false</SelfContained>
+    <!-- task 041: NU1510 (NuGet pruning hint — "package will not be pruned / likely unnecessary") is scoped
+         OUT of TreatWarningsAsErrors for this project. The two flagged refs (Caching/Hosting.Abstractions
+         10.0.3) are DELIBERATE version pins for the Microsoft.Extensions.AI 10.3.0 dependency chain (see
+         inline comments below); removing them to satisfy the pruner would drop the pinned version. NU1510 is
+         a NuGet restore-hygiene warning, not a Roslyn code/analyzer warning — outside the mechanical-baseline
+         analyzers-as-errors scope. This is a scoped NuGet exemption, NOT a code-warning suppression. -->
+    <NoWarn>$(NoWarn);NU1510</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

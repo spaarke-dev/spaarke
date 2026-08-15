@@ -4,7 +4,7 @@
     <title>Forcing-function: mechanical baseline (analyzers-as-errors + strict ESLint/tsc) — per-surface</title>
     <phase>4 Forcing-Functions</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Edits build config across surfaces (analyzers, .editorconfig, ESLint, tsc); behavior-neutral to runtime but gates builds — STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -76,6 +76,10 @@ internal sealed class NullConnectionMultiplexer : IConnectionMultiplexer
 
     public string ClientName => "null-object";
 
+    // Explicit non-null override: IConnectionMultiplexer.ToString() is declared non-nullable, but the
+    // implicitly-inherited object.ToString() returns string? (CS8766). Return a stable inert label.
+    public override string ToString() => nameof(NullConnectionMultiplexer);
+
     public string Configuration => string.Empty;
 
     public int TimeoutMilliseconds => 0;
