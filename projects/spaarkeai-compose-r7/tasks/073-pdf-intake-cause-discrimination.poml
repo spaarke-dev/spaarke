@@ -39,7 +39,7 @@
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/ComposePdfIntakeSource.cs</file>
       <file role="canonical-reference">Services/Ai/PublicContracts/ facade types (consume; do not fork Services/Ai internals)</file>
-      <file role="canonical-reference">NullComposePdfIntakeSource@472–473 typed "PDF intake unavailable" (the collapsed message being discriminated)</file>
+      <file role="canonical-reference">NullComposePdfIntakeSource@~510-511 (AnalysisServicesModule.cs) typed "PDF intake unavailable" (the collapsed message being discriminated; anchor re-verified 2026-08-15)</file>
     </relevant-files>
     <dependencies>
       <dependency task="001" status="pending">Coordination gate + /conflict-check on Services/Ai.</dependency>

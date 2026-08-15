@@ -56,7 +56,7 @@ The project is considered **complete** when:
 - [ ] A **PDF** opened via Browse or Assistant-upload becomes an **editable** Compose document (parity with `.docx`) — runs analysis, creates a response, saves as a docx version.
 - [ ] **Ctrl+Space** (no selection) opens "Describe a change"; **Ctrl+Shift+Space** focuses the Assistant input; IME not hijacked.
 - [ ] **Blank page** mounts editable (D8); **Restore from Source** no longer blanks (D4); an **Add Comment** affordance exists (D7).
-- [ ] Publish size ≤60 MB (delta vs ~46.94 MB reported); no new HIGH CVE; placement/component justifications recorded; `/conflict-check` clean; BFF + `sprk_spaarkeai` deployed together.
+- [ ] Publish size ≤60 MB (delta vs ~44.96 MB (net10) reported); no new HIGH CVE; placement/component justifications recorded; `/conflict-check` clean; BFF + `sprk_spaarkeai` deployed together.
 - [ ] Test suites (Compose jest + xUnit) run green and non-flaky.
 
 ## Scope
@@ -100,7 +100,7 @@ The project is considered **complete** when:
 | `Services/Ai/ComposePdfIntakeSource.cs` (FR-11) vs `spaarke-ai-architecture-redesign-r2` (sole `Services/Ai` owner) | Med | Med | Consume `PublicContracts/` seam — no fork; `/conflict-check` before BFF PR |
 | `Ctrl+Space` IME conflict (IME toggle on some stacks) | Low | Med | `event.isComposing` guard; `Ctrl+/` fallback confirmed |
 | PDF DI gate OFF in target env → intake silently unavailable | Med | Low | FR-06 verifies `Analysis:Enabled && DocumentIntelligence:Enabled`; typed "unavailable" via NullObject |
-| Publish size breach (BFF touches) | High | Low | Per-task publish-size verify (≤60 MB; baseline ~46.94 MB) |
+| Publish size breach (BFF touches) | High | Low | Per-task publish-size verify (≤60 MB; baseline ~44.96 MB (net10)) |
 | Test-hygiene overlap with PR #690 (ci-lfs, "fixes 5 Compose seam tests") | Low | Med | Watch/coordinate #690 before landing FR-13 |
 
 ## Dependencies

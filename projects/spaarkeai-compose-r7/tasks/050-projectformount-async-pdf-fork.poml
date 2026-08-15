@@ -51,7 +51,7 @@
     <constraint source="ADR-007">ProjectForMount was deliberately synchronous / no-I/O per ADR-007/ADR-013 (NFR-04 tension). This task takes ADR Tensions path A: making it async for the PDF fork is a documented, project-scoped exception — the docx path MUST stay synchronous-fast (no added I/O).</constraint>
     <constraint source="ADR-013">Reuse R6's ProjectPdfToDocxAsync / ComposePdfModelProjector; MUST NOT re-build the PDF projector or add a new AI capability/playbook.</constraint>
     <constraint source="ADR-032">The PDF fork rides the existing compound-gated intake (NullComposePdfIntakeSource fallback); this task does not change the gate, only consumes it.</constraint>
-    <constraint source="project">BFF change — state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); work stays in Services/Compose/. Verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~46.94 MB) — flag if ≥+5 MB; confirm no new HIGH CVE; run /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">BFF change — state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); work stays in Services/Compose/. Verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~44.96 MB net10) — flag if ≥+5 MB; confirm no new HIGH CVE; run /conflict-check before the BFF PR.</constraint>
     <constraint source="project">Add a seam test (tests/integration/seam/**) for async ProjectForMount PDF projection (ADR-038). MUST NOT delete docxBridge.ts.</constraint>
   </constraints>
 

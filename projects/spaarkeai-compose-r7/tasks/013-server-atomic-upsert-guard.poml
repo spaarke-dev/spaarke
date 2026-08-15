@@ -50,7 +50,7 @@
   <constraints>
     <constraint source="project">PromoteIfEphemeralAsync MUST be made idempotent via an atomic upsert on the sprk_graphitemid_uk alternate key — replace the read-then-CreateAsync@2717 sequence entirely; do not merely add a re-read.</constraint>
     <constraint source="ADR-044">Canonicalize the sprk_graphitemid value used as the alternate-key match per Dataverse GUID canonicalization (ADR-044) so the upsert matches reliably.</constraint>
-    <constraint source="project">BFF change — state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); all work stays in Services/Compose/. Verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~46.94 MB); confirm no new HIGH CVE; run /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">BFF change — state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); all work stays in Services/Compose/. Verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~44.96 MB net10); confirm no new HIGH CVE; run /conflict-check before the BFF PR.</constraint>
     <constraint source="project">Add/adjust a seam test under tests/integration/seam/** proving dedup across doors (ADR-038 DoD for dispatch-spine changes). MUST NOT delete docxBridge.ts.</constraint>
   </constraints>
 

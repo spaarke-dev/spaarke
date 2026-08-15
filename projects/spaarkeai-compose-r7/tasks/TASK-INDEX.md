@@ -109,7 +109,7 @@ Key blocking dependencies (from plan.md §Critical Path):
 - **061** — `/conflict-check` on `ConversationPane.tsx` + `SprkChatInput.tsx` vs active `spaarkeai-assistant-enhancements-r3` before the PR.
 - **073** — consume `Services/Ai/PublicContracts/` ONLY; **no fork** of `Services/Ai/` (sole owner `spaarke-ai-architecture-redesign-r2`).
 - **075** — watch PR **#690** (ci-lfs, "fixes 5 Compose seam tests"); do not double-fix.
-- **BFF tasks (012 if server, 013, 030, 050, 073, 074 if server)** — Placement Justification in PR (cite `.claude/constraints/bff-extensions.md`); publish ≤60 MB (delta vs ~46.94 MB baseline from 001); no new HIGH CVE; `/conflict-check` before the BFF PR.
+- **BFF tasks (012 if server, 013, 030, 050, 073, 074 if server)** — Placement Justification in PR (cite `.claude/constraints/bff-extensions.md`); publish ≤60 MB (delta vs ~44.96 MB (net10) baseline from 001); no new HIGH CVE; `/conflict-check` before the BFF PR.
 - **All Compose client tasks** — **NEVER delete `docxBridge.ts`** (NFR-06).
 - **090** — deploy BFF + `sprk_spaarkeai` **together** (anti-clobber, NFR-05).
 

@@ -43,7 +43,7 @@
       <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
       <file role="canonical-reference">ComposeEditor.tsx NON_DOCX_EXTENSION@267 + isEditableDocx@278 (admit .pdf at the intake door only)</file>
       <file role="canonical-reference">ComposeWorkspace.tsx Browse accept=".docx"@3596 (add .pdf)</file>
-      <file role="canonical-reference">AnalysisServicesModule.cs:154 compound DI gate (env verify — from task 001) + NullComposePdfIntakeSource@472–473 typed degradation</file>
+      <file role="canonical-reference">AnalysisServicesModule.cs compound DI gate ~L145/165 (env verify — from task 001) + NullComposePdfIntakeSource@~510-511 typed degradation (anchors re-verified 2026-08-15)</file>
     </relevant-files>
     <dependencies>
       <dependency task="050" status="pending">Async ProjectForMount PDF fork — the server side of parity.</dependency>

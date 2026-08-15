@@ -36,7 +36,7 @@
 **From Spec**:
 - Autosave is **client-only** (local/session storage); no server write until explicit Save. UC-4 touches no BFF surface.
 - Draft-recovery key + client dedup share ONE stable logical id (`sprkDocumentId ?? speDriveItemId ?? persistedLogicalId`) — FR-07(b) introduces it (none exists today).
-- All BFF work stays in `Services/Compose/`; reuse R6 PDF projector/intake. Publish ≤60 MB (baseline ~46.94 MB). NEVER delete `docxBridge.ts`.
+- All BFF work stays in `Services/Compose/`; reuse R6 PDF projector/intake. Publish ≤60 MB (baseline ~44.96 MB (net10)). NEVER delete `docxBridge.ts`.
 - Consume `Services/Ai/PublicContracts/` for FR-11 — no fork of `Services/Ai/`.
 
 ### Key Technical Decisions
@@ -102,7 +102,7 @@ Phase 8: Wrap-up (anti-clobber deploy, test-diet, docs)
 **Deliverables:**
 - [ ] `/conflict-check` clean (esp. `ConversationPane.tsx`, `Services/Ai`, `Services/Compose`)
 - [ ] Confirm PDF DI compound gate ON in target env
-- [ ] Record publish-size baseline (~46.94 MB)
+- [ ] Record publish-size baseline (~44.96 MB (net10))
 
 **Inputs**: spec.md, INDEX.md · **Outputs**: coordination note in `notes/`.
 

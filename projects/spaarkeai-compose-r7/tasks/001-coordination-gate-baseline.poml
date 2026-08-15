@@ -53,7 +53,7 @@
   <constraints>
     <constraint source="project">This task MUST NOT modify any .cs/.ts/.tsx source; it is read-only + note authoring.</constraint>
     <constraint source="project">Publish-size measurement MUST use the repo-standard command: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/, then measure compressed output; state the PDB convention (incl. or excl. PDBs) when reporting, per root §10.</constraint>
-    <constraint source="project">The env DI gate is at AnalysisServicesModule.cs:154 (compound Analysis:Enabled &amp;&amp; DocumentIntelligence:Enabled). Record whether the target env has both ON; if OFF, note that PDF intake will degrade to NullComposePdfIntakeSource typed "PDF intake unavailable" (FR-06 acceptance would then fail in that env).</constraint>
+    <constraint source="project">The env DI gate is in AnalysisServicesModule.cs — compound Analysis:Enabled &amp;&amp; DocumentIntelligence:Enabled, reads at ~L145 (DocumentIntelligence:Enabled) + ~L165 (Analysis:Enabled), real reg ~L229-230, NullComposePdfIntakeSource ~L510-511 (anchors re-verified 2026-08-15 post code-quality-r3 merge — module shifted, gate unchanged; grep the symbols rather than trusting exact lines). Record whether the target env has both ON; if OFF, note that PDF intake will degrade to NullComposePdfIntakeSource typed "PDF intake unavailable" (FR-06 acceptance would then fail in that env).</constraint>
   </constraints>
 
   <knowledge>
@@ -73,7 +73,7 @@
     <step order="0.5" name="net10-readiness">Confirm the branch is on net10 master (git rev-list --count HEAD..origin/master == 0), `dotnet --list-sdks` shows a 10.0.1xx entry, and `dotnet build -c Release src/server/api/Sprk.Bff.Api/` is clean. If build flags Graph/Kiota call sites, consult projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md. Record net10-ready = yes/no. (Baseline done at init 2026-08-14: branch merged net10 master, Release build clean.)</step>
     <step order="1">Run /conflict-check focused on ConversationPane.tsx, SprkChatInput.tsx, Services/Ai/**, Services/Compose/**. Record the result.</step>
     <step order="2">Run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ (on net10); measure the compressed size; record absolute MB + the PDB convention. This is the **net10** baseline that supersedes the net8 ~46.94 MB figure for all downstream NFR-01 delta reporting.</step>
-    <step order="3">Inspect AnalysisServicesModule.cs:154 and the target-env config to confirm the compound PDF DI gate state; record ON/OFF.</step>
+    <step order="3">Inspect AnalysisServicesModule.cs (grep DocumentIntelligence:Enabled / Analysis:Enabled / IComposePdfIntakeSource — compound gate ~L145/165) and the target-env config to confirm the compound PDF DI gate state; record ON/OFF.</step>
     <step order="4">Check the status of watched PRs #690 (ci-lfs) and #266 (OpenXml bump); note any relevance to FR-13 / dependency bumps.</step>
     <step order="5">Write projects/spaarkeai-compose-r7/notes/coordination-baseline.md with all four findings.</step>
     <step order="6">Update TASK-INDEX.md: set 001 status to ✅.</step>

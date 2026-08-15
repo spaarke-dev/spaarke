@@ -52,7 +52,7 @@
     <constraint source="ADR-049">Save As rides ADR-049 append-only versioning by creating a NEW document; it MUST NOT be implemented as a new-version append on the original.</constraint>
     <constraint source="project">The Save As ('new') path in ComposeWorkspace.tsx triggerSave@1346 / forkNew@1355 MUST uniquify the filename so the SPE PUT-by-path creates a distinct drive item; a fork MUST yield a new logical id (from task 010), not reuse the original's.</constraint>
     <constraint source="project">Keep ComposeSaveMode = 'version' | 'new' unchanged — this task changes fork behavior, not the enum.</constraint>
-    <constraint source="project">BFF change: if ResolveFileName@1346 is touched server-side, state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md), verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~46.94 MB), confirm no new HIGH CVE, and run /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">BFF change: if ResolveFileName@1346 is touched server-side, state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md), verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~44.96 MB net10), confirm no new HIGH CVE, and run /conflict-check before the BFF PR.</constraint>
     <constraint source="project">MUST NOT delete docxBridge.ts. MUST NOT add a parallel save/fork mechanism.</constraint>
   </constraints>
 
