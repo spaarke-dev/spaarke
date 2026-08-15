@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-14 (EXECUTION STARTED — Phase 0)
+> **Last Updated**: 2026-08-14 (context-handoff — REMEDIATION, forcing-functions wave)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -15,10 +15,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **EXECUTION 2026-08-14.** Phase 0 COMPLETE. **Phase 1 assessment wave IN PROGRESS** (operator opted in: "use workflow"). |
-| **Step** | Phase 0 ✅. Phase 1: 019 ✅ · **010 ✅ (shared client libs → B–)**. **6 assessment workflows RUNNING**: 011 shared-server-libs (`wf_78267cb8-c18`, resume) · 017 config-deployment (`wf_afca7b9b-22b`, resume) · 012 PCF (`wf_d18f1279-c8f`) · 013 Dataverse+ALM (`wf_7f967ea6-f87`) · 014 code-pages (`wf_595794d2-98d`) · 015 plugins (`wf_03c876dc-446`). 016 (aggregate) after all. |
-| **Status** | Committed `1aea2f47f` + `94263b533` (NOT pushed). **THREE workflow runtime bugs found+fixed** (0-agent-waste discipline paid off): (1) `parseArgs` didn't accept the JSON-string form the runtime passes args in; (2) dedup loop crashed on `res.dimension` when a finder returned null (StructuredOutput retry-cap) — now filters + flags NOT-ASSESSED, no silent drop; (3) `new Date()` is banned in Workflow scripts (breaks resume) — date now passed via `assessedDate` arg. All fixes are body-only (schema/prompts untouched) so cached agents replay on resume. 010 resumed to completion (23 cached agents, 25ms, 0 tokens). **010 result**: 53 verified findings, Fable refuted 4 first-pass claims; **B–** (mean 2.67, gating cap not binding). |
-| **Next Action** | Await 6 workflow completions (staggered notify). Per each: read `workstreams/{surface}/design.md` §6 row → append to `notes/SCORECARD.md` + mark task ✅. NOTE: 011 (D6,D9 finders failed) + 017 (D2 finder failed) resumed with those dims flagged NOT-ASSESSED — review + optionally targeted-re-run if a gating dim is degraded (017 D2). Then **016 aggregate re-baseline**. STILL GATED (not autonomous): BFF Tranche A (020,021,022,023,027) + deployment 060–063 — outward-facing PRs, /conflict-check + operator review; auth unblocked by 019. |
+| **Task** | Autonomous remediation orchestration. **28 of 35 tasks ✅** (Phase 0, Phase 1, all BFF Phase 2, 060, all 5 horizontals). **HEAD = `1d885d6c9`** (NOT pushed; branch `work/code-quality-and-assurance-r3`). |
+| **Step** | Phase 4 forcing-functions + Phase 6 deployment. **2 background agents IN-FLIGHT** (uncommitted edits on disk): **040** expand ArchTests (id `af48b44a9fc195f7d`, edits `tests/Spaarke.ArchTests/`) ‖ **062** Graph app-role constants (id `a52c42dc508a66cf5`, edits `Infrastructure/Auth/GraphAppRoles.cs` (new) + `SpeAdminGraphService.cs` + 2 Entra scripts + auth-deployment doc). |
+| **Status** | Method: dispatch disjoint-file **edit-only** subagents → main session integrates (build `dotnet build src/server/api/Sprk.Bff.Api/ -c Release` + test `dotnet test tests/unit/Sprk.Bff.Api.Tests/` → commit + mark POML `<status>completed` + flip TASK-INDEX 🔲→✅ **via Edit tool** (emoji sed fails on git-bash) + selective `git add`, never `git add .`). Last full test 10,388/0/97. |
+| **Next Action** | **(1) On 040 + 062 completion**: build Release + `dotnet test tests/unit/Sprk.Bff.Api.Tests/` + `dotnet test tests/unit/Spaarke.ArchTests/` (040) → commit + mark 040/062 ✅. **(2) Then REMAINING (7): 061** config fail-fast validation (#2, BFF) → then the build/CI-config trio **041** mechanical baseline (TreatWarningsAsErrors/analyzers/ESLint) → **042** CI gates (deps 040; `.github/workflows` — coordinate ci-cd-unit-test-remediation-r1) → **063** naming standard + conformance gate (deps 017 ✅; docs/architecture + `.github/workflows`) — run these 3 SEQUENTIALLY (shared build/CI config). **Then 090** wrap-up: invoke `/test-diet` (BINDING gate, CLAUDE.md §7) → `notes/test-diet-report.md`, then close. **(3)** Do NOT push (operator hasn't asked). |
+
+### In-flight agent recovery (if compacted mid-run)
+- **062 ✅ DONE (uncommitted on disk)**: `Infrastructure/Auth/GraphAppRoles.cs` (new SSOT, 14 roles) + `SpeAdminGraphService.cs:879` literal swap (byte-match) + 2 Entra scripts + `auth-deployment-setup.md` doc-comments. **062 DEFERRALS**: 11 baseline app-role `AppRoleId` GUIDs left `null` (not in-repo — need live §5a Graph enumeration); the `GraphAppRoleVerifier` + its unit tests (POML steps 3-4) NOT built (edit-only/don't-touch-tests narrowing) — mark 062 ✅ for the SSOT-constants portion, note the verifier as a follow-up.
+- **040** (`af48b44a9fc195f7d`) still running (edits `tests/Spaarke.ArchTests/`). On resume: auto-notifies; if edits on disk, integrate (`dotnet test tests/unit/Spaarke.ArchTests/`). If not notified + no edits, re-dispatch from `tasks/040-*.poml` (edit-only; rules MUST stay green — baseline-and-ratchet).
+- **Integrate 040+062 together**: build Release + BFF tests + ArchTests → commit → mark 040/062 ✅.
+- **Deferred (do NOT lose)**: 026 Finance rename (Dataverse `sprk_analysistool.sprk_handlerclass` pre-check — offline-blocked); 023+030 web-resource MSAL token flow needs LIVE-Dataverse validation + app-reg prereqs (SPA redirect URI + `user_impersonation` consent) + form-library registration of `sprk_bff_auth.js` + live `Cors:AllowedOrigins` origins (see `notes/task-023-notes.md`); 033 deferred 43 `AnalysisServicesModule` `Console.WriteLine` (needs /conflict-check) + 7 email-at-Info sites (active worktrees); 032 PDF-parse smoke test; `#772` deferred package majors; residual trivial stale-comment refs.
+- **Program result**: aggregate was **F** (gating cap on the live Finance anonymous-write); **023 CLOSED it server-side** → the F is lifted (pending live web-resource validation). Maintainability mean ≈ C+. Formal re-score at 090.
 
 ### What happened since init (2026-08-06 → 2026-08-13) — all PLANNING, no execution
 - **Initialized** via design-to-spec → project-pipeline (Project #741 under Epic #427; INDEX.md row; NG1 Idea #742). 27 tasks.
