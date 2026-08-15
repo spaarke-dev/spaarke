@@ -4,7 +4,7 @@
     <title>Hoist 13-file rich Kanban subtree into @spaarke/smart-todo-components (FR-01)</title>
     <phase>1: Shared-lib foundation</phase>
     <gate>001 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Moves 13 files (~4,100 LOC) across a package boundary, requires re-homing multiple LW-local hook/service dependencies to stay host-agnostic, and is on the critical path for every downstream FR-02/03/05..15 task. Architecture-adjacent change to a shared library consumed by 2+ hosts.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -147,7 +147,21 @@
     <criterion testable="true">Negative: no LW Context provider, singleton service, or `src/solutions/...` import is smuggled into the hoisted files — every LW dependency is resolved via prop injection or an optional service interface.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec section: FR-01. Step 2 of the Phase 1 serial spine (001→002→003). The `SmartTodo` Code Page (`src/solutions/SmartTodo/src/components/SmartToDo.tsx`) has its OWN separate, unrelated local component of a similar name — it is NOT part of this hoist's scope; do not confuse the two. If time allows, note the potential duplication as a deferral candidate (`/project-defer-issue-tracking`) but do not act on it in this task.</notes>
+  <notes>Spec section: FR-01. Step 2 of the Phase 1 serial spine (001→002→003). The `SmartTodo` Code Page (`src/solutions/SmartTodo/src/components/SmartToDo.tsx`) has its OWN separate, unrelated local component of a similar name — it is NOT part of this hoist's scope; do not confuse the two. If time allows, note the potential duplication as a deferral candidate (`/project-defer-issue-tracking`) but do not act on it in this task.
+
+  COMPLETION (2026-08-15, FULL/opus/xhigh): All 13 files hoisted host-agnostic into
+  `Spaarke.SmartTodo.Components/src/components/SmartToDo/` (+ new `src/types/entities.ts`, moved
+  `src/types/todoScoringTypes.ts`; barrels `components/index.ts` + `types/index.ts` updated). `tsc --noEmit`
+  = exit 0. Zero `src/solutions` reach-in imports; zero hex/rgb introduced; scoring routed to the LOCKED
+  `utils/todoScoring.ts` (bit-for-bit, no re-impl). `SmartToDo.tsx` redesigned host-agnostic: `useTodoItems`/
+  `useUserPreferences`/`DataverseService`/`useFeedTodoSync`/LW-`useKanbanColumns` replaced by injected props +
+  interfaces (`onCreateTodo/onDismissTodo/onRestoreTodo` → `ITodoMutationResult`; `dataverseService?:
+  IKanbanDataverseService`; `feedSync?: IFeedSyncBridge`; `onOpenTodo?` for navigation; items/prefs lifted to
+  props). adr-check CLEAN; code-review PASS (0 critical). DEVIATION: LW rich `KanbanCard` collides with the
+  pre-existing, externally-consumed widget `KanbanCard` root export (from the SmartTodo Code Page hoist), so it
+  is folder-internal + re-exported at root under alias `SmartToDoKanbanCard` (bare `KanbanCard` still resolves).
+  LW-local originals LEFT IN PLACE (task 003 coordinates deletion per step 8); NOTHING committed. Full detail +
+  task-003 contract: `projects/smart-todo-r5/notes/task-002-hoist.md`.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

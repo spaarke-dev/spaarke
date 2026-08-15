@@ -7,7 +7,7 @@
 | # | Title | Phase | FR | Tier/Effort | Parallel | Deps | Status |
 |---|---|---|---|---|---|---|---|
 | 001 | Absorb PR #508 boundary fix on SmartTodo.Components | 1 | FR-01 | opus/xhigh | P | — | ✅ |
-| 002 | Hoist 13-file rich Kanban subtree → shared lib | 1 | FR-01 | opus/xhigh | none | 001 | 🔲 |
+| 002 | Hoist 13-file rich Kanban subtree → shared lib | 1 | FR-01 | opus/xhigh | none | 001 | ✅ |
 | 003 | LegalWorkspace SmartToDo → thin shim; parity verify | 1 | FR-01 | sonnet/high | none | 002 | 🔲 |
 | 010 | Create sprk_priority + sprk_effort choice columns | 2 | FR-02/03 | sonnet/high | P | — | ✅ |
 | 011 | Auto-score handler (Option B) + wizard/quick-add parity | 2 | FR-02/03 | sonnet/high | none | 010 | 🔲 |

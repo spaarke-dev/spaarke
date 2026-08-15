@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | Group P DONE (001 ✅, 010 ✅) — next: **task 002** (13-file Kanban hoist) |
-| **Step** | Phase 1 spine: 001 ✅ → **002 (next)** → 003 |
+| **Task** | 001 ✅, 010 ✅, **002 ✅ (13-file hoist DONE)** — next: **task 003** (LW SmartToDo → thin shim) |
+| **Step** | Phase 1 spine: 001 ✅ → 002 ✅ → **003 (next)** |
 | **Status** | in-progress (executing critical path) |
-| **Next Action** | Execute **task 002** (`tasks/002-hoist-kanban-subtree-to-shared-lib.poml`, opus/xhigh, depends on 001 ✓). Then 003. Phase-3 group Q + Phase-5 group R are the true parallel fan-out waves. |
+| **Next Action** | Execute **task 003** (`tasks/003-...poml`, sonnet/high, depends on 002 ✓). Task 003 converts LW SmartToDo to a thin shim consuming `@spaarke/smart-todo-components` + supplies the injected props/services contract in `notes/task-002-hoist.md` "Contract handed to task 003", then DELETES the 13 LW-local originals (POML step 8). Task 002 changes are UNCOMMITTED in the worktree pending orchestrator review. Phase-3 group Q + Phase-5 group R are the parallel fan-out waves. |
 
 ### Critical Context
 Execution underway on branch `work/smart-todo-r5`. **001 complete** (PR#508 boundary fix — barrel imports, package/tsconfig wired, `tsc` green, gates clean). **010 complete by pre-existence** (`sprk_priority`/`sprk_effort` already on live `sprk_todo` with exact spec values — NO schema write). Most tasks are `parallel-safe:false` (shared-lib contention) → critical path runs serially in main session; subagent fan-out reserved for group Q (020/022/023/024) + group R (040/041/042). UI.Components `dist` + both packages' `node_modules` are now built locally (needed for `tsc`).
@@ -52,8 +52,20 @@ Execution underway on branch `work/smart-todo-r5`. **001 complete** (PR#508 boun
 - **Shared-lib contention**: 19 worktrees touch shared libs; `Spaarke.SmartTodo.Components` is hot. Run `/conflict-check` before each PR; small sequential PRs. Overlaps `code-quality-and-assurance-r3` (SpaarkeAi=Y).
 - Task 060 edits `.claude/skills/push-to-github` → main-session-only (§3 sub-agent write boundary).
 
-### Steps Completed / Decisions This Task
-_(none — no task started yet)_
+### Steps Completed / Decisions This Task — TASK 002 (in-progress, FULL/opus/xhigh)
+**Investigation complete (steps 0–2).** All 13 LW files + all LW-local deps read.
+- **Scoring parity CONFIRMED bit-for-bit**: LW `utils/todoScoreUtils` + `utils/dueLabelUtils` are IDENTICAL to package `utils/todoScoring.ts` (weights .50/.20/.30, urgency 100/80/50/25/0, labels Overdue/3d/7d/10d, `ITodoScoreBreakdown` shape). → hoisted files call package `utils/todoScoring` (locked contract, no re-impl).
+- **KanbanCard COLLISION (forced deviation)**: package already root-exports `KanbanCard`/`IKanbanCardProps` (flexbox, IKanbanCardTodo-generic) — **consumed externally** by SmartTodo Code Page (`src/solutions/SmartTodo/src/components/SmartToDo.tsx:54`). LW `KanbanCard` is a DIFFERENT impl (RecordCardShell/CardIcon, ITodo-typed). Cannot clobber root name. → hoist LW card folder-internal to `components/SmartToDo/KanbanCard.tsx`; root-export it ALIASED as `SmartToDoKanbanCard`/`ISmartToDoKanbanCardProps`. The 12 other symbols export under original names.
+
+**Layout decision**: hoist 13 files into `components/SmartToDo/` folder (folder-internal relative sibling imports preserved). Move `todoScoringTypes.ts` → `src/types/todoScoringTypes.ts`. New file `src/types/entities.ts` = host-agnostic `ITodo`, `PriorityLevel`, `EffortLevel`, `ITodoKanbanPreferences`, `ITodoMutationResult`.
+
+**Cross-folder LW import rewrites**: `../../types/entities`→pkg `types/entities`; `../../types/enums`(TodoColumn)→`types/kanban`, (Priority/EffortLevel)→`types/entities`; `../../utils/todoScoreUtils`+`../../utils/dueLabelUtils`→pkg `utils/todoScoring`; `../../hooks/useUserPreferences`(DEFAULT_*)→pkg `hooks/useKanbanColumns`, (ITodoKanbanPreferences)→`types/entities`; `../../types/xrm`(IWebApi)→dropped.
+
+**SmartToDo.tsx host-agnostic redesign (orchestrator pre-authorized injection)**: remove `useTodoItems`/`useUserPreferences`/`useFeedTodoSync`/`DataverseService`/LW `useKanbanColumns`. New `ISmartToDoProps`: items/isLoading/error/onRefetch/preferences/onUpdatePreferences/prefsLoading (lifted from hooks); onCreateTodo/onDismissTodo/onRestoreTodo→`Promise<ITodoMutationResult>`; `dataverseService?:IKanbanDataverseService` (pkg useKanbanColumns); `feedSync?:IFeedSyncBridge` (notifyTodoChange→feedSync.notifyChange); `onOpenTodo?` (replaces Xrm.Navigation block); embedded/onCountChange/onRefetchReady/onShowMore/disableSidePane kept. SmartToDoDialog forwards SmartToDo props.
+
+**HARD BOUNDARIES**: do NOT delete LW originals (task 003 coordinates). Do NOT git commit.
+
+**Next**: write types/entities.ts + move todoScoringTypes → write 13 files into components/SmartToDo/ → barrels (types/index, components/index, index) → `npx tsc --noEmit` → grep gates → code-review + adr-check → notes + TASK-INDEX.
 
 ### Parallel Execution
 _(none active)_
