@@ -4,6 +4,22 @@
 > The r3 program un-gated the aggregate **F→D** (maintainability mean **C+**); this backlog is the path toward the A+ senior-panel bar.
 > Already-tracked deferrals (plugins decommission, Finance web-resource live validation, per-surface TS baseline, NG1, #772, CI-workflow wiring) are NOT repeated here except where the review found them larger than believed.
 
+## Execution status (2026-08-15, branch `work/quality-r3-followups`)
+
+| Item | Status |
+|---|---|
+| 1 Remove dead allowlist CS0109/CS1998 | ✅ DONE — CS0109 test site fixed + both removed; gate re-armed |
+| 2 Ratchet GodClassGuard 4,950→2,700 + waivers | ✅ DONE — ratchet-with-waivers (7 files frozen); ArchTests 38/0 |
+| 3 Fix stale allowlist comment | ✅ DONE — counts corrected |
+| 4 Fix 16 masked nullable warnings (CS8604/CS8601) | ✅ DONE — all 8 prod + 3 test sites fixed, removed from allowlist; **Fable-verified all SAFE** (none masks a bug); full BFF suite 10,392/0/97 |
+| 5 Complete AI-facade migration (IPlaybookLookupService) | ✅ NON-ISSUE — `IPlaybookLookupService` IS a `PublicContracts` type; ADR-013 ArchTest documents these consumers as compliant + a spread-guard already freezes the footprint. No migration needed. |
+| 6 Retire CS0618 obsolete debt (14 callers) | ⏭️ SCOPED — needs the real `DemoExpirationService` multi-env refactor; kept as the sole allowlist entry, tracked (mini-project, not a quick fix) |
+| 7 Console.WriteLine→ILogger (39 DI sites) | ⏭️ SCOPED — 39 sites, some run before the logger factory (per-site verify); low-med value, deferred to a tracked pass |
+| 8 Broaden naming-gate scan scope | ✅ DONE — added bicep + config/environments.json to the default scan; also hardened R1 camelCase + empty-scan-fail-closed earlier |
+| 9–12 Structural (SpeAdmin, ChatEndpoints, test-suite, NG1) | 📄 ANALYSIS FILES written → `notes/red-item-analyses/RED-1..4` (project seeds) |
+
+Verified clean (not chased): `Mock<HttpMessageHandler>` = 0, CS1998 = 0.
+
 ## Review verdict (what the audit confirmed / corrected)
 
 - **BFF remediations: 4 of 5 VERIFIED against code; build clean 0 errors / 0 warnings.** Finance auth closure, downcast→1 (`DataverseServiceClientExtensions.cs`), dead-code + tarball removal, and the `Endpoints/`→`Api/` namespace migration all hold.
