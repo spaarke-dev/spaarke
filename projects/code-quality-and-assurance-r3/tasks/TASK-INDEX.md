@@ -48,7 +48,7 @@
 | 063 | Resource/secret naming standard + conformance CI gate | 6 Deployment & Config | STANDARD | sonnet | high | 017 | none | ✅ᶜ |
 
 > ᶜ **042 + 063**: r3-owned deliverables COMPLETE; the `.github/workflows` gate-wiring is a documented coordinated-PR deferral with `ci-cd-unit-test-remediation-r1` (owns existing workflows) — see [`notes/task-042-063-ci-gate-wiring-deferral.md`](../notes/task-042-063-ci-gate-wiring-deferral.md). 042's config-validation gate is already LIVE via the existing ArchTest suite; 063's standard + `scripts/naming-conformance-check.ps1` are authored + self-tested.
-| 090 | Project wrap-up | 9 Wrap-up | STANDARD | sonnet | medium | prior | none | 🔲 |
+| 090 | Project wrap-up | 9 Wrap-up | STANDARD | sonnet | medium | prior | none | ✅ |
 
 Legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ⏸️ deferred/blocked.
 

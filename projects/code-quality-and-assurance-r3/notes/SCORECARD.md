@@ -22,7 +22,7 @@ D1 Architecture & boundaries · D2 Correctness & reliability · D3 Security · D
 | **Code pages + build sprawl** | C+ | B+ | A– | C+ | D+ | C+ | D+ | D | D+ | D+ | C– | **C** | 2026-08-14 (Fable-verified) | [`workstreams/code-pages-build/design.md`](../workstreams/code-pages-build/design.md) |
 | **Plugins (Spaarke.CustomApiProxy)** | D+ | C+ | D | C+ | C | C+ | B– | D | B– | D+ | D+ | **D** | 2026-08-14 (Fable-verified) | [`workstreams/plugins/design.md`](../workstreams/plugins/design.md) |
 | **Config-deployment (#1 KV federation)** | B– | D+ | **F** | A– | C | C+ | C+ | A | B+ | D+ | C | **F** | 2026-08-14 (Fable-verified) | [`workstreams/config-deployment/design.md`](../workstreams/config-deployment/design.md) |
-| **AGGREGATE (8 surfaces)** | — | — | **F**² | — | — | — | — | — | — | — | — | **F**² · maintainability mean **C+** | 2026-08-14 (task 016) | supersedes March "A (95/100)" |
+| **AGGREGATE (8 surfaces)** | — | — | **D**³ | — | — | — | — | — | — | — | — | **D**³ (was F at task 016) · maintainability mean **C+** | 2026-08-14 (task 090 final) | supersedes March "A (95/100)"; see "Task 090 — Final Wrap-up Re-score" |
 
 > **▶ Remediation progress (2026-08-14).** **BFF task 023 has LANDED** — the anonymous Finance Dataverse-write endpoint (the program's D3=F root cause) now requires `@spaarke/auth` authorization; the 3 healthz `ex.Message` leaks are scrubbed; OBO(7)+User(2) require auth. The **gating F is closed server-side** (web-resource token flow pending live-Dataverse validation + app-reg prereqs — see `notes/task-023-notes.md`). Under the rubric, BFF D3 and config-deployment D3 both lift out of F (→ residual ~B–/C+); the **program aggregate un-gates from F toward the C+ maintainability mean.** Also landed: 020 (dead code −1,639 LOC), 021 (Bug-1 invoice cast), 022 (Bug-2 .eml), 027 (tarballs −31.8 MB), 060 (#3a app-reg refs). Formal re-score at wrap-up (task 090).
 
@@ -60,3 +60,39 @@ _The BFF row remains a re-baseline input; re-score at wrap-up (task 090)._
 **net10 HEAD refresh (2026-08-14, Fable):** BFF row still valid post-merge (532 commits). Publish **43.67 MB compressed incl PDBs** at HEAD (≈ the 44.96 net10 rebaseline; D4 stays A–). Oversized-file census drift (D1/D5 evidence): `Api/Ai/ChatEndpoints.cs` 4,066 (was 3,587), `ComposeService.cs` 3,573, `CommunicationService.cs` 2,676, `OfficeService.cs` 2,038; `CommunicationModule.cs` 490→557 lines. Resolved-by-master: MF-4 captive-dep + the `56ae2188` stale doc refs (D11 nudges up slightly). #3b still required. Full detail: `workstreams/bff-api/design.md` §net10 HEAD Reconciliation.
 
 _The BFF row is a re-baseline input, not a final grade — it improves as tasks 020–029 land. Re-score at wrap-up (task 090)._
+
+---
+
+## Task 090 — Final Wrap-up Re-score (2026-08-14, program close)
+
+**The gating F is LIFTED.** Task 023 closed the program's D3=F root cause server-side — the anonymous
+Finance Dataverse-write endpoint now requires `@spaarke/auth` authorization (`.RequireAuthorization()`),
+the healthz exception-detail leaks are scrubbed, and OBO(7)+User(2) endpoints require auth. The single
+live unauthenticated write that capped the aggregate at F no longer exists in the server code.
+
+### Final aggregate
+
+| Measure | March (superseded) | Task 016 re-baseline | **Task 090 final** |
+|---|---|---|---|
+| Headline | A (95/100) — unverified | **F** (gated) | **D** (gated) · maintainability mean **C+** |
+| Gating cap source | — | live anonymous Finance write (D3=F) | plugins **D3=D** (BaseProxyPlugin decommission, deferred live-env) |
+
+**Honest reading**: the program un-gated from **F → D**. The residual gating cap is **plugins D3=D** — the
+retired-but-present `BaseProxyPlugin` (ADR-002 violation), whose disposition is **decommission** (task 015)
+— a live-environment/ALM action deferred to the deployment owner, not r3 code. A secondary residual is
+**BFF D3**'s web-resource token flow, which needs LIVE-Dataverse validation + app-reg prereqs before it is
+fully closed client-side (`notes/task-023-notes.md`); the server side is closed. Absent these two deferred
+live-env items, the aggregate tracks the **C+ maintainability mean**.
+
+### A+ target — NOT reached (honest close)
+
+The chartered aspiration "aggregate reaches A+ (senior-panel standard)" is **NOT met** and is not claimed.
+The rubric (§4.3) requires every surface ≥ A– with no gating dim below A–; the program instead delivered:
+(1) an honest re-baseline replacing the stale "A 95/100"; (2) a large net-positive remediation (Finance F
+closed, −1,639 dead LOC, 2 prod bugs fixed, 13→1 downcast, facade compliance, −31.8 MB tarballs, namespace
+migration, DI decompose); (3) **live forcing-functions** (4 ArchTest fitness functions, C# analyzers-as-
+errors repo-wide, config-validation fail-fast, naming-conformance gate) that prevent re-drift. Reaching A+
+is a **multi-cycle** goal gated on the deferred live-env items (plugins decommission, web-resource live
+validation) + the per-surface TS mechanical-baseline activation — now de-risked because the guardrails are
+in place. This is the honest signal the rubric's gating design is meant to produce: a **gate**, not a
+verdict on eight surfaces' worth of largely-C+ code.

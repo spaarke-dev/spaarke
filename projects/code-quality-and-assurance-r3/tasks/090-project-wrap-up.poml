@@ -4,7 +4,7 @@
     <title>Project wrap-up: reconcile R3-draft, /test-diet gate, final SCORECARD, lessons-learned</title>
     <phase>9 Wrap-up</phase>
     <gate>blocked until all prior ✅</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Project-close wrap-up (reconciliation + /test-diet gate + final docs); runs /test-diet unconditionally per root CLAUDE.md §7 — STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

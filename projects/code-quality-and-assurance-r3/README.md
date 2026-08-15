@@ -1,7 +1,7 @@
 # Code Quality & Assurance R3
 
 > **Portfolio**: [Project #741](https://github.com/spaarke-dev/spaarke/issues/741) under [Epic #427](https://github.com/spaarke-dev/spaarke/issues/427) `[Epic]: Code Quality` · [Board #2](https://github.com/users/spaarke-dev/projects/2) — one Project Issue; surfaces = workstreams, no per-surface Issues. Status=Active, 35 tasks, Start 2026-08-06.
-> **Status**: Initialized — assessment-first; execution operator-gated
+> **Status**: ✅ **COMPLETE (2026-08-14)** — all 35 tasks ✅. Honest re-baseline published (aggregate **D**, un-gated from F, maintainability mean **C+**; supersedes March "A 95/100"); large net-positive remediation landed; live forcing-functions (4 ArchTests, C# analyzers-as-errors repo-wide, config fail-fast, naming gate) prevent re-drift. **A+ senior-panel target NOT reached** (multi-cycle; gated on deferred live-env items — plugins decommission, web-resource live validation — + per-surface TS activation; all tracked). `/test-diet` clean (`notes/test-diet-report.md`). NOT pushed (operator has not requested). See `notes/SCORECARD.md` §"Task 090 — Final Wrap-up Re-score" + `notes/lessons-learned.md`.
 > **Branch**: `work/code-quality-and-assurance-r3` (single worktree; surfaces = workstreams)
 
 ## Quick Links
@@ -64,7 +64,7 @@ R1 built the quality *system*; R2 did the first *structural* remediation. The pr
 - [ ] Deployment & config hygiene (from r1 ask): #3a vestigial Dataverse S2S app-reg dropped (task 060; #3b shared-lib MI migration is on the NG1/011 track), #2 uniform fail-fast config validation, #4 Graph app-role single-source constant — each with its ArchTest/CI forcing-function; #1 KV-federation assessed (`workstreams/config-deployment/design.md`).
 - [ ] NG1 (Dataverse access-stack unification + #3b credential migration) on the assess-then-decide track: task 011 verified design + re-estimate published; #3a app-reg drop landed; remediation decision recorded.
 - [ ] Productization naming (owner directive): resource/secret naming standard refreshed (env-agnostic names) + conformance CI gate live (tasks 017/063); r1 handoff (apply + live-env remediation) recorded.
-- [ ] Aggregate grade reaches **A+ (senior-panel standard)** with forcing-functions preventing re-drift.
+- [~] Aggregate grade reaches **A+ (senior-panel standard)** with forcing-functions preventing re-drift. → **Forcing-functions live ✅; A+ NOT reached (multi-cycle target).** Aggregate un-gated **F→D**, maintainability mean **C+**. A+ is gated on deferred live-env items (plugins `BaseProxyPlugin` decommission; Finance web-resource live-Dataverse validation) + per-surface TS mechanical-baseline activation — all tracked (`notes/SCORECARD.md` §Task 090, `notes/lessons-learned.md`). The other 13 graduation criteria are met.
 
 ---
 
