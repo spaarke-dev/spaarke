@@ -5,7 +5,7 @@
     <phase>2 BFF Remediation</phase>
     <tranche>B</tranche>
     <gate>quiet-window (after Tranche A)</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Facade-boundary change on the BFF hot path affecting SSE/503 semantics; adds new PublicContracts surface — FULL.</rigor-reason>
     <model-tier>opus</model-tier>

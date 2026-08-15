@@ -29,7 +29,7 @@
 | 022 | BFF-A: .eml builder cleanup (Bug-2) | 2 BFF Remediation | FULL | sonnet | high | none | A | ✅ |
 | 023 | BFF-A: auth closure via @spaarke/auth (§6 RESOLVED) | 2 BFF Remediation | FULL | opus | xhigh | none | A | ✅ |
 | 027 | BFF-A: repo hygiene (tarballs/artifacts) | 2 BFF Remediation | STANDARD | sonnet | low | none | A | ✅ |
-| 024 | BFF-B: AI-facade compliance | 2 BFF Remediation | FULL | opus | high | none | B | 🔲 |
+| 024 | BFF-B: AI-facade compliance | 2 BFF Remediation | FULL | opus | high | none | B | ✅ |
 | 025 | BFF-B: Endpoints/→Api/ migration | 2 BFF Remediation | STANDARD | sonnet | medium | none | B | 🔲 |
 | 026 | BFF-B: DI decompose (✅) + Finance rename (⏸️ deferred — Dataverse pre-check) | 2 BFF Remediation | STANDARD | sonnet | high | none | B | ✅ |
 | 028 | BFF-B: 13→1 downcast consolidation | 2 BFF Remediation | FULL | opus | xhigh | 021 | B | ✅ |

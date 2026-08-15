@@ -8,7 +8,6 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -41,14 +40,12 @@ public sealed class MatterPreFillService
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<MatterPreFillService> _logger;
 
-    // R7 Wave 12 Phase D + Wave 12.3 (2026-07-02): Linear AI Consumer dependencies.
-    // When the sprk_playbookconsumer routing row for ConsumerTypes.MatterPreFill has
-    // sprk_action populated, GetPreFillAsync routes through the Linear path
-    // (IActionResolver + IActionRunner + existing ParseAiResponse) instead of the
-    // Playbook Engine. Nullable to keep existing constructors (unit-test) compiling;
-    // DI-registered instances always supply non-null values.
-    private readonly IActionResolver? _linearActionResolver;
-    private readonly IActionRunner? _linearActionRunner;
+    // R7 Wave 12 Phase D + Wave 12.3 (2026-07-02): Linear AI Consumer dispatch. When the
+    // sprk_playbookconsumer routing row for ConsumerTypes.MatterPreFill has sprk_action
+    // populated, AnalyzeFilesAsync routes through the Linear path via
+    // IWorkspacePrefillAi.RunPrefillActionAsync (the PublicContracts facade that wraps
+    // IActionResolver + IActionRunner per ADR-013 / BFF §10 bullet 3) instead of the
+    // Playbook Engine — no AI-internal primitive is injected into this CRUD service.
 
     // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the sprk_playbookconsumer
     // Binding routing table — queried through
@@ -98,9 +95,7 @@ public sealed class MatterPreFillService
         IConsumerRoutingService consumerRouting,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<MatterPreFillService> logger,
-        IWorkspacePrefillAi? prefillAi = null,
-        IActionResolver? linearActionResolver = null,
-        IActionRunner? linearActionRunner = null)
+        IWorkspacePrefillAi? prefillAi = null)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
@@ -108,8 +103,6 @@ public sealed class MatterPreFillService
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _linearActionResolver = linearActionResolver;
-        _linearActionRunner = linearActionRunner;
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
 
@@ -208,11 +201,12 @@ public sealed class MatterPreFillService
         // --- Step 2: Invoke AI for structured extraction ---
         // R7 Wave 12 Phase D + Wave 12.3 (2026-07-02): Linear AI Consumer dispatch. When the
         // sprk_playbookconsumer routing row for ConsumerTypes.MatterPreFill has sprk_action
-        // populated, route through the code-defined path (IActionResolver + IActionRunner)
-        // rather than the Playbook Engine. Preserves the existing PreFillResponse contract +
-        // all ParseAiResponse fallbacks. Fall-through to ExtractFieldsViaPlaybookAsync
-        // preserves engine dispatch when the sprk_action lookup is empty.
-        var linearActionId = (_linearActionResolver != null && _linearActionRunner != null)
+        // populated, route through the code-defined path (IWorkspacePrefillAi.RunPrefillActionAsync,
+        // the PublicContracts facade wrapping IActionResolver + IActionRunner) rather than the
+        // Playbook Engine. Preserves the existing PreFillResponse contract + all ParseAiResponse
+        // fallbacks. Fall-through to ExtractFieldsViaPlaybookAsync preserves engine dispatch when
+        // the sprk_action lookup is empty.
+        var linearActionId = (_prefillAi != null)
             ? await _consumerRouting.ResolveActionAsync(ConsumerTypes.MatterPreFill, cancellationToken: cancellationToken)
                 .ConfigureAwait(false)
             : null;
@@ -225,12 +219,12 @@ public sealed class MatterPreFillService
     }
 
     /// <summary>
-    /// R7 Wave 12 Phase D — Linear AI Consumer path for Matter Prefill.
-    /// Composes <see cref="IActionResolver"/> + <see cref="IActionRunner"/> instead of
-    /// running through the Playbook Engine. Emits the same <see cref="PreFillResponse"/>
-    /// contract by feeding the raw JSON through the existing <see cref="ParseAiResponse"/>
-    /// (which handles the direct-schema / entity-extraction / partial-JSON fallbacks the
-    /// wizard client depends on).
+    /// R7 Wave 12 Phase D — Linear AI Consumer path for Matter Prefill. Resolves + runs the
+    /// bound Action via the <see cref="IWorkspacePrefillAi.RunPrefillActionAsync"/> facade
+    /// (PublicContracts — ADR-013 / BFF §10 bullet 3) instead of injecting the Linear AI
+    /// Consumer primitives directly. Emits the same <see cref="PreFillResponse"/> contract by
+    /// feeding the raw JSON through the existing <see cref="ParseAiResponse"/> (which handles
+    /// the direct-schema / entity-extraction / partial-JSON fallbacks the wizard client depends on).
     /// </summary>
     private async Task<PreFillResponse> ExtractFieldsViaLinearAsync(
         string documentText,
@@ -253,29 +247,20 @@ public sealed class MatterPreFillService
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
 
-            var action = await _linearActionResolver!.ResolveAsync(ConsumerTypes.MatterPreFill, timeoutCts.Token);
-
             var tenantId = httpContext.User?.FindFirst("tid")?.Value
                 ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
-            var docText = new DocumentText
-            {
-                DocumentId = null,
-                FileName = "matter-prefill-input",
-                ExtractedText = documentText,
-            };
-            var runContext = new LinearRunContext
-            {
-                ConsumerType = ConsumerTypes.MatterPreFill,
-                CorrelationId = httpContext.TraceIdentifier,
-                TenantId = tenantId,
-            };
-
             _logger.LogInformation(
-                "Invoking Linear Matter Prefill action. ActionId={ActionId}, TextLength={TextLength}, RequestId={RequestId}",
-                action.Id, documentText.Length, requestId);
+                "Invoking Linear Matter Prefill action. TextLength={TextLength}, RequestId={RequestId}",
+                documentText.Length, requestId);
 
-            var jsonElement = await _linearActionRunner!.RunAsync(action, docText, runContext, timeoutCts.Token);
+            var jsonElement = await _prefillAi!.RunPrefillActionAsync(
+                ConsumerTypes.MatterPreFill,
+                documentText,
+                "matter-prefill-input",
+                tenantId,
+                httpContext.TraceIdentifier,
+                timeoutCts.Token);
             var preFillJson = jsonElement.GetRawText();
 
             var confidence = 0.0;
