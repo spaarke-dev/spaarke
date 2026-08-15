@@ -153,6 +153,9 @@ import {
   anchoredAnnotationsToPriorAnchors,
 } from './useComposeWordShuttle';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
+// FR-07(b) (task 010): the non-rotating logical document id — minted once per logical document,
+// persisted client-side, and rehydrated on recovery. Shared key for FR-03 (040) + FR-07 dedup (011).
+import { startNewComposeLogicalId, clearActiveComposeLogicalId } from './composeIdentity';
 import type { ComposeReviewFindingsDegraded } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
@@ -1117,6 +1120,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // docx record — the G7 mechanism, reused). Only PDF-sourced loads carry either.
           sourceFormat: payload.sourceFormat === 'pdf' ? 'pdf' : null,
           transientKey: payload.sourceFormat === 'pdf' ? mintTransientKey() : undefined,
+          // FR-07(b) (task 010): a PDF-sourced load is a transient (create-on-save) document — give it
+          // a persisted non-rotating logical id so draft recovery + dedup key off a stable value.
+          composeLogicalId: payload.sourceFormat === 'pdf' ? startNewComposeLogicalId() : undefined,
         });
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -1809,6 +1815,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // next edit. ComposeEditor's internal dirtyRef also resets on the
         // next load; here we mirror that for post-save.
         setIsDirty(false);
+
+        // FR-07(b) (task 010): a transient draft that just persisted (create-on-save promotion)
+        // now has a real sprkDocumentId/speDriveItemId — it is no longer an UNSAVED draft to
+        // recover. Clear the active-draft slot so a later reload does not resurrect it as a blank
+        // draft. Guarded on the mounted doc having carried a transient logical id (a stored-doc
+        // replace-path save has none, so it leaves any other slot untouched).
+        if (state.documentRef?.composeLogicalId) {
+          clearActiveComposeLogicalId();
+        }
 
         // task 038 (zero-error guardrails): NOW that the save is confirmed (200), commit the persisted
         // op-log batch + recompute the editor's dirty flag. `serializeOperationLog()` no longer resets on
@@ -2969,6 +2984,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // G7 (task 022): mint the transient dedup key once for this Browse mount → every create-on-save
             // sends it so repeated saves target ONE record (no duplicate mint).
             transientKey: mintTransientKey(),
+            // FR-07(b) (task 010): mint+persist the non-rotating logical id for this new Browse document.
+            composeLogicalId: startNewComposeLogicalId(),
           });
           // A freshly Browse-mounted file is unsaved by definition — mark dirty so Save
           // (create-on-save, task 013) is enabled immediately.
@@ -3018,6 +3035,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       sessionId: mintDocumentSessionId(),
       // G7 (task 022): transient dedup key for this born-in-editor mount.
       transientKey: mintTransientKey(),
+      // FR-07(b) (task 010): mint+persist the non-rotating logical id for this born-in-editor document.
+      composeLogicalId: startNewComposeLogicalId(),
     });
     // A freshly-created born-in-editor doc is unsaved by definition — enable Save (create-on-save).
     setIsDirty(true);
@@ -3296,6 +3315,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
           // G7 (task 022): transient dedup key for this assistant-upload mount.
           transientKey: mintTransientKey(),
+          // FR-07(b) (task 010): mint+persist the non-rotating logical id for this uploaded document.
+          composeLogicalId: startNewComposeLogicalId(),
         });
         // A freshly-mounted upload is unsaved by definition — mark dirty so Save
         // (create-on-save, task 013) is enabled immediately.
@@ -3360,6 +3381,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         sessionId: draftDocumentSessionId,
         // G7 (task 022): transient dedup key for this inline (Part B) draft mount.
         transientKey: mintTransientKey(),
+        // FR-07(b) (task 010): mint+persist the non-rotating logical id for this inline draft document.
+        composeLogicalId: startNewComposeLogicalId(),
       });
       setIsDirty(true);
       return;
@@ -3432,6 +3455,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           containerId: containerIdRef.current,
           // G7 (task 022): transient dedup key for this ledger-resolved (Part A) draft mount.
           transientKey: mintTransientKey(),
+          // FR-07(b) (task 010): mint+persist the non-rotating logical id for this ledger-resolved draft.
+          composeLogicalId: startNewComposeLogicalId(),
         });
         // A freshly-seeded draft is unsaved by definition — mark dirty so Save (create-on-save) is
         // enabled immediately.

@@ -314,6 +314,10 @@ export type ComposeWorkspaceAction =
       // carried onto documentRef.transientKey so the PDF's repeated create-on-saves dedup to ONE new
       // docx record (the G7 mechanism, reused).
       transientKey?: string;
+      // FR-07(b) (task 010): the non-rotating logical id for a PDF-sourced (transient) load — carried
+      // onto documentRef.composeLogicalId so the recovered identity survives re-mount. Undefined for a
+      // native stored-doc load (identity comes from speDriveItemId/sprkDocumentId).
+      composeLogicalId?: string;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -355,6 +359,10 @@ export type ComposeWorkspaceAction =
       // (mintTransientKey). Carried onto documentRef.transientKey so every create-on-save sends it →
       // repeated saves dedup to ONE record. Omitted by an older caller → no dedup (unchanged behavior).
       transientKey?: string;
+      // FR-07(b) (task 010): the non-rotating logical document id (startNewComposeLogicalId /
+      // recovered). Carried onto documentRef.composeLogicalId — the SHARED key for FR-03 draft
+      // recovery (040) + FR-07 client dedup (011). Persisted client-side; survives re-mount/reload.
+      composeLogicalId?: string;
     }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
   // Item 6 (UAT round-4): `sessionId` carries a MINTED document session id for born-in-editor mounts
@@ -369,6 +377,8 @@ export type ComposeWorkspaceAction =
       containerId?: string;
       sessionId?: string;
       transientKey?: string;
+      // FR-07(b) (task 010): non-rotating logical id for this born-in-editor draft — see mountTransient.
+      composeLogicalId?: string;
     }
   | { kind: 'requestSave' }
   // FR-05 (task 100): create-on-save mints a NEW SPE drive-item; `documentSpeId` carries the
@@ -512,6 +522,10 @@ export function composeWorkspaceReducer(
               // Task 041: the PDF dedup key (supplied only on PDF-sourced loads) — repeated saves
               // of the same PDF session create-on-save onto ONE new docx record (G7 mechanism).
               transientKey: action.transientKey ?? state.documentRef.transientKey,
+              // FR-07(b) (task 010): the non-rotating logical id — supplied on a PDF-sourced
+              // (transient) load; preserved from state for a native stored-doc load (where identity
+              // comes from speDriveItemId/sprkDocumentId and this stays undefined).
+              composeLogicalId: action.composeLogicalId ?? state.documentRef.composeLogicalId,
             }
           : state.documentRef,
         errorMessage: null,
@@ -560,6 +574,9 @@ export function composeWorkspaceReducer(
           fileName: action.fileName,
           containerId: action.containerId,
           transientKey: action.transientKey,
+          // FR-07(b) (task 010): the non-rotating logical id for this transient mount — the shared
+          // key for FR-03 draft recovery + FR-07 dedup. Read identity via getComposeLogicalIdentity.
+          composeLogicalId: action.composeLogicalId,
         },
         checkoutStatus: 'skipped',
         // A transient (Browse / assistant-upload) mount has no server pre-parse — there is no
@@ -615,6 +632,8 @@ export function composeWorkspaceReducer(
           fileName: action.fileName,
           containerId: action.containerId,
           transientKey: action.transientKey,
+          // FR-07(b) (task 010): non-rotating logical id for this born-in-editor draft.
+          composeLogicalId: action.composeLogicalId,
         },
         checkoutStatus: 'skipped',
         // An AI-drafted seed has no server pre-parse either — same rationale as `mountTransient`.

@@ -4,7 +4,7 @@
     <title>Introduce a stable, non-rotating logical document id persisted across re-mounts (FR-07b)</title>
     <phase>1 Save-Identity Fix (UC-8)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts client code and a contract type; architectural foundation that blocks Phase 4 (draft key) and the client dedup key.</rigor-reason>
     <model-tier>opus</model-tier>
