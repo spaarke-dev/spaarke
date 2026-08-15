@@ -4,7 +4,7 @@
     <title>BFF: Graph app-role expected-list as compile-time constant (GraphAppRoles.cs) + drift verifier (refactor ask #4)</title>
     <phase>6 Deployment &amp; Configuration Hygiene</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New constants file + one verification helper + script consumption; small, well-specified, no auth-flow behavior change (the roles themselves are unchanged) — STANDARD per Step 3.5.5. Any test additions are MAINTAIN-class but do not alter existing tests.</rigor-reason>
     <model-tier>sonnet</model-tier>

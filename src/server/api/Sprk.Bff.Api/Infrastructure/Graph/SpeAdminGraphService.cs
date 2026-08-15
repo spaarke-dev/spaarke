@@ -876,7 +876,8 @@ public sealed class SpeAdminGraphService
         {
             throw new InvalidOperationException(
                 $"Could not resolve drive ID for container '{containerId}'. " +
-                "The container may not exist or the app registration lacks FileStorageContainer.Selected permission.");
+                // Role value referenced from the single source of truth (Infrastructure/Auth/GraphAppRoles.cs).
+                $"The container may not exist or the app registration lacks {Auth.GraphAppRoles.FileStorageContainerSelected} permission.");
         }
 
         _logger.LogDebug(

@@ -79,6 +79,12 @@ $SecretExpiryMonths = 24
 $SecretExpiryDate = (Get-Date).AddMonths($SecretExpiryMonths).ToString("yyyy-MM-ddTHH:mm:ssZ")
 
 # Microsoft Graph API well-known IDs
+#
+# NOTE: these four IDs are DELEGATED scopes (OAuth2PermissionScopes) requested at app-registration
+# creation time — a DIFFERENT concern from the app-only APPLICATION roles the BFF identity holds.
+# Do NOT merge these with the application-role list. The canonical source of truth for the BFF's
+# expected Graph APPLICATION (app-only) roles is:
+#   src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs
 $GraphApiId = "00000003-0000-0000-c000-000000000000"
 $GraphFilesReadWriteAll = "75359482-378d-4052-8f01-80520e7db3cd"   # Files.ReadWrite.All (delegated)
 $GraphSitesReadWriteAll = "89fe6a52-be36-487e-b7d8-d061c450a026"   # Sites.ReadWrite.All (delegated)
