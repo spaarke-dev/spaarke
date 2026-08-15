@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Reconciliation UX **prototype-parity** pass. **Batch 1 = DONE + DEPLOYED** (both surfaces, from branch). **Batch 2 (BFF) = NOT STARTED** — investigation + plan done. |
-| **Branch** | `work/email-communication-intelligence-r2` · **clean** · pushed (`b19fbf0b6`) · **3 commits ahead of master** · **master intentionally NOT merged** (operator: "do not merge to master yet"). |
-| **Deployed (dev, from BRANCH not master)** | Code page `sprk_communicationreconciliation` (`1e191e05-…`) + SpaarkeAi `sprk_spaarkeai` (`5206a442-…`) → both UPDATED+PUBLISHED to `spaarkedev1`. |
-| **Next Action** | Operator to answer the open question: **(1) progress badges now (client-only) + pick caching option for the BFF pass, OR (2) push straight into the attachment-text BFF endpoint (option b, Redis cache)**. Then implement Batch 2. |
+| **Phase** | Reconciliation UX **prototype-parity** pass. **Batch 1 = DONE+DEPLOYED**. **Card-layout fix = DONE+DEPLOYED** (2026-08-14). **Batch 2 / B2.1 attachment-text = DONE+DEPLOYED** (BFF + both clients, impersonated/secure). **B2.2 (undo) + B2.3 (progress badges) = REMAINING**. |
+| **Branch** | `work/email-communication-intelligence-r2` · **clean** · pushed (`1aabafb0a`) · synced to latest master (merged dotnet-10-upgrade close-out) · **master intentionally NOT merged** (operator: "do not /merge-to-master"). |
+| **Deployed (dev, from BRANCH)** | BFF `spaarke-bff-dev` (44.99 MB, hash-verified, healthy) + code page `sprk_communicationreconciliation` (`1e191e05-…`) + SpaarkeAi `sprk_spaarkeai` (`5206a442-…`) → all published to `spaarkedev1`. |
+| **Next Action** | Operator to UAT: (a) Related-to cards now stack vertically; (b) attachment text folds into the reader. Then decide **B2.2** (Fields/Tasks per-line undo — BFF reverse-apply + task-delete) and **B2.3** (progress badges — needs eager per-record proposal-count fetch, `headerActions` slot exists on SprkModal). |
 
 ### Files Modified This Session (ALL COMMITTED — Batch 1, 3 commits e27cfa991 / a01e9c633 / b19fbf0b6)
 - `EmailAssociationsAndTracking/EmailConnectionsReview.tsx` + `.styles.ts` + `EmailConnectionsReviewRows.tsx` — `variant='reconcile'` compact single-row cards, `Select`→`Confirm` revert, per-line **Undo** on the Filed banner (`clearPrimaryRegarding`).
