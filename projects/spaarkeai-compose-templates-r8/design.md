@@ -2,7 +2,7 @@
 
 > **Project**: `spaarkeai-compose-templates-r8`
 > **Created**: 2026-08-13 · **Author**: Ralph Schroeder + Claude (Opus 4.8)
-> **Status**: DESIGN — **second draft** (split out of `spaarkeai-compose-r7` on 2026-08-13; §2 open questions + §7-step-0 decisions now CLOSED per the best-practice investigation 2026-08-13; hand-authored input to `/design-to-spec` → `/project-pipeline`)
+> **Status**: DESIGN — **second draft** (split out of `spaarkeai-compose-r7` on 2026-08-13; §2 open questions + §7-step-0 decisions now CLOSED per the best-practice investigation 2026-08-13; **re-aligned 2026-08-15** against merged code-quality-and-assurance-r3 + net10 — new God-class ratchet / ADR-013 boundary / naming gates folded into §5–§6; substance unchanged, still aligned; hand-authored input to `/design-to-spec` → `/project-pipeline`)
 > **Split rationale**: what began as R7's "Templates tab" use case (UC-1) is really a **cross-surface template subsystem** — storage, merge model, a picker, *and* it should also cover **email templates**. That is bigger than R7's editor-UX scope, so it is its own project. R7 keeps the editor UX (save/autosave/hotkeys/PDF-import); R8 owns templates end-to-end.
 > **Governing constraints**: root CLAUDE.md §10 (BFF Hygiene), §11 (Component Justification), ADR-050 (modal shell), [ASSISTANT-SURFACE-LAUNCH-MECHANISM.md](../../docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md) (template → Compose tab).
 > **Research grounding**: [`notes/dataverse-template-storage-findings.md`](notes/dataverse-template-storage-findings.md) (storage) · [`notes/merge-field-and-unified-template-best-practice.md`](notes/merge-field-and-unified-template-best-practice.md) (merge model, token representation, entity shape, **authoring UX**).
@@ -134,11 +134,24 @@ editor they already use.** (Full rationale: [`notes/merge-field-and-unified-temp
 
 - **BFF Hygiene (§10)**: new/changed endpoints (template list, resolve-only, email-template read) need a
   **Placement Justification** + **publish-size verification** (≤60 MB compressed; report absolute + delta).
-  Reuse `Services/Ai/Delivery/*` + `Services/Compose/ComposeDocxProjectionBuilder`; no new subsystem.
+  **Current baseline: ~44.96 MB** (dotnet-10-upgrade-r1 task 031, net10 re-baseline). Reuse
+  `Services/Ai/Delivery/*` + `Services/Compose/ComposeDocxProjectionBuilder`; no new subsystem.
 - **Component Justification (§11)**: the new `sprk_template` entity is justified — the email `template`
   entity is memo-only (no binary), native `documenttemplate` is env-locked content-control, and R6's
   Note-attachment storage is being *removed*; none can store a Notes-free Word `.dotx`. Reuse
   `WordTemplateService`/`EmailTemplateService`/`ITemplateEngine`/projection — do **not** fork.
+- **God-class ratchet (NEW — code-quality-and-assurance-r3, `GodClassGuardTests`)**: per-file line freeze,
+  **+100 grace**. `ComposeEndpoints.cs` is frozen at **2,651**, `ComposeService.cs` 3,573,
+  `ComposeDocxProjectionBuilder.cs` 3,085, `CommunicationService.cs` 2,676. **R8 MUST put its new
+  resolve-only + list endpoints in a NEW file** (e.g. `Api/TemplateEndpoints.cs`), **not** append to
+  `ComposeEndpoints.cs` (a resolve + list + DTOs would blow the +100 grace and trip CI). Reuse the frozen
+  services/projection by *calling* them — do not add code inside them. (This also reads cleaner and is §11-fine.)
+- **ADR-013 linear-consumer boundary (NEW — CI-enforced by `ADR013_LinearConsumerBoundaryTests`)**: CRUD/
+  consumer code reaches AI/template primitives **only** through a `Services/Ai/PublicContracts/` facade
+  (`IComposeTemplateSource` already exists there). R8's resolve-only endpoint MUST call the facade — never
+  inject delivery/executor internals directly. (Already the design intent; now a fitness function.)
+- **Naming gate (NEW)**: `sprk_template` columns + new endpoints must satisfy the naming-conformance gate and
+  [`docs/standards/ODATA-NAMING-CONVENTION.md`](../../docs/standards/ODATA-NAMING-CONVENTION.md) (gate now scans bicep + config too).
 - **Coordination**: R8 touches `Services/Ai/Delivery/*` (shared with the AI-architecture project) and the
   `QuickStartModal`/`ComposeEmptyState` client. Run `/conflict-check` before BFF PRs. **Sequence after R7**
   (R7 owns the Compose client + the name-on-save modal R8's new-from-template depends on) or coordinate the
@@ -155,9 +168,13 @@ Server — `src/server/api/Sprk.Bff.Api/`:
 - `Services/Ai/Delivery/WordTemplateService.cs` — reuse `{{token}}` OOXML merge.
 - `Services/Ai/Delivery/EmailTemplateService.cs` + `ITemplateEngine.cs` — reuse for email; re-point source.
 - `Services/Compose/ComposeDocxProjectionBuilder.cs` — docx → TipTap HTML (new-from-template resolve).
+  **CALL only** — frozen God-class (3,085); do not add code inside it.
 - `Services/Compose/ComposeTemplatePartMergeEngine.cs` — existing apply-house-style path (unchanged).
-- `Api/ComposeEndpoints.cs` (apply-template `:117`) + a **new resolve-only endpoint**; template **list**.
-- `Api/CommunicationTemplateEndpoints.cs` — email template list/render (re-point to `sprk_template`).
+- **`Api/TemplateEndpoints.cs` (NEW file)** — the resolve-only endpoint + template **list** endpoint + the
+  Word **save-as-template** action live here, NOT in `ComposeEndpoints.cs` (frozen God-class 2,651, +100
+  grace — see §5). `ComposeEndpoints.cs` keeps its existing apply-template `:117` only.
+- `Api/CommunicationTemplateEndpoints.cs` — email template list/render (re-point to `sprk_template`); NOT
+  frozen, small — email-side changes stay here. Reach template resolution via the `PublicContracts` facade.
 
 Client:
 - `src/solutions/SpaarkeAi/src/components/conversation/QuickStartModal.tsx` — add "Templates" tab.
