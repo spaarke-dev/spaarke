@@ -128,6 +128,30 @@ describe('reducer persist-through of composeLogicalId (FR-07b)', () => {
     expect(getComposeLogicalIdentity(next.documentRef)).toEqual('lid-2');
   });
 
+  it('FR-07c: a pendingAssistantInsert carrying an id-less-but-logical ref keeps a dedup identity', () => {
+    // The task-011 call site replaces the empty `{ speDriveItemId: '' }` sentinel with a ref that
+    // carries a composeLogicalId (inherited from the mounted doc, or freshly minted). Once staged
+    // through the reducer, that ref still yields a non-empty dedup identity via the accessor — so the
+    // id-less assistant-insert door no longer enters the save path with an empty identity.
+    const staged = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'pendingAssistantInsert',
+      payload: {
+        type: 'compose_assistant_insert',
+        documentRef: { speDriveItemId: '', composeLogicalId: 'lid-idless' },
+        sourceNodeId: '',
+        sourcePlaybookId: '',
+        contentHtml: '<p>x</p>',
+        format: 'html',
+        insertMode: 'insert-at-cursor',
+        requireUserConfirm: true,
+        sessionId: '',
+        timestamp: '2026-08-15T00:00:00.000Z',
+      },
+    });
+    expect(staged.pendingAssistantInsert?.documentRef.composeLogicalId).toEqual('lid-idless');
+    expect(getComposeLogicalIdentity(staged.pendingAssistantInsert?.documentRef)).toEqual('lid-idless');
+  });
+
   it('saveSucceeded preserves composeLogicalId and the accessor promotes to sprkDocumentId', () => {
     const mounted = composeWorkspaceReducer(INITIAL_STATE, {
       kind: 'mountDraftHtml',

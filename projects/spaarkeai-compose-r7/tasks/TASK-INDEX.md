@@ -13,7 +13,7 @@
 |----|-------|-------|--------|-------|-------|--------|---------------|------|----|
 | 001 | Coordination gate + publish-size baseline + env verify | 0 | ✅ | MINIMAL | sonnet | high | ❌ (gate) | none | — |
 | 010 | Stable, non-rotating logical document id (persisted) | 1 | ✅ | FULL | **opus** | high | ❌ spine | 001 | FR-07b |
-| 011 | Always carry dedup identity on id-less mount | 1 | 🔲 | FULL | sonnet | **xhigh** | ❌ spine | 010 | FR-07c |
+| 011 | Always carry dedup identity on id-less mount | 1 | ✅ | FULL | sonnet | **xhigh** | ❌ spine | 010 | FR-07c |
 | 012 | Save As uniquifies filename (real fork) | 1 | 🔲 | FULL | sonnet | **xhigh** | ❌ spine | 010 | FR-07a |
 | 013 | Atomic server upsert on `sprk_graphitemid_uk` | 1 | 🔲 | FULL | **opus** | high | ❌ spine/BFF | 010 | FR-07d |
 | 020 | Save / Save As dropdown + Auto Save toggle | 2 | 🔲 | FULL | sonnet | high | ❌ spine | 012 | FR-01 |

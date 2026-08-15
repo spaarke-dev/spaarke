@@ -4,7 +4,7 @@
     <title>Always carry a dedup identity on mount — close the id-less/key-less mount vector (FR-07c)</title>
     <phase>1 Save-Identity Fix (UC-8)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx client mount lifecycle; brownfield root-cause of identity-reset across multiple mint sites.</rigor-reason>
     <model-tier>sonnet</model-tier>

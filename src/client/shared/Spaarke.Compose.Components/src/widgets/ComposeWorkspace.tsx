@@ -196,10 +196,17 @@ export type { AnchoredAnnotation, DefinedTerm, ComposeActionHistoryEntry } from 
  * returns first). Zero casts — every field is read from the now-typed
  * WorkspacePaneEvent compose fields with honest defaults for the R1 shape.
  */
-function toAssistantInsertPayload(event: WorkspacePaneEvent): ComposeAssistantToWorkspaceFlow {
+function toAssistantInsertPayload(
+  event: WorkspacePaneEvent,
+  // FR-07(c) (task 011): the dedup-identity fallback when the event omits a documentRef. The call
+  // site supplies the currently-mounted document's ref (which carries the task-010 composeLogicalId)
+  // — or a freshly-minted-id ref when nothing is mounted — so a legacy assistant-insert NEVER enters
+  // the staging/save path with the empty `{ speDriveItemId: '' }` sentinel (the id-less dedup hole).
+  fallbackDocumentRef?: ComposeDocumentRef
+): ComposeAssistantToWorkspaceFlow {
   return {
     type: 'compose_assistant_insert',
-    documentRef: event.documentRef ?? { speDriveItemId: '' },
+    documentRef: event.documentRef ?? fallbackDocumentRef ?? { speDriveItemId: '' },
     sourceNodeId: event.sourceNodeId ?? '',
     sourcePlaybookId: event.sourcePlaybookId ?? '',
     contentHtml: event.contentHtml ?? '',
@@ -2609,7 +2616,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         void materializeComposeDraftFromLedger(event.ledgerRef);
         return;
       }
-      dispatch({ kind: 'pendingAssistantInsert', payload: toAssistantInsertPayload(event) });
+      // FR-07(c) (task 011): never stage a legacy assistant-insert with an empty dedup identity.
+      // Inherit the currently-mounted document's ref (it already carries the task-010 composeLogicalId
+      // after task 010's mint doors); when NOTHING is mounted, mint+persist a logical id so a
+      // create-on-save from this staged insert still coalesces onto ONE identity instead of the
+      // id-less `{ speDriveItemId: '' }` sentinel that historically skipped dedup.
+      const fallbackRef: ComposeDocumentRef =
+        state.documentRef ?? { speDriveItemId: '', composeLogicalId: startNewComposeLogicalId() };
+      dispatch({ kind: 'pendingAssistantInsert', payload: toAssistantInsertPayload(event, fallbackRef) });
     },
     // task 072 (FR-35 Doc Q&A stretch) — ephemeral highlight only; no document
     // mutation, no ledger entry, no-op if the editor isn't mounted yet.
