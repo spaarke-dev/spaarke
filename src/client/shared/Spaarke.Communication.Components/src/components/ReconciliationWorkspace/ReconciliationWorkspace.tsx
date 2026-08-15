@@ -32,6 +32,7 @@
  */
 import * as React from 'react';
 import { Tab, TabList, Text, makeStyles, tokens } from '@fluentui/react-components';
+import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
 import {
   DataGridViewSelector,
   type DataGridProps,
@@ -127,14 +128,64 @@ async function resolveEmlArchive(client: IDataverseClient, communicationId: stri
   }
 }
 
+/** One item of the BFF `GET /api/communications/{id}/attachments/text` response (B2.1, camelCase). */
+interface AttachmentTextItem {
+  attachmentId: string;
+  documentId?: string | null;
+  fileName?: string;
+  text?: string | null;
+  extractable?: boolean;
+}
+
+/** Normalize a Dataverse id for a stable case/brace-insensitive join key. */
+function idKey(id: string): string {
+  return id.replace(/[{}]/g, '').toLowerCase();
+}
+
+/**
+ * Fold each attachment's RE-EXTRACTED text into the reader (owner UAT 2026-08-14, B2.1). The extracted
+ * text is a transient pipeline artifact never persisted, so the BFF re-extracts it on demand from SPE
+ * (its shared ITextExtractor owns a 24h Redis cache, so repeats are cheap). We overlay `text`/`extractable`
+ * onto the matching fold by `attachmentId`. Best-effort (NFR-04): any failure (no auth fetch, non-200,
+ * parse error) leaves the folds name-only — exactly today's behavior — never throwing into the reader.
+ */
+async function mergeAttachmentText(
+  attachments: ReconciliationAttachmentContent[],
+  communicationId: string,
+  authFetch: AuthenticatedFetchFn
+): Promise<ReconciliationAttachmentContent[]> {
+  try {
+    const res = await authFetch(`/communications/${encodeURIComponent(communicationId)}/attachments/text`);
+    if (!res.ok) return attachments;
+    const body = (await res.json()) as { attachments?: AttachmentTextItem[] };
+    const byId = new Map<string, AttachmentTextItem>();
+    for (const it of body.attachments ?? []) {
+      if (it.attachmentId) byId.set(idKey(it.attachmentId), it);
+    }
+    if (byId.size === 0) return attachments;
+    return attachments.map(a => {
+      const hit = byId.get(idKey(a.attachmentId));
+      return hit ? { ...a, text: hit.text ?? null, extractable: hit.extractable } : a;
+    });
+  } catch {
+    return attachments;
+  }
+}
+
 /** Resolve both reader-detail pieces (attachments + `.eml` archive) for one record. */
-async function resolveBrowseDetail(client: IDataverseClient, communicationId: string): Promise<BrowseDetail> {
+async function resolveBrowseDetail(
+  client: IDataverseClient,
+  communicationId: string,
+  authFetch: AuthenticatedFetchFn
+): Promise<BrowseDetail> {
   const cleanId = communicationId.replace(/[{}]/g, '');
   const [attachments, emlDocumentId] = await Promise.all([
     resolveAttachments(client, cleanId),
     resolveEmlArchive(client, cleanId),
   ]);
-  return { attachments, emlDocumentId };
+  // B2.1: overlay re-extracted attachment text onto the reader folds (best-effort; name-only on miss).
+  const withText = attachments.length > 0 ? await mergeAttachmentText(attachments, cleanId, authFetch) : attachments;
+  return { attachments: withText, emlDocumentId };
 }
 
 type TabValue = 'related' | 'fields' | 'tasks';
@@ -354,15 +405,16 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
           forceRescope();
         })
         .catch(() => forceRescope());
-      // Reader detail (attachments + `.eml` archive) — resolved once per record and cached
-      // (owner UAT round-3 item 2). Best-effort: a miss just leaves the reader body-only.
+      // Reader detail (attachments + `.eml` archive + re-extracted attachment text) — resolved once per
+      // record and cached (owner UAT round-3 item 2; B2.1 text overlay). Best-effort: a miss just leaves
+      // the reader body-only. Uses the host fetch when supplied, else the @spaarke/auth default.
       if (!detailById[id]) {
-        void resolveBrowseDetail(dataverseClient, id)
+        void resolveBrowseDetail(dataverseClient, id, authenticatedFetch ?? defaultAuthenticatedFetch)
           .then(detail => setDetailById(prev => ({ ...prev, [id]: detail })))
           .catch(() => {});
       }
     },
-    [dataverseClient, detailById]
+    [dataverseClient, detailById, authenticatedFetch]
   );
 
   const handleRecordOpen = React.useCallback<NonNullable<DataGridProps['onRecordOpen']>>(
