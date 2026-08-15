@@ -49,7 +49,7 @@ Smart To Do R5 completes the To Do experience shipped in R4 by (1) **hoisting** 
 
 ### Functional Requirements
 
-1. **FR-01 (FU-5 hoist)**: Move the 13-file rich Kanban subtree (`KanbanCard`, `KanbanHeader`, `AddTodoBar`, `DismissedSection`, `ThresholdSettings`, `TodoAISummaryDialog`, `TodoDetailPane`, `PriorityScoreCard`, `EffortScoreCard`, `SmartToDo`, `SmartToDoDialog`, `todoScoringTypes`, `index`) from `src/solutions/LegalWorkspace/src/components/SmartToDo/` into `@spaarke/smart-todo-components`, following the R4-102 host-agnostic parity pattern (no reach-into `src/solutions/...`). — **Acceptance**: components exported from the peer package; LegalWorkspace consumes them via `@spaarke/smart-todo-components` (thin shim only, no duplicated logic); build + existing behavior unchanged (bit-for-bit scoring parity).
+1. **FR-01 (FU-5 hoist + absorb PR #508 boundary fix)**: **Prerequisite (absorbs stale PR #508)** — first re-apply on current master the `@spaarke/ui-components` package-boundary fix that PR #508 (`fix/events-smarttodo-components-package-boundary`, CONFLICTING/abandoned 2026-06-29) proposed: rewrite the relative-path `../../../../Spaarke.UI.Components/src/...` imports in `Spaarke.SmartTodo.Components` (`src/types/kanban.ts`, `src/widgets/SmartTodoWidget/SmartTodoWidget.tsx`, `src/components/SmartTodoKanban/SmartTodoKanban.tsx`) to the proper `@spaarke/ui-components/...` package specifiers, adding the `@spaarke/ui-components` dependency + peerDep + tsconfig `paths` per the `Spaarke.AI.Widgets`/`DailyBriefing.Components` (PR #506) pattern. **Then** move the 13-file rich Kanban subtree (`KanbanCard`, `KanbanHeader`, `AddTodoBar`, `DismissedSection`, `ThresholdSettings`, `TodoAISummaryDialog`, `TodoDetailPane`, `PriorityScoreCard`, `EffortScoreCard`, `SmartToDo`, `SmartToDoDialog`, `todoScoringTypes`, `index`) from `src/solutions/LegalWorkspace/src/components/SmartToDo/` into `@spaarke/smart-todo-components`, following the R4-102 host-agnostic parity pattern (no reach-into `src/solutions/...`) and using the clean `@spaarke/ui-components/...` import pattern for any moved imports (never the relative-path bypass). — **Acceptance**: (a) `Spaarke.SmartTodo.Components` type-checks without surfacing UI.Components' private errors (boundary restored); (b) components exported from the peer package; (c) LegalWorkspace consumes them via `@spaarke/smart-todo-components` (thin shim only, no duplicated logic); (d) build + existing behavior unchanged (bit-for-bit scoring parity); (e) PR #508 closed as **superseded by smart-todo-r5**.
 
 2. **FR-02 (F-4 priority)**: Add `sprk_priority` Choice to `sprk_todo` (Urgent=100000000, High=100000001, Medium=100000002, Low=100000003). On selection, auto-set the **existing** `sprk_priorityscore` to Urgent→100 / High→75 / Medium→50 / Low→25 via a single source-of-truth handler (form OnChange), with parity in CreateTodoWizard + quick-add. Card renders a priority glyph. — **Acceptance**: choosing a priority sets the score; the score drives the composite via the unchanged `priorityComponent = score·0.50`; "Medium" reproduces today's null-default (50); card shows the priority indicator.
 
@@ -178,7 +178,9 @@ All other work is modify/move/config, not net-new. Net-new Dataverse columns: **
 ## Dependencies
 
 ### Prerequisites
+- **PR #508 boundary fix is absorbed into FR-01** (owner-confirmed 2026-08-15) — the stale/CONFLICTING PR #508 is NOT revived separately; FR-01 re-applies its fix on current master, then closes #508 as superseded. The hoist MUST land on the restored boundary.
 - **FU-5 hoist (FR-01) before FR-02/FR-03 card UI** — the only hard ordering constraint (don't author priority/effort cards in LW-local then re-hoist).
+- **Coordinate shared-client-lib PRs** — the registry warns 19 active worktrees touch shared libs; land R5's `Spaarke.SmartTodo.Components` changes in small PRs and run `/conflict-check` before each.
 - `sprk_priority` / `sprk_effort` columns created before their auto-score handlers + card UI.
 - RegardingResolver full regarding field set present on the `sprk_todo` form before R-11 smoke (FR-04).
 
@@ -197,6 +199,7 @@ All other work is modify/move/config, not net-new. Net-new Dataverse columns: **
 | R-9 ribbon expansion | In R5 or spin out? | **In R5** | FR-19 promoted to in-scope |
 | Canonical resolver | RegardingResolver or AssociationResolver? | RegardingResolver — confirmed on `master` (no AssociationResolver exists) | FR-04; no new resolver PCF |
 | F-1 white-on-yellow | Still broken? | Already fixed in code / deployment | FR-08 downgraded to a verification sweep |
+| PR #508 vs R5 | Revive #508 or fold into R5? | **Fold into FR-01**; close #508 as superseded | FR-01 absorbs the boundary fix as its prerequisite step |
 
 ## Assumptions
 
