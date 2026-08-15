@@ -35,7 +35,7 @@
 | 028 | BFF-B: 13→1 downcast consolidation | 2 BFF Remediation | FULL | opus | xhigh | 021 | B | ✅ |
 | 029 | BFF-B: delete dead Safety cluster (Services/Ai) | 2 BFF Remediation | FULL | sonnet | high | none | B | ✅ |
 | 030 | Horizontal: security sweep | 3 Horizontals | STANDARD | opus | high | none | P3 | ✅ |
-| 031 | Horizontal: test-quality sweep | 3 Horizontals | FULL | sonnet | high | none | none | 🔲 |
+| 031 | Horizontal: test-quality sweep | 3 Horizontals | FULL | sonnet | high | none | none | ✅ |
 | 032 | Horizontal: dependency + CVE hygiene | 3 Horizontals | STANDARD | sonnet | medium | none | P3 | ✅ |
 | 033 | Horizontal: observability sweep | 3 Horizontals | STANDARD | sonnet | medium | none | P3 | ✅ |
 | 034 | Horizontal: doc-drift audit | 3 Horizontals | MINIMAL | sonnet | low | none | P3 | ✅ |
