@@ -53,7 +53,9 @@ public static class EmailServicesModule
         // Attachment filter service \u2014 live dependency of Workers/Office/UploadFinalizationWorker.
         services.AddScoped<Sprk.Bff.Api.Services.Email.AttachmentFilterService>();
 
-        Console.WriteLine("\u2713 Email attachment/EML infrastructure registered");
+        // D9-01 (config-deployment): removed Console.WriteLine startup echo that bypassed the
+        // ILogger/OTel pipeline (pre-host-build registration context; the registrations are the
+        // source of truth).
 
         return services;
     }

@@ -4,7 +4,7 @@
     <title>Horizontal: doc-drift audit across .claude/ + docs/</title>
     <phase>3 Horizontals</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation drift audit (read + fix stale refs or file tasks); no code/tests — MINIMAL.</rigor-reason>
     <model-tier>sonnet</model-tier>

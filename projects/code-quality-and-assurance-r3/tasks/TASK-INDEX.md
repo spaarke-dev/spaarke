@@ -37,8 +37,8 @@
 | 030 | Horizontal: security sweep | 3 Horizontals | STANDARD | opus | high | none | P3 | ✅ |
 | 031 | Horizontal: test-quality sweep | 3 Horizontals | FULL | sonnet | high | none | none | 🔲 |
 | 032 | Horizontal: dependency + CVE hygiene | 3 Horizontals | STANDARD | sonnet | medium | none | P3 | ✅ |
-| 033 | Horizontal: observability sweep | 3 Horizontals | STANDARD | sonnet | medium | none | P3 | 🔲 |
-| 034 | Horizontal: doc-drift audit | 3 Horizontals | MINIMAL | sonnet | low | none | P3 | 🔲 |
+| 033 | Horizontal: observability sweep | 3 Horizontals | STANDARD | sonnet | medium | none | P3 | ✅ |
+| 034 | Horizontal: doc-drift audit | 3 Horizontals | MINIMAL | sonnet | low | none | P3 | ✅ |
 | 040 | Forcing-function: expand ArchTests | 4 Forcing-Functions | FULL | opus | high | none | P4 | 🔲 |
 | 041 | Forcing-function: mechanical baseline | 4 Forcing-Functions | STANDARD | sonnet | high | none | P4 | 🔲 |
 | 042 | Forcing-function: CI gates | 4 Forcing-Functions | STANDARD | sonnet | high | 040 | none | 🔲 |
