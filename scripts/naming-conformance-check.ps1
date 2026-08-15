@@ -77,13 +77,17 @@ function Test-NamingConformance {
 
         # R1 + collect for R2
         foreach ($name in (Get-SecretNameTokens -Text $text)) {
-            $upper = $name.ToUpperInvariant()
+            # Split into words by BOTH delimiters (-_.) AND camelCase boundaries, then match a WHOLE
+            # word against an env token. Catches kebab/snake (SPRK-DEV-URL) AND camelCase (DevDataverseUrl)
+            # while NOT false-flagging substrings ("Development" -> word "Development" != "DEV").
+            $words = [regex]::Matches($name, '[A-Z]+(?![a-z])|[A-Z][a-z]+|[a-z]+|[0-9]+') |
+                     ForEach-Object { $_.Value.ToUpperInvariant() }
+            $hit = $null
             foreach ($tok in $EnvTokens) {
-                # env token as a delimited segment (…-DEV-…, DEV-…, …-DEV), not a substring of a word
-                if ($upper -match "(^|[-_.])$tok([-_.]|$)") {
-                    $violations.Add([pscustomobject]@{ Rule='R1 env-token-in-name'; Name=$name; File=$file; Detail="contains env token '$tok'" })
-                    break
-                }
+                if ($words -contains $tok) { $hit = $tok; break }
+            }
+            if ($hit) {
+                $violations.Add([pscustomobject]@{ Rule='R1 env-token-in-name'; Name=$name; File=$file; Detail="contains env token '$hit'" })
             }
             $key = $name.ToLowerInvariant()
             if (-not $seenByCanonical.ContainsKey($key)) { $seenByCanonical[$key] = New-Object System.Collections.Generic.List[object] }
@@ -120,6 +124,7 @@ if ($SelfTest) {
 Dataverse__Url = @Microsoft.KeyVault(VaultName=sprk-dev-kv;SecretName=SPRK-DEV-DATAVERSE-URL)
 Bff__Secret    = @Microsoft.KeyVault(VaultName=kv-sdap-dev;SecretName=BFF-API-ClientSecret)
 Bff__Secret2   = @Microsoft.KeyVault(VaultName=sprk-demo-kv;SecretName=bff-api-clientsecret)
+Bff__Secret3   = @Microsoft.KeyVault(VaultName=sprk-prod-kv;SecretName=ProdBffSecret)
 '@
     }
     $good = @{
@@ -130,11 +135,13 @@ Bff__Secret    = @Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=BFF-
     }
     $badV  = @(Test-NamingConformance -FileToText $bad)
     $goodV = @(Test-NamingConformance -FileToText $good)
-    $badHasR1    = @($badV | Where-Object Rule -like 'R1*').Count -ge 1
-    $badHasR3    = @($badV | Where-Object Rule -like 'R3*').Count -ge 1   # kv-sdap-dev is non-canonical
+    $badHasR1    = @($badV | Where-Object Rule -like 'R1*').Count -ge 1  # SPRK-DEV-* delimited
+    $badHasR1cc  = @($badV | Where-Object { $_.Rule -like 'R1*' -and $_.Name -eq 'ProdBffSecret' }).Count -ge 1  # camelCase
+    $badHasR2    = @($badV | Where-Object Rule -like 'R2*').Count -ge 1  # BFF-API-ClientSecret vs bff-api-clientsecret
+    $badHasR3    = @($badV | Where-Object Rule -like 'R3*').Count -ge 1  # kv-sdap-dev is non-canonical
     $goodClean   = $goodV.Count -eq 0
-    Write-Host "SelfTest: bad->R1=$badHasR1 R3=$badHasR3 (total $($badV.Count)); good->clean=$goodClean"
-    if ($badHasR1 -and $badHasR3 -and $goodClean) { Write-Host 'SelfTest PASSED' -ForegroundColor Green; exit 0 }
+    Write-Host "SelfTest: bad->R1=$badHasR1 R1camelCase=$badHasR1cc R2=$badHasR2 R3=$badHasR3 (total $($badV.Count)); good->clean=$goodClean"
+    if ($badHasR1 -and $badHasR1cc -and $badHasR2 -and $badHasR3 -and $goodClean) { Write-Host 'SelfTest PASSED' -ForegroundColor Green; exit 0 }
     Write-Host 'SelfTest FAILED' -ForegroundColor Red
     $badV | Format-Table -AutoSize | Out-String | Write-Host
     exit 2
@@ -151,12 +158,21 @@ if (-not $Path -or $Path.Count -eq 0) {
 
 $fileToText = @{}
 foreach ($p in $Path) {
-    if (Test-Path $p) { $fileToText[$p] = (Get-Content -Raw -Path $p) }
+    if (Test-Path $p) {
+        $raw = Get-Content -Raw -Path $p
+        # Get-Content -Raw on an empty file returns $null; coerce to '' so the regex engine
+        # doesn't throw under StrictMode + ErrorActionPreference=Stop.
+        $fileToText[$p] = if ($null -eq $raw) { '' } else { $raw }
+    }
 }
 
 if ($fileToText.Count -eq 0) {
-    Write-Host 'naming-conformance-check: no scannable files found — nothing to check.' -ForegroundColor Yellow
-    exit 0
+    # FAIL-CLOSED: a naming gate that finds none of its expected inputs must NOT silently greenlight —
+    # a renamed/moved canonical file would otherwise make the gate pass forever without scanning anything.
+    Write-Host 'naming-conformance-check: ERROR — no scannable files found. The canonical secret-name' -ForegroundColor Red
+    Write-Host 'sources are missing or were renamed; the gate cannot verify conformance. Pass -Path explicitly' -ForegroundColor Red
+    Write-Host 'or restore the default sources (appsettings.template.json / appsettings.tokens.md / Seed-ProductionKeyVault.ps1).' -ForegroundColor Red
+    exit 1
 }
 
 $violations = @(Test-NamingConformance -FileToText $fileToText)
