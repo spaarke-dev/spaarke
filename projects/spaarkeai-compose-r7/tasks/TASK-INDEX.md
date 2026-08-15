@@ -11,7 +11,7 @@
 
 | ID | Title | Phase | Status | Rigor | Model | Effort | Parallel-safe | Deps | FR |
 |----|-------|-------|--------|-------|-------|--------|---------------|------|----|
-| 001 | Coordination gate + publish-size baseline + env verify | 0 | 🔲 | MINIMAL | sonnet | high | ❌ (gate) | none | — |
+| 001 | Coordination gate + publish-size baseline + env verify | 0 | ✅ | MINIMAL | sonnet | high | ❌ (gate) | none | — |
 | 010 | Stable, non-rotating logical document id (persisted) | 1 | 🔲 | FULL | **opus** | high | ❌ spine | 001 | FR-07b |
 | 011 | Always carry dedup identity on id-less mount | 1 | 🔲 | FULL | sonnet | **xhigh** | ❌ spine | 010 | FR-07c |
 | 012 | Save As uniquifies filename (real fork) | 1 | 🔲 | FULL | sonnet | **xhigh** | ❌ spine | 010 | FR-07a |

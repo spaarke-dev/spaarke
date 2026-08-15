@@ -4,7 +4,7 @@
     <title>Coordination gate + publish-size baseline + env verification</title>
     <phase>0 Coordination Gate + Baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>No source code modified — runs /conflict-check, records a publish-size baseline, and verifies the PDF DI env gate; produces a coordination note only.</rigor-reason>
     <model-tier>sonnet</model-tier>
