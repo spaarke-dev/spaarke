@@ -10,10 +10,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — project **INITIALIZED**, execution not started (owner-gated) |
-| **Step** | — |
-| **Status** | ready to begin |
-| **Next Action** | Say **"work on task 001"** → invokes `task-execute` on `tasks/001-coordination-gate-baseline.poml` (the coordination gate). Then follow TASK-INDEX execution order. |
+| **Task** | **012** — Save As uniquify (FR-07a) — ANALYZED, ready to implement (see `notes/task-012-analysis.md`) |
+| **Step** | Root-cause traced + fix designed; implementation not started |
+| **Status** | 012 analyzed / not-implemented (checkpoint) |
+| **Next Action** | Implement 012 per `notes/task-012-analysis.md` (Graph `conflictBehavior=rename` for the fork create + fresh `composeLogicalId` for forkNew), commit, then 013 (atomic upsert — same file, serialize), then 020/030/040/041… |
+
+**012 is fully analyzed** — root cause = `UploadSmallAsUserAsync` PUT-by-path defaults to `replace`, so a same-name fork re-versions the original. Fix = route the `forkNew` create through Graph `conflictBehavior=rename` (atomic, no duplicate window; infra exists at `UploadSessionManager.cs:531`) + mint a fresh `composeLogicalId` for the fork. Full plan + file/line map in `notes/task-012-analysis.md`. **012 & 013 both edit `ComposeService.cs` → serialize.**
+
+**Completed this session** (all committed + pushed-pending):
+- 001 ✅ gate (`3f5cbfe02`) — baseline **44.96 MB incl PDBs net10**; conflict-check CLEAR; DI-gate verified; PRs #690/#266 OPEN.
+- 010 ✅ (`2dde88f3c`) — `composeLogicalId` + `getComposeLogicalIdentity` accessor + `composeIdentity.ts` (localStorage single-slot). Shared key for 040/011.
+- 073 ✅ (`fd0b8e4da`, cherry-picked from Group-B subagent) — PDF-intake cause discrimination. **FR-11 end-to-end surfacing deferred to 050/051** (see task-073-notes.md — avoids r2 PublicContracts change + downcast).
+- 011 ✅ (`23793f4e9`) — id-less assistant-insert door now carries dedup identity.
+
+**Background stream still in flight (isolated worktree):**
+- **Task 075** (FR-13 test-hygiene) — subagent running; will report a commit SHA to cherry-pick. Main session owns TASK-INDEX/current-task/INDEX bookkeeping.
+
+**Key carried decisions**: composeLogicalId is the FR-03/FR-07 shared key; localStorage single active-draft slot; 050/051 must wire the PDF-intake cause-specific message (FR-11 rider). Baseline for NFR-01 deltas = 44.96 MB incl PDBs.
 
 ### Files Modified This Session
 - All under `projects/spaarkeai-compose-r7/` — created/finalized during `/design-to-spec` → `/project-pipeline` (spec, README, plan, CLAUDE.md, 20 POML tasks, TASK-INDEX) + two re-alignment passes. **All committed + pushed; nothing uncommitted.**
