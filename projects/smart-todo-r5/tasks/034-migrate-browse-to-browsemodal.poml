@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="smart-todo-r5">
+  <metadata>
+    <title>Migrate SmartTodo preview/browse consumer to BrowseModal, or confirm already-resolved (FR-15)</title>
+    <phase>4: Main-form modal</phase>
+    <gate>003 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches modal composition (ADR-050 compliance surface); tags include fluent-ui/modal/frontend; if a live consumer is found, it is a production UI migration. CLAUDE.md §8 FULL trigger.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded migration of an existing preset composition (BrowseModal already exists per ADR-050) — not net-new architecture. Sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modal surface — even though independent of the 030-033 OOB stream, touches shared modal composition patterns that could collide with concurrent modal work; keep serial per project convention for all Phase 4 tasks.</parallel-reason>
+    <deps>003</deps>
+    <tags>react, typescript, fluent-ui, modal, frontend</tags>
+    <estimated-effort>2-4 hours (verify-first; migration effort only if a live consumer is found)</estimated-effort>
+  </metadata>
+
+  <prompt>Find the SmartTodo preview/browse consumer that renders RecordNavigationModalShell directly (the double-title-bar problem FU-2/FR-15 describes) and migrate it onto BrowseModal (nav + onBeforeNavigate), retiring the direct RecordNavigationModalShell usage. If no such live consumer exists in the current codebase (see background — there is real evidence it may already be gone), verify that conclusively and document FR-15 as already-satisfied rather than inventing a migration target.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the ADR-050 canonical modal shell (SprkModal + presets), specifically BrowseModal's nav/onBeforeNavigate composition seam, and in verifying negative findings rigorously before closing a spec item as moot.</role>
+
+  <goal>EITHER (a) the SmartTodo preview/browse consumer that directly renders RecordNavigationModalShell is migrated to BrowseModal, forwarding nav (index/total/onNavigate) and onBeforeNavigate (dirty-check seam), with the direct RecordNavigationModalShell usage removed and no chromeMode API added anywhere; OR (b) a documented, grep-evidenced verification shows no such consumer exists in the current codebase (the double-title-bar problem was already eliminated when SmartTodoModal.tsx — RecordNavigationModalShell's last SmartTodo consumer — was deleted 2026-07-01 by ai-spaarke-ai-workspace-UI-r2 task 022), and FR-15/FU-2 is marked resolved-by-prior-work in TASK-INDEX.md and notes/.</goal>
+
+  <context>
+    <background>Spec FR-15 (FU-2, "MOSTLY RESOLVED by SprkModal" per design.md's 2026-08-14 update) describes migrating "the SmartTodo preview/browse consumer" off a direct RecordNavigationModalShell usage. Investigation before this task was authored found: (1) MODAL-DECISION-CRITERIA.md line 17 states explicitly "The SmartTodoModal (retired 2026-07-01 by R2 FR-14) was the last Spaarke consumer" of the iframe-hosted anti-pattern that used RecordNavigationModalShell in this feature area; (2) a repo-wide grep for RecordNavigationModalShell found it imported/used only in RichFilePreviewDialog.tsx (Documents preview, unrelated), ReconciliationBrowseShell.tsx (Communication.Components, unrelated), and QuickStartModal.tsx (SpaarkeAi conversation, unrelated) — NOT in src/solutions/SmartTodo or src/solutions/LegalWorkspace/src/components/SmartToDo; (3) design.md line 154 itself says "no smart-todo functional impact (the iframe-embedded form has no duplicate today)" — written when the iframe form still existed, now stale since it was deleted. This strongly suggests FR-15's premise (a live SmartTodo RecordNavigationModalShell consumer) no longer exists post-R2-retirement. This task's FIRST job is to re-verify that conclusively (the codebase may have changed since this POML was authored, or the hoist tasks 001-003 may have moved something relevant) — do not skip the verification step and do not assume the pre-authored research is still accurate at execution time.</background>
+    <relevant-files>
+      <file role="verify-first">src/solutions/SmartTodo/src/**</file>
+      <file role="verify-first">src/client/shared/Spaarke.SmartTodo.Components/src/** (post-hoist location per task 001-003)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/BrowseModal.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">LegalWorkspace SmartToDo converted to a thin shim / hoist complete — verify against the POST-hoist file layout, not the pre-hoist LW-local paths, since this task's gate gives the hoist priority.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">MUST use BrowseModal's nav/onBeforeNavigate seam if a migration is performed — do NOT add a chromeMode prop to RecordNavigationModalShell (explicitly banned by spec MUST-NOT rules and CLAUDE.md §"MUST NOT Rules"); that proposed API is obsolete per design.md FU-2.</constraint>
+    <constraint source="project">A negative finding (no live consumer) is a VALID, acceptance-satisfying outcome for this task — do not force a migration onto unrelated RecordNavigationModalShell consumers (RichFilePreviewDialog, ReconciliationBrowseShell, QuickStartModal) to manufacture work; those are Layout 2 justified exceptions per MODAL-DECISION-CRITERIA.md, not in FR-15's scope.</constraint>
+    <constraint source="spec">If a migration IS performed, the single-title-source rule applies (MODAL-DESIGN-SYSTEM.md §3) — the migrated consumer must not render its own title alongside BrowseModal's header title/counter.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>browsemodal-migration-or-verification</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/design.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="BrowseModal composition" location="src/client/shared/Spaarke.UI.Components/src/components/SprkModal/presets/BrowseModal.tsx">Fixed lg/landscape/unpadded; forwards nav to the shell's header nav group; onBeforeNavigate is the dirty-check seam — the pattern to apply if a live consumer is found.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier sonnet, effort high. Read BrowseModal.tsx, MODAL-DESIGN-SYSTEM.md §3 and §8 (BrowseModal section), and MODAL-DECISION-CRITERIA.md's Layout 3 retirement note in full.</step>
+    <step order="1">Grep the current (post-hoist, since this task gates on 003) codebase for RecordNavigationModalShell usage across src/solutions/SmartTodo, src/solutions/LegalWorkspace, and src/client/shared/Spaarke.SmartTodo.Components. Also grep for any preview/browse UI in these paths that might use a different-but-equivalent duplicate-title-bar pattern (e.g. a custom Dialog wrapping content that itself renders a title).</step>
+    <step order="2">If a live consumer is found: identify its "N of M" navigation contract (what supplies index/total/onNavigate), migrate it to BrowseModal per the composition pattern in BrowseModal.tsx/MODAL-DESIGN-SYSTEM.md §8, wire onBeforeNavigate if any dirty-check exists today, remove the direct RecordNavigationModalShell import, and verify no duplicate title renders.</step>
+    <step order="3">If NO live consumer is found: write the grep evidence (commands + zero-result output) into projects/smart-todo-r5/notes/fr-15-verification.md (or equivalent), update TASK-INDEX.md's row for 034 to note "verified already-resolved by R2 FR-14 retirement, no code change," and do not touch any unrelated RecordNavigationModalShell consumer.</step>
+    <step order="4">Either path: confirm no chromeMode prop exists anywhere in RecordNavigationModalShell's types/props (grep RecordNavigationModalShell/types.ts) — this is a standing MUST-NOT regardless of this task's outcome.</step>
+    <step order="5">If a migration was performed, add/update unit tests covering the BrowseModal composition (nav renders "N of M", onBeforeNavigate fires before navigation). If no migration was needed, no new tests are required.</step>
+    <step order="6">Update tasks/TASK-INDEX.md: mark 034 complete, noting which path (migration vs already-resolved) was taken.</step>
+    <step order="7">Document the outcome and evidence in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the verification step is ambiguous — e.g. a consumer is found that renders duplicate chrome but through a mechanism other than RecordNavigationModalShell, and it's unclear whether it falls under FR-15's scope — STOP and escalate per CLAUDE.md §6 rather than either forcing an unrelated migration or silently closing the task without addressing a real duplicate-chrome bug.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="No duplicate title bar (if migration performed)">
+      <steps>
+        <step>Open the migrated preview/browse surface</step>
+      </steps>
+      <expected>A single title/counter source is visible (BrowseModal's own header) — no nested RecordNavigationModalShell chrome.</expected>
+    </test>
+    <test name="Browse N of M works (if migration performed)">
+      <steps>
+        <step>Navigate forward/back through the record set</step>
+      </steps>
+      <expected>The counter updates correctly; onBeforeNavigate fires if a dirty-check is wired.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render the surface (migrated, or the unchanged existing surface if no migration was needed) under webLightTheme and webDarkTheme</step>
+      </steps>
+      <expected>Colors adapt via semantic tokens; zero hex/rgb literals in any changed files.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest for any changed files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">the migrated consumer file, if a migration was performed (path TBD by step 1's grep result)</output>
+    <output type="docs">projects/smart-todo-r5/notes/fr-15-verification.md (grep evidence, whichever path is taken)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a live SmartTodo consumer of RecordNavigationModalShell is found, then it is migrated to BrowseModal with nav + onBeforeNavigate forwarded, no duplicate title bar, and no chromeMode prop added anywhere.</criterion>
+    <criterion testable="true">Given no live consumer is found, then the negative finding is documented with grep evidence and TASK-INDEX.md/notes/ record it as already-resolved rather than left silently unaddressed.</criterion>
+    <criterion testable="true">Negative: no chromeMode API exists in RecordNavigationModalShell's props/types after this task, regardless of which path was taken.</criterion>
+    <criterion testable="true">Negative: no unrelated RecordNavigationModalShell consumer (RichFilePreviewDialog, ReconciliationBrowseShell, QuickStartModal) is modified by this task.</criterion>
+    <criterion testable="true">All unit tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec ref: FR-15 (FU-2). This task explicitly complies with ADR-050 (uses BrowseModal, adds no forked chrome) — it is NOT part of the ADR-050 Path A exception that governs 030-033. Pre-authoring research (grep across src/) found zero live RecordNavigationModalShell usage in SmartTodo/LegalWorkspace-SmartToDo code as of 2026-08-15 — re-verify at execution time since the hoist tasks (001-003) may move files.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

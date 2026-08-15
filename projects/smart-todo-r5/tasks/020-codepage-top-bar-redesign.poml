@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="smart-todo-r5">
+  <metadata>
+    <title>Code Page top-bar redesign (FR-05 / U-3)</title>
+    <phase>3: Top bar + filter + visuals</phase>
+    <gate>003 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts (Header.tsx, Header.styles.ts, SmartTodoApp.tsx) — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger). UI redesign with keyboard-nav + dark-mode gates.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard Fluent v9 frontend redesign of an existing component; not architectural/high-blast-radius — sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Q</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Redesign the SmartTodo Code Page top bar in src/solutions/SmartTodo/src/components/Header/ (Header.tsx + Header.styles.ts) plus its wiring in src/solutions/SmartTodo/src/SmartTodoApp.tsx to exactly match the layout in projects/smart-todo-r5/to-do-header-revision.jpg: LEFT = the existing MicrosoftToDoIcon (blue checkmark glyph, already used at Header.tsx line ~482) + "Smart To Do" title; RIGHT (in this order) = an outlined "Filter" pill button (magnifying-glass icon + "Filter" label) · a primary "+ New Task" button · a "⋮" three-dot overflow menu containing exactly Settings / Layout / Refresh. Remove the current 3-field QuickAdd input group (Title + Due Date + Assigned-To + Add + subtle "+ New") and the current toggle-into-inline-SearchBox "Filter" affordance entirely — per spec FR-05 the ONLY inline (non-overflow) actions are Filter and + New Task.</prompt>
+
+  <role>Spaarke platform developer. Expert in Fluent UI v9 (Toolbar, Menu, MenuTrigger/MenuList/MenuItem), React 18 Code Page conventions, and WCAG 2.1 AA keyboard navigation. Follow ADRs strictly.</role>
+
+  <goal>Header.tsx renders exactly the mockup layout with zero hex/rgb literals; the overflow Menu contains exactly 3 items (Settings → existing ThresholdSettingsPopover via onOpenSettings, Layout → orientation toggle via onOrientationChange, Refresh → existing handleRefresh); a new controlled `isFilterPaneOpen` boolean + `onToggleFilterPane` callback is threaded from SmartTodoApp.tsx through Header.tsx so task 021 can mount the actual FilterPane against it; "+ New Task" invokes a new `onNewTask` prop, stubbed in SmartTodoApp.tsx as a documented no-op (`// TODO(030): wire to OOB main-form create modal per FR-10`) since task 030 has not landed yet. All existing Settings/Layout(orientation)/Refresh BEHAVIOR is preserved — only its chrome location moves from inline buttons to the overflow menu.</goal>
+
+  <context>
+    <background>Spec FR-05 (U-3, owner-confirmed 2026-08-14) replaces the R4-104 single-row toolbar — which grew a 3-field QuickAdd group plus a toggle-into-inline-SearchBox "Filter" affordance (itself F-6: mislabeled/non-functional) — with the mockup's minimal 4-element chrome. FR-05 "subsumes F-3 toolbar + F-6 broken 'Search'": the Filter pill in this task is the ENTRY POINT only (opens the pane task 021 builds); this task does not implement filter logic. The QuickAdd group's removal is intentional per the closed acceptance set ("inline actions only Filter + New Task") — its replacement, the "+ New Task" full main-form modal, is built in task 030 (Phase 4, after this task). Until 030 lands, + New Task is a documented stub — do not silently omit the button.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SmartTodo/src/components/Header/Header.tsx</file>
+      <file role="modify">src/solutions/SmartTodo/src/components/Header/Header.styles.ts</file>
+      <file role="modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+      <file role="canonical-reference">projects/smart-todo-r5/to-do-header-revision.jpg</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/OrientationToggle/OrientationToggle.tsx</file>
+      <file role="canonical-reference">src/solutions/SmartTodo/src/components/ThresholdSettings.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">LegalWorkspace SmartToDo converted to a thin shim consuming @spaarke/smart-todo-components (Phase 1 hoist complete) — this task's Code Page-only changes do not depend on hoist content, but the gate requires Phase 1 closed before Phase 3 visual work per plan.md sequencing.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens exclusively for every new/changed style — zero hex/rgb literals (NFR-04).</constraint>
+    <constraint source="spec">FR-05: inline (non-overflow) actions are ONLY Filter and + New Task; overflow (⋮) holds exactly Settings, Layout, Refresh — no additional or fewer items (owner-decided mapping, 2026-08-14).</constraint>
+    <constraint source="spec">FR-05 acceptance: the broken/mislabeled inline-SearchBox "Filter" toggle (current isFilterOpen + SearchBox pattern in Header.tsx) is removed, not relabeled.</constraint>
+    <constraint source="project">Do NOT implement filter category logic in this task — only the Filter pill trigger + the open/close boolean state that task 021 will consume. Building filter predicate logic here is scope creep into FR-06 (task 021).</constraint>
+    <constraint source="project">Do NOT implement the OOB main-form modal launch for + New Task — that is task 030 (FR-10, Phase 4, not yet started). Stub with a clearly marked TODO, do not throw and do not hide the button.</constraint>
+    <constraint source="project">Preserve existing Settings/Layout/Refresh BEHAVIOR verbatim (same handlers: handleOpenSettings via settingsOpenerRef, handleOrientationChange via updateViewPrefs, handleRefresh via innerRefetchRef) — only relocate their trigger UI into the overflow Menu.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-ui-toolbar-and-menu</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">makeStyles module-scope conventions, semantic-token usage.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Read Header.tsx, Header.styles.ts, SmartTodoApp.tsx in full plus the mockup image. Confirm current behavior: QuickAdd dispatches QUICK_ADD_TODO_EVENT; Settings/Layout/Refresh are wired via onOpenSettings/onOrientationChange/onRefresh props already passed from SmartTodoApp.tsx.</step>
+    <step order="1">In Header.tsx, delete the QuickAdd render block (quickAddGroup: Input + date input + Assigned-To typeahead + Add button + subtle "+ New" button) and all its local state/handlers (quickAddValue, quickAddDueDate, quickAddAssignedTo*, assignedToResults, dispatchQuickAdd, handleQuickAdd*, handleSelectAssignedTo, handleAssignedToBlur/Focus). Note for task 021: the Assigned-To Xrm.WebApi contact-typeahead pattern being deleted here (debounced 250ms, `contains(fullname,'…')` OData filter against `contact`, statecode eq 0, $top=8) is the canonical reference to replicate for the new filter pane's Assigned-To category.</step>
+    <step order="2">Delete the inline Filter toggle-to-SearchBox pattern (isFilterOpen local boolean, the two duplicated SearchBox/ToggleButton JSX blocks in both the hasSelection and !hasSelection branches, handleToggleFilter, searchQuery/onSearchChange plumbing if no longer consumed elsewhere).</step>
+    <step order="3">Add a new outlined "Filter" Button (icon + "Filter" label, matches mockup's pill shape) wired to a NEW controlled prop pair on HeaderProps: `isFilterPaneOpen: boolean` + `onToggleFilterPane: () => void`. Add a new primary "+ New Task" Button wired to a new `onNewTask?: () => void` prop (hidden if omitted, matching the existing optional-prop convention used elsewhere in this file).</step>
+    <step order="4">Build the overflow "⋮" Menu using Fluent v9 `Menu`/`MenuTrigger`/`MenuPopover`/`MenuList`/`MenuItem` (icon-only trigger button, aria-label "More options"). Move the existing Settings button, OrientationToggle-driven "Layout" action, and Refresh button INTO 3 MenuItems in this exact order: Settings, Layout, Refresh. Settings MenuItem calls the existing `onOpenSettings` prop. Layout MenuItem calls `onOrientationChange` flipping between 'horizontal' and 'vertical' (reuse the same toggle logic OrientationToggle.tsx uses internally — read it for the exact flip semantics before reimplementing). Refresh MenuItem calls the existing `onRefresh` prop. Remove the now-orphaned inline `OrientationToggle` element and standalone Settings/Refresh `Button` elements from the toolbar body.</step>
+    <step order="5">Update Header.styles.ts: remove styles that become dead after step 1-2's JSX removal (quickAddGroup, quickAddInput, quickAddDateInput, quickAddAssignedInput, assignedToWrap, assignedToResults, assignedToResultItem, assignedToResultsHint, searchWrap) and add styles for the new filter-pill Button and overflow-menu trigger, using only tokens.* values.</step>
+    <step order="6">In SmartTodoApp.tsx: lift `isFilterPaneOpen` state (useState, default false) and pass `isFilterPaneOpen` + `onToggleFilterPane={() => setIsFilterPaneOpen(v => !v)}` into the Header component. Add a stub `handleNewTask` callback with the `// TODO(030)` comment described above and pass it as `onNewTask`. Remove now-unused `searchQuery`/`onSearchChange` plumbing if Header no longer consumes it (verify nothing else reads `searchQuery` state before deleting — SmartToDo's `searchQuery` prop is currently wired from this same state; if SmartToDo still needs it for card filtering, keep the state but stop passing onSearchChange to Header).</step>
+    <step order="7">Verify title-row visual match against the mockup (blue checkmark glyph + "Smart To Do", left-aligned). If MicrosoftToDoIcon does not visually read as the mockup's checkmark glyph, note the discrepancy but do not swap icons without escalating (see escalation trigger) — this is a minor risk, not a blocker.</step>
+    <step order="8">Update or add vitest coverage: remove QuickAdd-specific test cases, add coverage for the Filter pill (calls onToggleFilterPane), + New Task button (calls onNewTask, hidden when omitted), and the overflow Menu (exactly 3 items, each invoking its handler). Run the existing Header/SmartTodoApp test suite and fix regressions.</step>
+    <step order="9">Grep the changed files for hex/rgb literals — must return zero matches.</step>
+    <step order="10">Update tasks/TASK-INDEX.md: mark 020 ✅ completed.</step>
+    <step order="11">Document any deviation (e.g., icon swap decision, searchQuery retention decision) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If removing the QuickAdd inline group breaks an already-shipped, currently-relied-upon behavior not identified in this task's scope (e.g., a test elsewhere asserts QuickAdd's DOM presence, or SmartToDo's card-filter `searchQuery` prop has no other producer once Header stops driving it), STOP and escalate per CLAUDE.md §6 rather than silently dropping functionality outside this task's stated boundary.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Mockup layout parity">
+      <steps>
+        <step>Render the SmartTodo Code Page at typical viewport width</step>
+        <step>Compare against projects/smart-todo-r5/to-do-header-revision.jpg</step>
+      </steps>
+      <expected>Left = checkmark glyph + "Smart To Do"; right = Filter pill, + New Task, ⋮ overflow, in that order; no QuickAdd row, no inline SearchBox</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render with webLightTheme, then switch to webDarkTheme</step>
+        <step>Inspect the Filter pill, + New Task button, and overflow Menu/MenuItems</step>
+      </steps>
+      <expected>All colors adapt via semantic tokens; zero hex/rgb literals</expected>
+    </test>
+    <test name="Keyboard navigation">
+      <steps>
+        <step>Tab through the header from the title</step>
+        <step>Open the overflow Menu with Enter/Space; navigate items with Arrow keys; close with Escape</step>
+      </steps>
+      <expected>Focus order is Filter → + New Task → ⋮ trigger → menu items when open; Escape closes the menu and returns focus to the trigger</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest in src/solutions/SmartTodo</tool>
+    <tool name="terminal">grep for hex/rgb literals</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/components/Header/Header.tsx</output>
+    <output type="code">src/solutions/SmartTodo/src/components/Header/Header.styles.ts</output>
+    <output type="code">src/solutions/SmartTodo/src/SmartTodoApp.tsx</output>
+    <output type="test">src/solutions/SmartTodo/src/components/Header/__tests__/Header.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Code Page loads, when compared to to-do-header-revision.jpg, then the left cluster shows the checkmark glyph + "Smart To Do" and the right cluster shows Filter pill · + New Task · ⋮ overflow in that order, with no other inline action buttons.</criterion>
+    <criterion testable="true">Given the user opens the ⋮ menu, then it contains exactly 3 items in order — Settings, Layout, Refresh — each invoking its pre-existing handler (onOpenSettings / onOrientationChange / onRefresh) unchanged.</criterion>
+    <criterion testable="true">Given task 030 has not landed, when + New Task is clicked, then a documented no-op stub runs without throwing (button is present and clickable, not hidden).</criterion>
+    <criterion testable="true">Given the Filter pill is clicked, then `isFilterPaneOpen` toggles and `onToggleFilterPane` fires (task 021 will render pane content against this state — no pane content is expected from this task).</criterion>
+    <criterion testable="true">Negative: keyboard-only navigation reaches every inline + overflow control; Escape closes an open overflow menu without trapping focus.</criterion>
+    <criterion testable="true">Zero hex/rgb literals in changed files (grep-verifiable); all existing and updated unit tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-05 (U-3), F-6 (superseded by U-3). The Assigned-To Xrm.WebApi typeahead pattern removed from Header.tsx in step 1 is the canonical reference for task 021's Assigned-To filter category — cite this task's diff/notes for task 021's author.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

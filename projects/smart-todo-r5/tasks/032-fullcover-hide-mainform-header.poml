@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="smart-todo-r5">
+  <metadata>
+    <title>Full-cover sizing + hide OOB main-form header band (FR-12/13)</title>
+    <phase>4: Main-form modal</phase>
+    <gate>031 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes production modal sizing on the shared launcher (031's consolidation target) and investigates Dataverse form-header suppression, which may require a schema/form-config change on a production entity. Tags include dataverse/modal; CLAUDE.md §8 FULL trigger.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Sizing change + form-config investigation — bounded scope with an explicit escalation path if the investigation surfaces a rebuild requirement. Sonnet default per CLAUDE.md §8.5; not one of the three named opus/xhigh tasks.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same modal launch path as 030/031/033 — modifies the sizing constants and call options 031 just consolidated; concurrent edits would conflict.</parallel-reason>
+    <deps>031</deps>
+    <tags>react, dataverse, modal, frontend</tags>
+    <estimated-effort>1-2 days (includes investigation)</estimated-effort>
+  </metadata>
+
+  <prompt>Size the inner sprk_todo OOB main-form modal (the ONE shared launcher task 031 established) to fully cover its launching surface (F-7), and hide the OOB main form's top header band — record title + form command bar — so it reads as a clean full-frame editor (U-6). Investigate and pick the mechanism (form header configuration, a dedicated modal-specific form, or a navigateTo chrome option) rather than assuming one.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse main-form configuration (maker portal / SystemForm), Xrm.Navigation dialog options, and the OOB-vs-proprietary modal decision framework (MODAL-DECISION-CRITERIA.md). This is investigation + config, not new PCF/React code, unless the sizing half requires a TypeScript constant change.</role>
+
+  <goal>The inner sprk_todo OOB main-form dialog (create and open, both routed through the task-031 shared launcher) renders full-cover relative to its launching surface (no inset/nested look) and its native header band (record title + form command bar) is hidden, while native Save/Save &amp; Close remain reachable. The mechanism used (form config vs navigateTo option vs dedicated form) is documented with the investigation evidence.</goal>
+
+  <context>
+    <background>Spec FR-12 (U-6, header hide) + FR-13 (F-7, full-cover sizing), owner-decided 2026-08-14 as ONE combined item ("Option 1 chosen — keep the OOB main form; size to full-cover + hide its header"). Today (post-031) the shared launcher opens existing-record at the `record` OOB size (85%x85%) and create at `createForm` (70%x80%) — both smaller than "full cover" when the SmartTodo Code Page itself is ALSO open as a modal (the "modal-in-modal" case: LegalWorkspace's zero-selection Open path opens the whole Code Page at 85%x85% via ctx.onOpenWizard, and a card-open inside that Code Page then nests a second OOB dialog inside it). oobModalSizes.ts explicitly documents only 3 sanctioned size names (record/createForm/wizard) and states "No fourth size — a launch site that genuinely needs a different size is a documented escalation," not a silent literal. The header-hide mechanism (U-6) is an open investigation per spec.md Assumptions — form header configuration, a dedicated modal-only form, and a navigateTo chrome option are all plausible; pick based on what Dataverse actually supports for the sprk_todo entity, verified via MCP describe/form inspection or Microsoft Learn, not assumption.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+      <file role="modify-maybe">sprk_todo main form (Dataverse-hosted config; or a new dedicated modal-only form if that is the chosen mechanism — confirm via MCP before assuming a new form is needed)</file>
+      <file role="reference">projects/smart-todo-r5/to-do-main-form-modal.jpg</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="031" status="pending">Establishes the single shared launcher this task's sizing change targets — do not size a call site 031 is about to delete/consolidate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">Path A project-scoped exception remains in force — investigate mechanisms WITHIN the OOB `navigateTo` family (form config, navigateTo options, a dedicated OOB form). Do NOT propose or build a proprietary FormModal/SprkModal replacement as a "simpler" alternative; that is Option 2, explicitly NOT chosen by the owner on 2026-08-14. See escalation trigger.</constraint>
+    <constraint source="project">If full-cover sizing requires a value outside the 3 sanctioned OOB_MODAL_SIZES names, follow oobModalSizes.ts's own documented escalation contract for adding a 4th named size (do not hardcode an inline width/height literal at any call site) — record the addition + rationale in projects/smart-todo-r5/notes/, matching the file's own "flagged for visual review" precedent.</constraint>
+    <constraint source="project">Any form-level change (new form, header config) is Dataverse config on a production entity — verify current state via MCP describe_table / form inspection before editing, per the same discipline task 013 used.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>oob-modal-full-cover-and-header-hide</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/design.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts</file>
+    </files>
+    <patterns>
+      <pattern name="oob-size-scale-governance" location="src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts">The 3-name-only contract with its own documented-escalation clause — read this file's header comment in full before adding anything.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier sonnet, effort high. Read oobModalSizes.ts, MODAL-DECISION-CRITERIA.md Family 1 section, and spec.md's F-7/F-8 + U-6 framing in full.</step>
+    <step order="1">Investigate the header-hide mechanism. Options to evaluate in order: (a) Dataverse form-level "show form header" / navigation-pane config on the sprk_todo main form or a dedicated modal-variant form; (b) a navigateTo dialog option that suppresses the header (check current Xrm.Navigation.navigateTo DialogOptions/EntityFormOptions typings and Microsoft Learn — use the researcher subagent for authoritative current API surface if local typings are ambiguous); (c) a dedicated "modal" form clone of the main form with header disabled at the form-definition level (Dataverse forms support a "Show Form Header" property in some contexts — verify for the current environment/version). Record findings before implementing.</step>
+    <step order="2">Implement the chosen mechanism. If it is a form-config change, use MCP describe_table / form inspection to confirm current state, make the change, publish, and re-verify. If it is a navigateTo option, add it to the task-031 shared launcher (not a new call site).</step>
+    <step order="3">Determine the full-cover sizing value. If 85%x85%(open)/70%x80%(create) already visually fully covers the launching surface in the SINGLE-modal case (Code Page embedded directly as a workspace section, not itself modal-wrapped), verify whether the modal-in-modal case (LegalWorkspace zero-selection Open → Code-Page-as-modal → card-open nests a second dialog) is the actual F-7 target and needs a larger/100% value. Do not guess — reproduce both scenarios.</step>
+    <step order="4">If a new named size is needed, add it to OOB_MODAL_SIZES in oobModalSizes.ts (extend OobModalSizeName + the frozen record, following the file's existing Object.freeze pattern) with a doc comment stating the F-7 rationale, and reference it from the task-031 shared launcher's open/create branches as appropriate. Do NOT hardcode a literal at the call site.</step>
+    <step order="5">Manually verify (real MDA if available; otherwise harness/dev) that: the inner dialog visually covers its launching surface with no inset frame; no duplicate title/command bar renders below the modal's own chrome; native Save and Save &amp; Close remain clickable and functional.</step>
+    <step order="6">Update/add unit tests covering the new size constant (if added) and the shared launcher's option construction.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: mark 032 complete.</step>
+    <step order="8">Document the chosen header-hide mechanism, the sizing decision (including any new named size + rationale), and the modal-in-modal vs single-modal scenario finding in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If hiding the OOB form header is not achievable via form configuration, a dedicated modal-form clone, or a documented navigateTo option — i.e., it would require a proprietary rebuild of the form's chrome (Option 2's territory) — STOP and escalate per CLAUDE.md §6 rather than silently switching to a proprietary FormModal. That would reverse the owner's 2026-08-14 ADR-050 Path A decision and requires explicit sign-off, not an implementation-time pivot.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Full-cover sizing — single-modal case">
+      <steps>
+        <step>From the SmartTodo Code Page embedded directly in a workspace pane (not itself modal), click Open on a card</step>
+      </steps>
+      <expected>The inner dialog covers the launching surface with no inset/nested frame visible.</expected>
+    </test>
+    <test name="Full-cover sizing — modal-in-modal case">
+      <steps>
+        <step>From the LegalWorkspace widget with no card selected, click Open (opens the Code Page itself as a modal), then click Open on a card inside it</step>
+      </steps>
+      <expected>The inner dialog covers the outer Code-Page-as-modal frame (reads as "replace, not nest").</expected>
+    </test>
+    <test name="Header hidden, Save reachable">
+      <steps>
+        <step>Open the inner dialog (create or open)</step>
+        <step>Inspect the top of the dialog</step>
+        <step>Click Save &amp; Close</step>
+      </steps>
+      <expected>No native record-title/command-bar header band renders; Save &amp; Close is reachable and functions (e.g. via the surface's own controls or ribbon, whichever the chosen mechanism preserves).</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Repeat the above under webLightTheme and webDarkTheme</step>
+      </steps>
+      <expected>Any Spaarke-authored chrome (not the OOB form itself) adapts via semantic tokens; zero hex/rgb literals in changed files.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dataverse-mcp">describe_table / form inspection for the header-hide investigation</tool>
+    <tool name="npm">Run vitest for any changed shared-lib code</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">sprk_todo main form or dedicated modal form (if that is the chosen mechanism)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts (if a new size is added)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the inner OOB main-form modal (create or open), when rendered in the single-modal case, then it fully covers the launching surface with no inset frame.</criterion>
+    <criterion testable="true">Given the modal-in-modal case, then the inner dialog fully covers the outer Code-Page-as-modal frame.</criterion>
+    <criterion testable="true">Given the inner dialog, then no duplicate title/command bar renders below its own chrome.</criterion>
+    <criterion testable="true">Given the header is hidden, then native Save and Save &amp; Close remain reachable and functional.</criterion>
+    <criterion testable="true">Negative: if a 4th named OOB size was required, it is added via oobModalSizes.ts's documented pattern (not an inline literal), and the addition + rationale is recorded in notes/.</criterion>
+    <criterion testable="true">All unit tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-12 (U-6), FR-13 (F-7). Owner decision 2026-08-14: Option 1 (keep OOB form, full-cover + hidden header) — Option 2 (proprietary FormModal) explicitly rejected. F-8's Save&amp;Close coordination (task 033) is a separate concern that persists regardless of this task's sizing/header outcome.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

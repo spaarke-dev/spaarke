@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="smart-todo-r5">
+  <metadata>
+    <title>Absorb PR #508 boundary fix on Spaarke.SmartTodo.Components (FR-01 prerequisite)</title>
+    <phase>1: Shared-lib foundation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies TypeScript source + package/tsconfig files in a shared peer package consumed by multiple hosts (LegalWorkspace, future SpaarkeAi); FR-01 prerequisite that FR-02..FR-15 downstream card/hoist work depends on. Tags include shared-lib.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius: the `@spaarke/ui-components` package-boundary fix underlies every future hoist/consumer of `Spaarke.SmartTodo.Components`; getting the tsconfig `paths` / package.json dependency wiring wrong silently reintroduces the exact boundary violation PR #508 was meant to fix, breaking type-checking for all downstream consumers.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares `Spaarke.SmartTodo.Components` package files with the hoist spine (tasks 002/003) — those tasks add/move files into the same package immediately after this one lands; running 001 concurrently with anything else touching this package risks merge conflicts on package.json/tsconfig.json.</parallel-reason>
+    <deps>none</deps>
+    <tags>react, typescript, shared-lib</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Re-apply the stale, abandoned PR #508 (`fix/events-smarttodo-components-package-boundary`, CONFLICTING, 2026-06-29) package-boundary fix on CURRENT master for `Spaarke.SmartTodo.Components`. Rewrite the 4 relative-path imports that reach into `../../../Spaarke.UI.Components/src/...` (a private-source bypass of the `@spaarke/ui-components` package boundary) to proper `@spaarke/ui-components/...` package specifiers, in exactly these 3 files: `src/client/shared/Spaarke.SmartTodo.Components/src/types/kanban.ts` (1 import), `src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx` (2 imports), `src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartTodoKanban/SmartTodoKanban.tsx` (1 import). Add `@spaarke/ui-components` as both a `dependency` (`file:../Spaarke.UI.Components`) and `peerDependency` in `Spaarke.SmartTodo.Components/package.json`, and add `baseUrl` + `paths` mapping `@spaarke/ui-components` / `@spaarke/ui-components/*` to `Spaarke.SmartTodo.Components/tsconfig.json` — copy the EXACT pattern already in `src/client/shared/Spaarke.DailyBriefing.Components/tsconfig.json` and `package.json` (verified working reference; also consistent with `Spaarke.AI.Widgets/tsconfig.json`). Runtime semantics MUST NOT change — this is an import-path + build-config fix only.</prompt>
+
+  <role>SPAARKE platform developer. Expert in TypeScript project-reference boundaries, npm workspace package specifiers, and the `@spaarke/*` peer-package convention used across `src/client/shared/`. Follow ADRs strictly.</role>
+
+  <goal>`Spaarke.SmartTodo.Components` type-checks (`tsc --noEmit` / `npm run build`) without surfacing any `Spaarke.UI.Components` private-source compiler errors; zero remaining `../../../Spaarke.UI.Components/src/` or `../../../../Spaarke.UI.Components/src/` import specifiers anywhere in `Spaarke.SmartTodo.Components/src/`; `package.json` carries the `@spaarke/ui-components` dependency + peerDependency; `tsconfig.json` carries the `@spaarke/ui-components` path mapping; no runtime/behavioral change.</goal>
+
+  <context>
+    <background>Spec FR-01 (Prerequisite) and CLAUDE.md "PR #508 recipe" note: PR #508 proposed this exact fix but went stale/CONFLICTING and was abandoned 2026-06-29. Owner clarification (spec.md Owner Clarifications table, "PR #508 vs R5") confirmed: fold into FR-01, do not revive #508 separately; FR-01 re-applies the fix on current master, then #508 is closed as superseded at project wrap-up (task 090). This task is the FIRST step of FR-01 and MUST land before task 002 (the 13-file Kanban hoist) — the hoist will itself add imports from `@spaarke/ui-components` and must use the restored clean boundary, never the relative bypass this task removes.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/types/kanban.ts</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartTodoKanban/SmartTodoKanban.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/package.json</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/tsconfig.json</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.DailyBriefing.Components/tsconfig.json</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.DailyBriefing.Components/package.json</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/tsconfig.json</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No upstream task dependency — this is the first task of the project.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Scope: all cross-package imports in `Spaarke.SmartTodo.Components` MUST consume `@spaarke/ui-components` via its package specifier (or a documented `paths` alias resolving to its `dist/` types) — never reach into its `src/` directly. This is the boundary PR #508 restores.</constraint>
+    <constraint source="project">Scope: runtime behavior of `Spaarke.SmartTodo.Components` is UNCHANGED by this task — only import specifiers and build configuration (package.json, tsconfig.json) are touched. Do not alter component logic, props, or exports.</constraint>
+    <constraint source="project">Scope: use the `Spaarke.DailyBriefing.Components` tsconfig/package.json pattern verbatim (paths mapped to `../Spaarke.UI.Components/dist/index.d.ts` and `../Spaarke.UI.Components/dist/*`; dependency as `file:../Spaarke.UI.Components`) — do not invent a different resolution strategy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-lib package boundaries</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/package.json</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/tsconfig.json</file>
+    </files>
+    <patterns>
+      <pattern name="peer-package-boundary" location="src/client/shared/Spaarke.DailyBriefing.Components/tsconfig.json">The `baseUrl: "."` + `paths` mapping of `@spaarke/ui-components` / `@spaarke/ui-components/*` to `../Spaarke.UI.Components/dist/...` — the exact shape to replicate in `Spaarke.SmartTodo.Components/tsconfig.json`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor level per CLAUDE.md §8; load ADR-012, ADR-021, spec.md, CLAUDE.md, SHARED-UI-COMPONENTS-GUIDE.md.</step>
+    <step order="1">Grep `Spaarke.SmartTodo.Components/src/` for `Spaarke.UI.Components/src` to confirm the exact set of relative-path imports before editing (expect: 1 in `types/kanban.ts`, 2 in `widgets/SmartTodoWidget/SmartTodoWidget.tsx`, 1 in `components/SmartTodoKanban/SmartTodoKanban.tsx`).</step>
+    <step order="2">In `types/kanban.ts`, rewrite the `IKanbanColumn`/`KanbanOrientation` re-export from `'../../../Spaarke.UI.Components/src/components/Kanban/types'` to `'@spaarke/ui-components/components/Kanban/types'` (or the equivalent subpath the package's `dist/` build actually exposes — verify against `Spaarke.UI.Components/package.json`'s `exports`/`files` before finalizing the exact subpath).</step>
+    <step order="3">In `widgets/SmartTodoWidget/SmartTodoWidget.tsx`, rewrite both imports (`OrientationToggle` from `'../../../../Spaarke.UI.Components/src/components/OrientationToggle'` and `MicrosoftToDoIcon` from `'../../../../Spaarke.UI.Components/src/icons/MicrosoftToDoIcon'`) to `@spaarke/ui-components/...` package specifiers.</step>
+    <step order="4">In `components/SmartTodoKanban/SmartTodoKanban.tsx`, rewrite the `KanbanBoard` import from `'../../../../Spaarke.UI.Components/src/components/Kanban/KanbanBoard'` to `@spaarke/ui-components/...`.</step>
+    <step order="5">Update `Spaarke.SmartTodo.Components/package.json`: add `"@spaarke/ui-components": "file:../Spaarke.UI.Components"` under `dependencies`, and add `"@spaarke/ui-components": "*"` under `peerDependencies` (mirror `Spaarke.DailyBriefing.Components/package.json`'s exact shape).</step>
+    <step order="6">Update `Spaarke.SmartTodo.Components/tsconfig.json`: add `"baseUrl": "."` and a `"paths"` block mapping `@spaarke/ui-components` → `["../Spaarke.UI.Components/dist/index.d.ts"]` and `@spaarke/ui-components/*` → `["../Spaarke.UI.Components/dist/*"]` (copy verbatim from `Spaarke.DailyBriefing.Components/tsconfig.json`).</step>
+    <step order="7">Run `npm run build` (or `tsc --noEmit`) inside `Spaarke.SmartTodo.Components`; confirm zero errors and specifically zero errors originating from `Spaarke.UI.Components`' private `src/` files.</step>
+    <step order="8">Grep the whole package tree again to confirm zero remaining `Spaarke.UI.Components/src` matches.</step>
+    <step order="9">Run any existing tests in `Spaarke.SmartTodo.Components/__tests__/` to confirm no behavioral regression from the import rewrite.</step>
+    <step order="10">Update `projects/smart-todo-r5/tasks/TASK-INDEX.md`: mark 001 status 🔲 → ✅.</step>
+    <step order="11">Document any deviation (e.g., a different subpath than assumed) in `projects/smart-todo-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the `Spaarke.AI.Widgets` / `Spaarke.DailyBriefing.Components` tsconfig `paths` pattern differs materially from what PR #508 (per its title/description) assumed — e.g., if `Spaarke.UI.Components/dist/` does not actually expose the subpaths these imports need — STOP and reconcile before proceeding; do not invent a third resolution strategy without documenting why the two existing precedents don't apply.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="No visual/behavioral change (build-only task)">
+      <steps>
+        <step>Run `npm run build` in `Spaarke.SmartTodo.Components` before and after the change (or diff the compiled output shape) to confirm the change is import-path-only.</step>
+        <step>Run existing unit tests in `Spaarke.SmartTodo.Components/__tests__/` and confirm they still pass unchanged.</step>
+      </steps>
+      <expected>No dark-mode / rendering assertion needed — this task changes zero JSX/styling; a dark-mode check is not applicable. Build output and test results are unchanged aside from resolving without private-source errors.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/type-check `Spaarke.SmartTodo.Components` (`npm run build`)</tool>
+    <tool name="terminal">Run grep to verify import rewrites are complete</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/types/kanban.ts</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartTodoKanban/SmartTodoKanban.tsx</output>
+    <output type="config">src/client/shared/Spaarke.SmartTodo.Components/package.json</output>
+    <output type="config">src/client/shared/Spaarke.SmartTodo.Components/tsconfig.json</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the rewritten imports, when `npm run build` (or `tsc --noEmit`) runs in `Spaarke.SmartTodo.Components`, then it succeeds WITHOUT surfacing any `Spaarke.UI.Components` private-source compiler errors.</criterion>
+    <criterion testable="true">Given a repo-wide grep for `Spaarke.UI.Components/src` scoped to `Spaarke.SmartTodo.Components/src/`, when run after this task, then zero matches remain.</criterion>
+    <criterion testable="true">Given `package.json`, when inspected, then it contains `@spaarke/ui-components` under both `dependencies` and `peerDependencies`.</criterion>
+    <criterion testable="true">Given `tsconfig.json`, when inspected, then it contains a `paths` entry mapping `@spaarke/ui-components` and `@spaarke/ui-components/*`.</criterion>
+    <criterion testable="true">Negative: no component prop, export signature, or rendered output changes — a diff of `Spaarke.SmartTodo.Components/src/**/*.{ts,tsx}` shows only import-statement line changes plus the two config files.</criterion>
+    <criterion testable="true">All existing unit tests in `Spaarke.SmartTodo.Components/__tests__/` pass unchanged; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec section: FR-01 (Prerequisite). This is step 1 of 3 in the Phase 1 serial spine (001→002→003); task 002 (the 13-file Kanban hoist) depends on this boundary being clean before it adds new `@spaarke/ui-components` imports for the hoisted components. PR #508 itself is closed as superseded at project wrap-up (task 090), not by this task.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

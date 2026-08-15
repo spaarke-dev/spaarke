@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="smart-todo-r5">
+  <metadata>
+    <title>Save &amp; Close dismisses inner modal and refreshes the kanban (FR-14)</title>
+    <phase>4: Main-form modal</phase>
+    <gate>032 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Coordinates dialog-close detection across two host surfaces (Code Page + LegalWorkspace widget) for a production save flow; correctness failure silently hides saved data from the user (kanban goes stale). CLAUDE.md §8 FULL trigger; explicitly named as an opus/xhigh task in projects/smart-todo-r5/CLAUDE.md §"Execution Model &amp; Tiering".</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius task per projects/smart-todo-r5/CLAUDE.md §8.5 — explicitly named alongside 001 (hoist) and 013 (resolver wiring) as opus+xhigh-eligible. Getting the save-vs-cancel signal wrong silently breaks the user's expectation that "I saved, the list updated" across every SmartTodo entry point.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same modal launch path as 030/031/032 — extends the exact shared launcher + call sites those tasks established; concurrent edits would conflict.</parallel-reason>
+    <deps>032</deps>
+    <tags>react, typescript, dataverse, modal, frontend</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the task-031 shared OOB launcher's Save/Cancel outcome signal (NavigateToOutcome — savedEntityReference present on save, cancelled:true on dismiss) to trigger a kanban refetch in BOTH the SmartTodo Code Page and the LegalWorkspace widget, for BOTH create (task 030) and open (task 031) flows, so a user never has to manually reload to see their saved change.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Xrm.Navigation.navigateTo Promise-resolution semantics for target:2 dialogs, and in this codebase's existing refetch/refresh plumbing (TodoContext.refetch, SmartTodoApp's innerRefetchRef, LegalWorkspace's onRefetchReady/feedSync). Follow the Modal-Decision-Criteria's OOB family constraints — no proprietary dialog substitution.</role>
+
+  <goal>Every call to the task-031 shared launcher (create and open, from both SmartTodoApp.tsx and todo.registration.ts) awaits its NavigateToOutcome and, when a save actually occurred (savedEntityReference present, or the equivalent open-mode save signal confirmed during task 031's step 2 investigation), invokes the correct surface's existing refetch mechanism (SmartTodoApp's handleRefresh / TodoContext.refetch chain; LegalWorkspace's captured refetch via onRefetchReady / feedSync.notifyChange). When the user cancels/dismisses without saving, no refetch fires (avoid a jarring no-op reload) — a redundant refetch on cancel is tolerable but a MISSING refetch on save is not.</goal>
+
+  <context>
+    <background>Spec FR-14 (F-8, owner-decided 2026-08-14: Option 1 — keep OOB form, "F-8's Save&amp;Close coordination therefore still needs the interceptor work"). IMPORTANT CORRECTION to spec/design framing: design.md and earlier drafts describe this as "extending the SmartTodoModal interceptor" or "the parent-side interceptor." That component was fully retired 2026-07-01 by ai-spaarke-ai-workspace-UI-r2 (task 022 deleted src/solutions/SmartTodo/src/components/Modal/SmartTodoModal.tsx and its iframe-hosted approach entirely) — there is no interceptor object in the current codebase to extend. The ACTUAL current gap: both openSprkTodoAsLayout1 (SmartTodoApp.tsx, pre-031) and FeedSyncBridgeHost.handleOpenTodo (todo.registration.ts, pre-031) call `xrm.Navigation.navigateTo(...)` fire-and-forget (`void Promise.resolve(...).catch(...)` / `void xrm.Navigation.navigateTo(...)`) with NO `.then()` — the Promise DOES resolve when the dialog closes (this is standard target:2 dialog behavior, already exploited by wizardLaunchers.ts's navigateToWebResourceSurfaceAsync and navigateToEntityRecordSurfaceAsync, which already await it and parse `savedEntityReference`), but nothing currently observes that resolution to trigger a refresh. Post-031, there is exactly ONE shared launcher; this task's job is to chain the missing `.then()`/await-based refresh onto it — not to build a new close-detection subsystem, and not to intercept Xrm.Page.ui.close (that API is form-context-scoped and this task never needs in-form access; the outer navigateTo Promise is the correct and sufficient signal).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+      <file role="modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+      <file role="canonical-reference">src/solutions/SmartTodo/src/context/TodoContext.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Create-mode call site to wire.</dependency>
+      <dependency task="031" status="pending">The single shared launcher this task extends; also produced the step-2 investigation finding on whether open-mode's resolve shape matches create-mode's savedEntityReference contract — reuse that finding rather than re-investigating.</dependency>
+      <dependency task="032" status="pending">Sizing/header changes must land first so this task's manual verification reflects the final visual shape, not an interim one.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">Path A project-scoped exception remains in force. The refresh mechanism is the OOB navigateTo Promise resolving — do NOT introduce a proprietary FormModal/embedded-form approach to gain "easier" close control; that reverses the owner's 2026-08-14 Option-1 decision.</constraint>
+    <constraint source="project">MUST use the existing refetch entry points per surface — SmartTodoApp's captured innerRefetchRef/handleRefresh chain and TodoContext.refetch; LegalWorkspace's onRefetchReady-captured refetch and/or feedSync.notifyChange. Do NOT build a new refetch mechanism; wire the outcome signal to the ones that already exist.</constraint>
+    <constraint source="project">MUST NOT fire a refetch when the dialog was cancelled/dismissed without saving (avoid visible no-op flicker) — gate strictly on the save signal task 031's step 2 confirmed for open-mode (and the existing savedEntityReference for create-mode).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>oob-dialog-close-refresh</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+    </files>
+    <patterns>
+      <pattern name="NavigateToOutcome-based refresh" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts">navigateToEntityRecordSurfaceAsync already returns {launched, cancelled, savedEntityReference} — this task's refresh gate is `outcome.savedEntityReference !== undefined` (create) and the equivalent open-mode signal task 031 confirmed.</pattern>
+      <pattern name="innerRefetchRef/handleRefresh" location="src/solutions/SmartTodo/src/SmartTodoApp.tsx">Existing round-8 refetch capture — the correct hook point for the Code Page surface; do not bypass it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier opus, effort xhigh. Re-read task 031's notes/ entry for the open-mode resolve-shape finding before writing any code — do not re-derive it from scratch.</step>
+    <step order="1">Confirm (from task 031's investigation, or re-verify via researcher subagent / Microsoft Learn if the finding was inconclusive) exactly how an EXISTING-record `entityrecord` navigateTo dialog signals "user saved" vs "user cancelled" on Promise resolution — whether it is the same `{savedEntityReference:[...]}` shape create-mode uses, an empty resolve either way (meaning open-mode cannot distinguish save from cancel via the resolve value alone and a different signal — e.g. comparing pre/post record data, or accepting the harmless-redundant-refetch tradeoff — is required).</step>
+    <step order="2">In SmartTodoApp.tsx: await the shared launcher's outcome at both call sites (create via task 030, open via task 031/OPEN_TODOS_EVENT listener + useLaunchContext openTodo effect). On a confirmed save, call the existing handleRefresh (innerRefetchRef fallback to TodoContext.refetch). On cancel, do nothing.</step>
+    <step order="3">In todo.registration.ts's FeedSyncBridgeHost.handleOpenTodo: await the same shared launcher's outcome. On a confirmed save, invoke the captured refetch (via the same ref pattern already established for onRefetchReady) and/or feedSync.notifyChange so cross-block sync (FeedTodoSyncContext) also updates. On cancel, do nothing.</step>
+    <step order="4">If step 1 concludes open-mode CANNOT reliably distinguish save from cancel via the resolve value, implement the pragmatic fallback: refetch unconditionally on open-mode dialog close (accept the harmless redundant-refetch-on-cancel tradeoff explicitly called out in the constraints as tolerable) — document this decision and why create-mode does not need the same fallback (it has a reliable signal).</step>
+    <step order="5">Manually verify end-to-end on the real MDA (or closest available harness): (a) create a new To Do via + New Task, Save &amp; Close, confirm it appears in the kanban without reload; (b) open an existing To Do, edit + Save &amp; Close, confirm the change reflects without reload; (c) open an existing To Do and Cancel/X-close without saving, confirm no unexpected data change and (per step 1's finding) an acceptable refresh behavior; repeat (a)-(c) from the LegalWorkspace widget entry point.</step>
+    <step order="6">Add/update unit tests: outcome-gated refetch fires on savedEntityReference-present, does not fire (or is documented as the accepted redundant case) on cancelled, for both SmartTodoApp.tsx and todo.registration.ts call sites.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: mark 033 complete.</step>
+    <step order="8">Document the save-vs-cancel signal finding (step 1), the fallback decision if applicable (step 4), and the end-to-end verification results (step 5) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If neither the navigateTo resolve value nor a reasonable pragmatic fallback (unconditional refetch on close) can reliably deliver "kanban reflects the save without manual reload" for BOTH create and open across BOTH host surfaces — e.g., the dialog Promise never resolves in one host context, or resolves before the Dataverse write is queryable (read-after-write race) — STOP and escalate per CLAUDE.md §6. This is the known-hard MDA coordination boundary flagged in projects/smart-todo-r5/CLAUDE.md; do not ship a "mostly works" partial fix without surfacing it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Create + Save &amp; Close refreshes kanban (Code Page)">
+      <steps>
+        <step>Click + New Task, fill required fields, Save &amp; Close</step>
+      </steps>
+      <expected>The new To Do appears in the kanban within the same session, no manual reload.</expected>
+    </test>
+    <test name="Open + edit + Save &amp; Close refreshes kanban (both surfaces)">
+      <steps>
+        <step>From the SmartTodo Code Page, open an existing To Do, change a field, Save &amp; Close</step>
+        <step>From the LegalWorkspace widget, repeat</step>
+      </steps>
+      <expected>Both surfaces reflect the change without manual reload.</expected>
+    </test>
+    <test name="Cancel does not corrupt state">
+      <steps>
+        <step>Open an existing To Do, make no changes (or discard), close via X/Cancel</step>
+      </steps>
+      <expected>No unexpected data change; kanban state remains consistent (a harmless redundant refetch is acceptable per the documented fallback decision, a data regression is not).</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Repeat the create/open/save flows under webLightTheme and webDarkTheme</step>
+      </steps>
+      <expected>No visual regression in Spaarke-authored chrome; zero hex/rgb literals in changed files.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest across SmartTodo, LegalWorkspace, and Spaarke.UI.Components</tool>
+    <tool name="dataverse-mcp">Real-DV manual verification of the end-to-end save/refresh flow</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</output>
+    <output type="code">src/solutions/SmartTodo/src/SmartTodoApp.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/todo.registration.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the user creates a To Do via + New Task and clicks Save &amp; Close, then the modal dismisses and the SmartTodo Code Page kanban shows the new To Do without a manual reload.</criterion>
+    <criterion testable="true">Given the user opens an existing To Do and clicks Save &amp; Close from the Code Page, then the kanban reflects the change without a manual reload.</criterion>
+    <criterion testable="true">Given the user opens an existing To Do and clicks Save &amp; Close from the LegalWorkspace widget, then the widget's list reflects the change without a manual reload.</criterion>
+    <criterion testable="true">Negative: given the user cancels/dismisses without saving, then no data is changed (a redundant harmless refetch is acceptable only if step 1's investigation concluded save/cancel cannot be distinguished; otherwise no refetch fires).</criterion>
+    <criterion testable="true">Negative: given the save-vs-cancel signal could not be made reliable across both host surfaces, the task escalated per CLAUDE.md §6 rather than shipping a silently-broken refresh.</criterion>
+    <criterion testable="true">All unit tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec ref: FR-14 (F-8). Corrects the spec/design "SmartTodoModal interceptor" framing to current code reality (see background) — cite this correction in the PR description so reviewers aren't confused by the stale spec language. Do not intercept Xrm.Page.ui.close; the outer navigateTo Promise is the load-bearing signal.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

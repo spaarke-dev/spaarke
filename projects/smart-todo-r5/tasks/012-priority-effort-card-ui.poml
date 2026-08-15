@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="smart-todo-r5">
+  <metadata>
+    <title>Surface priority + effort indicators on the hoisted KanbanCard (FR-02/FR-03)</title>
+    <phase>2: Schema + scoring + resolver</phase>
+    <gate>003 + 010 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared React components (@spaarke/smart-todo-components) consumed by both LegalWorkspace and the SpaarkeAi widget; tags include fluent-ui/react/shared-lib; FULL per CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified visual addition to an existing card component, not high-blast-radius architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the hoisted KanbanCard/PriorityScoreCard/EffortScoreCard files in @spaarke/smart-todo-components, which Phase 3 visual tasks (020/022/023) also touch — must not interleave with those to avoid merge conflicts on the same package.</parallel-reason>
+    <deps>003,010</deps>
+    <tags>react, typescript, fluent-ui, shared-lib</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a priority glyph (Fluent v9 colored dot/flag) and an effort indicator to KanbanCard in @spaarke/smart-todo-components, reading the new sprk_priority/sprk_effort choice fields (created in task 010). Extend the existing PriorityScoreCard/EffortScoreCard components (post-hoist, now living in the peer package per task 003) rather than creating new card components.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 React components, semantic-token theming, and ADR-012 shared-library boundaries. Follow ADR-021 (semantic tokens, dark mode) strictly.</role>
+
+  <goal>KanbanCard renders a priority glyph + effort indicator derived from sprk_priority/sprk_effort on every card; PriorityScoreCard and EffortScoreCard (hoisted into @spaarke/smart-todo-components by task 003) are extended, not duplicated; zero hex/rgb literals; light/dark parity verified.</goal>
+
+  <context>
+    <background>Spec FR-02 ("Card renders a priority glyph") and FR-03 ("mapping is the single source of truth...card shows the priority indicator" per Success Criteria #2). Task 003 (Phase 1) hoists the 13-file rich Kanban subtree — including PriorityScoreCard.tsx and EffortScoreCard.tsx, currently at src/solutions/LegalWorkspace/src/components/SmartToDo/ — into @spaarke/smart-todo-components, following the same one-folder-per-component convention already used by the partially-hoisted KanbanCard (src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/). By the time this task runs, PriorityScoreCard/EffortScoreCard are expected at src/client/shared/Spaarke.SmartTodo.Components/src/components/PriorityScoreCard/ and .../EffortScoreCard/ respectively — verify the exact post-hoist path via Grep before editing (do not assume; task 003's actual output governs).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/KanbanCard.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/KanbanCard.styles.ts</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/components/PriorityScoreCard/ (post-hoist path — verify via Grep after task 003)</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/components/EffortScoreCard/ (post-hoist path — verify via Grep after task 003)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/types/kanban.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Converts LegalWorkspace SmartToDo/ to a thin shim; hoists PriorityScoreCard/EffortScoreCard into @spaarke/smart-todo-components — this task's target files depend on that landing first.</dependency>
+      <dependency task="010" status="pending">sprk_priority + sprk_effort Choice columns must exist on sprk_todo before the card can read them.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens exclusively for all new glyph/indicator styling — zero hex/rgb literals, zero inline color outside the existing data-driven exceptions already documented in KanbanCard.tsx (e.g. score-circle color, due-badge color).</constraint>
+    <constraint source="ADR-012">Extend existing components in @spaarke/smart-todo-components; no reach-into src/solutions/... (host-agnostic boundary, NFR-05).</constraint>
+    <constraint source="spec">MUST NOT change the composite score formula/weights in todoScoring.ts — this task is presentation-only.</constraint>
+    <constraint source="project">Priority/effort glyph is read-only display on the card (selection/edit happens via the form/wizard from task 011) — do not add write/edit affordances to KanbanCard itself.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui-cards</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Fluent v9 component authoring standards.</pattern>
+      <pattern name="hoisted-kanban-card" location="src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/KanbanCard.tsx">Existing card structure, styles convention, and dynamic-color exception pattern to extend from.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load KanbanCard.tsx, KanbanCard.styles.ts, todoScoring.ts, and Grep-confirm the post-task-003 location of PriorityScoreCard/EffortScoreCard before editing.</step>
+    <step order="1">Grep the repo for PriorityScoreCard.tsx / EffortScoreCard.tsx to confirm their post-hoist package path; if still under src/solutions/LegalWorkspace/... (task 003 not actually landed), STOP and escalate per the trigger below.</step>
+    <step order="2">Extend the shared IKanbanCardTodo / kanban.ts types (if needed) to include sprk_priority and sprk_effort as structurally-typed optional fields.</step>
+    <step order="3">Add a small priority glyph (colored dot or flag icon from @fluentui/react-icons) to KanbanCard.tsx, positioned per the existing card layout (near the score circle or title), colored via semantic tokens keyed off the priority value (e.g. Urgent/High/Medium/Low mapped to colorPaletteRed/Yellow/... foreground tokens — reuse the existing due-badge color pattern as precedent for a data-driven-but-token-based approach).</step>
+    <step order="4">Add an effort indicator (e.g. a compact label or icon) to KanbanCard.tsx reflecting sprk_effort.</step>
+    <step order="5">Extend PriorityScoreCard and EffortScoreCard (the detail-pane breakdown cards) to surface the new choice value alongside the existing numeric score/factor breakdown, without altering the factor-table logic.</step>
+    <step order="6">Write/update unit tests for KanbanCard (glyph renders per priority/effort value; glyph absent/neutral when unset) and for PriorityScoreCard/EffortScoreCard.</step>
+    <step order="7">Verify zero hex/rgb literals via grep; run npm test for the shared package.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: mark 012 complete.</step>
+    <step order="9">Document any deviation in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 003's hoist has not actually landed PriorityScoreCard/EffortScoreCard into @spaarke/smart-todo-components (i.e., they are still only in src/solutions/LegalWorkspace/src/components/SmartToDo/ at task-start), STOP and escalate rather than editing the pre-hoist LegalWorkspace-local copies — editing those would violate the Phase-1-before-Phase-2-card-UI ordering constraint (spec.md Dependencies) and get overwritten/duplicated by the hoist.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Priority/Effort Glyph Rendering">
+      <steps>
+        <step>Render KanbanCard with sprk_priority = each of Urgent/High/Medium/Low and sprk_effort = each of None/Very High/High/Medium/Low</step>
+        <step>Verify the glyph/indicator reflects the correct value for each combination</step>
+      </steps>
+      <expected>Each priority/effort value renders a visually distinct, correctly colored glyph/indicator; unset values render a neutral/no-op state (no crash, no misleading color).</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render KanbanCard (with a populated priority/effort glyph) in a harness with webLightTheme</step>
+        <step>Switch to webDarkTheme</step>
+        <step>Verify glyph/indicator colors adapt via semantic tokens with no hardcoded hex/rgb</step>
+      </steps>
+      <expected>All glyph/indicator colors adapt correctly in both themes with zero hex/rgb literals per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test the shared lib (Spaarke.SmartTodo.Components)</tool>
+    <tool name="terminal">Run grep for hex/rgb literal audit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/KanbanCard.tsx (updated)</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/KanbanCard.styles.ts (updated)</output>
+    <output type="code">PriorityScoreCard + EffortScoreCard (post-hoist location, updated)</output>
+    <output type="test">updated/added unit tests for the above</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a To Do with sprk_priority = Urgent/High/Medium/Low, when the KanbanCard renders, then a distinctly colored priority glyph appears matching that value.</criterion>
+    <criterion testable="true">Given a To Do with sprk_effort set, when the KanbanCard renders, then an effort indicator appears reflecting that value.</criterion>
+    <criterion testable="true">Given a To Do with sprk_priority/sprk_effort unset (null), when the KanbanCard renders, then a neutral/no-op state is shown — no crash, no misleading default color.</criterion>
+    <criterion testable="true">Zero hex/rgb literals introduced by this task (grep-verified); all new colors use Fluent v9 semantic tokens.</criterion>
+    <criterion testable="true">Light/dark theme parity holds for the new glyph/indicator (ui-test above).</criterion>
+    <criterion testable="true">No new component created for this surface — PriorityScoreCard/EffortScoreCard are extended in place; all unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md FR-02/FR-03 Assumptions: "assuming a Fluent v9 colored dot or flag glyph; exact icon selected during implementation." KanbanCard.tsx already has a precedent for data-driven-but-token-based coloring (due-badge urgency colors) — follow that pattern rather than inventing a new styling approach.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

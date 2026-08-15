@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="smart-todo-r5">
+  <metadata>
+    <title>Convert LegalWorkspace SmartToDo/ to a thin shim consuming @spaarke/smart-todo-components (FR-01)</title>
+    <phase>1: Shared-lib foundation</phase>
+    <gate>002 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Final step of the Phase-1 critical-path hoist spine; downstream Phase 2/3/4 tasks (012, 020, 022, 023, 024, 034) all depend on this task landing cleanly. Removes/rewrites LW-local source and updates real consumers (`workspaceConfig.tsx`, `App.tsx`).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical conversion task (re-export + import-path swap) following the exact shim pattern already proven by `todo.registration.ts`/`SmartTodoWidget` — well-specified, not architecturally novel like tasks 001/002.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial spine (001→002→003) — this task consumes the exact package shape task 002 produces; cannot run concurrently with it or with anything else touching `Spaarke.SmartTodo.Components` or LW's `SmartToDo/`.</parallel-reason>
+    <deps>002</deps>
+    <tags>react, typescript, shared-lib</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Convert LegalWorkspace's `src/solutions/LegalWorkspace/src/components/SmartToDo/` into a thin shim that re-exports/consumes `@spaarke/smart-todo-components` (task 002's hoist target) instead of housing the 13-file implementation locally. No duplicated component logic may remain in `src/solutions/LegalWorkspace/src/components/SmartToDo/`. Update the two real LW consumers (`workspaceConfig.tsx` and `App.tsx`) that import `SmartToDo` from `./components/SmartToDo/SmartToDo` so they resolve through the shim/package cleanly. Verify LegalWorkspace builds and the kanban renders identically (visual parity) before and after the swap. Confirm, by grep, that zero `../../../../Spaarke.UI.Components/src/` imports and zero `@spaarke/smart-todo-components`-internal-file reach-ins remain anywhere in the touched packages.</prompt>
+
+  <role>SPAARKE platform developer. Expert in thin-shim conversion patterns for shared-lib consumers and React/TypeScript re-export barrels. Follow ADRs strictly.</role>
+
+  <goal>`src/solutions/LegalWorkspace/src/components/SmartToDo/index.ts` (and any remaining files in that directory) contain ONLY re-exports of `@spaarke/smart-todo-components` symbols — zero duplicated component implementation; `workspaceConfig.tsx` and `App.tsx` render the kanban via the package with no behavioral change; LegalWorkspace builds green; a repo-wide grep confirms zero `../../../../Spaarke.UI.Components/src/` imports and zero direct reach-ins into `Spaarke.SmartTodo.Components/src/` from outside the package.</goal>
+
+  <context>
+    <background>Spec FR-01 acceptance criterion (c): "LegalWorkspace consumes them via `@spaarke/smart-todo-components` (thin shim only, no duplicated logic)". This mirrors the already-proven Pattern D shim shape used for `SmartTodoWidget` in `src/solutions/LegalWorkspace/src/sections/todo.registration.ts` (host-agnostic shared-lib component; LW-side shim owns only LW-specific coupling). Investigation confirms exactly 2 real consumers import the LW-local rich `SmartToDo` today: `src/solutions/LegalWorkspace/src/workspaceConfig.tsx` (`import { SmartToDo } from "./components/SmartToDo/SmartToDo"`) and `src/solutions/LegalWorkspace/src/App.tsx` (same import, used as `&lt;SmartToDo webApi={webApi} userId={userId} useDialogForDetail /&gt;`). Both must continue to work after the shim conversion, either by importing directly from `@spaarke/smart-todo-components` going forward, or via the thin re-export barrel this task creates at the original `./components/SmartToDo` path (whichever keeps the diff smallest while satisfying "thin shim only, no duplicated logic"). PR #508 is formally closed as superseded at project wrap-up (task 090), NOT by this task — this task only notes it in the acceptance record.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/index.ts</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/App.tsx</file>
+      <file role="canonical-reference">src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/index.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Produces the hoisted `@spaarke/smart-todo-components` package surface this shim consumes; MUST be complete before this task starts.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Scope: LegalWorkspace MUST consume the hoisted components via the `@spaarke/smart-todo-components` package specifier only; the shim at `src/solutions/LegalWorkspace/src/components/SmartToDo/` may re-export but must not reimplement any of the 13 hoisted components.</constraint>
+    <constraint source="project">Scope: no behavior change — `workspaceConfig.tsx` and `App.tsx` render identically before/after; delete all now-duplicated logic from `src/solutions/LegalWorkspace/src/components/SmartToDo/` (the 13 files task 002 moved out).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>thin-shim consumer conversion</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/index.ts</file>
+    </files>
+    <patterns>
+      <pattern name="Pattern D structural-only shim" location="src/solutions/LegalWorkspace/src/sections/todo.registration.ts">The proven end-state: shared-lib component is host-agnostic and owns 100% of its own chrome/logic; the LW-side file is structural-only, brokering LW-specific coupling (FeedTodoSyncContext, BroadcastChannel, Xrm.Navigation) via typed props. Apply the same "shim owns coupling, package owns implementation" split for the rich `SmartToDo` consumers.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor level per CLAUDE.md §8; load ADR-012, ADR-021, spec.md, CLAUDE.md, and `todo.registration.ts` before touching any file.</step>
+    <step order="1">Confirm task 002 left `src/solutions/LegalWorkspace/src/components/SmartToDo/` either already-thinned or with the 13 original files still present pending this task's cleanup — reconcile per task 002's step 8 note.</step>
+    <step order="2">Rewrite `src/solutions/LegalWorkspace/src/components/SmartToDo/index.ts` to re-export the hoisted symbols from `@spaarke/smart-todo-components` (e.g., `export { SmartToDo, KanbanCard, ... } from '@spaarke/smart-todo-components';`) — OR update `workspaceConfig.tsx`/`App.tsx` to import directly from `@spaarke/smart-todo-components` and remove the LW-local `SmartToDo/` directory entirely, whichever produces the smaller, cleaner diff while satisfying "no duplicated logic."</step>
+    <step order="3">Delete the 13 duplicated implementation files from `src/solutions/LegalWorkspace/src/components/SmartToDo/` if not already removed by task 002.</step>
+    <step order="4">Update `workspaceConfig.tsx` and `App.tsx` import statements as needed per the step-2 decision; verify prop usage (`webApi`, `userId`, `useDialogForDetail`) still matches the hoisted `SmartToDo` component's prop contract.</step>
+    <step order="5">Run LegalWorkspace's build (`npm run build` or equivalent per its `package.json`); fix any resulting type errors.</step>
+    <step order="6">Grep the whole repo for `../../../../Spaarke.UI.Components/src/` (should be zero, confirming task 001's fix holds) and for any import of `Spaarke.SmartTodo.Components/src/` from outside that package (should be zero — everything goes through the `@spaarke/smart-todo-components` specifier).</step>
+    <step order="7">Manually or via harness-render, verify visual parity: the kanban in both `workspaceConfig.tsx`'s and `App.tsx`'s mount points renders identically to pre-shim behavior.</step>
+    <step order="8">Update `projects/smart-todo-r5/tasks/TASK-INDEX.md`: mark 003 status 🔲 → ✅.</step>
+    <step order="9">Note in `projects/smart-todo-r5/notes/` that PR #508 is ready to be closed as superseded (actual closure happens at task 090 wrap-up, not here).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `workspaceConfig.tsx` or `App.tsx` requires a prop or behavior from the LW-local `SmartToDo` that the hoisted `@spaarke/smart-todo-components` version does not expose (a gap missed by task 002), STOP and escalate per CLAUDE.md §6 — do not patch around it by re-adding local component logic, which would reintroduce the duplication this task exists to eliminate.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Visual parity — LegalWorkspace kanban mount points">
+      <steps>
+        <step>Render `workspaceConfig.tsx`'s SmartToDo mount point before the shim conversion (or against a saved reference) and after.</step>
+        <step>Render `App.tsx`'s `&lt;SmartToDo webApi={webApi} userId={userId} useDialogForDetail /&gt;` mount point before and after.</step>
+      </steps>
+      <expected>Pixel-equivalent kanban rendering, identical interactive behavior (card click, drag, dialog open) in both mount points post-shim.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render the shim-consumed kanban in `webLightTheme`.</step>
+        <step>Switch to `webDarkTheme`.</step>
+      </steps>
+      <expected>All colors adapt via semantic tokens with no regression from the pre-shim LW-local rendering.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build LegalWorkspace + `Spaarke.SmartTodo.Components`</tool>
+    <tool name="terminal">Run grep to verify zero relative-path bypasses and zero cross-package reach-ins remain</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/src/components/SmartToDo/index.ts</output>
+    <output type="code">src/solutions/LegalWorkspace/src/workspaceConfig.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given LegalWorkspace builds after the shim conversion, when `npm run build` runs, then it succeeds with zero errors.</criterion>
+    <criterion testable="true">Given `src/solutions/LegalWorkspace/src/components/SmartToDo/` (if retained) is inspected, then it contains only re-export statements — zero component implementation logic.</criterion>
+    <criterion testable="true">Given a repo-wide grep for `../../../../Spaarke.UI.Components/src/`, when run after this task, then zero matches remain anywhere in the repo.</criterion>
+    <criterion testable="true">Given a repo-wide grep for imports of `Spaarke.SmartTodo.Components/src/` from outside that package, when run after this task, then zero matches remain (all consumers use the `@spaarke/smart-todo-components` package specifier).</criterion>
+    <criterion testable="true">Given `workspaceConfig.tsx` and `App.tsx` render pre- vs. post-shim, then the kanban is visually and behaviorally identical (no regression).</criterion>
+    <criterion testable="true">Negative: if a prop/behavior gap between the LW-local original and the hoisted package version is discovered, the task escalates per CLAUDE.md §6 rather than re-adding local component logic.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec section: FR-01, acceptance criterion (c) + (e). Final step of the Phase 1 serial spine (001→002→003). PR #508 is noted here as ready-to-close but is formally closed as superseded by task 090 (project wrap-up), per CLAUDE.md "Decisions Made" 2026-08-15 entry.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

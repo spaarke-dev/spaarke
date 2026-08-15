@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="smart-todo-r5">
+  <metadata>
+    <title>Vitest/Jest expansion — 22 useLaunchContext shims to passing + FR-02/03/06/07 coverage (FR-16)</title>
+    <phase>5: Tests + hygiene</phase>
+    <gate>011,021,022 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying override (root CLAUDE.md §8, TEST-MODIFYING row): this task modifies files under a solution's __tests__/ tree and carries the `testing` tag, so FULL rigor + code-review/adr-check at Step 9.5 apply UNCONDITIONALLY regardless of the STANDARD default for Phase 5.x tasks.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified test-authoring work against an existing Jest harness; no architectural/security/ADR-migration blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>R</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011,021,022</deps>
+    <tags>testing, typescript, unit-test</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Bring the SmartTodo `useLaunchContext.test.ts` suite to fully real, passing assertions (no placeholder tests) and add unit-test coverage for the FR-02/FR-03 priority/effort auto-score mappings (delivered by task 011), the FR-06 filter combination/defaults/clear-all logic (delivered by task 021), and the FR-07 Completed-toggle logic (delivered by task 022). Use the SmartTodo Code Page's EXISTING Jest harness (`src/solutions/SmartTodo/jest.config.cjs`) — do NOT introduce Vitest as a new/second runner; spec.md's "vitest" wording is stale terminology from before R4-114 wired Jest (code wins over docs per root CLAUDE.md §2).</prompt>
+
+  <role>Spaarke platform developer. Expert in Jest + ts-jest + React Testing Library unit testing for TypeScript/React Code Pages and shared component libraries. Follow ADR-038 testing-strategy principles strictly (translated to the TS ecosystem — see constraints).</role>
+
+  <goal>(1) `src/solutions/SmartTodo/src/hooks/__tests__/useLaunchContext.test.ts` has zero placeholder assertions (`expect(true).toBe(true)`) and its stale "no test runner wired" header comment is removed/corrected; every `it()` block in the file passes under `npm test` (Jest) in `src/solutions/SmartTodo`. (2) New coverage tests exist for the FR-02/FR-03 priority→score and effort→score mapping functions delivered by task 011, wherever task 011 places its single-source-of-truth mapping (expected: an extension of `src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts`); if `Spaarke.SmartTodo.Components` still has no working Jest runner at that point, one is wired per the `Spaarke.UI.Components/jest.config.js` pattern, and the pre-existing orphaned `__tests__/SmartTodoWidget.test.tsx` executes and passes as a side effect. (3) New coverage tests exist for the FR-06 filter-combination/defaults/clear-all logic delivered by task 021 and the FR-07 Completed-toggle logic delivered by task 022, in the SmartTodo Code Page Jest suite. All suites green; zero ADR-038-banned test shapes introduced.</goal>
+
+  <context>
+    <background>Spec FR-16 (TEST-1): "Bring the 22 `useLaunchContext` executable-spec shims to passing tests; add coverage for FR-02/FR-03 (auto-score mappings), FR-06 (filter combination logic, defaults, clear-all), and FR-07 (Completed toggle)." `useLaunchContext.test.ts` currently carries a 2026-06-08 header claiming "SmartTodo's package.json does NOT currently include a test runner" — that is now FALSE: R4-114 (commit history, 2026-06-25) wired `src/solutions/SmartTodo/jest.config.cjs` (ts-jest + jsdom), and `testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx']` already picks this file up. The file's ~30+ `it()` blocks for the pure `parseLaunchContextFromSearch` parser already run for real under Jest today (the "shim" framing is stale for those). The two genuinely-unfinished tests are the final `describe('useLaunchContext hook — URL clearing side-effect (jsdom required)')` block's two `it()`s, which are literal `expect(true).toBe(true)` placeholders with a "PSEUDO-TEST" comment describing the real assertion. Separately, `Spaarke.SmartTodo.Components/__tests__/SmartTodoWidget.test.tsx` exists but the package has NO test runner at all wired (no `jest`/`vitest` devDependency, no `"test"` script) — confirmed by inspecting `package.json`. FR-02/FR-03's mapping tables are described as "the single source of truth shared by form handler + wizards + quick-add", which points at a shared-lib location (most likely `todoScoring.ts`) rather than a single call site — task 011 decides the exact location; this task adds coverage wherever it lands.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SmartTodo/src/hooks/__tests__/useLaunchContext.test.ts</file>
+      <file role="canonical-reference">src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+      <file role="canonical-reference">src/solutions/SmartTodo/jest.config.cjs</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/__tests__/SmartTodoWidget.test.tsx</file>
+      <file role="new">src/client/shared/Spaarke.SmartTodo.Components/jest.config.js</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/jest.config.js</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/package.json</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts</file>
+      <file role="new">src/solutions/SmartTodo/src/components/Toolbar/__tests__/ToolbarActions.test.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">FR-02/FR-03 priority/effort auto-score handler + the single-source-of-truth mapping functions this task must cover.</dependency>
+      <dependency task="021" status="pending">FR-06 filter pane — Priority/Status/Due-date/Assigned-To combination logic, default filter state, Clear-all.</dependency>
+      <dependency task="022" status="pending">FR-07 Completed status + Show-Completed toggle logic.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST use Jest (the SmartTodo Code Page's existing runner, `jest.config.cjs`) for all Code-Page-side tests in this task. MUST NOT add Vitest anywhere in this task's scope — the codebase's established convention for every shared-lib + Code-Page unit-test suite (Spaarke.UI.Components, SmartTodo) is Jest + ts-jest; introducing a second runner has no cost-of-doing-nothing justification per root CLAUDE.md §11 and would fail the "prefer extending an existing service" test.</constraint>
+    <constraint source="project">Scope boundary: this task ONLY adds/completes TEST coverage once 011/021/022 land. It MUST NOT implement FR-02/03/06/07 production logic itself — if a dependency task's logic is missing or not yet in a testable shape, treat that as the escalation trigger below rather than writing the production code inline.</constraint>
+    <constraint source="ADR-038">Apply the ADR-038 §7 build-vs-maintain philosophy even though the file's literal "7 KEEP paths" taxonomy is .NET-scoped: every new test must name a concrete production behavior it protects (not a coverage-% filler); no DI-registration-only tests; no ctor/constructor null-check tests; no mirror tests (1:1 with a trivial getter/mapping); no pass-through-wrapper tests. Coverage is observation, never a gate.</constraint>
+    <constraint source="project">Mock only at module boundaries (e.g., `Xrm.WebApi`, `@spaarke/ui-components` catalog) — do not mock the function/module under test itself. Follow the `jest.mock('@spaarke/ui-components', ...)` module-boundary pattern already used in `RegardingResolverApp.test.tsx` where an analogous boundary exists.</constraint>
+    <constraint source="spec">FR-16 acceptance is literally "vitest suite green" in spec.md — per root CLAUDE.md §2 (code wins, docs lag) this is interpreted as "the SmartTodo Code Page's actual Jest suite is green" (plus the shared-lib Jest suite this task wires). Document this interpretation explicitly in the task notes so the terminology drift is traceable, not silently reinterpreted.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>src/solutions/SmartTodo/jest.config.cjs</file>
+      <file>src/client/shared/Spaarke.UI.Components/jest.config.js</file>
+    </files>
+    <patterns>
+      <pattern name="jest-shared-lib-config" location="src/client/shared/Spaarke.UI.Components/jest.config.js">ts-jest + jsdom config shape to replicate verbatim (with path adjustments) when wiring Spaarke.SmartTodo.Components's own jest.config.js.</pattern>
+      <pattern name="module-boundary-mock" location="src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx">jest.mock() at the @spaarke/ui-components module boundary — the ADR-038-compliant TS analog of "mock at module boundaries, not the unit under test".</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare 🔒 RIGOR LEVEL: FULL (test-modifying override) before starting. Load knowledge/files. Confirm tasks 011, 021, 022 are marked complete in TASK-INDEX.md; if any is not, STOP per the gate and escalate/wait rather than authoring against unfinished production code.</step>
+    <step order="1">Read task 011/021/022's actual landed diffs (via git log/diff on their touched files, or the completed POML `&lt;notes&gt;` completion summaries) to find the exact functions/locations for the priority/effort mapping, the filter-combination predicate, and the Completed-toggle logic.</step>
+    <step order="2">In `useLaunchContext.test.ts`: delete the stale "TEST-RUNNER STATUS (2026-06-08)" header block claiming no runner exists (Jest has run this file since R4-114); replace the two `expect(true).toBe(true)` placeholder tests in the `useLaunchContext hook — URL clearing side-effect` describe block with real assertions per their own "PSEUDO-TEST" comments — render the hook via `@testing-library/react`'s `renderHook` (add `@testing-library/react` as a SmartTodo devDependency if not already present; React 19-compatible version), seed `window.location.search`/`history`, and assert the launch params are cleared via `history.replaceState` while non-launch params (e.g. `data=...`) are preserved.</step>
+    <step order="3">Run `npm test` in `src/solutions/SmartTodo`; confirm every `it()` in `useLaunchContext.test.ts` passes. Note the actual total test count in this file in task notes (spec.md cites "22"; reconcile without treating a numeric mismatch alone as a blocker).</step>
+    <step order="4">Add coverage for the FR-02/FR-03 auto-score mappings at the location found in step 1 (expected: `Spaarke.SmartTodo.Components/src/utils/todoScoring.ts`). If that package still has no Jest runner, wire `jest.config.js` + `"test": "jest"` script + devDependencies (`jest`, `ts-jest`, `jest-environment-jsdom`, `@types/jest`, `identity-obj-proxy`) following `Spaarke.UI.Components/jest.config.js` exactly; confirm the pre-existing `__tests__/SmartTodoWidget.test.tsx` now executes and passes as a side effect of wiring the runner.</step>
+    <step order="5">Add coverage for the FR-06 filter-combination logic at the location found in step 1: each filter category narrows the kanban predicate independently and in combination (Priority ∩ Status ∩ Due-date ∩ Assigned-To); the default filter state is Status={Open, In Progress}; Clear-all resets to that default.</step>
+    <step order="6">Add coverage for the FR-07 Completed-toggle logic at the location found in step 1: Completed items are excluded from the default predicate; toggling "Show Completed" includes them; toggling off re-excludes them.</step>
+    <step order="7">Run the full SmartTodo Code Page Jest suite (and the shared-lib suite if wired in step 4); confirm all green. Grep the new/changed test files for banned shapes (constructor-null-check style, DI-registration-only, trivial `expect(x).toBeDefined()` fillers) and remove any found.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark 040 ✅.</step>
+    <step order="9">Document any deviations (esp. the actual vs. spec-cited "22" count, and the Jest-not-Vitest interpretation of the FR-16 acceptance text) in `projects/smart-todo-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 011's priority/effort mapping (or 021's filter logic, or 022's Completed-toggle logic) is not implemented as a single, testable seam — e.g., the mapping is copy-pasted ad hoc across the form handler, CreateTodoWizard, and quick-add with no shared function — STOP and escalate per CLAUDE.md §6 rather than writing three divergent test suites against duplicated logic; this signals task 011/021/022 did not honor their own "single source of truth" acceptance criterion.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Run Jest suites in src/solutions/SmartTodo and (if wired) src/client/shared/Spaarke.SmartTodo.Components</tool>
+    <tool name="terminal">git log/diff to locate task 011/021/022's landed code</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/solutions/SmartTodo/src/hooks/__tests__/useLaunchContext.test.ts</output>
+    <output type="test">src/client/shared/Spaarke.SmartTodo.Components/__tests__/SmartTodoWidget.test.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/jest.config.js</output>
+    <output type="test">src/client/shared/Spaarke.SmartTodo.Components/src/utils/__tests__/todoScoring.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `useLaunchContext.test.ts`, when `npm test` runs in `src/solutions/SmartTodo`, then every `it()` block in the file passes with a real assertion (zero `expect(true).toBe(true)` placeholders remain).</criterion>
+    <criterion testable="true">Given the FR-02/FR-03 mapping functions delivered by task 011, when their unit tests run, then Urgent/High/Medium/Low map to 100/75/50/25 and Low/Medium/High/VeryHigh/None map to 25/50/75/100/50 respectively, matching FR-02/FR-03 exactly.</criterion>
+    <criterion testable="true">Given the FR-06 filter logic delivered by task 021, when unit tests run, then each category (Priority/Status/Due-date/Assigned-To) narrows the predicate independently and in combination, the default state is Status={Open, In Progress}, and Clear-all resets to that default.</criterion>
+    <criterion testable="true">Given the FR-07 Completed-toggle logic delivered by task 022, when unit tests run, then Completed items are excluded by default and included only when the toggle is on.</criterion>
+    <criterion testable="true">Negative: if any dependency task's logic is not in a single testable seam, the task escalates per the trigger above rather than shipping duplicated-logic tests.</criterion>
+    <criterion testable="true">All Jest suites touched by this task (SmartTodo Code Page + Spaarke.SmartTodo.Components, if wired) pass; zero ADR-038-banned test shapes introduced (verified by self-review against the constraint list).</criterion>
+  </acceptance-criteria>
+
+  <notes>Reconciles spec.md's "vitest"/"22 shims" wording against the actual Jest-based state of the repo (code wins over docs, per root CLAUDE.md §2). File the terminology drift in `notes/` rather than silently "fixing" the spec text. `Spaarke.SmartTodo.Components/package.json` currently has ONLY `"build": "tsc --noEmit"` / `"lint": "tsc --noEmit"` scripts and no test runner at all — step 4 is the first time this package gets a working unit-test story.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

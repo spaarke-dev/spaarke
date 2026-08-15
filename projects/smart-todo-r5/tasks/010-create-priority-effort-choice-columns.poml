@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="smart-todo-r5">
+  <metadata>
+    <title>Create sprk_priority + sprk_effort Choice columns on sprk_todo (FR-02/FR-03)</title>
+    <phase>2: Schema + scoring + resolver</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New Dataverse schema on a production entity (sprk_todo); tags include dataverse/schema; downstream tasks 011-014 depend on the exact option values.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified schema creation with an exact, closed option-value table — not high-blast-radius architecture work.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only sprk_todo schema — independent of Phase 1's hoist (task 001) which touches Spaarke.SmartTodo.Components source files.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, schema</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Create two new Choice (option set) columns on the sprk_todo Dataverse entity — sprk_priority and sprk_effort — with the exact option values below, using the dataverse-create-schema skill / Web API. Do NOT modify the existing sprk_priorityscore or sprk_effortscore number fields; they stay as-is and are populated by a downstream task (011).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse Web API schema creation (option sets, attributes), MCP-first pre-validation. Follow ADR-024 (polymorphic resolver — informational context only, not touched by this task) and dataverse-create-schema patterns strictly.</role>
+
+  <goal>sprk_priority and sprk_effort Choice columns exist on sprk_todo, published, with the exact option labels/values below. No other schema drift (no changes to sprk_priorityscore, sprk_effortscore, or any other sprk_todo attribute).</goal>
+
+  <context>
+    <background>Spec FR-02/FR-03: sprk_priorityscore and sprk_effortscore already exist as Number fields (locked composite-score inputs — see todoScoring.ts). Users currently have no way to SET a priority/effort label; only the raw numeric score exists, which cannot present a user-selectable label or drive a UI glyph. This task adds ONLY the two Choice columns; the auto-score handler that maps choice -> score is task 011 (depends on this task).</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file role="canonical-reference">scripts/Deploy-ChartDefinitionEntity.ps1</file>
+      <file role="new">sprk_todo entity schema (Dataverse — sprk_priority, sprk_effort Choice columns)</file>
+    </relevant-files>
+    <dependencies />
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-02 scope: sprk_priority Choice values are EXACTLY Urgent=100000000, High=100000001, Medium=100000002, Low=100000003. No additional options.</constraint>
+    <constraint source="spec">FR-03 scope: sprk_effort Choice values are EXACTLY None=100000000, Very High=100000001, High=100000002, Medium=100000003, Low=100000004. No additional options.</constraint>
+    <constraint source="project">MUST NOT modify sprk_priorityscore or sprk_effortscore (existing Number fields) — they are populated by task 011, not this task.</constraint>
+    <constraint source="project">MUST NOT change the composite score formula/weights in todoScoring.ts — this task touches Dataverse schema only, no TS code.</constraint>
+    <constraint source="CLAUDE.md-§11">Justification required for both new columns — see &lt;justification&gt; below; do not add any third Choice column or option beyond the exact tables in FR-02/FR-03.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse-schema</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema" location=".claude/skills/dataverse-create-schema/SKILL.md">MCP pre-validation (describe_table) then idempotent Web API schema creation for option sets/attributes.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL per CLAUDE.md §8; load dataverse-create-schema skill, ADR-024/012/021, spec.md FR-02/FR-03.</step>
+    <step order="1">Use MCP describe_table (or Web API metadata GET) on sprk_todo to confirm sprk_priority and sprk_effort do NOT already exist, and confirm sprk_priorityscore/sprk_effortscore exist as Number fields (do not touch them).</step>
+    <step order="2">Create the sprk_priority global or local Choice option set on sprk_todo with options: Urgent=100000000, High=100000001, Medium=100000002, Low=100000003 (in that display order).</step>
+    <step order="3">Create the sprk_effort Choice option set on sprk_todo with options: None=100000000, Very High=100000001, High=100000002, Medium=100000003, Low=100000004 (in that display order).</step>
+    <step order="4">Publish customizations. Re-run MCP describe_table to verify both columns exist with the exact integer values and labels.</step>
+    <step order="5">Confirm no other sprk_todo attribute was modified (diff against the step-1 describe_table snapshot).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: mark 010 complete.</step>
+    <step order="7">Document any deviation (e.g., option-set naming collisions) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the option-set integer values 100000000-100000004 collide with existing options on sprk_priority or sprk_effort (i.e., the columns already exist with DIFFERENT values/labels than specified), STOP and escalate per CLAUDE.md §6 rather than silently renumbering or overwriting.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>sprk_priorityscore and sprk_effortscore already exist as Number(0-100) fields on sprk_todo (confirmed via grep: src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/formTypes.ts:14-15, src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts:131,134). No existing Choice/option-set field for priority or effort.</existing>
+    <extension>No — a numeric 0-100 score cannot present a user-selectable priority/effort LABEL or drive a card glyph; the score is a derived/computed value, not an input the user picks from a short list. A Choice field is the correct primitive for a bounded, labeled selection.</extension>
+    <cost-of-doing-nothing>Without these columns, users have no UI-level way to set priority/effort (only a raw 0-100 slider exists in the wizard today); the auto-score handler (011) has no input to map from; the card (012) cannot render a priority glyph; per spec FR-02/FR-03 acceptance, "choosing a priority sets the score" is impossible without a choice to choose from.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dataverse-mcp">describe_table pre-validation + post-creation verification</tool>
+    <tool name="powershell">Web API schema creation calls per dataverse-create-schema skill</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_todo.sprk_priority (Choice: Urgent/High/Medium/Low)</output>
+    <output type="schema">sprk_todo.sprk_effort (Choice: None/Very High/High/Medium/Low)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a describe_table call on sprk_todo after creation, then sprk_priority exists as a Choice column with exactly 4 options: Urgent=100000000, High=100000001, Medium=100000002, Low=100000003.</criterion>
+    <criterion testable="true">Given a describe_table call on sprk_todo after creation, then sprk_effort exists as a Choice column with exactly 5 options: None=100000000, Very High=100000001, High=100000002, Medium=100000003, Low=100000004.</criterion>
+    <criterion testable="true">Given the same describe_table call, then sprk_priorityscore and sprk_effortscore remain unchanged Number fields (no type/precision drift).</criterion>
+    <criterion testable="true">Both new columns are published (visible via a fresh, uncached metadata query — not just in an unpublished customization).</criterion>
+    <criterion testable="true">Negative: no additional/undocumented option values exist on either Choice column (exhaustive match against the tables above, not a superset).</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md FR-02/FR-03 for the full mapping tables (score mapping is task 011's concern, not this task's). Option value ranges follow the 100000000+ Dataverse custom-option convention used elsewhere in the solution.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

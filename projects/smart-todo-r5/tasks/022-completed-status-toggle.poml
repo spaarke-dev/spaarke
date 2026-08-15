@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="smart-todo-r5">
+  <metadata>
+    <title>Completed status — kanban render support + Show-Completed toggle (FR-07 / F-2)</title>
+    <phase>3: Top bar + filter + visuals</phase>
+    <gate>003 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts query-building + kanban bucketing (queryHelpers.ts, useKanbanColumns.ts) — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Contained query/bucketing change reusing an already-existing visual treatment (KanbanCard isCompleted) — not architectural — sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Q</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>react, typescript, frontend</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Surface Dataverse `sprk_todo.statuscode` = Completed (value 2) as a valid, renderable kanban state, hidden by default, exposed via the "Completed" checkbox inside task 021's filter pane Status category. Today `buildTodoItemsQuery` in src/solutions/SmartTodo/src/services/queryHelpers.ts hard-excludes Completed (`statuscode eq 1 or statuscode eq 659490001` only) and `useKanbanColumns.ts` never sees a Completed item, so no rendering path has been exercised. Make Completed items flow through the existing score-based bucketing (Today/Tomorrow/Future — there is no 4th "Completed" column) and render with the ALREADY-EXISTING `isCompleted` visual treatment in KanbanCard.tsx (statuscode===2 → cardCompleted/titleCompleted classes) without layout breakage.</prompt>
+
+  <role>Spaarke platform developer. Expert in the SmartTodo Kanban bucketing pipeline (useKanbanColumns) and OData query composition. Follow ADRs strictly.</role>
+
+  <goal>When the Status filter's Completed checkbox (task 021) is checked, Completed to-dos are fetched, bucketed into their normal score-based column, and rendered with the existing completed-item styling — with no new kanban column, no drag-drop/selection regression, and no visual breakage. When unchecked (the default), Completed items are excluded exactly as they are today.</goal>
+
+  <context>
+    <background>Spec FR-07 (F-2): "surface statuscode 'Completed' as a valid kanban/filter state, hidden by default, with a Show Completed toggle in the filter pane." Task 021 (FR-06) owns the Status-category checkbox UI and the base query-parameterization plumbing (buildTodoItemsQuery gains a statuscode-inclusion parameter). This task's scope is the KANBAN RENDER-side guarantee — verifying/hardening useKanbanColumns.ts and KanbanCard.tsx handle Completed items correctly once the query layer starts returning them — plus regression coverage for the default-hidden behavior. KanbanCard.tsx already derives `isCompleted = todo.statuscode === 2 || todo.statecode === 1` (line ~188) and applies `cardCompleted`/`titleCompleted` styling — this task verifies that treatment is sufficient and extends it only if gaps are found (e.g., completed items sorting oddly, drag-drop mis-firing on a completed card, or the "Dismissed" collapsible section colliding with newly-visible Completed items).</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SmartTodo/src/services/queryHelpers.ts</file>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/KanbanCard.tsx</file>
+      <file role="canonical-reference">src/solutions/SmartTodo/src/hooks/useTodoItems.ts</file>
+      <file role="canonical-reference">src/solutions/SmartTodo/src/components/DismissedSection.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Phase 1 hoist gate — useKanbanColumns.ts lives in the shared package this task modifies; hoist must be closed first per plan.md sequencing.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-07: Completed items are excluded by default; only visible when the Status filter's Completed checkbox is on.</constraint>
+    <constraint source="project">Do NOT add a 4th "Completed" kanban column — Completed items render inside their existing score-based Today/Tomorrow/Future bucket per the design's "kanban renders Completed without layout breakage" acceptance wording.</constraint>
+    <constraint source="project">Do NOT change the composite To Do Score formula/weights (todoScoring.ts) — out of scope, locked per spec MUST rule.</constraint>
+    <constraint source="ADR-021">Any new/changed styling uses Fluent v9 semantic tokens only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>kanban-bucketing-and-status-lifecycle</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Read queryHelpers.ts (statuscode constants at ~line 474-475: 1=Open, 659490001=In Progress, 2=Completed, 659490002=Dismissed; buildTodoItemsQuery at ~line 562), useKanbanColumns.ts bucketing logic, KanbanCard.tsx isCompleted derivation (~line 188) and its styling application, and DismissedSection.tsx to understand how the separate Dismissed (659490002) lane already works as a precedent for "a non-Open/In-Progress state that still renders."</step>
+    <step order="1">Confirm (do not re-implement, coordinate with task 021 if it has already landed the parameter) that buildTodoItemsQuery can be called with a statuscode-inclusion set that adds `or statuscode eq 2` when Completed is requested.</step>
+    <step order="2">Trace a Completed item through useKanbanColumns.ts's `resolveColumn`/bucketing: verify a statuscode=2 item still gets a valid Today/Tomorrow/Future bucket based on its score/due-date exactly like an Open item (no special-case exclusion exists today since Completed items never previously reached this function — confirm by reading, not by assumption).</step>
+    <step order="3">Verify KanbanCard.tsx's existing isCompleted treatment (cardCompleted/titleCompleted classes) renders correctly for a Completed item mixed into a column of non-completed items — no layout shift, no drag-drop interaction bugs (a completed item should probably remain draggable/interactive like any other card unless product intent says otherwise; if ambiguous, keep it interactive and note the decision).</step>
+    <step order="4">Add/extend unit tests: default fetch excludes Completed; with Completed included, an item bucketed correctly by score/due-date and rendered with the completed visual treatment; toggling the filter off removes previously-visible Completed items from the next fetch.</step>
+    <step order="5">Manually verify no regression in the existing Dismissed-section rendering (statuscode 659490002) — that lane is untouched by this task.</step>
+    <step order="6">Grep changed files for hex/rgb literals — zero matches.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: mark 022 ✅ completed.</step>
+    <step order="8">Document the final Completed-rendering decision (interactive vs read-only, any bucketing edge case found) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 021's Status-category query parameter shape differs from what this task expects (e.g., a different function signature or a different statuscode encoding), coordinate directly with the parallel work rather than diverging — the two tasks share the same predicate-building surface (see parallel-reason). If irreconcilable without a design decision, STOP and escalate per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Completed items render without layout breakage">
+      <steps>
+        <step>Seed or mock a mix of Open, In Progress, and Completed to-dos across different score ranges</step>
+        <step>Toggle the Status filter's Completed checkbox on</step>
+      </steps>
+      <expected>Completed items appear in their score-appropriate column with the existing dimmed/strikethrough treatment; no column overflow, no broken drag-drop for adjacent cards</expected>
+    </test>
+    <test name="Default-hidden regression">
+      <steps>
+        <step>Load the Code Page fresh with the Completed checkbox unchecked (default)</step>
+      </steps>
+      <expected>No Completed items appear anywhere in the kanban, identical to pre-R5 behavior</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render a Completed card in webLightTheme, then webDarkTheme</step>
+      </steps>
+      <expected>Completed styling (dimmed text, strikethrough) adapts via semantic tokens; zero hex/rgb literals</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest in the shared lib + src/solutions/SmartTodo</tool>
+    <tool name="terminal">grep for hex/rgb literals</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/services/queryHelpers.ts</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts</output>
+    <output type="test">src/client/shared/Spaarke.SmartTodo.Components/__tests__/useKanbanColumns.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Completed filter checkbox is unchecked (default), then no statuscode=2 items appear in the fetched set or the kanban — identical to current behavior.</criterion>
+    <criterion testable="true">Given the Completed filter checkbox is checked, then statuscode=2 items are fetched and bucketed into their normal score-based column (Today/Tomorrow/Future) — no 4th column is introduced.</criterion>
+    <criterion testable="true">Given a Completed item renders in a column with non-completed items, then the column layout does not break (no overflow, no card-height regression) and the existing isCompleted visual treatment (dimmed/strikethrough) applies.</criterion>
+    <criterion testable="true">Negative: the pre-existing Dismissed-section rendering (statuscode 659490002) is unaffected by this change.</criterion>
+    <criterion testable="true">All unit tests pass; zero hex/rgb literals via grep; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-07 (F-2). statuscode constants: 1=Open, 659490001=In Progress, 2=Completed, 659490002=Dismissed. Coordinate the Status/Completed query-parameter shape directly with whoever executes task 021 — parallel-unsafe for exactly this reason.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

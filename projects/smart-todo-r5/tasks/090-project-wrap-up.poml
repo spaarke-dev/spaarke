@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="smart-todo-r5">
+  <metadata>
+    <title>Project wrap-up — README complete, test-diet, close PR #508, INDEX update, lessons learned</title>
+    <phase>7: Cross-cutting + wrap-up</phase>
+    <gate>all tasks complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Project-close wrap-up task; touches `projects/INDEX.md` + reads/updates governance docs (main-session-only per §3), no product code change. Mirrors the `dotnet-10-upgrade-r1` task 090 precedent (rigor STANDARD).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified close-out checklist (test-diet, doc updates, PR close, registry update); no architectural design decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes `projects/INDEX.md` and reads/updates `.claude/`-adjacent governance artifacts — MAIN-SESSION-ONLY per root CLAUDE.md §3; also gated on every other task being complete, so nothing can run alongside it.</parallel-reason>
+    <deps>001,002,003,010,011,012,013,014,020,021,022,023,024,025,030,031,032,033,034,035,040,041,042,050,051,052,060</deps>
+    <tags>wrap-up, documentation</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close out smart-todo-r5: (1) update `README.md` status to Complete and check off every Graduation Criterion; (2) run `/test-diet` to reconcile tests added/modified during the project against the ADR-038 build-vs-maintain classifier (root CLAUDE.md §7 project-close gate, BINDING) and write `notes/test-diet-report.md`; (3) create `notes/lessons-learned.md`; (4) close stale PR #508 as superseded by this project's FR-01 (`gh pr close 508` with a comment citing FR-01); (5) update `projects/INDEX.md` for this project; (6) verify every row in `tasks/TASK-INDEX.md` is ✅; (7) reset `current-task.md` to none/complete. Do NOT mark the project complete if any Graduation Criterion in README.md is unmet — escalate instead.</prompt>
+
+  <role>SPAARKE platform developer. Expert in project close-out, test-diet reconciliation, and cross-project registry hygiene. Follow ADRs strictly.</role>
+
+  <goal>`README.md` status = Complete with all 10 Graduation Criteria checked; `/test-diet` report exists at `notes/test-diet-report.md` and is cited in the wrap-up PR description; `notes/lessons-learned.md` exists; PR #508 is closed on GitHub with a comment pointing at FR-01; `projects/INDEX.md` reflects smart-todo-r5's final state; `tasks/TASK-INDEX.md` shows every row ✅; `current-task.md` is reset to none/complete.</goal>
+
+  <context>
+    <background>Root CLAUDE.md §7 "Project-close test diet gate (BINDING)": when the just-completed task is a `090-wrapup-*`/`090-*` task, `task-execute` Step 11 invokes `/test-diet` BEFORE marking the project complete; skipping is a HARD WARNING and the wrap-up PR description MUST cite the report or document the skip rationale. Spec FR-01 explicitly absorbed the stale, CONFLICTING/abandoned PR #508 (`fix/events-smarttodo-components-package-boundary`, 2026-06-29) as a prerequisite of task 001 — the owner clarification table (spec.md "PR #508 vs R5") confirms: "Fold into FR-01; close #508 as superseded." README.md's Graduation Criteria list (10 items) is the closed set this task verifies against before the project can be called Complete; `current-task.md` and `TASK-INDEX.md` are the recoverable-state files per root CLAUDE.md §5/§7 that must be left clean for any future session.</background>
+    <relevant-files>
+      <file role="modify">projects/smart-todo-r5/README.md</file>
+      <file role="new">projects/smart-todo-r5/notes/test-diet-report.md</file>
+      <file role="new">projects/smart-todo-r5/notes/lessons-learned.md</file>
+      <file role="modify">projects/INDEX.md</file>
+      <file role="modify">projects/smart-todo-r5/tasks/TASK-INDEX.md</file>
+      <file role="modify">projects/smart-todo-r5/current-task.md</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/tasks/090-project-wrap-up.poml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="060" status="pending">PROC-1 real-DV smoke gate documented — referenced by Graduation Criterion coverage; wrap-up confirms it landed.</dependency>
+      <dependency task="014" status="pending">Real-DV smoke evidence for FR-04 (Graduation Criterion 3) must exist before this task can check that criterion.</dependency>
+      <dependency task="052" status="pending">Ribbon deploy+smoke (Graduation Criterion 9) must be complete.</dependency>
+      <dependency task="041" status="pending">Playwright NFR suite (Graduation Criterion 10) must be green.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-root-§7">`/test-diet` is MANDATORY at project close — read-only, emits `git rm`/`git mv` commands for reviewer application, does not auto-execute. The wrap-up PR description MUST cite `notes/test-diet-report.md` (or document the skip rationale, which is NOT expected here since Phase 5 added test coverage).</constraint>
+    <constraint source="project">MAIN-SESSION-ONLY: this task writes `projects/INDEX.md`, which sub-agents cannot write to per root CLAUDE.md §3. Perform the INDEX.md edit in the main session.</constraint>
+    <constraint source="spec">FR-01's owner clarification is explicit: PR #508 is NOT revived separately — it is folded into FR-01 (task 001) and closed as superseded at wrap-up. Do not merge or reopen #508; close it.</constraint>
+    <constraint source="project">Do not flip README.md status to Complete if any of the 10 Graduation Criteria checkboxes cannot be honestly checked — partial completion is reported, not silently marked done.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out (test-diet, PR closure, registry hygiene)</topic>
+    <files>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/README.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>projects/smart-todo-r5/plan.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="wrap-up-shape" location="projects/dotnet-10-upgrade-r1/tasks/090-project-wrap-up.poml">The canonical 090 wrap-up task shape (test-diet, INDEX.md update, README refresh, MAIN-SESSION-ONLY constraint) — mirror its structure for smart-todo-r5.</pattern>
+      <pattern name="test-diet-workflow" location=".claude/skills/test-diet/SKILL.md">6-step workflow: scope via git log, load ADR-038 §7 classifier, classify per test method, emit report, surface summary, update task status.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR: STANDARD. Confirm MAIN SESSION (writes `projects/INDEX.md`). Load `spec.md` Success Criteria, `README.md` Graduation Criteria, and `.claude/skills/test-diet/SKILL.md`.</step>
+    <step order="1">Verify every row in `tasks/TASK-INDEX.md` is ✅. If any row is not ✅, STOP per the escalation trigger below — do not proceed with wrap-up on an incomplete project.</step>
+    <step order="2">Walk `README.md`'s 10 Graduation Criteria one by one; for each, cite the task/evidence that satisfies it (e.g. #1 → task 003 shim + build parity; #3 → task 014 real-DV smoke evidence in `notes/`; #9 → task 052 ribbon smoke; #10 → task 041 Playwright run). If any criterion cannot be honestly checked, STOP per the escalation trigger.</step>
+    <step order="3">Update `README.md`: check all 10 Graduation Criteria boxes; change the Status line/header to "Complete".</step>
+    <step order="4">Run `/test-diet` (invoke the `test-diet` skill) scoped to `projects/smart-todo-r5`; write `projects/smart-todo-r5/notes/test-diet-report.md` per its Step 4 report format. Do not auto-execute any emitted `git rm`/`git mv` — surface them for reviewer application in this session.</step>
+    <step order="5">Apply reviewer-approved deletions/moves from the test-diet report (if any); re-run the relevant `npm test`/`vitest` suite to confirm nothing broke.</step>
+    <step order="6">Create `projects/smart-todo-r5/notes/lessons-learned.md`: capture at minimum (a) the PR #508 absorption pattern (folding a stale abandoned PR's fix into a new project's prerequisite task) as a reusable pattern; (b) the FR-20/PROC-1 real-DV smoke gate as a new cross-project process artifact; (c) any hoist (FR-01) friction encountered; (d) any ADR-050 Path A tension learnings (FR-10..14 OOB modal).</step>
+    <step order="7">Close PR #508: run `gh pr close 508 --comment "Superseded by smart-todo-r5 FR-01, which re-applies this package-boundary fix (relative-path imports to @spaarke/ui-components/... specifiers) on current master as a prerequisite of the FU-5 Kanban hoist. See projects/smart-todo-r5/spec.md FR-01."`. Verify the PR shows Closed state via `gh pr view 508`.</step>
+    <step order="8">Update `projects/INDEX.md`: locate the `smart-todo-r5` row. If NO row exists yet (the project's hot-path touches — SpaarkeAi=Y — should have triggered `task-execute` Step 0.5 to add one during an earlier task; if it never landed, that is itself a process gap), add one now with the project's hot-path declaration (BFF=N, SpaarkeAi=Y, CI Workflows=N, Skill Directives=N per `CLAUDE.md`) and today's date, then immediately mark it Complete/ready-for-archive per the "Project completes / worktree archived" row in the Maintenance Contract table. If a row already exists, flip Status to Complete and refresh Last Commit. Document either path taken in `notes/`.</step>
+    <step order="9">Update `tasks/TASK-INDEX.md`: mark 090 ✅.</step>
+    <step order="10">Reset `current-task.md` to "none" / project-complete state (clear active-task fields per root CLAUDE.md §7).</step>
+    <step order="11">Document any deviation from this checklist (e.g. a Graduation Criterion partially met, a test-diet AMBIGUOUS bucket left for reviewer) in `projects/smart-todo-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the 10 Graduation Criteria in README.md is unmet at the time this task runs, STOP — do not mark the project Complete, do not check the unmet box, and do not close PR #508. Report the specific unmet criterion(s) and the blocking task(s) per root CLAUDE.md §6, and leave `current-task.md` pointed at the blocking task rather than resetting it.</trigger>
+    <trigger>If `/test-diet` flags AMBIGUOUS tests requiring reviewer judgment, STOP and surface them per root CLAUDE.md §6 rather than auto-deleting or auto-keeping — the skill is advisory; the reviewer's call is final.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">git/gh CLI for PR closure and TASK-INDEX verification</tool>
+    <tool name="npm">Re-run vitest suite after any test-diet-approved deletions</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/smart-todo-r5/README.md (Status → Complete; all criteria checked)</output>
+    <output type="docs">projects/smart-todo-r5/notes/test-diet-report.md</output>
+    <output type="docs">projects/smart-todo-r5/notes/lessons-learned.md</output>
+    <output type="docs">projects/INDEX.md (smart-todo-r5 row updated/added)</output>
+    <output type="docs">projects/smart-todo-r5/tasks/TASK-INDEX.md (090 ✅)</output>
+    <output type="docs">projects/smart-todo-r5/current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `README.md`, when read, then its status line reads "Complete" and all 10 Graduation Criteria checkboxes are checked.</criterion>
+    <criterion testable="true">Given `notes/test-diet-report.md`, when read, then it exists, follows the test-diet Step 4 report format, and is cited (by path) somewhere in this task's notes or the wrap-up PR description.</criterion>
+    <criterion testable="true">Given `notes/lessons-learned.md`, when read, then it exists and covers at minimum the PR #508 absorption pattern and the FR-20/PROC-1 gate.</criterion>
+    <criterion testable="true">Given `gh pr view 508`, when run, then the PR shows state CLOSED with a comment present referencing FR-01/smart-todo-r5.</criterion>
+    <criterion testable="true">Given `projects/INDEX.md`, when read, then a `smart-todo-r5` row exists reflecting the project's hot-path declaration and Complete/archive-ready status.</criterion>
+    <criterion testable="true">Given `tasks/TASK-INDEX.md`, when read, then every row shows ✅ including 090 itself.</criterion>
+    <criterion testable="true">Given `current-task.md`, when read, then it is reset to none/complete with no stale active-task fields.</criterion>
+    <criterion testable="true">Negative: if any Graduation Criterion is unmet, then README.md is NOT flipped to Complete, PR #508 is NOT closed, and the task's status reflects escalation rather than completion.</criterion>
+  </acceptance-criteria>
+
+  <notes>Root CLAUDE.md §7 binding gate: `/test-diet` MUST run before this task can mark the project complete. Spec.md "PR #508 vs R5" owner clarification is the authority for closing #508 as superseded rather than reviving it. If `projects/INDEX.md` had no smart-todo-r5 row at wrap-up time, that is a process gap in earlier tasks' Step 0.5 hot-path registration (SpaarkeAi=Y should have triggered it) — note it in `notes/` as a lesson-learned, not silently work around it.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

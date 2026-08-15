@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="smart-todo-r5">
+  <metadata>
+    <title>Hoist 13-file rich Kanban subtree into @spaarke/smart-todo-components (FR-01)</title>
+    <phase>1: Shared-lib foundation</phase>
+    <gate>001 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Moves 13 files (~4,100 LOC) across a package boundary, requires re-homing multiple LW-local hook/service dependencies to stay host-agnostic, and is on the critical path for every downstream FR-02/03/05..15 task. Architecture-adjacent change to a shared library consumed by 2+ hosts.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius: this is the core hoist of the project — an incoherent or partial move breaks `Spaarke.SmartTodo.Components`'s build for every consumer (LegalWorkspace today, future SpaarkeAi Direct widget). The 13 files have non-trivial LW-local dependencies (hooks, services, types) that must be resolved host-agnostically without duplicating or drifting from the locked scoring contract.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same package (`Spaarke.SmartTodo.Components`) and same LW-local source tree as tasks 001 (prerequisite) and 003 (immediate successor) — this is a serial spine (001→002→003), not a parallelizable task.</parallel-reason>
+    <deps>001</deps>
+    <tags>react, typescript, shared-lib, refactor</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Move the 13-file rich Kanban subtree from `src/solutions/LegalWorkspace/src/components/SmartToDo/` (`KanbanCard.tsx`, `KanbanHeader.tsx`, `AddTodoBar.tsx`, `DismissedSection.tsx`, `ThresholdSettings.tsx`, `TodoAISummaryDialog.tsx`, `TodoDetailPane.tsx`, `PriorityScoreCard.tsx`, `EffortScoreCard.tsx`, `SmartToDo.tsx`, `SmartToDoDialog.tsx`, `todoScoringTypes.ts`, `index.ts`) INTO `@spaarke/smart-todo-components` (`src/client/shared/Spaarke.SmartTodo.Components/`), making them host-agnostic (zero imports reaching into `src/solutions/...`), using ONLY the clean `@spaarke/ui-components/...` package-specifier import pattern restored by task 001 for any UI.Components imports (never the relative-path bypass). Preserve bit-for-bit scoring parity against the existing locked `todoScoring.ts` contract in the target package — do not change the composite score formula or weights.</prompt>
+
+  <role>SPAARKE platform developer. Expert in React component extraction/hoisting, host-agnostic peer-package design, and TypeScript module boundaries. Follow ADRs strictly.</role>
+
+  <goal>The 13 hoisted components/types are present under `src/client/shared/Spaarke.SmartTodo.Components/src/` (organized per the package's existing `components/` / `types/` conventions), exported from the package's public surface (`src/index.ts` and/or `src/components/index.ts`), with zero import reaching into `src/solutions/...` anywhere in the moved files; the package builds (`tsc --noEmit`); `todoScoring.ts`-driven score output is bit-for-bit identical to pre-hoist for the same inputs.</goal>
+
+  <context>
+    <background>Spec FR-01 names this exact 13-file list as the hoist target, following "the R4-102 host-agnostic parity pattern" — the precedent set by `useKanbanColumns.ts`, which was hoisted in R4 task 101 into this same package and kept host-agnostic via structural typing (`IKanbanTodoLike`) rather than importing LegalWorkspace's concrete `ITodo` type. This task is the SAME kind of move for the richer Kanban UI subtree. Investigation confirms `src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx` (805 LOC, the largest file in the set) currently imports LW-local hooks/services directly: `useTodoItems`, `useKanbanColumns` (the LegalWorkspace-local version — distinct from the already-hoisted `Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts`), `useUserPreferences`, `useFeedTodoSync`, `DataverseService`, `types/entities` (`ITodo`), `utils/todoScoreUtils`, `types/enums`, `types/xrm`. These MUST be resolved host-agnostically (props injection, structural typing, or a host-service-interface pattern mirroring `IFeedSyncBridge`/`IKanbanDataverseService` already in the package) — NOT smuggled in via a `src/solutions/...` import. `todoScoringTypes.ts` and the package's existing `utils/todoScoring.ts` are the locked scoring contract; do not duplicate or diverge from it.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/KanbanCard.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/KanbanHeader.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/AddTodoBar.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/DismissedSection.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/ThresholdSettings.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/TodoAISummaryDialog.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/TodoDetailPane.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/PriorityScoreCard.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/EffortScoreCard.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDo.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/SmartToDoDialog.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/todoScoringTypes.ts</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/components/SmartToDo/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/types/todo.ts</file>
+      <file role="new">src/client/shared/Spaarke.SmartTodo.Components/src/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.SmartTodo.Components/src/components/index.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Restores the clean `@spaarke/ui-components/...` package-boundary import pattern this hoist must use for any UI.Components dependency; MUST be complete before this task starts.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Scope: hoisted components MUST be host-agnostic — zero import in any moved file may reach into `src/solutions/...` (NFR-05). LW-specific coupling (feed-sync bridge, wizard launch, etc.) stays in the LW shim (task 003), mirroring the `IFeedSyncBridge` pattern already used by `SmartTodoWidget`.</constraint>
+    <constraint source="ADR-021">Scope: all visual/styling code carried over in the hoist MUST continue using Fluent v9 semantic tokens exclusively — no hex/rgb literals introduced during the move.</constraint>
+    <constraint source="project">Scope: composite score formula/weights in the package's `utils/todoScoring.ts` are UNCHANGED by this task (spec MUST rule) — the hoisted `todoScoringTypes.ts` supplies types only; any scoring math the moved components reference must call into the existing locked `todoScoring.ts`, not a re-implementation.</constraint>
+    <constraint source="project">Scope: use the `@spaarke/ui-components/...` import pattern restored by task 001 for every UI.Components dependency in the hoisted files — never the relative-path bypass task 001 removed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>host-agnostic peer-package hoisting</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts</file>
+      <file>src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+    </files>
+    <patterns>
+      <pattern name="R4-102 host-agnostic hoist precedent" location="src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts">Structural typing (`IKanbanTodoLike`) + optional injected service (`IKanbanDataverseService`, inert no-op when omitted) — the established way this package hoists LW-coupled logic without importing LW types directly. Apply the same shape to `SmartToDo.tsx`'s LW-local hook/service dependencies.</pattern>
+      <pattern name="host-brokers-coupling shim" location="src/solutions/LegalWorkspace/src/sections/todo.registration.ts">The existing `SmartTodoWidget` consumer shows the target end-state: the shared-lib component is host-agnostic; the LW-side shim (`FeedSyncBridgeHost`) owns all LW-specific coupling (FeedTodoSyncContext, BroadcastChannel, Xrm.Navigation) and passes it in via typed props/callbacks.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor level per CLAUDE.md §8; load ADR-012, ADR-021, spec.md, CLAUDE.md, and the `useKanbanColumns.ts` + `todo.registration.ts` canonical references before touching any file.</step>
+    <step order="1">Read all 13 LW-local files fully; catalogue every import that reaches into `src/solutions/...` (hooks, services, types) per file — this is the dependency inventory that drives the host-agnostic redesign.</step>
+    <step order="2">For each LW-local dependency identified, decide the host-agnostic resolution: (a) prop injection if the caller already has the data/callback, (b) an optional injected service interface mirroring `IKanbanDataverseService`/`IFeedSyncBridge` if it's a data-access dependency, or (c) a locally-duplicated PURE type/util already covered by the package's existing `types/todo.ts` or `utils/todoScoring.ts` (verify no duplication of the locked scoring contract).</step>
+    <step order="3">Move `todoScoringTypes.ts` first (types only, likely zero LW dependencies) into `Spaarke.SmartTodo.Components/src/types/`, reconciling with the existing `types/todo.ts` (no duplicate type definitions).</step>
+    <step order="4">Move the leaf presentational components with the fewest dependencies first (`KanbanCard.tsx`, `KanbanHeader.tsx`, `PriorityScoreCard.tsx`, `EffortScoreCard.tsx`, `ThresholdSettings.tsx`) into `Spaarke.SmartTodo.Components/src/components/`, rewriting their imports per the step-2 plan.</step>
+    <step order="5">Move the mid-tier components (`AddTodoBar.tsx`, `DismissedSection.tsx`, `TodoAISummaryDialog.tsx`, `TodoDetailPane.tsx`, `SmartToDoDialog.tsx`).</step>
+    <step order="6">Move `SmartToDo.tsx` last (the largest, most-coupled file) — apply the host-agnostic redesign from step 2 for its LW-local hook/service dependencies.</step>
+    <step order="7">Create/update `index.ts` in the hoisted location exporting all 13 components + their prop types, and update `Spaarke.SmartTodo.Components/src/index.ts` (and/or `src/components/index.ts`) to re-export them from the package's public surface.</step>
+    <step order="8">Delete the original 13 files from `src/solutions/LegalWorkspace/src/components/SmartToDo/` ONLY after task 003 (the shim conversion) confirms the shim consumes the package cleanly — coordinate the deletion timing with task 003; this task may leave the LW-local files in place temporarily if task 003 is not run in the same session, but MUST NOT leave the LW-local files as the compiled source of truth once both tasks complete.</step>
+    <step order="9">Run `npm run build` (`tsc --noEmit`) in `Spaarke.SmartTodo.Components`; fix any type errors from the move.</step>
+    <step order="10">Grep the hoisted files for `src/solutions` to confirm zero reach-in imports remain.</step>
+    <step order="11">Verify scoring parity: compare computed scores for a representative set of inputs against pre-hoist `todoScoreUtils.ts` output (or existing unit test fixtures) to confirm bit-for-bit match with the package's `todoScoring.ts`.</step>
+    <step order="12">Update `projects/smart-todo-r5/tasks/TASK-INDEX.md`: mark 002 status 🔲 → ✅.</step>
+    <step order="13">Document any deviation (e.g., a dependency that could not be cleanly resolved host-agnostically) in `projects/smart-todo-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the 13 LW-local components has a hard dependency on LegalWorkspace app state (e.g., a React Context provider, a singleton service, or global app config) that cannot be made host-agnostic via prop injection or an optional service interface, STOP and escalate per CLAUDE.md §6 rather than smuggling the app coupling into the shared lib via a disguised import or a `src/solutions/...` reach-in.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021) — hoisted KanbanCard">
+      <steps>
+        <step>Render the hoisted `KanbanCard` in a harness or Storybook with `webLightTheme`.</step>
+        <step>Switch to `webDarkTheme`.</step>
+        <step>Verify background, urgency-accent, badge, and text colors adapt via semantic tokens with no hardcoded values.</step>
+      </steps>
+      <expected>All colors adapt without any hex/rgb literals per ADR-021; no visual regression vs. the pre-hoist LW-local `KanbanCard`.</expected>
+    </test>
+    <test name="Visual parity — full Kanban subtree">
+      <steps>
+        <step>Render the hoisted `SmartToDo` component with representative sample data in the package's test harness.</step>
+        <step>Compare against a screenshot/description of the pre-hoist LW-local rendering.</step>
+      </steps>
+      <expected>Pixel-equivalent layout and content; no missing icons, badges, or interactive affordances.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + type-check `Spaarke.SmartTodo.Components`</tool>
+    <tool name="terminal">Run grep to verify no `src/solutions` reach-in remains; run file-move commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanHeader.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/AddTodoBar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/DismissedSection.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/ThresholdSettings.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/TodoAISummaryDialog.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/TodoDetailPane.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/PriorityScoreCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/EffortScoreCard.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDoDialog.tsx</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/types/todoScoringTypes.ts</output>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the hoist is complete, when `import { SmartToDo, KanbanCard, ... } from '@spaarke/smart-todo-components'` is used, then all 13 hoisted symbols (+ their exported prop types) resolve from the package's public surface.</criterion>
+    <criterion testable="true">Given a repo-wide grep for `src/solutions` scoped to the hoisted files, when run after this task, then zero matches remain.</criterion>
+    <criterion testable="true">Given the package builds (`tsc --noEmit`), when run, then it succeeds with zero errors.</criterion>
+    <criterion testable="true">Given identical To Do input data, when the composite score is computed pre- vs. post-hoist, then the numeric output is bit-for-bit identical (no formula/weight drift).</criterion>
+    <criterion testable="true">Negative: no hex/rgb literal or inline color is introduced anywhere in the moved files (grep-verified per ADR-021).</criterion>
+    <criterion testable="true">Negative: no LW Context provider, singleton service, or `src/solutions/...` import is smuggled into the hoisted files — every LW dependency is resolved via prop injection or an optional service interface.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec section: FR-01. Step 2 of the Phase 1 serial spine (001→002→003). The `SmartTodo` Code Page (`src/solutions/SmartTodo/src/components/SmartToDo.tsx`) has its OWN separate, unrelated local component of a similar name — it is NOT part of this hoist's scope; do not confuse the two. If time allows, note the potential duplication as a deferral candidate (`/project-defer-issue-tracking`) but do not act on it in this task.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="smart-todo-r5">
+  <metadata>
+    <title>+ New Task opens sprk_todo OOB main form (create) as a modal (FR-10)</title>
+    <phase>4: Main-form modal</phase>
+    <gate>013 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx across two surfaces (SmartTodo Code Page + potentially the shared OOB-launch module); changes a production create flow from a proprietary wizard to an OOB Dataverse form modal; tags include dataverse/modal. CLAUDE.md §8 FULL trigger.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wiring task against an already-built reusable launcher (navigateToEntityRecordSurfaceAsync) — not net-new architecture; sonnet default per CLAUDE.md §8.5. Not one of the three named opus/xhigh tasks (001, 013, 033).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same modal launch path as 031/032/033 — 031 will refactor the exact call site this task creates; running concurrently risks a merge conflict on SmartTodoApp.tsx and wizardLaunchers.ts.</parallel-reason>
+    <deps>013</deps>
+    <tags>react, typescript, dataverse, modal, frontend</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the SmartTodo Code Page's "+ New Task" button (added as a stubbed no-op by task 020, prop `onNewTask` on Header.tsx, handler `handleNewTask` in SmartTodoApp.tsx marked `// TODO(030)`) to open the sprk_todo OOB main form in CREATE mode as a modal via Xrm.Navigation.navigateTo, pre-filling regarding/context when the Code Page was launched with one. Reuse the existing navigateToEntityRecordSurfaceAsync launcher rather than writing a new navigateTo call site.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Xrm.Navigation dialog APIs, OOB Dataverse form pre-seed conventions, and Fluent v9 Code Page conventions. Follow ADR-050 Path A strictly — this is a deliberate OOB-family choice, not a shell violation.</role>
+
+  <goal>Clicking "+ New Task" in the SmartTodo Code Page top bar opens the sprk_todo OOB main form (CREATE mode, no entityId) as a Xrm.Navigation.navigateTo target:2 modal at the OOB_MODAL_SIZES.createForm size, using the existing navigateToEntityRecordSurfaceAsync() function from src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts. When the Code Page's launch context carries a regarding triple (regardingType/regardingId/regardingName from useLaunchContext's createTodo branch, or an active kanban regarding filter), the create form's regarding fields are pre-seeded via defaultValues. On Save, the new To Do appears in the kanban (a same-session refetch is acceptable for this task; the persistent close/refresh contract is task 033 — this task only needs to not regress the existing manual-refresh path).</goal>
+
+  <context>
+    <background>Spec FR-10 (U-4, owner-confirmed 2026-08-14). Today "+ New Task" does NOT exist as a distinct affordance on the Code Page top bar — the R4-104 toolbar's QuickAdd group and a proprietary CreateTodoWizard mount (LaunchCreateTodoWizardHost, SmartTodoApp.tsx:510+) are the only create paths, and task 020 already deleted the QuickAdd group and stubbed a documented no-op `handleNewTask` (`// TODO(030): wire to OOB main-form create modal per FR-10`) so this task has a single, unambiguous wiring point. CreateTodoWizard itself is NOT being retired — LaunchCreateTodoWizardHost continues to serve the Outlook ribbon "Create To Do" flow and parent-form ribbon launches (useLaunchContext's `createTodo` branch, FR-19/Phase 6) unchanged; only the Code Page's own top-bar button switches families. A reusable async CREATE launcher already exists and does exactly what FR-10 needs: navigateToEntityRecordSurfaceAsync() (src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts:397-439) opens pageType:'entityrecord' with no entityId at the createForm OOB size (70%x80%, oobModalSizes.ts), accepts a `defaultValues` pre-seed map, and resolves with `{savedEntityReference}` when the user saves or `{cancelled:true}` when they don't. It is currently wired ONLY into the AI Assistant's surface-launch registry (launchSurface.ts, consumerType 'create-todo') — this task is its first SmartTodo Code Page consumer.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts</file>
+      <file role="canonical-reference">src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+      <file role="reference">projects/smart-todo-r5/to-do-main-form-modal.jpg</file>
+      <file role="do-not-modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx (LaunchCreateTodoWizardHost function, lines ~510-606) — separate Outlook/parent-ribbon flow, stays on CreateTodoWizard</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">RegardingResolver wired on the sprk_todo form — this task's create-mode navigateTo opens that same form, so the resolver fields must already be present for the modal to render correctly.</dependency>
+      <dependency task="020" status="pending">Code Page top bar redesign — supplies the "+ New Task" button and the `onNewTask`/`handleNewTask` stub this task implements. Not a POML dep (both in Phase 3/4 per plan.md sequencing) but a real code precondition — confirm task 020 has landed before starting.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">Path A project-scoped exception (per spec.md ADR Tensions + CLAUDE.md §6.5): keep the OOB Xrm.Navigation.navigateTo main form for To Do create — do NOT build a proprietary FormModal/SprkModal config for this surface. SprkModal/ADR-050 does not govern OOB navigateTo dialogs; this is a deliberate family choice per MODAL-DECISION-CRITERIA.md, not a shell violation. Cite this exception in the PR description.</constraint>
+    <constraint source="project">MUST reuse navigateToEntityRecordSurfaceAsync() (wizardLaunchers.ts) — do NOT write a second, parallel inline `xrm.Navigation.navigateTo(...)` call site for create-mode. Per CLAUDE.md §11, the existing function already solves this; a new call site is scope creep the §11 gate exists to catch.</constraint>
+    <constraint source="project">MUST NOT modify LaunchCreateTodoWizardHost or remove CreateTodoWizard from the codebase — it remains the entry point for the Outlook ribbon and parent-form ribbon "Create To Do" flows (FR-19, Phase 6), which are out of this task's scope.</constraint>
+    <constraint source="spec">FR-10 acceptance: the create form must show INFORMATION / TRACKING / RELATED RECORD / TO DO SCORE sections including the FR-02 (sprk_priority) and FR-03 (sprk_effort) fields task 010/011 add — verify these render (they are native form fields, not something this task builds, but the task's smoke check must confirm the form task 013 wired actually shows them).</constraint>
+    <constraint source="project">Regarding pre-fill is a defaultValues best-effort pre-seed (OOB forms only accept the documented createFromEntity/default-value seam) — do NOT attempt to force-populate via a script hack if a given regarding field name isn't accepted by the OOB pre-seed; document any field that doesn't pre-fill rather than working around it silently.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>oob-create-form-modal</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts</file>
+    </files>
+    <patterns>
+      <pattern name="navigateToEntityRecordSurfaceAsync" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts">The canonical async OOB entity-create-form launcher — resolves with savedEntityReference on save, cancelled:true on dismiss. Copy the call convention used by launchSurface.ts's 'oob-form' branch.</pattern>
+      <pattern name="oob-modal-decision-tree" location="docs/standards/MODAL-DECISION-CRITERIA.md">Family 1 (OOB Dataverse form dialog) row — confirms navigateTo target:2 is correct for "user needs the full OOB main form".</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier sonnet, effort high. Read SmartTodoApp.tsx in full (confirm the exact current state of the task-020 `handleNewTask` stub and `onNewTask` prop threading), wizardLaunchers.ts's navigateToEntityRecordSurfaceAsync + EntityRecordSurfaceParams, oobModalSizes.ts, and useLaunchContext.ts.</step>
+    <step order="1">Confirm task 020 has landed (Header.tsx exposes `onNewTask`, SmartTodoApp.tsx has the `handleNewTask` stub with the `// TODO(030)` marker). If task 020 has NOT landed, stop and note the out-of-order dependency in projects/smart-todo-r5/notes/ rather than re-implementing task 020's button.</step>
+    <step order="2">In SmartTodoApp.tsx, replace the `handleNewTask` stub body with a call to `navigateToEntityRecordSurfaceAsync({ entityName: 'sprk_todo', title: 'New To Do', defaultValues })`, importing it from `@spaarke/ui-components` (verify it is exported from the package barrel; add the export in wizardLaunchers.ts's module exports / the shared lib's index.ts if it is not yet barrel-exported — check WorkspaceShell/index.ts first).</step>
+    <step order="3">Build `defaultValues` from the current launch/regarding context: if `useLaunchContext()` returned a `createTodo` branch with a regarding triple, or the Kanban currently has an active regarding filter (openTodos branch), map it to the sprk_todo regarding attribute names (sprk_regardingrecordtype/id/name — mirror TodoRegardingUpdateBuilder.ts's field-name conventions from task 013's context, do not invent new attribute names). If no regarding context is present, pass an empty/undefined defaultValues (plain create).</step>
+    <step order="4">Await the returned NavigateToOutcome. On `savedEntityReference` present, trigger the same refetch path task 020 preserved (`handleRefresh` — captured inner Kanban refetch or TodoContext.refetch fallback) so the new To Do appears without a manual reload. On `cancelled`, do nothing.</step>
+    <step order="5">Manually verify (dev/harness or real MDA if available) that the create form renders INFORMATION / TRACKING / RELATED RECORD / TO DO SCORE sections including sprk_priority/sprk_effort (FR-02/03) and the RegardingResolver control (task 013). Note any section that doesn't render as expected.</step>
+    <step order="6">Add/update vitest coverage in SmartTodoApp's test suite: `handleNewTask` calls navigateToEntityRecordSurfaceAsync with entityName 'sprk_todo' and no entityId; on a resolved savedEntityReference the refresh path is invoked; on cancelled it is not.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: mark 030 complete.</step>
+    <step order="8">Document the exact defaultValues mapping used (and any field that didn't pre-fill) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If navigateToEntityRecordSurfaceAsync's defaultValues pre-seed does not reliably populate the regarding fields on the sprk_todo create form (OOB pre-seed only accepts the documented default-value/data param, not arbitrary field names), do NOT hack around it with a post-open script injection — document the gap and escalate per CLAUDE.md §6 rather than silently degrading the pre-fill contract.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="New Task opens OOB create form">
+      <steps>
+        <step>Click "+ New Task" in the SmartTodo Code Page top bar</step>
+        <step>Observe the modal that opens</step>
+      </steps>
+      <expected>The sprk_todo OOB main form opens in CREATE mode as a target:2 dialog (native Dataverse chrome, Save/Save &amp; Close visible) — not the CreateTodoWizard stepper.</expected>
+    </test>
+    <test name="Regarding pre-fill when launched with context">
+      <steps>
+        <step>Launch the Code Page with a regarding context (e.g. openTodos branch active from a Visual Host drill-through) and click "+ New Task"</step>
+      </steps>
+      <expected>The create form's regarding fields are pre-populated from the launch context where the OOB pre-seed contract supports it.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Open the create modal under webLightTheme, then webDarkTheme</step>
+      </steps>
+      <expected>The OOB form is Dataverse-themed (out of Spaarke's styling control) — verify the SmartTodo Code Page's own "+ New Task" button and surrounding chrome adapt correctly via semantic tokens in both themes; zero hex/rgb literals in any Spaarke-authored code touched by this task.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest in src/solutions/SmartTodo and Spaarke.UI.Components</tool>
+    <tool name="dataverse-mcp">Manual smoke verification of the sprk_todo create form sections</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/SmartTodoApp.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts (barrel export only, if not already exported)</output>
+    <output type="test">src/solutions/SmartTodo/src/__tests__/SmartTodoApp.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the SmartTodo Code Page, when the user clicks "+ New Task", then the sprk_todo OOB main form opens in CREATE mode as a Xrm.Navigation.navigateTo target:2 modal (createForm size), not the CreateTodoWizard.</criterion>
+    <criterion testable="true">Given the create form shows, then it displays INFORMATION / TRACKING / RELATED RECORD / TO DO SCORE sections including the sprk_priority and sprk_effort fields.</criterion>
+    <criterion testable="true">Given the user saves the new To Do, then it appears in the kanban without requiring a manual page reload.</criterion>
+    <criterion testable="true">Given the Code Page was launched with a regarding context, when + New Task opens, then the regarding fields the OOB pre-seed contract supports are pre-populated.</criterion>
+    <criterion testable="true">Negative: given the user cancels/closes the create modal without saving, then no To Do is created and the kanban is unchanged.</criterion>
+    <criterion testable="true">Negative: the Outlook ribbon and parent-form ribbon "Create To Do" flows (LaunchCreateTodoWizardHost / CreateTodoWizard) are unmodified and continue to work.</criterion>
+    <criterion testable="true">All unit tests pass; build is green; zero hex/rgb literals in changed files.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec ref: FR-10 (U-4). This task deliberately does NOT build the full close/refresh contract (task 033, FR-14) or the full-cover/hide-header treatment (task 032, FR-12/13) — it only needs create-mode to open correctly and not regress the manual-refresh path. Task 031 (FR-11) will refactor this call site alongside the Open call sites onto one shared launcher; expect this task's `navigateToEntityRecordSurfaceAsync` call to be touched again there.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="smart-todo-r5">
+  <metadata>
+    <title>Deploy + QA the full main-form modal flow on real MDA</title>
+    <phase>4: Main-form modal</phase>
+    <gate>033,034 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deploy task touching multiple production surfaces (SmartTodo Code Page, LegalWorkspace widget, sprk_todo form/schema config from 013/032); irreversible-adjacent (production deploy). CLAUDE.md §8 FULL trigger + template guidance ("deploys/irreversible" → prescriptive steps).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy + structured manual QA against a fixed acceptance checklist — bounded, well-specified work. Sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the same Code Page + widget + form surfaces every other Phase 4 task touched — must run after all of them, not concurrently with any.</parallel-reason>
+    <deps>033,034</deps>
+    <tags>deploy, code-page, modal, frontend</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build and deploy the SmartTodo Code Page and (if changed) the LegalWorkspace widget bundle carrying tasks 030-034's modal-behavior changes, then run a structured manual QA pass on the real target Dataverse/MDA environment covering create, open, full-cover sizing, hidden header, Save &amp; Close dismiss+refresh, and the browse-modal migration (or its documented already-resolved outcome).</prompt>
+
+  <role>SPAARKE platform developer. Expert in the code-page-deploy skill's build/deploy conventions and in structured manual QA against a closed acceptance checklist.</role>
+
+  <goal>The SmartTodo Code Page (and LegalWorkspace widget, if its bundle changed) are deployed to the target Dataverse environment with tasks 030-034's changes live, and every FR-10 through FR-15 behavior is verified working on the real MDA per the QA checklist below, with results recorded in projects/smart-todo-r5/notes/.</goal>
+
+  <context>
+    <background>Phase 4's serial spine (030→031→032→033) plus the parallel 034 all land production-facing modal behavior changes that cannot be fully verified in vitest/jsdom (real Xrm.Navigation dialog chrome, real form header rendering, real save/close timing). This task is the real-MDA gate before Phase 4 is considered done, mirroring the real-DV smoke pattern task 014 used for Phase 2 (PROC-1 / FR-20 spirit) even though this task predates the formal PROC-1 gate (task 060, Phase 7).</background>
+    <relevant-files>
+      <file role="reference">src/solutions/SmartTodo/**</file>
+      <file role="reference">src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+      <file role="reference">projects/smart-todo-r5/to-do-main-form-modal.jpg</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">Save &amp; Close dismiss+refresh must be complete before end-to-end QA.</dependency>
+      <dependency task="034" status="pending">Browse-modal migration (or its documented already-resolved outcome) must be finalized before QA.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Use the code-page-deploy skill's documented build/deploy steps (npm run build:prod convention per root CLAUDE.md §12) — do not improvise a deploy sequence.</constraint>
+    <constraint source="spec">NFR-06 (real-DV): this task's verification counts toward the project's real-Dataverse validation obligation for the modal-behavior FRs — do not substitute a dev-harness-only check for the acceptance criteria below.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>modal-flow-deploy-qa</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="code-page-deploy" location=".claude/skills/code-page-deploy/SKILL.md">Build + deploy procedure for Vite Code Pages to Dataverse — the canonical procedure this task follows, not a fresh deploy script.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier sonnet, effort high. Load the code-page-deploy skill.</step>
+    <step order="1">Invoke the code-page-deploy skill to build and deploy the SmartTodo Code Page (sprk_smarttodo) with tasks 030-034's changes.</step>
+    <step order="2">If task 031's shared-launcher change touched src/client/shared/Spaarke.UI.Components (a peer/shared package consumed by the LegalWorkspace widget bundle), rebuild and redeploy the LegalWorkspace widget bundle per its own deploy convention so the widget picks up the shared-lib change.</step>
+    <step order="3">Run the QA checklist on the real target environment: (a) + New Task opens the OOB create form as a modal, not CreateTodoWizard; (b) create form shows INFORMATION/TRACKING/RELATED RECORD/TO DO SCORE incl. priority/effort; (c) opening an existing To Do uses the same chrome/sizing as create; (d) both modals fully cover their launching surface (single-modal and modal-in-modal cases); (e) no duplicate header/title band on the inner modal; (f) native Save/Save &amp; Close works; (g) Save &amp; Close dismisses the modal and the kanban refreshes without manual reload, from both the SmartTodo Code Page and the LegalWorkspace widget; (h) Cancel/X-close does not corrupt data; (i) the browse/preview surface (per task 034's outcome) shows no duplicate title bar.</step>
+    <step order="4">For each checklist item, record pass/fail with a short note; for any failure, file it as a defect per /project-defer-issue-tracking rather than silently marking the task complete.</step>
+    <step order="5">Update tasks/TASK-INDEX.md: mark 035 complete (only if all checklist items pass; otherwise mark blocked and cite the filed defect(s)).</step>
+    <step order="6">Document the full QA results in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any QA checklist item fails and the root cause is unclear or points back into a completed Phase 4 task's design decision (not a simple deploy misconfiguration), STOP and escalate per CLAUDE.md §6 rather than attempting an ad hoc fix inside this deploy task — file the defect and let the appropriate prior task be reopened/amended.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Full modal flow — real MDA">
+      <steps>
+        <step>Execute the full QA checklist (step 3) on the target environment</step>
+      </steps>
+      <expected>All checklist items pass; any failure is filed as a defect, not silently accepted.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021) — real environment">
+      <steps>
+        <step>Toggle the MDA/host theme between light and dark while the modal flows are open</step>
+      </steps>
+      <expected>All Spaarke-authored chrome adapts correctly; no hex/rgb artifacts visible.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="code-page-deploy">Build + deploy the SmartTodo Code Page</tool>
+    <tool name="dataverse-mcp">Verify deployed form/config state where relevant</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">sprk_smarttodo Code Page deployed with tasks 030-034 changes</output>
+    <output type="docs">projects/smart-todo-r5/notes/035-modal-qa-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed SmartTodo Code Page, when the full QA checklist (step 3, items a-i) is run on the real target environment, then every item passes.</criterion>
+    <criterion testable="true">Negative: given any checklist item fails, then it is filed as a defect via /project-defer-issue-tracking and task 035 is marked blocked, not complete.</criterion>
+    <criterion testable="true">Given the LegalWorkspace widget bundle depends on a shared-lib change from task 031, then it is redeployed and verified alongside the Code Page.</criterion>
+  </acceptance-criteria>
+
+  <notes>This is the Phase 4 deploy gate. It complements (does not replace) task 014's Phase 2 real-DV smoke and the Phase 7 PROC-1 gate (task 060) — those are process/schema-focused; this one is modal-UX-focused.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

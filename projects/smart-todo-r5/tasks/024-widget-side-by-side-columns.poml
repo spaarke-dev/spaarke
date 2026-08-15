@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="smart-todo-r5">
+  <metadata>
+    <title>SpaarkeAi widget default orientation = side-by-side columns (FR-09 / U-2)</title>
+    <phase>3: Top bar + filter + visuals</phase>
+    <gate>003 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx default state in the shared SmartTodoWidget — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger); SpaarkeAi hot-path (per project hot-path declaration).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single well-understood default-value change with existing regression coverage to extend — not architectural — sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx, which task 012 (Phase 2, priority/effort per-card UI) also touches — coordinate to avoid clobbering each other's edits to the same widget file.</parallel-reason>
+    <deps>003</deps>
+    <tags>react, typescript, shared-lib, frontend</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Change the SpaarkeAi SmartTodoWidget's default Kanban orientation from stacked rows to side-by-side columns. The enum mapping is CONFIRMED (not ambiguous, contrary to the spec's "TBD at implementation" framing): src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx line ~379 sets `const [orientation, setOrientation] = React.useState&lt;Orientation&gt;('vertical')`, and the adjacent comment block (lines ~368-379) explicitly documents: "WIDGET default is 'vertical' (Today on top, Tomorrow in middle, Future on bottom — stacked rows)... The Code Page default remains 'horizontal' (columns side-by-side)." Change the widget's local default from `'vertical'` to `'horizontal'` to match the Code Page's existing side-by-side default, and update the stale comment block to reflect the new default + rationale (U-2, 2026-08-15).</prompt>
+
+  <role>Spaarke platform developer. Expert in the shared SmartTodo Kanban widget and its CSS-only orientation-flip mechanism (NFR-03). Follow ADRs strictly.</role>
+
+  <goal>SmartTodoWidget.tsx's local orientation state defaults to `'horizontal'` (side-by-side columns: left/center/right), matching the mockup intent and the Code Page's existing default; the stale "WIDGET default is 'vertical'" comment is corrected; drag-drop + selection state survive a manual orientation flip after the default change (regression, NFR-03), verified by extending the existing orientation-flip test coverage.</goal>
+
+  <context>
+    <background>Spec FR-09 (U-2): "the SpaarkeAi widget defaults to three side-by-side columns (left/center/right)... Verify which orientation enum value produces side-by-side and set it as the widget default." This investigation is already done — see the prompt above. The `orientation` prop threading (SmartTodoWidget → SmartTodoKanban → KanbanBoard) is a CSS-only swap per existing NFR-03 doc comments ("no React tree re-creation, so cards keep their drag-drop + selection state across an orientation flip") — this task changes only the INITIAL value, not the flip mechanism itself.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartTodoKanban/SmartTodoKanban.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Phase 1 hoist gate — SmartTodoWidget.tsx lives in the shared package this task modifies; hoist must be closed first per plan.md sequencing.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Do NOT change the Code Page's orientation default (already 'horizontal'/side-by-side via useUserPreferences) — this task is widget-local only.</constraint>
+    <constraint source="project">Do NOT persist the widget's orientation via useUserPreferences — it remains intentionally widget-local per the existing documented rationale (avoids per-context Dataverse round-trips inflating cold-start time).</constraint>
+    <constraint source="spec">NFR-03: drag-drop + selection state must survive an orientation flip with no layout glitch — regression-test this after changing the default, do not assume it still holds.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>widget-orientation-default</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-030-pane-event-bus.md</file>
+      <file>.claude/adr/ADR-031-stage-lifecycle.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Read SmartTodoWidget.tsx lines ~355-395 (orientation state + surrounding comments) and SmartTodoKanban.tsx's `orientation` prop documentation to confirm the mapping before editing.</step>
+    <step order="1">Change `React.useState&lt;Orientation&gt;('vertical')` to `React.useState&lt;Orientation&gt;('horizontal')` at SmartTodoWidget.tsx line ~379.</step>
+    <step order="2">Rewrite the surrounding comment block (lines ~368-379) to state the NEW default and rationale: widget now defaults to side-by-side columns (matching the Code Page and the mockup intent), attributed to U-2 / smart-todo-r5 task 024, 2026-08-15. Remove or correct the now-inaccurate "WIDGET default is 'vertical'... stacked rows" language.</step>
+    <step order="3">Confirm no other code path re-derives or overrides this default (e.g., a saved widget-instance config, a workspace-layout default) — grep for other `Orientation` defaults in the widget's mount path if any exist.</step>
+    <step order="4">Extend/verify existing orientation-flip tests: assert the widget's INITIAL render is side-by-side (horizontal), and that flipping to vertical and back preserves drag-drop + selection state (reuse the existing NFR-03 test pattern if present; add one if not).</step>
+    <step order="5">Manually verify visually: mount the widget in a narrow workspace pane and confirm 3 columns render side-by-side without overflow/clipping at typical pane widths (the prior 'vertical' default existed partly because of narrow-pane concerns per the original comment — confirm this is not a regression, or note if a responsive fallback is needed and escalate if so).</step>
+    <step order="6">Update tasks/TASK-INDEX.md: mark 024 ✅ completed.</step>
+    <step order="7">Document the confirmed enum mapping + any narrow-pane finding in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If mounting the widget at typical narrow workspace-pane widths with the new 'horizontal' (side-by-side) default causes visible column overflow/clipping that the CSS-only swap does not already handle gracefully, STOP and escalate per CLAUDE.md §6 rather than shipping a visually broken default — this may indicate the original 'vertical' default existed for a real narrow-viewport reason, not just an oversight.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Default orientation matches mockup intent">
+      <steps>
+        <step>Mount SmartTodoWidget fresh (no prior user interaction)</step>
+      </steps>
+      <expected>Three columns (Today/Tomorrow/Future) render side-by-side, left/center/right, not stacked</expected>
+    </test>
+    <test name="Orientation flip preserves state (NFR-03 regression)">
+      <steps>
+        <step>Select a card and begin a drag operation</step>
+        <step>Flip orientation via the widget's orientation toggle mid-interaction or immediately after</step>
+      </steps>
+      <expected>Selection state and drag-drop capability survive the CSS-only flip with no layout glitch</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render the side-by-side default in webLightTheme, then webDarkTheme</step>
+      </steps>
+      <expected>No visual regression; zero hex/rgb literals introduced by this change</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest in the shared lib</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</output>
+    <output type="test">src/client/shared/Spaarke.SmartTodo.Components/__tests__/SmartTodoWidget.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a fresh SmartTodoWidget mount with no prior orientation preference, then the initial render is side-by-side columns (orientation='horizontal'), not stacked.</criterion>
+    <criterion testable="true">Given a side-by-side default, when the user flips to vertical and back, then drag-drop and selection state survive both flips with no layout glitch (NFR-03 regression check).</criterion>
+    <criterion testable="true">Given the Code Page's own orientation default, then it is unchanged by this task (widget-local scope only).</criterion>
+    <criterion testable="true">All unit tests pass (existing + new orientation-default assertions); build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-09 (U-2). The "ambiguous enum naming" caveat in spec.md/CLAUDE.md Assumptions is RESOLVED by this task's own investigation — SmartTodoWidget.tsx's existing doc comment (pre-change) already states 'horizontal' = side-by-side, 'vertical' = stacked. No further enum-mapping ambiguity remains once this task's step 0 confirms it.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

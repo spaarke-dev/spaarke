@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="smart-todo-r5">
+  <metadata>
+    <title>Wire canonical RegardingResolver PCF on the sprk_todo main form (FR-04)</title>
+    <phase>2: Schema + scoring + resolver</phase>
+    <gate>010 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Form wiring + placement of the full regarding field set on a production entity; downstream tasks 014 and Phase 4 (030+) depend on this landing correctly; tags include pcf/dataverse.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius task per projects/smart-todo-r5/CLAUDE.md §"Execution Model &amp; Tiering" — explicitly named alongside 001 (hoist) and 033 (interceptor) as an opus+xhigh-eligible task; wiring the sole canonical resolver onto a production form incorrectly breaks field-mapping inheritance for every future To Do.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the live sprk_todo form configuration — not safe to run concurrently with any other task touching the same form (011's OnChange webresource, 014's deploy/smoke).</parallel-reason>
+    <deps>010</deps>
+    <tags>pcf, dataverse, regarding-resolver</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire the existing, already-built Spaarke.Controls.RegardingResolver PCF (v1.4.8) onto the sprk_todo main form, bound to sprk_regardingrecordtype with the entity input property set to "sprk_todo". Place the full regarding field set (5 denormalized fields + the relevant entity-specific lookups) on the form so ResolverWriteHandler can populate them, and confirm the sprk_todo_regarding_presave.js OnSave webresource is registered on the form. Do NOT build any new resolver PCF — RegardingResolver is the sole canonical resolver; AssociationResolver is retired and MUST NOT be resurrected.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse form configuration (maker portal / Web API SystemForm updates), PCF binding, and the ADR-024 polymorphic resolver pattern. Follow ADR-024 strictly — this task is CONFIG, not new PCF code.</role>
+
+  <goal>The sprk_todo main form has Spaarke.Controls.RegardingResolver bound to sprk_regardingrecordtype (entity="sprk_todo"), the full regarding field set present on the form (visible or hidden-but-present as ResolverWriteHandler requires), and sprk_todo_regarding_presave.js registered as an OnSave handler. No new PCF is created; no AssociationResolver reference is introduced.</goal>
+
+  <context>
+    <background>Spec FR-04 (R-11): the canonical resolver already exists and is proven on other entities; this task is pure wiring/configuration on sprk_todo, per the Owner Clarification "Canonical resolver: RegardingResolver — confirmed on master (no AssociationResolver exists)". The PCF's write path (ResolverWriteHandler.ts) and CREATE-mode presave bridge (RegardingResolverApp.tsx) already handle both the manual-picker flow and the subgrid auto-detect flow (v1.4.0 SRFR-045) — this task supplies the FORM WIRING those code paths depend on: the control placed and bound, and the target fields present on the form so Xrm.Page.getAttribute/setValue calls succeed (a field absent from the form returns null from getAttribute, silently breaking writes — this exact failure class is documented in RegardingResolverApp.tsx's v1.3.6 history).</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts</file>
+      <file role="canonical-reference">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+      <file role="canonical-reference">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts</file>
+      <file role="canonical-reference">src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+      <file role="modify">sprk_todo main form (Dataverse-hosted; no form.xml checked into this repo — form configured live via maker portal / Web API SystemForm; confirm current landing surface with MCP describe_table / form metadata before editing)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">sprk_priority + sprk_effort choice columns exist (informational — this task does not depend on their VALUES, only that the schema task landed first per plan.md gate).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">RegardingResolver is the SOLE canonical resolver — MUST NOT create, reference, or resurrect an AssociationResolver PCF (retired per SRFR-045, confirmed absent on master; src/client/pcf/CLAUDE.md explicitly flags it "RETIRED...Do not reference").</constraint>
+    <constraint source="spec">FR-04 scope: bind to sprk_regardingrecordtype with entity="sprk_todo"; place the 5 denormalized fields (sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber) + the per-entity lookups relevant to sprk_todo's polymorphic parent set on the form.</constraint>
+    <constraint source="project">This is CONFIG/wiring only — no PCF source code changes (ResolverWriteHandler.ts, RegardingResolverApp.tsx are read-only references, not edit targets) unless task execution surfaces a genuine schema gap (see escalation).</constraint>
+    <constraint source="project">Confirm sprk_todo_regarding_presave.js is registered as an OnSave handler on the form — it bridges the CREATE-mode gap for the 4 fields ResolverWriteHandler cannot updateRecord() before the row exists.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>regarding-resolver-wiring</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts</file>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver-write-path" location="src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts">The sole write logic (applyRegardingSelection/clearRegarding) — this task never reimplements it, only wires the form so it can run.</pattern>
+      <pattern name="subgrid-auto-detect" location="src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx">v1.4.0 detectPrePopulatedParent — requires the entity-specific sprk_regarding{Entity} lookup to be present on the form for Xrm.Page.getAttribute to find it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier opus, effort xhigh per CLAUDE.md §8.5; load ResolverWriteHandler.ts, RegardingResolverApp.tsx, TodoRegardingUpdateBuilder.ts (11-entity catalog), sprk_todo_regarding_presave.js.</step>
+    <step order="1">Via MCP describe_table (sprk_todo), confirm which of the 5 denormalized fields (sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber) and which entity-specific sprk_regarding{Entity} lookups already exist as ATTRIBUTES on sprk_todo. If any required attribute is missing from the entity schema (not just the form), STOP per the escalation trigger below — this task places existing attributes on the form, it does not create new attributes.</step>
+    <step order="2">Inspect the current sprk_todo main form (via maker portal or Web API systemform export) to determine whether RegardingResolver is already placed anywhere on the form, and inventory which of the 5 denormalized fields + entity-specific lookups are currently on the form vs. missing.</step>
+    <step order="3">Place/configure the Spaarke.Controls.RegardingResolver control on the sprk_todo form, bound to the sprk_regardingrecordtype field, with the manifest "entity" input property set to the literal string "sprk_todo" (FR-22 lever — no code branching required).</step>
+    <step order="4">Add any missing fields from the 5 denormalized set + the relevant entity-specific lookups (per TodoRegardingUpdateBuilder.ts's 11-entity catalog, scoped to whichever parent entities sprk_todo actually supports) to the form — visible or hidden-but-present as required by ResolverWriteHandler's Xrm.Page.getAttribute usage.</step>
+    <step order="5">Confirm sprk_todo_regarding_presave.js is registered as an OnSave event handler on the form (add the library + event registration if missing).</step>
+    <step order="6">Publish the form. Re-run the describe_table / form-inspection check from step 2 to verify the control is bound, all required fields are present, and the presave library is registered.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: mark 013 complete.</step>
+    <step order="8">Document the exact fields added/already-present and any deviation in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a required regarding field (any of the 5 denormalized fields, or an entity-specific lookup that sprk_todo's polymorphic parent set needs) is missing from the sprk_todo ENTITY SCHEMA (not just absent from the form), STOP and escalate per CLAUDE.md §6 — this is a schema gap outside this task's config-only scope, not something to work around by adding a new field ad hoc.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Spaarke.Controls.RegardingResolver (src/client/pcf/RegardingResolver/) is the fully-built, already-proven canonical resolver — explicitly designed for sprk_todo per its v1.4.0 docstring ("Designed for child entities: sprk_todo, sprk_event, sprk_invoice, sprk_communication, sprk_kpiassessment"). AssociationResolver, the only other candidate, is confirmed RETIRED (src/client/pcf/CLAUDE.md: "RETIRED (SRFR-045, 2026-07)...Do not reference").</existing>
+    <extension>Yes — wire the existing PCF onto the form via config; do not build anything new. This task adds zero PCF code.</extension>
+    <cost-of-doing-nothing>Without this wiring, the resolver fields never populate on sprk_todo regardless of how correct the PCF's internal logic is — a To Do created from a parent subgrid or via manual pick would have sprk_regardingrecordtype/id/name/number/url all null, and the field-mapping engine (SPAARKE-FIELD-MAPPING-FRAMEWORK.md) has no source parent to inherit from at creation, breaking FR-04's entire acceptance criterion.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dataverse-mcp">describe_table + form inspection for pre/post verification</tool>
+    <tool name="dataverse-deploy">Form publish per docs/guides/PCF-DEPLOYMENT-GUIDE.md conventions</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">sprk_todo main form: RegardingResolver control bound to sprk_regardingrecordtype (entity="sprk_todo")</output>
+    <output type="config">sprk_todo main form: full regarding field set present</output>
+    <output type="config">sprk_todo main form: sprk_todo_regarding_presave.js registered as OnSave handler</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the sprk_todo main form, when inspected, then Spaarke.Controls.RegardingResolver is bound to sprk_regardingrecordtype with the entity input property literally "sprk_todo".</criterion>
+    <criterion testable="true">Given the sprk_todo main form, when inspected, then all 5 denormalized fields (sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber) are present on the form (visible or hidden).</criterion>
+    <criterion testable="true">Given the sprk_todo main form, when inspected, then the entity-specific sprk_regarding{Entity} lookups relevant to sprk_todo's polymorphic parent set are present on the form.</criterion>
+    <criterion testable="true">Given the sprk_todo main form, when inspected, then sprk_todo_regarding_presave.js is registered as an OnSave event handler.</criterion>
+    <criterion testable="true">Negative: no AssociationResolver control, reference, or dependency is introduced anywhere in this change.</criterion>
+    <criterion testable="true">Negative: no PCF source code (ResolverWriteHandler.ts, RegardingResolverApp.tsx, ControlManifest.Input.xml) is modified by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>This task is deliberately config-only per FR-04's framing ("No new resolver PCF is created"). The real end-to-end verification (does the resolver actually populate fields on a real record via both the subgrid-auto-detect and manual-pick paths) is task 014's real-DV smoke, not this task.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
