@@ -4,7 +4,7 @@
     <title>Forcing-function: expand Spaarke.ArchTests into fitness functions</title>
     <phase>4 Forcing-Functions</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Adds enforced architectural fitness tests (touches tests/**) — TEST-MODIFYING override → code-review + adr-check unconditionally.</rigor-reason>
     <model-tier>opus</model-tier>
