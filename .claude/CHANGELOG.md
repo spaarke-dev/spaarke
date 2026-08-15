@@ -23,6 +23,10 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-08-14 — worktree-net10-migrate skill · dotnet-10-upgrade-r1 cutover)
+
+- **Added — [`.claude/skills/worktree-net10-migrate/SKILL.md`](skills/worktree-net10-migrate/SKILL.md)** + exemplar [`scripts/Update-WorktreeToNet10.ps1`](../scripts/Update-WorktreeToNet10.ps1) — one-command, **non-destructive** migrator to bring any worktree onto the net10 baseline (SDK check → dirty-tree guard → `git merge origin/master` → **net8-clobber guard** [every `src/server` csproj must be `net10.0`] → build; interprets NETSDK1045 + Graph 6.5/Kiota 2.0 errors). Registered in `.claude/skills/INDEX.md`. Addresses the live IDE-clobber failure mode (open VS/Rider autosaving stale net8 csproj over a merge → 503 on deploy).
+
 ### Changed (2026-08-14 — .NET 10 doc sweep · dotnet-10-upgrade-r1 cutover)
 
 - **Changed — root [`CLAUDE.md`](../CLAUDE.md) §1** + `.claude/patterns/dataverse/web-api-client.md` + `src/server/api/Sprk.Bff.Api/CLAUDE.md` + README + 11 architecture/guide/procedure docs — swept the **normative build-target references from ".NET 8" → ".NET 10"** (and 2 stale "Graph SDK v5" → "v6") now that the backend is retargeted and **`origin/master` runs net10** (BFF + shared libs `net10.0`, `global.json` 10.0.100, dev App Service `DOTNETCORE|10.0`, Functions `dotnet-isolated 10.0`). Left intentionally unchanged: ADR history, `.claude/archive/`, other projects' `projects/*/CLAUDE.md` context files, and behavioral notes accurate from net8+ (`BackgroundServiceExceptionBehavior.StopHost`, `TimeProvider` ".NET 8+", the DATAVERSE-AUTH historical troubleshooting narrative). 19 files / 29 lines. Cutover driver: `dotnet-10-upgrade-r1` (merged to master `d71bd3547`).
