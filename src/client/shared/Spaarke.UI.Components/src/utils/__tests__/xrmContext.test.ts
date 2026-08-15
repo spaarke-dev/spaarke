@@ -206,10 +206,14 @@ describe('xrmContext', () => {
       // Simulate a nested iframe stack where window, parent, and top are all
       // distinct frames but none carries Xrm (e.g. a non-MDA embed).
       Object.defineProperty(window, 'parent', {
-        value: { /* no Xrm */ },
+        value: {
+          /* no Xrm */
+        },
         writable: true,
       });
-      setWindowTop({ /* no Xrm */ });
+      setWindowTop({
+        /* no Xrm */
+      });
 
       expect(() => getXrm()).not.toThrow();
       expect(getXrm()).toBeUndefined();
