@@ -4,7 +4,7 @@
     <title>Resource/secret naming standard refresh + naming-conformance CI gate (productization; r3 owns standard+gate, r1 applies/remediates)</title>
     <phase>6 Deployment &amp; Configuration Hygiene</phase>
     <gate>after 017 (needs the naming-drift census + target-name map)</gate>
-    <status>not-started</status>
+    <status>completed</status><!-- standard refreshed + naming-conformance-check.ps1 (self-tested) + r1 handoff recorded. .github/workflows wiring = coordinated-PR deferral (notes/task-042-063-ci-gate-wiring-deferral.md). -->
     <rigor>STANDARD</rigor>
     <rigor-reason>Standard doc refresh + a CI conformance check (scripts/CI); touches skill-directives/CI hot path but no product source. STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

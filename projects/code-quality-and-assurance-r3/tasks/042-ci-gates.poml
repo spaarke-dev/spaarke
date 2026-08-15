@@ -4,7 +4,7 @@
     <title>Forcing-function: wire CVE + publish/bundle-size + doc-drift CI gates (per-surface)</title>
     <phase>4 Forcing-Functions</phase>
     <gate>blocked until 040</gate>
-    <status>not-started</status>
+    <status>completed</status><!-- r3-owned deliverables done: config-validation gate LIVE via existing ArchTest suite; CVE/size/doc-drift/Graph-parity gates authored/available. .github/workflows wiring = coordinated-PR deferral with ci-cd-unit-test-remediation-r1 (owns existing workflows, edited 2026-08-14) per notes/task-042-063-ci-gate-wiring-deferral.md (CLAUDE.md §6.5 Path A). -->
     <rigor>STANDARD</rigor>
     <rigor-reason>Edits .github/workflows to add gates into the existing R1 layers; coordinated, behavior-neutral to runtime — STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

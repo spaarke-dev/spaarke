@@ -41,11 +41,13 @@
 | 034 | Horizontal: doc-drift audit | 3 Horizontals | MINIMAL | sonnet | low | none | P3 | ✅ |
 | 040 | Forcing-function: expand ArchTests | 4 Forcing-Functions | FULL | opus | high | none | P4 | ✅ |
 | 041 | Forcing-function: mechanical baseline | 4 Forcing-Functions | STANDARD | sonnet | high | none | P4 | ✅ |
-| 042 | Forcing-function: CI gates | 4 Forcing-Functions | STANDARD | sonnet | high | 040 | none | 🔲 |
+| 042 | Forcing-function: CI gates | 4 Forcing-Functions | STANDARD | sonnet | high | 040 | none | ✅ᶜ |
 | 060 | Drop vestigial Dataverse S2S app-reg (#3a, scripts/docs/KV) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | ✅ |
 | 061 | Uniform fail-fast config validation (#2) | 6 Deployment & Config | FULL | opus | high | none | none | ✅ |
 | 062 | Graph app-role single-source constants (#4) | 6 Deployment & Config | STANDARD | sonnet | medium | none | none | ✅ |
-| 063 | Resource/secret naming standard + conformance CI gate | 6 Deployment & Config | STANDARD | sonnet | high | 017 | none | 🔲 |
+| 063 | Resource/secret naming standard + conformance CI gate | 6 Deployment & Config | STANDARD | sonnet | high | 017 | none | ✅ᶜ |
+
+> ᶜ **042 + 063**: r3-owned deliverables COMPLETE; the `.github/workflows` gate-wiring is a documented coordinated-PR deferral with `ci-cd-unit-test-remediation-r1` (owns existing workflows) — see [`notes/task-042-063-ci-gate-wiring-deferral.md`](../notes/task-042-063-ci-gate-wiring-deferral.md). 042's config-validation gate is already LIVE via the existing ArchTest suite; 063's standard + `scripts/naming-conformance-check.ps1` are authored + self-tested.
 | 090 | Project wrap-up | 9 Wrap-up | STANDARD | sonnet | medium | prior | none | 🔲 |
 
 Legend: 🔲 not-started · 🔄 in-progress · ✅ complete · ⏸️ deferred/blocked.
