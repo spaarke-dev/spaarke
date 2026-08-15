@@ -25,7 +25,7 @@
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/ (dotnet publish -c Release -o deploy/api-publish/ — measure compressed size + delta)</file>
       <file>src/solutions/SpaarkeAi/ (build + deploy the code page — Deploy-SpaarkeAi.ps1 / code-page-deploy)</file>
-      <file>infra/dataverse/ + scripts/Seed-PlaybookConsumers.ps1 (seed any new Action/Binding/tool/chipTransition catalog rows)</file>
+      <file>infra/dataverse/ + scripts/dataverse/Seed-PlaybookConsumers.ps1 (seed any new Action/Binding/tool/chipTransition catalog rows)</file>
       <file>.claude/skills/bff-deploy/SKILL.md</file>
       <file>.claude/skills/code-page-deploy/SKILL.md</file>
     </relevant-files>
