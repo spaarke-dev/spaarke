@@ -76,10 +76,10 @@ export interface IKanbanCardTodo extends IKanbanTodoLike {
 /**
  * Re-exports the `IKanbanColumn<T>` shape from `@spaarke/ui-components` so
  * peer package consumers see one canonical column type without needing to
- * import the UI primitive library directly. Source-path import keeps the
- * dependency narrow (same pattern as `PaneHeader` in `SmartTodoWidget.tsx`).
+ * import the UI primitive library directly. Re-exported through the
+ * `@spaarke/ui-components` package boundary (never its private `src/`).
  */
-export type { IKanbanColumn, KanbanOrientation } from '../../../Spaarke.UI.Components/src/components/Kanban/types';
+export type { IKanbanColumn, KanbanOrientation } from '@spaarke/ui-components';
 
 /**
  * Minimal Dataverse service surface the hoisted hook requires to persist

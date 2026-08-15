@@ -4,7 +4,7 @@
     <title>Absorb PR #508 boundary fix on Spaarke.SmartTodo.Components (FR-01 prerequisite)</title>
     <phase>1: Shared-lib foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies TypeScript source + package/tsconfig files in a shared peer package consumed by multiple hosts (LegalWorkspace, future SpaarkeAi); FR-01 prerequisite that FR-02..FR-15 downstream card/hoist work depends on. Tags include shared-lib.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -116,7 +116,9 @@
     <criterion testable="true">All existing unit tests in `Spaarke.SmartTodo.Components/__tests__/` pass unchanged; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec section: FR-01 (Prerequisite). This is step 1 of 3 in the Phase 1 serial spine (001→002→003); task 002 (the 13-file Kanban hoist) depends on this boundary being clean before it adds new `@spaarke/ui-components` imports for the hoisted components. PR #508 itself is closed as superseded at project wrap-up (task 090), not by this task.</notes>
+  <notes>Spec section: FR-01 (Prerequisite). This is step 1 of 3 in the Phase 1 serial spine (001→002→003); task 002 (the 13-file Kanban hoist) depends on this boundary being clean before it adds new `@spaarke/ui-components` imports for the hoisted components. PR #508 itself is closed as superseded at project wrap-up (task 090), not by this task.
+
+COMPLETION (2026-08-15): All 4 private-source reach-ins rewritten to the `@spaarke/ui-components` barrel (deviation from literal deep-subpath suggestion — barrel is the DailyBriefing-verified precedent; documented in notes/task-001-completion.md). package.json (dep file: + peer *) + tsconfig (baseUrl+paths→dist) mirror Spaarke.DailyBriefing.Components. `tsc --noEmit` exit 0 after building UI.Components dist; grep for `Spaarke.UI.Components/src` → 0 matches. Quality gates: code-review 0/0/0; adr-check ADR-012 ✅ / ADR-021 ✅, 0 violations. Detail: notes/task-001-completion.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

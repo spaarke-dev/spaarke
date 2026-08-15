@@ -9,13 +9,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none active — project fully initialized, ready for execution |
-| **Step** | Pipeline complete (artifacts + 28 POML tasks + branch pushed) |
-| **Status** | ready-to-execute (operator-gated) |
-| **Next Action** | In the new session, say **"work on task 001"** (invokes `task-execute` on `tasks/001-absorb-pr508-boundary-fix.poml`). To parallelize, say **"start group P"** (runs 001 + 010 concurrently). |
+| **Task** | Group P DONE (001 ✅, 010 ✅) — next: **task 002** (13-file Kanban hoist) |
+| **Step** | Phase 1 spine: 001 ✅ → **002 (next)** → 003 |
+| **Status** | in-progress (executing critical path) |
+| **Next Action** | Execute **task 002** (`tasks/002-hoist-kanban-subtree-to-shared-lib.poml`, opus/xhigh, depends on 001 ✓). Then 003. Phase-3 group Q + Phase-5 group R are the true parallel fan-out waves. |
 
 ### Critical Context
-`/design-to-spec` + `/project-pipeline` are DONE. Branch `work/smart-todo-r5` is committed (`f98353bc0`) and pushed. 28 tasks across 7 phases; all decisions locked (see `CLAUDE.md` → "Decisions Made"). Start at task 001 (the critical-path serial spine 001→002→003). Nothing is in-progress; no uncommitted work.
+Execution underway on branch `work/smart-todo-r5`. **001 complete** (PR#508 boundary fix — barrel imports, package/tsconfig wired, `tsc` green, gates clean). **010 complete by pre-existence** (`sprk_priority`/`sprk_effort` already on live `sprk_todo` with exact spec values — NO schema write). Most tasks are `parallel-safe:false` (shared-lib contention) → critical path runs serially in main session; subagent fan-out reserved for group Q (020/022/023/024) + group R (040/041/042). UI.Components `dist` + both packages' `node_modules` are now built locally (needed for `tsc`).
 
 ### Files/State this session (all committed)
 - `spec.md`, `design.md` — refined; #508 absorbed into FR-01

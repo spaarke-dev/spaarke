@@ -108,8 +108,8 @@ import { ArrowClockwiseRegular, Add20Regular, Open20Regular, Search20Regular } f
 import {
   OrientationToggle,
   type Orientation,
-} from '../../../../Spaarke.UI.Components/src/components/OrientationToggle';
-import { MicrosoftToDoIcon } from '../../../../Spaarke.UI.Components/src/icons/MicrosoftToDoIcon';
+  MicrosoftToDoIcon,
+} from '@spaarke/ui-components';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';

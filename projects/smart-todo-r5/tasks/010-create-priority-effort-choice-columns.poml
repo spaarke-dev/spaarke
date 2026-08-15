@@ -4,7 +4,7 @@
     <title>Create sprk_priority + sprk_effort Choice columns on sprk_todo (FR-02/FR-03)</title>
     <phase>2: Schema + scoring + resolver</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New Dataverse schema on a production entity (sprk_todo); tags include dataverse/schema; downstream tasks 011-014 depend on the exact option values.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,7 +99,9 @@
     <criterion testable="true">Negative: no additional/undocumented option values exist on either Choice column (exhaustive match against the tables above, not a superset).</criterion>
   </acceptance-criteria>
 
-  <notes>See spec.md FR-02/FR-03 for the full mapping tables (score mapping is task 011's concern, not this task's). Option value ranges follow the 100000000+ Dataverse custom-option convention used elsewhere in the solution.</notes>
+  <notes>See spec.md FR-02/FR-03 for the full mapping tables (score mapping is task 011's concern, not this task's). Option value ranges follow the 100000000+ Dataverse custom-option convention used elsewhere in the solution.
+
+COMPLETION (2026-08-15): Verify-only. `describe tables/sprk_todo` showed BOTH `sprk_priority` (Urgent/High/Medium/Low = 100000000-3) and `sprk_effort` (None/Very High/High/Medium/Low = 100000000-4) ALREADY EXIST on the live entity with the EXACT spec'd labels/values, and `sprk_priorityscore`/`sprk_effortscore` remain INT. All 5 acceptance criteria satisfied by pre-existence; NO schema write executed (identical values ⇒ escalation trigger did not fire; §2 code-wins). Detail: notes/task-010-schema-already-exists.md.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

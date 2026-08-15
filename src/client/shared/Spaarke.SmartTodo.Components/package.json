@@ -17,7 +17,11 @@
     "build": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
+  "dependencies": {
+    "@spaarke/ui-components": "file:../Spaarke.UI.Components"
+  },
   "peerDependencies": {
+    "@spaarke/ui-components": "*",
     "@fluentui/react-components": "^9.0.0",
     "@fluentui/react-icons": "^2.0.0",
     "@hello-pangea/dnd": "^17.0.0 || ^18.0.0",
