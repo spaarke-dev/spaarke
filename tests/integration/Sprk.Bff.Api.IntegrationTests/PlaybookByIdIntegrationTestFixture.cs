@@ -18,6 +18,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.IntegrationTests;
 

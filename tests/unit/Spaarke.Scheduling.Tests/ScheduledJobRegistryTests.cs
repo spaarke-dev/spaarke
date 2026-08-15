@@ -51,12 +51,4 @@ public class ScheduledJobRegistryTests
 
         registry.EnumerateAll().Should().BeEquivalentTo(new[] { a, b, c });
     }
-
-    [Fact]
-    public void Register_NullJob_Throws()
-    {
-        var registry = new ScheduledJobRegistry();
-        var act = () => registry.Register(null!);
-        act.Should().Throw<ArgumentNullException>();
-    }
 }

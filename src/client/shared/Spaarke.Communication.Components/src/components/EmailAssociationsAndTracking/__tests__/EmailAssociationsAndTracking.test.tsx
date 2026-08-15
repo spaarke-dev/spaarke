@@ -368,11 +368,15 @@ describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-0
     global.fetch = jest.fn().mockResolvedValue(NAV_PROPS_RESPONSE) as unknown as typeof fetch;
   });
 
-  it('item 3: the per-card commit button reads "Select" (not "Confirm")', () => {
-    renderWithProvider(<EmailConnectionsReview {...baseProps({ variant: 'reconcile' })} />);
-    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
-    expect(screen.getByRole('button', { name: 'Select' })).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Confirm' })).not.toBeInTheDocument();
+  it('item 3: compact cards show an always-visible "Confirm" button (reverted from "Select"; no click-to-reveal)', async () => {
+    const props = baseProps({ variant: 'reconcile' });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+    // Compact (prototype) cards render Confirm inline immediately — no select-then-reveal step.
+    expect(screen.getAllByRole('button', { name: 'Confirm' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Select' })).not.toBeInTheDocument();
+    // Clicking a card's Confirm fires the additive write directly.
+    fireEvent.click(screen.getAllByRole('button', { name: 'Confirm' })[0]);
+    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
   });
 
   it('item 4: "Look up another record" is a labelled field that opens the record-type menu', async () => {

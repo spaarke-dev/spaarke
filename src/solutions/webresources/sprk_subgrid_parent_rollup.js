@@ -26,6 +26,10 @@
  *   "refreshDelayMs": 1500
  * }
  *
+ * AUTH (task 023 / spec FR-09): calls the BFF over an Azure AD bearer token acquired via
+ * @spaarke/auth (MSAL silent SSO). The Finance recalculate endpoints are no longer anonymous.
+ * See the "BFF AUTHENTICATION" section below for the flow + live-validation caveat.
+ *
  * @see .claude/patterns/webresource/subgrid-parent-rollup.md
  */
 
@@ -43,7 +47,7 @@ Spaarke.SubgridRollup = Spaarke.SubgridRollup || {};
 Spaarke.SubgridRollup._instances = {};
 
 /** Version for console logging. */
-Spaarke.SubgridRollup._version = "1.0.0";
+Spaarke.SubgridRollup._version = "2.0.0"; // 2.0.0 — @spaarke/auth Bearer token (task 023 / FR-09)
 
 // =============================================================================
 // ENVIRONMENT VARIABLE RESOLUTION
@@ -109,6 +113,176 @@ Spaarke.SubgridRollup._getApiBaseUrl = function () {
             console.log("[SubgridRollup] Resolved BFF URL from env var: " + finalValue);
             return finalValue;
         });
+    });
+};
+
+// =============================================================================
+// BFF AUTHENTICATION (@spaarke/auth — MSAL silent SSO)
+// =============================================================================
+//
+// Task 023 (code-quality-and-assurance-r3, spec FR-09): the BFF Finance recalculate
+// endpoints now REQUIRE an Azure AD bearer token (no longer AllowAnonymous). This classic
+// web resource cannot import the npm `@spaarke/auth` package, so it mirrors that package's
+// canonical MSAL flow (see src/client/shared/Spaarke.Auth/src/strategies/BrowserMsalStrategy.ts):
+//
+//   1. GET {apiBaseUrl}/api/config/client (anonymous) → { msalClientId, msalAuthority, msalScopes }
+//   2. Load @azure/msal-browser (v2 UMD) from the Microsoft CDN (classic web resources cannot
+//      bundle npm modules; a CDN <script> is the standard shared-lib load path here).
+//   3. acquireTokenSilent (cached account) → ssoSilent (UPN login hint, uses the existing
+//      Entra session cookie). NO interactive popup is ever triggered (ADR-028 INV-5): a form
+//      load is not explicit user intent to authenticate, so on a cold cache we return null and
+//      the API call is skipped gracefully rather than popping a sign-in window.
+//
+// ⚠️ CANNOT BE VALIDATED OFFLINE. This silent-SSO flow requires a live Dataverse form/iframe
+//    with a signed-in user session and the following deployment prerequisites on the BFF app
+//    registration (AzureAd:ClientId returned by /api/config/client):
+//      - an SPA redirect URI registered for the Dataverse org origin (window.location.origin), and
+//      - admin consent for the api://{clientId}/user_impersonation scope.
+//    Verify in a live environment before relying on it. If token acquisition fails for any
+//    reason, the recalculate call is skipped (best-effort) and logged — the form never breaks.
+//
+// MSAL v2 CDN pin (Subresource-Integrity-friendly, Microsoft-hosted).
+Spaarke.SubgridRollup._MSAL_CDN_URL = "https://alcdn.msauth.net/browser/2.38.4/js/msal-browser.min.js";
+
+/** Cached MSAL PublicClientApplication instance (module-level). */
+Spaarke.SubgridRollup._msalInstance = null;
+
+/** Cached MSAL client config from /api/config/client (module-level). */
+Spaarke.SubgridRollup._msalConfig = null;
+
+/** In-flight MSAL.js CDN load promise (module-level, load-once). */
+Spaarke.SubgridRollup._msalLoadPromise = null;
+
+/**
+ * Dynamically load the MSAL.js browser UMD bundle from the Microsoft CDN (once).
+ * @returns {Promise<Object>} resolves to the global `msal` namespace.
+ */
+Spaarke.SubgridRollup._loadMsal = function () {
+    if (typeof window !== "undefined" && window.msal) {
+        return Promise.resolve(window.msal);
+    }
+    if (Spaarke.SubgridRollup._msalLoadPromise) {
+        return Spaarke.SubgridRollup._msalLoadPromise;
+    }
+    Spaarke.SubgridRollup._msalLoadPromise = new Promise(function (resolve, reject) {
+        try {
+            var script = document.createElement("script");
+            script.src = Spaarke.SubgridRollup._MSAL_CDN_URL;
+            script.async = true;
+            script.onload = function () {
+                if (window.msal) {
+                    resolve(window.msal);
+                } else {
+                    reject(new Error("MSAL.js loaded but window.msal is undefined"));
+                }
+            };
+            script.onerror = function () {
+                reject(new Error("Failed to load MSAL.js from " + Spaarke.SubgridRollup._MSAL_CDN_URL));
+            };
+            document.head.appendChild(script);
+        } catch (e) {
+            reject(e);
+        }
+    });
+    return Spaarke.SubgridRollup._msalLoadPromise;
+};
+
+/**
+ * Fetch the anonymous MSAL bootstrap config from the BFF (cached module-level).
+ * @param {string} apiBaseUrl - BFF API base URL.
+ * @returns {Promise<{clientId:string, authority:string, scopes:string[]}>}
+ */
+Spaarke.SubgridRollup._getMsalConfig = function (apiBaseUrl) {
+    if (Spaarke.SubgridRollup._msalConfig) {
+        return Promise.resolve(Spaarke.SubgridRollup._msalConfig);
+    }
+    return fetch(apiBaseUrl + "/api/config/client", {
+        method: "GET",
+        headers: { "Accept": "application/json" }
+    }).then(function (resp) {
+        if (!resp.ok) {
+            throw new Error("/api/config/client returned " + resp.status);
+        }
+        return resp.json();
+    }).then(function (cfg) {
+        Spaarke.SubgridRollup._msalConfig = {
+            clientId: cfg.msalClientId,
+            authority: cfg.msalAuthority,
+            scopes: cfg.msalScopes || []
+        };
+        return Spaarke.SubgridRollup._msalConfig;
+    });
+};
+
+/**
+ * Resolve a UPN login hint for ssoSilent. Prefers MSAL's own cached account username
+ * (authoritative UPN); falls back to Xrm userSettings.userName. Returns undefined if
+ * neither yields a value (ssoSilent then relies on the Entra session cookie alone).
+ */
+Spaarke.SubgridRollup._resolveLoginHint = function (msalInstance) {
+    try {
+        var accounts = msalInstance.getAllAccounts();
+        if (accounts && accounts.length > 0 && accounts[0].username) {
+            return accounts[0].username;
+        }
+    } catch (e) { /* ignore */ }
+    try {
+        var ctx = Xrm.Utility.getGlobalContext();
+        var settings = ctx && ctx.userSettings ? ctx.userSettings : null;
+        if (settings && settings.userName) {
+            return settings.userName;
+        }
+    } catch (e) { /* ignore */ }
+    return undefined;
+};
+
+/**
+ * Acquire a BFF access token via MSAL silent SSO. Returns null on any failure (caller
+ * skips the API call gracefully — never throws, never triggers an interactive popup).
+ *
+ * @param {string} apiBaseUrl - BFF API base URL.
+ * @returns {Promise<string|null>} access token, or null if acquisition failed.
+ */
+Spaarke.SubgridRollup._acquireBffToken = function (apiBaseUrl) {
+    return Spaarke.SubgridRollup._getMsalConfig(apiBaseUrl).then(function (cfg) {
+        return Spaarke.SubgridRollup._loadMsal().then(function (msal) {
+            if (!Spaarke.SubgridRollup._msalInstance) {
+                Spaarke.SubgridRollup._msalInstance = new msal.PublicClientApplication({
+                    auth: {
+                        clientId: cfg.clientId,
+                        authority: cfg.authority,
+                        redirectUri: window.location.origin
+                    },
+                    cache: {
+                        cacheLocation: "localStorage",   // INV-1 — survives tab/browser close
+                        storeAuthStateInCookie: true     // INV-2 — ssoSilent under 3rd-party cookie blocking
+                    }
+                });
+            }
+            var instance = Spaarke.SubgridRollup._msalInstance;
+            var scopes = cfg.scopes;
+
+            // 1. acquireTokenSilent with a cached account (refresh-token-backed).
+            var accounts = instance.getAllAccounts();
+            var silent = (accounts && accounts.length > 0)
+                ? instance.acquireTokenSilent({ scopes: scopes, account: accounts[0] })
+                : Promise.reject(new Error("no cached account"));
+
+            return silent.then(function (result) {
+                return result && result.accessToken ? result.accessToken : null;
+            }).catch(function () {
+                // 2. ssoSilent with a UPN login hint (uses the Entra session cookie).
+                var loginHint = Spaarke.SubgridRollup._resolveLoginHint(instance);
+                var req = loginHint ? { scopes: scopes, loginHint: loginHint } : { scopes: scopes };
+                return instance.ssoSilent(req).then(function (result) {
+                    return result && result.accessToken ? result.accessToken : null;
+                });
+                // NOTE: intentionally NO acquireTokenPopup fallback (ADR-028 INV-5).
+            });
+        });
+    }).catch(function (error) {
+        console.warn("[SubgridRollup] BFF token acquisition failed (call will be skipped):", error);
+        return null;
     });
 };
 
@@ -275,13 +449,23 @@ Spaarke.SubgridRollup._callApiAndRefresh = function (formContext, key, entityId)
 
     console.log("[SubgridRollup:" + key + "] POST " + apiUrl);
 
-    fetch(apiUrl, {
-        method: "POST",
-        headers: {
-            "Content-Type": "application/json",
-            "Accept": "application/json"
+    // Task 023 / FR-09: acquire a BFF access token via @spaarke/auth (MSAL silent SSO) and
+    // attach it as a Bearer header. If acquisition fails, skip the call gracefully (the BFF
+    // endpoint requires auth; sending an unauthenticated request would just 401).
+    Spaarke.SubgridRollup._acquireBffToken(inst.apiBaseUrl).then(function (token) {
+        if (!token) {
+            console.warn("[SubgridRollup:" + key + "] No BFF token acquired; skipping recalculate call.");
+            return;
         }
-    }).then(function (response) {
+
+        fetch(apiUrl, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                "Authorization": "Bearer " + token
+            }
+        }).then(function (response) {
         if (response.ok) {
             console.log("[SubgridRollup:" + key + "] API succeeded. Refreshing in " +
                 inst.config.refreshDelayMs + "ms...");
@@ -301,8 +485,9 @@ Spaarke.SubgridRollup._callApiAndRefresh = function (formContext, key, entityId)
         } else {
             console.warn("[SubgridRollup:" + key + "] API returned " + response.status);
         }
-    }).catch(function (error) {
-        console.warn("[SubgridRollup:" + key + "] API call failed:", error);
+        }).catch(function (error) {
+            console.warn("[SubgridRollup:" + key + "] API call failed:", error);
+        });
     });
 };
 

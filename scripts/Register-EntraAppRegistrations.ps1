@@ -1,13 +1,18 @@
 <#
 .SYNOPSIS
-    Creates production Entra ID app registrations for the Spaarke BFF API and Dataverse S2S.
+    Creates the production Entra ID app registration for the Spaarke BFF API.
 
 .DESCRIPTION
-    Creates two app registrations in the shared Entra ID tenant (a221a95e-...):
+    Creates the BFF API app registration in the shared Entra ID tenant (a221a95e-...):
       1. spaarke-bff-api-prod — BFF API production app (validates user tokens, OBO for Graph + Dataverse)
-      2. spaarke-dataverse-s2s-prod — Dataverse server-to-server authentication (ServiceClient)
 
-    For each registration:
+    NOTE (2026-08-14, code-quality-and-assurance-r3 task 060): the separate
+    `spaarke-dataverse-s2s-*` app registration was REMOVED. It had zero code consumers —
+    Dataverse server-to-server access consolidated onto the BFF app registration's
+    credential (`API_CLIENT_SECRET`) on 2026-01-07 (see docs/architecture/auth-azure-resources.md).
+    The BFF app registration is the single Dataverse Application User.
+
+    For the registration:
       - Creates the app registration with correct API permissions
       - Generates a 24-month client secret
       - Stores the secret in the platform Key Vault (sprk-platform-prod-kv)
@@ -39,20 +44,13 @@
 .PARAMETER SkipBffApi
     Skip BFF API app registration (if already created).
 
-.PARAMETER SkipDataverseS2S
-    Skip Dataverse S2S app registration (if already created).
-
 .EXAMPLE
     # Preview what will be created
     .\Register-EntraAppRegistrations.ps1 -DryRun
 
 .EXAMPLE
-    # Create both registrations
+    # Create the BFF API registration
     .\Register-EntraAppRegistrations.ps1
-
-.EXAMPLE
-    # Create only Dataverse S2S (BFF already done)
-    .\Register-EntraAppRegistrations.ps1 -SkipBffApi
 
 .NOTES
     Project: production-environment-setup-r1
@@ -67,8 +65,7 @@ param(
     [string]$ProductionApiDomain = "api.spaarke.com",
     [string]$DataverseOrgUrl = "",
     [switch]$DryRun,
-    [switch]$SkipBffApi,
-    [switch]$SkipDataverseS2S
+    [switch]$SkipBffApi
 )
 
 $ErrorActionPreference = "Stop"
@@ -78,11 +75,16 @@ $ErrorActionPreference = "Stop"
 # ─────────────────────────────────────────────────────────────────────────────
 
 $BffApiDisplayName = "spaarke-bff-api-prod"
-$DataverseS2SDisplayName = "spaarke-dataverse-s2s-prod"
 $SecretExpiryMonths = 24
 $SecretExpiryDate = (Get-Date).AddMonths($SecretExpiryMonths).ToString("yyyy-MM-ddTHH:mm:ssZ")
 
 # Microsoft Graph API well-known IDs
+#
+# NOTE: these four IDs are DELEGATED scopes (OAuth2PermissionScopes) requested at app-registration
+# creation time — a DIFFERENT concern from the app-only APPLICATION roles the BFF identity holds.
+# Do NOT merge these with the application-role list. The canonical source of truth for the BFF's
+# expected Graph APPLICATION (app-only) roles is:
+#   src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs
 $GraphApiId = "00000003-0000-0000-c000-000000000000"
 $GraphFilesReadWriteAll = "75359482-378d-4052-8f01-80520e7db3cd"   # Files.ReadWrite.All (delegated)
 $GraphSitesReadWriteAll = "89fe6a52-be36-487e-b7d8-d061c450a026"   # Sites.ReadWrite.All (delegated)
@@ -426,110 +428,18 @@ if (-not $SkipBffApi) {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 2: Create Dataverse S2S Production App Registration
+# NOTE: The separate "Dataverse S2S" app registration (spaarke-dataverse-s2s-*)
+# was removed 2026-08-14 (code-quality-and-assurance-r3 task 060). It had zero
+# code consumers; Dataverse S2S access consolidated onto the BFF app registration
+# credential (API_CLIENT_SECRET / BFF-API-ClientSecret) on 2026-01-07.
 # ─────────────────────────────────────────────────────────────────────────────
 
-$S2SAppId = $null
-$S2SObjectId = $null
-
-if (-not $SkipDataverseS2S) {
-    Write-Header "STEP 2: Dataverse S2S Production App Registration"
-
-    # Check if app already exists
-    $existingS2SApp = az ad app list --display-name $DataverseS2SDisplayName --output json 2>$null | ConvertFrom-Json
-    if ($existingS2SApp -and $existingS2SApp.Count -gt 0) {
-        Write-Warn "App registration '$DataverseS2SDisplayName' already exists (AppId: $($existingS2SApp[0].appId))"
-        Write-Info "Skipping creation. Use Azure Portal to modify if needed."
-        $S2SAppId = $existingS2SApp[0].appId
-        $S2SObjectId = $existingS2SApp[0].id
-    } else {
-        Write-Step 1 "Creating app registration: $DataverseS2SDisplayName"
-
-        if ($DryRun) {
-            Write-Info "DRY RUN: Would create app '$DataverseS2SDisplayName' with:"
-            Write-Info "  - Dynamics CRM permissions: user_impersonation (delegated)"
-            Write-Info "  - Purpose: Dataverse ServiceClient S2S auth (AuthType=ClientSecret)"
-            $S2SAppId = "00000000-0000-0000-0000-000000000001"
-        } else {
-            $createdS2SApp = az ad app create --display-name $DataverseS2SDisplayName `
-                --sign-in-audience AzureADMyOrg `
-                --output json 2>&1 | ConvertFrom-Json
-
-            if ($LASTEXITCODE -ne 0 -or -not $createdS2SApp) {
-                throw "Failed to create app registration '$DataverseS2SDisplayName'"
-            }
-
-            $S2SAppId = $createdS2SApp.appId
-            $S2SObjectId = $createdS2SApp.id
-            Write-Success "Created app: $DataverseS2SDisplayName (AppId: $S2SAppId)"
-
-            # Add Dynamics CRM permission
-            Write-Step 2 "Adding Dynamics CRM API permissions..."
-            az ad app permission add --id $S2SAppId `
-                --api $DynamicsCrmApiId `
-                --api-permissions "$($DynamicsCrmUserImpersonation)=Scope" `
-                --output none 2>&1
-
-            Write-Success "Dynamics CRM user_impersonation permission added"
-        }
-    }
-
-    # Generate client secret
-    Write-Step 3 "Generating client secret (valid $SecretExpiryMonths months)"
-
-    if (-not $DryRun -and $S2SAppId) {
-        $s2sSecretResult = az ad app credential reset `
-            --id $S2SAppId `
-            --append `
-            --display-name "Production-$(Get-Date -Format 'yyyyMMdd')" `
-            --end-date $SecretExpiryDate `
-            --output json 2>&1 | ConvertFrom-Json
-
-        if ($LASTEXITCODE -ne 0 -or -not $s2sSecretResult) {
-            throw "Failed to create client secret for '$DataverseS2SDisplayName'"
-        }
-
-        $s2sSecret = $s2sSecretResult.password
-        Write-Success "Client secret created (prefix: $($s2sSecret.Substring(0, 5))...)"
-
-        # Store in Key Vault
-        Store-SecretInKeyVault -VaultName $KeyVaultName `
-            -SecretName "Dataverse-S2S-ClientSecret" `
-            -SecretValue $s2sSecret `
-            -Description "Dataverse S2S production client secret ($DataverseS2SDisplayName)"
-
-        Store-SecretInKeyVault -VaultName $KeyVaultName `
-            -SecretName "Dataverse-S2S-ClientId" `
-            -SecretValue $S2SAppId `
-            -Description "Dataverse S2S production client ID ($DataverseS2SDisplayName)"
-    } else {
-        Write-Info "DRY RUN: Would generate 24-month client secret"
-        Write-Info "DRY RUN: Would store secrets in Key Vault:"
-        Write-Info "  - Dataverse-S2S-ClientSecret"
-        Write-Info "  - Dataverse-S2S-ClientId"
-    }
-
-    # Create service principal
-    Write-Step 4 "Creating service principal"
-
-    if (-not $DryRun -and $S2SAppId) {
-        $s2sSp = az ad sp create --id $S2SAppId --output json 2>$null | ConvertFrom-Json
-        if ($s2sSp) {
-            Write-Success "Service principal created (ObjectId: $($s2sSp.id))"
-        } else {
-            Write-Info "Service principal may already exist"
-        }
-    } else {
-        Write-Info "DRY RUN: Would create service principal for $DataverseS2SDisplayName"
-    }
-}
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 3: Configure Known Client Applications (BFF API)
+# Step 2: Configure Known Client Applications (BFF API)
 # ─────────────────────────────────────────────────────────────────────────────
 
 if ($BffApiAppId -and $BffApiObjectId -and -not $DryRun) {
-    Write-Header "STEP 3: Configure Known Client Applications"
+    Write-Header "STEP 2: Configure Known Client Applications"
 
     Write-Info "Known client applications will need to be configured after"
     Write-Info "production PCF and Code Page client app registrations are created."
@@ -538,18 +448,18 @@ if ($BffApiAppId -and $BffApiObjectId -and -not $DryRun) {
     Write-Info "  az rest --method PATCH --uri 'https://graph.microsoft.com/v1.0/applications/$BffApiObjectId'"
     Write-Info "    --body '{""api"":{""knownClientApplications"":[""<pcf-client-id>"",""<codepage-client-id>""]}}'"
 } elseif ($DryRun) {
-    Write-Header "STEP 3: Configure Known Client Applications"
+    Write-Header "STEP 2: Configure Known Client Applications"
     Write-Info "DRY RUN: Would configure knownClientApplications on BFF API app"
     Write-Info "  (Requires PCF and Code Page client app IDs — set after those are created)"
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 4: Admin Consent
+# Step 3: Admin Consent
 # ─────────────────────────────────────────────────────────────────────────────
 
-Write-Header "STEP 4: Admin Consent (Manual Step)"
+Write-Header "STEP 3: Admin Consent (Manual Step)"
 
-Write-Info "Admin consent MUST be granted for both app registrations."
+Write-Info "Admin consent MUST be granted for the BFF API app registration."
 Write-Info "This requires a Global Administrator or Privileged Role Administrator."
 Write-Info ""
 
@@ -560,21 +470,14 @@ if ($BffApiAppId) {
     Write-Info ""
 }
 
-if ($S2SAppId) {
-    Write-Info "Dataverse S2S ($DataverseS2SDisplayName):"
-    Write-Info "  Portal: https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/$S2SAppId"
-    Write-Info "  CLI:    az ad app permission admin-consent --id $S2SAppId"
-    Write-Info ""
-}
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Step 5: Dataverse Application User Registration
+# Step 4: Dataverse Application User Registration
 # ─────────────────────────────────────────────────────────────────────────────
 
-Write-Header "STEP 5: Dataverse Application User (Manual Step)"
+Write-Header "STEP 4: Dataverse Application User (Manual Step)"
 
-Write-Info "After Dataverse environment is provisioned, register the app registrations"
-Write-Info "as Application Users with appropriate security roles."
+Write-Info "After Dataverse environment is provisioned, register the BFF API app registration"
+Write-Info "as an Application User with appropriate security roles."
 Write-Info ""
 
 if ($BffApiAppId) {
@@ -582,14 +485,6 @@ if ($BffApiAppId) {
     Write-Info "  App ID: $BffApiAppId"
     Write-Info "  Security Role: System Administrator (or custom role)"
     Write-Info "  Command: pac admin assign-app-to-environment --environment <env-url> --app $BffApiAppId"
-    Write-Info ""
-}
-
-if ($S2SAppId) {
-    Write-Info "Dataverse S2S Application User:"
-    Write-Info "  App ID: $S2SAppId"
-    Write-Info "  Security Role: System Administrator (or custom role)"
-    Write-Info "  Command: pac admin assign-app-to-environment --environment <env-url> --app $S2SAppId"
     Write-Info ""
 }
 
@@ -621,28 +516,17 @@ if ($BffApiAppId) {
     Write-Host ""
 }
 
-if ($S2SAppId) {
-    Write-Host "  Dataverse S2S App Registration:" -ForegroundColor Green
-    Write-Host "    Display Name:    $DataverseS2SDisplayName" -ForegroundColor White
-    Write-Host "    Application ID:  $S2SAppId" -ForegroundColor White
-    Write-Host "    Permissions:     Dynamics CRM (user_impersonation)" -ForegroundColor White
-    Write-Host "    KV Secrets:      Dataverse-S2S-ClientSecret, Dataverse-S2S-ClientId" -ForegroundColor White
-    Write-Host ""
-}
-
 Write-Host "  Key Vault Secrets Stored:" -ForegroundColor Yellow
 Write-Host "    sprk-platform-prod-kv:" -ForegroundColor White
 Write-Host "      - TenantId" -ForegroundColor Gray
 Write-Host "      - BFF-API-ClientId" -ForegroundColor Gray
 Write-Host "      - BFF-API-ClientSecret" -ForegroundColor Gray
 Write-Host "      - BFF-API-Audience" -ForegroundColor Gray
-Write-Host "      - Dataverse-S2S-ClientId" -ForegroundColor Gray
-Write-Host "      - Dataverse-S2S-ClientSecret" -ForegroundColor Gray
 Write-Host ""
 
 Write-Host "  NEXT STEPS:" -ForegroundColor Cyan
-Write-Host "    1. Grant admin consent (see Step 4 above)" -ForegroundColor White
-Write-Host "    2. Register Application Users in Dataverse (see Step 5 above)" -ForegroundColor White
+Write-Host "    1. Grant admin consent (see Step 3 above)" -ForegroundColor White
+Write-Host "    2. Register the Application User in Dataverse (see Step 4 above)" -ForegroundColor White
 Write-Host "    3. Configure knownClientApplications when PCF/CodePage clients are created" -ForegroundColor White
 Write-Host "    4. Run Test-EntraAppRegistrations.ps1 to verify token acquisition" -ForegroundColor White
 Write-Host ""

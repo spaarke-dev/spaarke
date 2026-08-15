@@ -1,5 +1,6 @@
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai;
 

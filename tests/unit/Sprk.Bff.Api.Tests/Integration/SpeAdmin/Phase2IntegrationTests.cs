@@ -1095,7 +1095,7 @@ public class Phase2IntegrationTests
                 PrincipalId: "aad-obj-001",
                 PrincipalType: "user");
 
-            var dto = Sprk.Bff.Api.Endpoints.SpeAdmin.ContainerPermissionEndpoints.ContainerPermissionDto.FromDomain(domain);
+            var dto = Sprk.Bff.Api.Api.SpeAdmin.ContainerPermissionEndpoints.ContainerPermissionDto.FromDomain(domain);
 
             // Assert — ADR-007: no Graph SDK types exposed
             dto.Id.Should().Be("perm-001");
@@ -1118,7 +1118,7 @@ public class Phase2IntegrationTests
                 PrincipalId: "sp-obj-001",
                 PrincipalType: "application");
 
-            var dto = Sprk.Bff.Api.Endpoints.SpeAdmin.ContainerPermissionEndpoints.ContainerPermissionDto.FromDomain(domain);
+            var dto = Sprk.Bff.Api.Api.SpeAdmin.ContainerPermissionEndpoints.ContainerPermissionDto.FromDomain(domain);
 
             // Assert
             dto.DisplayName.Should().BeNull("service principals may not have a display name");

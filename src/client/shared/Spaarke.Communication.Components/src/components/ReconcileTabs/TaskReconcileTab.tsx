@@ -69,11 +69,28 @@ import type { AuthenticatedFetchFn } from '../EmailBody/EmailBodyView.types';
 import type { EmailCitation } from '../../logic/citations';
 import type { ReconcileRegarding, ProposalOutcome } from './FieldUpdateReconcileTab';
 
-/** sprk_eventstatus Choice values used by the reconcile form (as-built: Open=1, Completed=2). */
-export const EVENT_STATUS = { OPEN: 1, COMPLETED: 2 } as const;
+/**
+ * `sprk_eventstatus` Choice values — the canonical Events-subsystem status field (the deliberate
+ * statecode/statuscode→custom-field migration, events-workspace-apps-UX-r1). Full set 0-7; the
+ * reconcile Status dropdown surfaces the reviewer-relevant lifecycle values (owner UAT 2026-08-14
+ * — expanded from the prior Open/Completed-only pair). Archived(7)/Reassigned(6) are admin/terminal
+ * transitions handled elsewhere (ribbon), so they are omitted from the create/complete form.
+ */
+export const EVENT_STATUS = {
+  DRAFT: 0,
+  OPEN: 1,
+  COMPLETED: 2,
+  CLOSED: 3,
+  ON_HOLD: 4,
+  CANCELLED: 5,
+} as const;
 const STATUS_OPTIONS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: EVENT_STATUS.DRAFT, label: 'Draft' },
   { value: EVENT_STATUS.OPEN, label: 'Open' },
   { value: EVENT_STATUS.COMPLETED, label: 'Completed' },
+  { value: EVENT_STATUS.CLOSED, label: 'Closed' },
+  { value: EVENT_STATUS.ON_HOLD, label: 'On Hold' },
+  { value: EVENT_STATUS.CANCELLED, label: 'Cancelled' },
 ];
 
 const CREATE_TASK_KIND = 'create-task';

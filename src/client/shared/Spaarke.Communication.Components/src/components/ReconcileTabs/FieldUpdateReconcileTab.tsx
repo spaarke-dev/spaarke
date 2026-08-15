@@ -89,6 +89,8 @@ interface XrmAttributeMetadata {
   optionSet?: { options?: XrmOptionSetOption[] };
   Targets?: string[];
   targets?: string[];
+  DisplayName?: { UserLocalizedLabel?: { Label?: string }; LocalizedLabels?: Array<{ Label?: string }> };
+  displayName?: { userLocalizedLabel?: { label?: string } };
 }
 interface XrmEntityMetadata {
   Attributes?:
@@ -121,6 +123,8 @@ interface FieldMeta {
   type?: string;
   options?: Array<{ value: string; label: string }>;
   targets?: string[];
+  /** Friendly attribute label (e.g. "Deal Stage") for the card header (owner UAT 2026-08-14). */
+  displayName?: string;
 }
 
 /** Defensively parse `Xrm.Utility.getEntityMetadata(...)` (PascalCase/camelCase, array/collection). */
@@ -142,7 +146,12 @@ function parseFieldMeta(md: XrmEntityMetadata | undefined, field: string): Field
       })
     : undefined;
   const targets = attr?.Targets ?? attr?.targets;
-  return { type, options, targets };
+  const displayName =
+    attr?.DisplayName?.UserLocalizedLabel?.Label ??
+    attr?.DisplayName?.LocalizedLabels?.[0]?.Label ??
+    attr?.displayName?.userLocalizedLabel?.label ??
+    undefined;
+  return { type, options, targets, displayName };
 }
 
 /** Normalize a Dataverse lookup id (strip braces, lowercase) — mirrors EmailConnectionsReview. */
@@ -631,7 +640,7 @@ export const FieldUpdateReconcileTab: React.FC<FieldUpdateReconcileTabProps> = (
           <div key={p.reviewLogId} className={s.card} data-testid="field-reconcile-card">
             <div className={s.cardHeader}>
               <Text className={s.fieldName} title={p.targetField ?? undefined}>
-                {p.targetField ?? '(field)'}
+                {fieldMeta[p.reviewLogId]?.displayName ?? p.targetField ?? '(field)'}
               </Text>
               {typeof p.confidence === 'number' ? (
                 <Badge appearance="tint" color="informative" data-testid="field-reconcile-confidence">

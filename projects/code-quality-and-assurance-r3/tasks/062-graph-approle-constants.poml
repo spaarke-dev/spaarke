@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: Graph app-role expected-list as compile-time constant (GraphAppRoles.cs) + drift verifier (refactor ask #4)</title>
+    <phase>6 Deployment &amp; Configuration Hygiene</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New constants file + one verification helper + script consumption; small, well-specified, no auth-flow behavior change (the roles themselves are unchanged) — STANDARD per Step 3.5.5. Any test additions are MAINTAIN-class but do not alter existing tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified literal work (transcribe a grounded role list into a constant + helper, wire a script consumer); Sonnet default.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches provisioning scripts (scripts/) AND the BFF — coordinate with customer-provisioning-orchestration-r1 (its H10 consumes the constant); /conflict-check before the PR.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,auth,graph,deployment</tags>
+  </metadata>
+
+  <prompt>Move the Graph app-role expected-list into a compile-time constant GraphAppRoles.cs (role GUID + permission value + display name + owning module + why-required) plus a Graph-SDK verification helper that detects drift between the constant and a service principal's live appRoleAssignments. The provisioning surface (Register-EntraAppRegistrations.ps1 lineage) and r1's H10 become CONSUMERS of the constant — single source of truth. GROUNDED 2026-08-13: today the expected list is NOT in any script as a static list — docs/guides/auth-deployment-setup.md §5 defines it DYNAMICALLY as "whatever the BFF app registration currently has" (Step 5a az enumeration), records that the 2026-05-19 dev cutover granted 11 Graph app-role assignments to the MI, and names the baseline 11 in prose bullets (~:436-445). Register-EntraAppRegistrations.ps1:85-94 carries only 4 DELEGATED Graph scopes + Dynamics user_impersonation (app-reg creation, not the app-role grant list). Sibling drift source: scripts/Setup-EntraInfrastructure.ps1:77-81 hardcodes 3 more application roles (User.ReadWrite.All, GroupMember.ReadWrite.All, Directory.ReadWrite.All) for the registration subsystem. No code constant exists (grep GraphAppRoles across src/ → none).</prompt>
+  <role>SPAARKE platform developer. This is a drift-elimination forcing-function: silent-fail trap T3 (r1) is app-only Graph 403s when the MI service principal's grants lag the BFF app-reg's. Follow ADR-028 (the MI grant obligation) and CLAUDE.md §11 (this is justified NEW surface).</role>
+  <goal>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs exists as the single source of truth (GUID + value + display name + owning module + why-required per role, covering the §5b baseline 11 + the 3 registration-subsystem roles with owning-module attribution); a Graph-SDK verification helper compares the constant against a service principal's live appRoleAssignments and returns the drift set both directions; the runbook + provisioning scripts reference the constant as authoritative; adding a role requires exactly ONE code edit; build + full test green.</goal>
+
+  <context>
+    <background>Refactor ask #4 (notes/deployment-complexity-refactors-ask-2026-08-12.md) accepted 2026-08-13. The ~11-role expected list for the BFF/MI Graph application permissions currently lives as (a) a dynamic az-CLI enumeration procedure + prose bullet baseline in docs/guides/auth-deployment-setup.md §5 (Step 5a-5c; ":447 The dev cutover on 2026-05-19 granted 11 Graph + SharePoint app role assignments to the MI"; baseline names: FileStorageContainer.Selected, Files.Read.All, Files.ReadWrite.All, Sites.Read.All, Sites.ReadWrite.All, User.Read.All, Group.Read.All, Mail.Read, Mail.ReadWrite, Mail.Send, MailboxSettings.Read — some module-conditional), and (b) scattered hardcoded GUIDs: Setup-EntraInfrastructure.ps1:77-81 (3 registration-subsystem app roles) and Register-EntraAppRegistrations.ps1:85-94 (4 delegated scopes — different concern, delegated not application; leave as-is but reference the constant in comments). Adding a capability needing a new Graph role today = edit script(s) + runbook + re-run grants + hope they stay in sync — no forcing function. The natural home is Infrastructure/Auth/ (sibling of ManagedIdentityCredentialFactory.cs — the identity/credential area; the verifier concerns the MI service principal's grants, not Graph data-plane calls).</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs (the constant: GUID + value + displayName + owningModule + whyRequired + moduleConditional flag)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoleVerifier.cs (Graph-SDK helper: enumerate a SP's appRoleAssignments on the Graph resource SP, diff against GraphAppRoles both directions)</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Auth/GraphAppRoleVerifierTests.cs (drift-detection logic against stubbed assignment sets)</file>
+      <file role="modify">docs/guides/auth-deployment-setup.md (§5 — the constant becomes the authoritative expected list; Step 5a demoted to a cross-check)</file>
+      <file role="modify">scripts/Setup-EntraInfrastructure.ps1 (:77-81 — annotate/derive from the constant; no silent second list)</file>
+      <file role="modify">scripts/Register-EntraAppRegistrations.ps1 (comment cross-reference; its delegated-scope list is a different concern and stays)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs (area sibling + doc style)</file>
+      <file role="canonical-reference">docs/guides/auth-deployment-setup.md §5a-5c (the procedure being codified)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Standalone. Enforcement rule lives in task 040 (ArchTest rule b: single source of truth) + task 042 (CI parity gate). customer-provisioning-orchestration-r1's H10 consumes the constant (r3 owns constant + verifier; r1 owns applying grants).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this task does NOT grant, revoke, or change any permission on any app-reg or service principal — it codifies the expected list + a read-only verifier. Applying grants stays with the operator runbook / r1's H10.</constraint>
+    <constraint source="project">Scope (content): every entry carries role GUID + permission value + display name + owning module + why-required comment + whether module-conditional (e.g., Mail.* only when Email/Communication enabled — mirroring the §5b conditionals). GUIDs MUST be taken from the Microsoft Graph well-known role IDs and cross-checked against the live SP enumeration (Step 5a) during execution — do not invent GUIDs from memory.</constraint>
+    <constraint source="project">Scope (no new surface beyond the two files): the verifier is a plain class using the EXISTING Microsoft.Graph package + existing IGraphClientFactory app-only client — no new endpoint, no DI-registered hosted service, no new NuGet. Callable from tests, diagnostics, and r1's H10 tooling.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR (scripts/ + Infrastructure/Auth/ touch r1's surface). Verify against src/ AND tests/.</constraint>
+    <constraint source="ADR-028">Scope: the constant documents the APPLICATION (app-only) roles required by the BFF identity (app-reg and/or MI per ADR-028's MI mandate). Delegated scopes (Register-EntraAppRegistrations.ps1:87-90) are out of scope — do not merge the two lists.</constraint>
+    <constraint source="auth-gate">GATED on the BFF Auth Surface Map (task 019 → notes/bff-auth-surface-map.md). The map resolves which service principal must hold the Graph app-roles (system-assigned MI vs UAMI — GAP #4); the verifier MUST target that SP. Do NOT assume the SP identity — take it from the map.</constraint>
+    <constraint source="auth-map-2026-08-13">Map resolution: the identity is a **UAMI** — grant target is `mi-bff-api-dev` (clientId 5967251e…) / `mi-bff-api-demo` (b0ce4ca4…), NOT the retired `56ae2188…` and NOT the app-reg. The verifier census MUST run against BOTH the app-reg SP (the expected-role-list SOURCE) and the UAMI SP (the grant TARGET) per env, and flag drift. Owner/portal confirmation item (map §H): whether the full 11-role set was ever replicated from the retired principal onto the UAMI SP — surface it, don't assume.</constraint>
+    <constraint source="net10-2026-08-14">Environment reality (handback `notes/r3-handoff.md`): **only `spaarke-dev` is live** — demo/prod decommissioned. The UAMI-SP Graph-role census runs against **dev** (`mi-bff-api-dev` `5967251e…`) for now; demo (`mi-bff-api-demo` `b0ce4ca4…`) re-verify is DEFERRED until re-provisioned.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph app-role parity / single source of truth</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Load auth-deployment-setup.md §5 + ADR-028; run /conflict-check (r1 coordination).</step>
+    <step order="1">Enumerate the authoritative current list: run the §5a enumeration against the BFF app-reg SP (or use the recorded 2026-05-19 cutover evidence if az access is unavailable — then mark entries needing live confirmation); reconcile with the §5b baseline 11 + Setup-EntraInfrastructure.ps1:77-81's 3.</step>
+    <step order="2">Author GraphAppRoles.cs with the full annotated entry set (owning module + why-required + module-conditional flags).</step>
+    <step order="3">Author GraphAppRoleVerifier.cs: given a service principal object id, fetch its appRoleAssignments on the Graph resource SP and return (missing-from-SP, extra-on-SP) vs the constant (filtered by enabled modules where conditional).</step>
+    <step order="4">Unit tests: drift detected in both directions on stubbed assignment sets; clean pass when sets match; module-conditional filtering honored.</step>
+    <step order="5">Update auth-deployment-setup.md §5 to name GraphAppRoles.cs as the authoritative list (Step 5a becomes a cross-check); annotate Setup-EntraInfrastructure.ps1 + Register-EntraAppRegistrations.ps1 to reference the constant.</step>
+    <step order="6">dotnet build + full dotnet test green; dotnet publish, record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
+    <step order="7">Update TASK-INDEX.md: set task 062 status to ✅.</step>
+    <step order="8">Document the final role census + any unconfirmed GUIDs in projects/code-quality-and-assurance-r3/notes/; notify r1 (H10 consumption) via the coordination note.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the live §5a enumeration cannot be run AND any role's GUID cannot be confirmed from authoritative Microsoft documentation, STOP and escalate per CLAUDE.md §6 rather than shipping an unverified GUID — a wrong GUID in the single source of truth would propagate to every future customer provisioning run (worse than the current drift). Also escalate if the enumeration reveals the live grant set materially differs from the §5b baseline (list drift is the finding, not something to silently normalize).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No code constant exists: grep GraphAppRoles (and equivalent role-list constructs) across src/ → none. The expected list lives only in docs/guides/auth-deployment-setup.md §5 prose + a dynamic az enumeration, with a second hardcoded partial list at scripts/Setup-EntraInfrastructure.ps1:77-81.</existing>
+    <extension>No existing component can host this: Register-EntraAppRegistrations.ps1:85-94 holds delegated scopes (different concern); the runbook is prose (not machine-consumable); Setup-EntraInfrastructure.ps1 is subsystem-scoped. A compile-time constant in Infrastructure/Auth/ is the minimal machine-consumable single source; the verifier extends the existing IGraphClientFactory app-only client rather than adding new Graph plumbing.</extension>
+    <cost-of-doing-nothing>Silent-fail trap T3 recurs per customer: a new capability adds a Graph role to one grant path but not the MI SP, and app-only Graph calls (SPE, mail, groups) 403 in production despite delegated flow working — currently detectable only by the manual §5a runbook cross-check. Two lists (runbook prose + Setup-EntraInfrastructure.ps1) already disagree today.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs + GraphAppRoleVerifier.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/Auth/GraphAppRoleVerifierTests.cs</output>
+    <output type="doc">docs/guides/auth-deployment-setup.md §5 (constant is authoritative) + script cross-references + notes/ role census</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a new Graph role requirement, adding it requires exactly ONE code edit (a GraphAppRoles.cs entry) — runbook and scripts consume/reference the constant rather than carrying independent lists.</criterion>
+    <criterion testable="true">Given the verifier with a stubbed SP missing a required role, it reports that role as missing; given an SP with an extra unexpected assignment, it reports it as extra (drift detected BOTH directions).</criterion>
+    <criterion testable="true">Negative: the verifier performs READ-ONLY Graph calls — no code path in this task creates/deletes appRoleAssignments; no permission on any SP changed by merging this PR.</criterion>
+    <criterion testable="true">Negative: module-conditional roles (Mail.* etc.) are NOT reported as missing when their owning module is disabled.</criterion>
+    <criterion testable="true">Every GraphAppRoles entry carries GUID + value + displayName + owningModule + why-required; GUIDs confirmed against live enumeration or authoritative docs (unconfirmed → escalation fired, not shipped).</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet; no new endpoint or DI hosted service; /conflict-check run before the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>Refactor ask #4 — accepted 2026-08-13; r3 owns the code constant + BFF verifier with ArchTest+CI rigor; r1 owns applying grants (its H10 consumes the constant; r1 drops its Phase E / D20 absorption). Enforcement rules live in task 040 (ArchTest rule b) + task 042 (CI parity gate). The 11-name baseline here is the §5b prose list — the EXECUTION-time enumeration (step 1) is authoritative for the shipped constant.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

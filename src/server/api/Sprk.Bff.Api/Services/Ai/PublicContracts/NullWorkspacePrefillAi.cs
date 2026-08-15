@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Sprk.Bff.Api.Configuration;
 
@@ -50,6 +51,23 @@ public sealed class NullWorkspacePrefillAi : IWorkspacePrefillAi
         _logger.LogDebug(
             "NullWorkspacePrefillAi.ExecutePlaybookAsync invoked while AI feature is disabled (errorCode={ErrorCode}).",
             ErrorCode);
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public Task<JsonElement> RunPrefillActionAsync(
+        string consumerType,
+        string extractedText,
+        string fileName,
+        string? tenantId,
+        string? correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        // P3 Fail-Fast (ADR-032): mirrors NullActionResolver/NullActionRunner — the linear
+        // pre-fill path throws FeatureDisabledException so the pre-fill service's catch block
+        // yields the same empty response it did when the Null primitives threw directly.
+        _logger.LogDebug(
+            "NullWorkspacePrefillAi.RunPrefillActionAsync invoked while AI feature is disabled (errorCode={ErrorCode}, consumerType={ConsumerType}).",
+            ErrorCode, consumerType);
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 }

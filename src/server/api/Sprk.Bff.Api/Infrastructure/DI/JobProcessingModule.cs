@@ -86,12 +86,9 @@ public static class JobProcessingModule
         services.Configure<AiSearchOptions>(configuration.GetSection("AiSearch"));
 
         logging.AddConsole();
-        Console.WriteLine("\u2713 Job processing configured with Service Bus (queue: sdap-jobs)");
-        Console.WriteLine("\u2713 Email polling backup service configured");
-        Console.WriteLine("\u2713 Document vector backfill service registered (enable via config)");
-        Console.WriteLine("\u2713 Embedding migration service registered (enable via config)");
-        Console.WriteLine("\u2713 Scheduled RAG indexing service registered (enable via config)");
-        Console.WriteLine("\u2713 RecordSyncJob registered (enable via RecordSync:Enabled=true)");
+        // D9-01 (config-deployment): removed 6 Console.WriteLine startup echoes that bypassed the
+        // ILogger/OTel pipeline. These ran at service-registration time (pre-host-build) with no
+        // ILogger available; the AddHostedService registrations above are the source of truth.
 
         return services;
     }

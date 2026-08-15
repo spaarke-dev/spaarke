@@ -132,7 +132,7 @@ public abstract class DataverseHttpServiceBase
     protected static string BuildODataQuery(
         ScopeListOptions options,
         string selectFields,
-        string expandClause,
+        string? expandClause,
         string nameFieldPath,
         string? categoryFieldPath,
         Dictionary<string, string> sortFieldMappings)

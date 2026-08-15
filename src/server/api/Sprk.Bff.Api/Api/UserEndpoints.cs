@@ -15,8 +15,11 @@ public static class UserEndpoints
     public static IEndpointRouteBuilder MapUserEndpoints(this IEndpointRouteBuilder app)
     {
         // GET /api/me - Get current user info
+        // Task 023 (B-3): explicit RequireAuthorization — the handler already forces an OBO
+        // exchange (crash-401 on missing bearer); this makes the 401 explicit at the auth layer.
         app.MapGet("/api/me", GetCurrentUserAsync)
-            .RequireRateLimiting("graph-read");
+            .RequireRateLimiting("graph-read")
+            .RequireAuthorization();
 
         // GET /api/me/capabilities?containerId={containerId} - Get user capabilities for container
         app.MapGet("/api/me/capabilities", async (
@@ -61,7 +64,8 @@ public static class UserEndpoints
                     extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         })
-        .RequireRateLimiting("graph-read");
+        .RequireRateLimiting("graph-read")
+        .RequireAuthorization();
 
         return app;
     }

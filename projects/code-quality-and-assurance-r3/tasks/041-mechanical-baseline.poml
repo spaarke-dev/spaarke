@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>Forcing-function: mechanical baseline (analyzers-as-errors + strict ESLint/tsc) — per-surface</title>
+    <phase>4 Forcing-Functions</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Edits build config across surfaces (analyzers, .editorconfig, ESLint, tsc); behavior-neutral to runtime but gates builds — STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical build-config enablement per surface; Sonnet default at effort high (volume of warning cleanup).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits build config across surfaces; activate per-surface (each surface flips its own gate as its last step) — sequential to avoid cross-surface breakage.</parallel-reason>
+    <deps>none</deps>
+    <tags>build,analyzers,eslint</tags>
+  </metadata>
+
+  <prompt>Enable the mechanical baseline: TreatWarningsAsErrors=true + Roslyn analyzers + .editorconfig (C#); strict ESLint (--max-warnings 0, no-console) + tsc --noEmit (TS). Activate PER-SURFACE — each surface flips its own gate on as its last workstream step; never enable a gate repo-wide while another surface is still dirty.</prompt>
+  <role>SPAARKE platform developer with .NET analyzer + ESLint/tsc config expertise. Follow design.md §9 + §4A (per-surface activation).</role>
+  <goal>Each surface's mechanical baseline (analyzers-as-errors + .editorconfig for C#; --max-warnings 0 + no-console + tsc --noEmit for TS) is table-stakes-clean and activated only for that surface as its gate flips; no repo-wide big-bang.</goal>
+
+  <context>
+    <background>spec.md FR-15 / design.md §9 + §4A. Table-stakes an A+ panel assumes. Activated PER-SURFACE (owner decision, design §15 Q4): the program authors the config; each surface flips its own on as its last step. Carries archived-R3 items #5 (ESLint 181 → --max-warnings 0), #6 (console.log 117 → no-console).</background>
+    <relevant-files>
+      <file role="modify">.editorconfig / Directory.Build.props (C# analyzers-as-errors)</file>
+      <file role="modify">.eslintrc / tsconfig (TS strict + no-console + tsc --noEmit)</file>
+      <file role="canonical-reference">docs/standards/CODE-QUALITY-RUBRIC.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent; but a surface only flips its gate after its own warning cleanup.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: PER-SURFACE activation only (design §4A) — MUST NOT enable a gate repo-wide while another surface is still dirty. Each surface flips its own analyzers/ESLint gate as its last workstream step.</constraint>
+    <constraint source="project">Scope: enablement is behavior-neutral to runtime — it gates the build; the runtime behavior of the surface is unchanged. Clean warnings, do not suppress them wholesale.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Mechanical build baseline</topic>
+    <files>
+      <file>docs/standards/CODE-QUALITY-RUBRIC.md</file>
+      <file>projects/code-quality-and-assurance-r3/design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Confirm which surface is activating (per-surface only).</step>
+    <step order="1">Author the shared config (analyzers-as-errors + .editorconfig for C#; strict ESLint --max-warnings 0 + no-console + tsc --noEmit for TS) in a form each surface can opt into.</step>
+    <step order="2">For the activating surface, clean its warnings to zero (not suppress).</step>
+    <step order="3">Flip that surface's gate on (as its last workstream step); confirm the surface builds clean.</step>
+    <step order="4">Verify no other still-dirty surface had a gate turned on repo-wide.</step>
+    <step order="5">Update TASK-INDEX.md: set task 041 status to ✅ (or note per-surface progress).</step>
+    <step order="6">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If enabling a gate for one surface would force it on for a still-dirty surface (shared config file), STOP and escalate — per-surface activation is a hard constraint (design §4A); do not big-bang.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="config">C# analyzer/.editorconfig config + TS ESLint/tsconfig config (per-surface opt-in)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the activating surface, its build is table-stakes-clean with analyzers-as-errors (C#) or --max-warnings 0 + no-console + tsc --noEmit (TS).</criterion>
+    <criterion testable="true">Negative: no gate is enabled repo-wide while another surface is still dirty (per-surface activation).</criterion>
+    <criterion testable="true">Given the cleanup, warnings were fixed, not suppressed wholesale.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-15 / design.md §9 + §4A + archived-R3 items #5, #6. Verification addendum MF-7: the BFF Release publish currently emits 3× CS0618 (DemoExpirationService.cs:347-348 re DemoProvisioningOptions — matches design NG4, a known deferred migration). Before TreatWarningsAsErrors flips on the Office/Demo surface, these must be resolved or explicitly suppressed-with-justification — do not silently blanket-suppress CS0618.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

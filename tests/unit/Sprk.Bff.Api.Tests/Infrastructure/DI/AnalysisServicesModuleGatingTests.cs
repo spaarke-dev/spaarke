@@ -22,6 +22,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Infrastructure.DI;
