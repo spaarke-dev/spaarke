@@ -122,19 +122,11 @@ internal sealed class UserPrivilegeChecker : IDataversePrivilegeChecker
     {
         var sw = Stopwatch.StartNew();
 
-        // Resolve the ServiceClient from the composite IDataverseService.
-        if (_dataverseService is not DataverseServiceClientImpl impl)
+        // Resolve the ServiceClient from the composite IDataverseService (fail-closed: any
+        // resolution failure logs at Error and returns an empty privilege set).
+        var serviceClient = _dataverseService.TryUnwrapServiceClient(nameof(FetchReadablePrivilegesAsync), _logger);
+        if (serviceClient is null)
         {
-            _logger.LogError(
-                "FetchReadablePrivilegesAsync: IDataverseService is not DataverseServiceClientImpl (actual: {Type}); cannot access ServiceClient",
-                _dataverseService.GetType().FullName);
-            return EmptySet();
-        }
-
-        var serviceClient = impl.OrganizationService;
-        if (serviceClient is null || !serviceClient.IsReady)
-        {
-            _logger.LogError("FetchReadablePrivilegesAsync: ServiceClient is not ready");
             return EmptySet();
         }
 

@@ -3,11 +3,15 @@
     Verifies Entra ID app registrations by testing token acquisition.
 
 .DESCRIPTION
-    Tests both production app registrations created by Register-EntraAppRegistrations.ps1:
+    Tests the production app registration created by Register-EntraAppRegistrations.ps1:
       1. spaarke-bff-api-prod — Acquires token using client credentials
-      2. spaarke-dataverse-s2s-prod — Acquires token for Dataverse
 
-    For each registration:
+    NOTE (2026-08-14, code-quality-and-assurance-r3 task 060): the separate
+    `spaarke-dataverse-s2s-*` app registration + its `Dataverse-S2S-*` Key Vault
+    secrets were REMOVED (zero code consumers; Dataverse S2S access consolidated onto
+    the BFF app registration credential on 2026-01-07). Its test block was dropped.
+
+    For the registration:
       - Retrieves client ID from Key Vault (or parameter)
       - Retrieves client secret from Key Vault (or parameter)
       - Acquires an app-only token using client credentials flow
@@ -30,15 +34,6 @@
 .PARAMETER BffApiClientSecret
     Override BFF API client secret (skip Key Vault lookup). Optional.
 
-.PARAMETER S2SClientId
-    Override Dataverse S2S client ID (skip Key Vault lookup). Optional.
-
-.PARAMETER S2SClientSecret
-    Override Dataverse S2S client secret (skip Key Vault lookup). Optional.
-
-.PARAMETER DataverseOrgUrl
-    Dataverse organization URL for S2S token test. Default: (skipped if empty)
-
 .EXAMPLE
     # Test using Key Vault secrets
     .\Test-EntraAppRegistrations.ps1
@@ -56,10 +51,7 @@ param(
     [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
     [string]$KeyVaultName = "sprk-platform-prod-kv",
     [string]$BffApiClientId = "",
-    [string]$BffApiClientSecret = "",
-    [string]$S2SClientId = "",
-    [string]$S2SClientSecret = "",
-    [string]$DataverseOrgUrl = ""
+    [string]$BffApiClientSecret = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -262,73 +254,22 @@ if (-not $BffApiClientId -or -not $BffApiClientSecret) {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Test 2: Dataverse S2S App Registration
+# NOTE: The "Dataverse S2S App Registration" test block was removed 2026-08-14
+# (code-quality-and-assurance-r3 task 060) along with the separate
+# spaarke-dataverse-s2s-* app registration + its Dataverse-S2S-* Key Vault secrets.
 # ─────────────────────────────────────────────────────────────────────────────
 
-Write-Header "TEST 2: Dataverse S2S App Registration (spaarke-dataverse-s2s-prod)"
-
-# Retrieve credentials
-if (-not $S2SClientId) {
-    Write-Host "  Retrieving Dataverse-S2S-ClientId from Key Vault..." -ForegroundColor Gray
-    $S2SClientId = Get-SecretFromKeyVault -VaultName $KeyVaultName -SecretName "Dataverse-S2S-ClientId"
-}
-if (-not $S2SClientSecret) {
-    Write-Host "  Retrieving Dataverse-S2S-ClientSecret from Key Vault..." -ForegroundColor Gray
-    $S2SClientSecret = Get-SecretFromKeyVault -VaultName $KeyVaultName -SecretName "Dataverse-S2S-ClientSecret"
-}
-
-if (-not $S2SClientId -or -not $S2SClientSecret) {
-    Write-TestSkipped "Dataverse S2S token acquisition" "Credentials not available (Key Vault not accessible or secrets not set)"
-} else {
-    # Test 2a: App registration exists
-    $s2sAppInfo = az ad app show --id $S2SClientId --output json 2>$null | ConvertFrom-Json
-    Write-TestResult "App registration exists in Entra ID" ($null -ne $s2sAppInfo) `
-        $(if ($s2sAppInfo) { "DisplayName: $($s2sAppInfo.displayName)" } else { "App not found for ID: $S2SClientId" })
-
-    if ($s2sAppInfo) {
-        # Test 2b: Display name follows naming convention
-        Write-TestResult "Display name follows spaarke- naming" `
-            ($s2sAppInfo.displayName -match "^spaarke-") `
-            "Name: $($s2sAppInfo.displayName)"
-
-        # Test 2c: Dynamics CRM permissions configured
-        $hasDynamics = $false
-        if ($s2sAppInfo.requiredResourceAccess) {
-            $hasDynamics = ($s2sAppInfo.requiredResourceAccess | Where-Object { $_.resourceAppId -eq "00000007-0000-0000-c000-000000000000" }).Count -gt 0
-        }
-        Write-TestResult "Dynamics CRM permissions configured" $hasDynamics
-    }
-
-    # Test 2d: Token acquisition for Dataverse
-    if ($DataverseOrgUrl) {
-        Write-Host ""
-        Write-Host "  Testing Dataverse token acquisition..." -ForegroundColor Gray
-        $dvToken = Get-ClientCredentialToken `
-            -TenantId $TenantId `
-            -ClientId $S2SClientId `
-            -ClientSecret $S2SClientSecret `
-            -Scope "$DataverseOrgUrl/.default"
-
-        Write-TestResult "Token acquisition (Dataverse scope)" ($null -ne $dvToken) `
-            $(if ($dvToken) { "Token type: $($dvToken.token_type), expires_in: $($dvToken.expires_in)s" } else { "Token acquisition failed — admin consent may be needed" })
-    } else {
-        Write-TestSkipped "Dataverse token acquisition" "DataverseOrgUrl not provided (not yet provisioned)"
-    }
-}
-
 # ─────────────────────────────────────────────────────────────────────────────
-# Test 3: Key Vault Secret Verification
+# Test 2: Key Vault Secret Verification
 # ─────────────────────────────────────────────────────────────────────────────
 
-Write-Header "TEST 3: Key Vault Secret Verification ($KeyVaultName)"
+Write-Header "TEST 2: Key Vault Secret Verification ($KeyVaultName)"
 
 $expectedSecrets = @(
     "TenantId",
     "BFF-API-ClientId",
     "BFF-API-ClientSecret",
-    "BFF-API-Audience",
-    "Dataverse-S2S-ClientId",
-    "Dataverse-S2S-ClientSecret"
+    "BFF-API-Audience"
 )
 
 foreach ($secretName in $expectedSecrets) {

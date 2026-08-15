@@ -1,7 +1,7 @@
 using System.Net;
 using FluentAssertions;
 using Microsoft.AspNetCore.Routing;
-using Sprk.Bff.Api.Endpoints.SpeAdmin;
+using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Xunit;

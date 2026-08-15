@@ -149,8 +149,8 @@ builder.Services.AddSingleton<IDataverseService>(sp =>
 ### 2. DataverseWebApiService (Alternative)
 
 **File**: `DataverseWebApiService.cs`
-**Status**: ⚠️ Available but not currently used
-**Lifetime**: Would be Scoped (with HttpClient)
+**Status**: ✅ **LIVE** — the production implementation for Event + FieldMapping. (Corrected 2026-08-14, r3 task 011/034: previously mislabeled "not currently used"; it is a **second live `ClientSecret` consumer**, pending the #3b ClientSecret→Managed-Identity migration.)
+**Lifetime**: Scoped (with HttpClient)
 
 **Purpose**: Alternative Dataverse integration using REST/OData API
 
@@ -172,7 +172,7 @@ builder.Services.AddSingleton<IDataverseService>(sp =>
 }
 ```
 
-**DI Registration** (Alternative, not currently used):
+**DI Registration** (LIVE — serves Event + FieldMapping in production):
 ```csharp
 builder.Services.AddHttpClient<IDataverseService, DataverseWebApiService>(client =>
 {
@@ -712,6 +712,8 @@ builder.Services.AddScoped<IDataverseService>(...)
 ---
 
 ## Security Best Practices
+
+> **⚠️ ADR-028 §24 (canonical, 2026-08-14 r3 task 011/034):** for server-side outbound auth, **Managed Identity is MANDATED** — `ClientSecret` is a *violation to migrate*, not a best practice. The `ClientSecret` examples below reflect the current (pre-migration) state; the app-only Dataverse paths are the sanctioned **#3b ClientSecret→MI** target (keep the KV secret only for the OBO/user-context path). Do not cite this section as endorsing ClientSecret for new server outbound.
 
 ### 1. Never Store Secrets in Code
 

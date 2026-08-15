@@ -416,7 +416,7 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         string entityLogicalName,
         CancellationToken ct)
     {
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverse.UnwrapServiceClient(nameof(MembershipFieldDiscoveryService));
 
         var request = new RetrieveEntityRequest
         {
@@ -547,24 +547,6 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         }
 
         return rows;
-    }
-
-    /// <summary>
-    /// Unwrap the underlying <see cref="ServiceClient"/> from
-    /// <see cref="IDataverseService"/>. Follows the same pattern used by
-    /// <c>Services.Dataverse.MetadataService</c> +
-    /// <c>Services.Finance.SpendSnapshotService</c>.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverse is DataverseServiceClientImpl impl)
-        {
-            return impl.OrganizationService;
-        }
-
-        throw new InvalidOperationException(
-            $"MembershipFieldDiscoveryService requires IDataverseService to be backed by " +
-            $"DataverseServiceClientImpl. Actual type: {_dataverse?.GetType().Name ?? "null"}.");
     }
 
     // ── Cache helpers ──────────────────────────────────────────────────────

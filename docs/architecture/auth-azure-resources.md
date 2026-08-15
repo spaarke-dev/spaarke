@@ -275,9 +275,14 @@ AiSafety__ContentSafety__ApiKey=(from Key Vault or App Settings)
 
 | Property | Value |
 |----------|-------|
-| **Type** | System-assigned |
-| **Principal** | App Service's identity |
-| **Purpose** | Access Key Vault secrets, Cosmos DB data plane |
+| **Type** | **User-assigned (UAMI)** — the App Service has **no** system-assigned identity (corrected 2026-08-14, code-quality-and-assurance-r3 task 060 / BFF Auth Surface Map §C) |
+| **Principal (dev)** | `mi-bff-api-dev` — clientId `5967251e-171c-46fe-a6c2-ef843c90309d`, principalId `9fd47efb-7962-492b-ac44-e5ccd0268ebb` |
+| **Principal (demo)** | `mi-bff-api-demo` — clientId `b0ce4ca4-…` |
+| **Purpose** | App-only Graph, `Services/Ai` Dataverse, Cosmos DB data plane, Key Vault secrets, Content Safety, AI Search, Service Bus (partial) |
+
+> **Note**: The App Service pins the UAMI via the `AZURE_CLIENT_ID` app setting. The
+> earlier `56ae2188-c978-4734-ad16-0bc288973f20` principal is **retired** (Phase-C-era) —
+> any reference to it elsewhere is drift.
 
 **Required Role Assignments**:
 - Key Vault: `Key Vault Secrets User`
@@ -704,8 +709,21 @@ Secret names by app registration:
 
 | App Registration | Key Vault Secret Name |
 |------------------|-----------------------|
-| **BFF API App** (`1e40baad`) | `API-CLIENT-SECRET` |
-| **DSM-SPE Dev 2** (`170c98e1`) | `BFF-API-ClientSecret` |
+| **BFF API App** (`1e40baad-e065-4aea-a8d4-4b7ab273458c`) | `BFF-API-ClientSecret` (surfaced to config as `API_CLIENT_SECRET` and 4 other keys — see the shared-secret note in this doc) |
+
+> **Corrected 2026-08-14 (code-quality-and-assurance-r3 task 060 / BFF Auth Surface Map §D).**
+> This table previously mapped `BFF-API-ClientSecret` to "DSM-SPE Dev 2" (`170c98e1`). That
+> was stale: `BFF-API-ClientSecret` holds the **BFF app registration** (`1e40baad`) secret
+> (verified via `config/environments.json`), which is what the code requires for OBO.
+> `170c98e1` ("DSM-SPE Dev 2") is a client SPA / `msalClient` (the Code Page client, see the
+> `knownClientApplications` section earlier), **not** the BFF-secret holder.
+>
+> Other tables in this document that still attribute `BFF-API-ClientSecret` /
+> "Dataverse ServiceClient (S2S)" to "DSM-SPE Dev 2" (the secret-history and rotation-inventory
+> tables) are the same stale drift; the separate Dataverse S2S credential path has **zero code
+> consumers** (consolidated to `API_CLIENT_SECRET` 2026-01-07). Reconciling the live-secret
+> provenance in those tables requires portal confirmation and is left to the r1 provisioning /
+> #3b (task 011) track — task 060 does not touch live secrets or the client-SPA app registration.
 
 ### Step 4: Update App Service Configuration
 
@@ -822,24 +840,23 @@ api://{client-id}/user_impersonation
 
 ---
 
-### Production Dataverse S2S App (spaarke-dataverse-s2s-prod)
+### Production Dataverse S2S App — REMOVED
 
-| Property | Value |
-|----------|-------|
-| **Display Name** | `spaarke-dataverse-s2s-prod` |
-| **Application (client) ID** | *(set after creation — stored in Key Vault as `Dataverse-S2S-ClientId`)* |
-| **Platform** | Web (no redirect URI needed) |
-| **Purpose** | Server-to-server Dataverse authentication (ServiceClient, AuthType=ClientSecret) |
-
-**API Permissions** (Delegated):
-- Dynamics CRM: `user_impersonation`
-
-**Key Vault Secrets** (`sprk-platform-prod-kv`):
-
-| Secret Name | Content |
-|-------------|---------|
-| `Dataverse-S2S-ClientId` | Application (client) ID |
-| `Dataverse-S2S-ClientSecret` | Client secret (24-month expiry) |
+> **Removed 2026-08-14 (code-quality-and-assurance-r3 task 060).** There is no separate
+> Dataverse server-to-server app registration in the provisioning model. The former
+> `spaarke-dataverse-s2s-*` credential path had **zero code consumers** — Dataverse S2S
+> access was consolidated onto the **BFF app registration's** credential (`API_CLIENT_SECRET` /
+> KV `BFF-API-ClientSecret`) on 2026-01-07 (see the consolidation note earlier in this
+> document). The BFF app registration (`1e40baad-e065-4aea-a8d4-4b7ab273458c` in dev) is the
+> single Dataverse Application User. The `Dataverse-S2S-ClientId` / `Dataverse-S2S-ClientSecret`
+> Key Vault secrets are obsolete and were dropped from provisioning; an operator should delete
+> them from any live vault.
+>
+> **Scope note**: the dev-era docs conflated the S2S label with the "DSM-SPE Dev 2"
+> (`170c98e1`) **client SPA** used by Code Pages (still live as a `knownClientApplications`
+> client). Task 060 removes only the *separate Dataverse S2S credential/app-reg concept + its
+> `Dataverse-S2S-*` KV secrets*; it does **not** retire the `170c98e1` client-SPA registration,
+> and any live-env app-registration deletion is the r1 provisioning track's job.
 
 ---
 
@@ -849,8 +866,6 @@ api://{client-id}/user_impersonation
 |----------|-----|------------|
 | **BFF API Name** | SPE BFF API | spaarke-bff-api-prod |
 | **BFF API Client ID** | `1e40baad-e065-4aea-a8d4-4b7ab273458c` | *(after creation)* |
-| **S2S Name** | DSM-SPE Dev 2 | spaarke-dataverse-s2s-prod |
-| **S2S Client ID** | `170c98e1-d486-4355-bcbe-170454e0207c` | *(after creation)* |
 | **Redirect URI** | `https://spe-api-dev-67e2xz.azurewebsites.net` | `https://api.spaarke.com` |
 | **Secret Storage** | App Service settings / user-secrets | Key Vault (`sprk-platform-prod-kv`) |
 | **Naming** | Legacy (pre-convention) | FR-11 compliant (`spaarke-` prefix) |
@@ -859,8 +874,8 @@ api://{client-id}/user_impersonation
 
 ### Post-Creation Manual Steps
 
-1. **Admin Consent**: Global Administrator must grant admin consent for both registrations
-2. **Dataverse Application Users**: After Dataverse environment provisioning, register both apps as Application Users with appropriate security roles
+1. **Admin Consent**: Global Administrator must grant admin consent for the BFF API registration
+2. **Dataverse Application User**: After Dataverse environment provisioning, register the BFF API app as an Application User with an appropriate security role
 3. **Known Client Applications**: After PCF/Code Page production client registrations are created, add their client IDs to `knownClientApplications` on the BFF API app
 4. **SPE Container Type Registration**: Run `Register-BffApi-WithCertificate.ps1` (modified for prod) to register the BFF API with the production SPE container type
 

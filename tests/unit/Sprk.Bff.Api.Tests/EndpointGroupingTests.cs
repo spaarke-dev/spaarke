@@ -57,20 +57,14 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
     }
 
     [Fact]
-    public async Task UserEndpoints_ReturnsProblemDetailsOnError()
+    public async Task UserEndpoints_WithoutAuth_Return401()
     {
-        // Attempt to get user info without auth
+        // /api/me requires authorization (task 023): an unauthenticated request is
+        // short-circuited by the auth middleware with a bare 401 challenge (no body),
+        // consistent with every other .RequireAuthorization() endpoint in the app.
         var response = await _client.GetAsync("/api/me");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
-
-        var content = await response.Content.ReadAsStringAsync();
-        var problemDetails = JsonSerializer.Deserialize<JsonElement>(content);
-
-        // Should have RFC 7807 Problem Details structure
-        problemDetails.TryGetProperty("type", out _).Should().BeTrue();
-        problemDetails.TryGetProperty("title", out _).Should().BeTrue();
-        problemDetails.TryGetProperty("status", out _).Should().BeTrue();
     }
 
     [Fact(Skip = "Requires fully mocked Graph/Dataverse services - endpoint returns 404 without proper registration")]
@@ -181,21 +175,15 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
     [Theory]
     [InlineData("/api/me")]
     [InlineData("/api/me/capabilities")]
-    public async Task UserEndpoints_ExistAndReturnConsistentErrorFormat(string endpoint)
+    public async Task UserEndpoints_ExistAndRequireAuth(string endpoint)
     {
         var response = await _client.GetAsync(endpoint);
 
-        // Should return a valid HTTP status (not 404)
+        // Should return a valid HTTP status (not 404) — the endpoint exists...
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
 
-        if (response.StatusCode >= HttpStatusCode.BadRequest)
-        {
-            var content = await response.Content.ReadAsStringAsync();
-            content.Should().NotBeEmpty();
-
-            var problemDetails = JsonSerializer.Deserialize<JsonElement>(content);
-            problemDetails.TryGetProperty("type", out _).Should().BeTrue();
-            problemDetails.TryGetProperty("title", out _).Should().BeTrue();
-        }
+        // ...and now requires authorization (task 023): an unauthenticated request is a
+        // bare 401 auth challenge (no body), consistent with the app's other secured endpoints.
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
     }
 }

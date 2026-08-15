@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="code-quality-and-assurance-r3">
+  <metadata>
+    <title>BFF: finish Endpoints/→Api/ folder migration (namespace-only) + delete legacy tree</title>
+    <phase>2 BFF Remediation</phase>
+    <tranche>B</tranche>
+    <gate>quiet-window (after Tranche A)</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Behavior-neutral namespace-only move (zero route change); not a bug/auth/test-modifying change — STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical namespace-only migration with both target namespaces already imported; Sonnet default.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot-path contention (19 worktrees); moves endpoint files; /conflict-check before each PR; small sequential PRs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff,refactor,tranche-b</tags>
+  </metadata>
+
+  <prompt>Finish the Endpoints/→Api/ migration: move the 6 remaining files (namespace-only, zero route change; both target namespaces already imported; 5 test-line usings to update) and delete the legacy Endpoints/ tree. The route table MUST be byte-identical before/after (route-dump diff).</prompt>
+  <role>SPAARKE platform developer with BFF endpoint-mapping expertise. Follow root CLAUDE.md §10. Provably behavior-neutral (route-dump diff is the gate).</role>
+  <goal>The 6 Endpoints/ files are moved to Api/ (namespace-only), the 5 test-line usings updated, the legacy Endpoints/ folder deleted, and the route table is byte-identical (route-dump diff before/after); build + full test green; publish-size delta reported.</goal>
+
+  <context>
+    <background>spec.md FR-11 / bff design §3.6. 6 files remain in the legacy Endpoints/ folder under Sprk.Bff.Api.Endpoints.*, all still mapped, split across two namespaces. Moves are namespace-only, zero route change (route strings are literals; extension-method names unchanged); both target namespaces already imported. 5 test-line usings + the _archive follow-up. Then delete the Endpoints/ tree.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Endpoints/ (6 files → Api/)</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">BFF already assessed; migration scope verified.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (namespace-only): move exactly the 6 remaining Endpoints/ files to Api/; update namespaces + the 5 test-line usings; delete the legacy Endpoints/ tree. Do NOT change any route string or extension-method name.</constraint>
+    <constraint source="project">Scope: the route table MUST be byte-identical — capture a route-dump before and after and diff them as the acceptance gate.</constraint>
+    <constraint source="CLAUDE.md-§10">Scope: BFF publish ≤ 60 MB compressed (baseline 44.96 MB incl PDBs (net10 baseline; net8 was 46.89)); report absolute + delta. No new NuGet packages. Run /conflict-check before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF endpoint folder migration</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r3/workstreams/bff-api/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read bff design §3.6; run /conflict-check.</step>
+    <step order="1">Capture a route-dump of the current route table (baseline).</step>
+    <step order="2">Move the 6 files from Endpoints/ to Api/ changing only the namespace; confirm both target namespaces are already imported at call sites.</step>
+    <step order="3">Update the 5 test-line usings.</step>
+    <step order="4">Delete the legacy Endpoints/ tree.</step>
+    <step order="5">Capture a route-dump after; diff against baseline — MUST be byte-identical.</step>
+    <step order="6">dotnet build + full dotnet test green; run dotnet publish and record size delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89).</step>
+    <step order="7">Update TASK-INDEX.md: set task 025 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r3/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the after route-dump is NOT byte-identical to baseline, STOP and escalate — a route changed, which means the move was not namespace-only.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ (6 files migrated; Endpoints/ deleted)</output>
+    <output type="doc">projects/code-quality-and-assurance-r3/notes/publish-size-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the migration, the route-dump diff before/after is byte-identical (zero route change).</criterion>
+    <criterion testable="true">Given the change, the legacy Endpoints/ folder is gone and the 5 test-line usings are updated.</criterion>
+    <criterion testable="true">dotnet build + full test green; publish ≤ 60 MB with delta vs 44.96 MB incl PDBs (net10 baseline; net8 was 46.89); no new NuGet package.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-11 / bff design §3.6 + Phase 5c.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

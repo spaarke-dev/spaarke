@@ -211,6 +211,13 @@ public class SignalRDeliveryService
         // Uses the concrete ServiceHubContext directly (NegotiateAsync is not on IServiceHubContext).
         var hub = await _lazyHub.Value.ConfigureAwait(false);
         var negotiation = await hub.NegotiateAsync(new NegotiationOptions { UserId = userOid }, ct).ConfigureAwait(false);
+        // A negotiation missing Url or AccessToken cannot yield a usable client connection — fail loud
+        // rather than hand the client a null-bearing connection info (the Azure SDK types both nullable).
+        if (string.IsNullOrEmpty(negotiation.Url) || string.IsNullOrEmpty(negotiation.AccessToken))
+        {
+            throw new InvalidOperationException(
+                "Azure SignalR negotiation returned no Url/AccessToken; cannot mint client connection info.");
+        }
         return new SignalRConnectionInfo(negotiation.Url, negotiation.AccessToken);
     }
 

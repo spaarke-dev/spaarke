@@ -279,8 +279,10 @@ public class DataverseAccessDataSource : IAccessDataSource
             }
 
             var user = result.Value.First();
-            _logger.LogInformation("Found Dataverse user {FullName} (systemuserid: {SystemUserId}) for Azure AD OID {AzureAdOid}",
-                user.FullName, user.SystemUserId, azureAdObjectId);
+            // PII (D9-01): user full name removed from this authorization-path log. The systemuserid
+            // and Azure AD OID GUIDs are sufficient non-PII correlation identifiers for diagnostics.
+            _logger.LogInformation("Found Dataverse user (systemuserid: {SystemUserId}) for Azure AD OID {AzureAdOid}",
+                user.SystemUserId, azureAdObjectId);
 
             return user.SystemUserId;
         }

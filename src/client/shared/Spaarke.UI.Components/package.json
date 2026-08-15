@@ -96,7 +96,7 @@
     "dompurify": "^3.4.0",
     "mammoth": "^1.12.0",
     "marked": "^17.0.4",
-    "pdfjs-dist": "^5.7.284",
+    "pdfjs-dist": "^6.2.108",
     "react-window": "^1.8.11"
   }
 }

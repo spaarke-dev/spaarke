@@ -710,11 +710,11 @@ public class DataverseWebApiService : IDataverseService
 
         var url = $"{_entitySetName}({guid})";
 
-        // Log the actual payload for debugging email field persistence
-        var payloadJson = JsonSerializer.Serialize(payload, new JsonSerializerOptions { WriteIndented = false });
-        _logger.LogInformation(
-            "Updating document {Id} with payload ({FieldCount} fields): {Payload}",
-            id, payload.Count, payloadJson);
+        // PII (D9-02): do NOT serialize payload VALUES — for document/email writes they include
+        // email body/from/to/cc/subject. Log the field-name keys only (never values), at Debug.
+        _logger.LogDebug(
+            "Updating document {Id} with {FieldCount} fields: {FieldNames}",
+            id, payload.Count, string.Join(", ", payload.Keys));
 
         // Check specifically for email fields in the payload
         var emailFieldsInPayload = payload.Keys.Where(k => k.StartsWith("sprk_email")).ToList();
@@ -730,10 +730,16 @@ public class DataverseWebApiService : IDataverseService
         // Log response status and any error details
         if (!response.IsSuccessStatusCode)
         {
-            var errorContent = await response.Content.ReadAsStringAsync(ct);
             _logger.LogError(
-                "Failed to update document {Id}: Status={Status}, Response={Response}",
-                id, response.StatusCode, errorContent);
+                "Failed to update document {Id}: Status={Status}",
+                id, response.StatusCode);
+            // PII (D9-06): the raw Dataverse error body can echo submitted attribute values
+            // (incl. email fields). Gate the verbatim body behind Debug so it is not emitted at Error.
+            if (_logger.IsEnabled(LogLevel.Debug))
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogDebug("Dataverse error body for document {Id}: {Response}", id, errorContent);
+            }
         }
 
         response.EnsureSuccessStatusCode();

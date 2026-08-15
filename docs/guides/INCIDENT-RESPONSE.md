@@ -95,7 +95,7 @@ az ad sp show --id 720bcc53-3399-488d-9a93-dafde5d9e290 --query "displayName" -o
 1. Check Microsoft 365 Service Health for Dataverse outages
 2. If authentication issue: Verify app registration credentials in Key Vault have not expired
 3. If Dataverse environment-specific: Verify the `Dataverse__ServiceUrl` app setting is correct
-4. If S2S token issue: Re-create the client secret and update Key Vault
+4. If token/credential issue: Re-create the BFF API app registration client secret (`BFF-API-ClientSecret`) and update Key Vault — this credential also serves the Dataverse service path (the separate Dataverse S2S secret was removed 2026-08-14, task 060)
 
 ```bash
 # Check current Dataverse URL setting
@@ -560,8 +560,12 @@ After every SEV-1 or SEV-2 incident, conduct a blameless post-incident review wi
 
 | App | App ID | Purpose |
 |-----|--------|---------|
-| BFF API (prod) | `92ecc702-d9ae-492d-957e-563244e93d8c` | Graph + SPE + Dataverse |
-| Dataverse S2S (prod) | `720bcc53-3399-488d-9a93-dafde5d9e290` | Dataverse server-to-server |
+| BFF API (prod) | `92ecc702-d9ae-492d-957e-563244e93d8c` | Graph + SPE + Dataverse (single Dataverse Application User) |
+
+<!-- The separate "Dataverse S2S (prod)" app registration (`720bcc53-...`) was removed
+     2026-08-14 (code-quality-and-assurance-r3 task 060) — zero code consumers; Dataverse
+     server-to-server access consolidated onto the BFF API app registration. -->
+
 
 ### Managed Identities
 
