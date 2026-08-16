@@ -1,12 +1,13 @@
 # Customer Provisioning & Deployment Orchestration — Design Specification
 
-> **Status**: **Draft v3.2 — post-r3-completion refresh, Fable-verified, pending owner review** ([r3 handoff](notes/r3-handoff.md) 2026-08-14 confirmed r3 tasks 060/061/062/017 landed on master; net10 baseline merged 2026-08-15). Ready for `/design-to-spec` after owner review — no further external dependencies blocking.
+> **Status**: **Draft v3.3 — post-owner-review + Q1–Q7 additions + Q5 research spike, pending owner sign-off** ([r3 handoff](notes/r3-handoff.md) 2026-08-14 resolved; net10 baseline; Q5 Graph/SPE 2026-08 spike confirmed v3.2 patterns still current with 2 medium-term watch items). Ready for `/design-to-spec` after owner sign-off — no external blocking dependencies; 6 new sections (§4.3a operator toolchain, §4D tenant-isolation invariants, §9A consolidated identity/config surface, §11.1a solutions reconciliation, §14A upgrade model, plus §5.4 trade-off expansion).
 > **Created**: 2026-06-15
 > **Revised**:
 > - 2026-06-16 (feedback round 1: resource inventory, identity spec, config capture, Q1–Q6 resolved)
 > - 2026-08-12 (v3: D3 rewritten for two tiers, TF Power Platform provider adoption, H12 promoted to first-class config-seed manifest, silent-failure trap catalog, Cosmos DB provisioning added, SPE confidential-client fix, resolved v2 open items B1–B3/I1–I3/I5–I6)
 > - 2026-08-12 (v3.1: D20 fail-fast config + Graph role constants added as PENDING per r3 handoff; sourced pricing research; D3 rewritten in place; §3A reframed as rationale not amendment)
 > - 2026-08-15 (v3.2: r3 handoff resolved — D20 LANDED (tasks 060/061/062/017); Fable-adversarial review corrections (H-1 Deploy-AllIndexes path, H-2 AI Search catalog, H-3 UAMI vs system-assigned reality); dropped vestigial Dataverse S2S app-reg (r3 task 060); added Phase G naming compliance + Phase H #1 KV federation remediation per r3 handoff §4a/§4b; added §4C rollback semantics + §4.2 handler execution model + Model 1/2 handler-behavior differences + H0 quota preflight; Redis moved per Q-E FR-12; TF adoption deferred to first-customer engagement; dev-only baseline with new trial environment for Phase F E2E)
+> - 2026-08-16 (v3.3: owner-review round Q1–Q7 addressed. **New §4.3a Claude Code Operator Toolchain** (Q4 — 15 tools + auth flow + prereqs + skill definition + fallback matrix); **new §4D Tenant Isolation Invariants** (Q6 — 5 binding invariants + code-fix Register-EntraAppRegistrations.ps1:63 hardcoded tenant removed); **new §9A Consolidated Identity + Config Surface** (Q7 — one-page reference); **new §11.1a Solutions Reconciliation** (Q2 — authoritative 8-solutions from Deploy-DataverseSolutions.ps1 vs 36 in src/solutions/); **new §14A Upgrade Model** (Q3 — U1/U2/U3 classes + handler upgrade-mode semantics + version-compatibility matrix + U-CB breaking-change classes + drift detection); **§5.4 expanded** into proper trade-off table (Q1 custom state-machine vs Durable Functions vs Temporal); **Q5 Graph/SPE 2026-08 spike** confirmed v3.2 patterns still current — added R22 (ExchangePolicy→RBAC-for-Apps migration watch), R23 (MI-as-FIC opportunity), H8 SPE-privilege footnote)
 > **Author**: Ralph Schroeder / Claude Code
 > **Project**: customer-provisioning-orchestration-r1
 > **Supersedes**: `projects/spaarke-environment-factory-r1/design.md`
@@ -141,7 +142,7 @@ Provisioning steps implemented as idempotent handlers. Each handler is a self-co
 | **H5 (v3 design intent, v3.2 deferred exec)** | Dataverse environment creation — **design target = TF Power Platform provider (D14)**, but implementation deferred to first-customer engagement per v3.2 M-10 (dev-only reality, no customer volume). **Interim (Phase A/B)**: continue with `pac admin create-environment` PS invocation + gate-verified. When first customer signs, TF migration lands as its own task chain. | Interim: `pac admin`; target: TF `powerplatform_environment` resource | — | `dvenv-{customerId}` |
 | H6 | Solution export/fix (managed) + Package Deployer import (~10 solutions, dependency-ordered) | Export (D1) + `Deploy-DataverseSolutions.ps1` + Package Deployer | — | `solimport-{customerId}-{solutionVer}` |
 | H7 | 7 Dataverse env-var values + BFF app-settings — **v3.2 (Phase H)**: token substitution pattern superseded by canonical secret-catalog manifest + KV federation reader (BFF startup reads from KV directly with SDK caching); `#{TOKEN}#` substitution retained during transition | Step 8 + template evolution per Phase H | — | `envvars-{customerId}-{configVer}` |
-| **H8 (v3, confidential-client)** | SPE container type + root container | Existing scripts + **switch to confidential-client (app-only) token** — delegated token now 403s (`public client not allowed`). Cert bootstrapped from KV. | Container-type replication (up to 24h — **lead-time item, not in-pipeline wait**; §9 north star; H0 preflight checks cert-bootstrap done) | `spe-{customerId}` |
+| **H8 (v3, confidential-client · v3.3 SPE privilege footnote)** | SPE container type + root container | Existing scripts + **switch to confidential-client (app-only) token** — delegated token now 403s (`public client not allowed`). Cert bootstrapped from KV. **v3.3 SPE privilege footnote**: `FileStorageContainerType.Manage.All` no longer requires SPE-Admin / Global-Admin as of June 2026 per Q5 research spike ([notes/graph-spe-2026-08-standards-spike.md](notes/graph-spe-2026-08-standards-spike.md)) — owning-tenant bootstrap simpler; runbook detail, not a code change. | Container-type replication (up to 24h — **lead-time item, not in-pipeline wait**; §9 north star; H0 preflight checks cert-bootstrap done) | `spe-{customerId}` |
 | H9 | BFF deploy + app settings + **`Deploy-Release.ps1` Phase 4 hardened** (Gap 2 — `customerId`-driven, no `spaarkedev1` hardcode) | `Deploy-BffApi.ps1` + `auth-deployment-setup.md` + hardened Phase 4 | — | `bff-{customerId}-{buildId}` |
 | **H10 (v3 design intent, v3.2 deferred exec · Graph-parity from code constant)** | Dataverse Application User (BFF app-reg + UAMI) + **Graph app-role parity from `GraphAppRoles.cs` constant** (T3 v3.2). Design target = TF `powerplatform_user`; implementation deferred with H5 to first-customer engagement per M-10. Interim: PPAC UI fallback + verification query. **Escalation gate**: 10/14 GUIDs in `GraphAppRoles.cs` are null — must be completed via `az` enumeration of the Graph resource SP BEFORE first production customer provisioning. | Interim: PPAC UI + Graph SDK for role sync; target: TF `powerplatform_user` | — | `appuser-{customerId}` |
 | H11 | User provisioning (identity preset) | r1 registration flow (D6) | **B2B consent** (B2BGuest only) | `users-{customerId}` |
@@ -211,6 +212,37 @@ Idempotency + resumability (D11) covers the happy path where a failed handler ca
 
 **What's explicitly NOT in scope (per D17)**: automated rollback that re-creates a pristine state. Rollback = quarantine + operator decision (repair or teardown). This matches Terraform semantics (`terraform destroy` is a separate operator action, not automatic on `apply` failure).
 
+### 4D. Tenant Isolation Invariants (added v3.3 per Q6 concern)
+
+Customer-provisioning risk analysis surfaces one class of catastrophe that must be structurally impossible: **cross-tenant data bleed** — one customer's SPE container ID / KV secret / query filter accidentally scoped to a different tenant leads to unauthorized file access, PII disclosure, or (in the legal domain we serve) privileged-communication leak. This section states the invariants r1 must uphold + how each is enforced at code level, not just docs.
+
+**Five binding invariants**:
+
+| # | Invariant | Enforcement mechanism | Verification |
+|---|---|---|---|
+| **I1** | **No hardcoded default tenant in provisioning scripts** — every script that provisions per-customer must require `-TenantId` explicitly; no fallback default | Script parameter definitions carry `[Parameter(Mandatory=$true)]`; **v3.3 code fix**: `Register-EntraAppRegistrations.ps1:63` currently has `[string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2"` (Spaarke tenant hardcoded) — remove default; make mandatory | Pre-commit ArchTest: grep-scan provisioning scripts for tenant-shaped GUID defaults; fail on hit |
+| **I2** | **All AI Search queries include unconditional `tenantId` filter** — regardless of index, regardless of query shape | BFF services build OData filter with `tenantId eq '{ctx.TenantId}'` predicate ALWAYS present; Fable H-2 confirmed for `ReferenceRetrievalService` (line 316) + `RecordSearchService` FR-12 (line 257) | **New ArchTest** (per r3 task 040 pattern) — scan BFF for any AI Search client `.Search(...)` call whose filter doesn't include `tenantId eq`; fail on hit. Phase A audit: full BFF audit beyond spot-checked services |
+| **I3** | **All Cosmos reads/writes include `/tenantId` partition key predicate** — no cross-partition queries against tenant-scoped containers (AI sessions, prompts, audit) | Cosmos SDK usage MUST specify `PartitionKey` on every operation; cross-partition queries flagged in code review | **New ArchTest** — scan for Cosmos SDK `.ReadItemAsync(...)` / `.CreateItemAsync(...)` calls without explicit `PartitionKey`; fail on hit. Existing ProvisioningRun container (`/customerId`) already conforms per §6.2 |
+| **I4** | **SPE container IDs are always tenant-scoped-derived, never fallback default** — the BFF's SPE-related code paths MUST read the container ID from the current tenant's env-var (`sprk_SharePointEmbeddedContainerId`) or KV secret (`customer-{customerId}-spe-container-id`); no fallback default | BFF code review + ArchTest: fail on any string literal matching SPE container ID pattern (`b!...`) in BFF services; container-ID resolution goes through a single `ITenantContainerResolver` service with per-request tenant context | Phase A audit: enumerate every SPE call site (`FileStorageContainer.Selected`, `.Files.ReadWrite.All`) + verify all derive container from tenant context |
+| **I5** | **Graph token acquisition is per-tenant scoped** — delegated calls use OBO with the caller's `tid` claim; app-only calls use `.default` scope with the target tenant's `tid` explicitly named (NOT the default tenant of the MI credential) | `GraphClientFactory` must accept a `tenantId` parameter on every token acquisition; no code path uses `DefaultAzureCredential()` without explicit tenant scoping | New ArchTest — scan `GraphClientFactory` for token acquisition without explicit `tenantId`; fail on hit |
+
+**Why each invariant matters** (the "cost of doing nothing" per CLAUDE.md §11):
+
+- **I1**: an operator running the provisioning script for a new customer without passing `-TenantId` would provision the customer's Entra app-reg in the **Spaarke tenant**, granting Spaarke's users access to the customer's Dataverse env. Data-bleed severity: HIGH.
+- **I2**: a missing `tenantId` filter on an AI Search query returns documents from ALL customers' indexed content — a legal firm's motion drafts returned to a different firm. Severity: CATASTROPHIC (legal privilege leak).
+- **I3**: a cross-partition Cosmos query returns AI conversation history from other customers. Severity: HIGH (conversational PII).
+- **I4**: a fallback default SPE container ID would put a customer's file uploads into another customer's SPE container. Severity: CATASTROPHIC (privileged docs in wrong hands).
+- **I5**: token acquired against wrong tenant returns Graph resources (SPE files, mail, group membership) from wrong tenant. Severity: CATASTROPHIC.
+
+**Verification lifecycle**:
+
+- **At code time**: 5 ArchTests (new; sequence into r3 forcing-functions ecosystem via CI-wiring coordinated PR with `ci-cd-unit-test-remediation-r1`)
+- **At provisioning time**: H13 acceptance samples a query in each of the 5 invariant classes to prove filter enforcement
+- **At runtime**: OpenTelemetry span attributes include `tenantId`; log samples cross-referenced against expected tenant for anomaly detection
+- **Ongoing**: Phase A audit sweep of every BFF service touching AI Search / Cosmos / Graph / SPE — beyond the 2 spot-checked services in the Fable pass
+
+**What this section is NOT**: it does not defend against MALICIOUS insider abuse (an authenticated Spaarke operator with cloud-admin privileges can bypass any structural control). r1's threat model is honest-but-buggy code + operator error — not adversarial internal access. External-actor threat model (unauthenticated cross-tenant abuse from the internet) is covered by CORS + AAD auth + per-request `tid` validation — separate concerns handled by ADR-028 auth architecture.
+
 ### 4B. Silent-failure trap catalog (added v3, 2026-08-12)
 
 Six known-issue guardrails baked into handlers as **verified post-conditions**, not runbook footnotes. Each trap has been diagnosed in production; ignoring any of them results in a BFF that boots but fails silently in a specific code path. Handlers assert the trap is cleared before reporting success.
@@ -277,6 +309,116 @@ The orchestration layer that sequences handlers, manages run state, enforces gat
 | Fleet web app | Future | Lightweight read-only UI over Cosmos `runs` container; not MDA dashboard in r1 |
 | Spaarke Assistant integration | Future | Natural-language provisioning via the same L2 API |
 
+### 4.3a Claude Code Operator Toolchain (added v3.3 per Q4) — what Claude Code actually needs to execute
+
+D16 says the L3 skill "calls L2 REST API" — but Claude Code is an agent, not a script; it needs concrete tools to actually execute each phase of a provisioning run. **This section enumerates the required toolchain, auth flow to L2, and the fallback matrix for when a tool is unavailable.**
+
+#### 4.3a.1 Required tools (matrix)
+
+| # | Capability | Primary tool | Fallback | Where it comes from |
+|---|---|---|---|---|
+| 1 | **Read design + spec + POML tasks** | Read / Glob / Grep | — | Native Claude Code tools |
+| 2 | **Invoke PowerShell scripts** (H2a `Provision-Customer.ps1`, H6 `Deploy-DataverseSolutions.ps1`, etc.) | `PowerShell` tool | `Bash` tool with `pwsh -File` | Native |
+| 3 | **Invoke Unix/bash tooling** (git, jq, curl fallbacks) | `Bash` tool | — | Native |
+| 4 | **Call L2 REST API** (`POST /api/runs`, `GET /api/runs/{id}`, etc.) | `WebFetch` (with bearer token from step 5) OR `Bash` + `curl` + `az account get-access-token` | `PowerShell` + `Invoke-RestMethod` | Native + `az` CLI |
+| 5 | **AAD bearer token for L2 auth** | `az account get-access-token --resource api://spaarke-provisioning-controlplane-{env}` | Interactive `az login` first, then step 5 | Requires `az` CLI installed on operator machine |
+| 6 | **Read Dataverse** (gate verification queries — `systemusers`, `sprk_dataverseenvironment` reads) | Dataverse MCP tools (`mcp__dataverse__read_query`, `mcp__dataverse__search`) when connected | `pac data` PS commands OR raw Web API via `Invoke-RestMethod` with OAuth bearer | Dataverse MCP requires interactive OAuth once; PS fallback always available |
+| 7 | **Write to Dataverse** (registry updates on run completion) | Dataverse MCP `mcp__dataverse__update_record` | `pac data` OR raw Web API PATCH | Same as #6 |
+| 8 | **Read Azure resource state** (verify traps cleared, T1 keyVaultReferenceIdentity, resource existence checks) | `Bash` + `az ...` CLI (`az resource show`, `az keyvault ...`, `az webapp ...`) | Azure MCP if available | `az` CLI required |
+| 9 | **Read Graph** (verify admin consent status, UAMI Graph role parity per T3) | `Bash` + `az ad ...` CLI OR `az rest` against Graph endpoints | Direct Graph SDK invocation via a script | `az` CLI |
+| 10 | **Read Cosmos** (fleet status queries, run history) | `Bash` + `az cosmosdb sql query` CLI | `Invoke-RestMethod` with Cosmos SQL API | `az` CLI |
+| 11 | **File upload to SPE** (H13 acceptance sample) | `Bash` + `curl` with Graph app-only token | `pnp` CLI OR Graph SDK script | `pnp` optional; Graph SDK always available |
+| 12 | **Real-time run status polling** | `WebFetch` / `curl` loop against `GET /api/runs/{id}` (polling interval per H1 15–30s) | — | Native + step 4/5 tools |
+| 13 | **Structured handoff report** (end-of-run) | `Write` (markdown to `projects/customer-provisioning-orchestration-r1/notes/runs/{runId}.md`) | — | Native |
+| 14 | **Task tracking** (which handler is in-flight; which gate is pending) | `TodoWrite` tool | — | Native |
+| 15 | **Multi-agent orchestration** for complex adversarial verification (rarely needed here) | `Agent` tool with subagent types (`researcher`, `general-purpose`) | — | Native; opt-in per invocation |
+
+#### 4.3a.2 Auth flow to L2 REST API (B1 refinement)
+
+The L2 REST API is AAD-protected (per §4.2 B1) with audience `api://spaarke-provisioning-controlplane-{env}` and requires `Operator` app-role for mutating calls (`POST /api/runs`, `POST /api/runs/{id}/resume`, etc.) or `Reader` for read-only (`GET /api/runs/{id}`).
+
+**Claude Code's auth identity**: **the operator's own AAD identity** (interactive `az login`), NOT a service principal. This is deliberate — provisioning is auditable operator action, not automated. Operator's AAD identity must have `Operator` app-role assignment on the control-plane app-reg (single-tenant to Spaarke).
+
+**Token acquisition** (Claude Code does this once per run, refreshes as needed):
+
+```powershell
+$token = az account get-access-token `
+  --resource "api://spaarke-provisioning-controlplane-prod" `
+  --query accessToken -o tsv
+
+# All L2 calls use bearer token
+Invoke-RestMethod `
+  -Uri "https://spaarke-provisioning-prod.azurewebsites.net/api/runs" `
+  -Method POST `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -Body $payload -ContentType "application/json"
+```
+
+Token lifetime ~1 hour; auto-refresh via `az account get-access-token` again when 401s appear.
+
+**Model 2 self-service exception** (D18 consent-callback): H0.5's `POST /api/onboarding/consent-callback` endpoint is anonymous with HMAC verification, NOT AAD-protected — this is by design because the customer admin is authenticating to their OWN tenant via the Microsoft consent flow, not to Spaarke's control plane. The HMAC signing key is a shared secret between the multi-tenant BFF app-reg's admin-consent redirect page and the L2 endpoint.
+
+#### 4.3a.3 Operator machine prerequisites (MUST be installed before /provision-environment)
+
+- **`pwsh`** ≥ 7.4 (PowerShell 7+; Claude Code invokes via `PowerShell` tool)
+- **`az` CLI** ≥ 2.60 (latest per Aug 2026); operator must be logged in via `az login` before starting a run
+- **`pac`** CLI ≥ 1.35 (Power Platform CLI; latest recommended)
+- **`git`** ≥ 2.40 (for reading scripts + solution ZIPs from working tree)
+- **Dataverse MCP** (optional but strongly recommended): configured via VS Code / Claude Code MCP settings; provides `mcp__dataverse__*` tools; interactive OAuth once per env
+- **Azure MCP** (optional): if configured, provides higher-level Azure tools than raw `az` CLI
+
+**Prerequisites-check step** (added to `/provision-environment` skill as Step 0):
+
+Before any provisioning begins, the skill runs a self-check:
+
+```powershell
+# Verify tool versions
+pwsh --version           # ≥ 7.4
+az --version             # ≥ 2.60
+pac --version            # ≥ 1.35
+
+# Verify operator auth
+az account show          # must show Spaarke tenant
+az ad signed-in-user show # must show operator's principal
+
+# Verify L2 API reachable + Operator role granted
+az account get-access-token --resource api://spaarke-provisioning-controlplane-{env}
+curl -H "Authorization: Bearer $token" https://spaarke-provisioning-{env}.azurewebsites.net/api/health
+
+# Verify MCP if expected
+mcp list                 # optional: confirm Dataverse MCP connected
+```
+
+Fail-fast with clear messages if any prereq missing.
+
+#### 4.3a.4 Skill definition (Phase D deliverable, not yet written)
+
+The `/provision-environment` skill lives at `.claude/skills/provision-environment/SKILL.md` and is created in **Phase D**. Structure (aligned with existing `/deploy-new-release` skill pattern):
+
+1. **Purpose + trigger phrases** (`/provision-environment {customerId}`, "provision customer", etc.)
+2. **Prerequisites** (per §4.3a.3)
+3. **Interactive intake** (asks operator for `customerId`, `tenantId`, `tenancyModel`, `profile` if not passed as args)
+4. **Preflight** — invokes L2 `POST /api/runs/{id}/preflight` = H0
+5. **Confirmation gate** — shows operator the run plan + estimated cost + estimated duration; requires "yes" to proceed
+6. **Execute** — loop: enqueue next handler → poll status until complete/failed → advance
+7. **Manual gate handling** — if handler reaches `WaitingOnGate`, skill surfaces the gate + gates progression instruction (e.g., "operator: click admin consent URL then reply `advance`")
+8. **Completion** — writes handoff report to `runs/{runId}.md`; updates `sprk_dataverseenvironment` registry via Dataverse MCP; produces final summary
+
+**Cannot ship r1 without this skill.** Phase D delivers it.
+
+#### 4.3a.5 Fallback matrix (when tools are unavailable)
+
+| Failure | Impact | Fallback |
+|---|---|---|
+| Dataverse MCP disconnected mid-run | Cannot query gate state via MCP | Auto-switch to `pac data` or raw Web API PS calls; log the fallback; continue |
+| Azure MCP unavailable | Cannot use higher-level Azure tools | Fall back to raw `az` CLI |
+| Operator's `az` token expires mid-run | 401 on next L2 call | Auto-refresh via `az account get-access-token`; retry once; if still fails, pause + prompt operator |
+| L2 API unreachable | Cannot advance run | Escalate immediately — pipeline halt; operator investigates; run auto-resumes via L2 crash-recovery (I6) when L2 back |
+| PS script exits non-zero | Handler failed | Standard §4C rollback semantics kick in |
+| Long-running handler times out (H2a Bicep 30 min, H5 dv-env creation 20 min) | Not a failure — expected | Skill polls L2 asynchronously; §4.2 handler execution model handles the actual work |
+
+**Design implication**: the skill MUST be robust to MCP disconnects (they happen mid-session per our own experience — 2026-08-14, 2026-08-15). Fallback paths are mandatory, not optional.
+
 ---
 
 ## 5. ADR Constraint Analysis
@@ -312,9 +454,43 @@ BFF already at 269 registrations (17x the 15-line limit, acknowledged violation)
 
 Per-handler job status (ADR-017) governs individual handler outcomes. The **ProvisioningRun record** in Cosmos (D13) provides multi-phase orchestration state. No ADR change needed — different concerns, different stores.
 
-### 5.4 What You'd Do Differently Without the ADRs
+### 5.4 What You'd Do Differently Without the ADRs — expanded v3.3 trade-off analysis
 
-Only one thing: you might use Azure Durable Functions or Temporal for the control plane instead of building a custom state machine. Everything else (no plugins, Minimal API, ProblemDetails) correctly guides the design. The state-machine approach is more work but avoids infrastructure sprawl, and `Provision-Customer.ps1`'s state-file pattern already proves it works.
+**Short answer**: nothing. ADR-004 (async job contract), ADR-010 (DI minimalism), ADR-017 (job status), Minimal API + ProblemDetails all correctly guide r1. The one place a reviewer might question is L2 orchestration — could we adopt Azure Durable Functions or Temporal instead of building a custom state machine over Cosmos? **The answer is still no**, and v3.3 makes the reasoning explicit rather than a footnote.
+
+**Option A — custom state machine over Cosmos + `IJobHandler` workers + L2 reconciler (what we chose)**:
+
+| Pro | Con |
+|---|---|
+| Zero new infrastructure — reuses ADR-004 `IJobHandler` + Service Bus + Redis idempotency + Cosmos (all already in the stack) | Must build state-reconciler `BackgroundService` + failure-taxonomy logic ourselves (~500–800 LOC net-new in L2) |
+| Native fit for our shape — 19 heterogeneous handlers with per-handler idempotency keys, gates verifying external systems (Graph, ARM, Dataverse), and long human-in-the-loop gates (admin consent, SPE 24h replication) fit Cosmos-polling state better than a linear/graph workflow DSL | State-machine debugging is harder — no visualizer; must instrument logs to trace runs |
+| Cost transparency — Cosmos serverless bills per-RU (predictable at provisioning cadence) | We own the retry/timeout/cancellation semantics — must get them right |
+| Testability — each handler is a plain `IJobHandler` unit-testable in isolation; L2 reconciler is a plain `BackgroundService` | State-advancement logic tested separately with Cosmos-fixture tests |
+| No vendor lock — Cosmos + Service Bus are stack primitives; no dependency on a specific workflow product | Losing the "workflow product" advantage of built-in observability |
+| Fits ADR-004 — no ADR change needed | ADR-004 was written for single-shot handlers; provisioning arguably at the edge of what ADR-004 anticipated |
+
+**Option B — Azure Durable Functions (rejected)**:
+
+| Pro | Con |
+|---|---|
+| Built-in orchestration DSL (`await context.CallActivityAsync(...)`) reads sequentially even though it's async | **Requires a Function App** — new Azure resource, new deployment story, new Bicep, new CI/CD; violates §4.2 B2 App-Service-parity decision |
+| Free replay-based state (no explicit state store to design) | Replay model is subtle — accidentally non-deterministic code (`DateTime.Now`, random GUIDs, unbounded loops) breaks in production, not local |
+| Automatic checkpointing + retry policies out of the box | Long-running orchestrations (>24h for SPE replication) hit Azure Storage limits on history table; requires "eternal orchestrations" pattern which is complex |
+| Portal-based visualizer for instance debugging | **Adds a runtime dependency our stack currently doesn't have** — every future BFF/L2 change person must understand Durable Functions replay semantics |
+| Strong for LINEAR workflows | Weaker for STATE-MACHINE workflows with human gates; the "wait for external event" pattern is inferior to Cosmos-polling ergonomically |
+
+**Option C — Temporal (rejected)**:
+
+| Pro | Con |
+|---|---|
+| Best-in-class workflow durability + human-gate semantics (`workflow.WaitForSignal`) | **Requires running a Temporal cluster** — either self-hosted (large ops burden) or Temporal Cloud (external vendor, network egress, cost) |
+| Rich SDK + type-safe workflow authoring | Adds a whole new runtime, testing model, and mental model — team currently has zero Temporal expertise |
+| Excellent observability + replay tooling | Cross-cloud dependency for what is otherwise an all-Azure stack |
+| Solves problems we have (long orchestrations, human gates) | **Massive over-investment** for single-digit provisions per day |
+
+**Long-term reality**: Provisioning cadence is **single-digit runs per day**. At that volume, the marginal cost of a custom state machine is invisible; the fixed cost of adopting a workflow product is huge. **Durable Functions makes sense when you have hundreds of concurrent orchestrations per hour** (e.g., order processing). **Temporal makes sense when you have thousands per hour + complex human-gate workflows** (e.g., loan approvals). Neither describes r1. The custom state machine (~500–800 LOC in L2) is a one-time cost; adopting a workflow product is an ongoing operational + cognitive tax.
+
+**Migration story if we're wrong**: if provisioning cadence grows to hundreds/day in year 2+, migrating from custom Cosmos state machine to Durable Functions is possible — the handler contracts (`IJobHandler`) don't change; only L2's orchestration layer changes. Reserved as an Option-D-future-work if cadence justifies.
 
 ### 5.5 Inherited gates from r3-era master merge (added v3.2 per Fable M-6)
 
@@ -962,6 +1138,34 @@ H14 verification: `Get-ApplicationAccessPolicy` returns 2 entries and both `AppI
 
 Both secrets are 48-byte base64, generated during H4, fail-closed if missing.
 
+### 9A. Consolidated Identity + Configuration Surface (per-customer) — added v3.3
+
+**Purpose**: single-page reference for "what identity + config surface does one customer environment carry?" Distilled from §7.7 (KV secrets), §7.9 (naming), §9.1 (app-reg), §9.2 (MI), §9.3 (Dataverse security), §9.4 (Exchange policies), §9.5 (webhooks), §10.2 (parameters), §10.3 (env vars), §10.4 (BFF app settings). When those sections and this table disagree, **this table is the reconciled current-state view**; the individual sections carry the depth.
+
+| # | Artifact | Where it lives | Who provisions | Who verifies | Rotation cadence | Model 1 vs Model 2 |
+|---|---|---|---|---|---|---|
+| 1 | **BFF API app registration** (1 per customer) | Spaarke tenant (Model 1) or customer tenant (Model 2) | H3 | H13 acceptance | Client secret 24-month; **NEVER remove** (per r3 handoff) | Model 1: Spaarke tenant · Model 2: customer tenant post-consent (D18) |
+| 2 | ~~Dataverse S2S app-reg~~ | ~~—~~ | — | — | — | **DROPPED v3.2 (r3 task 060)** — zero code consumers |
+| 3 | **User-Assigned Managed Identity** (`mi-spaarke-{customerId}-{env}`) | Customer subscription (Model 2) or Spaarke platform sub (Model 1 shared floors) | H2a (Phase C — new `uami.bicep`) | Trap T5 verification | N/A (identity, not credential) | Per-customer in both models |
+| 4 | **Dataverse Application User** (2 registrations: BFF app-reg + UAMI) | Customer's Dataverse environment | H10 | Trap T2 verification (Dataverse `systemusers` query) | Never expires; **NEVER remove per r3 handoff** | Both models — Dataverse env is dedicated per §3A A1 |
+| 5 | **Key Vault** | Customer subscription | H2a (Bicep with vault name as param per §7.9) | ARM read | N/A | Model 1: `sprk-{env}-kv` shared · Model 2: `sprk-{customerId}-{env}-kv` dedicated · **Dev exception**: `spaarke-spekvcert` |
+| 6 | **KV secrets** (10 canonical Infrastructure + 4 Auth + 4 Integration = ~18 secrets) | KV per #5 | H4 seeder (from Phase H canonical secret-catalog manifest) | Trap T1 verification (`keyVaultReferenceIdentity` patched) + boot-time fail-fast (r3 task 061 `ValidateOnStart`) | Client secrets 24-month; webhook signing keys ad hoc (regenerate → rotate consumers) | Same in both models |
+| 7 | **Dataverse env variables** (7 per-customer values) | Customer Dataverse env (`environmentvariablevalue` records) | H7 | Client startup fail-fast (no hardcoded URL fallbacks; per task 024) + H13 sample-query check | Rotate with resource replacement (rare) | Same in both models |
+| 8 | **BFF `IOptions<T>` classes** (26 sections: 24 Tier-1 validated-on-start + 2 Tier-2 kill-switch-gated + Tier-3 defaults) | BFF App Service settings + KV references (form: `@Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=...)`) | H4 + H9 (BFF deploy) | r3 task 061 `.ValidateDataAnnotations().ValidateOnStart()` at boot — `/health` probe fails if any Tier-1 missing/invalid | KV secret rotations propagate automatically | Same in both models |
+| 9 | **Graph app-role grants** (14 per `Infrastructure/Auth/GraphAppRoles.cs`, r3 task 062 constant) | Granted on **UAMI service principal** by H10 (post-step) | H10 + T3 verification (Graph query: UAMI SP `appRoleAssignments` includes all 14) | Nightly parity ArchTest (queued behind CI-wiring per r3 `task-042-063-ci-gate-wiring-deferral.md`) | Admin-consent-per-tenant is a one-time customer action; grants themselves don't expire | Same in both models |
+| 10 | **Exchange ApplicationAccessPolicies** (2 total: BFF app-reg + UAMI, both mandatory per T4) | Customer Exchange Online tenant (Model 2) or Spaarke Exchange tenant (Model 1) | H14 sub-step (a) — create-if-missing then verify | Trap T4 verification (`Get-ApplicationAccessPolicy` returns 2 entries; both principals) | 30-min propagation post-create; policies don't expire; **future migration to Exchange RBAC for Applications tracked in R22 v3.3** | Same in both models |
+| 11 | **Webhook signing keys** (2: `communication-webhook-signing-key` + `Email-WebhookSigningKey`) | KV per #5 | H4 (generated 48-byte base64) | H14 sub-step (b/c) — subscription create then signature verification round-trip | Regenerate + re-subscribe (rare — coordinated maintenance window) | Same in both models |
+| 12 | **SPE container-type + root container ID** | KV secret `customer-{customerId}-spe-container-id` + Dataverse env-var `sprk_SharePointEmbeddedContainerId` | H8 (confidential-client fix per T6) | Trap T6 verification (container GET via app-only token) | Never rotate; container = data | Per-customer isolated by both KV boundary + Dataverse env boundary; **Invariant 4 per §4D** |
+| 13 | **Customer `tid` (Entra tenant ID)** | Dataverse env-var `sprk_TenantId` + Cosmos ProvisioningRun.parameters.tenantId | H0.5 (consent-callback for Model 2) or H0 param (Model 1) | H13 sample query verifies BFF sees the right tenant | Never rotates for a given customer | Model 1: Spaarke tid · Model 2: customer tid |
+| 14 | **Per-tenant token budget** (`tokenBudgetMonthlyUSD`, D19) | Cosmos ProvisioningRun.parameters + APIM policy state | H0 param + D19 metering layer | H13 verifies budget enforcement (attempt over-budget → blocked) | Ops-driven (upgrade/downgrade) | Model 1: capped (trial); Model 2: unlimited |
+
+**Rotation summary** (things that expire and must be rotated to keep the customer operational):
+- **BFF-API-ClientSecret**: 24-month expiry → alarm at expiry-30-days → rotate + push to KV + BFF picks up via KV reference (zero downtime if done right)
+- **Webhook signing keys**: no expiry, but rotated on incident (leak, algorithm upgrade) — coordinated with re-subscription of every Graph/service-endpoint webhook
+- **Everything else**: identity artifacts (UAMI, MI SP, Dataverse App User) don't expire; RBAC / role grants don't expire
+
+**One-page mental model**: Model 2 customer environment = **1 BFF app-reg + 1 UAMI + 1 Dataverse env with 2 App Users + 1 KV with ~18 secrets + 1 SPE container-type/root container + 14 Graph app-roles on UAMI + 2 Exchange policies + 7 Dataverse env-var values + 2 webhook signing keys + 1 customer tid**. Model 1 differs only in: BFF app-reg in Spaarke tenant, KV shared as `sprk-{env}-kv`, 3 fixed-floor Azure resources (App Service Plan, OpenAI, AI Search) shared with metering.
+
 ---
 
 ## 10. Parameter Model & Customer Configuration
@@ -1101,6 +1305,46 @@ Verified against the codebase 2026-06-15 (v2) + refreshed 2026-08-12 (v3) — fu
 | `Decommission-Customer.ps1` | `scripts/` | **OUT OF SCOPE** (D17) | Remains operational as-is. Registry-aware teardown deferred to r2. |
 | `/deploy-new-release` | `.claude/skills/` | **REUSE as-is** | Out of scope. Reference model for L3 skill UX. |
 
+### 11.1a Solutions Reconciliation — what actually ships vs what's in the repo (added v3.3 per Q2)
+
+Design v3.1/v3.2 said "~10 managed solutions"; INVENTORY §1 says the same. **The actual authoritative count is 8** per `scripts/Deploy-DataverseSolutions.ps1` `$SolutionImportOrder`. This section resolves the confusion once.
+
+**Three different "solution" concepts in the repo — v3.3 disambiguates**:
+
+| Source | Count | What it is | Ship to customers? |
+|---|---|---|---|
+| `src/solutions/` folders | **36** | Mix of managed solutions, code-page SPAs (deployed as web resources, not solutions), wizards, and dev-only tools | **Not all** — see reconciliation below |
+| `src/dataverse/solutions/` folders (`spaarke_core`, `spaarke_containers`, `spaarke_documents`) | 3 | Unpacked solution skeletons per INVENTORY §1 ALM note | **No** — these are dev-time unpacked forms, not the source of truth for shipping |
+| `Deploy-DataverseSolutions.ps1` `$SolutionImportOrder` | **8** | Authoritative list the deployer imports (with dependency order + tier) | **Yes — these 8 are what H6 ships** |
+
+**Authoritative 8 managed solutions shipped by H6** (per `Deploy-DataverseSolutions.ps1:125-135`):
+
+| Tier | Solution folder | Solution unique name | Dependency |
+|---|---|---|---|
+| 1 | `SpaarkeCore` | `SpaarkeCore` | Base — entities, option sets, security roles, MDA shell |
+| 2 | `webresources` | `SpaarkeWebResources` | JS files referenced by forms + ribbons; depends on Tier 1 |
+| 3 | `CalendarSidePane` | `CalendarSidePane` | Tier 3 — independent |
+| 3 | `DocumentUploadWizard` | `DocumentUploadWizard` | Tier 3 — independent |
+| 3 | `EventCommands` | `EventRibbons` | Tier 3 — event ribbon JS |
+| 3 | `EventDetailSidePane` | `EventDetailSidePane` | Tier 3 — independent |
+| 3 | `EventsPage` | `EventsPage` | Tier 3 — independent |
+| 3 | `LegalWorkspace` | `LegalWorkspace` | Tier 3 — independent |
+
+**The other ~28 items in `src/solutions/` — what happens to them?**
+
+Most are **code-page SPAs deployed as web resources**, NOT as managed solutions. The deployment mechanism differs:
+
+- **Code pages** (SpaarkeAi, EmailPage, PlaybookLibrary, DailyBriefing, Notepad, AllDocuments, FindSimilarCodePage, SpeAdminApp, Reporting, SmartTodo, WorkspaceLayoutWizard, EventsPage, EventDetailSidePane, CalendarSidePane, DemoRegistration, EmailPage, ...): built via `npm run build` in each folder → produces `dist/*.js` bundles → deployed as **web resources** via `Deploy-Release.ps1 Phase 4` (customer-scoped per Gap 2 hardening). These become web resources INSIDE the `webresources` solution (Tier 2) OR feature solutions.
+- **Wizards** (7 CreateXxxWizard folders): actually feature-solution-scoped — built and packaged inside the appropriate feature solution
+- **Non-SPA content** (CopilotAgent = M365 declarative agent manifest, spaarke_insights = solution staging, sprk_communicationconversationpage = internal): deployed via their own specialized tooling
+- **Retired / dev-only**: some folders may not deploy anywhere (verified in Phase A)
+
+**v3.3 obligation on Phase A**: audit each of the ~28 non-deployer-listed items in `src/solutions/` and mark each as (a) code-page deployed via `Deploy-Release.ps1`, (b) feature-solution-scoped inside one of the 8 shipped solutions, (c) dev-only / retired, or (d) unknown-needs-review. Publish results at `notes/solutions-reconciliation-2026-08.md`.
+
+**Design implication**: r1's H6 handler ships **8 managed solutions**, NOT 10. Every place in the design that says "~10 managed solutions" — §1 Executive Summary, §11.1 disposition table, §11 header, PROJECT-UPDATE §2 — must be reconciled to 8 (or updated to a corrected authoritative count if Phase A reveals additions). **v3.3 correction on the immediate references only**; PROJECT-UPDATE is a companion doc that will need its own update.
+
+**INVENTORY §1's "10 solutions (386 components)"**: the 386-component count is authoritative (from `Build-SpaarkeMaster.ps1`); the "10 solutions" count is the drift. Reconcile INVENTORY as a Phase A action.
+
 ### 11.2 Infrastructure-as-Code (v3.2 updated)
 
 | Asset | Path | Disposition | Notes |
@@ -1181,6 +1425,8 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 | **R19 (v3.2)** | **Cross-customer concurrency limits at resource layer** — Azure OpenAI regional TPM quota (150/200/30/350 per model per region) is a **regional** quota; Dataverse env-creation rate limits (~4/hour per tenant typical); Graph API throttling; subscription vCPU/SKU quotas. Two concurrent Model 2 provisions in the same region can fail on quota clash. | Fable §6 item 2 | H0 preflight (v3.2 extended) queries: `az cognitiveservices` for OpenAI TPM headroom; `pac admin quota` for Dataverse env quota; `az vm list-usage` for subscription vCPU. **Fails run before H1 starts** if any headroom insufficient for the +1 provisioning target. |
 | **R20 (v3.2)** | **Handler execution model under App Service HTTP timeout** — App Service 230s default request timeout is fatal for 30-min handlers (H2a Bicep, H5 Dataverse env, H6 solution import). | Fable M-9 | **§4.2 (v3.2) handler execution model**: L2 REST endpoints ENQUEUE handlers via Service Bus + return 202 Accepted; state-reconciler `BackgroundService` in L2 polls Cosmos every 5s to advance the DAG. Handlers run in existing BFF `IJobHandler` infrastructure (ADR-004). No handler runs synchronously in the HTTP request path. |
 | **R21 (v3.2)** | **UAMI migration debt** — v3.1 asserted UAMI provisioned by `uami.bicep`; actual is System-Assigned MI (no `uami.bicep` module). T5 slot-swap failure mode intrinsic to System-Assigned MI persists until UAMI Phase C lands. | Fable H-3 + `infrastructure/bicep/modules/app-service.bicep` inspection | **Phase C** (new): create `uami.bicep` module + refactor `app-service.bicep` to consume UAMI + bind both slots → T5 structurally impossible. Interim H4 grants KV RBAC to both slots' System-Assigned MI principals separately. |
+| **R22 (v3.3)** | **Exchange ApplicationAccessPolicy → RBAC for Applications migration (medium-term)** — Microsoft's Aug 2026 status: RBAC for Applications is now the recommended pattern; the legacy `Set-ApplicationAccessPolicy` doc is titled `(legacy)`. **No hard cutover date**; coexistence is safe (additive). r1 continues using `Set-ApplicationAccessPolicy` for now (T4). | Q5 research spike ([`notes/graph-spe-2026-08-standards-spike.md`](notes/graph-spe-2026-08-standards-spike.md)) | Add Phase D backlog item "migrate Exchange app-access to RBAC for Applications" for consideration in r2 or when Microsoft announces sunset date. r1 acceptance criteria unchanged for now — H14 continues creating both policies per T4. |
+| **R23 (v3.3)** | **MI-as-Federated-Identity-Credential opportunity for Model 2 secretless** — GA'd 2026; enables cross-tenant Graph app-only without secrets (20-FIC-per-app cap). Not needed for r1's current design (which uses per-tenant BFF app-reg with client secret per §9.1) but material Phase C+ optimization for Model 2 cross-tenant scenarios. | Q5 research spike | Phase D backlog item; not r1 acceptance. If adopted, replaces the `BFF-API-ClientSecret` rotation ceremony entirely for the cross-tenant Model 2 path. |
 
 ---
 
@@ -1264,6 +1510,92 @@ Absorbed from the 13 known deployment-guide issues + r1 carry-overs + 2026-08-12
 | **F** | E2E dry run: fresh **`trial-{yyyymmdd}` customer stamp** (Model 1 profile per H-6) provisioned end-to-end using only the new pipeline; reach `Setup Status = Ready`; validate all 6 §4B silent-fail traps cleared; `naming-conformance-check.ps1` exits 0; Model 1 vs Model 2 differences verified per §4.1a table (both tiers dry-run if reasonable) | C, C', D, E, G, H | Acceptance. Trial-env baseline used because demo/prod decommissioned per R18. |
 
 **Parallelism**: A, B, E, G can start immediately in parallel. C waits on {A, B, G}. C' waits on {A drift resolution, C}. H waits on {G, C}. D waits on C. F is acceptance.
+
+### 14A. Upgrade Model (added v3.3 per Q3) — how existing customers receive updates
+
+**Problem statement**: r1's design v3.2 covered PROVISIONING (standing up a new customer environment from zero) but was silent on UPGRADING (rolling out solution / BFF / config changes to already-provisioned customer environments). These are related but architecturally distinct: provisioning is one-shot green-field; upgrade is repeated brown-field against live customer data. Different failure modes, different rollback semantics, different customer-communication requirements.
+
+This section establishes the upgrade contract. It does NOT introduce new handlers in the r1 catalog (H0–H14); instead it repurposes existing handlers as **upgrade-mode variants** where the semantics differ, and adds explicit upgrade-specific concerns (drift detection, version-compatibility matrix, backwards-compatibility windows) that are silent in the provisioning-only path.
+
+#### 14A.1 The three upgrade classes
+
+| Class | What upgrades | Cadence | Complexity | Rollback |
+|---|---|---|---|---|
+| **U1 — BFF code** (managed Azure code) | `Sprk.Bff.Api` binaries, config, IOptions changes | Weekly to monthly | Low (slot-swap semantics from Deploy-BffApi.ps1) | Slot-swap reversal within minutes |
+| **U2 — Dataverse solutions** (managed schema + web resources) | ~8 shipped solutions per §11.1a; new columns, new option-set values, new plugin steps, new PCF versions, seed-data updates | Monthly to quarterly | Medium — Package Deployer upgrade mode + solution-version dependency graph; irreversible for column removals | No automated rollback; incidents recover via forward-fix |
+| **U3 — Bicep infrastructure** (Azure resource drift + Bicep template changes) | Bicep template updates, new resources, SKU changes, region migrations, key rotations | Rare (per release major) | High — real risk of drift-obliteration; requires per-customer maintenance windows | `az deployment group rollback` if within retention window; otherwise manual repair |
+
+#### 14A.2 Handler reuse — upgrade mode vs first-install mode
+
+r1's H2a/H6/H7/H9/H12a/b/c/H14 handlers all execute in **upgrade mode** when the target `sprk_dataverseenvironment` row already has `sprk_provisionedon` set (not null). Key semantic differences per handler:
+
+| Handler | First-install mode | Upgrade mode |
+|---|---|---|
+| **H2a** (Bicep infra) | `az deployment group create --mode Incremental` — all resources absent, all get created | Same command; Bicep **detects existing resources by name + skips deploy if unchanged** (per Bicep's built-in idempotency). Drift-detection preflight (`az deployment group what-if`) surfaces any manual resource edits to operator BEFORE apply. |
+| **H2b** (AI Search indexes) | 7 canonical indexes PUT to fresh service | Indexes upserted; **new index fields added additively** (Azure Search allows adding filterable/searchable/retrievable fields to existing index without re-index); **breaking field changes (rename, type change, vector dimension change)** require full re-index — flagged as U-CB (breaking) below |
+| **H6** (solution import) | `pac solution import --publish-changes --force-overwrite` with dependency order | Same command in **upgrade mode**: Package Deployer detects existing solution + applies upgrade delta + retires the holding solution. Version-bump order matters: dependency solutions (SpaarkeCore) upgrade first. |
+| **H4** (KV secrets) | Full seeder run against empty KV | Seeder writes missing secrets; **NEVER overwrites live client secrets unless a rotation is explicitly requested** (v3.3 rotation-safe mode); the 24-month rotation is a separate operator-triggered handler variant (`H4-rotate`) |
+| **H7** (env-var values) | 7 canonical values set | Values updated only if changed; H13 verifies clients pick up new values (localStorage cache invalidation: 60-min TTL — accept the window OR force cache-bust via a new value in `sprk_ClientCacheBustToken` env-var, added v3.3) |
+| **H12a/b/c** (config-seed) | Full seed of all rows | **Additive-only by default**: new AI action definitions / playbooks / grid configs / field mappings are added; existing rows are LEFT ALONE (customer may have edited them). Explicit `--overwrite-authored-content` flag needed to force-update — reserved for security-critical playbook fixes |
+| **H14** (integrations) | 2 Exchange policies + Graph webhook subscriptions created | Existing policies/subscriptions verified; missing ones created (per T4 action-and-verify semantics); no destructive re-create |
+| **H9** (BFF deploy) | BFF deployed to production slot | **Blue-green via staging slot**: deploy new build to staging → smoke-test → slot-swap; rollback = re-swap. Coordinate with r3 handoff §6 gates (analyzers-as-errors + god-class ratchet + ArchTests must all pass before slot-swap) |
+
+#### 14A.3 Version compatibility matrix
+
+**The problem**: a customer running BFF v1.5.0 with SpaarkeCore v1.2.3 may not be compatible with a Dataverse solution upgrade that adds a column BFF v1.5.0 doesn't know about. Silent-fail traps galore.
+
+**Solution**: publish a **version compatibility matrix** at each release tag. Two dimensions: **BFF version** × **Solution version**. Each cell = compatibility status:
+
+| Status | Meaning | Upgrade order |
+|---|---|---|
+| ✅ Green | Compatible; upgrade either first | BFF or solution can lead; doesn't matter |
+| 🟡 Yellow | Compatible but MUST upgrade in specific order | E.g., "solution must upgrade first; BFF requires new column X" |
+| 🔴 Red | Incompatible; do NOT deploy this pair | Blocked; requires intermediate release |
+
+**Enforcement**: H0 preflight (upgrade mode) reads `sprk_dataverseenvironment.sprk_bffversion` + `sprk_solutionversion`; queries the matrix; **fails the upgrade if the target pair is 🔴 Red**. Adds two new columns to §6.1 registry: `sprk_bffversion` + `sprk_solutionversion` (v3.3 registry extension).
+
+**Matrix publication**: `docs/deployment/version-compatibility-matrix.md` — updated per release tag; source-controlled; queryable by version-string.
+
+#### 14A.4 Breaking change classes (U-CB)
+
+Certain solution/schema/config changes cannot be applied in-place safely and require **coordinated maintenance windows** with customer communication:
+
+- **U-CB-1**: **Column removal or type change** on any `sprk_*` entity — Dataverse allows the change but data is lost/coerced; requires opt-in via `--allow-destructive` flag, mandatory pre-migration data export, customer signoff
+- **U-CB-2**: **AI Search index vector dimension change** (e.g., 3072 → 768 embedding-model migration) — requires full re-index; window depends on document volume (hours to days)
+- **U-CB-3**: **BFF app-reg permission additions** requiring re-consent from customer admin — customer must click the admin-consent URL again; H0.5 re-consent flow (v3.2) handles this but customer coordination is required
+- **U-CB-4**: **SPE container-type schema changes** (rare; typically only on major Microsoft SDK updates) — up-to-24h replication window per T6; treat as maintenance
+- **U-CB-5**: **KV secret rotation cascading** to BFF app-restart — client secret rotation invalidates BFF's in-memory MSAL cache; requires slot-swap or App Service restart
+- **U-CB-6**: **Client secret expiry** (BFF-API-ClientSecret 24-month) — automated H4-rotate variant + 30-day-out alarm; if missed, BFF authentication breaks silently
+
+Each U-CB has an associated **customer-communication template** in `docs/deployment/customer-comms/` — this is a Phase A deliverable for r1's docs consolidation.
+
+#### 14A.5 Drift detection
+
+Before every U3 (Bicep infra) upgrade, run `az deployment group what-if` to detect operator-modified resources. Options on drift:
+
+- **A**: Accept drift, apply upgrade → resource is reset to declarative state (safe if the manual edit was accidental)
+- **B**: Reject upgrade, escalate to customer/operator to reconcile the drift first (safe if the manual edit was intentional and load-bearing)
+- **C**: Update Bicep template to match drift, then apply (rare; requires design decision)
+
+**H0 preflight (upgrade mode)** always runs the `what-if`; if drift detected, **defaults to B (reject + escalate)** with drift report emitted as `runNotes/drift-{customerId}-{timestamp}.md`.
+
+#### 14A.6 Upgrade success criteria (added to §15)
+
+- H0 preflight (upgrade mode) blocks incompatible BFF/solution pairs per version matrix
+- H2a upgrade-mode drift-detection preflight surfaces manual resource edits BEFORE apply
+- H4 upgrade mode is rotation-safe (never overwrites live secrets absent explicit rotate)
+- H6 upgrade mode via Package Deployer upgrade-mode with dependency-order respected
+- H9 blue-green slot-swap with rollback via re-swap; r3-era gates green before swap
+- H12a/b/c upgrade mode is additive-only by default; `--overwrite-authored-content` reserved for security fixes
+- U-CB customer-comms templates documented per class
+- Version-compatibility matrix at every release tag
+
+#### 14A.7 What this section is NOT
+
+- **Not** a decommission model — see D17 (out of scope; existing `Decommission-Customer.ps1`)
+- **Not** a data-migration model — see §11.6 (spaarke-data CLI is separate)
+- **Not** a zero-downtime guarantee — the blue-green pattern gives minutes-of-drain during slot-swap; customer-visible URL is uninterrupted but in-flight requests may retry
+- **Not** an SLA — customer-facing SLA is separate (customer engagement work, not r1 pipeline concern)
 
 ---
 
@@ -1404,6 +1736,33 @@ These items require detailed verification during Phase A (doc consolidation + au
 ---
 
 ## 20. CHANGELOG
+
+### v3.3 — 2026-08-16 (owner-review round Q1–Q7 + Q5 Graph/SPE spike)
+
+**Trigger**: owner reviewed v3.2 and raised 7 substantive questions/clarifications. Q5 explicitly authorized a research spike. Each Q resolved with a design addition or clarification.
+
+**Additions**:
+
+- **§5.4 EXPANDED** (Q1 custom state machine vs Durable Functions vs Temporal): full trade-off table for each of Option A (custom, chosen), Option B (Durable Functions, rejected), Option C (Temporal, rejected). Reasoning: single-digit runs/day cadence means fixed cost of workflow product > marginal cost of custom state machine. Migration story if wrong: swap L2 orchestration without changing handler contracts.
+- **NEW §4.3a Claude Code Operator Toolchain** (Q4): 15-row tool matrix (PowerShell / Bash / WebFetch / az / pac / Dataverse MCP / Azure MCP + fallbacks); auth flow (operator's own AAD identity, NOT service principal; `az account get-access-token --resource api://spaarke-provisioning-controlplane-{env}`); operator machine prerequisites (pwsh 7.4+, az 2.60+, pac 1.35+, git 2.40+); Phase D deliverable spec for `/provision-environment` skill; fallback matrix for MCP disconnects (real concern given our own experience 2026-08-14/15)
+- **NEW §4D Tenant Isolation Invariants** (Q6): 5 binding invariants (I1 no hardcoded default tenant in scripts; I2 unconditional `tenantId` filter on AI Search; I3 partition-key predicate on Cosmos; I4 SPE container IDs tenant-scoped-derived; I5 Graph token per-tenant scoped) with enforcement mechanism (mostly new ArchTests per r3 task 040 pattern) + verification query + why-it-matters (severity per invariant — CATASTROPHIC for I2/I4/I5 legal-privilege leak scenarios). Threat model: honest-but-buggy code + operator error, NOT malicious insider or external actor.
+- **NEW §9A Consolidated Identity + Config Surface** (Q7): 14-row single-page table showing per-customer artifacts (BFF app-reg, UAMI, Dataverse App User, KV, KV secrets, env-vars, IOptions, Graph roles, Exchange policies, webhook keys, SPE container, tenant `tid`, token budget) — where each lives, who provisions, who verifies, rotation cadence, Model 1 vs Model 2 differences. One-page mental model at bottom: **Model 2 = 1 BFF app-reg + 1 UAMI + 1 Dataverse env with 2 App Users + 1 KV with ~18 secrets + 1 SPE container + 14 Graph app-roles + 2 Exchange policies + 7 env-vars + 2 webhook keys + 1 tid**.
+- **NEW §11.1a Solutions Reconciliation** (Q2): resolves the 36-in-src / 8-in-deployer / 3-in-src-dataverse-solutions confusion. **Authoritative 8 solutions** (SpaarkeCore + webresources + 6 feature solutions) per Deploy-DataverseSolutions.ps1 `$SolutionImportOrder`. Other ~28 in `src/solutions/` are code pages deployed as web resources via `Deploy-Release.ps1` Phase 4 (not solutions). Reconciles `~10 solutions` misreport across INVENTORY §1, §1 Executive Summary, §11.1, PROJECT-UPDATE §2. Phase A audit obligation to enumerate each of the ~28.
+- **NEW §14A Upgrade Model** (Q3): three upgrade classes (U1 BFF code / U2 Dataverse solutions / U3 Bicep infra) with cadence/complexity/rollback per class; per-handler upgrade-mode semantics table (H2a/H2b/H4/H6/H7/H9/H12a/b/c/H14 all differ); version compatibility matrix (BFF × Solution version cells: green/yellow/red); breaking-change classes (U-CB-1 through U-CB-6 — column removal, vector dimension change, permission additions, SPE schema, KV secret cascading, client-secret expiry); drift detection via `az deployment group what-if` before every U3 upgrade with default REJECT + escalate behavior; upgrade success criteria; explicit non-goals (not decommission, not data migration, not zero-downtime SLA).
+- **Risk register R22 (v3.3)**: Exchange ApplicationAccessPolicy → RBAC for Applications migration watch (Q5 spike found this coming but no hard cutover date; coexistence safe; add Phase D backlog item for r2 consideration)
+- **Risk register R23 (v3.3)**: MI-as-Federated-Identity-Credential opportunity for Model 2 secretless cross-tenant Graph app-only (GA'd 2026; 20-FIC-per-app cap; not needed for r1's current design but material Phase C+ optimization if adopted)
+- **§4.1 H8 footnote** (v3.3): SPE `FileStorageContainerType.Manage.All` no longer requires SPE-Admin / Global-Admin as of June 2026 per Q5 spike (runbook simplification, not code change)
+
+**Code fix (not design)**:
+- **`scripts/Register-EntraAppRegistrations.ps1:63` — hardcoded Spaarke tenant DEFAULT removed** (v3.3 tenant-isolation invariant I1 enforcement). `[string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2"` → `[Parameter(Mandatory=$true)] [string]$TenantId`. Doc comments updated; examples updated. Prevents cross-tenant provisioning accidents.
+
+**Q5 research spike deliverable**:
+- **NEW `notes/graph-spe-2026-08-standards-spike.md`**: full report from researcher. TL;DR: Graph SDK v6.5.0 / Kiota 2.0 latest (no v7); SPE patterns all still current; Terraform Power Platform provider v4.1.0 Jan 2026 validates D14. Verdict: **v3.2 has zero stale patterns blocking execution**; three follow-on items now folded into design (R22, R23, H8 footnote).
+
+**Companion doc updates**:
+- Researcher's own memory: `.claude/agent-memory/researcher/MEMORY.md` + new pinned memory `graph-spe-standards-2026-08-16.md`
+
+**Ready for `/design-to-spec`**: no external blocking dependencies. Owner sign-off on the v3.3 additions completes the design engagement.
 
 ### v3.2 — 2026-08-15 (post-r3-completion + Fable-verified + net10 baseline)
 

@@ -23,14 +23,17 @@
 
     Prerequisites:
       - Azure CLI authenticated with Entra ID admin permissions
-      - Access to sprk-platform-prod-kv Key Vault
-      - Tenant: a221a95e-6abc-4434-aecc-e48338a1b2f2
+      - Access to the target Key Vault (per -KeyVaultName)
+      - -TenantId REQUIRED (v3.3 tenant-isolation invariant I1 per r1 design.md §4D)
 
 .PARAMETER TenantId
-    Entra ID tenant ID. Default: a221a95e-6abc-4434-aecc-e48338a1b2f2
+    Entra ID tenant ID. MANDATORY (v3.3 tenant-isolation invariant I1 — no hardcoded
+    default; requiring the operator to pass -TenantId prevents cross-tenant provisioning
+    accidents like accidentally provisioning the customer's app-reg in Spaarke's tenant).
 
 .PARAMETER KeyVaultName
-    Key Vault name for storing secrets. Default: sprk-platform-prod-kv
+    Key Vault name for storing secrets. Default: sprk-platform-prod-kv (Spaarke tenant
+    platform KV; override per customer per r1 design.md §7.9 naming standard).
 
 .PARAMETER ProductionApiDomain
     Production API domain for redirect URIs. Default: api.spaarke.com
@@ -45,22 +48,26 @@
     Skip BFF API app registration (if already created).
 
 .EXAMPLE
-    # Preview what will be created
-    .\Register-EntraAppRegistrations.ps1 -DryRun
+    # Preview what will be created (Spaarke tenant)
+    .\Register-EntraAppRegistrations.ps1 -TenantId "a221a95e-6abc-4434-aecc-e48338a1b2f2" -DryRun
 
 .EXAMPLE
-    # Create the BFF API registration
-    .\Register-EntraAppRegistrations.ps1
+    # Create the BFF API registration for a customer tenant
+    .\Register-EntraAppRegistrations.ps1 -TenantId "<customer-tenant-guid>" `
+        -KeyVaultName "sprk-{customerId}-prod-kv"
 
 .NOTES
-    Project: production-environment-setup-r1
+    Project: production-environment-setup-r1 (originally) / customer-provisioning-orchestration-r1 (v3.3 tenant-isolation fix)
     Task: 021 — Create Entra ID app registrations
     Naming: FR-11 compliant (spaarke- prefix)
     Secrets: FR-08 compliant (Key Vault only)
+    v3.3 change: -TenantId is now MANDATORY (was defaulted to Spaarke tenant a221a95e-...)
+                 per r1 design.md §4D tenant-isolation invariant I1
 #>
 
 param(
-    [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    [Parameter(Mandatory = $true)]
+    [string]$TenantId,
     [string]$KeyVaultName = "sprk-platform-prod-kv",
     [string]$ProductionApiDomain = "api.spaarke.com",
     [string]$DataverseOrgUrl = "",
