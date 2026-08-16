@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **10 of 28 DONE**: 001 002 003 010 · 020 024 042 (Wave A) · 011 012 022 (Wave B). All committed/pushed. |
-| **Step** | Wave B verified clean (SmartTodo.Components tsc 0; solutions/SmartTodo jest 76/76). ADR-006 form-script tension → Path A row added to spec.md. 5 fast-follows logged in notes/defer-issues.md. |
-| **Status** | in-progress — Wave B landed; Wave C to plan |
-| **Next Action** | Plan **Wave C** by disjoint files. Candidates: **023** (coloring — `SmartTodo.Components/hooks/useKanbanColumns.ts` + hot `UI.Components/Kanban/KanbanBoard.tsx`), **021** (filter pane — `solutions/SmartTodo/{FilterPane,hooks/useTodoItems,services/DataverseService,services/queryHelpers,SmartTodoApp}`; big), **034** (BrowseModal — verify files first). 023 ∩ 021 = disjoint (package hooks/UI.Components vs solutions/SmartTodo). **013** (RegardingResolver LIVE form, opus) — do carefully/separate, it gates the Phase-4 modal spine (030→033) + 014. Deploys 014/025/035 + wrap-up 090 last. |
+| **Task** | **13 of 28 DONE**: 001 002 003 010 · 020 024 042 (A) · 011 012 022 (B) · 021 023 034 (C). All committed/pushed. |
+| **Step** | Wave C verified (solutions/SmartTodo jest 114/114; both packages tsc clean). 034 = already-resolved (FR-15 verified moot). **PAUSED per operator (option 1)** before live-Dataverse/deploy work. |
+| **Status** | in-progress — PAUSED at operator boundary; awaiting go-ahead for live-form/deploy phases |
+| **Next Action** | **Regroup with operator before proceeding** — remaining work mutates the LIVE Dataverse env: **013** (RegardingResolver `sprk_todo` form wiring, opus — gates modal spine + 014), Phase-4 modal spine **030→031→032→033** (serial; 033 opus interceptor) + **035** deploy, deploys **014 / 025 / 052**, ribbon **050→051→052**, **060** real-DV smoke, **090** wrap-up (test-diet, close #508, archive). None are pure-client-code; all warrant operator awareness. All 13 done tasks are committed+pushed on `work/smart-todo-r5`. |
 
 ### Disjoint-partition ledger (subagents share ONE worktree — never co-edit a file)
 - **useKanbanColumns.ts** touched by 022 AND 023 → never same wave.
