@@ -4,7 +4,7 @@
     <title>Convert LegalWorkspace SmartToDo/ to a thin shim consuming @spaarke/smart-todo-components (FR-01)</title>
     <phase>1: Shared-lib foundation</phase>
     <gate>002 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Final step of the Phase-1 critical-path hoist spine; downstream Phase 2/3/4 tasks (012, 020, 022, 023, 024, 034) all depend on this task landing cleanly. Removes/rewrites LW-local source and updates real consumers (`workspaceConfig.tsx`, `App.tsx`).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -114,7 +114,9 @@
     <criterion testable="true">Negative: if a prop/behavior gap between the LW-local original and the hoisted package version is discovered, the task escalates per CLAUDE.md §6 rather than re-adding local component logic.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec section: FR-01, acceptance criterion (c) + (e). Final step of the Phase 1 serial spine (001→002→003). PR #508 is noted here as ready-to-close but is formally closed as superseded by task 090 (project wrap-up), per CLAUDE.md "Decisions Made" 2026-08-15 entry.</notes>
+  <notes>Spec section: FR-01, acceptance criterion (c) + (e). Final step of the Phase 1 serial spine (001→002→003). PR #508 is noted here as ready-to-close but is formally closed as superseded by task 090 (project wrap-up), per CLAUDE.md "Decisions Made" 2026-08-15 entry.
+
+COMPLETION (2026-08-15, sonnet/high, FULL rigor): Discovered a THIRD real consumer beyond the two named in this POML's background — `components/Shell/WorkspaceGrid.tsx`'s `LazySmartToDoDialog` (dynamic import of `../SmartToDo/SmartToDoDialog`), the "Open To Do Dialog" 90vw×90vh Fluent Dialog. Rewired all three (App.tsx, workspaceConfig.tsx via its unchanged import, WorkspaceGrid.tsx via its unchanged import) through a NEW shared hook `src/solutions/LegalWorkspace/src/hooks/useSmartToDoBridge.ts` that fulfils the full task-002 injected-props contract once (items/isLoading/error/onRefetch, preferences/onUpdatePreferences/prefsLoading, onCreateTodo/onDismissTodo/onRestoreTodo→ITodoMutationResult, dataverseService (LW's DataverseService passed directly — structurally compatible with IKanbanDataverseService, no adapter class needed), feedSync (useFeedTodoSync bridge), onOpenTodo (Xrm.Navigation webresource nav, ported verbatim from the pre-hoist handleOpenSmartTodo)). `components/SmartToDo/SmartToDo.tsx` and `SmartToDoDialog.tsx` became thin shims (preserve the pre-hoist public prop surface so workspaceConfig.tsx/WorkspaceGrid.tsx needed ZERO changes) calling the bridge hook and forwarding to the package components. `index.ts` is now a 2-export barrel. Deleted (git rm) the other 10 fully-duplicated files. Also fixed a pre-existing tsc error in App.tsx: a dead `useDialogForDetail` JSX prop that was never part of ISmartToDoProps in either the old or new component (confirmed via baseline tsc diff — 8 fewer errors post-change, zero new ones). `npm run build` fails on an unrelated pre-existing `@tiptap/core` resolution error in `Spaarke.Compose.Components` (confirmed identical on baseline via git-stash A/B test) — out of scope for this task. Full detail: `projects/smart-todo-r5/notes/task-003-shim.md`.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
