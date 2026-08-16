@@ -16,10 +16,11 @@
  * current filter set) is INTENTIONALLY dropped in R2 per FR-13. Users navigating
  * between records return to the workspace and pick the next one.
  *
- * Layout (R4-104 — single consolidated chrome row, was R4-030's 4-row):
+ * Layout (task 020 / FR-05 / U-3, 2026-08-16 top-bar redesign):
  *   TodoProvider (shared state)
- *     ├── Header (R4-104 single-row Toolbar with title + QuickAdd + view
- *     │           toggles + selection-aware actions)
+ *     ├── Header (title + Filter pill / + New Task / ⋮ overflow — Settings,
+ *     │           Layout, Refresh — or selection-aware actions when a
+ *     │           selection is active)
  *     └── SmartToDo (Kanban, with `hideHeader` so inner KanbanHeader is
  *           suppressed — chrome lives in the consolidated Header above)
  *
@@ -49,7 +50,6 @@ import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 // ListView import removed 2026-06-19 per UAT: list view discontinued — kanban only.
 import { Header } from "./components/Header";
-import { useCurrentContactId } from "@spaarke/smart-todo-components";
 import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
@@ -146,15 +146,15 @@ function SmartTodoLayout(): React.ReactElement {
   // `hooks/useUserPreferences.ts::DEFAULT_SMART_TODO_VIEW_MODE`.
   //
   // R4-104: Orientation is hoisted to App-level so the consolidated Header
-  // can render `<OrientationToggle>` alongside the ViewToggle (the inner
-  // KanbanHeader is suppressed via `hideHeader`).
+  // can drive it (now via the overflow "Layout" menu item, task 020 — the
+  // inner KanbanHeader is suppressed via `hideHeader`).
   const { preferences: viewPrefs, updatePreferences: updateViewPrefs } =
     useUserPreferences({ webApi: getWebApi(), userId: getUserId() });
   const orientation = viewPrefs.orientation;
-  // UAT 2026-06-19 — resolve current user's sprk_contact for quick-add
-  // Assigned To defaults (display name + bind GUID). Passed to Header.
-  const { contactId: currentContactId, contactName: currentContactName } =
-    useCurrentContactId({ webApi: getWebApi(), userId: getUserId() });
+  // task 020 (FR-05 / U-3, 2026-08-16) — the QuickAdd Assigned-To typeahead
+  // that consumed `useCurrentContactId` was removed from Header along with
+  // the rest of the QuickAdd group; the hook call is removed here as it has
+  // no other consumer (was Header-only plumbing).
   // viewMode / handleViewModeChange removed 2026-06-19 per UAT — list view
   // discontinued, kanban is the sole presentation. The preference field
   // remains in useUserPreferences (back-compat for old user records) but
@@ -192,8 +192,15 @@ function SmartTodoLayout(): React.ReactElement {
 
   // ── R4 task 030 — Header state (App-level, per task brief) ───────────────
   //
-  // `searchQuery` is owned here so future tasks (031 facets, 033 list view)
-  // can read it. `selectedIds` is the **multi-select** set driving Row 4 of
+  // `searchQuery` is owned here and still forwarded to `<SmartToDo>` for its
+  // card-level substring filter (title / description / regarding-record name
+  // / number). task 020 (FR-05 / U-3, 2026-08-16) removed Header's inline
+  // SearchBox — the only prior producer of `setSearchQuery` — per FR-05
+  // acceptance ("the broken/mislabeled inline-SearchBox 'Filter' toggle...
+  // is removed, not relabeled"). The state is DELIBERATELY retained (not
+  // deleted) because `<SmartToDo>` still reads it; it now stays at its
+  // initial "" value until task 021's filter pane (FR-06) wires a new
+  // producer. `selectedIds` is the **multi-select** set driving Row 4 of
   // the header (card affordances — task 060). It is INDEPENDENT of
   // `selectedEventId` from TodoContext (which, post-R4 task 042, drives only
   // the ListView highlight — the side-pane is retired per FR-18).
@@ -201,13 +208,38 @@ function SmartTodoLayout(): React.ReactElement {
   // For task 030 `selectedIds` is initialized empty; the toolbar renders
   // `null` (zero selection). Task 060 will populate the Set as the user
   // multi-selects cards in the kanban + list views.
-  const [searchQuery, setSearchQuery] = React.useState<string>("");
+  // Not React state — nothing currently produces a new value (see comment
+  // above); a plain constant avoids an unused-setter lint warning while
+  // `<SmartToDo searchQuery={searchQuery} />` keeps compiling unchanged.
+  const searchQuery = "";
   // `setSelectedIds` is consumed by task 032 Delete's `onClearSelection`
   // callback. Task 060 will additionally populate the Set as the user
   // multi-selects cards in the kanban + list views.
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(
     () => new Set<string>(),
   );
+
+  // ── task 020 (FR-05 / U-3, 2026-08-16) — Filter pane trigger state ───────
+  //
+  // Controlled open/close boolean for the new Filter pill. This task builds
+  // ONLY the trigger + state — task 021 (FR-06) mounts the actual filter
+  // pane content against `isFilterPaneOpen` / `onToggleFilterPane`. No
+  // filter predicate logic is implemented here (would be scope creep into
+  // FR-06 per this task's constraints).
+  const [isFilterPaneOpen, setIsFilterPaneOpen] = React.useState<boolean>(false);
+  const handleToggleFilterPane = React.useCallback(() => {
+    setIsFilterPaneOpen((v) => !v);
+  }, []);
+
+  // ── task 020 (FR-05 / U-3, 2026-08-16) — "+ New Task" stub ───────────────
+  //
+  // TODO(030): wire to OOB main-form create modal per FR-10. Task 030 has
+  // not landed yet, so this is a documented no-op — the button must stay
+  // visible and clickable (never hidden, never throws) per this task's
+  // acceptance criteria.
+  const handleNewTask = React.useCallback(() => {
+    // Intentional no-op until task 030 (FR-10) lands.
+  }, []);
 
   // R2 FR-13 (2026-07-01) — The hybrid `<SmartTodoModal>` (R4 task 040) that
   // used to overlay this component has been retired. The `OPEN_TODOS_EVENT`
@@ -397,17 +429,14 @@ function SmartTodoLayout(): React.ReactElement {
     }
   }, [refetch]);
 
-  // R4-104 (Wave E-3) — The consolidated Header's primary add path is the
-  // inline QuickAdd input (single-line title → dispatches QUICK_ADD_TODO_EVENT
-  // → SmartToDo's handleAdd). The "+ New" wizard button is intentionally
-  // omitted from the Header in standalone Code Page mode because:
-  //   1. The QuickAdd input already satisfies UAT 9 (compact, in-toolbar add)
-  //   2. The richer CreateTodoWizard path remains active via Outlook ribbon
-  //      + parent-form ribbon launches (LaunchCreateTodoWizardHost, below)
-  //   3. Adding a wizard launcher here would re-introduce the duplicate-chrome
-  //      affordance the consolidation aims to eliminate
-  // If a future UAT round requests an in-toolbar wizard launcher, pass
-  // `onOpenWizard` to <Header /> with imperative wizard-open logic.
+  // task 020 (FR-05 / U-3, 2026-08-16) — The QuickAdd inline input (title →
+  // QUICK_ADD_TODO_EVENT → SmartToDo's handleAdd) and its Header-side
+  // "+ New" wizard button (`onOpenWizard`) were removed along with the rest
+  // of the QuickAdd group. The Header's new primary add path is the
+  // "+ New Task" button (`handleNewTask`, stubbed below — TODO(030)). The
+  // richer `CreateTodoWizard` path remains reachable via Outlook ribbon +
+  // parent-form ribbon launches (`LaunchCreateTodoWizardHost`, below) — those
+  // launch triggers are unrelated to the Header and were not touched here.
 
   // ── R4 task 042 (FR-18) — TodoDetailPanel side-pane retired ──────────────
   // The R3 two-pane layout (kanban + collapsible TodoDetailPanel separated by
@@ -418,45 +447,44 @@ function SmartTodoLayout(): React.ReactElement {
 
   return (
     <div className={styles.page}>
-      {/* ── R4-104 (Wave E-3) — Consolidated single-row Header (UAT 8/9/10/11)
+      {/* ── task 020 (FR-05 / U-3, 2026-08-16) — Top-bar redesign ───────────
             ──────────────────────────────────────────────────────────────────
-            Replaces the R4-030 4-row layout. The inner `<KanbanHeader>` is
-            suppressed via `<SmartToDo hideHeader />` to eliminate the
-            duplicate-chrome the prior layout produced.
-            All Wave 2a/2b functionality is preserved by relocating the
-            controls into this single Toolbar landmark:
+            Replaces the R4-104 single-row toolbar (3-field QuickAdd + broken
+            inline-SearchBox "Filter") with the mockup's minimal chrome:
+            Filter pill / + New Task / ⋮ overflow (Settings, Layout, Refresh).
+            The inner `<KanbanHeader>` stays suppressed via
+            `<SmartToDo hideHeader />`. All prior Settings/Layout/Refresh
+            BEHAVIOR is preserved verbatim — only their trigger UI moved into
+            the overflow Menu:
               - R4-031 Assigned-to-Me — already query-baked, no UI here
               - R4-032 Selection-aware Open/Delete/Email/Pin — embedded
                 <SelectionAwareToolbar> renders when selectedCount > 0
-              - R4-033 List/Card view toggle — <ViewToggle>
-              - R4-070 Kanban orientation toggle — <OrientationToggle>
-                (suppressed in list view where orientation is meaningless)
-            QuickAdd dispatches QUICK_ADD_TODO_EVENT → SmartToDo subscribes
-            and routes through its existing handleAdd (single-source). */}
+              - R4-070 Kanban orientation toggle — now the overflow "Layout"
+                menu item (flips horizontal ↔ vertical)
+            List/Card view toggle (R4-033) was already discontinued
+            2026-06-19 (kanban-only) and is not part of this redesign. */}
       <Header
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
         onRefresh={handleRefresh}
         onOpenSettings={handleOpenSettings}
         selectedCount={selectedIds.size}
         toolbarActions={toolbarActions}
         orientation={orientation}
         onOrientationChange={handleOrientationChange}
-        defaultAssignedToContactId={currentContactId ?? undefined}
-        defaultAssignedToName={currentContactName ?? undefined}
+        isFilterPaneOpen={isFilterPaneOpen}
+        onToggleFilterPane={handleToggleFilterPane}
+        onNewTask={handleNewTask}
       />
 
       {/* ── Primary surface — Kanban Board (UAT 2026-06-19: list view removed
-            per user feedback; kanban is the sole presentation. The
-            viewMode + onViewModeChange Header props are intentionally
-            omitted so the Header suppresses the ViewToggle.) ── */}
+            per user feedback; kanban is the sole presentation.) ── */}
       <div className={styles.primaryPanel}>
         <SmartToDo
           webApi={getWebApi()}
           userId={getUserId()}
-          // Code-review hotfix 2026-06-27 — wire Header SearchBox to filter.
-          // SmartTodoApp owns the searchQuery state (line ~160) but until now
-          // never forwarded it to <SmartToDo>, so the filter input was a no-op.
+          // task 020 (2026-08-16) — Header's inline SearchBox (the sole prior
+          // producer of this value) was removed per FR-05; `searchQuery` is
+          // now a frozen "" constant (see comment near its declaration
+          // above) until task 021's filter pane wires a new producer.
           searchQuery={searchQuery}
           // R4 task 060 — Card affordances plumbing (FR-25/26/27)
           selectedIds={selectedIds}

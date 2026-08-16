@@ -4,7 +4,7 @@
     <title>Code Page top-bar redesign (FR-05 / U-3)</title>
     <phase>3: Top bar + filter + visuals</phase>
     <gate>003 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts (Header.tsx, Header.styles.ts, SmartTodoApp.tsx) — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger). UI redesign with keyboard-nav + dark-mode gates.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -126,7 +126,9 @@
     <criterion testable="true">Zero hex/rgb literals in changed files (grep-verifiable); all existing and updated unit tests pass; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec refs: FR-05 (U-3), F-6 (superseded by U-3). The Assigned-To Xrm.WebApi typeahead pattern removed from Header.tsx in step 1 is the canonical reference for task 021's Assigned-To filter category — cite this task's diff/notes for task 021's author.</notes>
+  <notes>Spec refs: FR-05 (U-3), F-6 (superseded by U-3). The Assigned-To Xrm.WebApi typeahead pattern removed from Header.tsx in step 1 is the canonical reference for task 021's Assigned-To filter category — cite this task's diff/notes for task 021's author.
+
+COMPLETION (2026-08-16, task-execute FULL rigor): Header.tsx (734→323 lines), Header.styles.ts (259→137 lines), and SmartTodoApp.tsx redesigned to the mockup layout — Filter pill / + New Task / ⋮ overflow (Settings→onOpenSettings, Layout→flips orientation via onOrientationChange, Refresh→onRefresh, all pre-existing handlers unchanged, exactly 3 items in that order). QuickAdd group + inline SearchBox-toggle "Filter" fully removed (not relabeled). New Header.test.tsx added (13 tests, first component test in this solution's src/) using a manual react-dom/client + act() harness (no @testing-library/react/user-event installed in this package) with @spaarke/ui-components mocked (this worktree's Spaarke.SdapClient/dist was never built — pre-existing env gap, unrelated to this task). Deviations (searchQuery retention, QUICK_ADD_TODO_EVENT contract retention for SmartToDo.tsx's out-of-scope import, ViewToggle removal, useCurrentContactId removal) fully documented in projects/smart-todo-r5/notes/task-020-topbar.md. Quality gates (code-review + adr-check): 0 Critical, 0 ADR violations. tsc --noEmit clean on all 4 scoped files; npx jest full-solution 76/76 pass; zero hex/rgb literals. Nothing committed; only the 4 scoped files + this POML + the notes file were touched.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
