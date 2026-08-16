@@ -40,13 +40,32 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// predicate stays INERT (every pre-task-030 construction site is byte-identical); an EMPTY (non-null)
 /// set means "tabs known, none open" and DOES scope tab-gated tools out.
 /// </param>
+/// <param name="AdvisoryToolAllowList">
+/// spaarkeai-assistant-enhancements-r4 FR-02 (task 011): the closed grounded-tool allow-list of an
+/// ADVISORY capability whose dispatch runs a NESTED bounded agent turn (design note Option A —
+/// <c>notes/011-012-advisory-nested-turn-design.md</c>). It is the resolved Action's own catalog DATA
+/// (task 010 <c>sprk_groundedtoolallowlist</c>, a list of <c>sprk_toolid</c> values such as
+/// <c>spaarke.grid_overview</c>), applied AFTER the Action was already selected by binding id — so it is
+/// the ADR-039-sanctioned deterministic context-scoping pre-filter, NEVER a classifier or a second dispatch
+/// decider. When non-null, <see cref="AgentToolProjection.PreFilter"/> keeps ONLY the allow-listed grounded
+/// READ handler tools and DROPS every capability-selecting tool (<see cref="BindingCapabilityTool"/> +
+/// <see cref="RefusalCapabilityTool"/>) so the nested turn structurally cannot dispatch a second capability
+/// (the one probabilistic DISPATCH decider remains the top-level Text-path turn). Match is by the projected
+/// LLM-facing function name (<see cref="ToolHandlerToAIFunctionAdapter.SanitiseToolName"/>-normalized), so
+/// <c>sprk_toolid</c>-authored allow-list entries line up with the projected handler names deterministically.
+/// <c>null</c> (the default) = NOT an advisory turn → this narrowing stays INERT and the projection is
+/// byte-identical to every pre-task-011 turn; an EMPTY (non-null) set is fail-closed (an advisory turn with
+/// no grounded tools mounts none — only ever constructed by the task-012 runner, which requires a non-empty
+/// list before routing to the nested turn).
+/// </param>
 public sealed record AgentToolFilterContext(
     string Surface,
     bool HasSessionFiles,
     bool HasActiveDocument,
     bool HasAnalysisBinding,
     bool HasAttachedRecord = false,
-    IReadOnlyCollection<string>? OpenTabContextTypes = null)
+    IReadOnlyCollection<string>? OpenTabContextTypes = null,
+    IReadOnlyCollection<string>? AdvisoryToolAllowList = null)
 {
     /// <summary>The assistant (chat) surface token.</summary>
     public const string AssistantSurface = "assistant";
@@ -80,6 +99,13 @@ public sealed record AgentToolFilterContext(
 ///   context-type set (context scoping, the ONLY ADR-039-sanctioned dispatch aid; never a
 ///   classifier, ranker, or second dispatch surface). Empty tags = relevant to ANY context
 ///   (unaffected).</item>
+///   <item>FR-02 advisory narrowing (task 011): when
+///   <see cref="AgentToolFilterContext.AdvisoryToolAllowList"/> is non-null the turn is an ADVISORY
+///   capability's NESTED bounded turn — the pre-filter keeps ONLY the allow-listed grounded READ handler
+///   tools and drops EVERY <see cref="BindingCapabilityTool"/> + <see cref="RefusalCapabilityTool"/> so the
+///   nested turn cannot dispatch a second capability. The allow-list is the resolved Action's catalog data
+///   applied after the Action was selected by binding id (deterministic context scoping, ADR-039 — the ONE
+///   probabilistic dispatch decider stays the top-level Text-path turn). Null = inert (byte-identical).</item>
 /// </list>
 /// <para>
 /// <b>Prompt-cache stability (NFR-04)</b>: the surviving tools are sorted by
@@ -129,6 +155,33 @@ public static class AgentToolProjection
 
         foreach (var tool in tools)
         {
+            // FR-02 advisory nested-turn narrowing (R4 task 011; design note Option A). When
+            // AdvisoryToolAllowList is non-null the projection is for an ADVISORY capability's NESTED
+            // bounded turn: keep ONLY the allow-listed GROUNDED READ handler tools and DROP every
+            // capability-selecting tool (BindingCapabilityTool + RefusalCapabilityTool), so the nested
+            // turn structurally cannot dispatch a second capability (ADR-039: exactly one probabilistic
+            // DISPATCH decider — the top-level Text-path turn — is preserved). The allow-list is the
+            // resolved Action's own catalog DATA (task 010 sprk_groundedtoolallowlist), applied AFTER the
+            // Action was already selected by binding id → deterministic context scoping, never intent
+            // detection / a classifier / a routing surface. A grounded (handler) tool survives ONLY when
+            // its projected function name is in the allow-list (sanitisation-normalized both sides so
+            // sprk_toolid-authored entries like "spaarke.grid_overview" match the projected name). NULL
+            // (every non-advisory turn) leaves this branch inert and the predicates below unchanged —
+            // byte-identical projection. Empty (non-null) is fail-closed (zero grounded tools).
+            if (context.AdvisoryToolAllowList is { } advisoryAllowList)
+            {
+                if (tool is BindingCapabilityTool or RefusalCapabilityTool)
+                {
+                    continue;
+                }
+                if (!AdvisoryAllowListContains(advisoryAllowList, tool.Name))
+                {
+                    continue;
+                }
+                yield return tool;
+                continue;
+            }
+
             // Binding-projected tools (generic capability + the FR-P2-04 refusal
             // capability) filter on the catalog's sprk_surfaces column — the same
             // pure predicate for both projections.
@@ -184,6 +237,33 @@ public static class AgentToolProjection
 
             yield return tool;
         }
+    }
+
+    /// <summary>
+    /// Deterministic membership test for the FR-02 advisory allow-list (task 011). An allow-list entry
+    /// (an <c>sprk_toolid</c> value authored on the Action's <c>sprk_groundedtoolallowlist</c>) matches a
+    /// projected tool when its <see cref="ToolHandlerToAIFunctionAdapter.SanitiseToolName"/>-normalized form
+    /// equals the tool's already-sanitised LLM-facing <paramref name="toolName"/>. Normalizing BOTH sides
+    /// makes the match robust whether the maker authored the raw tool id or a display-shaped value — no
+    /// hardcoded tool-name list; the allow-list is catalog data (ADR-039 §3.2).
+    /// </summary>
+    private static bool AdvisoryAllowListContains(IReadOnlyCollection<string> allowList, string toolName)
+    {
+        foreach (var entry in allowList)
+        {
+            if (string.IsNullOrWhiteSpace(entry))
+            {
+                continue;
+            }
+            if (string.Equals(
+                    ToolHandlerToAIFunctionAdapter.SanitiseToolName(entry),
+                    toolName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     /// <summary>

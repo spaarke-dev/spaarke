@@ -12,8 +12,8 @@
 |---|---|---|---|---|---|---|---|---|
 | 001 | Behavior-gap register + eval-case harness | 0 Foundation | FR-12, FR-10 | sonnet / high | STANDARD | ✅ | — | ✅ |
 | 010 | Per-Action bounded grounded-tool opt-in field | 1 E1 tier | FR-03 | opus / high | FULL | ❌ | — | ✅ |
-| 011 | Advisory pre-filter bounded-tool scoping | 1 E1 tier | FR-02 | opus / xhigh | FULL | ❌ | 010 | 🔄 ESCALATED (ADR-039 — owner decision; see current-task.md) |
-| 012 | Advisory task-agenda capability (upgrade list-tasks) | 1 E1 tier | FR-01 | opus / high | FULL | ❌ | 010, 011 | 🔲 |
+| 011 | Advisory pre-filter bounded-tool scoping | 1 E1 tier | FR-02 | opus / xhigh | FULL | ❌ | 010 | ✅ (Option A projection primitive; runner+routing → 012) |
+| 012 | Advisory task-agenda capability + nested-turn runner | 1 E1 tier | FR-01 | opus / high | FULL | ❌ | 010, 011 | 🔲 (scope now incl. AdvisoryCapabilityRunner + dispatch routing) |
 | 013 | E1 eval cases (task-agenda golden utterances) | 1 E1 tier | FR-10 | sonnet / high | FULL | ✅ | 012 | 🔲 |
 | 020 | OBO-identity wording (user-scoped tools) | 2 E2 | FR-05 | sonnet / high | FULL | ❌ | — | ✅ |
 | 021 | Gate free-string `SprkChatSuggestions` | 2 E2 | FR-04 | sonnet / high | FULL | ❌ | 012, 022 | 🔲 |

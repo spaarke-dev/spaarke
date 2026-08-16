@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-assistant-enhancements-r4
 
-> **Last Updated**: 2026-08-15 (by context-handoff)
+> **Last Updated**: 2026-08-16 (by task-execute — 011 complete)
 > **Recovery**: Read "Quick Recovery" first. Tracks the **active task only**; history lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 ---
@@ -10,9 +10,12 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | ✅ **001, 022, 010 COMPLETE**. 🔴 **011 ESCALATED (BLOCKED — ADR-039 conflict, awaiting owner decision)** 2026-08-16. |
-| **Status** | Wave 1: 3 done. **011 stopped at its escalation trigger — NO code written** (writing it as scoped would violate ADR-039). Needs owner path A/B/C decision (see below). All prior work committed locally (not pushed). |
-| **Next Action** | 011=Option A APPROVED → implement per `notes/011-012-advisory-nested-turn-design.md` (main session). Serialized independents: **✅ 020 DONE · ✅ 030 DONE** → **011 next** (the big architectural one; then 012→013). 040 needs `--chrome`. 031/032 now unblocked (dep 030). |
+| **Task** | ✅ **001, 022, 010, 020, 030, 011 COMPLETE**. 011 = Option A projection primitive (owner-approved). |
+| **Status** | Wave 1 nearly done: E1 spine 010→011 ✅; independents 020/022/030 ✅. **011 done as the deterministic projection primitive**; the nested-turn machinery (AdvisoryCapabilityRunner + dispatch routing) was moved into **012** (integration-testable with the real advisory Action). All work committed locally (not pushed). |
+| **Next Action** | **012 next** — now carries BOTH the advisory `list-tasks` Action/Binding authoring AND the nested-turn machinery (see the 012 POML 2026-08-16 scope addendum + `notes/011-012-advisory-nested-turn-design.md` §3a). Then 013 (E1 eval). 031/032 unblocked (dep 030). 021/023/024 (E2) need 012. 040 needs `--chrome`. **OWED before any BFF PR: `/conflict-check`** (compose-r5/r6 + assistant-r3 share the Chat projection files). |
+
+### 011 completion note (2026-08-16) — Option A projection primitive (opus/xhigh, FULL)
+Re-scoped per owner-approved Option A. Original framing ("narrow the TOP-LEVEL PreFilter when advisory") was ADR-039-incompatible (top-level turn selects no Action yet → narrowing there = forbidden second decider). Option A = a NESTED advisory turn; **011 shipped the deterministic PROJECTION PRIMITIVE for it**, the machinery moved to 012 (§3a seam refinement — mirrors 010=data → 011=primitive → 012=runner+consumer). Shipped in `AgentToolProjection.cs`: (1) `AgentToolFilterContext.AdvisoryToolAllowList` optional null-inert structural fact (mirrors `OpenTabContextTypes` → every construction site byte-identical); (2) `PreFilter` narrowing — non-null ⇒ DROP all `BindingCapabilityTool` + `RefusalCapabilityTool` (nested turn structurally cannot dispatch a 2nd capability) + keep ONLY grounded handler tools whose `SanitiseToolName`-normalized name ∈ the allow-list (matches task-010 `sprk_toolid` entries); null=inert byte-identical; empty non-null=fail-closed zero; (3) `AdvisoryAllowListContains` helper. **5 new unit tests** (mounts-only-allow-list · drops-all-capability+refusal/no-second-decider · case+sanitisation robustness · null-inert · empty-fail-closed); **44/44** AgentTurnLoopContractTests pass; BFF build 0 errors; **publish 44.96 MB compressed (Δ0.00, ≤60 MB)**; CVE clean. **Step 9.5 CLEAN** (adr-check 0 violations — ADR-039/013/§10/§11; field grep-verifiable inert until the 012 runner sets it; code-review PASS, 0 blocking). Design note + 012 POML updated to record the runner/routing move. ⚠️ **The 011 primitive is inert until 012 wires the setter** (exactly as 010's field was inert until 011).
 
 ### 030 completion note (2026-08-16)
 `MemoryFactType.Preference = 4` added + `MemoryWriteHandler.SupportedFactTypes["preference"]` wire-map entry + a `**Preferences**` section in `MemoryItemStore.RenderFragment` (shared by record + user fragments → recalls in both). **Deliberately did NOT expose `preference` in the LLM-facing `memory.write` schema** — preferences are authored by the GOVERNED E3 pipeline (031) + narrow-allow-list producer (032), not freely by the model (E3 governance intent). ADR-042 deferred hard-governance untouched (`trustLevel` inert; escalation trigger did not fire). 5 new tests (2 render + 3 wire-map) · 37/37 targeted pass · build clean (no CS8509) · **publish 44.96 MB, Δ0** · CVE clean. Unblocks 031/032.

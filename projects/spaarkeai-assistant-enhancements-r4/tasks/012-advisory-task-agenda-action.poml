@@ -5,6 +5,24 @@
     <phase>1 — E1 grounded-recommend tier</phase>
     <gate>startable</gate>
     <status>pending</status>
+    <!-- SCOPE ADDENDUM 2026-08-16 (task 011 seam refinement; owner-approved Option A, see notes/011-012-advisory-nested-turn-design.md §3a):
+         011 delivered ONLY the deterministic projection primitive (AgentToolFilterContext.AdvisoryToolAllowList + AgentToolProjection.PreFilter
+         narrowing + unit tests). The NESTED-TURN MACHINERY that Option A introduced now lands HERE in 012 alongside the catalog authoring, because
+         the runner is only meaningful — and only integration-testable — with a real advisory Action to run (mirrors 010=data → 011=primitive →
+         012=runner+consumer). 012 must therefore ALSO build:
+           (A) AdvisoryCapabilityRunner (new, Services/Ai/Chat/): given a resolved advisory Action (+ its GroundedToolAllowList + systemPrompt +
+               ADR-016 Reasoning tier/temp) and the session context, run a NESTED bounded agent turn that constructs an AgentToolFilterContext with
+               AdvisoryToolAllowList SET (→ fires the 011 PreFilter narrowing so ONLY the allow-listed grounded READ tools mount; zero
+               BindingCapabilityTool/RefusalCapabilityTool), streams the grounded+cited narration, then emits the surface_launch (opens Tasks once).
+           (B) SessionDispatchOrchestrator routing: when a dispatched Action resolves as advisory (output_determinism=advisory) + non-empty
+               GroundedToolAllowList, route to AdvisoryCapabilityRunner instead of the linear ActionRunner single completion. All other dispatches
+               unchanged. Thread OutputDeterminism + GroundedToolAllowList through the dispatch-path Action resolution (confirm AnalysisAction exposes
+               both to the chat/dispatch path — the chat path today reads advisory only on the linear side).
+           (C) Fallback A′ if adr-check/code-review rejects the nested function-calling loop as a "second probabilistic surface": deterministic tool
+               orchestration — the runner calls both allow-listed tools in code, then ONE advisory completion (no tool-calling) reasons/narrates over
+               the assembled grounded results. Same user value, zero nested loop; the allow-list becomes the runner's call manifest.
+         The machinery needs unit + seam coverage (tests/integration/seam/**): an advisory Action routes to the nested runner; a non-advisory Action
+         does not; the nested turn mounts ONLY the allow-list (no capability tool survives — the no-second-decider assertion end-to-end). -->
     <rigor>FULL</rigor>
     <rigor-reason>Authors the P1-fixing capability (Action + Binding catalog data) on the advisory tier; judgment-sensitive prompt/output authoring on the ADR-039 boundary; requires code-review + adr-check.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -15,7 +33,7 @@
     <parallel-reason>Edits list-tasks.action.json + sprk_playbookconsumer Binding row + seed (shared catalog); sequential with 010/011 on the Services/Ai catalog spine. /conflict-check before the PR.</parallel-reason>
     <deps>010, 011</deps>
     <tags>bff-api, ai, jps</tags>
-    <estimated-effort>5-7 hours</estimated-effort>
+    <estimated-effort>8-12 hours (catalog authoring + the nested-turn machinery moved from 011 per the 2026-08-16 scope addendum)</estimated-effort>
   </metadata>
   <prompt>Upgrade the existing `list-tasks` Action + Binding from the ack-only tier to the advisory grounded-recommend tier so "what do I need to do today" yields a grounded, cited summary + a recommendation and opens Tasks. Author with `output_determinism: advisory` (catalog data), the ADR-016 Reasoning tier at temperature ~0.2–0.3, and the FR-03 bounded grounded-tool allow-list = {`spaarke.grid_overview`, `spaarke.daily_briefing_overview`}. Rewrite the `systemPrompt` so the Assistant CALLS `spaarke.grid_overview` (My-Tasks configId, OBO `today`) + `spaarke.daily_briefing_overview`, narrates a grounded summary (counts + top items, EACH cited to a tool result) + a recommendation, and opens the Tasks surface — NOT the current forbid-everything ack prompt. Add `chipTransitions` so E2 follow-on cards (Briefing / Smart To Do) can key off this capability. Seed the Binding row. No thin ack, no fabricated data, no duplicate tab.</prompt>
   <role>SPAARKE JPS + AI capability author. Follow ADRs strictly. Expert in Action/Binding catalog authoring (`*.action.json`, `sprk_playbookconsumer` Bindings), advisory-mode grounded prompting, and the ADR-039 closed-catalog / one-decider invariant.</role>
@@ -56,7 +74,9 @@
     <step order="4">Author/seed the Binding in `sprk_playbookconsumer` (disposition + `chipTransitions` for the E2 Briefing / Smart To Do follow-on cards).</step>
     <step order="5">Run `jps-validate` on the Action JSON.</step>
     <step order="6">Seed rows via `scripts/dataverse/Seed-PlaybookConsumers.ps1` (and the Action seed).</step>
-    <step order="7">If BFF code was touched, dotnet publish size check + CVE scan; /conflict-check before the PR; update TASK-INDEX ✅.</step>
+    <step order="7">Build the nested-turn machinery (2026-08-16 scope addendum): (A) new `AdvisoryCapabilityRunner` (Services/Ai/Chat/) that runs a nested bounded turn constructing an `AgentToolFilterContext` with `AdvisoryToolAllowList` set (fires the task-011 PreFilter narrowing), streams the grounded+cited narration, and emits the `surface_launch` once; (B) route advisory + non-empty-allow-list dispatches to it from `SessionDispatchOrchestrator` (all other dispatches unchanged), threading `OutputDeterminism` + `GroundedToolAllowList` through the dispatch-path Action resolution.</step>
+    <step order="8">Add unit + seam tests (tests/integration/seam/**): an advisory Action routes to the nested runner; a non-advisory Action does not; the nested turn mounts ONLY the allow-list end-to-end (no `BindingCapabilityTool`/refusal tool survives — the no-second-decider assertion). If the nested function-calling loop is rejected at adr-check/code-review as a second probabilistic surface, implement fallback A′ (deterministic in-code tool calls + ONE advisory completion).</step>
+    <step order="9">dotnet build + publish size check (COMPRESSED ≤60 MB; baseline 44.96 MB) + CVE scan; run `jps-validate`; /conflict-check before the PR; update TASK-INDEX ✅.</step>
   </steps>
   <escalation>
     <trigger>If authoring the advisory capability appears to require a second decider / classifier / routing surface (beyond the task 011 deterministic pre-filter) to select the two tools, STOP and escalate (ADR-039 forbids it) rather than adding dispatch logic.</trigger>
@@ -77,6 +97,8 @@
     <criterion testable="true">Every narrated number is cited to a tool result; no fabrication (negative case).</criterion>
     <criterion testable="true">The Tasks surface opens once — no duplicate tab.</criterion>
     <criterion testable="true">The Binding carries `chipTransitions` so E2 Briefing / Smart To Do follow-on cards can key off this capability.</criterion>
+    <criterion testable="true">A new `AdvisoryCapabilityRunner` runs the nested bounded turn (setting `AgentToolFilterContext.AdvisoryToolAllowList` → the task-011 PreFilter fires); `SessionDispatchOrchestrator` routes advisory + non-empty-allow-list Actions to it and leaves all other dispatches unchanged (`OutputDeterminism` + `GroundedToolAllowList` threaded through the dispatch-path Action resolution).</criterion>
+    <criterion testable="true">Seam coverage (tests/integration/seam/**) proves: advisory Action → nested runner; non-advisory → unchanged linear path; the nested turn mounts ONLY the allow-list end-to-end and NO capability/refusal tool survives (no-second-decider, ADR-039).</criterion>
     <criterion testable="true">`jps-validate` passes green.</criterion>
     <criterion testable="true">If BFF code touched: publish ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
   </acceptance-criteria>
