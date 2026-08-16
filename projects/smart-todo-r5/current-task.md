@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 001 ✅, 010 ✅, 002 ✅, **003 ✅ (thin-shim conversion DONE)** — next: **task 011** (auto-score handler, deps 010 ✓) |
-| **Step** | Phase 1 spine COMPLETE: 001 ✅ → 002 ✅ → 003 ✅. Phase 2 spine open: 010 ✅ → **011 (next)**. |
-| **Status** | in-progress (executing critical path) |
-| **Next Action** | Execute **task 011** (`tasks/011-...poml`, sonnet/high, depends on 010 ✓ — auto-score handler Option B + wizard/quick-add parity). Tasks 001/002/003 changes are UNCOMMITTED in the worktree pending orchestrator review. With 003 done, Phase-3 group Q (020/022/023/024, dep 003) and task 012 (dep 003,010) and task 034 (dep 003) are also now unblocked — orchestrator may choose to run 011 serially then fan out group Q, or parallelize per TASK-INDEX. |
+| **Task** | 001 ✅ 010 ✅ 002 ✅ 003 ✅ — **Phase 1 spine COMPLETE + committed/pushed** (`edc56d533`). Next: Phase-2/3 fan-out. |
+| **Step** | 4 of 28 done. Unblocked now: 011 (010✓), 012 (003✓,010✓), 013 (010✓), 020/022/023/024 (003✓), 034 (003✓), 042 (no deps). |
+| **Status** | in-progress — Phase 1 landed; planning the next wave |
+| **Next Action** | Plan a **parallel wave by DISJOINT file sets** (subagents share ONE worktree → concurrent edits to the same file corrupt). Read the candidate POMLs' `<relevant-files>` first. Known contention: **013 (RegardingResolver form/PCF) vs 042 (RegardingResolver S1/N1 fixes)** both touch `RegardingResolverApp.tsx` → NOT concurrent. **020 (Code Page top bar) vs 022 (Code Page Completed toggle)** likely share the Code Page `SmartToDo.tsx` → verify before pairing. Clean-looking parallel candidates: one shared-lib task (012 or 023/024) + one Code-Page task + one test task (042), if file sets verified disjoint. Serial spine option: 010→011 next. |
 
 ### Critical Context
 Execution underway on branch `work/smart-todo-r5`. **001 complete** (PR#508 boundary fix — barrel imports, package/tsconfig wired, `tsc` green, gates clean). **010 complete by pre-existence** (`sprk_priority`/`sprk_effort` already on live `sprk_todo` with exact spec values — NO schema write). Most tasks are `parallel-safe:false` (shared-lib contention) → critical path runs serially in main session; subagent fan-out reserved for group Q (020/022/023/024) + group R (040/041/042). UI.Components `dist` + both packages' `node_modules` are now built locally (needed for `tsc`).
