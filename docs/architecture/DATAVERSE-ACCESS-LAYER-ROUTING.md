@@ -39,15 +39,18 @@ are **stubs**: some throw `NotImplementedException`, and seven return **silent-e
    returns empty. Fix: inject `IEventDataverseService` (→ WebApi) for the event query. **Behavior change
    (starts returning real events) — validate the todo-generation side effects before enabling.** Tracked in
    `projects/code-quality-and-assurance-r3/notes/defer-issues.md`.
-2. **🐞 Split-brain `UpdateRecordFieldsAsync` — WebApi half THROWS (DEF-2).** Live in BOTH impls; which runs
-   depends on the injected alias (`FinanceRollupService` via composite → SDK, works;
-   `InvoiceReviewService`/`ScorecardCalculatorService`/handlers via `IFieldMappingDataverseService` → WebApi).
-   RED-4 B verified (2026-08-16) that the WebApi half is worse than "duplicate": it calls the WebApi impl's
-   `GetEntitySetNameAsync` (`:176`), a stub that **throws `NotImplementedException`** — so field-mapping
-   read/child-query/write via the WebApi path throws (same landmine that surfaced in the compose cold-session
-   UAT, `ComposeOutputsColdSessionTests`). Tracked as **DEF-2** (`projects/code-quality-and-assurance-r3/notes/defer-issues.md`);
-   needs an owner decision (implement `GetEntitySetNameAsync` on WebApi, or a shared set-name resolver) before
-   RED-4 C.
+2. **✅ FIXED (RED-4 B, 2026-08-16) — WebApi field-mapping no longer throws (DEF-2).** `UpdateRecordFieldsAsync`
+   is live in BOTH impls (`FinanceRollupService` via composite → SDK; `InvoiceReviewService`/
+   `ScorecardCalculatorService`/handlers via `IFieldMappingDataverseService` → WebApi). RED-4 B found the WebApi
+   half was worse than "duplicate": its first call was the WebApi impl's `GetEntitySetNameAsync`, a stub that
+   **threw `NotImplementedException`** — so field-mapping read/child-query/write via the WebApi path threw (the
+   landmine that surfaced in the compose cold-session UAT, `ComposeOutputsColdSessionTests`). **Fixed** by
+   implementing `GetEntitySetNameAsync` (`:176`) against the `EntityDefinitions` metadata endpoint (cached,
+   fails loud), mirroring `GetEntityObjectTypeCodeAsync`. Both impls now resolve set names correctly; the
+   remaining "which impl runs" question is cosmetic and folds into RED-4 C unification. Regression:
+   `tests/integration/Spe.Integration.Tests/DataverseWebApiFieldMappingRegressionTests.cs` (live-gated).
+   Tracked as **DEF-2** (`projects/code-quality-and-assurance-r3/notes/defer-issues.md`) — behavioral
+   live-dev smoke pending.
 3. **✅ DONE (RED-4 B, 2026-08-16) — runtime-dead code deleted.** `DataverseWebApiService` shrank **2,822 → 1,409
    LOC** (−1,414): the document/analysis/generic-entity/processing-job/KPI/communication-query/health surfaces
    (unreachable — those interfaces route to SDK) were removed and the class declaration narrowed from the

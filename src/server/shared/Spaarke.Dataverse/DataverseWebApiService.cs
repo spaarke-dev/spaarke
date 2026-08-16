@@ -173,15 +173,54 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         return await _httpClient.SendAsync(request, ct);
     }
 
-    public Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
-    {
-        _logger.LogWarning(
-            "GetEntitySetNameAsync called on DataverseWebApiService (not implemented). " +
-            "Consider using DataverseServiceClientImpl for metadata operations.");
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _entitySetNameCache = new(StringComparer.OrdinalIgnoreCase);
 
-        throw new NotImplementedException(
-            "Metadata operations via Web API are not yet implemented. " +
-            "Use DataverseServiceClientImpl for full metadata support.");
+    /// <summary>
+    /// Resolves an entity's Dataverse <c>EntitySetName</c> — the plural collection name used in Web API URLs
+    /// (e.g. <c>sprk_fieldmappingprofile</c> → <c>sprk_fieldmappingprofiles</c>) — via the
+    /// <c>EntityDefinitions</c> metadata endpoint. Cached in-memory per logical name (entity set names are
+    /// immutable for the lifetime of the connected environment). Metadata is environment-scoped, so no
+    /// impersonation is applied here; the calling read/write carries impersonation separately.
+    /// </summary>
+    /// <remarks>
+    /// DEF-2 fix (RED-4 B, 2026-08-16): this was previously a <c>throw new NotImplementedException</c> stub,
+    /// which broke every field-mapping read / child-query / write routed to this impl —
+    /// <see cref="RetrieveRecordFieldsAsync"/>, <see cref="QueryChildRecordIdsAsync"/> and
+    /// <c>UpdateRecordFieldsAsync</c> all call it as their first operation (surfaced as an HTTP 500 in the
+    /// compose cold-session UAT). Now implemented, mirroring <see cref="GetEntityObjectTypeCodeAsync"/>. It
+    /// fails LOUD (throws <see cref="InvalidOperationException"/>) on a metadata error or missing set name —
+    /// this is a write-path URL dependency, so a silent empty would corrupt the request URL.
+    /// </remarks>
+    public async Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        if (_entitySetNameCache.TryGetValue(entityLogicalName, out var cached))
+            return cached;
+
+        var url = $"EntityDefinitions(LogicalName='{entityLogicalName}')?$select=EntitySetName";
+        var response = await SendGetAsync(url, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError(
+                "GetEntitySetNameAsync failed for '{Entity}': {StatusCode}", entityLogicalName, response.StatusCode);
+            throw new InvalidOperationException(
+                $"Failed to query EntitySetName metadata for entity '{entityLogicalName}': " +
+                $"HTTP {(int)response.StatusCode} {response.StatusCode}.");
+        }
+
+        var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
+        var entitySetName = data != null
+            && data.TryGetValue("EntitySetName", out var nameElement)
+            && nameElement.ValueKind == JsonValueKind.String
+            ? nameElement.GetString()
+            : null;
+
+        if (string.IsNullOrEmpty(entitySetName))
+            throw new InvalidOperationException(
+                $"Entity '{entityLogicalName}' has no EntitySetName in Dataverse metadata " +
+                "(entity not found or not queryable via the Web API metadata endpoint).");
+
+        _entitySetNameCache[entityLogicalName] = entitySetName;
+        return entitySetName;
     }
 
     public async Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
