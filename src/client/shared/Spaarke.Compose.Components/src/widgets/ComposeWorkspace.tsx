@@ -140,6 +140,7 @@ import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 // FR-05 (task 032, spaarkeai-compose-r6): "Apply firm template" dialog — 030 part-merge wiring.
 import { ComposeApplyTemplateDialog } from './ComposeApplyTemplateDialog';
+import { ComposeSaveNameDialog } from './ComposeSaveNameDialog';
 // Return-from-Word re-anchor UX (task 054 — BUILT; mounted here by task 103, gap 3.5).
 import { ComposeReanchorBanner } from './ComposeReanchorBanner';
 import { ComposeExternalChangeBanner } from './ComposeExternalChangeBanner';
@@ -237,6 +238,32 @@ function mintDocumentSessionId(): string {
     return c.randomUUID();
   }
   return `compose-doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * FR-02 (task 030): the placeholder name a NEW born-in-editor / blank / template document carries
+ * BEFORE it is named. The first-save name modal (UC-3) always fires before this reaches the server on
+ * a user-initiated Save, so it never LANDS on a kept SPE record. It is still the tab-strip label for
+ * an unnamed draft (the "Document1" convention). A background best-effort flush (beforeunload) that
+ * bypasses the modal substitutes {@link autoNameForUnnamedDraft} so no path persists the literal
+ * "Untitled document.docx".
+ */
+const UNTITLED_DOC_NAME = 'Untitled document.docx';
+
+/** True when a name is still the unnamed-draft placeholder (never a user-chosen name). */
+function isUntitledDraftName(name?: string): boolean {
+  return !name || name.trim().length === 0 || name === UNTITLED_DOC_NAME;
+}
+
+/**
+ * FR-02 (task 030): a non-colliding fallback name for the residual case where an UNNAMED draft is
+ * persisted WITHOUT going through the first-save modal (only the best-effort beforeunload flush, which
+ * cannot show UI during unload). Guarantees the negative criterion "no code path lands
+ * 'Untitled document.docx'". Phase 4 (040) client draft supersedes this flush for unnamed docs.
+ */
+function autoNameForUnnamedDraft(): string {
+  const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ').replace(/:/g, '-');
+  return `Compose draft ${stamp}.docx`;
 }
 
 /**
@@ -1369,9 +1396,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // BFF Save — POST /api/compose/documents/{speId}/save
   // -------------------------------------------------------------------------
   const triggerSave = React.useCallback(
-    async (saveMode: ComposeSaveMode = 'version'): Promise<void> => {
+    async (
+      saveMode: ComposeSaveMode = 'version',
+      // FR-02 (task 030): the name captured by the first-save / Save As modal (UC-3). When present it
+      // OVERRIDES the create-on-save displayName (→ server ResolveFileName + sprk_documentname), so a
+      // newly-named document persists under the entered name instead of the 'Untitled document.docx'
+      // placeholder. Undefined for every already-named / replace-path save (unchanged behavior).
+      opts?: { displayNameOverride?: string }
+    ): Promise<void> => {
       if (state.status !== 'loaded') return;
       if (!state.documentRef || !editorRef.current) return;
+
+      // FR-02 (task 030): trimmed user-entered name from the save-name modal, if any.
+      const nameOverride = opts?.displayNameOverride?.trim() || undefined;
 
       // G7 (FR-06, task 022): "Save New Document" (fork) forces the create-on-save path — a brand-new
       // sprk_document record — EVEN when the doc already has a real SPE item. A fresh transient key is
@@ -1399,8 +1436,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       //      (a same-name PUT would re-version the original — the FR-07a coalesce bug);
       //  (2) mint a fresh task-010 composeLogicalId so the fork carries a NEW logical id, not the
       //      original's (adopted onto the forked documentRef by saveSucceeded below).
+      // FR-02 (task 030): a Save As now carries a user-entered name (the modal). Honor it directly when
+      // it is DISTINCT from the source file name — a distinct name already lands a distinct SPE
+      // drive-item, so the FR-07(a) coalesce guard is unneeded and appending a "(copy …)" token would
+      // mangle the user's deliberate name. Fall back to the machine uniquify only when there is NO
+      // override or the entered name equals the source (same-name Save As still must not re-version).
       const forkDisplayName = forkNew
-        ? uniquifyForkFileName(state.documentRef.fileName, effectiveTransientKey ?? mintTransientKey())
+        ? (nameOverride && nameOverride !== state.documentRef.fileName
+            ? nameOverride
+            : uniquifyForkFileName(nameOverride ?? state.documentRef.fileName, effectiveTransientKey ?? mintTransientKey()))
         : null;
       const forkLogicalId = forkNew ? startNewComposeLogicalId() : undefined;
       const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
@@ -1579,10 +1623,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // Task 041 (FR-06): a PDF-sourced create-on-save names the NEW document as Word — swap
             // the .pdf extension for .docx (the saved bytes ARE docx; a ".pdf"-named docx would
             // mislead every downstream consumer). Non-PDF, non-fork creates keep the existing name verbatim.
+            // FR-02 (task 030): precedence for the create-on-save name —
+            //  1. forkDisplayName (Save As, above);
+            //  2. the modal's nameOverride (first create-on-save of a newly-named doc);
+            //  3. PDF-sourced: the source PDF name with .pdf→.docx (task 041);
+            //  4. the current file name IF it is a real user name (imported .docx keeps its name);
+            //  5. an auto-name fallback — NEVER the literal 'Untitled document.docx' placeholder, so
+            //     no path (incl. a modal-bypassing background flush) lands an "Untitled" record.
             displayName: forkDisplayName
+              ?? nameOverride
               ?? (pdfSourced
                 ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
-                : (state.documentRef.fileName ?? null)),
+                : (isUntitledDraftName(state.documentRef.fileName)
+                    ? autoNameForUnnamedDraft()
+                    : state.documentRef.fileName ?? null)),
             transientKey: effectiveTransientKey,
             forkNew,
             // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): on a PDF-sourced create,
@@ -2078,18 +2132,61 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, []);
   useRegisterComposeSaveHandler(handleBridgeSave);
 
-  // Keyboard shortcut: Ctrl/Cmd+S → save.
+  // -------------------------------------------------------------------------
+  // FR-02 (task 030, UC-3): name-on-first-save / Save As modal
+  // -------------------------------------------------------------------------
+  // The name-capture modal state. Null = closed. `requestSave` (below) opens it for an EXPLICIT save
+  // that needs a name; its onSubmit re-enters triggerSave with the entered name (threaded into the
+  // create-on-save displayName → server ResolveFileName + sprk_documentname).
+  const [saveNameModal, setSaveNameModal] = React.useState<
+    { mode: 'first-save' | 'save-as'; defaultName: string } | null
+  >(null);
+
+  // Does this save need a name first? Save As ALWAYS prompts (a deliberate fork the user names); a
+  // normal Save prompts only on the FIRST create-on-save of a never-persisted, still-unnamed draft
+  // (born-in-editor / blank / template). An imported .docx or PDF already carries a real name and an
+  // already-persisted doc has an SPE id — neither prompts.
+  const saveNeedsName = React.useCallback(
+    (mode: ComposeSaveMode): boolean => {
+      if (mode === 'new') return true;
+      const ref = state.documentRef;
+      if (!ref) return false;
+      const neverPersisted = !ref.speDriveItemId && !ref.sprkDocumentId;
+      return neverPersisted && isUntitledDraftName(ref.fileName);
+    },
+    [state.documentRef]
+  );
+
+  // The EXPLICIT-save entry point (toolbar Save / Save As + Ctrl+S). Opens the name modal when a name
+  // is required; otherwise saves directly. Background/best-effort paths (beforeunload flush, cross-pane
+  // bridge) call triggerSave DIRECTLY — they cannot show UI, and triggerSave's auto-name fallback keeps
+  // them from persisting the 'Untitled document.docx' placeholder.
+  const requestSave = React.useCallback(
+    (mode: ComposeSaveMode = 'version'): void => {
+      if (saveNeedsName(mode)) {
+        const current = state.documentRef?.fileName;
+        // Save As seeds from the source name (the user edits it); a first save starts blank.
+        const defaultName = mode === 'new' && !isUntitledDraftName(current) ? (current ?? '') : '';
+        setSaveNameModal({ mode: mode === 'new' ? 'save-as' : 'first-save', defaultName });
+        return;
+      }
+      void triggerSave(mode);
+    },
+    [saveNeedsName, state.documentRef, triggerSave]
+  );
+
+  // Keyboard shortcut: Ctrl/Cmd+S → save (through the name-modal gate on a first/unnamed save).
   React.useEffect(() => {
     if (state.status !== 'loaded') return;
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
         e.preventDefault();
-        void triggerSave();
+        requestSave();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [state.status, triggerSave]);
+  }, [state.status, requestSave]);
 
   // -------------------------------------------------------------------------
   // FR-04 draft-into-editor — render-follows-store materialization (task 016)
@@ -3081,11 +3178,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, []);
 
   const handleBlankRequested = React.useCallback((): void => {
-    mountBornInEditor('<p></p>', 'Untitled document.docx');
+    mountBornInEditor('<p></p>', UNTITLED_DOC_NAME);
   }, [mountBornInEditor]);
 
   const handleTemplateRequested = React.useCallback((): void => {
-    mountBornInEditor(COMPOSE_BLANK_TEMPLATE_HTML, 'Untitled document.docx');
+    mountBornInEditor(COMPOSE_BLANK_TEMPLATE_HTML, UNTITLED_DOC_NAME);
   }, [mountBornInEditor]);
 
   // -------------------------------------------------------------------------
@@ -3869,9 +3966,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               }}
               wordActionsDisabled={wordActionsDisabled}
               // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
-              // 'new' fork) into triggerSave. Ctrl+S / the cross-pane bridge call triggerSave() → 'version'.
+              // 'new' fork) into the save path. FR-02 (task 030): route through requestSave so a first
+              // create-on-save / Save As opens the name modal (UC-3) before persisting. Ctrl+S also
+              // goes through requestSave; the cross-pane bridge stays on triggerSave() → 'version'.
               onSave={mode => {
-                void triggerSave(mode ?? 'version');
+                requestSave(mode ?? 'version');
               }}
               canSave={canSaveNow}
               // G10 (task 040): the manual "Refresh Profile" button — only for a PROMOTED doc (there is a
@@ -4001,6 +4100,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           if (isApplyingTemplate) return;
           setApplyTemplateOpen(false);
           setApplyTemplateError(null);
+        }}
+      />
+
+      {/* FR-02 (task 030 / UC-3) — name-on-first-save / Save As modal (FormModal preset, ADR-050 /
+          ADR-021). Opened by requestSave for the FIRST create-on-save of an unnamed draft and for
+          every Save As; onSubmit re-enters triggerSave with the entered name, which the create-on-save
+          threads into displayName (→ server ResolveFileName + sprk_documentname). Removes the silent
+          'Untitled document.docx' fallback. */}
+      <ComposeSaveNameDialog
+        open={saveNameModal !== null}
+        mode={saveNameModal?.mode ?? 'first-save'}
+        defaultName={saveNameModal?.defaultName ?? ''}
+        onClose={() => setSaveNameModal(null)}
+        onSubmit={name => {
+          const mode: ComposeSaveMode = saveNameModal?.mode === 'save-as' ? 'new' : 'version';
+          setSaveNameModal(null);
+          void triggerSave(mode, { displayNameOverride: name });
         }}
       />
 

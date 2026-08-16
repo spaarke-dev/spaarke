@@ -1,9 +1,9 @@
 # Current Task State — spaarkeai-compose-r7
 
-> **Last Updated**: 2026-08-16 (by context-handoff)
+> **Last Updated**: 2026-08-16 (task-execute — task 030 in progress)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git at handoff**: HEAD `02e59c35a` · working tree CLEAN (0 uncommitted — all 9 tasks committed, nothing at risk) · **1 behind master** (merge before the 030 BFF work — recent master is `docs(quality)` only; expect a clean/INDEX.md-only merge).
+> **Git**: master MERGED (HEAD `9aaf695c8` merge; resolved DataverseWebApiService.cs conflict — RED-4 dead-code deletion took master side, my UpsertAsync lives in DataverseServiceClientImpl/interface; 1124 Compose tests green post-merge). Branch current with master.
 
 ---
 
@@ -11,10 +11,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **030** — Name / file-name modal on first save + Save As (FR-02, BFF name threading) next |
+| **Task** | **040** — Client-only draft store + dirty autosave + recovery (FR-03) — NEXT |
 | **Step** | Not started |
 | **Status** | ready (spine) |
-| **Next Action** | Execute 030 (FormModal/SprkModal for document+file name on create-on-save & Save As; thread name to BFF create-on-save — ADR-050), then 040→041→050→051→060→061→070→071→072→074→090. |
+| **Next Action** | Execute 040 (client-only local/session draft keyed on `getComposeLogicalIdentity`; dirty autosave ~15s; `beforeunload`/modal-close guard; recovery on reopen; connect to the `autoSaveEnabled` state from task 020). Then 041→050→051→060→061→070→071→072→074→090. |
+
+**10 of 20 tasks done: 001, 010, 011, 012, 013, 020, 030, 073, 075.** Phase 1 (Save-Identity) + Phase 2 (Save dropdown) + Phase 3 (Name modal) COMPLETE.
+
+**030 complete** (commit pending this turn): `ComposeSaveNameDialog.tsx` (FormModal preset) + `requestSave` interception in ComposeWorkspace. **No BFF change** (displayName plumbing already existed — task 100/013). 13/13 dialog tests green; full runnable jest 605 pass. See `notes/task-030-notes.md`.
+
+**Carried decisions for 040**:
+- `autoSaveEnabled` useState(true) lives in ComposeWorkspace (task 020) — 040 connects it to real client-only autosave behavior.
+- `getComposeLogicalIdentity(ref)` = `sprkDocumentId ?? speDriveItemId ?? composeLogicalId` (task 010) = the FR-03 draft-recovery key.
+- Task 030 added `requestSave`/`saveNeedsName`/`isUntitledDraftName`/`autoNameForUnnamedDraft`/`UNTITLED_DOC_NAME` in ComposeWorkspace — 040's autosave sits alongside these (new docs are named-first before explicit server save; the local draft protects pre-name work).
+- **050/051 still must wire the FR-11 PDF-intake cause-specific message** (deferred from 073).
+- Task-013 lesson still applies to any future BFF write-path change: run the FULL BFF suite.
 
 **9 of 20 tasks done: 001, 010, 011, 012, 013, 020, 073, 075.** **Phase 1 (Save-Identity) + Phase 2 (Save dropdown) COMPLETE.**
 
