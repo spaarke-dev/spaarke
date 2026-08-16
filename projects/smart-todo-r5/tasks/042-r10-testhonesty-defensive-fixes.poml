@@ -4,7 +4,7 @@
     <title>R-10 test-honesty + defensive fixes — ToolbarActions navigate seam, RegardingResolver S1/N1 (FR-18)</title>
     <phase>5: Tests + hygiene</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying override (root CLAUDE.md §8, TEST-MODIFYING row): this task modifies `ToolbarActions.test.ts` under a solution's __tests__/ tree and adds a regression test to `RegardingResolverApp.test.tsx`; carries the `testing` tag. FULL rigor + code-review/adr-check at Step 9.5 apply UNCONDITIONALLY.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -101,4 +101,33 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files listed in knowledge/files. Follow task-execute skill.</protocol>
   </execution>
+
+  <completion-notes date="2026-08-16">
+    Confirmed drift note exactly: N1 console.warn was at line 1259, adjacent console.error at
+    line 1272 (no further drift beyond the rename already flagged). (a) ToolbarActions.ts: added
+    `navigate?: (href: string) => void` seam (mirrors the existing `confirm` seam), defaulting to
+    `window.location.href = href`; handleEmail now calls `navigateFn(href)`. Un-skipped the
+    `handleEmail composes a mailto:` test, removed the `Object.defineProperty(window, 'location',
+    ...)` workaround entirely, added a second test for the default (no-navigate) path.
+    ToolbarActions.test.ts suite: 18/18 passing, 0 skipped, 0 failing. NOTE: the spec/POML's
+    "78/78" total is a stale full-solution baseline (R4-114 background) — a from-scratch full
+    `src/solutions/SmartTodo` Jest run measures 63/63 passing across 3 suites (excluding
+    Header.test.tsx, which is mid-edit by a sibling agent in this shared worktree, out of this
+    task's file scope). The literal deliverable — zero `.skip` on handleEmail + the owned suite
+    100% green — is met; the absolute "78" count could not be reproduced or corrected without
+    touching out-of-scope files. (b) RegardingResolverApp.tsx: added `pickerSelectGenerationRef`
+    (useRef counter) + a generation-guard check in both the success and catch branches of the
+    `resolveRecordType`-await inside handlePickerSelect (S1); changed the catch's console.warn to
+    console.error for symmetry with the adjacent outer console.error (N1). Additive-only, scoped
+    to the notify branch — applyRegardingSelection/ResolverWriteHandler/CREATE-mode bridge
+    untouched. Added 2 regression tests (stale-resolution no-op; console.error severity). Full
+    RegardingResolver suite: 74/74 passing, 0 skipped, 0 failing. No ControlManifest version bump,
+    no PCF redeploy — S1/N1 ship in source only, deployment deferred to task 013/014's FR-04
+    wiring redeploy per FR-18b. Quality gates (Step 9.5, mandatory — test-modifying task):
+    code-review clean (0 Critical/Warning, 2 doc-only Suggestions); adr-check clean (0 Violations,
+    1 non-blocking citation-accuracy note re: ADR-038's declared domain excludes Jest). Full notes:
+    projects/smart-todo-r5/notes/task-042-testhonesty.md. Nothing committed; only the 4 scoped
+    files left modified (an accidental package-lock.json side-effect from `npm run refreshTypes`
+    was reverted via `git checkout --`).
+  </completion-notes>
 </task>

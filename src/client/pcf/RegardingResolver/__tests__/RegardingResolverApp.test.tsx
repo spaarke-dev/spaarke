@@ -443,6 +443,115 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
   });
 
   // ---------------------------------------------------------------------------
+  // FR-18 (R-10 hygiene) — handlePickerSelect S1 race guard + N1 severity fix
+  // (2026-06-25 code review, R4-112). Both live in the resolveRecordType-await
+  // branch of handlePickerSelect (RegardingResolverApp.tsx ~line 1176-1279).
+  // ---------------------------------------------------------------------------
+
+  describe('FR-18 — handlePickerSelect S1 race guard + N1 severity fix', () => {
+    test('S1 — a stale resolveRecordType resolution (superseded by a newer selection) is a no-op', async () => {
+      const onRecordTypeChanged = jest.fn();
+
+      // Control resolution order manually: the FIRST handlePickerSelect
+      // invocation's resolveRecordType call resolves AFTER the SECOND
+      // invocation's already has — simulating the out-of-order race S1
+      // guards against.
+      let resolveFirstCall!: (value: { id: string; name: string }) => void;
+      let resolveSecondCall!: (value: { id: string; name: string }) => void;
+      mockResolveRecordType.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            resolveFirstCall = resolve;
+          })
+      );
+      mockResolveRecordType.mockImplementationOnce(
+        () =>
+          new Promise(resolve => {
+            resolveSecondCall = resolve;
+          })
+      );
+
+      const { context } = buildContext();
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={onRecordTypeChanged}
+          version="1.3.6"
+        />
+      );
+
+      const trigger = screen.getByTestId('polymorphic-picker-trigger');
+      // Two overlapping selections — each click is an independent
+      // handlePickerSelect invocation with its own generation.
+      fireEvent.click(trigger);
+      fireEvent.click(trigger);
+
+      await waitFor(() => {
+        expect(mockApplyResolverFields).toHaveBeenCalledTimes(2);
+      });
+      await waitFor(() => {
+        expect(mockResolveRecordType).toHaveBeenCalledTimes(2);
+      });
+
+      // Resolve the LATER (winning) invocation first.
+      resolveSecondCall({ id: 'rt-winner', name: 'WinningType' });
+      await waitFor(() => {
+        expect(onRecordTypeChanged).toHaveBeenCalledWith(
+          expect.objectContaining({ id: 'rt-winner', name: 'WinningType' })
+        );
+      });
+
+      // Now resolve the EARLIER (stale, superseded) invocation. Per S1 it
+      // must be a complete no-op: no further onRecordTypeChanged call.
+      onRecordTypeChanged.mockClear();
+      resolveFirstCall({ id: 'rt-stale', name: 'StaleType' });
+      // Drain the microtask queue so the stale continuation runs.
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(onRecordTypeChanged).not.toHaveBeenCalled();
+    });
+
+    test('N1 — resolveRecordType rejection logs console.error (not console.warn), matching the outer catch severity', async () => {
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      mockResolveRecordType.mockRejectedValueOnce(new Error('resolveRecordType failed'));
+
+      const onRecordTypeChanged = jest.fn();
+      const { context } = buildContext();
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={onRecordTypeChanged}
+          version="1.3.6"
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+
+      await waitFor(() => {
+        expect(errorSpy).toHaveBeenCalledWith(
+          '[RegardingResolver] resolveRecordType for output notify failed:',
+          expect.any(Error)
+        );
+      });
+      // The non-stale (single-selection) failure path still notifies null.
+      expect(onRecordTypeChanged).toHaveBeenCalledWith(null);
+      // The N1 message text must NEVER go through console.warn.
+      expect(warnSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('resolveRecordType for output notify failed'),
+        expect.anything()
+      );
+
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
   // FR-A5-01 / NFR-04 — Read-only mode preservation (SRFR-033)
   // ---------------------------------------------------------------------------
 

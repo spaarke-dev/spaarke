@@ -844,6 +844,14 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   // triggering re-renders itself.
   const autoDetectFiredRef = React.useRef<boolean>(false);
 
+  // S1 (2026-06-25 code review, R4-112) — increments on every
+  // `handlePickerSelect` invocation; used below to detect and ignore a
+  // stale `resolveRecordType` resolution from a superseded selection.
+  // Currently unreachable in production because the picker dialog is
+  // modal (only one selection can be in flight at a time); defensive-only
+  // for a future non-modal picker.
+  const pickerSelectGenerationRef = React.useRef<number>(0);
+
   // ---------------- Write context ----------------
   const writeCtx = React.useMemo<IResolverWriteContext>(
     () => ({
@@ -1175,6 +1183,12 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
 
   const handlePickerSelect = React.useCallback(
     async (entityType: string, recordId: string, recordName: string): Promise<void> => {
+      // S1 (2026-06-25 code review, R4-112) — capture this invocation's
+      // generation so the resolveRecordType-await branch below can detect a
+      // stale resolution superseded by a newer selection.
+      pickerSelectGenerationRef.current += 1;
+      const myGeneration = pickerSelectGenerationRef.current;
+
       // FR-24 — Defensive write-gate: read-only mode hides the picker trigger,
       // but if a race reaches this handler, refuse to write.
       if (readOnly) {
@@ -1246,6 +1260,13 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         // parent entity itself).
         try {
           const recordType = await resolveRecordType(writeCtx.webApi, selection.entityType);
+          // S1 — bail on a stale resolution: a newer handlePickerSelect
+          // invocation has superseded this one while the await was in
+          // flight. Skip the notify call and return without further side
+          // effects (see 2026-06-25 code review, R4-112).
+          if (pickerSelectGenerationRef.current !== myGeneration) {
+            return;
+          }
           if (recordType) {
             onRecordTypeChanged({
               id: recordType.id,
@@ -1256,7 +1277,14 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
             onRecordTypeChanged(null);
           }
         } catch (rtErr) {
-          console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
+          // S1 — same stale-generation guard applied to the failure branch.
+          if (pickerSelectGenerationRef.current !== myGeneration) {
+            return;
+          }
+          // N1 — console.error (not console.warn) for symmetry with the
+          // adjacent outer console.error in this function's catch block
+          // below (2026-06-25 code review, R4-112).
+          console.error('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
           onRecordTypeChanged(null);
         }
 
