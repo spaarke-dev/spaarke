@@ -10,12 +10,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **012** — Save As uniquify (FR-07a) — ANALYZED, ready to implement (see `notes/task-012-analysis.md`) |
-| **Step** | Root-cause traced + fix designed; implementation not started |
-| **Status** | 012 analyzed / not-implemented (checkpoint) |
-| **Next Action** | Implement 012 per `notes/task-012-analysis.md` (Graph `conflictBehavior=rename` for the fork create + fresh `composeLogicalId` for forkNew), commit, then 013 (atomic upsert — same file, serialize), then 020/030/040/041… |
+| **Task** | **013** — Atomic server upsert on `sprk_graphitemid_uk` (FR-07d) — ANALYZED, ready to implement (`notes/task-013-analysis.md`) |
+| **Step** | Root-cause traced + design settled; implementation not started |
+| **Status** | 013 analyzed / not-implemented (checkpoint) |
+| **Next Action** | Implement 013 per `notes/task-013-analysis.md`: add `UpsertAsync` to `IGenericEntityService` (Spaarke.Dataverse, base lib) + `DataverseServiceClientImpl` (`UpsertRequest`) + Web-API `NotImplemented`; rewire `PromoteIfEphemeralAsync` absent-branch Create→Upsert keyed on canonicalized `sprk_graphitemid` (keep read-first rebind/graduate path); seam test; BFF gates. Then 020→030→040→041→050→051→060→061→070→071→072→074→090. |
 
-**012 is fully analyzed** — root cause = `UploadSmallAsUserAsync` PUT-by-path defaults to `replace`, so a same-name fork re-versions the original. Fix = route the `forkNew` create through Graph `conflictBehavior=rename` (atomic, no duplicate window; infra exists at `UploadSessionManager.cs:531`) + mint a fresh `composeLogicalId` for the fork. Full plan + file/line map in `notes/task-012-analysis.md`. **012 & 013 both edit `ComposeService.cs` → serialize.**
+**7 of 20 tasks done: 001, 010, 011, 012, 073, 075.** Phase 1 (Save-Identity/UC-8): client vectors **010/011/012 ✅**; server vector **013 planned** (last one). 012 shipped **client-only** (uniquify displayName by construction — no BFF change; see `notes/task-012-notes.md`).
+
+**013 design** (settled): keep the read-first idempotency check (preserves rebind + graduate-on-divergence); replace ONLY the absent-branch `CreateAsync`+catch with an atomic `UpsertAsync` keyed on canonicalized `sprk_graphitemid` (ADR-044). Requires an additive `UpsertAsync` on the `Spaarke.Dataverse` shared lib (base layer, 2 impls). Full plan in `notes/task-013-analysis.md`. **013 is BFF+shared-lib → run `/conflict-check` + publish (≤60 MB vs 44.96) + CVE + seam test.**
 
 **Completed this session** (all committed + pushed-pending):
 - 001 ✅ gate (`3f5cbfe02`) — baseline **44.96 MB incl PDBs net10**; conflict-check CLEAR; DI-gate verified; PRs #690/#266 OPEN.
