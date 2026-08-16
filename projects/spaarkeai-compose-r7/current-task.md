@@ -10,16 +10,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **020** — Save / Save As dropdown + Auto Save toggle (FR-01, client) next |
-| **Step** | About to read POML + ComposeFormatToolbar SplitButton |
-| **Status** | in-progress (spine) |
-| **Next Action** | Execute 020 (replace Save SplitButton with Save/Save As dropdown + Auto Save toggle), then 030→040→041→050→051→060→061→070→071→072→074→090. |
+| **Task** | **030** — Name / file-name modal on first save + Save As (FR-02, BFF name threading) next |
+| **Step** | Not started |
+| **Status** | ready (spine) |
+| **Next Action** | Execute 030 (FormModal/SprkModal for document+file name on create-on-save & Save As; thread name to BFF create-on-save — ADR-050), then 040→041→050→051→060→061→070→071→072→074→090. |
 
-**8 of 20 tasks done: 001, 010, 011, 012, 013, 073, 075.** **Phase 1 (Save-Identity/UC-8) COMPLETE** — all four D1 vectors closed (010 stable id · 011 id-less mount · 012 Save-As fork · 013 server atomic upsert, `c3f646504`).
+**9 of 20 tasks done: 001, 010, 011, 012, 013, 020, 073, 075.** **Phase 1 (Save-Identity) + Phase 2 (Save dropdown) COMPLETE.**
 
-**013 shipped**: atomic `UpsertAsync` on `Spaarke.Dataverse` base lib + `PromoteIfEphemeralAsync` rewire (keyed on raw `sprk_graphitemid` — ADR-044 N/A, opaque string). Full suite 10,421 passed. Publish 44.96 MB (delta 0.00). Note the promote-write-primitive change rippled to 5 seam/contract test suites (migrated).
+Recent commits: 013 (`c3f646504` — server atomic upsert; full suite 10,421 passed), 020 (`df57361da` — Save/Save As dropdown + Auto Save toggle; `autoSaveEnabled` state lives in ComposeWorkspace for Phase 4 to consume).
 
-**Carried**: composeLogicalId = FR-03/FR-07 shared key; 050/051 must wire the FR-11 PDF-intake cause message; baseline 44.96 MB incl PDBs. Branch 0 behind master (merged this session).
+**Carried decisions/context**:
+- `composeLogicalId` (getComposeLogicalIdentity accessor) = FR-03/FR-07 shared key; `autoSaveEnabled` useState(true) in ComposeWorkspace = the Auto Save toggle state 040/041 must connect to real autosave.
+- **050/051 must wire the FR-11 PDF-intake cause-specific message** (deferred from 073 — see task-073-notes.md).
+- **013 lesson**: changing a promote-write primitive (CreateAsync→UpsertAsync) ripples to every test that mocks it — expect similar test-migration when touching ComposeService write paths. Run the FULL BFF suite for BFF data-path changes, not just the targeted folder.
+- NFR-01 baseline = 44.96 MB incl PDBs. Branch 0 behind master (merged this session; only docs(quality) commits since).
+- 030 is BFF-touching (ComposeEndpoints/ComposeService name threading) → /conflict-check + publish + CVE gates.
 
 **Completed this session** (all committed + pushed-pending):
 - 001 ✅ gate (`3f5cbfe02`) — baseline **44.96 MB incl PDBs net10**; conflict-check CLEAR; DI-gate verified; PRs #690/#266 OPEN.
