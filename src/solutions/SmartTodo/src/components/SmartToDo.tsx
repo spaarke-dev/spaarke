@@ -45,7 +45,18 @@ import {
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import { KanbanBoard, OrientationToggle, type Orientation } from "@spaarke/ui-components";
+import {
+  KanbanBoard,
+  OrientationToggle,
+  type Orientation,
+  // smart-todo-r5 task 011 (FR-02/FR-03) — the SAME shared choice→score
+  // mapping table CreateTodoWizard (CreateTodoStep.tsx) and the sprk_todo
+  // form OnChange webresource resolve through. Quick-add doesn't expose its
+  // own Priority/Effort choice UI yet, so it uses the table's documented
+  // null-defaults (Medium priority / None effort) — see handleAdd below.
+  NULL_DEFAULT_PRIORITY_SCORE,
+  NULL_DEFAULT_EFFORT_SCORE,
+} from "@spaarke/ui-components";
 import { useCurrentContactId } from "@spaarke/smart-todo-components";
 // R4 task 102 (E-1, 2026-06-18) — `KanbanCard` hoisted from this folder into
 // the `@spaarke/smart-todo-components` peer package so the workspace widget
@@ -640,8 +651,16 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         sprk_name: title,
         statecode: 0,        // Active
         statuscode: 1,       // Open (per task 009)
-        sprk_priorityscore: 50,
-        sprk_effortscore: 10,
+        // smart-todo-r5 task 011 (FR-02/FR-03): quick-add has no Priority/
+        // Effort choice input, so it resolves the shared mapping's
+        // null-defaults (Medium priority → 50, None effort → 50 — Option B
+        // quick-wins-first) rather than the previous hardcoded 50/10 literals
+        // (the old `10` was NOT a documented default anywhere and predates
+        // this mapping). Same table CreateTodoWizard and the sprk_todo form
+        // OnChange webresource resolve through — see
+        // `@spaarke/ui-components/utils/todoScoreMappings.ts`.
+        sprk_priorityscore: NULL_DEFAULT_PRIORITY_SCORE,
+        sprk_effortscore: NULL_DEFAULT_EFFORT_SCORE,
         createdon: new Date().toISOString(),
         modifiedon: new Date().toISOString(),
       };

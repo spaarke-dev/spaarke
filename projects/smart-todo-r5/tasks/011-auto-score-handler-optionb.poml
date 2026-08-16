@@ -4,7 +4,7 @@
     <title>Single-source-of-truth auto-score handler — Option B quick-wins-first (FR-02/FR-03)</title>
     <phase>2: Schema + scoring + resolver</phase>
     <gate>010 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx across 3 surfaces (form OnChange webresource, CreateTodoWizard, quick-add) with a shared contract; 6+ steps; FULL per CLAUDE.md §8 decision tree.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -107,7 +107,9 @@
     <criterion testable="true">All existing + new unit tests pass; build is green for every touched package.</criterion>
   </acceptance-criteria>
 
-  <notes>See spec.md FR-02/FR-03 and the "F-5 effort direction" Owner Clarification row for the locked Option B table. CreateTodoStep.tsx currently exposes raw sliders (0-100) for priorityScore/effortScore — decide during step 2 whether to fully replace with a choice control or keep the slider as an advanced/override affordance; either way the choice-driven path must be the default per FR-02/FR-03 acceptance criteria ("choosing a priority sets the score").</notes>
+  <notes>See spec.md FR-02/FR-03 and the "F-5 effort direction" Owner Clarification row for the locked Option B table. CreateTodoStep.tsx currently exposes raw sliders (0-100) for priorityScore/effortScore — decide during step 2 whether to fully replace with a choice control or keep the slider as an advanced/override affordance; either way the choice-driven path must be the default per FR-02/FR-03 acceptance criteria ("choosing a priority sets the score").
+
+COMPLETION (2026-08-16): Canonical mapping module created at `src/client/shared/Spaarke.UI.Components/src/utils/todoScoreMappings.ts`, re-exported via `utils/index.ts`. Wired in all 3 surfaces: (1) `CreateTodoStep.tsx` — sliders replaced with Priority/Effort Dropdowns resolving through `priorityChoiceToScore`/`effortChoiceToScore`; (2) `SmartToDo.tsx` `handleAdd` — hardcoded `50`/`10` literals replaced with `NULL_DEFAULT_PRIORITY_SCORE`/`NULL_DEFAULT_EFFORT_SCORE` imported from `@spaarke/ui-components`; (3) new webresource `src/client/webresources/js/sprk_todo_score_onchange.js` mirrors the literal table with an explicit cross-reference comment. `todoScoring.ts` verified byte-identical (git diff empty + sha256 hash assertion in the new test suite). 21 new unit tests (value tables, null-defaults, negative/defensive fallback, import-graph parity, locked-formula hash) — all passing. `todoService.test.ts` (13/13) and the full SmartTodo Jest suite (76/76) pass with no regressions. tsc --noEmit clean for all touched files (pre-existing unrelated errors only in `@spaarke/auth`/`@spaarke/sdap-client`/`ComponentFramework` resolution elsewhere). ADR-check surfaced one Warning (ADR-006 — new webresource JS carries logic beyond ribbon-invocation scope) with a recommended Path A resolution (extend the existing ADR-050 OOB-form tension in spec.md); not fixed in-task since `spec.md` is outside this task's file scope — see `notes/task-011-scoring.md` for full detail. TASK-INDEX.md intentionally NOT updated (orchestrator scope ban — 3 concurrent agents in one worktree); no git add/commit performed.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

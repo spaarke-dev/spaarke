@@ -123,6 +123,12 @@ export class TodoService {
     }
     // priority / effort scores are 0-100 integers — write only if non-default
     // (we always write so the column reflects the form, even at default 50)
+    // Values originate from `CreateTodoStep.tsx`'s Priority/Effort choice
+    // dropdowns resolved through the shared `todoScoreMappings.ts` table
+    // (smart-todo-r5 task 011 / FR-02/FR-03) — this write path is otherwise
+    // UNCHANGED (still plain `priorityScore`/`effortScore` numbers on
+    // `ICreateTodoFormState`; the composite `todoScoring.ts` formula is not
+    // touched here).
     entity['sprk_priorityscore'] = formValues.priorityScore;
     entity['sprk_effortscore'] = formValues.effortScore;
 
