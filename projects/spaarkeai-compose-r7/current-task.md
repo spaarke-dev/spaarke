@@ -1,8 +1,9 @@
 # Current Task State — spaarkeai-compose-r7
 
-> **Last Updated**: 2026-08-15 (by context-handoff)
+> **Last Updated**: 2026-08-16 (by context-handoff)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Git at handoff**: HEAD `02e59c35a` · working tree CLEAN (0 uncommitted — all 9 tasks committed, nothing at risk) · **1 behind master** (merge before the 030 BFF work — recent master is `docs(quality)` only; expect a clean/INDEX.md-only merge).
 
 ---
 
@@ -42,8 +43,12 @@ Recent commits: 013 (`c3f646504` — server atomic upsert; full suite 10,421 pas
 
 **⚠️ Branch is 4 behind master (growing).** Before the 012/013 BFF spine, consider `git merge origin/master` (INDEX.md conflict expected) so the BFF data-integrity edits don't hit a large late conflict — master may have touched ComposeService.cs.
 
-### Files Modified This Session
-- All under `projects/spaarkeai-compose-r7/` — created/finalized during `/design-to-spec` → `/project-pipeline` (spec, README, plan, CLAUDE.md, 20 POML tasks, TASK-INDEX) + two re-alignment passes. **All committed + pushed; nothing uncommitted.**
+### Files Modified This Session (all COMMITTED — nothing uncommitted)
+This session implemented 9 tasks (001, 010, 011, 012, 013, 020, 073, 075 + checkpoints). Each task is its own commit. Product surfaces touched:
+- **Client** (`Spaarke.Compose.Components`): `composeIdentity.ts` (new — logical-id + fork-name helpers), `compose-contracts.ts` (`composeLogicalId` + `getComposeLogicalIdentity`), `ComposeWorkspace.tsx` + `.types.ts` (identity plumbing, id-less-mount fix, Save-As uniquify, autoSave state), `ComposeFormatToolbar.tsx` (+test) (Save/Save As dropdown + Auto Save), `ComposeEditor.tsx` (autoSave prop drill), `index.ts` (exports).
+- **BFF/shared-lib**: `IGenericEntityService`/`DataverseServiceClientImpl`/`DataverseWebApiService` (new `UpsertAsync`), `ComposeService.cs` (promote atomic upsert), `Services/Ai/ComposePdfIntakeSource.cs` (+test) (FR-11 discrimination).
+- **Tests**: 12 BFF test files migrated `CreateAsync`→`UpsertAsync`; test-hygiene batch (075). Full BFF suite **10,421 passed / 0 failed**.
+- **Docs**: `notes/task-0{10,11,12,13,20,73,75}-notes.md` + `task-012/013-analysis.md`.
 
 ### Critical Context
 Project is fully initialized and **execution-ready**: spec (13 FRs / 6 NFRs), 20 validated POML tasks (8 phases), branch `work/spaarkeai-compose-r7` @ `6486c52ea`, **0 behind master, clean, pushed**. The branch is **net10-ready** (master is net10 as of 2026-08-14; BFF Release build clean) and **re-aligned** to the code-quality-and-assurance-r3 + dotnet-10-COMPLETE master (anchors re-verified 2026-08-15). Nothing blocks starting task 001. Do **not** re-run the pipeline — go straight to execution.
