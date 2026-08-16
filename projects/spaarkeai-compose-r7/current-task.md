@@ -11,10 +11,28 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040** — Client-only draft store + dirty autosave + recovery (FR-03) — NEXT |
-| **Step** | Not started |
-| **Status** | ready (spine) |
-| **Next Action** | Execute 040 (client-only local/session draft keyed on `getComposeLogicalIdentity`; dirty autosave ~15s; `beforeunload`/modal-close guard; recovery on reopen; connect to the `autoSaveEnabled` state from task 020). Then 041→050→051→060→061→070→071→072→074→090. |
+| **Task** | **040** — Client-only draft store + dirty autosave + recovery (FR-03) — DESIGNED, ready to implement |
+| **Step** | Design complete (investigation done); implementation not started |
+| **Status** | ready (spine) — investigated editor handle + dirty/save/mount surface |
+| **Next Action** | Implement per the **Task-040 design** below. Then 041→050→051→060→061→070→071→072→074→090. |
+
+### Task-040 design (investigated 2026-08-16 — execute this)
+
+**Files**: NEW `src/client/shared/Spaarke.Compose.Components/src/widgets/composeDraftStore.ts` (best-effort localStorage, try/catch, like `composeIdentity.ts`); MODIFY `ComposeWorkspace.tsx`; MODIFY `ComposeEditor.tsx` (`ComposeEditorHandle` + impl).
+
+**The draft KEY** = `getComposeLogicalIdentity(state.documentRef)` (task-010 accessor `sprkDocumentId ?? speDriveItemId ?? composeLogicalId`, `''`-guarded) — `src/types/compose-contracts.ts:694`. Reuse it; do NOT derive a second key.
+
+**Content serialization — RECOMMENDED Option B (reuse existing recovery path)**: `ComposeEditorHandle` has `buildContentModel()` (structured model) but **NO plain HTML getter**. Add `getDraftHtml(): string | null` to the handle (`ComposeEditor.tsx:843` interface + its `useImperativeHandle` impl — TipTap `editor.getHTML()`). Serialize `{ logicalId, fileName, html, savedAt }` to localStorage. Recover on mount by seeding via the EXISTING `mountDraftHtml` reducer path (the same one blank/template/AI-draft use). ⚠️ **Ripple (task-013 pattern)**: adding a handle method breaks every test that mocks `ComposeEditorHandle` (the editor stubs in `ComposeWorkspace.*.test.tsx`, `bornInEditorSave`, `renderOnSave`, etc.) — add `getDraftHtml: () => '<p/>'` to each stub. Run the FULL runnable jest suite.
+
+**Wiring in ComposeWorkspace.tsx**:
+- `autoSaveEnabled` useState(true) already exists (task 020) — gate the autosave effect on it.
+- **Autosave effect**: `setInterval` ~15s while `state.status==='loaded'`; on tick, if `editorRef.current?.isDirty()` (the editor's OWN authoritative flag, read fresh — see `:1494`) AND a logical id exists → `composeDraftStore.set(logicalId, {...})`. **NO network call** (NFR-03 — the escalation trigger). Use a ref-mirror for the draft-capture closure (same convention as `triggerSaveRef`/`hasUnsavedWorkRef`) so the interval need not re-subscribe.
+- **Clear on save**: in the `saveSucceeded` path (~`:1840`/`setIsDirty(false)` ~`:1902`) → `composeDraftStore.clear(logicalId)`. Note the logical id may ROTATE on promotion (transient→promoted adopts the new sprkDocumentId) — clear the OLD key (pre-save identity) there; task 030's `clearActiveComposeLogicalId` precedent.
+- **Recovery on mount**: after a mount resolves a documentRef with a logical id, check `composeDraftStore.get(logicalId)`; if a draft exists AND is newer than the mounted content → recover it (seed via `mountDraftHtml`). For 040, a straightforward recover-on-reopen for born-in-editor/transient drafts satisfies criterion 2; the recovery-vs-server-content PROMPT/indicator is task 041's job — keep 040's recovery minimal + non-destructive (don't silently clobber a loaded server doc without the 041 guard; simplest safe scope = recover when the mounted doc has no server content newer than the draft).
+
+**Boundaries**: CLIENT-ONLY (no BFF). Autosave dirty-only, ~15s (tunable). Do NOT touch the "no autosave" invariant comment (@34/@2789) or the `unmountFlush` test — those are **task 041** (the invariant flip is 041's documented Path-A change). NEVER delete `docxBridge.ts`.
+
+**Escalation trigger (NFR-03)**: if dirty-tracking cannot separate local-draft persistence from a server save (version-per-tick risk) → STOP + escalate. (Design above keeps them fully separate: the draft path calls only `composeDraftStore`, never `authenticatedFetch`.)
 
 **10 of 20 tasks done: 001, 010, 011, 012, 013, 020, 030, 073, 075.** Phase 1 (Save-Identity) + Phase 2 (Save dropdown) + Phase 3 (Name modal) COMPLETE.
 
