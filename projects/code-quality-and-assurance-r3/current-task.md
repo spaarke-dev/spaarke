@@ -1,14 +1,31 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-14 (context-handoff — REMEDIATION, forcing-functions wave)
+> **Last Updated**: 2026-08-16 (context-handoff — POST-PROGRAM: review + follow-on fixes + RED project setup + RED-4/DEF-1)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
-> ✅ **PROJECT COMPLETE (2026-08-14).** All **35/35 tasks ✅**. Final 5 completed this session: 061 (config fail-fast, `5a6ad556e`), 041 (mechanical baseline — BFF C# activated, `e1f06c5a9`), 042 + 063 (CI gates + naming standard; ArchTest gate live, `.github/workflows` wiring deferred to coordinated PR with ci-cd-r1, `cec19d374`), 090 (wrap-up: `/test-diet` clean + final re-score + close, `704b6a213`). **HEAD = `704b6a213`, NOT pushed** (operator has not requested). Aggregate un-gated **F→D**, maintainability mean **C+**; A+ NOT reached (multi-cycle; deferred live-env items tracked). See `notes/SCORECARD.md` §Task 090, `notes/lessons-learned.md`, `notes/r3-draft-reconciliation.md`, `notes/test-diet-report.md`. **No active task.**
+| Field | Value |
+|-------|-------|
+| **Project** | code-quality-and-assurance-r3 — **COMPLETE (35/35)** + extensive post-program follow-on. **All merged to master `3146837a7`.** Nothing uncommitted. |
+| **State** | ✅ Program closed (aggregate un-gated **F→D**, maintainability mean **C+**; A+ = multi-cycle). ✅ Merged to master + **BFF deployed to dev** (Finance recalc 401 verified live). ✅ Post-program review (4 evidence agents). ✅ Follow-on fixes merged. ✅ RED follow-on projects defined/set up. **No active in-flight task** — this is a coordination/handoff state. |
+| **Next Action** | **RED-4 "B" hardening** is the one thread with an active dependency: wait for **smart-todo-r5** to decide DEF-1 (see below), then finish B as a tested pass. Everything else is queued + documented. |
+
+### ✅ Completed this session (all on master `3146837a7`)
+1. **r3 closeout**: 061 (`5a6ad556e`), 041 (`e1f06c5a9`), 042+063 (`cec19d374`), 090 (`704b6a213`). Merged to master; BFF deployed to dev.
+2. **Review + follow-on fixes**: eliminated the masked nullable class CS8601/CS8604 (Fable-verified SAFE); tightened analyzer allowlist; **redesigned the God-class ratchet** (per-file freeze + 2,000 new-file ceiling, replacing arbitrary 2,700) + documented it (`.claude/patterns/testing/god-class-ratchet.md` + CLAUDE.md §17 + memory); hardened the naming gate.
+3. **Handoffs**: `customer-provisioning-orchestration-r1` (unblocked; `projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md`) · `ci-cd-unit-test-remediation-r1` (RED-3) · **`email-communication-intelligence-r2` merged to master** for them.
+4. **RED follow-on projects**: **RED-1** `projects/speadmin-decomposition-r1/` + **RED-2** `projects/chatendpoints-decomposition-r1/` (folders, initialize-only) · RED-3 routed to ci-cd-r1 · **RED-4** Fable-verified assessment (`notes/red-item-analyses/RED-4-dataverse-two-stack-ASSESSMENT.md`) → set up **C** `projects/dataverse-access-unification-r1/`, routed **#3b** MI→task 011/NG1 (`notes/task-011-ng1-3b-mi-migration.md`), delivered **B keystone** (`docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md`), found **DEF-1**.
+
+### ▶ Open threads (next)
+- **DEF-1** (`notes/defer-issues.md`, ROUTED→smart-todo-r5): 2 of 5 `TodoGenerationService` rules (Overdue events :322, Deadline :~460) silently make zero To Dos — query `sprk_event` via composite→SDK silent-empty stub. **smart-todo-r5 decides** (A: inject `IEventDataverseService`; B: remove Rules 1&3 as legacy) per `projects/smart-todo-r5/notes/INBOUND-event-sourced-todo-generation-broken.md`. **Then** the RED-4 B "silent-empty stubs→throw" step can run (sequenced after — else it crashes the generator). GitHub issue for DEF-1 left in r5 per operator.
+- **RED-4 B remainder** (careful tested pass, on branch `work/dataverse-access-hardening` merged so far as docs): reroute/remove (per DEF-1 decision) → silent-empty→throw → delete ~1,100 dead LOC in `DataverseWebApiService` (fix 2 test refs) → resolve `UpdateRecordFieldsAsync` split-brain. Each behind build+test.
+- **#3b MI migration** → task 011/NG1 (both Dataverse impls; operator prereqs: register MI as Dataverse App User + grant `prvActOnBehalfOfAnotherUser`; never remove secret until MI proven live).
+- **Operator-gated execution**: RED-1, RED-2, C (worktree + task breakdown created at start via `/design-to-spec`→`/project-pipeline`).
+- **Backlog carryovers**: CI-workflow gate wiring (042/063) coordinated PR w/ ci-cd-r1 · TS per-surface mechanical baseline · CS0618 retirement (DemoExpiration refactor) · Console→ILogger (39 DI sites) · #772 deferred pkg majors.
 
 ---
 

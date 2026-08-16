@@ -39,11 +39,22 @@ are **stubs**: some throw `NotImplementedException`, and seven return **silent-e
    returns empty. Fix: inject `IEventDataverseService` (→ WebApi) for the event query. **Behavior change
    (starts returning real events) — validate the todo-generation side effects before enabling.** Tracked in
    `projects/code-quality-and-assurance-r3/notes/defer-issues.md`.
-2. **Split-brain `UpdateRecordFieldsAsync`** — live in BOTH impls; which runs depends on the injected alias
-   (`FinanceRollupService` via composite → SDK; `InvoiceReviewService`/`ScorecardCalculatorService`/handlers
-   via `IFieldMappingDataverseService` → WebApi). Converge to one live impl.
-3. **~1,100 LOC runtime-dead** document/analysis/KPI code in `DataverseWebApiService` (unreachable — those
-   interfaces route to SDK). Delete (fix the 2 test references first).
+2. **🐞 Split-brain `UpdateRecordFieldsAsync` — WebApi half THROWS (DEF-2).** Live in BOTH impls; which runs
+   depends on the injected alias (`FinanceRollupService` via composite → SDK, works;
+   `InvoiceReviewService`/`ScorecardCalculatorService`/handlers via `IFieldMappingDataverseService` → WebApi).
+   RED-4 B verified (2026-08-16) that the WebApi half is worse than "duplicate": it calls the WebApi impl's
+   `GetEntitySetNameAsync` (`:176`), a stub that **throws `NotImplementedException`** — so field-mapping
+   read/child-query/write via the WebApi path throws (same landmine that surfaced in the compose cold-session
+   UAT, `ComposeOutputsColdSessionTests`). Tracked as **DEF-2** (`projects/code-quality-and-assurance-r3/notes/defer-issues.md`);
+   needs an owner decision (implement `GetEntitySetNameAsync` on WebApi, or a shared set-name resolver) before
+   RED-4 C.
+3. **✅ DONE (RED-4 B, 2026-08-16) — runtime-dead code deleted.** `DataverseWebApiService` shrank **2,822 → 1,409
+   LOC** (−1,414): the document/analysis/generic-entity/processing-job/KPI/communication-query/health surfaces
+   (unreachable — those interfaces route to SDK) were removed and the class declaration narrowed from the
+   composite `IDataverseService` to `: IEventDataverseService, IFieldMappingDataverseService`. Kept: the live
+   event + field-mapping + impersonation/POA surface, the shared `GetEntitySetNameAsync`/`ConvertJsonElementToObject`
+   helpers, and both `UpdateRecordFieldsAsync` impls. Waiver removed from `GodClassGuardTests` (now under the
+   2,000 ceiling). Verified: BFF 10,402 tests pass, ArchTests 38/38.
 4. **Seven silent-empty SDK stubs** — convert to throw ONLY after trap #1 is rerouted (else it crashes the
    TodoGenerationmigration path loudly).
 

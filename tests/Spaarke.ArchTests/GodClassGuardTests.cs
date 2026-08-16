@@ -54,7 +54,9 @@ public class GodClassGuardTests
         ["src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs"] = 3_085,
         ["src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs"] = 2_999,
         ["src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs"] = 2_864,          // RED-4
-        ["src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs"] = 2_822,              // RED-4
+        // DataverseWebApiService.cs removed from waivers 2026-08-16 (RED-4 B hardening): dead-code
+        // deletion (−1,414 LOC) dropped it from 2,822 → 1,409, below the 2,000 ceiling. Now governed
+        // by the standard new-file rule. See docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md.
         ["src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs"] = 2_676,
         ["src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs"] = 2_651,
         ["src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs"] = 2_528,
