@@ -23,10 +23,15 @@
 - 073 ✅ (`fd0b8e4da`, cherry-picked from Group-B subagent) — PDF-intake cause discrimination. **FR-11 end-to-end surfacing deferred to 050/051** (see task-073-notes.md — avoids r2 PublicContracts change + downcast).
 - 011 ✅ (`23793f4e9`) — id-less assistant-insert door now carries dedup identity.
 
-**Background stream still in flight (isolated worktree):**
-- **Task 075** (FR-13 test-hygiene) — subagent running; will report a commit SHA to cherry-pick. Main session owns TASK-INDEX/current-task/INDEX bookkeeping.
+- 075 ✅ (`57cf4b865`, cherry-picked from Group-B subagent) — test-hygiene batch (FakeTimeProvider flake, 4 jest suites, nda fixture, seam-test tighten). Subagent-verified 10,402 xUnit + 960 jest green.
 
-**Key carried decisions**: composeLogicalId is the FR-03/FR-07 shared key; localStorage single active-draft slot; 050/051 must wire the PDF-intake cause-specific message (FR-11 rider). Baseline for NFR-01 deltas = 44.96 MB incl PDBs.
+**Group B complete** (073 ∥ 075 both integrated). **6 of 20 tasks done: 001, 010, 011, 073, 075** (+012 analyzed).
+
+**Remaining (14)**: 012 → 013 (BFF spine, serialize — both edit ComposeService.cs) → 020 → 030 → 040 → 041 → 050 → 051 → 060 → 061 → 070 → 071 → 072 → 074 → 090.
+
+**Key carried decisions**: composeLogicalId is the FR-03/FR-07 shared key; localStorage single active-draft slot; 050/051 must wire the PDF-intake cause-specific message (FR-11 rider); 012 fix = Graph `conflictBehavior=rename` for forkNew create (plan in `notes/task-012-analysis.md`). Baseline for NFR-01 deltas = **44.96 MB incl PDBs**.
+
+**⚠️ Branch is 4 behind master (growing).** Before the 012/013 BFF spine, consider `git merge origin/master` (INDEX.md conflict expected) so the BFF data-integrity edits don't hit a large late conflict — master may have touched ComposeService.cs.
 
 ### Files Modified This Session
 - All under `projects/spaarkeai-compose-r7/` — created/finalized during `/design-to-spec` → `/project-pipeline` (spec, README, plan, CLAUDE.md, 20 POML tasks, TASK-INDEX) + two re-alignment passes. **All committed + pushed; nothing uncommitted.**
