@@ -4,7 +4,7 @@
     <title>SpaarkeAi widget default orientation = side-by-side columns (FR-09 / U-2)</title>
     <phase>3: Top bar + filter + visuals</phase>
     <gate>003 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx default state in the shared SmartTodoWidget — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger); SpaarkeAi hot-path (per project hot-path declaration).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -107,7 +107,9 @@
     <criterion testable="true">All unit tests pass (existing + new orientation-default assertions); build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec refs: FR-09 (U-2). The "ambiguous enum naming" caveat in spec.md/CLAUDE.md Assumptions is RESOLVED by this task's own investigation — SmartTodoWidget.tsx's existing doc comment (pre-change) already states 'horizontal' = side-by-side, 'vertical' = stacked. No further enum-mapping ambiguity remains once this task's step 0 confirms it.</notes>
+  <notes>Spec refs: FR-09 (U-2). The "ambiguous enum naming" caveat in spec.md/CLAUDE.md Assumptions is RESOLVED by this task's own investigation — SmartTodoWidget.tsx's existing doc comment (pre-change) already states 'horizontal' = side-by-side, 'vertical' = stacked. No further enum-mapping ambiguity remains once this task's step 0 confirms it.
+
+COMPLETION (2026-08-15): Confirmed the enum mapping directly against `KanbanBoard.tsx`'s CSS (base `board` style = `flexDirection: 'row'` = side-by-side, applied whenever NOT vertical; `boardVertical` override = `flexDirection: 'column'` = stacked, applied only when `orientation === 'vertical'`). Changed `SmartTodoWidget.tsx`'s local `useState<Orientation>` default from `'vertical'` to a new exported constant `SMART_TODO_WIDGET_DEFAULT_ORIENTATION = 'horizontal'` (single source of truth, also consumed by the new test). Rewrote the stale "WIDGET default is 'vertical'" comment block with the new default + the confirmed CSS rationale. Escalation trigger did NOT fire — `KanbanBoard`'s horizontal-mode `overflowX: 'auto'` already handles narrow-pane overflow via horizontal scroll (pre-existing 2026-06-20 round-4 fix); the prior 'vertical' default was a UX preference, not a clipping workaround. Code Page default (already 'horizontal') untouched; scoring formula untouched. Added a pure-value smoke test (`runOrientationDefaultSmokeTest`) matching the file's existing Jest-less `assert()` pattern, since `@spaarke/smart-todo-components` has no Jest config yet (build/lint = `tsc --noEmit` only; task 040 wires Jest). `npx tsc --noEmit` → exit 0. Quality gates (code-review + adr-check, FULL rigor Step 9.5): 0 Critical / 0 Warning / 0 Suggestion; ADR-021 + ADR-012 compliant. Only the 2 concurrency-scoped files were touched; nothing committed. Full writeup: `projects/smart-todo-r5/notes/task-024-widget-columns.md`.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

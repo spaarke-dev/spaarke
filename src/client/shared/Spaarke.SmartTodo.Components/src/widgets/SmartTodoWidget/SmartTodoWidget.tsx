@@ -127,6 +127,17 @@ export const TODO_STATUSCODE_COMPLETED = 2 as const;
 export const TODO_STATUSCODE_DISMISSED = 659490002 as const;
 
 // ---------------------------------------------------------------------------
+// U-2 / smart-todo-r5 task 024 (2026-08-15) — exported so the smoke-test file
+// can assert the widget's initial orientation without a React renderer (this
+// peer package has no Jest config yet — see __tests__/SmartTodoWidget.test.tsx
+// header comment). `'horizontal'` maps to `KanbanBoard`'s base `board` style
+// (`flexDirection: 'row'`) — side-by-side columns; kept as the single source
+// of truth for the `useState` initial value below.
+// ---------------------------------------------------------------------------
+
+export const SMART_TODO_WIDGET_DEFAULT_ORIENTATION: Orientation = 'horizontal';
+
+// ---------------------------------------------------------------------------
 // Search debounce — local SearchBox text is held by `searchQuery` state and
 // flushed to the filter applied to the rendered list after this delay. 150ms
 // is short enough that the user perceives results as live but long enough to
@@ -372,11 +383,18 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // To Do home") persists orientation via `useUserPreferences` (R4-071) —
   // that's the canonical persistence point.
   //
-  // UAT 2026-06-20: WIDGET default is 'vertical' (Today on top, Tomorrow in
-  // middle, Future on bottom — stacked rows). This matches the widget's
-  // typical narrow workspace pane. The Code Page default remains
-  // 'horizontal' (columns side-by-side) because it gets full viewport width.
-  const [orientation, setOrientation] = React.useState<Orientation>('vertical');
+  // U-2 / smart-todo-r5 task 024 (2026-08-15): WIDGET default changed to
+  // 'horizontal' (Today/Tomorrow/Future side-by-side columns — left, center,
+  // right), matching the mockup intent (FR-09) and the Code Page's existing
+  // default. Superseded the prior UAT 2026-06-20 'vertical' (stacked-rows)
+  // default. `orientation='horizontal'` maps to `KanbanBoard`'s base `board`
+  // style (`flexDirection: 'row'`, side-by-side); `'vertical'` applies
+  // `boardVertical` (`flexDirection: 'column'`, stacked) — confirmed against
+  // `Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx`. The
+  // orientation toggle remains available for users on narrow panes who want
+  // the stacked layout; the CSS-only flip (NFR-08) preserves drag-drop +
+  // selection state either way.
+  const [orientation, setOrientation] = React.useState<Orientation>(SMART_TODO_WIDGET_DEFAULT_ORIENTATION);
 
   // SearchBox — local controlled value debounced into `appliedQuery` which
   // drives the in-memory filter.

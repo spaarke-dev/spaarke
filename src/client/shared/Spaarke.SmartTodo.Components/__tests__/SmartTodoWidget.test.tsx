@@ -1,13 +1,29 @@
 /**
- * SmartTodoWidget — query-builder smoke tests.
+ * SmartTodoWidget — query-builder smoke tests + orientation-default smoke test.
  *
- * Run-time render tests (loading / empty / populated / error) require Jest +
- * jsdom + Fluent v9 test setup; the `@spaarke/smart-todo-components` peer
- * package ships type-check only (`build: tsc --noEmit`) — there is no Jest
- * config in this initial 0.1.0 release. These tests are kept in source as
- * pure-function exercises against `buildSmartTodoQuery`, so they can be
- * picked up later either by the peer package (when it gets Jest config) or
- * inlined into the LW shim's existing Jest run.
+ * Run-time render tests (loading / empty / populated / error, and the
+ * NFR-03/NFR-08 drag-drop + selection state regression across an orientation
+ * flip) require Jest + jsdom + Fluent v9 + `@hello-pangea/dnd` test setup;
+ * the `@spaarke/smart-todo-components` peer package ships type-check only
+ * (`build: tsc --noEmit`) — there is no Jest config in this initial 0.1.0
+ * release (wiring it is tracked separately as smart-todo-r5 task 040). These
+ * tests are kept in source as pure-function / pure-value exercises against
+ * `buildSmartTodoQuery` and `SMART_TODO_WIDGET_DEFAULT_ORIENTATION`, so they
+ * can be picked up later either by the peer package (when it gets Jest
+ * config) or inlined into the LW shim's existing Jest run.
+ *
+ * smart-todo-r5 task 024 (U-2 / FR-09, 2026-08-15): the widget's default
+ * orientation changed from 'vertical' (stacked rows) to 'horizontal'
+ * (side-by-side columns — left/center/right), matching the mockup intent
+ * and the Code Page's existing default. The full NFR-03 drag-drop +
+ * selection-survives-a-flip regression is documented here as a render-test
+ * gap (needs Jest — task 040) rather than faked with a test that can't
+ * execute; the underlying CSS-only flip mechanism (`KanbanBoard`'s
+ * `orientation` prop) is unchanged by this task — only the widget's INITIAL
+ * value changed — so NFR-03 coverage that already exists for the flip
+ * mechanism itself (`Spaarke.UI.Components/.../Kanban/__tests__/KanbanBoard.test.tsx`,
+ * "keeps the same column structure across orientation flips") continues to
+ * apply once Jest is wired here.
  *
  * R4 spec FR-02 acceptance:
  *   - Zero `sprk_event` references in the emitted query.
@@ -27,6 +43,7 @@ import {
   buildSmartTodoQuery,
   TODO_STATUSCODE_OPEN,
   TODO_STATUSCODE_IN_PROGRESS,
+  SMART_TODO_WIDGET_DEFAULT_ORIENTATION,
 } from '../src/widgets/SmartTodoWidget/SmartTodoWidget';
 
 // Lightweight assert helpers — kept dependency-free so these compile cleanly
@@ -90,9 +107,35 @@ export function runQueryBuilderSmokeTests(): void {
   console.info('[SmartTodoWidget.test] All query-builder smoke tests passed.');
 }
 
+// ---------------------------------------------------------------------------
+// smart-todo-r5 task 024 (U-2 / FR-09) — orientation-default smoke test.
+//
+// This is a pure-VALUE check (no React renderer, matching this file's
+// existing Jest-less pattern): it asserts the exported single-source-of-truth
+// constant that `SmartTodoWidget`'s `useState<Orientation>` seeds from is
+// 'horizontal' (side-by-side columns), NOT a render assertion. It exists so
+// the acceptance criterion "fresh mount defaults to side-by-side columns" is
+// enforced at the value level today; a true render-level assertion (mount +
+// inspect `data-orientation` on the `KanbanBoard` region, per
+// `Spaarke.UI.Components/.../Kanban/__tests__/KanbanBoard.test.tsx`'s
+// existing pattern) is deferred to when Jest is wired into this package
+// (task 040) — documented above, not silently skipped.
+// ---------------------------------------------------------------------------
+
+export function runOrientationDefaultSmokeTest(): void {
+  assert(
+    SMART_TODO_WIDGET_DEFAULT_ORIENTATION === 'horizontal',
+    "SmartTodoWidget's default orientation must be 'horizontal' (side-by-side columns: Today/Tomorrow/Future left/center/right) per U-2 / FR-09 — 'vertical' would stack them as rows instead."
+  );
+
+  // eslint-disable-next-line no-console
+  console.info('[SmartTodoWidget.test] Orientation-default smoke test passed.');
+}
+
 // Module-eval auto-run is gated to a Node.js env so test consumers can import
 // this file without side effects. When the peer package gets Jest wired,
 // replace this gate with `describe`/`it` blocks.
 if (typeof process !== 'undefined' && process.env?.SMART_TODO_WIDGET_SMOKE === '1') {
   runQueryBuilderSmokeTests();
+  runOrientationDefaultSmokeTest();
 }
