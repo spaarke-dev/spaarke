@@ -9,10 +9,17 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 001 ✅ 010 ✅ 002 ✅ 003 ✅ — **Phase 1 spine COMPLETE + committed/pushed** (`edc56d533`). Next: Phase-2/3 fan-out. |
-| **Step** | 4 of 28 done. Unblocked now: 011 (010✓), 012 (003✓,010✓), 013 (010✓), 020/022/023/024 (003✓), 034 (003✓), 042 (no deps). |
-| **Status** | in-progress — Phase 1 landed; planning the next wave |
-| **Next Action** | Plan a **parallel wave by DISJOINT file sets** (subagents share ONE worktree → concurrent edits to the same file corrupt). Read the candidate POMLs' `<relevant-files>` first. Known contention: **013 (RegardingResolver form/PCF) vs 042 (RegardingResolver S1/N1 fixes)** both touch `RegardingResolverApp.tsx` → NOT concurrent. **020 (Code Page top bar) vs 022 (Code Page Completed toggle)** likely share the Code Page `SmartToDo.tsx` → verify before pairing. Clean-looking parallel candidates: one shared-lib task (012 or 023/024) + one Code-Page task + one test task (042), if file sets verified disjoint. Serial spine option: 010→011 next. |
+| **Task** | **7 of 28 DONE**: 001 002 003 010 (Phase 1) + 020 024 042 (Wave A). All committed/pushed. |
+| **Step** | Wave A (020/024/042) landed clean via 3 disjoint subagents. **Wave B dispatched: {011, 012, 022}**. |
+| **Status** | in-progress — Wave B running (or ready to review) |
+| **Next Action** | Review Wave B {011, 012, 022} on return (verify each, run combined build/jest, commit as separate units, mark TASK-INDEX). Then Wave C candidates: **023** (coloring — touches hot `UI.Components/Kanban/KanbanBoard.tsx`, do carefully), **021** (filter pane — needs 020✓; touches queryHelpers ⚠ conflicts w/ 022), **034** (BrowseModal), **013** (RegardingResolver form — LIVE Dataverse, opus, careful/separate). Then Phase-4 modal spine 030→031→032→033 (serial, needs 013), Phase-6 ribbon 050→051→052, deploys 014/025/035, wrap-up 090. |
+
+### Disjoint-partition ledger (subagents share ONE worktree — never co-edit a file)
+- **useKanbanColumns.ts** touched by 022 AND 023 → never same wave.
+- **queryHelpers.ts** touched by 021 AND 022 → never same wave.
+- **RegardingResolverApp.tsx** touched by 042 (done) AND 013-adjacent → 013 is live-form, separate.
+- **solutions/SmartTodo/SmartToDo.tsx** touched by 011 (quick-add handleAdd) — distinct from SmartTodoApp.tsx (020, done) and Header (020, done).
+- Wave B {011, 012, 022} verified disjoint: 011=UI.Components/CreateTodoWizard+SmartToDo.tsx+webresource · 012=SmartTodo.Components/components/KanbanCard+scorecards · 022=SmartTodo.Components/hooks/useKanbanColumns.ts+queryHelpers.ts.
 
 ### Critical Context
 Execution underway on branch `work/smart-todo-r5`. **001 complete** (PR#508 boundary fix — barrel imports, package/tsconfig wired, `tsc` green, gates clean). **010 complete by pre-existence** (`sprk_priority`/`sprk_effort` already on live `sprk_todo` with exact spec values — NO schema write). Most tasks are `parallel-safe:false` (shared-lib contention) → critical path runs serially in main session; subagent fan-out reserved for group Q (020/022/023/024) + group R (040/041/042). UI.Components `dist` + both packages' `node_modules` are now built locally (needed for `tsc`).

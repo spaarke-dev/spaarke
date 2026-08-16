@@ -14,11 +14,11 @@
 | 012 | Priority/effort per-card UI in shared lib | 2 | FR-02/03 | sonnet/high | none | 003,010 | 🔲 |
 | 013 | RegardingResolver wiring + full regarding field set on form | 2 | FR-04 | opus/high | none | 010 | 🔲 |
 | 014 | Deploy schema+form; real-DV resolver smoke | 2 | FR-04/20 | sonnet/high | none | 011,012,013 | 🔲 |
-| 020 | Code Page top-bar redesign (Filter/New Task/overflow) | 3 | FR-05 | sonnet/high | Q | 003 | 🔲 |
+| 020 | Code Page top-bar redesign (Filter/New Task/overflow) | 3 | FR-05 | sonnet/high | Q | 003 | ✅ |
 | 021 | Filter pane (Priority/Status/Due/Assigned-To; clear-all) | 3 | FR-06 | sonnet/high | none | 020 | 🔲 |
 | 022 | Completed status + Show-Completed toggle | 3 | FR-07 | sonnet/high | Q | 003 | 🔲 |
 | 023 | Subtle channel coloring + yellow-contrast audit | 3 | FR-08 | sonnet/high | Q | 003 | 🔲 |
-| 024 | Widget default = side-by-side columns | 3 | FR-09 | sonnet/high | none | 003 | 🔲 |
+| 024 | Widget default = side-by-side columns | 3 | FR-09 | sonnet/high | none | 003 | ✅ |
 | 025 | Deploy code page + widget; visual QA | 3 | deploy | sonnet/high | none | 020-024 | 🔲 |
 | 030 | + New Task opens OOB main form (create) modal | 4 | FR-10 | sonnet/high | none | 013 | 🔲 |
 | 031 | Open shares same launch mechanism | 4 | FR-11 | sonnet/high | none | 030 | 🔲 |
@@ -28,7 +28,7 @@
 | 035 | Deploy + modal QA | 4 | deploy | sonnet/high | none | 033,034 | 🔲 |
 | 040 | vitest expansion + new coverage | 5 | FR-16 | sonnet/high | R | 011,021,022 | 🔲 |
 | 041 | Playwright NFR suite (perf/a11y/orientation) | 5 | FR-17 | sonnet/high | R | 024,025 | 🔲 |
-| 042 | R-10 handleEmail seam + un-skip; RegardingResolver S1/N1 | 5 | FR-18 | sonnet/high | R | — | 🔲 |
+| 042 | R-10 handleEmail seam + un-skip; RegardingResolver S1/N1 | 5 | FR-18 | sonnet/high | R | — | ✅ |
 | 050 | Refresh Matter ribbon icon + RibbonDiff | 6 | FR-19 | sonnet/high | S | — | 🔲 |
 | 051 | 5 per-entity ribbon solutions (Create To Do) | 6 | FR-19 | sonnet/high | none | 050 | 🔲 |
 | 052 | Deploy + smoke each parent button | 6 | deploy | sonnet/high | none | 051 | 🔲 |
