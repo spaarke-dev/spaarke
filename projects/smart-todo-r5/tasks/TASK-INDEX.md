@@ -12,8 +12,8 @@
 | 010 | Create sprk_priority + sprk_effort choice columns | 2 | FR-02/03 | sonnet/high | P | — | ✅ |
 | 011 | Auto-score handler (Option B) + wizard/quick-add parity | 2 | FR-02/03 | sonnet/high | none | 010 | ✅ |
 | 012 | Priority/effort per-card UI in shared lib | 2 | FR-02/03 | sonnet/high | none | 003,010 | ✅ |
-| 013 | RegardingResolver wiring + full regarding field set on form | 2 | FR-04 | opus/high | none | 010 | 🔲 |
-| 014 | Deploy schema+form; real-DV resolver smoke | 2 | FR-04/20 | sonnet/high | none | 011,012,013 | 🔲 |
+| 013 | RegardingResolver wiring + full regarding field set on form | 2 | FR-04 | opus/high | none | 010 | ✅ |
+| 014 | Deploy schema+form; real-DV resolver smoke | 2 | FR-04/20 | sonnet/high | none | 011,012,013 | 🔄 |
 | 020 | Code Page top-bar redesign (Filter/New Task/overflow) | 3 | FR-05 | sonnet/high | Q | 003 | ✅ |
 | 021 | Filter pane (Priority/Status/Due/Assigned-To; clear-all) | 3 | FR-06 | sonnet/high | none | 020 | ✅ |
 | 022 | Completed status + Show-Completed toggle | 3 | FR-07 | sonnet/high | Q | 003 | ✅ |

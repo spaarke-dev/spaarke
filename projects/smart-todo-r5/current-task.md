@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **14 of 28 DONE**: 001 002 003 010 · 020 024 042 · 011 012 022 · 021 023 034 · **040**. All committed/pushed. |
-| **Step** | 040 wired Jest to Spaarke.SmartTodo.Components (27/27) + fixed useLaunchContext + surfaced/fixed real API drift (buildSmartTodoQuery userId→contactId). solutions/SmartTodo 116/116. **PAUSED per operator (option 1)** before live-Dataverse/deploy work. |
-| **Status** | in-progress — PAUSED at operator boundary; awaiting go-ahead for live-form/deploy phases |
-| **Next Action** | **Regroup with operator before proceeding** — remaining work mutates the LIVE Dataverse env: **013** (RegardingResolver `sprk_todo` form wiring, opus — gates modal spine + 014), Phase-4 modal spine **030→031→032→033** (serial; 033 opus interceptor) + **035** deploy, deploys **014 / 025 / 052**, ribbon **050→051→052**, **060** real-DV smoke, **090** wrap-up (test-diet, close #508, archive). None are pure-client-code; all warrant operator awareness. All 13 done tasks are committed+pushed on `work/smart-todo-r5`. |
+| **Task** | **15 of 28 DONE** (013 ✅) + **014 deploy done / smoke pending**: 001 002 003 010 · 020 024 042 · 011 012 022 · 021 023 034 · 040 · **013**. |
+| **Step** | **013 ✅ COMPLETE** — presave OnLoad handler registered+published on live To Do form via 014's solution-import deploy. **014 🔄** — DEPLOY DONE + verified (score webresource `sprk_todo_score_onchange` created `3f7f07ab…`; presave+score OnLoad handlers live on form eca59df4…; published). **Real-DV interactive smoke (steps 3–7) PENDING — needs operator in MDA browser** (subgrid-create + PolymorphicPicker + visual glyph). See `notes/task-014-deploy-and-smoke.md`. |
+| **Status** | in-progress — 014 awaiting operator browser smoke; then I MCP-verify the created records. |
+| **Next Action** | **Operator runs the 014 smoke script** (Path A subgrid-create from a Matter; Path B manual-pick a Project; set Priority/Effort; open a pre-R5 To Do for regression) → give me the created To Do name(s)/GUID(s) → I verify 5 resolver fields + scores + field-mapping inheritance via MCP and close 014. **KEY DEPLOY FACT**: direct Web API PATCH of `systemform` is a silent no-op in spaarkedev1 — form edits require `pac` solution export/edit/import (used here; applies to Phase-4 form tasks 030/031/032). Remaining after 014: **025** deploy (Code Page+widget), modal spine **030→033**, **035** deploy, ribbon **050→052**, **060** smoke, **090** wrap-up. |
 
 ### Disjoint-partition ledger (subagents share ONE worktree — never co-edit a file)
 - **useKanbanColumns.ts** touched by 022 AND 023 → never same wave.

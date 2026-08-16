@@ -4,7 +4,7 @@
     <title>Wire canonical RegardingResolver PCF on the sprk_todo main form (FR-04)</title>
     <phase>2: Schema + scoring + resolver</phase>
     <gate>010 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Form wiring + placement of the full regarding field set on a production entity; downstream tasks 014 and Phase 4 (030+) depend on this landing correctly; tags include pcf/dataverse.</rigor-reason>
     <model-tier>opus</model-tier>
