@@ -101,6 +101,13 @@ public sealed class MemoryWriteHandler : IToolHandler
             ["keyDate"] = MemoryFactType.KeyDate,
             ["priorAnalysis"] = MemoryFactType.PriorAnalysis,
             ["keyFact"] = MemoryFactType.KeyFact,
+            // FR-07 (task 030): the governed preference channel. Mapped here so the token resolves
+            // wherever a caller supplies it (the E3 feedback→memory pipeline, task 031). The
+            // memory.write LLM-facing schema (sprk_analysistool-memory-write-row.json) deliberately
+            // still lists only the four fact-about-the-record types — preferences are authored by the
+            // GOVERNED feedback pipeline (031) + narrow-allow-list producer (032), NOT freely by the
+            // model, so the LLM is not offered "preference" as a self-serve memory.write category.
+            ["preference"] = MemoryFactType.Preference,
         };
 
     // ── Telemetry (FR-B-08) — one counter; ADR-015 dimensions are deterministic ids +

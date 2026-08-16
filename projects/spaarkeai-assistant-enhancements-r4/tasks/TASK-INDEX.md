@@ -20,7 +20,7 @@
 | 022 | Briefing + Smart To Do launch-registry entries | 2 E2 | FR-06 | sonnet / med | STANDARD | ✅ | — | ✅ |
 | 023 | Follow-on cards, open-tab-gated (Briefing/SmartToDo) | 2 E2 | FR-06 | sonnet / high | FULL | ❌ | 022, 012 | 🔲 |
 | 024 | E2 eval cases (dead-end + card gating) | 2 E2 | FR-10 | sonnet / high | FULL | ✅ | 021, 023 | 🔲 |
-| 030 | `Preference` MemoryFactType + wire map | 3 E3 loop | FR-07 | opus / high | FULL | ❌ | — | 🔲 |
+| 030 | `Preference` MemoryFactType + wire map | 3 E3 loop | FR-07 | opus / high | FULL | ❌ | — | ✅ |
 | 031 | Feedback→memory pipeline | 3 E3 loop | FR-08 | opus / high | FULL | ❌ | 030 | 🔲 |
 | 032 | Governed narrow-allow-list preference-producer | 3 E3 loop | FR-09 | opus / xhigh | FULL | ❌ | 030 | 🔲 |
 | 033 | E3 eval + preference-producer bounds tests | 3 E3 loop | FR-09, FR-10 | sonnet / high | FULL | ✅ | 031, 032 | 🔲 |

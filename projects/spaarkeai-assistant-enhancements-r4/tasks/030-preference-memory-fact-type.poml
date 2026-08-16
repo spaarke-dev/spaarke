@@ -4,7 +4,8 @@
     <title>Preference MemoryFactType + MemoryWriteHandler wire map (FR-07)</title>
     <phase>3 — E3 feedback→memory loop</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-16: MemoryFactType.Preference=4 + MemoryWriteHandler.SupportedFactTypes["preference"] wire map + a **Preferences** AppendSection in MemoryItemStore.RenderFragment (shared by ToRecordPromptFragmentAsync + ToUserPromptFragmentAsync → recalls in both scopes). Deliberately did NOT expose "preference" in the LLM-facing memory.write schema (sprk_analysistool-memory-write-row.json enum + handler ToolParameterDefinition stay at 4) — preferences are authored by the governed E3 pipeline (031) + narrow-allow-list producer (032), not freely by the model. ADR-042 deferred hard-governance untouched (trustLevel inert; escalation trigger did not fire). 5 new tests (2 render + 3 wire-map); 37/37 targeted pass; build clean (no CS8509 exhaustiveness break); publish 44.96 MB (Δ0); CVE clean. -->
     <rigor>FULL</rigor>
     <rigor-reason>Extends the memory fact-type enum + write handler on the governed memory path; a memory-governance boundary change on Services/Ai/Memory.</rigor-reason>
     <model-tier>opus</model-tier>
