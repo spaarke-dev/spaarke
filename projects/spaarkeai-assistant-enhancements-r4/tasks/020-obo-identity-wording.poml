@@ -4,7 +4,8 @@
     <title>OBO-identity wording on user-scoped tool descriptions (FR-05 / QW1)</title>
     <phase>2 — E2 follow-ons</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-16: FR-05 identity-ask fix was ALREADY shipped in R3 on the only two identity-scoped tools (grid_overview + daily_briefing_overview) with handler⇄seed byte-parity (CatalogToolDescriptionParityContractTests). Added a contract regression guard (UserScopedToolOboIdentityContractTests, 2 cases) locking the assertion's presence. Deliberately did NOT spray the assertion onto the 6 generic frozen dataverse.* tools (query named tables, not "my records") or the email/memory tools (act as user but not identity-scoped) — §11 accuracy. 8/8 targeted tests pass; build+CVE clean; test-only → publish unchanged (44.96 MB, Δ0). Owner flagged in current-task.md if broader coverage wanted. -->
     <rigor>FULL</rigor>
     <rigor-reason>Edits a BFF AI tool handler description + its byte-equal seed row guarded by the D-4 parity test; touches shared Services/Ai; BFF-touching change requires code-review + adr-check.</rigor-reason>
     <model-tier>sonnet</model-tier>
