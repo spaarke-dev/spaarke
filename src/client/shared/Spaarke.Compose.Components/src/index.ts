@@ -311,6 +311,7 @@ export {
   recoverActiveComposeLogicalId,
   persistActiveComposeLogicalId,
   clearActiveComposeLogicalId,
+  uniquifyForkFileName,
 } from './widgets/composeIdentity';
 
 // -------------------------------------------------------------------------

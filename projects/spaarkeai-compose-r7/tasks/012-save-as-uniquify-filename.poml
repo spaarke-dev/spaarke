@@ -4,7 +4,7 @@
     <title>Save As is a real fork — uniquify the filename so Graph PUT-by-path cannot coalesce (FR-07a)</title>
     <phase>1 Save-Identity Fix (UC-8)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.cs save-fork code in the transient-create/fork brownfield path; feeds the Phase 2 dropdown.</rigor-reason>
     <model-tier>sonnet</model-tier>

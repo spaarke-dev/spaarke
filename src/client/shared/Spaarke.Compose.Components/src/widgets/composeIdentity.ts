@@ -105,3 +105,23 @@ export function startNewComposeLogicalId(): string {
   persistActiveComposeLogicalId(id);
   return id;
 }
+
+/**
+ * FR-07(a) (task 012): make a Save-New (fork) filename distinct BY CONSTRUCTION so the server's SPE
+ * PUT-by-path (which defaults to replace/version semantics — a same-name PUT re-versions the existing
+ * drive-item) cannot coalesce the fork onto the ORIGINAL's file. Inserts a short unique token derived
+ * from the fork's fresh transient key (a per-fork UUID) before the extension:
+ *   "Contract.docx" → "Contract (copy 3f2a1b).docx".
+ * Collision-safe without any drive-listing round-trip (the duplicate window the escalation trigger
+ * warns about) — every fork mints a fresh key, so every fork name is distinct. The client sends this as
+ * the create-on-save `displayName`, so the server writes to a NON-existing path and Graph mints a
+ * DISTINCT item (a real fork); the client shows the same name (no server round-trip to reconcile).
+ */
+export function uniquifyForkFileName(fileName: string | undefined, forkKey: string): string {
+  const token = forkKey.replace(/[^a-z0-9]/gi, '').slice(0, 6).toLowerCase() || Date.now().toString(36).slice(-6);
+  const base = fileName && fileName.trim().length > 0 ? fileName : 'Untitled document.docx';
+  const dot = base.lastIndexOf('.');
+  return dot > 0
+    ? `${base.slice(0, dot)} (copy ${token})${base.slice(dot)}`
+    : `${base} (copy ${token})`;
+}

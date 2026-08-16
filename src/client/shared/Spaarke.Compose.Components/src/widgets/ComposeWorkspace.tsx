@@ -155,7 +155,7 @@ import {
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
 // FR-07(b) (task 010): the non-rotating logical document id — minted once per logical document,
 // persisted client-side, and rehydrated on recovery. Shared key for FR-03 (040) + FR-07 dedup (011).
-import { startNewComposeLogicalId, clearActiveComposeLogicalId } from './composeIdentity';
+import { startNewComposeLogicalId, clearActiveComposeLogicalId, uniquifyForkFileName } from './composeIdentity';
 import type { ComposeReviewFindingsDegraded } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
@@ -1387,6 +1387,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // G7: the dedup key to send on a create-on-save. A fork mints a fresh key (its own identity going
       // forward); a normal transient save reuses the mount-time key so repeated saves dedup to ONE record.
       const effectiveTransientKey = forkNew ? mintTransientKey() : state.documentRef.transientKey;
+      // FR-07(a) (task 012): a Save-New fork must be a REAL fork — a distinct file + record, never a
+      // silent re-version of the original. Two parts, both keyed off the fork's fresh transient key:
+      //  (1) uniquify the create-on-save displayName so the SPE PUT-by-path lands a DISTINCT drive-item
+      //      (a same-name PUT would re-version the original — the FR-07a coalesce bug);
+      //  (2) mint a fresh task-010 composeLogicalId so the fork carries a NEW logical id, not the
+      //      original's (adopted onto the forked documentRef by saveSucceeded below).
+      const forkDisplayName = forkNew
+        ? uniquifyForkFileName(state.documentRef.fileName, effectiveTransientKey ?? mintTransientKey())
+        : null;
+      const forkLogicalId = forkNew ? startNewComposeLogicalId() : undefined;
       const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
       // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
       // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
@@ -1558,12 +1568,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             containerId: saveContainerId,
             tenantId,
             sessionId: state.sessionId,
+            // FR-07(a) (task 012): a Save-New fork sends the uniquified name so the SPE PUT-by-path
+            // creates a DISTINCT drive-item (a real fork), never a silent re-version of the original.
             // Task 041 (FR-06): a PDF-sourced create-on-save names the NEW document as Word — swap
             // the .pdf extension for .docx (the saved bytes ARE docx; a ".pdf"-named docx would
-            // mislead every downstream consumer). Non-PDF creates keep the existing name verbatim.
-            displayName: pdfSourced
-              ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
-              : (state.documentRef.fileName ?? null),
+            // mislead every downstream consumer). Non-PDF, non-fork creates keep the existing name verbatim.
+            displayName: forkDisplayName
+              ?? (pdfSourced
+                ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
+                : (state.documentRef.fileName ?? null)),
             transientKey: effectiveTransientKey,
             forkNew,
             // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): on a PDF-sourced create,
@@ -1783,6 +1796,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // (never regress to null on success). Omitted on op-log / born-in-editor saves → the reducer
           // keeps whatever base it had.
           contentModel: usedModelPath && importedBuilt ? (payload.contentModel ?? importedBuilt.model) : undefined,
+          // FR-07(a) (task 012): on a Save-New fork, adopt the uniquified fork name + the fresh
+          // task-010 logical id so the forked documentRef reflects the NEW document's identity (a real
+          // fork), not the original's. Undefined on every non-fork save (the reducer keeps existing).
+          fileName: forkDisplayName ?? undefined,
+          composeLogicalId: forkLogicalId,
         });
         // 026-F5 (task 012, r6): save-time degradation warnings are their OWN warning family — the old
         // dispatch into `importWarnings` both clobbered the load-time import warnings AND never rendered

@@ -410,6 +410,11 @@ export type ComposeWorkspaceAction =
       // the client POSTed; the caller resolves that fallback). Omitted on op-log / born-in-editor
       // saves → the reducer keeps the existing `loadedContentModel` (never regresses to null).
       contentModel?: ComposeContentModel | null;
+      // FR-07(a) (task 012): on a Save-New fork, the uniquified fork filename + the fresh task-010
+      // logical id, adopted onto the forked documentRef so it reflects the NEW document (a real fork),
+      // not the original. Undefined on every non-fork save (the reducer keeps the existing values).
+      fileName?: string;
+      composeLogicalId?: string;
     }
   | { kind: 'saveFailed'; errorMessage: string; isLock?: boolean }
   | { kind: 'reset' }
@@ -718,10 +723,16 @@ export function composeWorkspaceReducer(
               // replace-path saves and the toolbar show the document's real identity. Review
               // B-LOW-4: the undefined-name fallback MIRRORS triggerSave's ('document.pdf' →
               // 'document.docx') so local state never diverges from the server record.
+              // FR-07(a) (task 012): a Save-New fork adopts the uniquified fork name (action.fileName);
+              // otherwise the PDF→docx rename or the existing name, unchanged.
               fileName:
-                state.sourceFormat === 'pdf'
+                action.fileName
+                ?? (state.sourceFormat === 'pdf'
                   ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
-                  : state.documentRef.fileName,
+                  : state.documentRef.fileName),
+              // FR-07(a/b) (task 012/010): a fork adopts a NEW logical id (action.composeLogicalId);
+              // a non-fork save preserves the existing one (the accessor prefers sprkDocumentId anyway).
+              composeLogicalId: action.composeLogicalId ?? state.documentRef.composeLogicalId,
               // gap 1.7: carry the server-minted SPE id back so the mount is no longer transient
               // (empty speDriveItemId) — a second Save now targets the real drive-item.
               speDriveItemId:

@@ -7,6 +7,7 @@ import {
   recoverActiveComposeLogicalId,
   persistActiveComposeLogicalId,
   clearActiveComposeLogicalId,
+  uniquifyForkFileName,
 } from './composeIdentity';
 import { getComposeLogicalIdentity } from '../types/compose-contracts';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
@@ -99,6 +100,63 @@ describe('getComposeLogicalIdentity — accessor derivation (FR-07b)', () => {
     expect(getComposeLogicalIdentity({ speDriveItemId: '' })).toBeUndefined();
     expect(getComposeLogicalIdentity(null)).toBeUndefined();
     expect(getComposeLogicalIdentity(undefined)).toBeUndefined();
+  });
+});
+
+describe('uniquifyForkFileName — Save As real fork (FR-07a)', () => {
+  it('inserts a token before the extension', () => {
+    const out = uniquifyForkFileName('Contract.docx', 'abcdef12-3456-7890');
+    expect(out).toEqual('Contract (copy abcdef).docx');
+  });
+
+  it('produces DISTINCT names for distinct fork keys (collision-safe by construction)', () => {
+    const a = uniquifyForkFileName('Contract.docx', 'aaaaaa11-0000');
+    const b = uniquifyForkFileName('Contract.docx', 'bbbbbb22-0000');
+    expect(a).not.toEqual(b);
+    // and neither equals the original → the SPE PUT-by-path lands a distinct item, never a re-version
+    expect(a).not.toEqual('Contract.docx');
+    expect(b).not.toEqual('Contract.docx');
+  });
+
+  it('handles a name with no extension', () => {
+    expect(uniquifyForkFileName('Contract', 'abcdef99')).toEqual('Contract (copy abcdef)');
+  });
+
+  it('falls back to a default base name when empty', () => {
+    expect(uniquifyForkFileName('', 'abcdef99')).toEqual('Untitled document (copy abcdef).docx');
+    expect(uniquifyForkFileName(undefined, 'abcdef99')).toEqual('Untitled document (copy abcdef).docx');
+  });
+
+  it('strips non-alphanumerics from the token (stable across UUID punctuation)', () => {
+    // A UUID with dashes yields a clean 6-char alnum token.
+    expect(uniquifyForkFileName('X.docx', '3f2a-1b9c')).toEqual('X (copy 3f2a1b).docx');
+  });
+});
+
+describe('reducer — Save As fork adopts new name + logical id (FR-07a)', () => {
+  it('saveSucceeded with fork fileName + composeLogicalId re-targets the forked ref', () => {
+    // A mounted (loaded) original document.
+    const loaded = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'mountTransient',
+      docxBytes: new ArrayBuffer(8),
+      fileName: 'Contract.docx',
+      transientKey: 'tk-orig',
+      composeLogicalId: 'lid-orig',
+    });
+    // Save As fork → server minted a new record; the fork carries the uniquified name + fresh logical id.
+    const forked = composeWorkspaceReducer(loaded, {
+      kind: 'saveSucceeded',
+      sprkDocumentId: 'doc-fork',
+      documentSpeId: 'spe-fork',
+      etag: 'e1',
+      driveId: 'd1',
+      versionId: 'v1',
+      fileName: 'Contract (copy 3f2a1b).docx',
+      composeLogicalId: 'lid-fork',
+    });
+    expect(forked.documentRef?.fileName).toEqual('Contract (copy 3f2a1b).docx');
+    expect(forked.documentRef?.composeLogicalId).toEqual('lid-fork'); // NEW logical id, not the original's
+    expect(getComposeLogicalIdentity(forked.documentRef)).toEqual('doc-fork'); // promoted identity is distinct
   });
 });
 
