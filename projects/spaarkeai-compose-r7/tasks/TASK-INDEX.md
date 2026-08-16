@@ -29,7 +29,7 @@
 | 072 | Add Comment toolbar affordance | 7 | 🔲 | FULL | sonnet | high | ❌ spine | 001 | FR-10 |
 | 073 | PDF-intake cause discrimination (LOW-10) | 7 | ✅ | FULL | sonnet | high | ✅ Group B | 001 | FR-11 |
 | 074 | apply-template ETag/If-Match + typed-404 | 7 | 🔲 | FULL | sonnet | high | ❌ spine | 001 | FR-12 |
-| 075 | Test-hygiene batch (flake + jest suites + fixture) | 7 | 🔲 | FULL | sonnet | high | ✅ Group B | 001 | FR-13 |
+| 075 | Test-hygiene batch (flake + jest suites + fixture) | 7 | ✅ | FULL | sonnet | high | ✅ Group B | 001 | FR-13 |
 | 090 | Project wrap-up (deploy, test-diet, docs, archive) | 8 | 🔲 | FULL | sonnet | high | ❌ final | 010–075 | — |
 
 **Rigor distribution**: FULL ×18, MINIMAL ×1 (001). (075 is FULL by the CLAUDE.md §8 TEST-MODIFYING override.)

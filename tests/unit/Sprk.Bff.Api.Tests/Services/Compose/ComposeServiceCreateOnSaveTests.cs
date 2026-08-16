@@ -308,7 +308,15 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         // The background profile runs on a DETACHED HttpContext (not the request one) carrying the
         // captured OBO bearer token — proving the user assertion survives the response boundary (OBO).
-        await fake.Started.WaitAsync(TimeSpan.FromSeconds(5));
+        //
+        // Task 075 (FR-13) flake fix: the TCS completes the moment the background Task.Run reaches
+        // ProfileDocumentAsUserAsync, so this wait is immune to scheduling ORDER under full-suite
+        // parallelism — but a tight real-clock deadline is still marginal when the ThreadPool is
+        // saturated by every other test class's concurrent work (the documented "3rd/4th occurrence
+        // under parallel load" flake — always green isolated/on rerun, per compose-r6 090-closeout.md).
+        // 10s (matching the same hang-guard convention as AuditLogServiceTests) keeps this a pure
+        // hang guard — never the thing that actually gates pass/fail under normal scheduling latency.
+        await fake.Started.WaitAsync(TimeSpan.FromSeconds(10));
         fake.InvokedDocumentId.Should().Be(recordId);
         fake.InvokedContext.Should().NotBeSameAs(httpContext,
             "the profile runs on a synthetic detached HttpContext, not the disposed request one");
@@ -316,7 +324,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             "the OBO user assertion is captured before the response and threaded into the detached context");
 
         fake.Release();
-        await fake.Finished.WaitAsync(TimeSpan.FromSeconds(5));
+        await fake.Finished.WaitAsync(TimeSpan.FromSeconds(10));
         provider.Dispose();
     }
 
@@ -386,8 +394,10 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         // The background task runs, throws, and the exception is SWALLOWED by RunBackgroundProfileAsync
         // (never rethrown) — awaiting Finished completes without faulting the test.
-        await fake.Started.WaitAsync(TimeSpan.FromSeconds(5));
-        await fake.Finished.WaitAsync(TimeSpan.FromSeconds(5));
+        // Task 075 (FR-13) flake fix — see the sibling fire-and-forget test above for the full
+        // rationale (10s hang guard, immune to ThreadPool saturation under full-suite parallelism).
+        await fake.Started.WaitAsync(TimeSpan.FromSeconds(10));
+        await fake.Finished.WaitAsync(TimeSpan.FromSeconds(10));
         provider.Dispose();
     }
 

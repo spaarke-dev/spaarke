@@ -4,7 +4,7 @@
     <title>Test-hygiene batch — FakeTimeProvider flake, pre-existing jest suites, nda fixture paraIds (FR-13)</title>
     <phase>7 Accepted Defers + Hardening</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING task (modifies tests/** + fixtures) — CLAUDE.md §8 override row forces FULL rigor + Step 9.5 gates unconditionally.</rigor-reason>
     <model-tier>sonnet</model-tier>
