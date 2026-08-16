@@ -166,6 +166,20 @@ describe('ComposeWorkspace — FR-03 draft-safe autosave (client-only)', () => {
     expect(editorProps.initialHtml).toBe('<p>recovered from a prior crash</p>');
   });
 
+  it('warns via beforeunload when there is unsaved work (FR-03 task 041 guard)', () => {
+    act(() => {
+      renderWorkspace({ initialDraftRef: { html: '<p>seed</p>' } }); // born-in-editor → unsaved (transient)
+    });
+    expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument();
+
+    // A real browser unload with unsaved work must be canceled (native "leave?" prompt).
+    const evt = new Event('beforeunload', { cancelable: true });
+    act(() => {
+      window.dispatchEvent(evt);
+    });
+    expect(evt.defaultPrevented).toBe(true);
+  });
+
   it('does NOT recover when a real mount door (stored document) is present', async () => {
     persistActiveComposeLogicalId('lid-recover-2');
     saveComposeDraft('lid-recover-2', '<p>should be ignored</p>');

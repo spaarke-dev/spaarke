@@ -672,6 +672,9 @@ export interface ComposeEditorProps {
    *  behavior itself is Phase 4 (040/041); the toggle renders only when both are wired by the host. */
   autoSaveEnabled?: boolean;
   onAutoSaveToggle?: (enabled: boolean) => void;
+  /** FR-03 (task 041): forwarded to ComposeFormatToolbar's save-state indicator — true when the doc has
+   *  unsaved edits (dirty OR an unpersisted transient draft). Undefined → the indicator is not rendered. */
+  hasUnsavedEdits?: boolean;
   /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the toolbar button when set
    *  (the host wires it only for a promoted doc — one that has a sprk_document record to re-profile). */
   onRefreshProfile?: () => void;
@@ -1866,6 +1869,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       isSaving,
       autoSaveEnabled,
       onAutoSaveToggle,
+      hasUnsavedEdits,
       onRefreshProfile,
       onReloadFromSource,
       onOpenDocument,
@@ -3107,6 +3111,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           isSaving={isSaving}
           autoSaveEnabled={autoSaveEnabled}
           onAutoSaveToggle={onAutoSaveToggle}
+          hasUnsavedEdits={hasUnsavedEdits}
           onRefreshProfile={onRefreshProfile}
           onReloadFromSource={onReloadFromSource}
           onOpenDocument={onOpenDocument}

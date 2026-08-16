@@ -31,10 +31,16 @@
  *   - spaarkeai-assistant-enhancements-r2 (DI-02 fix): flush-on-unmount. Every
  *     compose-tab close path (`WorkspaceTabManager.closeTab`, `clearAllTabs` on a
  *     History switch or exclusive-playbook reset) unmounted this component with no
- *     dirty-check — there is no autosave/debounce anywhere in this workspace, only
- *     explicit Ctrl+S/toolbar-Save/bridge-chip saves. The unmount cleanup now
- *     best-effort flushes through the SAME `triggerSave` path when unsaved work is
- *     present (see `hasUnsavedWorkRef` below).
+ *     dirty-check. The unmount cleanup now best-effort flushes through the SAME
+ *     `triggerSave` path when unsaved work is present (see `hasUnsavedWorkRef` below).
+ *   - spaarkeai-compose-r7 (FR-03, tasks 040/041): draft-safe autosave. There is now a
+ *     CLIENT-ONLY local draft autosave (a ~15s dirty-only localStorage snapshot via
+ *     `composeDraftStore` — see the autosave effect), a `beforeunload` guard, and a
+ *     toolbar save-state indicator. This DELIBERATELY reverses the prior "no autosave"
+ *     invariant (spec ADR-Tensions path A) — but ONLY for local drafts: NO automatic
+ *     SERVER save / SPE version is ever created. A write to the BFF still happens ONLY
+ *     on an explicit Ctrl+S / toolbar-Save / bridge-chip save (plus the best-effort
+ *     flush-on-unmount above); the autosave path never calls `triggerSave` (NFR-03).
  *
  * Constraints honored (BINDING):
  *   - ADR-021: Fluent v9 only; `makeStyles` + `tokens.*` (semantic).
@@ -2961,13 +2967,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // spaarkeai-assistant-enhancements-r2 task 035; or an exclusive-playbook reset) —
   // unmounts this component with NO dirty-check/flush gate anywhere in
   // `WorkspaceTabManager` (verified: both methods unconditionally filter the tab
-  // out of the list; neither reads editor dirty state). And unlike the escalation's
-  // assumption of a "debounce that hasn't fired yet", there is NO
-  // autosave/debounce/flush-on-blur in this workspace at all — `triggerSave` fires
-  // ONLY on an explicit Ctrl+S, the toolbar Save button, or the cross-pane "Add to
-  // DMS" bridge chip (`useRegisterComposeSaveHandler` above). So a compose tab
-  // closed via ANY of those paths while dirty silently drops every keystroke typed
-  // since the last explicit Save. The compose DOCUMENT itself is durable
+  // out of the list; neither reads editor dirty state). The SERVER-save path stays
+  // deliberately narrow: `triggerSave` fires ONLY on an explicit Ctrl+S, the toolbar
+  // Save button, or the cross-pane "Add to DMS" bridge chip
+  // (`useRegisterComposeSaveHandler` above) — plus this best-effort flush-on-unmount.
+  // FR-03 (tasks 040/041) added a CLIENT-ONLY draft autosave (a ~15s dirty-only
+  // localStorage snapshot) + a `beforeunload` guard, but that path NEVER calls
+  // `triggerSave` and never creates an SPE version (NFR-03) — so this flush-on-unmount
+  // remains the safety net for the un-persisted SERVER save. So a compose tab
+  // closed via ANY of those paths while dirty would (without this flush) drop every
+  // keystroke typed since the last explicit Save. The compose DOCUMENT itself is durable
   // server-side (ADR-049 — OOXML byte-store; TipTap is a lossy view) — only the
   // un-flushed in-memory delta is at risk.
   //
@@ -3009,6 +3018,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // Intentionally fire-once (mount/unmount only) — reads the latest state via
     // `hasUnsavedWorkRef`/`triggerSaveRef`, not via this effect's own deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // FR-03 (task 041): warn before the BROWSER unloads (tab close / navigation / reload) while there is
+  // unsaved work. Reads the same `hasUnsavedWorkRef` mirror the flush-on-unmount uses. The in-app
+  // tab-close / History-switch path is already covered by the flush-on-unmount effect above (best-effort
+  // `triggerSave`) plus the task-040 local draft; this guard covers the one path a React unmount cannot —
+  // a real browser unload. Standard `preventDefault()` + `returnValue` contract; a clean/saved doc never
+  // warns (the guard reads the live ref, so it never fires spuriously).
+  React.useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent): void => {
+      if (!hasUnsavedWorkRef.current) return;
+      e.preventDefault();
+      // Legacy Chrome/Firefox still require a non-empty `returnValue` to show the native prompt.
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
   }, []);
 
   // -------------------------------------------------------------------------
@@ -4117,6 +4143,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // this state to the draft-safe autosave behavior; here it just renders + toggles.
               autoSaveEnabled={autoSaveEnabled}
               onAutoSaveToggle={setAutoSaveEnabled}
+              // FR-03 (task 041): drive the toolbar save-state indicator. Unsaved = a dirty edit OR an
+              // unpersisted transient (create-on-save) draft — the same signal the Save button gates on.
+              hasUnsavedEdits={isDirty || hasTransientDraft}
               // UAT round-2 items #1/#2 — the editor's "Review" toolbar dropdown toggles this docked
               // summary panel (owned here) alongside its own right-gutter "Review Notes". `open` mirrors
               // the panel's real render gate; `hasFindings` gates whether the "Review" control appears.

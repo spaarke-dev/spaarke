@@ -177,6 +177,20 @@ const useStyles = makeStyles({
   menuButton: {
     minWidth: '96px',
   },
+  // FR-03 (task 041): the save-state indicator (Saving… / Unsaved / Saved + Auto Save On/Off).
+  // Subtle, single-line, Fluent v9 semantic tokens only (ADR-021 dark-mode-correct).
+  saveStateIndicator: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXXS,
+    marginInlineStart: tokens.spacingHorizontalXS,
+    marginInlineEnd: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase200,
+    whiteSpace: 'nowrap',
+    userSelect: 'none',
+  },
   // FIX #5: the icon-only tool palette rendered INSIDE a Paragraph/Font/Word
   // dropdown popover — a comfortable, even horizontal gap (not cramped, not
   // spread). Semantic tokens only.
@@ -274,6 +288,10 @@ export interface ComposeFormatToolbarProps {
   /** FR-01/FR-03 (task 020/040): invoked with the NEXT Auto Save state when the user toggles the menu
    *  item. Rendered only when both this and {@link autoSaveEnabled} are set. */
   onAutoSaveToggle?: (enabled: boolean) => void;
+  /** FR-03 (task 041): true when the document has unsaved edits (dirty OR an unpersisted transient
+   *  draft). Drives the save-state indicator (Saving… while {@link isSaving}, Unsaved when true, Saved
+   *  otherwise). Undefined → the indicator is not rendered (a host that does not track dirty state). */
+  hasUnsavedEdits?: boolean;
   /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the button when set (the host
    *  wires it only for a promoted doc — one with a sprk_document record to re-profile). */
   onRefreshProfile?: () => void;
@@ -442,6 +460,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     isSaving,
     autoSaveEnabled,
     onAutoSaveToggle,
+    hasUnsavedEdits,
     onRefreshProfile,
     onReloadFromSource,
     onOpenDocument,
@@ -1065,6 +1084,24 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
             </MenuList>
           </MenuPopover>
         </Menu>
+      ) : null}
+
+      {/* FR-03 (task 041): save-state indicator (absorbs R6 D6). Reflects task-040 draft/dirty state:
+          Saving… while a save is in flight, Unsaved when there are dirty edits, Saved otherwise — plus
+          the Auto Save On/Off state. Rendered only when the host tracks save state (Save wired +
+          hasUnsavedEdits provided). Fluent v9 semantic tokens only (ADR-021 dark-mode); `aria-live` so
+          the state change is announced to assistive tech. */}
+      {onSave && hasUnsavedEdits !== undefined ? (
+        <Text
+          className={styles.saveStateIndicator}
+          data-testid="compose-save-state-indicator"
+          data-save-state={isSaving ? 'saving' : hasUnsavedEdits ? 'unsaved' : 'saved'}
+          aria-live="polite"
+        >
+          {isSaving ? <Spinner size="extra-tiny" aria-hidden /> : null}
+          {isSaving ? 'Saving…' : hasUnsavedEdits ? 'Unsaved' : 'Saved'}
+          {autoSaveEnabled !== undefined ? ` · Auto Save ${autoSaveEnabled ? 'On' : 'Off'}` : ''}
+        </Text>
       ) : null}
 
       <ToolbarDivider data-testid="compose-format-divider-2" />

@@ -1125,3 +1125,58 @@ describe('ComposeFormatToolbar — UAT round-4 (2026-08-04): menu allocation (#1
     expect(idx('compose-format-undo')).toBeLessThan(idx('compose-format-redo'));
   });
 });
+
+// ---------------------------------------------------------------------------
+// FR-03 (task 041) — save-state indicator (Saving… / Unsaved / Saved + Auto Save)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — FR-03 save-state indicator', () => {
+  it('is not rendered when the host does not track save state (no onSave / hasUnsavedEdits)', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-save-state-indicator')).not.toBeInTheDocument();
+  });
+
+  it('shows "Unsaved" when there are dirty edits and no save in flight', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), hasUnsavedEdits: true, isSaving: false } });
+    const el = screen.getByTestId('compose-save-state-indicator');
+    expect(el).toHaveAttribute('data-save-state', 'unsaved');
+    expect(el).toHaveTextContent('Unsaved');
+  });
+
+  it('shows "Saved" when there are no unsaved edits', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), hasUnsavedEdits: false, isSaving: false } });
+    const el = screen.getByTestId('compose-save-state-indicator');
+    expect(el).toHaveAttribute('data-save-state', 'saved');
+    expect(el).toHaveTextContent('Saved');
+  });
+
+  it('shows "Saving…" while a save is in flight (overrides the dirty state)', () => {
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), hasUnsavedEdits: true, isSaving: true } });
+    const el = screen.getByTestId('compose-save-state-indicator');
+    expect(el).toHaveAttribute('data-save-state', 'saving');
+    expect(el).toHaveTextContent('Saving…');
+  });
+
+  it('reflects the Auto Save On/Off state when the toggle is wired', () => {
+    const { unmount } = renderFormatToolbar(
+      {},
+      { props: { onSave: jest.fn(), hasUnsavedEdits: false, autoSaveEnabled: true, onAutoSaveToggle: jest.fn() } }
+    );
+    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Auto Save On');
+    unmount();
+
+    renderFormatToolbar(
+      {},
+      { props: { onSave: jest.fn(), hasUnsavedEdits: false, autoSaveEnabled: false, onAutoSaveToggle: jest.fn() } }
+    );
+    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Auto Save Off');
+  });
+
+  it('renders correctly in dark mode (ADR-021 — no crash, indicator present)', () => {
+    renderFormatToolbar(
+      {},
+      { theme: webDarkTheme, props: { onSave: jest.fn(), hasUnsavedEdits: true, isSaving: false } }
+    );
+    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Unsaved');
+  });
+});

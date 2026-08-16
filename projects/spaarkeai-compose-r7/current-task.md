@@ -11,9 +11,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040 ✅ COMPLETE** (commit pending this turn) — next: **041** (save-state indicator + beforeunload + invariant/test flip) |
-| **Step** | 040 implemented + gated (code-review + adr-check PASS); trackers updated |
-| **Next Action** | Execute **041**. Then 050→051→060→061→070→071→072→074→090. |
+| **Task** | **040 ✅ + 041 ✅ COMPLETE** — Phase 4 (Draft-Safe Autosave / UC-4) DONE. Next: **050** (async ProjectForMount PDF fork — opus/BFF) |
+| **Step** | 040 + 041 implemented + gated (code-review + adr-check PASS); trackers updated; 041 commit pending this turn |
+| **Next Action** | Execute **050** (⚠️ **opus** model-tier — see note) → 051 → 060 → 061 → 070 → 071 → 072 → 074 → 090. |
+
+### ⚠️ Task 050 is model-tier=OPUS (BFF contract change)
+050 (async `ProjectForMount` PDF fork) is **opus** + BFF + irreversible-adjacent (ADR-007/013 contract change, NFR-04). Session is on **Opus 4.8** so it IS executable in the main session (session model ≥ task tier). It touches `Services/Compose/ComposeService.cs` + `ComposeEndpoints.cs` → BFF gates apply: `/conflict-check`, publish ≤60 MB (delta vs 44.96 MB net10 baseline), no new HIGH CVE, Placement Justification. **050/051 must ALSO wire the deferred FR-11 PDF-intake cause-specific message** (from task 073). Anchor caveat: `AnalysisServicesModule.cs` DI gate ~L145/165 (grep symbols, don't trust exact lines).
+
+### Task 041 — what shipped (see notes/task-041-notes.md)
+Save-state indicator in ComposeFormatToolbar (Saving…/Unsaved/Saved + Auto Save On/Off; Fluent tokens, `data-save-state`, aria-live) driven by new `hasUnsavedEdits` prop threaded ComposeWorkspace→ComposeEditor→toolbar (`isDirty || hasTransientDraft`); `beforeunload` guard (warns only on `hasUnsavedWorkRef`); **the deliberate ADR-Tensions Path-A "no autosave" invariant flip** at ComposeWorkspace.tsx:34 + :2966 (client-only autosave now exists; NO automatic SERVER save — NFR-03). unmountFlush test: docblock reconciled, **assertions unchanged** (DI-02 flush-on-unmount is still the only POST-without-explicit-Save path; directional adaptation). +6 standalone toolbar indicator tests (81/81); +1 CI-only beforeunload test; full suite 621 pass / 0 fail.
 
 ### Task-041 carried boundary (task 040 DELIBERATELY deferred these — they are 041's scope, not misses)
 - **Flip the "no autosave" invariant comments** at `ComposeWorkspace.tsx:34` + `:2966` — 040 left them untouched (they assert *no automatic SERVER flush*, still TRUE; the client draft store never calls `triggerSave`/BFF). 041 reconciles the wording as the documented ADR-Tensions **Path-A** change.
@@ -25,7 +31,7 @@
 ### Task 040 — what shipped (see notes/task-040-notes.md)
 NEW `composeDraftStore.ts` (client-only localStorage, single-slot, id-match-gated) + `ComposeEditor.getDraftHtml()` + ComposeWorkspace autosave effect (~15s dirty-only, `autoSaveEnabled`-gated, **no BFF**), clear-on-save, and non-destructive recovery-on-mount via the existing `mountDraftHtml` path (key = task-010 `getComposeLogicalIdentity`). **Ripple was SMALLER than predicted** — zero editor-handle mocks needed changing (inferred stub types + optional-chained consumer). 10/10 store tests standalone; 3 CI-only workspace tests; full suite 615 pass / 0 fail; NFR-03 escalation trigger NOT fired (draft path calls no fetch).
 
-**11 of 20 tasks done: 001, 010, 011, 012, 013, 020, 030, 040, 073, 075.** Phases 1–3 + Phase 4a (draft store) COMPLETE.
+**12 of 20 tasks done: 001, 010, 011, 012, 013, 020, 030, 040, 041, 073, 075.** Phases 1–4 COMPLETE (Save-Identity + Save dropdown + Name modal + Draft-Safe Autosave).
 
 ### Task-040 design (investigated 2026-08-16 — execute this)
 
