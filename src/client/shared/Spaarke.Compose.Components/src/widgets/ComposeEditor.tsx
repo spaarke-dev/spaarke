@@ -667,6 +667,11 @@ export interface ComposeEditorProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** FR-01/FR-03 (task 020/040): forwarded to ComposeFormatToolbar's Save dropdown Auto Save toggle.
+   *  `autoSaveEnabled` is the current state; `onAutoSaveToggle` reports toggles. The draft-safe autosave
+   *  behavior itself is Phase 4 (040/041); the toggle renders only when both are wired by the host. */
+  autoSaveEnabled?: boolean;
+  onAutoSaveToggle?: (enabled: boolean) => void;
   /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the toolbar button when set
    *  (the host wires it only for a promoted doc — one that has a sprk_document record to re-profile). */
   onRefreshProfile?: () => void;
@@ -1848,6 +1853,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onSave,
       canSave,
       isSaving,
+      autoSaveEnabled,
+      onAutoSaveToggle,
       onRefreshProfile,
       onReloadFromSource,
       onOpenDocument,
@@ -3084,6 +3091,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onSave={onSave}
           canSave={canSave}
           isSaving={isSaving}
+          autoSaveEnabled={autoSaveEnabled}
+          onAutoSaveToggle={onAutoSaveToggle}
           onRefreshProfile={onRefreshProfile}
           onReloadFromSource={onReloadFromSource}
           onOpenDocument={onOpenDocument}

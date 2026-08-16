@@ -4,7 +4,7 @@
     <title>Replace Save SplitButton with Save / Save As dropdown + Auto Save toggle (FR-01)</title>
     <phase>2 Save Dropdown (UC-2)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx Fluent v9 toolbar UI; frontend implementation with dark-mode + interaction requirements.</rigor-reason>
     <model-tier>sonnet</model-tier>

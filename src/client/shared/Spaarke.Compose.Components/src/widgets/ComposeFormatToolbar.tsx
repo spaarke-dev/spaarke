@@ -98,6 +98,8 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
+  MenuItemCheckbox,
+  MenuDivider,
   Popover,
   PopoverTrigger,
   PopoverSurface,
@@ -264,6 +266,14 @@ export interface ComposeFormatToolbarProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** FR-01/FR-03 (task 020/040): current Auto Save state, surfaced as a checkable menu item in the Save
+   *  dropdown. The actual draft-safe autosave behavior is implemented in Phase 4 (040/041); this toolbar
+   *  only renders the control + reports toggles. Undefined → the Auto Save item is not rendered (a host
+   *  that has not wired autosave yet keeps the plain Save / Save As menu). */
+  autoSaveEnabled?: boolean;
+  /** FR-01/FR-03 (task 020/040): invoked with the NEXT Auto Save state when the user toggles the menu
+   *  item. Rendered only when both this and {@link autoSaveEnabled} are set. */
+  onAutoSaveToggle?: (enabled: boolean) => void;
   /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the button when set (the host
    *  wires it only for a promoted doc — one with a sprk_document record to re-profile). */
   onRefreshProfile?: () => void;
@@ -430,6 +440,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onSave,
     canSave,
     isSaving,
+    autoSaveEnabled,
+    onAutoSaveToggle,
     onRefreshProfile,
     onReloadFromSource,
     onOpenDocument,
@@ -984,10 +996,23 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
              primaryActionButton's `aria-label`; a Tooltip carries the full label on hover (icon-only
              buttons need both — ADR-021/a11y). ---- */}
       {onSave ? (
-        <Menu positioning="below-end">
+        <Menu
+          positioning="below-end"
+          // FR-01 (task 020): the Auto Save toggle is a checkable menu item. Its checked state is
+          // controlled by the host (autoSaveEnabled); rendered only when the host wired autosave
+          // (both autoSaveEnabled + onAutoSaveToggle set — the FR-03 Phase-4 behavior lives there).
+          checkedValues={
+            autoSaveEnabled !== undefined && onAutoSaveToggle
+              ? { autosave: autoSaveEnabled ? ['on'] : [] }
+              : undefined
+          }
+          onCheckedValueChange={(_e, data) => {
+            if (data.name === 'autosave') onAutoSaveToggle?.(data.checkedItems.includes('on'));
+          }}
+        >
           <MenuTrigger disableButtonEnhancement>
             {(triggerProps: MenuButtonProps) => (
-              <Tooltip content={isSaving ? 'Saving…' : 'Save Version'} relationship="label" withArrow>
+              <Tooltip content={isSaving ? 'Saving…' : 'Save'} relationship="label" withArrow>
                 <SplitButton
                   appearance="subtle"
                   data-testid="compose-format-save"
@@ -996,7 +1021,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                     onClick: () => onSave('version'),
                     disabled: saveDisabled,
                     icon: <SaveRegular />,
-                    'aria-label': isSaving ? 'Saving' : 'Save version',
+                    'aria-label': isSaving ? 'Saving' : 'Save',
                   }}
                 />
               </Tooltip>
@@ -1004,14 +1029,39 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
+              {/* FR-01 (task 020): Save = append an SPE version to the SAME document (ADR-049).
+                  Explicit item so the split-button's primary action is discoverable in the menu too. */}
+              <MenuItem
+                icon={<SaveRegular />}
+                disabled={saveDisabled}
+                onClick={() => onSave('version')}
+                data-testid="compose-format-save-version"
+              >
+                Save
+              </MenuItem>
+              {/* FR-01/FR-07a (task 020/012): Save As = a REAL fork — a distinct new sprk_document with a
+                  uniquified filename (never a silent re-version of the original). Replaces R6's
+                  "Save New Document". */}
               <MenuItem
                 icon={<SaveRegular />}
                 disabled={saveDisabled}
                 onClick={() => onSave('new')}
                 data-testid="compose-format-save-new"
               >
-                Save New Document
+                Save As
               </MenuItem>
+              {autoSaveEnabled !== undefined && onAutoSaveToggle ? (
+                <>
+                  <MenuDivider />
+                  <MenuItemCheckbox
+                    name="autosave"
+                    value="on"
+                    data-testid="compose-format-autosave-toggle"
+                  >
+                    Auto Save
+                  </MenuItemCheckbox>
+                </>
+              ) : null}
             </MenuList>
           </MenuPopover>
         </Menu>

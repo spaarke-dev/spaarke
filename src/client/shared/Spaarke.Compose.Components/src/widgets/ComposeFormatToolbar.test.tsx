@@ -442,19 +442,20 @@ describe('ComposeFormatToolbar — alignment controls (R5 task 010, ET-1 guard r
 // 6. Save split-button (G7 task 022) — "Save Version" primary + "Save New Document" menu item
 // ---------------------------------------------------------------------------
 
-describe('ComposeFormatToolbar — Save split-button (G7 task 022)', () => {
+describe('ComposeFormatToolbar — Save / Save As dropdown + Auto Save (FR-01 task 020)', () => {
   // The SplitButton root carries the testid; its first inner <button> is the primary action.
   const getPrimary = () => within(screen.getByTestId('compose-format-save')).getAllByRole('button')[0];
 
-  it('renders "Save Version" as the primary action and "Save New Document" in the caret menu', async () => {
+  it('renders "Save" as the primary action and Save + Save As in the caret menu', async () => {
     const user = userEvent.setup();
     renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
 
-    // Primary action = Save Version (the default / replace-in-place choice).
-    expect(screen.getByRole('button', { name: /save version/i })).toBeInTheDocument();
-    // The caret menu opens the deliberate-fork item.
+    // Primary action = Save (append an SPE version — ADR-049).
+    expect(getPrimary()).toHaveAccessibleName(/^save$/i);
+    // The caret menu carries both the explicit Save and the Save As (fork) items.
     await user.click(screen.getByRole('button', { name: /save options/i }));
-    expect(await screen.findByTestId('compose-format-save-new')).toBeInTheDocument();
+    expect(await screen.findByTestId('compose-format-save-version')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-format-save-new')).toHaveTextContent(/save as/i);
   });
 
   it('the primary action fires onSave("version")', async () => {
@@ -466,7 +467,17 @@ describe('ComposeFormatToolbar — Save split-button (G7 task 022)', () => {
     expect(onSave).toHaveBeenCalledWith('version');
   });
 
-  it('the caret-menu "Save New Document" fires onSave("new")', async () => {
+  it('the caret-menu "Save" item fires onSave("version")', async () => {
+    const user = userEvent.setup();
+    const onSave = jest.fn();
+    renderFormatToolbar({}, { props: { onSave, canSave: true } });
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    await user.click(await screen.findByTestId('compose-format-save-version'));
+    expect(onSave).toHaveBeenCalledWith('version');
+  });
+
+  it('the caret-menu "Save As" fires onSave("new") — a real fork per task 012', async () => {
     const user = userEvent.setup();
     const onSave = jest.fn();
     renderFormatToolbar({}, { props: { onSave, canSave: true } });
@@ -474,6 +485,31 @@ describe('ComposeFormatToolbar — Save split-button (G7 task 022)', () => {
     await user.click(screen.getByRole('button', { name: /save options/i }));
     await user.click(await screen.findByTestId('compose-format-save-new'));
     expect(onSave).toHaveBeenCalledWith('new');
+  });
+
+  it('renders the Auto Save toggle (checked) when the host wired autosave, and fires onAutoSaveToggle', async () => {
+    const user = userEvent.setup();
+    const onAutoSaveToggle = jest.fn();
+    renderFormatToolbar(
+      {},
+      { props: { onSave: jest.fn(), canSave: true, autoSaveEnabled: true, onAutoSaveToggle } }
+    );
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    const toggle = await screen.findByTestId('compose-format-autosave-toggle');
+    expect(toggle).toHaveTextContent(/auto save/i);
+    expect(toggle).toHaveAttribute('aria-checked', 'true'); // reflects autoSaveEnabled
+    await user.click(toggle);
+    expect(onAutoSaveToggle).toHaveBeenCalledWith(false); // toggling an ON item turns it OFF
+  });
+
+  it('does NOT render the Auto Save toggle when the host has not wired autosave', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } }); // no autoSaveEnabled/onAutoSaveToggle
+
+    await user.click(screen.getByRole('button', { name: /save options/i }));
+    await screen.findByTestId('compose-format-save-new');
+    expect(screen.queryByTestId('compose-format-autosave-toggle')).not.toBeInTheDocument();
   });
 
   it('the primary action is disabled when canSave is false or a save is in flight', () => {
@@ -485,9 +521,9 @@ describe('ComposeFormatToolbar — Save split-button (G7 task 022)', () => {
     expect(getPrimary()).toBeDisabled();
   });
 
-  it('ADR-021: renders the split-button under a dark theme (theme tokens, no crash)', () => {
+  it('ADR-021: renders the dropdown under a dark theme (theme tokens, no crash)', () => {
     renderFormatToolbar({}, { theme: webDarkTheme, props: { onSave: jest.fn(), canSave: true } });
-    expect(screen.getByRole('button', { name: /save version/i })).toBeInTheDocument();
+    expect(getPrimary()).toHaveAccessibleName(/^save$/i);
   });
 });
 
@@ -850,23 +886,25 @@ describe('ComposeFormatToolbar — UAT round-1 (2026-08-03): repositioning + ico
     expect(onGenerateMemo).toHaveBeenCalledTimes(1);
   });
 
-  it('#5: Save Version is icon-only (no visible text) — the accessible name survives via aria-label on the primary action', () => {
+  it('#5: Save is icon-only (no visible text) — the accessible name survives via aria-label on the primary action', () => {
+    // FR-01 (task 020): primary label is now "Save" (append an SPE version); the fork moved to the
+    // caret-menu "Save As" item.
     renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
 
     const saveWrapper = screen.getByTestId('compose-format-save');
     const primaryButton = within(saveWrapper).getAllByRole('button')[0];
-    expect(primaryButton).toHaveAttribute('aria-label', 'Save version');
-    expect(primaryButton.textContent).toBe(''); // icon-only — no visible "Save Version" text
+    expect(primaryButton).toHaveAttribute('aria-label', 'Save');
+    expect(primaryButton.textContent).toBe(''); // icon-only — no visible "Save" text
   });
 
-  it('#5: a Tooltip is present on the Save trigger (hover reveals the full "Save Version" label)', async () => {
+  it('#5: a Tooltip is present on the Save trigger (hover reveals the "Save" label)', async () => {
     const user = userEvent.setup();
     renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true } });
 
     const saveWrapper = screen.getByTestId('compose-format-save');
     const primaryButton = within(saveWrapper).getAllByRole('button')[0];
     await user.hover(primaryButton);
-    expect(await screen.findByText('Save Version')).toBeInTheDocument();
+    expect(await screen.findByText('Save')).toBeInTheDocument();
   });
 
   it('#6: the Word dropdown is icon-only (aria-label "Word", no visible text) and RELOCATED to the action side — after every format-menu trigger, immediately before Save', async () => {

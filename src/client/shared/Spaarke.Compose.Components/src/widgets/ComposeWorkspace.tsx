@@ -851,6 +851,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [lastMaterializedKey, setLastMaterializedKey] = React.useState<string | null>(null);
   const [composeDraftError, setComposeDraftError] = React.useState<string | null>(null);
 
+  // FR-01/FR-03 (task 020): Auto Save state, surfaced as the Save-dropdown toggle. ON by default per
+  // spec (draft-safe autosave). Task 020 wires the CONTROL to this state; the actual draft-safe autosave
+  // behavior (client-only local draft, beforeunload guard, recovery) is Phase 4 (tasks 040/041), which
+  // consumes this same state. Kept here (the workspace) so 040 can drive autosave off it without moving it.
+  const [autoSaveEnabled, setAutoSaveEnabled] = React.useState(true);
+
   // -------------------------------------------------------------------------
   // #1(b) — "Open preview" for the document persisted by the last Save
   // FIX #7a — the host (ConversationPane) save-completed conduit. When a Save persists a document,
@@ -3912,6 +3918,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                   : undefined
               }
               isSaving={isSavingNow}
+              // FR-01/FR-03 (task 020): the Save-dropdown Auto Save toggle. Phase 4 (040/041) connects
+              // this state to the draft-safe autosave behavior; here it just renders + toggles.
+              autoSaveEnabled={autoSaveEnabled}
+              onAutoSaveToggle={setAutoSaveEnabled}
               // UAT round-2 items #1/#2 — the editor's "Review" toolbar dropdown toggles this docked
               // summary panel (owned here) alongside its own right-gutter "Review Notes". `open` mirrors
               // the panel's real render gate; `hasFindings` gates whether the "Review" control appears.
