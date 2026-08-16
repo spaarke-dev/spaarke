@@ -2,15 +2,12 @@
  * Priority/effort card UI — value-mapping coverage (FR-02/FR-03,
  * smart-todo-r5 task 012).
  *
- * Jest-less pure-function smoke tests, matching this package's existing
- * `SmartTodoWidget.test.tsx` / `useKanbanColumns.test.ts` pattern —
- * `@spaarke/smart-todo-components` ships type-check only (`build: tsc
- * --noEmit`); there is no Jest config in this peer package yet (wiring it
- * is tracked separately as smart-todo-r5 task 040). A full render test
- * (mount `<KanbanCard>` / `<PriorityScoreCard>` / `<EffortScoreCard>` and
- * assert the glyph/badge DOM) requires Jest + jsdom + Fluent v9 provider
- * setup and is documented here as a render-test gap (needs Jest — task
- * 040), not faked with a test that can't execute.
+ * smart-todo-r5 task 040: converted from this file's original Jest-less
+ * `assert()`-based smoke-test harness (no Jest runner existed in this
+ * package before task 040 wired one — see `jest.config.cjs`) to real Jest
+ * `describe`/`it`/`expect` (`it.each` for the per-choice-value tables). The
+ * assertions below are UNCHANGED from the original harness — only the
+ * execution mechanism changed.
  *
  * These tests exercise the exported PURE functions that decide what the
  * priority glyph / effort badge renders for a given `sprk_priority` /
@@ -29,7 +26,22 @@
  * `DUE_BADGE_STYLE` map, so this task follows the same established
  * per-file convention rather than introducing new shared surface). They
  * are imported here under aliases to avoid a name collision.
+ *
+ * `@spaarke/ui-components` is mocked (module-boundary pattern, mirroring
+ * `FilterPane.test.tsx`) because its barrel (`dist/index.js` ->
+ * `services/index.js`) unconditionally requires `@spaarke/sdap-client`,
+ * which is not built as a dist package in this worktree. The rich
+ * `components/SmartToDo/KanbanCard.tsx` only imports `RecordCardShell` /
+ * `CardIcon` (neither rendered by these pure-function tests) - the mock
+ * keeps the suite hermetic to the `derivePriorityGlyph`/`deriveEffortBadge`
+ * functions under test without pulling in the unrelated SDAP dependency
+ * chain.
  */
+
+jest.mock('@spaarke/ui-components', () => ({
+  RecordCardShell: () => null,
+  CardIcon: () => null,
+}));
 
 import {
   derivePriorityGlyph as deriveWidgetPriorityGlyph,
@@ -41,20 +53,6 @@ import {
 } from '../src/components/SmartToDo/KanbanCard';
 import { priorityChoiceLabel } from '../src/components/SmartToDo/PriorityScoreCard';
 import { effortChoiceLabel } from '../src/components/SmartToDo/EffortScoreCard';
-
-// Lightweight assert helpers — kept dependency-free so these compile cleanly
-// even before Jest is wired into this peer package.
-function assert(cond: boolean, msg: string): void {
-  if (!cond) {
-    // eslint-disable-next-line no-console
-    console.error(`[priorityEffortCardUi.test] FAIL: ${msg}`);
-    throw new Error(msg);
-  }
-}
-
-function assertEqual<T>(actual: T, expected: T, msg: string): void {
-  assert(actual === expected, `${msg} (expected ${String(expected)}, got ${String(actual)})`);
-}
 
 // ---------------------------------------------------------------------------
 // sprk_priority (Urgent=100000000, High=100000001, Medium=100000002,
@@ -68,23 +66,29 @@ const PRIORITY_CASES: Array<{ value: number; label: string }> = [
   { value: 100000003, label: 'Low' },
 ];
 
-for (const { value, label } of PRIORITY_CASES) {
-  const widget = deriveWidgetPriorityGlyph(value);
-  assert(widget !== undefined, `widget KanbanCard priority glyph should render for sprk_priority=${value}`);
-  assertEqual(widget?.label, label, `widget KanbanCard priority glyph label for sprk_priority=${value}`);
-  assert(typeof widget?.color === 'string' && widget.color.length > 0, `widget KanbanCard priority glyph colour is a non-empty token string for sprk_priority=${value}`);
+describe('priority glyph + PriorityScoreCard label — sprk_priority value mapping (FR-02/FR-03 UI)', () => {
+  it.each(PRIORITY_CASES)(
+    'renders label "$label" for sprk_priority=$value on the widget KanbanCard, the rich KanbanCard, and PriorityScoreCard',
+    ({ value, label }) => {
+      const widget = deriveWidgetPriorityGlyph(value);
+      expect(widget).not.toBeUndefined();
+      expect(widget?.label).toBe(label);
+      expect(typeof widget?.color).toBe('string');
+      expect(widget!.color.length).toBeGreaterThan(0);
 
-  const rich = deriveRichPriorityGlyph(value);
-  assert(rich !== undefined, `rich KanbanCard priority glyph should render for sprk_priority=${value}`);
-  assertEqual(rich?.label, label, `rich KanbanCard priority glyph label for sprk_priority=${value}`);
+      const rich = deriveRichPriorityGlyph(value);
+      expect(rich).not.toBeUndefined();
+      expect(rich?.label).toBe(label);
 
-  assertEqual(priorityChoiceLabel(value), label, `PriorityScoreCard choice-badge label for sprk_priority=${value}`);
-}
+      expect(priorityChoiceLabel(value)).toBe(label);
+    },
+  );
 
-// Each of the 4 priority values must resolve to a visually distinct colour
-// on the widget card (acceptance criterion: "distinctly colored").
-const distinctPriorityColors = new Set(PRIORITY_CASES.map(({ value }) => deriveWidgetPriorityGlyph(value)?.color));
-assertEqual(distinctPriorityColors.size, PRIORITY_CASES.length, 'all 4 sprk_priority values map to distinct glyph colours (widget card)');
+  it('all 4 sprk_priority values map to distinct glyph colours (widget card) — acceptance: "distinctly colored"', () => {
+    const distinctPriorityColors = new Set(PRIORITY_CASES.map(({ value }) => deriveWidgetPriorityGlyph(value)?.color));
+    expect(distinctPriorityColors.size).toBe(PRIORITY_CASES.length);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // sprk_effort (None=100000000, Very High=100000001, High=100000002,
@@ -99,46 +103,51 @@ const EFFORT_CASES: Array<{ value: number; label: string }> = [
   { value: 100000004, label: 'Low' },
 ];
 
-for (const { value, label } of EFFORT_CASES) {
-  const widget = deriveWidgetEffortBadge(value);
-  assert(widget !== undefined, `widget KanbanCard effort badge should render for sprk_effort=${value}`);
-  assertEqual(widget?.label, label, `widget KanbanCard effort badge label for sprk_effort=${value}`);
-  assert(
-    typeof widget?.style.backgroundColor === 'string' && typeof widget.style.color === 'string',
-    `widget KanbanCard effort badge has both a background and foreground token for sprk_effort=${value}`
+describe('effort badge + EffortScoreCard label — sprk_effort value mapping (FR-02/FR-03 UI)', () => {
+  it.each(EFFORT_CASES)(
+    'renders label "$label" for sprk_effort=$value on the widget KanbanCard, the rich KanbanCard, and EffortScoreCard',
+    ({ value, label }) => {
+      const widget = deriveWidgetEffortBadge(value);
+      expect(widget).not.toBeUndefined();
+      expect(widget?.label).toBe(label);
+      expect(typeof widget?.style.backgroundColor).toBe('string');
+      expect(typeof widget?.style.color).toBe('string');
+
+      const rich = deriveRichEffortBadge(value);
+      expect(rich).not.toBeUndefined();
+      expect(rich?.label).toBe(label);
+
+      expect(effortChoiceLabel(value)).toBe(label);
+    },
   );
 
-  const rich = deriveRichEffortBadge(value);
-  assert(rich !== undefined, `rich KanbanCard effort badge should render for sprk_effort=${value}`);
-  assertEqual(rich?.label, label, `rich KanbanCard effort badge label for sprk_effort=${value}`);
-
-  assertEqual(effortChoiceLabel(value), label, `EffortScoreCard choice-badge label for sprk_effort=${value}`);
-}
-
-// Each of the 5 effort values must resolve to a visually distinct
-// background/foreground pair on the widget card.
-const distinctEffortColors = new Set(
-  EFFORT_CASES.map(({ value }) => {
-    const badge = deriveWidgetEffortBadge(value);
-    return `${badge?.style.backgroundColor}|${badge?.style.color}`;
-  })
-);
-assertEqual(distinctEffortColors.size, EFFORT_CASES.length, 'all 5 sprk_effort values map to distinct badge tones (widget card)');
+  it('all 5 sprk_effort values map to distinct badge tones (widget card)', () => {
+    const distinctEffortColors = new Set(
+      EFFORT_CASES.map(({ value }) => {
+        const badge = deriveWidgetEffortBadge(value);
+        return `${badge?.style.backgroundColor}|${badge?.style.color}`;
+      }),
+    );
+    expect(distinctEffortColors.size).toBe(EFFORT_CASES.length);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Unset (null/undefined) and out-of-range values — neutral no-op, never a
 // crash, never a misleading default colour (acceptance criterion 3).
 // ---------------------------------------------------------------------------
 
-for (const value of [null, undefined, 999999999]) {
-  assertEqual(deriveWidgetPriorityGlyph(value), undefined, `widget KanbanCard priority glyph is a no-op for ${String(value)}`);
-  assertEqual(deriveRichPriorityGlyph(value), undefined, `rich KanbanCard priority glyph is a no-op for ${String(value)}`);
-  assertEqual(priorityChoiceLabel(value), undefined, `PriorityScoreCard choice-badge label is a no-op for ${String(value)}`);
+describe('unset/out-of-range values — neutral no-op across all 6 lookup functions', () => {
+  it.each([null, undefined, 999999999])(
+    'is a no-op for %s — priority glyph, effort badge, and both score-card labels all return undefined, never throw',
+    (value) => {
+      expect(deriveWidgetPriorityGlyph(value)).toBeUndefined();
+      expect(deriveRichPriorityGlyph(value)).toBeUndefined();
+      expect(priorityChoiceLabel(value)).toBeUndefined();
 
-  assertEqual(deriveWidgetEffortBadge(value), undefined, `widget KanbanCard effort badge is a no-op for ${String(value)}`);
-  assertEqual(deriveRichEffortBadge(value), undefined, `rich KanbanCard effort badge is a no-op for ${String(value)}`);
-  assertEqual(effortChoiceLabel(value), undefined, `EffortScoreCard choice-badge label is a no-op for ${String(value)}`);
-}
-
-// eslint-disable-next-line no-console
-console.log('[priorityEffortCardUi.test] All assertions passed.');
+      expect(deriveWidgetEffortBadge(value)).toBeUndefined();
+      expect(deriveRichEffortBadge(value)).toBeUndefined();
+      expect(effortChoiceLabel(value)).toBeUndefined();
+    },
+  );
+});

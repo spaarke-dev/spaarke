@@ -1,17 +1,18 @@
 /**
  * useKanbanColumns — Completed-item bucketing coverage (FR-07 / F-2 Show-
- * Completed toggle, smart-todo-r5 task 022).
+ * Completed toggle, smart-todo-r5 task 022) + subtle-coloring token mapping
+ * (FR-08 / U-1+F-1, task 023).
  *
- * Jest-less pure-function smoke tests, matching this package's existing
- * `SmartTodoWidget.test.tsx` pattern — `@spaarke/smart-todo-components`
- * ships type-check only (`build: tsc --noEmit`); there is no Jest config
- * in this peer package yet (wiring it is tracked separately as
- * smart-todo-r5 task 040). These tests exercise the exported pure function
- * `bucketTodoItems` directly (no React renderer needed — the hook itself
- * wraps this pure function in `useMemo`/`useState`, so testing the pure
- * function covers the bucketing behavior under test here) so they compile
- * cleanly today and can be picked up as-is (or trivially wrapped in
- * `describe`/`it`) once Jest is wired into this package.
+ * smart-todo-r5 task 040: converted from this file's original Jest-less
+ * `assert()`-based smoke-test harness (no Jest runner existed in this
+ * package before task 040 wired one — see `jest.config.cjs`) to real Jest
+ * `describe`/`it`/`expect`. The assertions below are UNCHANGED from the
+ * original harness — only the execution mechanism changed.
+ *
+ * These tests exercise the exported pure function `bucketTodoItems` directly
+ * (no React renderer needed — the hook itself wraps this pure function in
+ * `useMemo`/`useState`, so testing the pure function covers the bucketing
+ * behavior under test here).
  *
  * Scope: this file verifies the KANBAN RENDER-SIDE guarantee that FR-07
  * requires — that a Completed (statuscode=2) item, once the query layer
@@ -28,16 +29,6 @@
 import { tokens } from '@fluentui/react-components';
 import { bucketTodoItems } from '../src/hooks/useKanbanColumns';
 import type { IKanbanCardTodo } from '../src/types/kanban';
-
-// Lightweight assert helpers — kept dependency-free so these compile cleanly
-// even before Jest is wired into this peer package.
-function assert(cond: boolean, msg: string): void {
-  if (!cond) {
-    // eslint-disable-next-line no-console
-    console.error(`[useKanbanColumns.test] FAIL: ${msg}`);
-    throw new Error(msg);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Fixture helpers
@@ -65,27 +56,23 @@ function makeTodo(overrides: Partial<IKanbanCardTodo> & { sprk_todoid: string })
 // exactly as before (3 columns, no unexpected 4th bucket, counts preserved).
 // ---------------------------------------------------------------------------
 
-export function runDefaultHiddenRegressionTest(): void {
-  const items: IKanbanCardTodo[] = [
-    makeTodo({ sprk_todoid: 't1', statuscode: 1, sprk_duedate: isoDaysFromNow(0) }), // Open, due today
-    makeTodo({ sprk_todoid: 't2', statuscode: 659490001, sprk_duedate: isoDaysFromNow(1) }), // In Progress, due tomorrow
-  ];
+describe('bucketTodoItems — default-hidden regression (no Completed items in the set)', () => {
+  it('buckets a mixed Open/InProgress set into exactly Today/Tomorrow/Future with no item dropped', () => {
+    const items: IKanbanCardTodo[] = [
+      makeTodo({ sprk_todoid: 't1', statuscode: 1, sprk_duedate: isoDaysFromNow(0) }), // Open, due today
+      makeTodo({ sprk_todoid: 't2', statuscode: 659490001, sprk_duedate: isoDaysFromNow(1) }), // In Progress, due tomorrow
+    ];
 
-  const columns = bucketTodoItems(items);
+    const columns = bucketTodoItems(items);
 
-  assert(columns.length === 3, 'bucketTodoItems must always return exactly 3 columns (Today/Tomorrow/Future)');
-  assert(
-    columns.map(c => c.id).join(',') === 'Today,Tomorrow,Future',
-    'Column ids/order must be Today, Tomorrow, Future'
-  );
-  const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
-  assert(totalItems === 2, 'All non-Completed items must be present — no item silently dropped');
-  assert(columns[0].items.some(i => i.sprk_todoid === 't1'), 'Open item due today must land in Today');
-  assert(columns[1].items.some(i => i.sprk_todoid === 't2'), 'In Progress item due tomorrow must land in Tomorrow');
-
-  // eslint-disable-next-line no-console
-  console.info('[useKanbanColumns.test] Default-hidden regression test passed.');
-}
+    expect(columns).toHaveLength(3);
+    expect(columns.map((c) => c.id)).toEqual(['Today', 'Tomorrow', 'Future']);
+    const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
+    expect(totalItems).toBe(2);
+    expect(columns[0].items.some((i) => i.sprk_todoid === 't1')).toBe(true);
+    expect(columns[1].items.some((i) => i.sprk_todoid === 't2')).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Test 2: a Completed (statuscode=2) item flows through the SAME score/due-
@@ -93,77 +80,57 @@ export function runDefaultHiddenRegressionTest(): void {
 // column. This is the core FR-07 render-side guarantee.
 // ---------------------------------------------------------------------------
 
-export function runCompletedItemBucketingTest(): void {
-  const items: IKanbanCardTodo[] = [
-    makeTodo({ sprk_todoid: 'open-today', statuscode: 1, sprk_duedate: isoDaysFromNow(0) }),
-    makeTodo({ sprk_todoid: 'completed-today', statuscode: 2, sprk_duedate: isoDaysFromNow(-1) }), // overdue → Today
-    makeTodo({ sprk_todoid: 'completed-future', statuscode: 2, sprk_duedate: isoDaysFromNow(10) }),
-    makeTodo({ sprk_todoid: 'completed-undated', statuscode: 2 }), // no due date → Future
-  ];
+describe('bucketTodoItems — Completed-item bucketing (FR-07 core guarantee)', () => {
+  it('buckets Completed items into their score/due-date column exactly like any other item, with no 4th column introduced', () => {
+    const items: IKanbanCardTodo[] = [
+      makeTodo({ sprk_todoid: 'open-today', statuscode: 1, sprk_duedate: isoDaysFromNow(0) }),
+      makeTodo({ sprk_todoid: 'completed-today', statuscode: 2, sprk_duedate: isoDaysFromNow(-1) }), // overdue → Today
+      makeTodo({ sprk_todoid: 'completed-future', statuscode: 2, sprk_duedate: isoDaysFromNow(10) }),
+      makeTodo({ sprk_todoid: 'completed-undated', statuscode: 2 }), // no due date → Future
+    ];
 
-  const columns = bucketTodoItems(items);
+    const columns = bucketTodoItems(items);
 
-  assert(columns.length === 3, 'Including Completed items must NOT introduce a 4th column');
+    expect(columns).toHaveLength(3);
 
-  const today = columns.find(c => c.id === 'Today')!;
-  const future = columns.find(c => c.id === 'Future')!;
+    const today = columns.find((c) => c.id === 'Today')!;
+    const future = columns.find((c) => c.id === 'Future')!;
 
-  assert(
-    today.items.some(i => i.sprk_todoid === 'completed-today'),
-    'Completed item with an overdue due-date must bucket into Today, same as a non-completed item would'
-  );
-  assert(
-    today.items.some(i => i.sprk_todoid === 'open-today'),
-    'Completed item bucketing into Today must NOT displace a non-completed Today item (mixed-column rendering)'
-  );
-  assert(
-    future.items.some(i => i.sprk_todoid === 'completed-future'),
-    'Completed item due far out must bucket into Future, same as a non-completed item would'
-  );
-  assert(
-    future.items.some(i => i.sprk_todoid === 'completed-undated'),
-    'Completed item with no due date must default to Future, same as a non-completed item would'
-  );
+    expect(today.items.some((i) => i.sprk_todoid === 'completed-today')).toBe(true);
+    expect(today.items.some((i) => i.sprk_todoid === 'open-today')).toBe(true);
+    expect(future.items.some((i) => i.sprk_todoid === 'completed-future')).toBe(true);
+    expect(future.items.some((i) => i.sprk_todoid === 'completed-undated')).toBe(true);
 
-  const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
-  assert(totalItems === items.length, 'Every Completed item must be present in exactly one column — none dropped');
-
-  // eslint-disable-next-line no-console
-  console.info('[useKanbanColumns.test] Completed-item bucketing test passed.');
-}
+    const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
+    expect(totalItems).toBe(items.length);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Test 3: a pinned Completed item still respects its pinned column override
 // (pin behavior is uniform across statuscode — no special-case guard).
 // ---------------------------------------------------------------------------
 
-export function runCompletedPinnedItemTest(): void {
-  const items: IKanbanCardTodo[] = [
-    makeTodo({
-      sprk_todoid: 'completed-pinned-future-column',
-      statuscode: 2,
-      sprk_duedate: isoDaysFromNow(0), // would compute to Today by date...
-      sprk_todopinned: true,
-      sprk_todocolumn: 100000002, // ...but pinned explicitly to Future
-    }),
-  ];
+describe('bucketTodoItems — pinned Completed item', () => {
+  it('honors the pinned column override for a Completed item exactly like a non-completed item', () => {
+    const items: IKanbanCardTodo[] = [
+      makeTodo({
+        sprk_todoid: 'completed-pinned-future-column',
+        statuscode: 2,
+        sprk_duedate: isoDaysFromNow(0), // would compute to Today by date...
+        sprk_todopinned: true,
+        sprk_todocolumn: 100000002, // ...but pinned explicitly to Future
+      }),
+    ];
 
-  const columns = bucketTodoItems(items);
-  const future = columns.find(c => c.id === 'Future')!;
-  const today = columns.find(c => c.id === 'Today')!;
+    const columns = bucketTodoItems(items);
+    const future = columns.find((c) => c.id === 'Future')!;
+    const today = columns.find((c) => c.id === 'Today')!;
 
-  assert(
-    future.items.some(i => i.sprk_todoid === 'completed-pinned-future-column'),
-    'Pinned Completed item must honor its pinned column override, same as a non-completed item would'
-  );
-  assert(
-    !today.items.some(i => i.sprk_todoid === 'completed-pinned-future-column'),
-    'Pinned Completed item must NOT also appear in its date-computed column'
-  );
-
-  // eslint-disable-next-line no-console
-  console.info('[useKanbanColumns.test] Completed-pinned-item test passed.');
-}
+    expect(future.items.some((i) => i.sprk_todoid === 'completed-pinned-future-column')).toBe(true);
+    expect(today.items.some((i) => i.sprk_todoid === 'completed-pinned-future-column')).toBe(false);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Test 4: negative regression — a Dismissed-shaped item (statuscode
@@ -175,23 +142,19 @@ export function runCompletedPinnedItemTest(): void {
 // change (it doesn't touch statuscode handling in this file at all).
 // ---------------------------------------------------------------------------
 
-export function runDismissedShapeUnaffectedTest(): void {
-  const items: IKanbanCardTodo[] = [
-    makeTodo({ sprk_todoid: 'dismissed-1', statuscode: 659490002, sprk_duedate: isoDaysFromNow(1) }),
-  ];
+describe('bucketTodoItems — Dismissed-shape unaffected (negative regression)', () => {
+  it('applies zero statuscode filtering — a Dismissed-shaped item still buckets by score/due-date', () => {
+    const items: IKanbanCardTodo[] = [
+      makeTodo({ sprk_todoid: 'dismissed-1', statuscode: 659490002, sprk_duedate: isoDaysFromNow(1) }),
+    ];
 
-  const columns = bucketTodoItems(items);
-  const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
+    const columns = bucketTodoItems(items);
+    const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
 
-  assert(totalItems === 1, 'bucketTodoItems applies no statuscode filtering — a Dismissed-shaped item still buckets');
-  assert(
-    columns.find(c => c.id === 'Tomorrow')!.items.some(i => i.sprk_todoid === 'dismissed-1'),
-    'Dismissed-shaped item due tomorrow must bucket into Tomorrow — confirms zero statuscode special-casing'
-  );
-
-  // eslint-disable-next-line no-console
-  console.info('[useKanbanColumns.test] Dismissed-shape-unaffected test passed.');
-}
+    expect(totalItems).toBe(1);
+    expect(columns.find((c) => c.id === 'Tomorrow')!.items.some((i) => i.sprk_todoid === 'dismissed-1')).toBe(true);
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Test 5: subtle channel coloring (smart-todo-r5 task 023, FR-08 / U-1 + F-1,
@@ -205,78 +168,42 @@ export function runDismissedShapeUnaffectedTest(): void {
 // (`countTextColor`) staying in place.
 // ---------------------------------------------------------------------------
 
-export function runSubtleColoringTokenMappingTest(): void {
-  const columns = bucketTodoItems([]);
-  const today = columns.find(c => c.id === 'Today')!;
-  const tomorrow = columns.find(c => c.id === 'Tomorrow')!;
-  const future = columns.find(c => c.id === 'Future')!;
+describe('bucketTodoItems — subtle-coloring token mapping (FR-08 data contract)', () => {
+  it('preserves the semantic red/yellow/green token mapping and the yellow-contrast countTextColor fix, with zero hex/rgb literals', () => {
+    const columns = bucketTodoItems([]);
+    const today = columns.find((c) => c.id === 'Today')!;
+    const tomorrow = columns.find((c) => c.id === 'Tomorrow')!;
+    const future = columns.find((c) => c.id === 'Future')!;
 
-  // Semantic mapping preserved: red=Today, yellow=Tomorrow, green=Future.
-  assert(today.accentColor === tokens.colorPaletteRedBorder2, 'Today accentColor must remain the red Border2 token');
-  assert(
-    tomorrow.accentColor === tokens.colorPaletteYellowBorder2,
-    'Tomorrow accentColor must remain the yellow Border2 token'
-  );
-  assert(
-    future.accentColor === tokens.colorPaletteGreenBorder2,
-    'Future accentColor must remain the green Border2 token'
-  );
+    // Semantic mapping preserved: red=Today, yellow=Tomorrow, green=Future.
+    expect(today.accentColor).toBe(tokens.colorPaletteRedBorder2);
+    expect(tomorrow.accentColor).toBe(tokens.colorPaletteYellowBorder2);
+    expect(future.accentColor).toBe(tokens.colorPaletteGreenBorder2);
 
-  // tintColor still sourced from the lightest (`Background1`) semantic token
-  // tier per column — KanbanBoard.tsx now scopes its application to the
-  // column header strip only (not the full column body), but the token
-  // VALUES this hook emits are unchanged (ADR-021: semantic tokens only).
-  assert(
-    today.tintColor === tokens.colorPaletteRedBackground1,
-    'Today tintColor must remain the red Background1 token'
-  );
-  assert(
-    tomorrow.tintColor === tokens.colorPaletteYellowBackground1,
-    'Tomorrow tintColor must remain the yellow Background1 token'
-  );
-  assert(
-    future.tintColor === tokens.colorPaletteGreenBackground1,
-    'Future tintColor must remain the green Background1 token'
-  );
+    // tintColor still sourced from the lightest (`Background1`) semantic token
+    // tier per column — KanbanBoard.tsx now scopes its application to the
+    // column header strip only (not the full column body), but the token
+    // VALUES this hook emits are unchanged (ADR-021: semantic tokens only).
+    expect(today.tintColor).toBe(tokens.colorPaletteRedBackground1);
+    expect(tomorrow.tintColor).toBe(tokens.colorPaletteYellowBackground1);
+    expect(future.tintColor).toBe(tokens.colorPaletteGreenBackground1);
 
-  // F-1 yellow-contrast fix: the Tomorrow column's count pill still forces a
-  // dark neutral foreground (WCAG-safe against the saturated yellow
-  // Border2/accentColor pill background) — Today/Future keep the default
-  // (colorNeutralForegroundOnBrand, applied by KanbanBoard.tsx when
-  // `countTextColor` is undefined).
-  assert(
-    tomorrow.countTextColor === tokens.colorNeutralForeground1,
-    'Tomorrow countTextColor must stay pinned to colorNeutralForeground1 (white-on-yellow fix)'
-  );
-  assert(today.countTextColor === undefined, 'Today must not set a countTextColor override (red pill keeps default)');
-  assert(
-    future.countTextColor === undefined,
-    'Future must not set a countTextColor override (green pill keeps default)'
-  );
+    // F-1 yellow-contrast fix: the Tomorrow column's count pill still forces a
+    // dark neutral foreground (WCAG-safe against the saturated yellow
+    // Border2/accentColor pill background) — Today/Future keep the default
+    // (colorNeutralForegroundOnBrand, applied by KanbanBoard.tsx when
+    // `countTextColor` is undefined).
+    expect(tomorrow.countTextColor).toBe(tokens.colorNeutralForeground1);
+    expect(today.countTextColor).toBeUndefined();
+    expect(future.countTextColor).toBeUndefined();
 
-  // No hex/rgb literals anywhere in the emitted values (ADR-021) — every
-  // token resolves to a Fluent v9 CSS custom-property reference at runtime
-  // (e.g. "var(--colorPaletteRedBorder2)"), never a literal color.
-  const hexOrRgbPattern = /^#|^rgb/i;
-  for (const col of [today, tomorrow, future]) {
-    assert(
-      !hexOrRgbPattern.test(col.accentColor ?? ''),
-      `${col.id} accentColor must not be a hex/rgb literal`
-    );
-    assert(!hexOrRgbPattern.test(col.tintColor ?? ''), `${col.id} tintColor must not be a hex/rgb literal`);
-  }
-
-  // eslint-disable-next-line no-console
-  console.info('[useKanbanColumns.test] Subtle-coloring token-mapping test passed.');
-}
-
-// Module-eval auto-run is gated to a Node.js env so test consumers can import
-// this file without side effects. When the peer package gets Jest wired,
-// replace this gate with `describe`/`it` blocks.
-if (typeof process !== 'undefined' && process.env?.USE_KANBAN_COLUMNS_SMOKE === '1') {
-  runDefaultHiddenRegressionTest();
-  runCompletedItemBucketingTest();
-  runCompletedPinnedItemTest();
-  runDismissedShapeUnaffectedTest();
-  runSubtleColoringTokenMappingTest();
-}
+    // No hex/rgb literals anywhere in the emitted values (ADR-021) — every
+    // token resolves to a Fluent v9 CSS custom-property reference at runtime
+    // (e.g. "var(--colorPaletteRedBorder2)"), never a literal color.
+    const hexOrRgbPattern = /^#|^rgb/i;
+    for (const col of [today, tomorrow, future]) {
+      expect(hexOrRgbPattern.test(col.accentColor ?? '')).toBe(false);
+      expect(hexOrRgbPattern.test(col.tintColor ?? '')).toBe(false);
+    }
+  });
+});
