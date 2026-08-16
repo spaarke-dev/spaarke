@@ -4,7 +4,7 @@
     <title>Migrate SmartTodo preview/browse consumer to BrowseModal, or confirm already-resolved (FR-15)</title>
     <phase>4: Main-form modal</phase>
     <gate>003 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Touches modal composition (ADR-050 compliance surface); tags include fluent-ui/modal/frontend; if a live consumer is found, it is a production UI migration. CLAUDE.md §8 FULL trigger.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -113,7 +113,9 @@
     <criterion testable="true">All unit tests pass; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec ref: FR-15 (FU-2). This task explicitly complies with ADR-050 (uses BrowseModal, adds no forked chrome) — it is NOT part of the ADR-050 Path A exception that governs 030-033. Pre-authoring research (grep across src/) found zero live RecordNavigationModalShell usage in SmartTodo/LegalWorkspace-SmartToDo code as of 2026-08-15 — re-verify at execution time since the hoist tasks (001-003) may move files.</notes>
+  <notes>Spec ref: FR-15 (FU-2). This task explicitly complies with ADR-050 (uses BrowseModal, adds no forked chrome) — it is NOT part of the ADR-050 Path A exception that governs 030-033. Pre-authoring research (grep across src/) found zero live RecordNavigationModalShell usage in SmartTodo/LegalWorkspace-SmartToDo code as of 2026-08-15 — re-verify at execution time since the hoist tasks (001-003) may move files.
+
+**Execution outcome (2026-08-16, path taken: ALREADY-RESOLVED — no code change).** Re-verified post-hoist (task 003 complete) via exhaustive grep across src/solutions/SmartTodo, src/solutions/LegalWorkspace, and src/client/shared/Spaarke.SmartTodo.Components: zero live RecordNavigationModalShell imports/JSX renders. Two textual hits found (ToolbarActions.ts docblock, SmartTodo/README.md) are stale comments describing an R4-era plan retired 2026-07-01 per SmartTodoApp.tsx's own R2 FR-13 comment — the live OPEN_TODOS_EVENT/useLaunchContext open paths call `openSprkTodoAsLayout1` (OOB navigateTo, ADR-050 Path A exception), not RecordNavigationModalShell. No chromeMode prop exists anywhere in the repo (verified). No unrelated consumer (RichFilePreviewDialog, ReconciliationBrowseShell, QuickStartModal) was touched. Full grep evidence + conclusion: projects/smart-todo-r5/notes/fr-15-verification.md. No src/** edits made; TASK-INDEX.md update deferred to main session per this wave's scope boundary (concurrent-edit avoidance with sibling agents editing src/solutions/SmartTodo/** this wave).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
