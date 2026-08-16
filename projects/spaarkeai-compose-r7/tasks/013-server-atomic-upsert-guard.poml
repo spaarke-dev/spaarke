@@ -4,7 +4,7 @@
     <title>Atomic server upsert on sprk_graphitemid_uk in PromoteIfEphemeralAsync (FR-07d)</title>
     <phase>1 Save-Identity Fix (UC-8)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs data-write path; data-integrity fix closing a read-then-create race.</rigor-reason>
     <model-tier>opus</model-tier>

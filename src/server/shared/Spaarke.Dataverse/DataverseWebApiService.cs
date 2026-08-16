@@ -2644,6 +2644,13 @@ public class DataverseWebApiService : IDataverseService
     // Stubs - Use DataverseServiceClientImpl for these operations
     // ========================================
 
+    public Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default)
+    {
+        throw new NotImplementedException(
+            "UpsertAsync is implemented in DataverseServiceClientImpl (Microsoft.Xrm.Sdk UpsertRequest). " +
+            "The BFF runtime always resolves the ServiceClient implementation.");
+    }
+
     public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default)
     {
         throw new NotImplementedException(

@@ -96,9 +96,9 @@ public sealed class ComposeContentDedupTests
     {
         ArrangeNoExistingRow();
         Entity? created = null;
-        _dataverse.Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => created = e)
-            .ReturnsAsync(Guid.NewGuid());
+            .ReturnsAsync((Guid.NewGuid(), true)); // task 013 (FR-07d): promote writes via atomic upsert
         _dedup.Setup(d => d.ResolveContentIdentityAsync(DriveId, SpeItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(("hashNew", (Guid?)null));
 
@@ -118,9 +118,9 @@ public sealed class ComposeContentDedupTests
         var newId = Guid.NewGuid();
         ArrangeNoExistingRow();
         Entity? created = null;
-        _dataverse.Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => created = e)
-            .ReturnsAsync(newId);
+            .ReturnsAsync((newId, true)); // task 013 (FR-07d): promote writes via atomic upsert
         _dedup.Setup(d => d.ResolveContentIdentityAsync(DriveId, SpeItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(("hashDup", canonical));
 
@@ -191,9 +191,9 @@ public sealed class ComposeContentDedupTests
     {
         ArrangeNoExistingRow();
         Entity? created = null;
-        _dataverse.Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => created = e)
-            .ReturnsAsync(Guid.NewGuid());
+            .ReturnsAsync((Guid.NewGuid(), true)); // task 013 (FR-07d): promote writes via atomic upsert
 
         var result = await CreateSut(detector: null).PromoteIfEphemeralAsync(Request(), HttpCtx());
 
@@ -207,8 +207,8 @@ public sealed class ComposeContentDedupTests
     public async Task CreateOnSave_DedupThrows_IsNonFatal_StillCreates()
     {
         ArrangeNoExistingRow();
-        _dataverse.Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid.NewGuid(), true)); // task 013 (FR-07d): promote writes via atomic upsert
         _dedup.Setup(d => d.ResolveContentIdentityAsync(DriveId, SpeItemId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("graph blip"));
 
@@ -216,6 +216,6 @@ public sealed class ComposeContentDedupTests
 
         var result = await act.Should().NotThrowAsync("dedup is best-effort/non-fatal (NFR-04) — a failure must not fail the save");
         result.Subject!.WasCreated.Should().BeTrue();
-        _dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
+        _dataverse.Verify(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 }

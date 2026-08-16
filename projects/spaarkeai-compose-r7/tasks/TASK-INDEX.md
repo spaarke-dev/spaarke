@@ -15,7 +15,7 @@
 | 010 | Stable, non-rotating logical document id (persisted) | 1 | ✅ | FULL | **opus** | high | ❌ spine | 001 | FR-07b |
 | 011 | Always carry dedup identity on id-less mount | 1 | ✅ | FULL | sonnet | **xhigh** | ❌ spine | 010 | FR-07c |
 | 012 | Save As uniquifies filename (real fork) | 1 | ✅ | FULL | sonnet | **xhigh** | ❌ spine | 010 | FR-07a |
-| 013 | Atomic server upsert on `sprk_graphitemid_uk` | 1 | 🔲 | FULL | **opus** | high | ❌ spine/BFF | 010 | FR-07d |
+| 013 | Atomic server upsert on `sprk_graphitemid_uk` | 1 | ✅ | FULL | **opus** | high | ❌ spine/BFF | 010 | FR-07d |
 | 020 | Save / Save As dropdown + Auto Save toggle | 2 | 🔲 | FULL | sonnet | high | ❌ spine | 012 | FR-01 |
 | 030 | Name / file-name modal on first save + Save As | 3 | 🔲 | FULL | sonnet | high | ❌ spine/BFF | 001 | FR-02 |
 | 040 | Client-only draft store + dirty autosave + recovery | 4 | 🔲 | FULL | sonnet | high | ❌ spine | 010, 030 | FR-03 |

@@ -2711,26 +2711,36 @@ public class ComposeService : IComposeService
             }
         }
 
+        // FR-07(d) (task 013): atomic UPSERT on the sprk_graphitemid_uk alternate key — replaces the
+        // read-then-CreateAsync sequence so two concurrent first-saves of the SAME minted SPE item can
+        // never each insert a row (Dataverse resolves the target server-side; the second UPDATES the
+        // first's row → exactly one sprk_document, no TOCTOU window). The key uses the RAW DocumentSpeId
+        // string, identical to the read above (TryFindDocumentByGraphItemIdAsync): sprk_graphitemid is an
+        // opaque SPE drive-item id (a STRING, not a GUID), so the match is exact-string and ADR-044 GUID
+        // canonicalization does NOT apply (verified — the alt-key lookup keys on the raw string).
+        entity.KeyAttributes[GraphItemIdAttribute] = request.DocumentSpeId;
+
         Guid newId;
+        bool rowCreatedThisCall;
         try
         {
-            newId = await _dataverse.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
+            (newId, rowCreatedThisCall) = await _dataverse.UpsertAsync(entity, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
-                "Compose promote: created sprk_document {DocumentRecordId} for driveItem={DocumentSpeId}",
-                newId, request.DocumentSpeId);
+                "Compose promote: upserted sprk_document {DocumentRecordId} for driveItem={DocumentSpeId} (created={Created})",
+                newId, request.DocumentSpeId, rowCreatedThisCall);
         }
         catch (InvalidOperationException ex)
         {
-            // Narrow race — a concurrent Save promoted first. Re-resolve by BOTH keys:
-            //   • sprk_graphitemid_uk — the classic case (two saves of the SAME minted SPE item), OR
-            //   • G7 (task 022) sprk_composetransientkey_uk — two truly-concurrent FIRST saves of the same
-            //     transient draft each minted their OWN SPE item (different graphitemid) but carry the SAME
-            //     transient key, so the loser's create fails the transient-key unique constraint. Re-resolving
-            //     by the transient key lands the loser on the winner's record → ONE record, no duplicate
-            //     (the loser's minted item is orphaned, an acceptable rare edge — never a duplicate ROW).
+            // The graphItemId upsert is atomic, so the classic same-SPE-item race is already closed. This
+            // catch now handles the SECONDARY race the upsert CANNOT: two truly-concurrent FIRST saves of
+            // the same transient draft each mint their OWN SPE item (DIFFERENT graphitemid) but carry the
+            // SAME transient key — the loser's upsert-create then fails the sprk_composetransientkey_uk
+            // unique constraint. Re-resolve by graphItemId (defensive) then transientKey to land the loser
+            // on the winner's record → ONE record (the loser's minted item is orphaned, an acceptable rare
+            // edge — never a duplicate ROW).
             _logger.LogWarning(ex,
-                "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key (graphItemId, then transientKey).",
+                "Compose promote: upsert failed for driveItem={DocumentSpeId} — likely a concurrent same-transientKey first-save. Re-resolving via alternate key (graphItemId, then transientKey).",
                 request.DocumentSpeId);
 
             Guid? raceWinnerId = (await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
@@ -2749,6 +2759,7 @@ public class ComposeService : IComposeService
             }
 
             newId = raceWinnerId.Value;
+            rowCreatedThisCall = false; // the winner created the row; this call resolved onto it
         }
 
         // 3) Rebind the ChatSession DocumentId from SPE id → new sprk_documentid (FR-07).
@@ -2770,7 +2781,9 @@ public class ComposeService : IComposeService
             DocumentSpeId = request.DocumentSpeId,
             SessionId = request.SessionId,
             DocumentRecordId = newId,
-            WasCreated = true,
+            // FR-07(d) (task 013): honest create-vs-update signal from the atomic upsert (false when a
+            // concurrent winner created the row and this call updated/resolved onto it).
+            WasCreated = rowCreatedThisCall,
         };
     }
 

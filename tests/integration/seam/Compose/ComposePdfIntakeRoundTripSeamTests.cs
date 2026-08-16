@@ -203,9 +203,9 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
             .ReturnsAsync(sourceEntity);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
