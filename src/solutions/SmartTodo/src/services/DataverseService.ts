@@ -35,6 +35,9 @@ import {
 // DEF-11 Part 2 (2026-07-04, record-header-and-notepad-r1): openTodos launch
 // filter (R4 FR-34 consumer wiring).
 import type { ITodoRegardingFilter } from './queryHelpers';
+// task 021 (FR-06 / F-3) — Filter pane predicate, threaded from
+// `SmartTodoApp.tsx` → `useTodoItems` → here → `buildTodoItemsQuery`.
+import type { ITodoFilterState } from './queryHelpers';
 
 // ---------------------------------------------------------------------------
 // statuscode + statecode constants for sprk_todo (per task 009 customization)
@@ -437,12 +440,20 @@ export class DataverseService {
    * FR-34 openTodos contract (e.g., from MatterHeader's checkmark), scope
    * results to the specified parent record. See `buildTodoItemsQuery` for the
    * exact OData shape.
+   *
+   * task 021 (FR-06 / F-3): optional `filter` — the Filter pane's predicate
+   * (Priority / Status / Due-date / Assigned-To). When provided, it is
+   * authoritative over the default "assigned to me" + Open/In-Progress query
+   * — see `buildTodoItemsQuery`. When omitted, behavior is unchanged (back-
+   * compat for any caller that doesn't yet pass a filter, e.g. the
+   * `useTodoItems` external-item-added refetch path when no filter is set).
    */
   async getActiveTodos(
     contactId: string,
     regardingFilter?: ITodoRegardingFilter,
+    filter?: ITodoFilterState,
   ): Promise<IResult<ITodo[]>> {
-    const query = buildTodoItemsQuery(contactId, regardingFilter);
+    const query = buildTodoItemsQuery(contactId, regardingFilter, undefined, filter);
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
       return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));

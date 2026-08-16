@@ -50,6 +50,11 @@ import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 // ListView import removed 2026-06-19 per UAT: list view discontinued — kanban only.
 import { Header } from "./components/Header";
+// task 021 (FR-06 / F-3) — Filter pane, mounted against task 020's
+// isFilterPaneOpen/onToggleFilterPane state (below).
+import { FilterPane } from "./components/FilterPane";
+import { DEFAULT_TODO_FILTER } from "./services/queryHelpers";
+import type { ITodoFilterState } from "./services/queryHelpers";
 import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
@@ -221,15 +226,22 @@ function SmartTodoLayout(): React.ReactElement {
 
   // ── task 020 (FR-05 / U-3, 2026-08-16) — Filter pane trigger state ───────
   //
-  // Controlled open/close boolean for the new Filter pill. This task builds
-  // ONLY the trigger + state — task 021 (FR-06) mounts the actual filter
-  // pane content against `isFilterPaneOpen` / `onToggleFilterPane`. No
-  // filter predicate logic is implemented here (would be scope creep into
-  // FR-06 per this task's constraints).
+  // Controlled open/close boolean for the Filter pill.
   const [isFilterPaneOpen, setIsFilterPaneOpen] = React.useState<boolean>(false);
   const handleToggleFilterPane = React.useCallback(() => {
     setIsFilterPaneOpen((v) => !v);
   }, []);
+
+  // ── task 021 (FR-06 / F-3) — Filter pane predicate ───────────────────────
+  //
+  // Owned here (ABOVE the Kanban, per NFR-03 — independent of the CSS-only
+  // orientation swap below) and threaded through to `<SmartToDo>` →
+  // `useTodoItems` → `DataverseService.getActiveTodos` →
+  // `buildTodoItemsQuery`. Default matches FR-06: Status {Open, In
+  // Progress}, everything else unfiltered.
+  const [filterState, setFilterState] = React.useState<ITodoFilterState>(
+    DEFAULT_TODO_FILTER,
+  );
 
   // ── task 020 (FR-05 / U-3, 2026-08-16) — "+ New Task" stub ───────────────
   //
@@ -475,6 +487,16 @@ function SmartTodoLayout(): React.ReactElement {
         onNewTask={handleNewTask}
       />
 
+      {/* ── task 021 (FR-06 / F-3) — Filter pane, anchored to task 020's
+            Filter pill via isFilterPaneOpen. Stays mounted across open/close
+            (visibility toggled via CSS) — see FilterPane.tsx module doc. ── */}
+      <FilterPane
+        isOpen={isFilterPaneOpen}
+        filterState={filterState}
+        onChange={setFilterState}
+        webApi={getWebApi()}
+      />
+
       {/* ── Primary surface — Kanban Board (UAT 2026-06-19: list view removed
             per user feedback; kanban is the sole presentation.) ── */}
       <div className={styles.primaryPanel}>
@@ -486,6 +508,9 @@ function SmartTodoLayout(): React.ReactElement {
           // now a frozen "" constant (see comment near its declaration
           // above) until task 021's filter pane wires a new producer.
           searchQuery={searchQuery}
+          // task 021 (FR-06 / F-3) — Filter pane predicate, threaded to the
+          // Dataverse query (not a client-side post-filter like searchQuery).
+          filter={filterState}
           // R4 task 060 — Card affordances plumbing (FR-25/26/27)
           selectedIds={selectedIds}
           onToggleSelect={handleToggleSelect}

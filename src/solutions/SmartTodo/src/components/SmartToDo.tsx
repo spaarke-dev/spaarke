@@ -84,7 +84,7 @@ import {
   useLaunchContext,
   LAUNCH_ACTION_OPEN_TODOS,
 } from "../hooks/useLaunchContext";
-import type { ITodoRegardingFilter } from "../services/queryHelpers";
+import type { ITodoRegardingFilter, ITodoFilterState } from "../services/queryHelpers";
 // R4 task 101 (W-3, 2026-06-18) — `useKanbanColumns` was hoisted into the
 // `@spaarke/smart-todo-components` peer package so the workspace widget can
 // reuse the same Today/Tomorrow/Future bucketing. The Code Page now imports
@@ -356,6 +356,18 @@ export interface ISmartToDoProps {
    * Back-compat: when omitted or empty string, no filter is applied.
    */
   searchQuery?: string;
+  /**
+   * task 021 (FR-06 / F-3) — Filter pane predicate (Priority / Status /
+   * Due-date / Assigned-To), lifted to `SmartTodoApp.tsx` (same lifting
+   * pattern as `orientation` and `searchQuery` above) and threaded straight
+   * through to the internal `useTodoItems` call so the Dataverse query
+   * itself is scoped — not a client-side post-filter like `searchQuery`.
+   *
+   * Back-compat: when omitted, `useTodoItems` receives `filter: undefined`
+   * and falls back to the pre-task-021 default query (today's behavior —
+   * Status {Open, In Progress}, everything else unfiltered).
+   */
+  filter?: ITodoFilterState;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +389,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onSettingsOpenerReady,
   orientation: orientationProp,
   searchQuery,
+  filter,
 }) => {
   const styles = useStyles();
 
@@ -434,6 +447,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     userId: contactId ?? '00000000-0000-0000-0000-000000000000',
     mockItems,
     regardingFilter,
+    filter,
   });
 
   // R4 task 031 / FR-07 / OD-2 — "Assigned to Me" is the sole filter mode for

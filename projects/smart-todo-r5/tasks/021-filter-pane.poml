@@ -4,7 +4,7 @@
     <title>Filter pane — Priority / Status / Due date / Assigned-To (FR-06 / F-3)</title>
     <phase>3: Top bar + filter + visuals</phase>
     <gate>020 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New .tsx component + modifies query-building .ts across the Code Page data layer (queryHelpers.ts, DataverseService.ts, useTodoItems.ts) — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger); tags include dataverse (Xrm.WebApi typeahead).</rigor-reason>
     <model-tier>sonnet</model-tier>
