@@ -220,11 +220,25 @@ export function bucketTodoItems<T extends IKanbanTodoLike>(
   //   Tomorrow → light yellow tint (tokens.colorPaletteYellowBackground1)
   //   Future   → light green tint  (tokens.colorPaletteGreenBackground1)
   //
+  // smart-todo-r5 task 023 (FR-08 / U-1 + F-1, 2026-08-16) — UAT feedback: the
+  // full-column wash (this `tintColor` applied as the ENTIRE column body's
+  // `backgroundColor`) read as too heavy/saturated. `KanbanBoard.tsx` now
+  // scopes `tintColor` to the column HEADER strip only (title + subtitle +
+  // count pill row) instead of the whole card-list body — a "lightly tinted
+  // header" per spec FR-08's named options ("thin accent bar OR lightly
+  // tinted header"). The token values themselves are UNCHANGED (still the
+  // lightest `Background1` tier) — only the render-side application area
+  // shrank. This keeps the change additive/backward-compatible: any other
+  // `IKanbanColumn` consumer that doesn't set `tintColor` is unaffected, and
+  // consumers still reading `column.tintColor` for their own purposes see
+  // the same token values as before.
+  //
   // ADR-021 binding: semantic tokens only (no hex). The `Background1` variants
   // are the LIGHTEST in the Fluent v9 palette and read as gentle wash backgrounds
   // — not competing with card content while still cueing column identity.
-  // The existing top-border `accentColor` (Border2 variants) stays in place as a
-  // sharper accent rail; the tint sits behind it for visual reinforcement.
+  // The existing top-border `accentColor` (Border2 variants) stays in place as
+  // the PRIMARY urgency cue (full-height 3px top-border rail); the header tint
+  // is now a secondary reinforcement, not a base layer under every card.
   //
   // Capital Case labels ('Today'/'Tomorrow'/'Future') are already passed as
   // column.title strings; the `KanbanBoard` columnTitle style does NOT apply

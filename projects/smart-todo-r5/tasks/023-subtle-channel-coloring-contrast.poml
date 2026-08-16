@@ -4,7 +4,7 @@
     <title>Subtle channel urgency coloring + yellow-contrast audit (FR-08 / U-1 + F-1)</title>
     <phase>3: Top bar + filter + visuals</phase>
     <gate>003 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .ts/.tsx visual/styling code across the shared Kanban surface (useKanbanColumns.ts, KanbanBoard.tsx, KanbanCard.tsx) — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger); a11y-tagged with axe-core contrast gates.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -117,7 +117,9 @@
     <criterion testable="true">Zero hex/rgb literals in changed files (grep-verifiable); all unit tests pass; build is green.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec refs: FR-08 (U-1 + F-1). F-1's yellow-foreground fix is largely already shipped (KanbanCard.tsx, useKanbanColumns.ts countTextColor) — confirm via the step-1 grep sweep rather than re-implementing.</notes>
+  <notes>Spec refs: FR-08 (U-1 + F-1). F-1's yellow-foreground fix is largely already shipped (KanbanCard.tsx, useKanbanColumns.ts countTextColor) — confirm via the step-1 grep sweep rather than re-implementing.
+
+Completion notes (2026-08-16): Step-1 grep sweep (`colorPaletteYellow` across both `Spaarke.SmartTodo.Components` and `src/solutions/SmartTodo`) found ZERO white-on-yellow surfaces remaining — every existing yellow usage already pairs with `colorNeutralForeground1`; F-1 confirmed fully fixed, no code changes needed for that half. Subtle-coloring fix (U-1): split KanbanBoard.tsx's single accent+tint inline-style closure into two — `columnInlineStyle` (accentColor top-border, unchanged, on the column container) and new `columnHeaderTintStyle` (tintColor as backgroundColor, scoped to the columnHeader div only — title/subtitle/count-pill strip — instead of the full column body). useKanbanColumns.ts token values (accentColor/tintColor/countTextColor) are bit-for-bit unchanged — comment-only update describing the new render-side scoping. Reconciled with SmartTodoWidget.tsx's "column tints" doc comment: confirmed it describes this SAME single-rendering-site mechanism (KanbanBoard.tsx), not a second independent tint application — no double-apply risk (widget file itself not modified, out of this task's 3-file scope; its comment is now mildly stale, flagged as a minor doc-drift item in notes/task-023-coloring.md, not fixed in-scope). Added one additive test (`runSubtleColoringTokenMappingTest`) to useKanbanColumns.test.ts verifying the red/yellow/green token mapping + F-1 countTextColor pin + zero hex/rgb. Verification: tsc clean in both packages (0 errors in KanbanBoard.tsx; 3 pre-existing unrelated @spaarke/auth/@spaarke/sdap-client errors elsewhere in Spaarke.UI.Components, confirmed out of scope); existing KanbanBoard.test.tsx (12 tests, unmodified) passed — zero DnD/layout/a11y regression; ad-hoc compiled run of useKanbanColumns.test.ts — 5/5 passed; zero hex/rgb/hsl literals grep-verified across all 3 changed files. code-review + adr-check (Step 9.5, FULL rigor) both clean — no critical/warning findings. Escalation trigger did not fire (primary accent-border + count-pill cues unchanged; scannability preserved). Full writeup: projects/smart-todo-r5/notes/task-023-coloring.md. Scope discipline: only the 3 designated files were touched (useKanbanColumns.ts, KanbanBoard.tsx, useKanbanColumns.test.ts); nothing staged/committed (per concurrent-agent boundary — 1 of 3 agents in this worktree); TASK-INDEX.md/current-task.md intentionally left untouched for the orchestrator.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

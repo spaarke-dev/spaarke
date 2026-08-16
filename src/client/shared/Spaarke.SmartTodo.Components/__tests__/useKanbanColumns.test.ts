@@ -25,6 +25,7 @@
  * shared-lib package).
  */
 
+import { tokens } from '@fluentui/react-components';
 import { bucketTodoItems } from '../src/hooks/useKanbanColumns';
 import type { IKanbanCardTodo } from '../src/types/kanban';
 
@@ -192,6 +193,83 @@ export function runDismissedShapeUnaffectedTest(): void {
   console.info('[useKanbanColumns.test] Dismissed-shape-unaffected test passed.');
 }
 
+// ---------------------------------------------------------------------------
+// Test 5: subtle channel coloring (smart-todo-r5 task 023, FR-08 / U-1 + F-1,
+// 2026-08-16) — the semantic red=Today / yellow=Tomorrow / green=Future
+// color mapping must be preserved, using ONLY Fluent v9 semantic tokens
+// (ADR-021 — zero hex/rgb literals). This test does NOT assert on how
+// `KanbanBoard.tsx` renders `tintColor` (full-column vs header-only) — that
+// is a render-side concern covered by the component itself, not this pure
+// bucketing function. It asserts the DATA CONTRACT this hook still owns:
+// the right token family per column, and the yellow-contrast fix
+// (`countTextColor`) staying in place.
+// ---------------------------------------------------------------------------
+
+export function runSubtleColoringTokenMappingTest(): void {
+  const columns = bucketTodoItems([]);
+  const today = columns.find(c => c.id === 'Today')!;
+  const tomorrow = columns.find(c => c.id === 'Tomorrow')!;
+  const future = columns.find(c => c.id === 'Future')!;
+
+  // Semantic mapping preserved: red=Today, yellow=Tomorrow, green=Future.
+  assert(today.accentColor === tokens.colorPaletteRedBorder2, 'Today accentColor must remain the red Border2 token');
+  assert(
+    tomorrow.accentColor === tokens.colorPaletteYellowBorder2,
+    'Tomorrow accentColor must remain the yellow Border2 token'
+  );
+  assert(
+    future.accentColor === tokens.colorPaletteGreenBorder2,
+    'Future accentColor must remain the green Border2 token'
+  );
+
+  // tintColor still sourced from the lightest (`Background1`) semantic token
+  // tier per column — KanbanBoard.tsx now scopes its application to the
+  // column header strip only (not the full column body), but the token
+  // VALUES this hook emits are unchanged (ADR-021: semantic tokens only).
+  assert(
+    today.tintColor === tokens.colorPaletteRedBackground1,
+    'Today tintColor must remain the red Background1 token'
+  );
+  assert(
+    tomorrow.tintColor === tokens.colorPaletteYellowBackground1,
+    'Tomorrow tintColor must remain the yellow Background1 token'
+  );
+  assert(
+    future.tintColor === tokens.colorPaletteGreenBackground1,
+    'Future tintColor must remain the green Background1 token'
+  );
+
+  // F-1 yellow-contrast fix: the Tomorrow column's count pill still forces a
+  // dark neutral foreground (WCAG-safe against the saturated yellow
+  // Border2/accentColor pill background) — Today/Future keep the default
+  // (colorNeutralForegroundOnBrand, applied by KanbanBoard.tsx when
+  // `countTextColor` is undefined).
+  assert(
+    tomorrow.countTextColor === tokens.colorNeutralForeground1,
+    'Tomorrow countTextColor must stay pinned to colorNeutralForeground1 (white-on-yellow fix)'
+  );
+  assert(today.countTextColor === undefined, 'Today must not set a countTextColor override (red pill keeps default)');
+  assert(
+    future.countTextColor === undefined,
+    'Future must not set a countTextColor override (green pill keeps default)'
+  );
+
+  // No hex/rgb literals anywhere in the emitted values (ADR-021) — every
+  // token resolves to a Fluent v9 CSS custom-property reference at runtime
+  // (e.g. "var(--colorPaletteRedBorder2)"), never a literal color.
+  const hexOrRgbPattern = /^#|^rgb/i;
+  for (const col of [today, tomorrow, future]) {
+    assert(
+      !hexOrRgbPattern.test(col.accentColor ?? ''),
+      `${col.id} accentColor must not be a hex/rgb literal`
+    );
+    assert(!hexOrRgbPattern.test(col.tintColor ?? ''), `${col.id} tintColor must not be a hex/rgb literal`);
+  }
+
+  // eslint-disable-next-line no-console
+  console.info('[useKanbanColumns.test] Subtle-coloring token-mapping test passed.');
+}
+
 // Module-eval auto-run is gated to a Node.js env so test consumers can import
 // this file without side effects. When the peer package gets Jest wired,
 // replace this gate with `describe`/`it` blocks.
@@ -200,4 +278,5 @@ if (typeof process !== 'undefined' && process.env?.USE_KANBAN_COLUMNS_SMOKE === 
   runCompletedItemBucketingTest();
   runCompletedPinnedItemTest();
   runDismissedShapeUnaffectedTest();
+  runSubtleColoringTokenMappingTest();
 }
