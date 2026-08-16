@@ -9,8 +9,8 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **13 of 28 DONE**: 001 002 003 010 · 020 024 042 (A) · 011 012 022 (B) · 021 023 034 (C). All committed/pushed. |
-| **Step** | Wave C verified (solutions/SmartTodo jest 114/114; both packages tsc clean). 034 = already-resolved (FR-15 verified moot). **PAUSED per operator (option 1)** before live-Dataverse/deploy work. |
+| **Task** | **14 of 28 DONE**: 001 002 003 010 · 020 024 042 · 011 012 022 · 021 023 034 · **040**. All committed/pushed. |
+| **Step** | 040 wired Jest to Spaarke.SmartTodo.Components (27/27) + fixed useLaunchContext + surfaced/fixed real API drift (buildSmartTodoQuery userId→contactId). solutions/SmartTodo 116/116. **PAUSED per operator (option 1)** before live-Dataverse/deploy work. |
 | **Status** | in-progress — PAUSED at operator boundary; awaiting go-ahead for live-form/deploy phases |
 | **Next Action** | **Regroup with operator before proceeding** — remaining work mutates the LIVE Dataverse env: **013** (RegardingResolver `sprk_todo` form wiring, opus — gates modal spine + 014), Phase-4 modal spine **030→031→032→033** (serial; 033 opus interceptor) + **035** deploy, deploys **014 / 025 / 052**, ribbon **050→051→052**, **060** real-DV smoke, **090** wrap-up (test-diet, close #508, archive). None are pure-client-code; all warrant operator awareness. All 13 done tasks are committed+pushed on `work/smart-todo-r5`. |
 
