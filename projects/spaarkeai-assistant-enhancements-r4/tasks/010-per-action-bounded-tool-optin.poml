@@ -4,7 +4,7 @@
     <title>Per-Action bounded grounded-tool opt-in field — mirror sprk_allowsknowledge (FR-03)</title>
     <phase>1 — E1 grounded-recommend tier</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New catalog field on the ADR-039 Action-materialization path; touches shared BFF Services/Ai; closed-catalog boundary change requires code-review + adr-check.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -78,7 +78,9 @@
     <criterion testable="true">Unit tests added/updated in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
     <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
   </acceptance-criteria>
-  <notes>`allowstools` was $comment prose only in list-tasks.action.json — do NOT resurrect it as a code gate. The REAL precedent is `sprk_allowsknowledge`. Task 011 narrows the deterministic pre-filter to this allow-list; task 012 authors the first opt-in Action. redesign-r2 is closed (Services/Ai R4-editable) but keep AI-facade discipline; /conflict-check with compose-r5/r6 + assistant-r3 before the PR.</notes>
+  <notes>`allowstools` was $comment prose only in list-tasks.action.json — do NOT resurrect it as a code gate. The REAL precedent is `sprk_allowsknowledge`. Task 011 narrows the deterministic pre-filter to this allow-list; task 012 authors the first opt-in Action. redesign-r2 is closed (Services/Ai R4-editable) but keep AI-facade discipline; /conflict-check with compose-r5/r6 + assistant-r3 before the PR.
+
+  COMPLETION (2026-08-15, main session): Delivered the field as catalog DATA only (010/011 boundary honored — no agent-path edits). New column `sprk_groundedtoolallowlist` (multiline text, JSON array of grounded-tool ids). Changes: `ActionEntity.GroundedToolAllowList` DTO + `sprk_groundedtoolallowlist` added to the 3 `$select` sites + `AnalysisAction.GroundedToolAllowList` model prop (`IReadOnlyList<string>`, default `[]` = ack-tier) + materialize at the 3 constructor sites via `internal static ParseGroundedToolAllowList` (fail-closed→empty, dedup ordinal first-seen, drop blanks). 12 unit tests (AnalysisActionAllowListTests.cs) PASS. BFF build 0 errors; CVE scan clean (no new HIGH). Step 9.5 gates CLEAN (opus subagent: no Critical/Warning; ADR-039/013/038 compliant; grep-verified field is inert — zero consumers, so it cannot widen/gate tools in code). Agent-path MOUNTING ("mounts zero/exactly") is DATA-verified here, BEHAVIOR-verified in task 011. Publish size: measured framework-dependent (see current-task.md); delta ~0 (no new packages). OWED before PR: /conflict-check (Services/Ai overlap w/ compose-r5/r6 + assistant-r3). DEPLOY NOTE (task 080): the new Dataverse column `sprk_groundedtoolallowlist` on `sprk_analysisaction` must be created in the environment (schema add).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>

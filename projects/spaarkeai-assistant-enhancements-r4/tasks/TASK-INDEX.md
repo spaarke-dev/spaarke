@@ -10,14 +10,14 @@
 
 | # | Task | Phase | FRs | Tier / Effort | Rigor | Parallel-safe | Deps | Status |
 |---|---|---|---|---|---|---|---|---|
-| 001 | Behavior-gap register + eval-case harness | 0 Foundation | FR-12, FR-10 | sonnet / high | STANDARD | ✅ | — | 🔲 |
-| 010 | Per-Action bounded grounded-tool opt-in field | 1 E1 tier | FR-03 | opus / high | FULL | ❌ | — | 🔲 |
+| 001 | Behavior-gap register + eval-case harness | 0 Foundation | FR-12, FR-10 | sonnet / high | STANDARD | ✅ | — | ✅ |
+| 010 | Per-Action bounded grounded-tool opt-in field | 1 E1 tier | FR-03 | opus / high | FULL | ❌ | — | ✅ |
 | 011 | Advisory pre-filter bounded-tool scoping | 1 E1 tier | FR-02 | opus / xhigh | FULL | ❌ | 010 | 🔲 |
 | 012 | Advisory task-agenda capability (upgrade list-tasks) | 1 E1 tier | FR-01 | opus / high | FULL | ❌ | 010, 011 | 🔲 |
 | 013 | E1 eval cases (task-agenda golden utterances) | 1 E1 tier | FR-10 | sonnet / high | FULL | ✅ | 012 | 🔲 |
 | 020 | OBO-identity wording (user-scoped tools) | 2 E2 | FR-05 | sonnet / high | FULL | ❌ | — | 🔲 |
 | 021 | Gate free-string `SprkChatSuggestions` | 2 E2 | FR-04 | sonnet / high | FULL | ❌ | 012, 022 | 🔲 |
-| 022 | Briefing + Smart To Do launch-registry entries | 2 E2 | FR-06 | sonnet / med | STANDARD | ✅ | — | 🔲 |
+| 022 | Briefing + Smart To Do launch-registry entries | 2 E2 | FR-06 | sonnet / med | STANDARD | ✅ | — | ✅ |
 | 023 | Follow-on cards, open-tab-gated (Briefing/SmartToDo) | 2 E2 | FR-06 | sonnet / high | FULL | ❌ | 022, 012 | 🔲 |
 | 024 | E2 eval cases (dead-end + card gating) | 2 E2 | FR-10 | sonnet / high | FULL | ✅ | 021, 023 | 🔲 |
 | 030 | `Preference` MemoryFactType + wire map | 3 E3 loop | FR-07 | opus / high | FULL | ❌ | — | 🔲 |

@@ -9,10 +9,23 @@
 
 | Field | Value |
 |---|---|
-| **Project** | spaarkeai-assistant-enhancements-r4 — initialized, **execution NOT started** (owner-gated) |
-| **Task** | none active — ready to begin **task 001** |
-| **Status** | Project fully initialized + net10-ready + plan aligned with post-review master. Nothing mid-flight. |
-| **Next Action** | In the fresh session: **invoke `task-execute` for task 001** (Phase 0 — behavior-gap register + eval harness). Then the E1 spine `010 → 011 → 012 → 013`. Per repo convention start when the owner says "work on task 001" / "continue". |
+| **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
+| **Task** | ✅ **001, 022, 010 COMPLETE** (2026-08-15/16). Next up: **011** (opus/xhigh — E1 pre-filter boundary). |
+| **Status** | Wave 1: 3 of ~6 startable done. Nothing mid-flight — all committed locally (not pushed). |
+| **Next Action** | **011** (agent-path consumption: thread the resolved `GroundedToolAllowList` into `AgentToolFilterContext` + a deterministic `AgentToolProjection.PreFilter` narrowing predicate). ⚠️ **This is the ADR-039 "second decider" boundary (opus/xhigh, escalation trigger) — start it with FRESH context, not a depleted one.** Then 012 → 013. Remaining wave-1: 020 (OBO wording, sonnet BFF), 030 (Preference enum, opus BFF) — serialize (BFF dotnet builds). **040 needs a `--chrome` live-DOM session.** |
+
+### Wave-1 completion notes (2026-08-15/16)
+- **010** (FR-03): `sprk_groundedtoolallowlist` field as catalog DATA (DTO + 3 `$select` + `AnalysisAction.GroundedToolAllowList` model + 3 materialize sites + `ParseGroundedToolAllowList` fail-closed helper). 12 unit tests PASS · BFF build 0 errors · CVE clean · **Step 9.5 gates CLEAN** (ADR-039/013/038 compliant; field grep-verified inert = zero consumers) · **publish 44.96 MB compressed = baseline, delta +0.00, ≤60 MB** (§10: measure COMPRESSED zip, not the 137 MB raw folder). Agent-path MOUNTING deferred to 011.
+- **001** (FR-12/10): behavior-gap register confirmed + `tests/integration/contract/Eval/assistant-r4-eval-cases.json` (template `AR4-001`) + convention docs. `.cs` harness deferred to the FR-01 task. Reused R1 net-new-family precedent.
+- **022** (FR-06): 2 `workspace-tab` launch entries (daily-briefing, smart-todo) + 2 tests. ⚠️ **FLAG for owner/task-080**: Briefing + Smart To Do are `sprk_workspacelayout` rows opened via the generic `'workspace'` widget type keyed by a **per-environment auto-generated `layoutId` GUID** — the agent hardcoded live spaarkedev1 GUIDs (mirrors existing `ENTITY_VIEW_CONFIG_IDS`). Multi-env deploy needs these GUIDs updated per environment.
+- **OWED before any PR**: `/conflict-check` on Services/Ai (010) + shared lib surfaceLaunchRegistry.ts (022) — compose-r5/r6 + assistant-r3 overlap. **Task 080**: create the `sprk_groundedtoolallowlist` column on `sprk_analysisaction`.
+
+### Parallelism decision (why only 001+022 are background agents)
+The three BFF wave-1 tasks (010/020/030) share the `Services/Ai` spine AND would run concurrent `dotnet build` in ONE worktree (bin/obj corruption) → cannot safely parallelize as agents here. Only the two non-BFF `parallel-safe:true` tasks (001 docs/eval, 022 client/npm) run as autonomous background agents; the BFF spine runs sequentially in the main session (Opus 4.8 = correct tier). 040 needs live-DOM → not autonomous.
+
+### 010/011 boundary (LOAD-BEARING — don't re-litigate)
+- **010** = the field as catalog **DATA**: `ActionEntity.GroundedToolAllowList` DTO (`sprk_groundedtoolallowlist`, multiline JSON array of grounded-tool ids), added to the 3 `$select` sites, `AnalysisAction.GroundedToolAllowList` model prop (parsed `IReadOnlyList<string>`; **empty = opt-out/ack-tier**), materialized at the 3 constructor sites via `ParseGroundedToolAllowList` (fail-closed → empty), + unit tests. Mirrors `sprk_allowsknowledge` read/materialize shape. **No agent-path edits.**
+- **011** = agent-path **consumption**: thread the resolved allow-list into `AgentToolFilterContext` + the deterministic `AgentToolProjection.PreFilter` narrowing predicate (the ADR-039 boundary; has an escalation trigger). 010's "mounts zero/exactly" criteria are DATA-verified in 010, BEHAVIOR-verified in 011.
 
 ### Git / baseline state (all clean)
 - Branch `work/spaarkeai-assistant-enhancements-r4` @ **`7fbb9f5f9`** — **0 uncommitted, 0 unpushed, 0 behind master**.

@@ -1,0 +1,20 @@
+{
+  "$comment": "spaarkeai-assistant-enhancements-r4 task 001 (FR-10 infra / P5) — SCAFFOLD ONLY. This file seeds ONE template/example eval case (AR4-001) shaped to the assistant-r1-eval-cases.json convention (the nearest precedent per task 001's knowledge files) so FR-01/04/06/09 implementation tasks copy a known-good shape instead of inventing one. It deliberately does NOT introduce a harness .cs file yet (no [Trait(\"Category\",\"GoldenUtteranceEval\")] class reads this file today) — task 001 is STANDARD rigor, docs+scaffolding only, no .cs/.ts/.tsx edits. The FR-01 implementation task (grounded task-agenda advisory capability) is the one that (a) upgrades the existing list-tasks Action/Binding to output_determinism:advisory + the per-Action bounded-tool allow-list, and (b) authors AssistantEnhancementsR4EvalTests.cs (mirroring AssistantEnhancementsR1EvalTests.cs) that loads THIS file, joins the Category=GoldenUtteranceEval merge gate, and extends it with the case(s) FR-04/06/09 add. See tests/integration/contract/Eval/README.md 'Adding a case' + the Assistant-Enhancements-R1 eval family section, and projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md 'Eval-case harness convention' section for the full convention writeup.",
+  "schemaVersion": "assistant-r4-eval@v1",
+  "cases": [
+    {
+      "caseId": "AR4-001",
+      "family": "task-agenda-advisory",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "what do I need to do today",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 (R1) — list-tasks Binding mirrored in infra/dataverse/sprk_playbookconsumer-rows.json; R4 FR-01/FR-02/FR-03 upgrade this Binding's Action to output_determinism:advisory + a per-Action bounded grounded-tool allow-list (spaarkeai-assistant-enhancements-r4, task TBD — the FR-01 implementation task) — the consumerType itself is unchanged, only the Action's determinism mode + tool grounding"
+      },
+      "notes": "P1 / FR-01 template case (root behavior-gap register row P1 — 'thin ack, no summary'). Acceptance this case anchors once its harness lands: a grounded summary (real counts/top items from spaarke.grid_overview My-Tasks + spaarke.daily_briefing_overview, EACH cited to a tool result) + a recommendation (e.g. 'I'd start with the 2 due today'), then the Tasks tab opens; NO fabricated data, NO thin ack-only reply, NO duplicate tab. This schema (mirrored from assistant-r1-eval-cases.json) does not yet model citation-integrity assertions the way golden-utterances.json's assertions.citationIntegrity flag does — the FR-01 harness should either add an equivalent assertions block to this family's schema (extend-the-DATA-not-the-shared-schema, per README NFR-06 precedent) or assert grounding operationally against AgentToolProjection.PreFilter / the advisory Action's cited-claim contract, mirroring AssistantEnhancementsR1EvalTests.ProfileInjection_DoesNotFlipTheGroundedR1CapabilitySet_OperationalEvalInMergeGate's pattern of asserting against real production types rather than an LLM judge where the underlying selection is deterministic."
+    }
+  ]
+}

@@ -103,6 +103,10 @@ The design draft §7 attributed the advisory/injection rules to **ADR-015** — 
 
 Track deferred work + new issues in BOTH `notes/behavior-gap-register.md` (behavior gaps) / a `notes/defer-issues.md` (defects) AND GitHub Issues via `/project-defer-issue-tracking` (alias `/defer`). §11 rule: every entry names a concrete behavior/contract that fails without the work.
 
+### Eval-case obligation (FR-10 infra — task 001)
+
+Every FR-01/04/06/09 behavior change MUST land with a golden-utterance eval case (ADR-039 + ADR-038). The convention + current harness location are documented in [`notes/behavior-gap-register.md`](notes/behavior-gap-register.md) under **"Eval-case harness convention"**: the suite lives at `tests/integration/contract/Eval/`; R4 owns a dedicated net-new family (`assistant-r4-eval-cases.json`, seeded with template case `AR4-001` for FR-01) mirroring the `assistant-r1-eval-cases.json` / `AssistantEnhancementsR1EvalTests.cs` precedent — one project-level harness (`AssistantEnhancementsR4EvalTests.cs`, authored by the FR-01 task) all four behavior-change FRs add cases to, not four separate harnesses. The register's P1–P4 rows are the paper trail each eval case cites back to.
+
 ---
 
 ## Resources

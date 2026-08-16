@@ -101,6 +101,10 @@ A **net-new** family joined to the SAME merge gate (via the `Category=GoldenUtte
   - **AC3 incoherent practice-area × matter-type cannot commit** — CREATE-MATTER@v1 emits `practice_area_suggestion` + `matter_type_suggestion` as INDEPENDENT string LABELS (never enum/const/GUID), `additionalProperties:false`, allowstools=false, so no resolved closed-set value is ever model-emitted (each ref resolved deterministically per-field downstream — task 010 resolver).
 - **Not-vacuous**: the list-tasks + incoherent-combo facts carry discriminating assertions (disposition value, cue contents, independent-labels guard); the profile fact asserts an exact grounded set.
 
+## Assistant-Enhancements-R4 eval family (SCAFFOLDED — task 001, not yet gated)
+
+`spaarkeai-assistant-enhancements-r4` task 001 (FR-10 infra / P5) seeded [`assistant-r4-eval-cases.json`](assistant-r4-eval-cases.json) with ONE template case (`AR4-001`, the FR-01 "what do I need to do today" grounded-summary-and-recommendation expectation) mirroring the Assistant-Enhancements-R1 family's shape above. **There is no `AssistantEnhancementsR4EvalTests.cs` yet** — task 001 is scaffolding/docs only (no `.cs` edits). The FR-01 implementation task authors that harness (same pattern as `AssistantEnhancementsR1EvalTests.cs`: `[Trait("Category", "GoldenUtteranceEval")]`, inventory integrity + honest catalog grounding + a not-vacuous operational fact) and joins the merge gate with zero CI-YAML change; FR-04/06/09 tasks add cases to the SAME file + extend the SAME harness. Convention + paper-trail-to-register detail: `projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md` ("Eval-case harness convention" section).
+
 ## Deletion-safety
 
 KEEP-protected per ADR-038 (`tests/integration/contract/**`). Since P1 (task 026) the suite is an ACTIVE merge gate (NFR-02); every catalog/prompt change adds or updates cases (NFR-06).
