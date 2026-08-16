@@ -11,10 +11,21 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040** — Client-only draft store + dirty autosave + recovery (FR-03) — DESIGNED, ready to implement |
-| **Step** | Design complete (investigation done); implementation not started |
-| **Status** | ready (spine) — investigated editor handle + dirty/save/mount surface |
-| **Next Action** | Implement per the **Task-040 design** below. Then 041→050→051→060→061→070→071→072→074→090. |
+| **Task** | **040 ✅ COMPLETE** (commit pending this turn) — next: **041** (save-state indicator + beforeunload + invariant/test flip) |
+| **Step** | 040 implemented + gated (code-review + adr-check PASS); trackers updated |
+| **Next Action** | Execute **041**. Then 050→051→060→061→070→071→072→074→090. |
+
+### Task-041 carried boundary (task 040 DELIBERATELY deferred these — they are 041's scope, not misses)
+- **Flip the "no autosave" invariant comments** at `ComposeWorkspace.tsx:34` + `:2966` — 040 left them untouched (they assert *no automatic SERVER flush*, still TRUE; the client draft store never calls `triggerSave`/BFF). 041 reconciles the wording as the documented ADR-Tensions **Path-A** change.
+- **Update the `unmountFlush` test** (`ComposeWorkspace.unmountFlush.test.tsx`) to the new intended behavior (coupled with the comment flip — one coherent Path-A change).
+- **Save-state indicator** (Saving…/Saved/Unsaved + Auto Save On/Off) in `ComposeFormatToolbar.tsx`.
+- **`beforeunload`/modal-close guard** on unsaved work.
+- **040 hooks 041 can reuse**: `autoSaveEnabled` state (task 020), `getComposeDraft`/`saveComposeDraft`/`clearComposeDraft` (`composeDraftStore.ts`), `ComposeEditorHandle.getDraftHtml()`, `draftAutosaveMirrorRef`, `COMPOSE_DRAFT_AUTOSAVE_INTERVAL_MS`.
+
+### Task 040 — what shipped (see notes/task-040-notes.md)
+NEW `composeDraftStore.ts` (client-only localStorage, single-slot, id-match-gated) + `ComposeEditor.getDraftHtml()` + ComposeWorkspace autosave effect (~15s dirty-only, `autoSaveEnabled`-gated, **no BFF**), clear-on-save, and non-destructive recovery-on-mount via the existing `mountDraftHtml` path (key = task-010 `getComposeLogicalIdentity`). **Ripple was SMALLER than predicted** — zero editor-handle mocks needed changing (inferred stub types + optional-chained consumer). 10/10 store tests standalone; 3 CI-only workspace tests; full suite 615 pass / 0 fail; NFR-03 escalation trigger NOT fired (draft path calls no fetch).
+
+**11 of 20 tasks done: 001, 010, 011, 012, 013, 020, 030, 040, 073, 075.** Phases 1–3 + Phase 4a (draft store) COMPLETE.
 
 ### Task-040 design (investigated 2026-08-16 — execute this)
 

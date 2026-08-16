@@ -18,7 +18,7 @@
 | 013 | Atomic server upsert on `sprk_graphitemid_uk` | 1 | ✅ | FULL | **opus** | high | ❌ spine/BFF | 010 | FR-07d |
 | 020 | Save / Save As dropdown + Auto Save toggle | 2 | ✅ | FULL | sonnet | high | ❌ spine | 012 | FR-01 |
 | 030 | Name / file-name modal on first save + Save As | 3 | ✅ | FULL | sonnet | high | ❌ spine/BFF | 001 | FR-02 |
-| 040 | Client-only draft store + dirty autosave + recovery | 4 | 🔲 | FULL | sonnet | high | ❌ spine | 010, 030 | FR-03 |
+| 040 | Client-only draft store + dirty autosave + recovery | 4 | ✅ | FULL | sonnet | high | ❌ spine | 010, 030 | FR-03 |
 | 041 | Save-state indicator + beforeunload + invariant/test update | 4 | 🔲 | FULL | sonnet | high | ❌ spine | 040 | FR-03 |
 | 050 | Async `ProjectForMount` PDF fork (server) | 5 | 🔲 | FULL | **opus** | high | ❌ spine/BFF | 001 | FR-06 |
 | 051 | Client PDF intake-door gates + env verify + parity | 5 | 🔲 | FULL | sonnet | high | ❌ spine | 050 | FR-06 |

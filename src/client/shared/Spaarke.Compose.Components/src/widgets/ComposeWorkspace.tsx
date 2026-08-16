@@ -156,7 +156,12 @@ import {
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
 // FR-07(b) (task 010): the non-rotating logical document id — minted once per logical document,
 // persisted client-side, and rehydrated on recovery. Shared key for FR-03 (040) + FR-07 dedup (011).
-import { startNewComposeLogicalId, clearActiveComposeLogicalId, uniquifyForkFileName } from './composeIdentity';
+import { startNewComposeLogicalId, clearActiveComposeLogicalId, uniquifyForkFileName, recoverActiveComposeLogicalId } from './composeIdentity';
+// FR-03 (task 040): CLIENT-ONLY local draft store for draft-safe autosave (localStorage; no BFF).
+import { saveComposeDraft, getComposeDraft, clearComposeDraft } from './composeDraftStore';
+// FR-03/FR-07 (task 010): the canonical identity accessor = the draft-store key. Value import (the
+// sibling `import type` block below is type-only).
+import { getComposeLogicalIdentity } from '../types/compose-contracts';
 import type { ComposeReviewFindingsDegraded } from './ComposeWorkspace.types';
 import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
@@ -249,6 +254,13 @@ function mintDocumentSessionId(): string {
  * "Untitled document.docx".
  */
 const UNTITLED_DOC_NAME = 'Untitled document.docx';
+
+/**
+ * FR-03 (task 040): dirty-autosave tick interval for the CLIENT-ONLY local draft store. ~15s per
+ * spec §8 phase 4 — tunable, not a hard contract. Each tick writes localStorage ONLY when the editor
+ * is dirty; it never calls the BFF (NFR-03).
+ */
+const COMPOSE_DRAFT_AUTOSAVE_INTERVAL_MS = 15000;
 
 /** True when a name is still the unnamed-draft placeholder (never a user-chosen name). */
 function isUntitledDraftName(name?: string): boolean {
@@ -1908,6 +1920,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // replace-path save has none, so it leaves any other slot untouched).
         if (state.documentRef?.composeLogicalId) {
           clearActiveComposeLogicalId();
+          // FR-03 (task 040): drop the CLIENT-ONLY local draft for the PRE-save logical id — the doc
+          // just persisted (an SPE version now exists), so a later reload must NOT resurrect it as an
+          // unsaved draft. Keyed by the same accessor the autosave tick used; scoped so an unrelated
+          // document's draft is left intact.
+          clearComposeDraft(getComposeLogicalIdentity(state.documentRef));
         }
 
         // task 038 (zero-error guardrails): NOW that the save is confirmed (200), commit the persisted
@@ -2994,6 +3011,49 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // -------------------------------------------------------------------------
+  // FR-03 (task 040) — draft-safe autosave (CLIENT-ONLY local draft store)
+  // -------------------------------------------------------------------------
+  // A dirty-only ~15s tick snapshots the editor HTML to localStorage, keyed by the task-010 logical
+  // id, so a crash / tab-close / navigation never loses unsaved work. NFR-03 (the task-040 escalation
+  // trigger): this path is fully separate from the server save — it calls ONLY `saveComposeDraft`
+  // (localStorage), never `authenticatedFetch`, so it can never create an SPE version per tick. The
+  // SPE version is appended EXCLUSIVELY by an explicit Save (`triggerSave`).
+  //
+  // `draftAutosaveMirrorRef` mirrors the live inputs on every render (the same ref-mirror convention
+  // as `hasUnsavedWorkRef`/`triggerSaveRef`) so the interval — registered once, deps `[state.status]`
+  // — reads CURRENT values (Auto Save toggle, logical id, file name) instead of a stale closure, and
+  // never needs to re-subscribe on each edit.
+  const draftAutosaveMirrorRef = React.useRef<{
+    enabled: boolean;
+    logicalId: string | undefined;
+    fileName: string | undefined;
+  }>({ enabled: true, logicalId: undefined, fileName: undefined });
+  draftAutosaveMirrorRef.current = {
+    enabled: autoSaveEnabled,
+    logicalId: getComposeLogicalIdentity(state.documentRef),
+    fileName: state.documentRef?.fileName,
+  };
+
+  React.useEffect(() => {
+    if (state.status !== 'loaded') return;
+    const intervalId = window.setInterval(() => {
+      const { enabled, logicalId, fileName } = draftAutosaveMirrorRef.current;
+      // Auto Save off (task 020 toggle) OR no stable id yet → nothing to persist.
+      if (!enabled || !logicalId) return;
+      const handle = editorRef.current;
+      // Dirty-only: `isDirty()` is the editor's OWN authoritative flag (dirtyRef) — read fresh.
+      if (!handle || !handle.isDirty()) return;
+      const html = handle.getDraftHtml?.();
+      if (typeof html !== 'string') return;
+      // CLIENT-ONLY write — localStorage, never the BFF (NFR-03).
+      saveComposeDraft(logicalId, html, fileName);
+    }, COMPOSE_DRAFT_AUTOSAVE_INTERVAL_MS);
+    return () => window.clearInterval(intervalId);
+    // Re-arm only when the loaded/unloaded status flips; live inputs ride the mirror ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status]);
+
   const handleImportWarnings = React.useCallback((warnings: Array<{ type: string; message: string }>): void => {
     dispatch({ kind: 'importWarnings', warnings });
   }, []);
@@ -3618,6 +3678,42 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     return () => ac.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDraftRef?.ledgerRef, initialDraftRef?.sessionId, initialDraftRef?.html, bffBaseUrl]);
+
+  // -------------------------------------------------------------------------
+  // FR-03 (task 040) — recover a CLIENT-ONLY local draft on reopen/crash
+  // -------------------------------------------------------------------------
+  // When the workspace opens with NO real mount door (no stored-doc / upload / draft-seed prop) and a
+  // prior session left a persisted active draft, re-seed that draft into the editor via the SAME
+  // `mountDraftHtml` born-in-editor path the blank/template/AI-draft mounts use — reusing the
+  // RECOVERED logical id (never minting a fresh one) so identity + dedup stay stable across the reload.
+  //
+  // Scope kept minimal + non-destructive for task 040: recovery runs ONLY when no server document is
+  // being mounted (the `initial*Ref` guard), so it can never clobber a loaded server doc. The
+  // recover-vs-server-content PROMPT + save-state indicator are task 041. Fire-once on mount.
+  React.useEffect(() => {
+    if (state.status !== 'empty' && state.status !== 'error') return;
+    // A real mount door (stored-doc / upload / draft-seed) owns the mount — defer to it, never recover.
+    if (initialDocumentRef || initialUploadRef || initialDraftRef) return;
+    const recoveredId = recoverActiveComposeLogicalId();
+    if (!recoveredId) return;
+    const draft = getComposeDraft(recoveredId);
+    if (!draft || draft.html.length === 0) return;
+    setSearchResolvedDriveId(null);
+    dispatch({
+      kind: 'mountDraftHtml',
+      html: draft.html,
+      fileName: draft.fileName,
+      containerId: containerIdRef.current,
+      sessionId: mintDocumentSessionId(),
+      transientKey: mintTransientKey(),
+      // Reuse the RECOVERED logical id so the rehydrated draft keeps its identity (do NOT mint fresh).
+      composeLogicalId: recoveredId,
+    });
+    // A recovered draft is unsaved by definition — mark dirty so Save (create-on-save) is enabled.
+    setIsDirty(true);
+    // Fire-once on mount; the prop-guard (not deps) enforces "real mount doors win".
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // -------------------------------------------------------------------------
   // FR-34 D-F3 (task 071) — emit the content-render ack signal once the seeded

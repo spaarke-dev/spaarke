@@ -3,8 +3,8 @@
   <metadata>
     <title>Client-only local draft store + dirty autosave + crash recovery (FR-03)</title>
     <phase>4 Draft-Safe Autosave (UC-4)</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx client code + introduces a new client util (draft store); autosave lifecycle with data-loss stakes.</rigor-reason>
     <model-tier>sonnet</model-tier>

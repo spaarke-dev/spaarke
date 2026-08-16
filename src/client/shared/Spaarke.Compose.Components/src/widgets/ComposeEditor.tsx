@@ -967,6 +967,17 @@ export interface ComposeEditorHandle {
   isDirty(): boolean;
 
   /**
+   * FR-03 draft-safe autosave (spaarkeai-compose-r7 task 040): the current editor body as plain
+   * HTML (TipTap `editor.getHTML()`), for the CLIENT-ONLY local draft store. Read-only — NO
+   * dirty-flag side effect, NO byte authoring, NO network. The host serializes this to localStorage
+   * on the ~15s dirty-autosave tick and re-seeds it via the `mountDraftHtml` recovery path on reopen
+   * (the same HTML shape the born-in-editor / blank / template / AI-draft mounts already use). Returns
+   * null when the editor is unmounted. Distinct from {@link buildContentModel} (the high-fidelity
+   * save-path model that DOES reset dirty) — the draft store deliberately captures the cheap HTML view.
+   */
+  getDraftHtml(): string | null;
+
+  /**
    * FR-04 draft-into-editor (spaarkeai-compose-r2 task 016). Materialize a
    * `compose`-disposition draft — re-read FROM the stored session-ledger entry
    * by ComposeWorkspace (ADR-040 render-follows-store) — into the TipTap
@@ -2902,6 +2913,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           };
         },
         isDirty: () => dirtyRef.current,
+        // FR-03 draft-safe autosave (task 040): the cheap HTML view for the CLIENT-ONLY local draft
+        // store. Read-only — no dirty reset, no byte authoring, no network. Null when unmounted.
+        getDraftHtml: () => (editor ? editor.getHTML() : null),
         // FR-04 seam (task 016) now delegates to the FR-16 redline path (task 033):
         // the stored ledger draft renders as a PENDING redline, not a committed
         // insertion. ComposeWorkspace's render-follows-store path calls this.
