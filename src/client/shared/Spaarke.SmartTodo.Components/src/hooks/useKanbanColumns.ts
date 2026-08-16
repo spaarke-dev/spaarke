@@ -180,6 +180,24 @@ function resolveColumn(todo: IKanbanTodoLike, todayThreshold: number, tomorrowTh
 /**
  * Build the three-column structure from a flat item list. Pure function —
  * safe for the widget's render path. Preserves item order (callers pre-sort).
+ *
+ * FR-07 (F-2) Show-Completed toggle (smart-todo-r5 task 022, 2026-08-16) —
+ * verified: this function (and `resolveColumn`/`assignColumnByDate` above)
+ * bucket purely on `sprk_duedate` + pin state. There is NO statuscode or
+ * statecode special-casing anywhere in this file, so a Completed
+ * (statuscode=2) item that the caller's query now includes (see
+ * `buildTodoItemsQuery`'s `includeCompleted` param in
+ * `src/solutions/SmartTodo/src/services/queryHelpers.ts`) flows through and
+ * lands in its normal Today/Tomorrow/Future bucket exactly like an Open/
+ * In-Progress item — there is no 4th "Completed" column, satisfying the
+ * spec's "kanban renders Completed without layout breakage" acceptance
+ * wording. The completed visual treatment (dimmed/strikethrough) is applied
+ * downstream by `KanbanCard`'s `isCompleted` derivation
+ * (`todo.statuscode === 2 || todo.statecode === 1`) — this hook does not
+ * need to know about it. Completed items also remain draggable/pinnable via
+ * `moveItem`/`togglePin` like any other item (no special-case guard added —
+ * product intent was ambiguous, so the decision is to keep them fully
+ * interactive; see `projects/smart-todo-r5/notes/task-022-completed-toggle.md`).
  */
 export function bucketTodoItems<T extends IKanbanTodoLike>(
   items: ReadonlyArray<T>,

@@ -535,8 +535,13 @@ const TODO_REGARDING_LOOKUP_BY_ENTITY: Record<string, string> = {
  * Build the OData query for active to-do items (Kanban-visible).
  *
  * Returns `sprk_todo` records where:
- *   - statecode = 0 (Active)
- *   - statuscode in (Open, In Progress) — excludes Completed + Dismissed
+ *   - statecode = 0 (Active) and statuscode in (Open, In Progress) — the
+ *     always-included baseline
+ *   - PLUS, when `includeCompleted` is true (FR-07 / F-2 Show-Completed
+ *     toggle, smart-todo-r5 task 022): statuscode = 2 (Completed) items are
+ *     OR'd in as well. Dismissed (659490002) items are NEVER included here —
+ *     that lane is exclusively `buildDismissedTodoQuery` below and is
+ *     untouched by this parameter.
  *   - assignee = current user's CONTACT ("Assigned to Me" — R4 task 031 / FR-07 / OD-2)
  *   - IF regardingFilter is provided (R4 FR-34 openTodos launch — record-header-
  *     and-notepad-r1 DEF-11 Part 2): AND `_sprk_regarding<X>_value eq <guid>`.
@@ -546,7 +551,11 @@ const TODO_REGARDING_LOOKUP_BY_ENTITY: Record<string, string> = {
  *     silently ignored (safe fallback — matches unsupported handling in the
  *     memo repository).
  *
- * Sort: priorityscore desc, then duedate asc (most urgent first).
+ * Sort: priorityscore desc, then duedate asc (most urgent first). This is
+ * unchanged when Completed items are included — they sort into the same
+ * order and are then bucketed by `useKanbanColumns`'s score/due-date logic
+ * exactly like an Open/In-Progress item (no special-case exclusion exists
+ * in the bucketing hook — see `useKanbanColumns.ts`).
  *
  * UAT 2026-06-19: `sprk_assignedto` migrated from systemuser → sprk_contact
  * lookup. Caller must resolve the current systemuser → sprk_contact (via
@@ -558,13 +567,29 @@ const TODO_REGARDING_LOOKUP_BY_ENTITY: Record<string, string> = {
  *
  * @param contactId - GUID of the current user's sprk_contact record
  * @param regardingFilter - Optional parent-record filter (openTodos launch)
+ * @param includeCompleted - FR-07 Show-Completed toggle state. Defaults to
+ *   `false` (today's behavior — Completed items excluded), so all existing
+ *   call sites are unaffected until they explicitly opt in. The Status
+ *   filter's "Completed" checkbox (task 021) is expected to thread its
+ *   checked-state through to this parameter.
  */
 export function buildTodoItemsQuery(
   contactId: string,
   regardingFilter?: ITodoRegardingFilter,
+  includeCompleted: boolean = false,
 ): string {
-  const activeClause =
-    `statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)`;
+  const openInProgressClause = `statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)`;
+
+  // FR-07 (F-2) — OR in Completed (statuscode 2) without asserting a
+  // specific statecode for it, mirroring `buildDismissedTodoQuery`'s
+  // existing precedent of matching a terminal statuscode without a
+  // statecode assertion.
+  // Only wrap in an outer paren when a top-level `or` is introduced (the
+  // includeCompleted branch) — the default branch keeps the exact prior
+  // filter shape so this stays a strictly additive change.
+  const activeClause = includeCompleted
+    ? `(${openInProgressClause} or statuscode eq 2)`
+    : openInProgressClause;
 
   // UAT 2026-06-19 — Contact-lookup ownership clause.
   const ownershipClause = `_sprk_assignedto_value eq ${contactId}`;
