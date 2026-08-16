@@ -186,6 +186,12 @@ const useStyles = makeStyles({
     fontStyle: 'italic',
     marginTop: tokens.spacingVerticalXS,
   },
+
+  // ── Selected-priority row (FR-02 / task 012) ───────────────────────────────
+  selectedLabel: {
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightSemibold,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -222,6 +228,70 @@ const LevelBadge: React.FC<ILevelBadgeProps> = ({ level }) => {
 };
 
 // ---------------------------------------------------------------------------
+// Selected-priority badge (FR-02 / task 012)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pure value→label lookup for the raw `sprk_priority` Choice field (task
+ * 010). Exported (unlike `PriorityChoiceBadge` below) specifically so it is
+ * unit-testable without a React renderer — this package ships type-check
+ * only today (`tsc --noEmit`, no Jest — task 040 wires Jest in). Returns
+ * `undefined` for an unset/unrecognised value (neutral no-op, never a
+ * misleading default).
+ */
+export function priorityChoiceLabel(value: number | null | undefined): string | undefined {
+  switch (value) {
+    case 100000000: return 'Urgent';
+    case 100000001: return 'High';
+    case 100000002: return 'Medium';
+    case 100000003: return 'Low';
+    default: return undefined;
+  }
+}
+
+/**
+ * Small badge surfacing the raw `sprk_priority` Choice selection (task 010:
+ * Urgent=100000000, High=100000001, Medium=100000002, Low=100000003) — a
+ * DIFFERENT data source from `priority.level` above (which is derived from
+ * the 0-100 `priority.score`, not the raw Choice field). Reuses the
+ * existing Urgent/High/Normal/Low tone classes (colours) from `LevelBadge`
+ * above, only swapping the "Normal" tone's display text to "Medium" (the
+ * Choice option label) — no new CSS palette is introduced. Kept internal to
+ * this file (not exported) per task 012's acceptance criterion "no new
+ * component created for this surface — extended in place".
+ */
+const PriorityChoiceBadge: React.FC<{ value: number }> = ({ value }) => {
+  const styles = useStyles();
+
+  const display = React.useMemo((): { label: string; toneClass: string } | undefined => {
+    const label = priorityChoiceLabel(value);
+    if (!label) {
+      return undefined; // Unrecognised value — neutral no-op (no badge rendered).
+    }
+    switch (value) {
+      case 100000000: return { label, toneClass: styles.levelBadgeUrgent };
+      case 100000001: return { label, toneClass: styles.levelBadgeHigh };
+      case 100000002: return { label, toneClass: styles.levelBadgeNormal };
+      case 100000003: return { label, toneClass: styles.levelBadgeLow };
+      default: return undefined;
+    }
+  }, [value, styles]);
+
+  if (!display) {
+    return null;
+  }
+
+  return (
+    <span
+      className={mergeClasses(styles.levelBadge, display.toneClass)}
+      aria-label={`Selected priority: ${display.label}`}
+    >
+      {display.label}
+    </span>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -230,6 +300,16 @@ export interface IPriorityScoreCardProps {
   priority: ITodoPriorityScore;
   /** Whether the data came from mock (shows notice when true) */
   isMockData: boolean;
+  /**
+   * Raw `sprk_priority` Choice value (task 010: Urgent=100000000,
+   * High=100000001, Medium=100000002, Low=100000003) — optional,
+   * presentation-only surface of the user-selected label alongside the
+   * existing SCORE-derived level badge above. Distinct data source from
+   * `priority.level` (derived from `priority.score`, not this raw Choice
+   * field). Added by task 012 (FR-02). Unset/unrecognised → no row rendered
+   * (neutral no-op, not a misleading default).
+   */
+  priorityChoice?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +317,7 @@ export interface IPriorityScoreCardProps {
 // ---------------------------------------------------------------------------
 
 export const PriorityScoreCard: React.FC<IPriorityScoreCardProps> = React.memo(
-  ({ priority, isMockData }) => {
+  ({ priority, isMockData, priorityChoice }) => {
     const styles = useStyles();
 
     // Total points across all factors
@@ -257,6 +337,15 @@ export const PriorityScoreCard: React.FC<IPriorityScoreCardProps> = React.memo(
           </span>
           <LevelBadge level={priority.level} />
         </div>
+
+        {/* Selected-priority row (FR-02 / task 012) — the raw sprk_priority
+            Choice selection, distinct from the score-derived level above. */}
+        {typeof priorityChoice === 'number' && (
+          <div className={styles.scoreRow}>
+            <Text size={100} className={styles.selectedLabel}>Selected:</Text>
+            <PriorityChoiceBadge value={priorityChoice} />
+          </div>
+        )}
 
         {/* Factor breakdown table */}
         <table

@@ -105,6 +105,18 @@ const useStyles = makeStyles({
     color: tokens.colorStatusSuccessForeground1,
   },
 
+  // ── Selected-effort choice tones not covered by the 3 score-derived tiers
+  //    above (FR-03 / task 012: sprk_effort has 5 options — None/Very High/
+  //    High/Medium/Low — vs. the 3-tier score-derived High/Med/Low here) ────
+  levelBadgeChoiceHigh: {
+    backgroundColor: tokens.colorPaletteDarkOrangeBackground1,
+    color: tokens.colorPaletteDarkOrangeForeground1,
+  },
+  levelBadgeChoiceNone: {
+    backgroundColor: tokens.colorNeutralBackground4,
+    color: tokens.colorNeutralForeground2,
+  },
+
   // ── Base effort row ────────────────────────────────────────────────────────
   baseEffortRow: {
     display: 'flex',
@@ -275,6 +287,73 @@ const MultiplierRow: React.FC<IMultiplierRowProps> = React.memo(
 MultiplierRow.displayName = 'MultiplierRow';
 
 // ---------------------------------------------------------------------------
+// Selected-effort badge (FR-03 / task 012)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pure value→label lookup for the raw `sprk_effort` Choice field (task
+ * 010). Exported (unlike `EffortChoiceBadge` below) specifically so it is
+ * unit-testable without a React renderer — this package ships type-check
+ * only today (`tsc --noEmit`, no Jest — task 040 wires Jest in). Returns
+ * `undefined` for an unset/unrecognised value (neutral no-op, never a
+ * misleading default).
+ */
+export function effortChoiceLabel(value: number | null | undefined): string | undefined {
+  switch (value) {
+    case 100000000: return 'None';
+    case 100000001: return 'Very High';
+    case 100000002: return 'High';
+    case 100000003: return 'Medium';
+    case 100000004: return 'Low';
+    default: return undefined;
+  }
+}
+
+/**
+ * Small badge surfacing the raw `sprk_effort` Choice selection (task 010:
+ * None=100000000, Very High=100000001, High=100000002, Medium=100000003,
+ * Low=100000004) — a DIFFERENT data source from `effort.level` above (which
+ * is derived from the 0-100 `effort.score`, not the raw Choice field, and
+ * only has 3 tiers vs. this field's 5). Reuses the existing High/Med/Low
+ * tone classes from `EffortLevelBadge` above for "Very High"/"Medium"/"Low"
+ * (colours match the same danger/warning/success vocabulary), adding only
+ * 2 new tones ("High", "None") not already covered. Kept internal to this
+ * file (not exported) per task 012's acceptance criterion "no new component
+ * created for this surface — extended in place".
+ */
+const EffortChoiceBadge: React.FC<{ value: number }> = ({ value }) => {
+  const styles = useStyles();
+
+  const display = React.useMemo((): { label: string; toneClass: string } | undefined => {
+    const label = effortChoiceLabel(value);
+    if (!label) {
+      return undefined; // Unrecognised value — neutral no-op (no badge rendered).
+    }
+    switch (value) {
+      case 100000000: return { label, toneClass: styles.levelBadgeChoiceNone };
+      case 100000001: return { label, toneClass: styles.levelBadgeHigh };
+      case 100000002: return { label, toneClass: styles.levelBadgeChoiceHigh };
+      case 100000003: return { label, toneClass: styles.levelBadgeMed };
+      case 100000004: return { label, toneClass: styles.levelBadgeLow };
+      default: return undefined;
+    }
+  }, [value, styles]);
+
+  if (!display) {
+    return null;
+  }
+
+  return (
+    <span
+      className={mergeClasses(styles.levelBadge, display.toneClass)}
+      aria-label={`Selected effort: ${display.label}`}
+    >
+      {display.label}
+    </span>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -283,6 +362,16 @@ export interface IEffortScoreCardProps {
   effort: ITodoEffortScore;
   /** Whether the data came from mock (shows notice when true) */
   isMockData: boolean;
+  /**
+   * Raw `sprk_effort` Choice value (task 010: None=100000000, Very
+   * High=100000001, High=100000002, Medium=100000003, Low=100000004) —
+   * optional, presentation-only surface of the user-selected label
+   * alongside the existing SCORE-derived level badge above. Distinct data
+   * source from `effort.level` (derived from `effort.score`, not this raw
+   * Choice field). Added by task 012 (FR-03). Unset/unrecognised → no row
+   * rendered (neutral no-op, not a misleading default).
+   */
+  effortChoice?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +379,7 @@ export interface IEffortScoreCardProps {
 // ---------------------------------------------------------------------------
 
 export const EffortScoreCard: React.FC<IEffortScoreCardProps> = React.memo(
-  ({ effort, isMockData }) => {
+  ({ effort, isMockData, effortChoice }) => {
     const styles = useStyles();
 
     return (
@@ -307,6 +396,15 @@ export const EffortScoreCard: React.FC<IEffortScoreCardProps> = React.memo(
           </span>
           <EffortLevelBadge level={effort.level} />
         </div>
+
+        {/* Selected-effort row (FR-03 / task 012) — the raw sprk_effort
+            Choice selection, distinct from the score-derived level above. */}
+        {typeof effortChoice === 'number' && (
+          <div className={styles.scoreRow}>
+            <Text size={100} className={styles.baseEffortLabel}>Selected:</Text>
+            <EffortChoiceBadge value={effortChoice} />
+          </div>
+        )}
 
         {/* Base effort display */}
         <div className={styles.baseEffortRow}>
