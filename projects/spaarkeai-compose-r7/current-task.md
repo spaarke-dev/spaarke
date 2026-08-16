@@ -10,14 +10,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **013** — Atomic server upsert on `sprk_graphitemid_uk` (FR-07d) — ANALYZED, ready to implement (`notes/task-013-analysis.md`) |
-| **Step** | Root-cause traced + design settled; implementation not started |
-| **Status** | 013 analyzed / not-implemented (checkpoint) |
-| **Next Action** | Implement 013 per `notes/task-013-analysis.md`: add `UpsertAsync` to `IGenericEntityService` (Spaarke.Dataverse, base lib) + `DataverseServiceClientImpl` (`UpsertRequest`) + Web-API `NotImplemented`; rewire `PromoteIfEphemeralAsync` absent-branch Create→Upsert keyed on canonicalized `sprk_graphitemid` (keep read-first rebind/graduate path); seam test; BFF gates. Then 020→030→040→041→050→051→060→061→070→071→072→074→090. |
+| **Task** | **020** — Save / Save As dropdown + Auto Save toggle (FR-01, client) next |
+| **Step** | About to read POML + ComposeFormatToolbar SplitButton |
+| **Status** | in-progress (spine) |
+| **Next Action** | Execute 020 (replace Save SplitButton with Save/Save As dropdown + Auto Save toggle), then 030→040→041→050→051→060→061→070→071→072→074→090. |
 
-**7 of 20 tasks done: 001, 010, 011, 012, 073, 075.** Phase 1 (Save-Identity/UC-8): client vectors **010/011/012 ✅**; server vector **013 planned** (last one). 012 shipped **client-only** (uniquify displayName by construction — no BFF change; see `notes/task-012-notes.md`).
+**8 of 20 tasks done: 001, 010, 011, 012, 013, 073, 075.** **Phase 1 (Save-Identity/UC-8) COMPLETE** — all four D1 vectors closed (010 stable id · 011 id-less mount · 012 Save-As fork · 013 server atomic upsert, `c3f646504`).
 
-**013 design** (settled): keep the read-first idempotency check (preserves rebind + graduate-on-divergence); replace ONLY the absent-branch `CreateAsync`+catch with an atomic `UpsertAsync` keyed on canonicalized `sprk_graphitemid` (ADR-044). Requires an additive `UpsertAsync` on the `Spaarke.Dataverse` shared lib (base layer, 2 impls). Full plan in `notes/task-013-analysis.md`. **013 is BFF+shared-lib → run `/conflict-check` + publish (≤60 MB vs 44.96) + CVE + seam test.**
+**013 shipped**: atomic `UpsertAsync` on `Spaarke.Dataverse` base lib + `PromoteIfEphemeralAsync` rewire (keyed on raw `sprk_graphitemid` — ADR-044 N/A, opaque string). Full suite 10,421 passed. Publish 44.96 MB (delta 0.00). Note the promote-write-primitive change rippled to 5 seam/contract test suites (migrated).
+
+**Carried**: composeLogicalId = FR-03/FR-07 shared key; 050/051 must wire the FR-11 PDF-intake cause message; baseline 44.96 MB incl PDBs. Branch 0 behind master (merged this session).
 
 **Completed this session** (all committed + pushed-pending):
 - 001 ✅ gate (`3f5cbfe02`) — baseline **44.96 MB incl PDBs net10**; conflict-check CLEAR; DI-gate verified; PRs #690/#266 OPEN.
