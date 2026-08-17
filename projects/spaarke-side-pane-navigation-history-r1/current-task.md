@@ -12,9 +12,10 @@
 | **Phase** | 086 deploy + UAT iteration (feature complete; owner UAT in progress) |
 | **Status** | in-progress — 2 approved next actions, then owner UAT, then 087 + 090 |
 | **Env** | spaarkedev1 (`https://spaarkedev1.crm.dynamics.com`), app Matter Management `729afe6d-ca73-f011-b4cb-6045bdd8b757` |
-| **Next Action** | **090** wrap-up — `/test-diet` gate, lessons-learned, archive. This is the ONLY remaining formal task; 087 passed owner-UAT (light+dark) 2026-08-15. |
-| **Done since checkpoint** | TodoRibbons deployed+published (sprk_todo silent enable-rule); Email+Reconciliation registrar (code on master, deploy r2-gated); 3 UAT fixes committed `f7e76b467` + deployed (real bookmark names, email→sprk_emailpage, outline rail icon); 087 ✅. |
-| **Deferred (owner decisions)** | **052 Path B** ("assigned to me" via team membership) — needs BFF work → scope expansion, out of current no-BFF constraint. **021** — name/assign an owner-scoped `sprk_navitem` security role + run a 2-user isolation test (UAT ran as System Admin). |
+| **Status** | ✅ **PROJECT COMPLETE** 2026-08-15 — 21/21 tasks done, deployed + owner-UAT-passed (light+dark). |
+| **Next Action** | Final `/worktree-sync` (merge branch → master) + `/devops-project-archive` (close portfolio Issue #764). Both operator-gated. |
+| **Wrap-up artifacts (090)** | `notes/lessons-learned.md`, `notes/test-diet-report.md` (clean — 0 deletes), `notes/success-criteria-verification.md` (11/12 met; criterion-2 Edited toggle owner-descoped). README + TASK-INDEX = COMPLETE. |
+| **Resolved this session** | 052 → access-based (platform security trim, no BFF); 021 → 2-user isolation verified with non-admin users; 087 → owner UAT light+dark. |
 
 ### Critical Context
 The Navigator side pane is fully deployed and working on spaarkedev1. Auto-load is SOLVED via two insertions: (a) an **entity ribbon enable-rule** (`CustomRule` → `Spaarke.SidePaneManager.initialize`, `Default=true`) that fires **silently** when an entity's grid/form command bar loads — proven on Matter, rolled to Document/Project/Event/Communication; (b) a **code-page registrar** `ensureNavigatorSidePane()` (SpaarkeAi home). Modern UCI has NO supported global page-load hook, so both insertions are needed; only OOB dashboards remain a gap. Full reference: `docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md`.
