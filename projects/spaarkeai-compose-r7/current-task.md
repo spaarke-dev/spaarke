@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-compose-r7
 
-> **Last Updated**: 2026-08-16 (task-execute — task 030 in progress)
+> **Last Updated**: 2026-08-16 (task-execute — task 050 ✅ complete; next 051)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 > **Git**: master MERGED (HEAD `9aaf695c8` merge; resolved DataverseWebApiService.cs conflict — RED-4 dead-code deletion took master side, my UpsertAsync lives in DataverseServiceClientImpl/interface; 1124 Compose tests green post-merge). Branch current with master.
@@ -11,12 +11,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **040 ✅ + 041 ✅ COMPLETE** — Phase 4 (Draft-Safe Autosave / UC-4) DONE. Next: **050** (async ProjectForMount PDF fork — opus/BFF) |
-| **Step** | 040 + 041 implemented + gated (code-review + adr-check PASS); trackers updated; 041 commit pending this turn |
-| **Next Action** | Execute **050** (⚠️ **opus** model-tier — see note) → 051 → 060 → 061 → 070 → 071 → 072 → 074 → 090. |
+| **Task** | **050 ✅ COMPLETE** — async `ProjectForMount` PDF fork (server, FR-06). Next: **051** (client PDF intake-door gates + env verify + parity) |
+| **Step** | 050 implemented + gated (code-review + adr-check PASS); publish −0.0148 MB; 1127 Compose tests green; commit pending this turn |
+| **Next Action** | Execute **051** (client PDF gates + parity, sonnet@high) → 060 → 061 → 070 → 071 → 072 → 074 → 090. |
 
-### ⚠️ Task 050 is model-tier=OPUS (BFF contract change)
-050 (async `ProjectForMount` PDF fork) is **opus** + BFF + irreversible-adjacent (ADR-007/013 contract change, NFR-04). Session is on **Opus 4.8** so it IS executable in the main session (session model ≥ task tier). It touches `Services/Compose/ComposeService.cs` + `ComposeEndpoints.cs` → BFF gates apply: `/conflict-check`, publish ≤60 MB (delta vs 44.96 MB net10 baseline), no new HIGH CVE, Placement Justification. **050/051 must ALSO wire the deferred FR-11 PDF-intake cause-specific message** (from task 073). Anchor caveat: `AnalysisServicesModule.cs` DI gate ~L145/165 (grep symbols, don't trust exact lines).
+### Task 050 — what shipped (see notes/task-050-notes.md)
+`ProjectForMount` is now **async** with the same `IsPdfSource → ProjectPdfToDocxAsync` fork LoadAsync has (ADR-007/013 sync→async = spec ADR-Tensions path A / NFR-04). Mount doors (`/api/compose/project` Browse + `/api/compose/upload`) now open a PDF as an editable synthesized docx with `sourceFormat:"pdf"` + `pdf-intake-*` warnings; docx path stays synchronous-fast (intake `await` is PDF-branch-only). Added `SourceFormat` to `ComposeMountProjection` + both mount response records; added the honest 503/422 `ComposePdfIntakeException` mapping to BOTH mount handlers (they lacked it); **correctness fix**: `/project` echoes `Content` on `Minted || SourceFormat != null` (a PDF's synthesized docx is pre-minted → `Minted=false`, so without this the client got a docx projection but no docx bytes). New seam test `ComposeMountPdfProjectionSeamTests.cs` (3 tests). Publish **44.9452 MB incl PDBs** (−0.0148 vs 44.96); CVE clean; conflict-clean.
+
+### ⚠️ 051 carries the FR-11 rider — but it is BOUNDARY-BLOCKED server-side (owner decision, Path C recommended)
+FR-11 end-to-end cause-specific message CANNOT be wired without either widening the **r2-sole-owned** `IComposePdfIntakeSource` interface (`ParseWithDiagnosticsAsync` lives only on the concrete) OR an **ADR-013 downcast breach**. Decision at 050 = **Path C (comply, don't breach)**: 073's facade-level discrimination is shipped; the current collapsed message is already honest/safe; end-to-end surfacing is a UX refinement not worth a boundary breach. 051 consumes `sourceFormat` (now on mount responses) + admits `.pdf` in the Browse accept filter/intake gate + runs parity UAT — it does NOT depend on FR-11. File FR-11 via `/defer` once owner confirms Path C (or opts for an r2-coordinated interface addition).
 
 ### Task 041 — what shipped (see notes/task-041-notes.md)
 Save-state indicator in ComposeFormatToolbar (Saving…/Unsaved/Saved + Auto Save On/Off; Fluent tokens, `data-save-state`, aria-live) driven by new `hasUnsavedEdits` prop threaded ComposeWorkspace→ComposeEditor→toolbar (`isDirty || hasTransientDraft`); `beforeunload` guard (warns only on `hasUnsavedWorkRef`); **the deliberate ADR-Tensions Path-A "no autosave" invariant flip** at ComposeWorkspace.tsx:34 + :2966 (client-only autosave now exists; NO automatic SERVER save — NFR-03). unmountFlush test: docblock reconciled, **assertions unchanged** (DI-02 flush-on-unmount is still the only POST-without-explicit-Save path; directional adaptation). +6 standalone toolbar indicator tests (81/81); +1 CI-only beforeunload test; full suite 621 pass / 0 fail.

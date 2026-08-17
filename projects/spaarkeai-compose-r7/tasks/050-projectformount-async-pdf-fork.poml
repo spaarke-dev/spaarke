@@ -3,8 +3,8 @@
   <metadata>
     <title>Async ProjectForMount with PDF fork — server parity with LoadAsync (FR-06)</title>
     <phase>5 PDF Import Parity (UC-7)</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs; a documented contract change (sync→async) with an Azure DI call on the mount path.</rigor-reason>
     <model-tier>opus</model-tier>

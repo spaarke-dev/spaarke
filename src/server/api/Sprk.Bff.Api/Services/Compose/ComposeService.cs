@@ -302,8 +302,35 @@ public class ComposeService : IComposeService
     // (keyed by paraId) cannot pair them. MintAndPersist is the ingest-time stamp (fill-gaps-only,
     // idempotent, fail-open — NOT the save-path count-gate this project retires), the same pass
     // LoadAsync applies before its own projection build.
-    public ComposeMountProjection ProjectForMount(ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+    public async Task<ComposeMountProjection> ProjectForMount(
+        ReadOnlyMemory<byte> content,
+        string? fileName = null,
+        CancellationToken cancellationToken = default)
     {
+        // Task 050 (spaarkeai-compose-r7, FR-06 — PDF import parity, NFR-04 / ADR Tensions path A): give
+        // the mount doors (Browse-project + Assistant-upload) the SAME PDF fork LoadAsync has (@502) so a
+        // PDF opened via those doors becomes an editable Compose document, not a fail-closed read-only
+        // mount. Detection is bytes-first (IsPdfSource: %PDF- magic OR .pdf extension — a mis-named PDF
+        // still lands here), and on a PDF the source projects through the ONE ProjectPdfToDocxAsync intake
+        // leg (Azure DI prebuilt-layout → ComposePdfModelProjector → SynthesizeDocument), after which the
+        // synthesized .docx replaces `content` and the ENTIRE mint/HTML/canonical pipeline below runs
+        // UNCHANGED — "PDF projects into the same model docx projects into" holds by construction.
+        //
+        // This is why ProjectForMount is now async — a documented, project-scoped ADR-007/ADR-013 contract
+        // change: it was deliberately synchronous / no-I/O, and the DOCX path STAYS synchronous-fast (the
+        // await below is reached ONLY on the PDF branch; a native .docx mount does zero added I/O and never
+        // touches the intake source). Unavailability / parse failure throws a CLEAR ComposePdfIntakeException
+        // (the endpoints map it to 503/422), never a silent empty mount over a non-empty PDF.
+        IReadOnlyList<ComposeProjectionWarning>? pdfIntakeWarnings = null;
+        string? sourceFormat = null;
+        if (IsPdfSource(fileName, content.Span))
+        {
+            sourceFormat = "pdf";
+            (content, pdfIntakeWarnings) = await ProjectPdfToDocxAsync(
+                    content, fileName ?? "(compose-mount)", driveId: "(mount)", documentSpeId: "(mount)", cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var stamp = _baselineParaIdStamper.MintAndPersist(content);
         var bytes = stamp.Mutated ? stamp.Bytes : content;
 
@@ -311,14 +338,26 @@ public class ComposeService : IComposeService
         var canonical = _projectionBuilder.BuildContentModel(bytes, cancellationToken);
 
         var mountModel = canonical.Status == ComposeProjectionStatus.Failed ? null : canonical.Model;
+        // Task 013 (012-review F7): flatten warnings ride to the client with the model.
+        var contentModelWarnings = mountModel is not null && canonical.Warnings.Count > 0 ? canonical.Warnings : null;
+        // Task 050 (FR-06): the PDF intake's counted degradations ride WITH the model warnings — intake
+        // facts FIRST (source-level: fixed-layout reflow, page chrome, list/table approximation), mirroring
+        // LoadAsync@563. Merged UNCONDITIONALLY so the intake facts reach the client even when the
+        // synthesized-docx re-projection itself failed (mountModel null / op-log fallback).
+        if (pdfIntakeWarnings is { Count: > 0 })
+        {
+            contentModelWarnings = contentModelWarnings is null
+                ? pdfIntakeWarnings
+                : pdfIntakeWarnings.Concat(contentModelWarnings).ToList();
+        }
         return new ComposeMountProjection
         {
             Content = bytes,
             Minted = stamp.Mutated,
             Projection = projection,
             ContentModel = mountModel,
-            // Task 013 (012-review F7): flatten warnings ride to the client with the model.
-            ContentModelWarnings = mountModel is not null && canonical.Warnings.Count > 0 ? canonical.Warnings : null,
+            ContentModelWarnings = contentModelWarnings,
+            SourceFormat = sourceFormat,
         };
     }
 
