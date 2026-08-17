@@ -12,7 +12,7 @@
 |-------|-------|
 | **Project** | code-quality-and-assurance-r3 — **COMPLETE (35/35)** + extensive post-program follow-on. **All merged to master `3146837a7`.** Nothing uncommitted. |
 | **State** | ✅ Program closed (aggregate un-gated **F→D**, maintainability mean **C+**; A+ = multi-cycle). ✅ Merged to master + **BFF deployed to dev** (Finance recalc 401 verified live). ✅ Post-program review (4 evidence agents). ✅ Follow-on fixes merged. ✅ RED follow-on projects defined/set up. **No active in-flight task** — this is a coordination/handoff state. |
-| **Next Action** | **RED-4 "B" mostly landed.** ✅ dead-code deletion (`e94987071`, **merged to master**, main repo synced). ✅ **DEF-2 fixed** (implemented `GetEntitySetNameAsync` on WebApi + live-gated regression; verified full BFF suite green) — commit pending push/merge. **ONE B item remains**: SDK silent-empty stubs→throw, still gated on **DEF-1** (smart-todo-r5). DEF-2 needs a **live-dev smoke** (field-mapping write vs spaarke-dev) to close behaviorally. |
+| **Next Action** | **RED-4 "B" COMPLETE.** ✅ dead-code deletion (`e94987071`) ✅ DEF-2 fix (`749dd273e`) ✅ **silent-empty SDK stubs→throw** (DEF-1 unblocked by smart-todo-r5 reroute `8e0aa4e6e`; all 8 event/field-mapping stubs now throw; verified no live composite caller; BFF 10,427 pass) — commit pending push/merge. **Only follow-ups left**: DEF-2 **live-dev smoke** (field-mapping write vs spaarke-dev), and the operator-gated big projects (RED-1, RED-2, C). |
 
 ### ✅ Completed this session (all on master `3146837a7`)
 1. **r3 closeout**: 061 (`5a6ad556e`), 041 (`e1f06c5a9`), 042+063 (`cec19d374`), 090 (`704b6a213`). Merged to master; BFF deployed to dev.
