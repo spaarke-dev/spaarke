@@ -27,7 +27,7 @@
 | 034 | Migrate browse consumer → BrowseModal | 4 | FR-15 | sonnet/high | none | 003 | ✅ (already-resolved; verified) |
 | 035 | Deploy + modal QA | 4 | deploy | sonnet/high | none | 033,034 | ✅ |
 | 040 | vitest expansion + new coverage | 5 | FR-16 | sonnet/high | R | 011,021,022 | ✅ |
-| 041 | Playwright NFR suite (perf/a11y/orientation) | 5 | FR-17 | sonnet/high | R | 024,025 | 🔲 |
+| 041 | Playwright NFR suite (perf/a11y/orientation) | 5 | FR-17 | sonnet/high | R | 024,025 | ✅ authored+valid+wired (⚠️ real-env green run escalated — no live Power Apps env in sandbox; see notes/task-041-playwright-nfr.md) |
 | 042 | R-10 handleEmail seam + un-skip; RegardingResolver S1/N1 | 5 | FR-18 | sonnet/high | R | — | ✅ |
 | 050 | Refresh Matter ribbon icon + RibbonDiff | 6 | FR-19 | sonnet/high | S | — | ✅ |
 | 051 | 5 per-entity ribbon solutions (Create To Do) | 6 | FR-19 | sonnet/high | none | 050 | 🔲 |
