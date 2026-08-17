@@ -1,14 +1,20 @@
 /**
  * SearchFilter — unit tests (smart-todo-r5 UAT 2026-08-17 — expanding text
- * search, replacing task 021's structured Filter pane).
+ * search, replacing task 021's structured Filter pane; layout revised same
+ * day in UAT pass 2 to render inline in `Header.tsx`, left of the Filter
+ * pill, with the "Search" caption label removed).
  *
  * Covers the closed acceptance set from the UAT decision (see
  * `projects/smart-todo-r5/notes/uat-filter-text-search.md`):
- *   - `isOpen=false` renders the bar hidden (`aria-hidden="true"`, CSS
+ *   - `isOpen=false` renders the box hidden (`aria-hidden="true"`, CSS
  *     `display: none`) — clicking the Header's Filter pill (task 020,
  *     unchanged) expands it.
- *   - `isOpen=true` renders the bar visible (`aria-hidden="false"`) with the
+ *   - `isOpen=true` renders the box visible (`aria-hidden="false"`) with the
  *     current `value` reflected in the input.
+ *   - No "Search" caption/label is rendered (pass 2 — placeholder text
+ *     carries the affordance instead).
+ *   - The placeholder reads exactly "Filter by name, description, assigned
+ *     to..." (pass 2 wording).
  *   - Typing in the box invokes `onChange` with the raw next value (no
  *     internal debounce — the actual name/description/assigned-to matching
  *     lives in `SmartToDo.tsx`'s `displayItems` memo, exercised separately).
@@ -122,6 +128,21 @@ describe('SearchFilter — visibility (Filter pill toggle, task 020 unchanged)',
   it('render_IsOpenTrue_MarksAriaHiddenFalse', () => {
     const h = (activeHarness = renderSearchFilter({ isOpen: true }));
     expect(findByTestId(h.container, 'search-filter')).toHaveAttribute('aria-hidden', 'false');
+  });
+});
+
+describe('SearchFilter — UAT pass 2 layout (2026-08-17): no label, revised placeholder', () => {
+  it('render_NeverShowsASearchCaptionLabel', () => {
+    const h = (activeHarness = renderSearchFilter());
+    expect(h.container.textContent).not.toMatch(/^Search$/);
+    expect(Array.from(h.container.querySelectorAll('*')).some((el) => el.textContent === 'Search')).toBe(false);
+  });
+
+  it('render_InputPlaceholder_MatchesExactUatWording', () => {
+    const h = (activeHarness = renderSearchFilter());
+    expect(findInputByTestId(h.container, 'search-filter-input').placeholder).toBe(
+      'Filter by name, description, assigned to...',
+    );
   });
 });
 

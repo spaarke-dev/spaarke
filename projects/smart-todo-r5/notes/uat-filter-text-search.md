@@ -108,3 +108,120 @@ introducing 2 new ones in the extracted `todoSearchUtils.ts`.
 - hex/rgb/`'1px'` grep across every changed file: zero matches introduced by this
   diff (one pre-existing `shorthands.borderWidth("1px")` remains in `SmartToDo.tsx`
   at an untouched line, unrelated to this change).
+
+---
+
+## UAT pass 2 (2026-08-17) — relocate the search box inline, left of Filter; drop the label
+
+**Trigger**: Operator UAT feedback on the pass-1 layout above (still delivered as a
+direct implementation brief, not a `task-XXX.poml`). Pass 1 put the expanding
+`SearchBox` on its own bordered row underneath the top bar, with a "Search" caption
+and placeholder "Search by name, description, or assignee…". The operator's
+follow-up ask, in full:
+
+1. The search field must expand **INLINE, to the LEFT of the "Filter" button, on
+   the SAME ROW** as Filter + "+ New Task" — not on a separate row below.
+2. Remove the "Search" label entirely.
+3. Change the placeholder to exactly: `Filter by name, description, assigned to...`
+
+### What changed (pass 2, on top of pass 1)
+
+| Area | Pass 1 | Pass 2 (this change) |
+|---|---|---|
+| Mount point | `SmartTodoApp.tsx`, rendered as a full-width bar BELOW `<Header>` | `Header.tsx`'s toolbar `rightGroup`, rendered as a flex sibling immediately BEFORE the Filter `<Button>`, in both the default cluster and the `hasSelection` (`<SelectionAwareToolbar>`) branch |
+| Caption | `<Text>Search</Text>` to the left of the box | Removed entirely — no text node, placeholder-only affordance |
+| Placeholder | `Search by name, description, or assignee…` | `Filter by name, description, assigned to...` (exact wording, ASCII ellipsis — not the unicode `…` pass 1 used) |
+| `aria-label` | `Search to-do items by name, description, or assignee` | `Filter to-do items by name, description, assigned to` (kept in sync with the new placeholder wording) |
+| Box sizing / chrome | Own row: `colorNeutralBackground2` bg + bottom border + bar padding, `maxWidth: 480px` | No row chrome (it's an inline toolbar sibling now); fixed `width: 240px` so it doesn't crowd Filter / + New Task / ⋮ on narrower viewports |
+| `isOpen`/`value`/`onChange` contract | Owned by `SmartTodoApp.tsx`, passed straight to `<SearchFilter>` | UNCHANGED contract on `<SearchFilter>` itself — `SmartTodoApp.tsx` now threads `searchQuery`/`setSearchQuery` through two NEW required `Header` props (`searchQuery`, `onSearchQueryChange`) instead of rendering `<SearchFilter>` directly |
+| Stay-mounted / `display:none` collapse | Yes (NFR-03 — text survives close/reopen; also keeps the collapsed box out of the tab order) | UNCHANGED — kept the same mechanism deliberately. Considered animating the collapse via `width` transition for a smoother "expand" but `display:none` was kept instead: animating `width` while keeping the box interactive when "closed" would require `visibility`/`pointer-events` tricks to preserve the NFR-03 tab-order guarantee, and the operator brief said smooth is "nice but not required" — not worth the a11y risk for this pass. |
+
+### Files touched (pass 2)
+
+- `components/SearchFilter/SearchFilter.tsx` — dropped the `Text` "Search" caption;
+  changed placeholder + `aria-label` wording; updated module doc.
+- `components/SearchFilter/SearchFilter.styles.ts` — dropped the bordered-bar
+  `rootOpen` chrome (background/border/padding) and the now-unused `label` style;
+  `searchBox` width changed from `maxWidth: 480px / width: 100%` (full-bleed row) to
+  a fixed `240px` (inline toolbar sibling).
+- `components/Header/Header.tsx` — **now imports and renders `<SearchFilter>`**
+  (previously explicitly "untouched" per the pass-1 note above — that note is
+  superseded by this pass). Added two new REQUIRED props, `searchQuery: string` and
+  `onSearchQueryChange: (next: string) => void`; renders `<SearchFilter isOpen=
+  {isFilterPaneOpen} value={searchQuery} onChange={onSearchQueryChange} />`
+  immediately before the Filter `<Button>` in BOTH the default cluster and the
+  `hasSelection` branch (so Filter's search-trigger role is available and
+  positioned identically regardless of selection state). `isFilterPaneOpen` /
+  `onToggleFilterPane` themselves are UNCHANGED — no new state was invented, only
+  new pass-through props for the value/onChange the Header now needs to place its
+  child.
+- `SmartTodoApp.tsx` — removed the standalone `<SearchFilter isOpen=… value=…
+  onChange=…/>` block that previously rendered below `<Header>`; removed the now-
+  unused `SearchFilter` import; passes `searchQuery`/`onSearchQueryChange` to
+  `<Header>` instead. `searchQuery` state (`useState`) and `isFilterPaneOpen` state
+  are UNCHANGED — still owned here, still lifted the same way.
+- `components/SearchFilter/__tests__/SearchFilter.test.tsx` — added 2 tests (no
+  "Search" text node anywhere in the render; placeholder matches the exact new
+  wording). Pre-existing tests (`aria-hidden` visibility, controlled value, typing,
+  NFR-03 toggle-never-fires-onChange) needed no changes — the component's public
+  contract (`isOpen`/`value`/`onChange`) did not change, only its internal JSX.
+- `components/Header/__tests__/Header.test.tsx` — added a new `describe` block (7
+  tests) covering: `<SearchFilter>` precedes the Filter button in DOM order (both
+  branches), `aria-hidden` reflects `isFilterPaneOpen`, `searchQuery` reflects into
+  the input's value, placeholder wording + no "Search" label, typing invokes
+  `onSearchQueryChange`. Updated the pre-existing
+  `render_DefaultNoSelection_ShowsFilterNewTaskOverflowInOrderOnly` test: its old
+  assertion (`container.querySelector('input')` must be `null` — i.e., "no inline
+  SearchBox exists at all", written against task 020's REMOVED toggle pattern) no
+  longer holds now that a real, intentional `<SearchFilter>` is always mounted;
+  replaced with an assertion that the mounted box is `aria-hidden="true"` in the
+  default (`isFilterPaneOpen=false`) state. Also added `searchQuery` /
+  `onSearchQueryChange` to the test harness's default props (both new required
+  `HeaderProps` fields).
+
+### Verification (pass 2)
+
+- `npx tsc --noEmit` (in `src/solutions/SmartTodo`): 38 errors on baseline (`git
+  stash` of this pass's 6 changed files) → 38 after. **Zero new errors** (diff of
+  the two error listings is empty — same 38 pre-existing, cross-package errors as
+  pass 1 left: `@azure/msal-browser` / `ComponentFramework` / `DOMPurify`
+  type-resolution gaps in `Spaarke.Auth`/`Spaarke.UI.Components`, plus the one
+  pre-existing `IWebApi` structural mismatch at `SmartToDo.tsx:424`).
+- `npx jest` (in `src/solutions/SmartTodo`, full suite): **9 suites / 130 tests, all
+  passing**. Baseline (via `git stash` of this pass's 6 changed files, same suite):
+  9 suites / 121 tests. Net **+9 tests** = the 2 new `SearchFilter` assertions
+  (no-label check, exact placeholder) + the 7 new `Header` assertions (the new
+  `describe('Header — inline SearchFilter …')` block) — no regressions in any
+  other suite.
+- hex/rgb/`1px` grep across all 6 changed files (`SmartTodoApp.tsx`, `Header.tsx`,
+  `Header.styles.ts`, `Header.test.tsx`, `SearchFilter.tsx`,
+  `SearchFilter.styles.ts`, `SearchFilter.test.tsx`): **zero matches** — every style
+  value is a Fluent v9 semantic token or a `shorthands.*(…tokens…)` call.
+- Manual DOM-order check confirmed (`compareDocumentPosition`): `<SearchFilter>`'s
+  `data-testid="search-filter"` element always precedes the Filter `<Button>` in
+  `rightGroup`'s children, in both the default and `hasSelection` branches.
+
+### Code-review / ADR-check self-note
+
+- **ADR-021 (Fluent v9 tokens only)**: compliant — no hex/rgb/inline-px introduced;
+  `SearchFilter.styles.ts`'s new fixed `240px` box width is a dimension, not a
+  color/border, consistent with the pre-existing `maxWidth: '480px'` precedent it
+  replaces (dimensions in `px` are not the ADR-021 hex/rgb/color-literal ban).
+- **§11 Component Justification**: no new component/service/abstraction was
+  introduced — this pass relocates an existing component's mount point and edits
+  its existing props' owner (`Header` gained 2 pass-through props); `<SearchFilter>`
+  itself, its `isOpen`/`value`/`onChange` contract, and the underlying
+  `isFilterPaneOpen`/`onToggleFilterPane`/`searchQuery` state all pre-date this
+  pass unchanged.
+- **Scope boundary**: touched only `src/solutions/SmartTodo/**` (`SmartTodoApp.tsx`,
+  `components/Header/{Header.tsx,__tests__/Header.test.tsx}`,
+  `components/SearchFilter/{SearchFilter.tsx,SearchFilter.styles.ts,
+  __tests__/SearchFilter.test.tsx}`) — no `.claude/`, RegardingResolver PCF,
+  `smart-todo-components`, or `spaarke_insights` files touched.
+- **A11y**: Filter pill keeps `aria-expanded={isFilterPaneOpen}` (disclosure
+  semantics, unchanged); the inline box keeps `aria-hidden={!isOpen}` +
+  `display:none`-when-closed, so the collapsed box stays out of both the
+  accessibility tree and the tab order — no regression from the position change.
+- **No git commit made** and neither `TASK-INDEX.md` nor `current-task.md` was
+  touched, per this pass's explicit boundary (this is a direct UAT brief, not a
+  `task-XXX.poml`).

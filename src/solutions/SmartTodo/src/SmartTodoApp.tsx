@@ -16,11 +16,12 @@
  * current filter set) is INTENTIONALLY dropped in R2 per FR-13. Users navigating
  * between records return to the workspace and pick the next one.
  *
- * Layout (task 020 / FR-05 / U-3, 2026-08-16 top-bar redesign):
+ * Layout (task 020 / FR-05 / U-3, 2026-08-16 top-bar redesign; UAT pass 2
+ * 2026-08-17 moved the inline search into Header — see below):
  *   TodoProvider (shared state)
- *     ├── Header (title + Filter pill / + New Task / ⋮ overflow — Settings,
- *     │           Layout, Refresh — or selection-aware actions when a
- *     │           selection is active)
+ *     ├── Header (title + [inline expanding SearchFilter] + Filter pill +
+ *     │           + New Task / ⋮ overflow — Settings, Layout, Refresh — or
+ *     │           selection-aware actions when a selection is active)
  *     └── SmartToDo (Kanban, with `hideHeader` so inner KanbanHeader is
  *           suppressed — chrome lives in the consolidated Header above)
  *
@@ -58,7 +59,11 @@ import { Header } from "./components/Header";
 // isFilterPaneOpen/onToggleFilterPane state (below). See
 // projects/smart-todo-r5/notes/uat-filter-text-search.md for the decision +
 // the FR-07 "Show Completed" regression this intentionally accepts.
-import { SearchFilter } from "./components/SearchFilter";
+// UAT pass 2 (2026-08-17): `<SearchFilter>` is now MOUNTED BY `Header.tsx`
+// itself (inline, left of the Filter pill) — this file no longer imports or
+// renders it directly, only lifts the `searchQuery` state and threads it
+// (plus its setter) through Header's `searchQuery` / `onSearchQueryChange`
+// props.
 import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
@@ -200,9 +205,11 @@ function SmartTodoLayout(): React.ReactElement {
   // card-level substring filter (title / description / regarding-record name
   // / number / assigned-to — extended by the smart-todo-r5 UAT 2026-08-17
   // change, see `SmartToDo.tsx`'s `displayItems` memo). Its producer is now
-  // the `<SearchFilter>` bar below (mounted against `isFilterPaneOpen`,
-  // REPLACING task 021's structured Filter pane per the operator's UAT
-  // decision — see `projects/smart-todo-r5/notes/uat-filter-text-search.md`).
+  // the `<SearchFilter>` box that `Header.tsx` mounts inline against
+  // `isFilterPaneOpen` (UAT pass 2, 2026-08-17 — moved inline, left of the
+  // Filter pill; REPLACES task 021's structured Filter pane per the
+  // operator's UAT decision) — see
+  // `projects/smart-todo-r5/notes/uat-filter-text-search.md`.
   // `selectedIds` is the **multi-select** set driving Row 4 of the header
   // (card affordances — task 060). It is INDEPENDENT of `selectedEventId`
   // from TodoContext (which, post-R4 task 042, drives only the ListView
@@ -485,18 +492,9 @@ function SmartTodoLayout(): React.ReactElement {
         onOrientationChange={handleOrientationChange}
         isFilterPaneOpen={isFilterPaneOpen}
         onToggleFilterPane={handleToggleFilterPane}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
         onNewTask={handleNewTask}
-      />
-
-      {/* ── smart-todo-r5 UAT 2026-08-17 — expanding text search, anchored
-            to task 020's Filter pill via isFilterPaneOpen. Stays mounted
-            across open/close (visibility toggled via CSS) — see
-            SearchFilter.tsx module doc. REPLACES task 021's structured
-            Filter pane. ── */}
-      <SearchFilter
-        isOpen={isFilterPaneOpen}
-        value={searchQuery}
-        onChange={setSearchQuery}
       />
 
       {/* ── Primary surface — Kanban Board (UAT 2026-06-19: list view removed

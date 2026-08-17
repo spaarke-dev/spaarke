@@ -15,13 +15,23 @@
  * **Why** (spec FR-05, owner-confirmed 2026-08-14): the R4-104 toolbar grew a
  * 3-field QuickAdd group (F-3) plus a broken/mislabeled toggle-into-inline-
  * SearchBox "Filter" affordance (F-6 — it filtered client-side substrings,
- * not real search). FR-05 replaces both with: a Filter pill (ENTRY POINT
- * only — opens the expanding text search `components/SearchFilter` mounts
- * (task 021's structured Filter pane was REPLACED by this search per the
- * smart-todo-r5 UAT 2026-08-17 decision); no filter logic lives here),
+ * not real search). FR-05 replaces both with: a Filter pill (opens the
+ * expanding text search `components/SearchFilter` — task 021's structured
+ * Filter pane was REPLACED by this search per the smart-todo-r5 UAT
+ * 2026-08-17 decision; NO filter-predicate logic lives in this file, only
+ * the mounted `<SearchFilter>` + its toggle),
  * a primary "+ New Task" button (stubbed until task 030 wires the OOB
  * main-form create modal per FR-10), and a "⋮" overflow menu holding exactly
  * Settings / Layout / Refresh (owner-decided mapping, U-3, 2026-08-15).
+ *
+ * **UAT pass 2 (2026-08-17)**: `<SearchFilter>` is now rendered HERE, INLINE
+ * in the toolbar row, immediately to the LEFT of the Filter pill — expanding
+ * into view on that same row when Filter is toggled on, rather than as a
+ * separate bordered bar underneath the top bar (pass 1's layout, previously
+ * owned by `SmartTodoApp.tsx`). This Header now owns both the trigger
+ * (Filter pill) AND the search box's mount point; `SmartTodoApp.tsx` still
+ * owns the `searchQuery` state + `isFilterPaneOpen` state, threaded down via
+ * the `searchQuery` / `onSearchQueryChange` props below.
  *
  * **Preserved behaviour**: Settings (`onOpenSettings` via
  * `settingsOpenerRef`), Layout (`onOrientationChange` via `updateViewPrefs`),
@@ -86,6 +96,7 @@ import {
   type Orientation,
   type ToolbarAction,
 } from '@spaarke/ui-components';
+import { SearchFilter } from '../SearchFilter';
 import { useHeaderStyles } from './Header.styles';
 
 // ---------------------------------------------------------------------------
@@ -172,15 +183,27 @@ export interface HeaderProps {
   onOrientationChange?: (orientation: Orientation) => void;
 
   /**
-   * Controlled open state for the search bar underneath (`components/SearchFilter`,
-   * smart-todo-r5 UAT 2026-08-17 — replaced task 021's structured Filter pane;
-   * this Header only renders the trigger, not the pane content). Required: the
-   * sole consumer, `SmartTodoApp`, always lifts this state.
+   * Controlled open state for the inline expanding search box
+   * (`components/SearchFilter`, smart-todo-r5 UAT 2026-08-17 — replaced task
+   * 021's structured Filter pane). UAT pass 2 (2026-08-17) moved the box's
+   * mount point INTO this Header, inline to the left of the Filter pill, so
+   * this Header now renders both the trigger AND the box. Required: the sole
+   * consumer, `SmartTodoApp`, always lifts this state.
    */
   isFilterPaneOpen: boolean;
 
   /** Called when the user clicks the Filter pill — toggles `isFilterPaneOpen` upstream. */
   onToggleFilterPane: () => void;
+
+  /**
+   * Current search text for the inline `<SearchFilter>` box (smart-todo-r5
+   * UAT pass 2, 2026-08-17). Fully controlled — owned by `SmartTodoApp` and
+   * threaded straight through to `<SearchFilter value=…>`.
+   */
+  searchQuery: string;
+
+  /** Invoked with the next search text on every keystroke in the inline `<SearchFilter>` box. */
+  onSearchQueryChange: (next: string) => void;
 
   /**
    * Called when the user clicks "+ New Task". Until task 030 (FR-10) lands,
@@ -206,6 +229,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOrientationChange,
   isFilterPaneOpen,
   onToggleFilterPane,
+  searchQuery,
+  onSearchQueryChange,
   onNewTask,
 }) => {
   const styles = useHeaderStyles();
@@ -250,6 +275,15 @@ export const Header: React.FC<HeaderProps> = ({
               selectedCount={selectedCount}
               actions={toolbarActions}
             />
+            {/* ── smart-todo-r5 UAT pass 2 (2026-08-17) — inline expanding
+                  search, immediately to the LEFT of the Filter pill, on the
+                  same toolbar row. Stays mounted across open/close (CSS
+                  display toggle) — see SearchFilter.tsx module doc. ── */}
+            <SearchFilter
+              isOpen={isFilterPaneOpen}
+              value={searchQuery}
+              onChange={onSearchQueryChange}
+            />
             <Button
               appearance="outline"
               size="small"
@@ -263,6 +297,16 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         ) : (
           <div className={styles.rightGroup}>
+            {/* ── smart-todo-r5 UAT pass 2 (2026-08-17) — inline expanding
+                  search, immediately to the LEFT of the Filter pill, on the
+                  same toolbar row as "+ New Task" / ⋮. Stays mounted across
+                  open/close (CSS display toggle) — see SearchFilter.tsx
+                  module doc. ── */}
+            <SearchFilter
+              isOpen={isFilterPaneOpen}
+              value={searchQuery}
+              onChange={onSearchQueryChange}
+            />
             <Button
               appearance="outline"
               size="small"

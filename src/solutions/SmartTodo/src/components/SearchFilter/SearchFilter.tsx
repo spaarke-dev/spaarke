@@ -1,6 +1,6 @@
 /**
  * SearchFilter — SmartTodo Code Page expanding text search (smart-todo-r5 UAT
- * decision, 2026-08-17).
+ * decision, 2026-08-17; layout revised same day per operator UAT pass 2).
  *
  * REPLACES the structured Filter pane (task 021, FR-06 / F-3 — Priority /
  * Status / Due-date / Assigned-To categories) per the operator's UAT
@@ -9,15 +9,23 @@
  * the To Do's NAME + DESCRIPTION + ASSIGNED-TO display name (case-insensitive
  * substring) as the user types.
  *
+ * UAT pass 2 (2026-08-17) relocated this component: it is now rendered by
+ * `Header.tsx` INLINE in the toolbar row, immediately to the left of the
+ * Filter pill — not as a separate row underneath the top bar (that was pass
+ * 1's layout). It also DROPPED the "Search" caption label that pass 1 shipped
+ * — the SearchBox's placeholder now carries all the affordance text. See
+ * `projects/smart-todo-r5/notes/uat-filter-text-search.md`.
+ *
  * Fully controlled: this component holds NO filter-predicate state of its
- * own — `value`/`onChange` are owned by `SmartTodoApp.tsx` and threaded to
+ * own — `value`/`onChange` are owned by `SmartTodoApp.tsx`, threaded through
+ * `Header.tsx`'s `searchQuery`/`onSearchQueryChange` props, and applied to
  * `<SmartToDo searchQuery={value}>`'s existing client-side substring filter
- * (which this task extends to also match assigned-to — see
- * `SmartToDo.tsx`'s `displayItems` memo). The bar itself stays MOUNTED
- * across open/close (visibility toggled via CSS `display: none`, not
- * unmount) so the search text survives a close/reopen — mirrors the
- * structured FilterPane's precedent for the same reason (state continuity,
- * NFR-03).
+ * (which also matches assigned-to — see `SmartToDo.tsx`'s `displayItems`
+ * memo). The box itself stays MOUNTED across open/close (visibility toggled
+ * via CSS `display: none`, not unmount) so the search text survives a
+ * close/reopen — mirrors the structured FilterPane's precedent for the same
+ * reason (state continuity, NFR-03) and also keeps the collapsed box out of
+ * the tab order for free.
  *
  * Regression note (documented for operator sign-off, NOT a bug to fix here):
  * removing the structured Status filter also removes the "Show Completed"
@@ -31,7 +39,7 @@
  * @see projects/smart-todo-r5/notes/uat-filter-text-search.md
  */
 import * as React from 'react';
-import { SearchBox, Text } from '@fluentui/react-components';
+import { SearchBox } from '@fluentui/react-components';
 import type { InputOnChangeData, SearchBoxChangeEvent } from '@fluentui/react-components';
 import { useSearchFilterStyles } from './SearchFilter.styles';
 
@@ -77,16 +85,13 @@ export const SearchFilter: React.FC<SearchFilterProps> = ({ isOpen, value, onCha
       data-testid="search-filter"
       aria-hidden={!isOpen}
     >
-      <Text weight="semibold" size={200} className={styles.label}>
-        Search
-      </Text>
       <SearchBox
         ref={inputRef}
         className={styles.searchBox}
         value={value}
         onChange={handleChange}
-        placeholder="Search by name, description, or assignee…"
-        aria-label="Search to-do items by name, description, or assignee"
+        placeholder="Filter by name, description, assigned to..."
+        aria-label="Filter to-do items by name, description, assigned to"
         data-testid="search-filter-input"
       />
     </div>

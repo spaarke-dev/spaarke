@@ -1,11 +1,13 @@
 /**
- * Header — unit tests (task 020, FR-05 / U-3 top-bar redesign, 2026-08-16).
+ * Header — unit tests (task 020, FR-05 / U-3 top-bar redesign, 2026-08-16;
+ * extended smart-todo-r5 UAT pass 2, 2026-08-17, for the inline
+ * `<SearchFilter>` mount).
  *
  * Covers the closed acceptance set from
  * `projects/smart-todo-r5/tasks/020-codepage-top-bar-redesign.poml`:
- *   - Default (no selection) cluster renders exactly Filter · + New Task · ⋮
- *     overflow, in that order, and NOTHING else inline (no QuickAdd, no
- *     inline SearchBox).
+ *   - Default (no selection) cluster renders exactly [SearchFilter] · Filter
+ *     · + New Task · ⋮ overflow, in that order, and NOTHING else inline (no
+ *     QuickAdd, no legacy toggle-into-inline-SearchBox pattern).
  *   - Filter pill toggles `isFilterPaneOpen` via `onToggleFilterPane`.
  *   - "+ New Task" invokes `onNewTask` when provided; is hidden when omitted
  *     (matches the existing optional-prop convention).
@@ -17,6 +19,19 @@
  *     the overflow menu, keeping only the Filter pill alongside
  *     `<SelectionAwareToolbar>` (pre-existing precedent — QuickAdd/+Wizard
  *     were likewise suppressed during selection).
+ *
+ * UAT pass 2 (2026-08-17) additions — covers
+ * `projects/smart-todo-r5/notes/uat-filter-text-search.md`:
+ *   - `<SearchFilter>` is mounted INLINE in this Header's toolbar row,
+ *     immediately to the LEFT of the Filter pill, in DOM order before it —
+ *     not as a separate row/component owned by `SmartTodoApp.tsx`.
+ *   - `searchQuery` / `onSearchQueryChange` thread straight through to the
+ *     inline `<SearchFilter value / onChange>`.
+ *   - The search input is present in the DOM even when `isFilterPaneOpen`
+ *     is false (stays mounted, `aria-hidden="true"`, CSS `display: none`) —
+ *     the old "no inline SearchBox at all" assertion from task 020 is
+ *     replaced by an aria-hidden check, since a real inline SearchFilter is
+ *     now an intentional part of this Header.
  *
  * Test harness note: this package's node_modules (verified 2026-08-16, task
  * 020) has `@testing-library/jest-dom` but NOT `@testing-library/react` or
@@ -121,6 +136,7 @@ interface Harness {
   onOpenSettings: jest.Mock;
   onOrientationChange: jest.Mock;
   onRefresh: jest.Mock;
+  onSearchQueryChange: jest.Mock;
 }
 
 function renderHeader(overrides: Partial<HeaderProps> = {}): Harness {
@@ -129,6 +145,7 @@ function renderHeader(overrides: Partial<HeaderProps> = {}): Harness {
   const onOpenSettings = jest.fn();
   const onOrientationChange = jest.fn();
   const onRefresh = jest.fn();
+  const onSearchQueryChange = jest.fn();
 
   const props: HeaderProps = {
     selectedCount: 0,
@@ -139,6 +156,8 @@ function renderHeader(overrides: Partial<HeaderProps> = {}): Harness {
     onOrientationChange,
     onRefresh,
     orientation: 'horizontal',
+    searchQuery: '',
+    onSearchQueryChange,
     ...overrides,
   };
 
@@ -167,6 +186,7 @@ function renderHeader(overrides: Partial<HeaderProps> = {}): Harness {
     onOpenSettings,
     onOrientationChange,
     onRefresh,
+    onSearchQueryChange,
   };
 }
 
@@ -202,9 +222,14 @@ describe('Header — mockup layout parity (FR-05)', () => {
     expect(newTaskButton).toBeInTheDocument();
     expect(overflowTrigger).toBeInTheDocument();
 
-    // No QuickAdd remnants, no inline SearchBox (the removed toggle pattern).
-    expect(h.container.querySelector('input')).toBeNull();
-    expect(h.container.querySelector('[role="searchbox"]')).toBeNull();
+    // No QuickAdd remnants (the removed R4-104 group). The inline
+    // `<SearchFilter>` (UAT pass 2, 2026-08-17) DOES mount a real input —
+    // collapsed via aria-hidden/display:none when isFilterPaneOpen is false
+    // (the default here) — asserted separately below.
+    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
 
     // DOM order matches mockup order: Filter → + New Task → ⋮.
     const allButtons = Array.from(h.container.querySelectorAll('button'));
@@ -236,6 +261,91 @@ describe('Header — mockup layout parity (FR-05)', () => {
   it('render_OnNewTaskOmitted_HidesNewTaskButtonWithoutThrowing', () => {
     const h = (activeHarness = renderHeader({ onNewTask: undefined }));
     expect(queryButtonByText(h.container, /new task/i)).toBeNull();
+  });
+});
+
+describe('Header — inline SearchFilter (smart-todo-r5 UAT pass 2, 2026-08-17)', () => {
+  it('render_SearchFilter_SitsImmediatelyBeforeTheFilterPillInDomOrder', () => {
+    const h = (activeHarness = renderHeader());
+
+    const searchFilter = h.container.querySelector('[data-testid="search-filter"]');
+    const filterButton = findButtonByText(h.container, /^Filter$/);
+
+    expect(searchFilter).not.toBeNull();
+    // DOM position comparison: searchFilter precedes filterButton.
+    // eslint-disable-next-line no-bitwise
+    expect(
+      searchFilter!.compareDocumentPosition(filterButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
+  it('render_IsFilterPaneOpenTrue_SearchFilterIsNotAriaHidden', () => {
+    const h = (activeHarness = renderHeader({ isFilterPaneOpen: true }));
+    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute(
+      'aria-hidden',
+      'false',
+    );
+  });
+
+  it('render_IsFilterPaneOpenFalse_SearchFilterIsAriaHidden', () => {
+    const h = (activeHarness = renderHeader({ isFilterPaneOpen: false }));
+    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    );
+  });
+
+  it('render_SearchQuery_ReflectsThroughToTheInlineInputValue', () => {
+    const h = (activeHarness = renderHeader({
+      isFilterPaneOpen: true,
+      searchQuery: 'Smith v Jones',
+    }));
+    const input = h.container.querySelector(
+      '[data-testid="search-filter-input"]',
+    ) as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    expect(input!.value).toBe('Smith v Jones');
+  });
+
+  it('render_InputPlaceholder_MatchesExactUatWordingAndHasNoSearchLabel', () => {
+    const h = (activeHarness = renderHeader({ isFilterPaneOpen: true }));
+    const input = h.container.querySelector(
+      '[data-testid="search-filter-input"]',
+    ) as HTMLInputElement | null;
+    expect(input!.placeholder).toBe('Filter by name, description, assigned to...');
+    expect(
+      Array.from(h.container.querySelectorAll('*')).some((el) => el.textContent === 'Search'),
+    ).toBe(false);
+  });
+
+  it('type_IntoTheInlineSearchInput_InvokesOnSearchQueryChange', () => {
+    const h = (activeHarness = renderHeader({ isFilterPaneOpen: true }));
+    const input = h.container.querySelector(
+      '[data-testid="search-filter-input"]',
+    ) as HTMLInputElement;
+
+    const nativeSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value',
+    )?.set;
+    act(() => {
+      nativeSetter?.call(input, 'jordan');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    expect(h.onSearchQueryChange).toHaveBeenCalledWith('jordan');
+  });
+
+  it('render_WithSelection_StillMountsSearchFilterBeforeTheFilterPill', () => {
+    const h = (activeHarness = renderHeader({ selectedCount: 2, isFilterPaneOpen: true }));
+    const searchFilter = h.container.querySelector('[data-testid="search-filter"]');
+    const filterButton = findButtonByText(h.container, /^Filter$/);
+
+    expect(searchFilter).not.toBeNull();
+    // eslint-disable-next-line no-bitwise
+    expect(
+      searchFilter!.compareDocumentPosition(filterButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
 
