@@ -4,7 +4,7 @@
     <title>Full-cover sizing + hide OOB main-form header band (FR-12/13)</title>
     <phase>4: Main-form modal</phase>
     <gate>031 complete</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes production modal sizing on the shared launcher (031's consolidation target) and investigates Dataverse form-header suppression, which may require a schema/form-config change on a production entity. Tags include dataverse/modal; CLAUDE.md §8 FULL trigger.</rigor-reason>
     <model-tier>sonnet</model-tier>

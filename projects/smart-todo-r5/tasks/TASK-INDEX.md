@@ -22,7 +22,7 @@
 | 025 | Deploy code page + widget; visual QA | 3 | deploy | sonnet/high | none | 020-024 | 🔲 |
 | 030 | + New Task opens OOB main form (create) modal | 4 | FR-10 | sonnet/high | none | 013 | ✅ |
 | 031 | Open shares same launch mechanism | 4 | FR-11 | sonnet/high | none | 030 | ✅ |
-| 032 | Full-cover sizing + hide main-form header | 4 | FR-12/13 | sonnet/high | none | 031 | 🔲 |
+| 032 | Full-cover sizing + hide main-form header | 4 | FR-12/13 | sonnet/high | none | 031 | 🔄 |
 | 033 | Save & Close dismiss + kanban refresh (interceptor) | 4 | FR-14 | opus/xhigh | none | 032 | 🔲 |
 | 034 | Migrate browse consumer → BrowseModal | 4 | FR-15 | sonnet/high | none | 003 | ✅ (already-resolved; verified) |
 | 035 | Deploy + modal QA | 4 | deploy | sonnet/high | none | 033,034 | 🔲 |

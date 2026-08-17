@@ -384,10 +384,11 @@ export interface EntityRecordSurfaceParams {
   /** Entity logical name (e.g. `sprk_todo`). */
   entityName: string;
   /**
-   * Existing record ID to OPEN (present = open at the `record` OOB size,
-   * 85%×85%, centered — task 031 / FR-11). Absent = CREATE a new record at
-   * the `createForm` OOB size (70%×80% — task 030 / FR-10). Braces are
-   * stripped internally (`{...}` registry-format GUIDs are accepted).
+   * Existing record ID to OPEN (present = open at the `fullCover` OOB size,
+   * 100%×100%, centered — task 032 / FR-13, was `record` 85%×85% pre-032).
+   * Absent = CREATE a new record at the `fullCover` OOB size (100%×100% —
+   * task 032 / FR-13, was `createForm` 70%×80% pre-032). Braces are stripped
+   * internally (`{...}` registry-format GUIDs are accepted).
    */
   entityId?: string;
   /**
@@ -403,16 +404,57 @@ export interface EntityRecordSurfaceParams {
    * combines this with `entityId`).
    */
   defaultValues?: Record<string, unknown>;
+  /**
+   * Optional `navigateTo` `pageInput.formId` override — selects a specific
+   * System Form instance instead of the entity's default-ordered main form.
+   * Added by task 032 (FR-12, header-hide investigation) as the wiring seam
+   * for a header-hidden modal-variant `sprk_todo` form: MS Learn confirms
+   * `Xrm.Navigation.navigateTo` has NO `navigationOptions` property that
+   * suppresses the form's own header/command-bar chrome (verified 2026-08-16
+   * against the `ms.date: 2026-04-09` reference), so hiding it requires a
+   * FORM-LEVEL change (an OnLoad handler calling
+   * `formContext.ui.headerSection.setBodyVisible/setCommandBarVisible/
+   * setTabNavigatorVisible(false)`) scoped to a DEDICATED form via `formId`
+   * — NOT applied to the live "To Do main form" directly, because that form
+   * is also opened full-page from native parent-record "To Dos" subgrids,
+   * where the header must stay visible. See
+   * `projects/smart-todo-r5/notes/task-032-fullcover-header.md` for the full
+   * investigation + the exact form-clone recipe the orchestrator deploys.
+   * Currently UNUSED by any call site (no clone form exists yet) — passing
+   * it is a no-op until a real form GUID is supplied.
+   */
+  formId?: string;
 }
 
 /**
  * Launch an OOB entity record surface (`pageType:'entityrecord'`) in a modal —
- * CREATE mode when `params.entityId` is absent (`createForm` OOB size,
- * 70%×80%, no position override), OPEN-EXISTING mode when present (`record`
- * OOB size, 85%×85%, `position: 1` centered — per
- * `.claude/patterns/ui/record-modal-selection.md` Layout 1). REUSES the same
- * frame-walking resolver + modal-option shape for both branches — the ONE
- * `sprk_todo` OOB main-form launcher (task 031, spec FR-11).
+ * CREATE mode when `params.entityId` is absent, OPEN-EXISTING mode when
+ * present (`position: 1` centered on the OPEN branch only, unchanged since
+ * pre-031). REUSES the same frame-walking resolver + modal-option shape for
+ * both branches — the ONE `sprk_todo` OOB main-form launcher (task 031, spec
+ * FR-11).
+ *
+ * **Sizing (task 032, spec FR-13 / F-7)**: BOTH branches use the `fullCover`
+ * OOB size (100%×100%) instead of the generic `record` (85%×85%) /
+ * `createForm` (70%×80%) sizes every other consumer of those constants keeps.
+ * Rationale — this launcher can be invoked from WITHIN an already-modal
+ * SmartTodo Code Page (LegalWorkspace's zero-selection Open path opens the
+ * Code Page itself at a hardcoded 85%×85% in `todo.registration.ts`); at the
+ * pre-032 sizes, the inner dialog was SMALLER than that outer modal (a
+ * `record`-sized 85%×85% open roughly matches it, but the 70%×80% create was
+ * visibly inset), reading as "nested" rather than "replace". `fullCover`
+ * (100%×100%) always covers any possible outer frame regardless of dialog
+ * nesting depth — Dataverse dialogs render relative to the TOP browsing
+ * context's viewport (see `resolveXrmNavigation`'s frame-walking rationale
+ * above), not the calling iframe's bounds, so 100%×100% is the same absolute
+ * size whether this launcher fires from a bare embedded pane (single-modal
+ * case) or from inside the Code-Page-as-modal (modal-in-modal case) — full
+ * investigation + the single-modal/modal-in-modal reasoning in
+ * `projects/smart-todo-r5/notes/task-032-fullcover-header.md`. This is a
+ * scoped exception to the `record` "MUST NOT vary by entity" invariant
+ * (`.claude/patterns/ui/record-modal-selection.md`) — CLAUDE.md §6.5 Path A,
+ * cited in that notes file — limited to this ONE dedicated `sprk_todo`
+ * launcher; no other `record`/`createForm` consumer changes.
  *
  * Outcome-shape parity (task 031 step 2 research — Microsoft Learn
  * `Xrm.Navigation.navigateTo` reference, "Return value" section, verified
@@ -454,25 +496,29 @@ export async function navigateToEntityRecordSurfaceAsync(
   if (params.defaultValues && Object.keys(params.defaultValues).length > 0) {
     pageInput.data = params.defaultValues;
   }
+  // Task 032 (FR-12) header-hide seam — see `EntityRecordSurfaceParams.formId`
+  // doc comment. No-op today (no caller passes it; no clone form exists yet).
+  if (params.formId) {
+    pageInput.formId = params.formId;
+  }
   const navOptions: Record<string, unknown> = isOpenExisting
     ? {
-        // `record` OOB size (85% × 85%) + centered position — Layout 1
-        // (record-modal-selection.md), task 031 / spec FR-11.
+        // `fullCover` OOB size (100% × 100%) + centered position — task 032
+        // / spec FR-13 (was `record` 85%×85% / Layout 1 pre-032; see the
+        // function doc comment above for the full-cover rationale).
         target: DEFAULT_TARGET,
         position: 1,
-        width: OOB_MODAL_SIZES.record.width,
-        height: OOB_MODAL_SIZES.record.height,
+        width: OOB_MODAL_SIZES.fullCover.width,
+        height: OOB_MODAL_SIZES.fullCover.height,
       }
     : {
-        // `createForm` OOB size (70% × 80%) — this launches an OOB entity
-        // CREATE form (`pageType: 'entityrecord'`, no existing entityId), the
-        // exact scenario `createForm` was named for (spec FR-11), NOT the
-        // `wizard` (60% × 70%) webresource size the rest of this module uses.
-        // Verified zero existing callers depend on the prior 60%×70% fallback
-        // (task 090 repo-wide grep) — see notes/task-090-completion.md.
+        // `fullCover` OOB size (100% × 100%) — task 032 / spec FR-13 (was
+        // `createForm` 70%×80% pre-032; see the function doc comment above).
+        // This launches an OOB entity CREATE form (`pageType: 'entityrecord'`,
+        // no existing entityId).
         target: DEFAULT_TARGET,
-        width: OOB_MODAL_SIZES.createForm.width,
-        height: OOB_MODAL_SIZES.createForm.height,
+        width: OOB_MODAL_SIZES.fullCover.width,
+        height: OOB_MODAL_SIZES.fullCover.height,
       };
   if (params.title !== undefined) {
     navOptions.title = params.title;

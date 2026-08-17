@@ -1,12 +1,13 @@
 /**
  * wizardLaunchers.test — unit tests for `navigateToEntityRecordSurfaceAsync`'s
- * task 031 consolidation (spec FR-11 — "one code path for create + open").
+ * task 031 consolidation (spec FR-11 — "one code path for create + open") and
+ * task 032's full-cover sizing + `formId` seam (spec FR-12/FR-13).
  *
  * Covers smart-todo-r5 task 031 acceptance criteria:
- *   - `entityId` present → OPEN branch: `record` OOB size (85%×85%),
- *     `position: 1`, `pageInput.entityId` set with braces stripped.
- *   - `entityId` absent → CREATE branch: `createForm` OOB size (70%×80%), no
- *     `position` key (unchanged pre-031 behavior).
+ *   - `entityId` present → OPEN branch: `pageInput.entityId` set with braces
+ *     stripped, `position: 1`.
+ *   - `entityId` absent → CREATE branch: no `position` key (unchanged
+ *     pre-031 behavior).
  *   - Outcome-shape parity per the task's Microsoft Learn research finding:
  *     OPEN never returns `savedEntityReference` (the API only populates it
  *     for CREATE); a clean OPEN resolve returns a plain `{ launched: true }`
@@ -14,6 +15,15 @@
  *   - `resolveXrmNavigation()`'s frame-walk remains the sole resolver (no
  *     host reachable → `{ launched: false }`, verified via `window.Xrm`
  *     absence rather than re-implementing a second resolver in the test).
+ *
+ * Covers smart-todo-r5 task 032 acceptance criteria (FR-13 full-cover sizing):
+ *   - BOTH branches now size at `fullCover` (100%×100%), replacing the
+ *     pre-032 `record` (85%×85%) / `createForm` (70%×80%) sizes — see
+ *     `oobModalSizes.test.ts` for the size-constant-level coverage and
+ *     `projects/smart-todo-r5/notes/task-032-fullcover-header.md` for the
+ *     full rationale.
+ *   - `formId` (FR-12 header-hide seam): omitted by default (no
+ *     `pageInput.formId`); passed through verbatim when supplied.
  *
  * Classification (ADR-038 §7): MAINTAIN-class framework-contract tests for a
  * shared-lib launcher consumed by two host surfaces (SmartTodo Code Page +
@@ -49,7 +59,7 @@ afterEach(() => {
 
 describe('navigateToEntityRecordSurfaceAsync', () => {
   describe('OPEN branch (entityId present)', () => {
-    it('uses the record OOB size (85%x85%) and centered position', async () => {
+    it('uses the fullCover OOB size (100%x100%, task 032/FR-13) and centered position', async () => {
       const navigateTo = installXrmStub(undefined);
 
       await navigateToEntityRecordSurfaceAsync({
@@ -62,9 +72,34 @@ describe('navigateToEntityRecordSurfaceAsync', () => {
       expect(navOptions).toMatchObject({
         target: 2,
         position: 1,
-        width: { value: 85, unit: '%' },
-        height: { value: 85, unit: '%' },
+        width: { value: 100, unit: '%' },
+        height: { value: 100, unit: '%' },
       });
+    });
+
+    it('omits pageInput.formId when no formId is supplied (task 032 no-op default)', async () => {
+      const navigateTo = installXrmStub(undefined);
+
+      await navigateToEntityRecordSurfaceAsync({
+        entityName: 'sprk_todo',
+        entityId: '11111111-1111-1111-1111-111111111111',
+      });
+
+      const [pageInput] = navigateTo.mock.calls[0];
+      expect(pageInput).not.toHaveProperty('formId');
+    });
+
+    it('passes pageInput.formId through verbatim when supplied (task 032 header-hide seam)', async () => {
+      const navigateTo = installXrmStub(undefined);
+
+      await navigateToEntityRecordSurfaceAsync({
+        entityName: 'sprk_todo',
+        entityId: '11111111-1111-1111-1111-111111111111',
+        formId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      });
+
+      const [pageInput] = navigateTo.mock.calls[0];
+      expect(pageInput).toMatchObject({ formId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa' });
     });
 
     it('strips braces from a registry-format entityId', async () => {
@@ -123,7 +158,7 @@ describe('navigateToEntityRecordSurfaceAsync', () => {
   });
 
   describe('CREATE branch (entityId absent)', () => {
-    it('uses the createForm OOB size (70%x80%) with no position key', async () => {
+    it('uses the fullCover OOB size (100%x100%, task 032/FR-13) with no position key', async () => {
       const navigateTo = installXrmStub({});
 
       await navigateToEntityRecordSurfaceAsync({
@@ -135,8 +170,8 @@ describe('navigateToEntityRecordSurfaceAsync', () => {
       expect(pageInput).not.toHaveProperty('entityId');
       expect(navOptions).toMatchObject({
         target: 2,
-        width: { value: 70, unit: '%' },
-        height: { value: 80, unit: '%' },
+        width: { value: 100, unit: '%' },
+        height: { value: 100, unit: '%' },
         title: 'New To Do',
       });
       expect(navOptions).not.toHaveProperty('position');
