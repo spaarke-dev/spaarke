@@ -3,8 +3,8 @@
   <metadata>
     <title>Render the typed two-kind suggestion structure — one chip family, capability vs question variants (FR-04)</title>
     <phase>2 — E2 follow-ons</phase>
-    <gate>blocked</gate>
-    <status>pending</status>
+    <gate>open</gate>
+    <status>completed</status>
     <!-- Client half of the split from task 021 (notes/021-grounded-suggestions-design-delta.md). Consumes the typed
          two-kind SSE contract 021a emits. Close coordination with 021a on that wire shape. -->
     <rigor>FULL</rigor>
@@ -80,7 +80,9 @@
     <criterion testable="true">ASSISTANT-UI-ELEMENT-CRITERIA.md documents the action-chip-vs-question-chip distinction.</criterion>
     <criterion testable="true">No regression to other SprkChat consumers / full-page / widget hosts (NFR-09).</criterion>
   </acceptance-criteria>
-  <notes>Depends on 021a's typed SSE contract — coordinate the exact shape before implementing. Dep 012 supplies the FR-01 advisory capability a "prioritize my tasks" capability chip maps to. /conflict-check with compose-r5/r6 before the PR.</notes>
+  <notes>Depends on 021a's typed SSE contract — coordinate the exact shape before implementing. Dep 012 supplies the FR-01 advisory capability a "prioritize my tasks" capability chip maps to. /conflict-check with compose-r5/r6 before the PR.
+
+COMPLETED 2026-08-17. Rendered the typed two-kind chip family per §9a wire contract. Files: types.ts (SprkChatFollowupKind + ISprkChatFollowup; SSE/hook/props string[]→ISprkChatFollowup[]; new optional `onSuggestionCapabilitySelect` prop), useSseStream.ts (parseSuggestions drops untyped/kindless/capability-without-binding/action-without-routable-actionId), SprkChatSuggestions.tsx (one family, two variants: capability/action=brand+arrow, question=outline pill; retired `[action:*]` strip; data-suggestion-kind), SprkChat.tsx (handleSuggestionSelect branches on kind), SpaarkeAi ConversationPane.tsx (handleSuggestionCapability→chips.dispatchBinding, the SAME Click-path seam onNextStep uses; shared lib never imports dispatchConsumer — ADR-012), ASSISTANT-UI-ELEMENT-CRITERIA.md §5a. Reuse-first (§11): capability chips ride the existing dispatchBinding seam, no new dispatch surface (ADR-039 — routing purely by structural kind, no keyword heuristic). Tests: 374/374 shared-lib pass (40 suggestion-suite tests incl. capability-dispatch, question-send, action-route, untyped/unroutable-dropped negatives, variant-per-kind). ESLint 0 errors. SpaarkeAi surface-gate: no new production error. ConsumerChips untouched. Step 9.5: independent code-review (no Critical; 3 findings all fixed Path C) + adr-check (ADR-039/012/021/022 clean). MERGE-ORDER GATE: deploy WITH 021a at task 080 (SSE wire changed). PR HELD (owner).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files + the design delta. Follow task-execute skill.</protocol>

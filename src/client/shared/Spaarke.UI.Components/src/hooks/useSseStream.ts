@@ -55,6 +55,8 @@ import type {
   IPlaybookOptionsPayload,
   IElicitationModalPayload,
   ISurfaceLaunchPayload,
+  ISprkChatFollowup,
+  SprkChatFollowupKind,
   AccessTokenGetter,
 } from '../components/SprkChat/types';
 
@@ -126,22 +128,76 @@ export function parsePaneEvent(line: string): IAiPaneEvent | null {
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** The three structural kinds a valid follow-up item may declare (021a wire contract). */
+const VALID_FOLLOWUP_KINDS: ReadonlySet<string> = new Set<SprkChatFollowupKind>([
+  'capability',
+  'question',
+  'action',
+]);
+
 /**
- * Extract suggestions array from a "suggestions" SSE event.
- * The backend sends suggestions in the `data.suggestions` property:
- * data: {"type":"suggestions","content":null,"data":{"suggestions":["s1","s2","s3"]}}
- * Falls back to `event.suggestions` for backward compatibility.
+ * The only `actionId`s the client can route (the deterministic missing-context
+ * shortcuts in SprkChat.handleSuggestionSelect). An `action` item carrying any
+ * other id is a soft dead-end (an "acts" chip with no wired route), so it is
+ * dropped here — symmetric with dropping a capability that has no targetBindingId.
  */
-function parseSuggestions(event: IChatSseEvent): string[] {
-  // Primary: data.suggestions (ChatSseSuggestionsData from the backend)
-  if (event.data?.suggestions && event.data.suggestions.length > 0) {
-    return event.data.suggestions.filter(s => typeof s === 'string' && s.length > 0);
+const VALID_ACTION_IDS: ReadonlySet<string> = new Set<string>(['upload', 'search', 'select']);
+
+/**
+ * Extract the typed follow-up items from a "suggestions" SSE event
+ * (spaarkeai-assistant-enhancements-r4 task 021a/021b — grounded suggestions).
+ *
+ * The backend (021a `ChatSseSuggestionsData`) sends typed items in `data.suggestions`:
+ * data: {"type":"suggestions","content":null,"data":{"suggestions":[
+ *   {"kind":"capability","label":"Prioritize my tasks","targetBindingId":"<id>","actionId":null},
+ *   {"kind":"question","label":"What are the risks in section 3?","targetBindingId":null,"actionId":null}
+ * ]}}
+ *
+ * The untyped `string[]` shape is fully retired. An item with no valid `kind`,
+ * no `label`, or (for capability) no `targetBindingId` / (for action) no `actionId`
+ * is DROPPED — a bare/untyped item is never rendered, so a dead-end is structurally
+ * impossible (AC: no untyped free string reaches the chip row). Nulls are serialized;
+ * branch on `kind`, not on presence.
+ */
+function parseSuggestions(event: IChatSseEvent): ISprkChatFollowup[] {
+  const raw = event.data?.suggestions ?? event.suggestions;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    return [];
   }
-  // Fallback: event.suggestions (if sent as a top-level property)
-  if (Array.isArray(event.suggestions) && event.suggestions.length > 0) {
-    return event.suggestions.filter(s => typeof s === 'string' && s.length > 0);
+  const parsed: ISprkChatFollowup[] = [];
+  for (const item of raw as unknown[]) {
+    if (typeof item !== 'object' || item === null) {
+      continue; // legacy bare string / malformed entry — never rendered
+    }
+    const candidate = item as Record<string, unknown>;
+    const kind = candidate.kind;
+    const label = candidate.label;
+    if (typeof kind !== 'string' || !VALID_FOLLOWUP_KINDS.has(kind)) {
+      continue; // untyped / unknown kind — structurally can't be routed, drop it
+    }
+    if (typeof label !== 'string' || label.length === 0) {
+      continue; // no chip text — nothing to render
+    }
+    const targetBindingId =
+      typeof candidate.targetBindingId === 'string' && candidate.targetBindingId.length > 0
+        ? candidate.targetBindingId
+        : null;
+    const actionId =
+      typeof candidate.actionId === 'string' && candidate.actionId.length > 0
+        ? candidate.actionId
+        : null;
+    // A capability with no Binding id, or an action with no (or an unroutable)
+    // action id, is a dead-end promise — drop it (the guarantee the design
+    // delta §5 requires: a chip that "acts" must have a real route).
+    if (kind === 'capability' && targetBindingId === null) {
+      continue;
+    }
+    if (kind === 'action' && (actionId === null || !VALID_ACTION_IDS.has(actionId))) {
+      continue;
+    }
+    parsed.push({ kind: kind as SprkChatFollowupKind, label, targetBindingId, actionId });
   }
-  return [];
+  return parsed;
 }
 
 /**
@@ -380,7 +436,7 @@ interface SseEventHandlers {
   onTypingStart: () => void;
   onToken: (token: string) => void;
   onTypingEnd: () => void;
-  onSuggestions: (suggestions: string[]) => void;
+  onSuggestions: (suggestions: ISprkChatFollowup[]) => void;
   onCitations: (citations: ICitation[]) => void;
   onPlanPreview: (planId: string, planData: IChatSseEventData) => void;
   onActionEvent: (event: PendingActionEvent) => void;
@@ -580,7 +636,7 @@ export function useSseStream(): IUseSseStreamResult {
   const [error, setError] = useState<Error | null>(null);
   const [isStreaming, setIsStreaming] = useState<boolean>(false);
   const [isTyping, setIsTyping] = useState<boolean>(false);
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<ISprkChatFollowup[]>([]);
   const [citations, setCitations] = useState<ICitation[]>([]);
   // Phase 2F: stores planId from plan_preview SSE event so SprkChat can call /plan/approve
   const [pendingPlanId, setPendingPlanId] = useState<string | null>(null);
@@ -722,7 +778,7 @@ export function useSseStream(): IUseSseStreamResult {
               setContent(accumulated);
             },
             onTypingEnd: () => setIsTyping(false),
-            onSuggestions: (s: string[]) => setSuggestions(s),
+            onSuggestions: (s: ISprkChatFollowup[]) => setSuggestions(s),
             onCitations: (c: ICitation[]) => setCitations(c),
             onPlanPreview: (planId: string, planData: IChatSseEventData) => {
               setPendingPlanId(planId);

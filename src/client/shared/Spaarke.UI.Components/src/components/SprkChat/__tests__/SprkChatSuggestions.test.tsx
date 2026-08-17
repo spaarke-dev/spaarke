@@ -1,8 +1,12 @@
 /**
  * SprkChatSuggestions Component Tests
  *
- * Tests rendering of suggestion chips, selection behavior, keyboard navigation,
- * truncation, visibility animation, and accessibility.
+ * Tests the TYPED two-kind chip family (spaarkeai-assistant-enhancements-r4 task
+ * 021b — grounded, capability-backed suggestions; design delta §5a):
+ * - one chip family, two variants driven by the structural `kind`
+ * - capability/action chips render the "acts" arrow; question chips do not
+ * - onSelect receives the full typed item (so the parent can route by kind)
+ * - selection, keyboard navigation, truncation, visibility, accessibility
  *
  * @see ADR-012 - Shared Component Library
  * @see ADR-021 - Fluent UI v9; makeStyles; design tokens; dark mode
@@ -13,7 +17,28 @@ import * as React from 'react';
 import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SprkChatSuggestions } from '../SprkChatSuggestions';
+import type { ISprkChatFollowup } from '../types';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
+
+// ── Typed follow-up fixtures ────────────────────────────────────────────────
+const cap = (label: string, targetBindingId = 'binding-1'): ISprkChatFollowup => ({
+  kind: 'capability',
+  label,
+  targetBindingId,
+  actionId: null,
+});
+const question = (label: string): ISprkChatFollowup => ({
+  kind: 'question',
+  label,
+  targetBindingId: null,
+  actionId: null,
+});
+const action = (label: string, actionId: string): ISprkChatFollowup => ({
+  kind: 'action',
+  label,
+  targetBindingId: null,
+  actionId,
+});
 
 describe('SprkChatSuggestions', () => {
   let mockOnSelect: jest.Mock;
@@ -26,199 +51,179 @@ describe('SprkChatSuggestions', () => {
     jest.clearAllMocks();
   });
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 1: Render_WithSuggestions_ShowsChips
-  // ─────────────────────────────────────────────────────────────────────
-
   it('Render_WithSuggestions_ShowsChips', () => {
-    const suggestions = ['Summarize the key points', 'What are the risks?', 'List action items'];
+    const suggestions = [cap('Prioritize my tasks'), question('What are the risks?'), action('Upload File', 'upload')];
 
     renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
 
     expect(screen.getByTestId('suggestion-chip-0')).toBeInTheDocument();
     expect(screen.getByTestId('suggestion-chip-1')).toBeInTheDocument();
     expect(screen.getByTestId('suggestion-chip-2')).toBeInTheDocument();
-    expect(screen.getByText('Summarize the key points')).toBeInTheDocument();
+    expect(screen.getByText('Prioritize my tasks')).toBeInTheDocument();
     expect(screen.getByText('What are the risks?')).toBeInTheDocument();
-    expect(screen.getByText('List action items')).toBeInTheDocument();
+    expect(screen.getByText('Upload File')).toBeInTheDocument();
   });
-
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 2: Render_EmptySuggestions_ShowsNothing
-  // ─────────────────────────────────────────────────────────────────────
 
   it('Render_EmptySuggestions_ShowsNothing', () => {
     renderWithProviders(<SprkChatSuggestions suggestions={[]} onSelect={mockOnSelect} visible={true} />);
-
-    // Component returns null when suggestions is empty, so the container
-    // testid should not be present in the DOM.
     expect(screen.queryByTestId('sprkchat-suggestions')).not.toBeInTheDocument();
   });
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 3: Render_MaxThreeSuggestions_TruncatesExtra
-  // ─────────────────────────────────────────────────────────────────────
-
   it('Render_MaxThreeSuggestions_TruncatesExtra', () => {
     const suggestions = [
-      'First suggestion',
-      'Second suggestion',
-      'Third suggestion',
-      'Fourth suggestion',
-      'Fifth suggestion',
+      cap('First'),
+      question('Second?'),
+      cap('Third'),
+      question('Fourth?'),
+      cap('Fifth'),
     ];
 
     renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
 
-    // First three should be rendered
     expect(screen.getByTestId('suggestion-chip-0')).toBeInTheDocument();
     expect(screen.getByTestId('suggestion-chip-1')).toBeInTheDocument();
     expect(screen.getByTestId('suggestion-chip-2')).toBeInTheDocument();
-
-    // Fourth and fifth should NOT be rendered
     expect(screen.queryByTestId('suggestion-chip-3')).not.toBeInTheDocument();
     expect(screen.queryByTestId('suggestion-chip-4')).not.toBeInTheDocument();
-
-    // Verify text content
-    expect(screen.getByText('First suggestion')).toBeInTheDocument();
-    expect(screen.getByText('Second suggestion')).toBeInTheDocument();
-    expect(screen.getByText('Third suggestion')).toBeInTheDocument();
-    expect(screen.queryByText('Fourth suggestion')).not.toBeInTheDocument();
-    expect(screen.queryByText('Fifth suggestion')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fourth?')).not.toBeInTheDocument();
+    expect(screen.queryByText('Fifth')).not.toBeInTheDocument();
   });
 
   // ─────────────────────────────────────────────────────────────────────
-  // Test 4: Click_SuggestionChip_CallsOnSelect
+  // Variant rendering — arrow encodes the promise (design delta §5a)
   // ─────────────────────────────────────────────────────────────────────
 
-  it('Click_SuggestionChip_CallsOnSelect', async () => {
+  it('Render_CapabilityChip_ShowsActsArrow', () => {
+    renderWithProviders(
+      <SprkChatSuggestions suggestions={[cap('Prioritize my tasks')]} onSelect={mockOnSelect} visible={true} />
+    );
+
+    const chip = screen.getByTestId('suggestion-chip-0');
+    expect(chip).toHaveAttribute('data-suggestion-kind', 'capability');
+    // The "acts" arrow (→) is present for capability chips.
+    expect(chip.textContent).toContain('→');
+  });
+
+  it('Render_ActionChip_ShowsActsArrow', () => {
+    renderWithProviders(
+      <SprkChatSuggestions suggestions={[action('Upload File', 'upload')]} onSelect={mockOnSelect} visible={true} />
+    );
+
+    const chip = screen.getByTestId('suggestion-chip-0');
+    expect(chip).toHaveAttribute('data-suggestion-kind', 'action');
+    expect(chip.textContent).toContain('→');
+  });
+
+  it('Render_QuestionChip_HasNoArrow', () => {
+    renderWithProviders(
+      <SprkChatSuggestions suggestions={[question('What are the risks?')]} onSelect={mockOnSelect} visible={true} />
+    );
+
+    const chip = screen.getByTestId('suggestion-chip-0');
+    expect(chip).toHaveAttribute('data-suggestion-kind', 'question');
+    // No "acts" arrow on a question chip — it asks, it does not act.
+    expect(chip.textContent).not.toContain('→');
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Selection — onSelect receives the full typed item
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('Click_CapabilityChip_CallsOnSelectWithItem', async () => {
     const user = userEvent.setup();
-    const suggestions = ['Summarize the key points', 'What are the risks?'];
+    const capItem = cap('Prioritize my tasks', 'binding-42');
+    const suggestions = [capItem, question('What are the risks?')];
+
+    renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
+
+    await user.click(screen.getByTestId('suggestion-chip-0'));
+
+    expect(mockOnSelect).toHaveBeenCalledTimes(1);
+    expect(mockOnSelect).toHaveBeenCalledWith(capItem);
+  });
+
+  it('Click_QuestionChip_CallsOnSelectWithItem', async () => {
+    const user = userEvent.setup();
+    const qItem = question('What are the risks?');
+    const suggestions = [cap('Prioritize my tasks'), qItem];
 
     renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
 
     await user.click(screen.getByTestId('suggestion-chip-1'));
 
-    // onSelect should be called with the FULL original text, not truncated
     expect(mockOnSelect).toHaveBeenCalledTimes(1);
-    expect(mockOnSelect).toHaveBeenCalledWith('What are the risks?');
+    expect(mockOnSelect).toHaveBeenCalledWith(qItem);
   });
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 5: Render_LongSuggestion_TruncatesText
-  // ─────────────────────────────────────────────────────────────────────
-
   it('Render_LongSuggestion_TruncatesText', () => {
-    // 60 characters - exceeds MAX_TEXT_LENGTH of 50
     const longText = 'This is a very long suggestion that exceeds the fifty char limit easily';
-    const suggestions = [longText];
+    const suggestions = [question(longText)];
 
     renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
 
-    // The displayed text should be truncated to 49 chars + ellipsis (unicode \u2026)
-    const truncated = longText.slice(0, 49).trimEnd() + '\u2026';
+    const truncated = longText.slice(0, 49).trimEnd() + '…';
     expect(screen.getByText(truncated)).toBeInTheDocument();
-
-    // The full original text should NOT appear as visible text
     expect(screen.queryByText(longText)).not.toBeInTheDocument();
   });
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 6: Visible_False_HidesComponent
-  // ─────────────────────────────────────────────────────────────────────
-
   it('Visible_False_HidesComponent', () => {
-    const suggestions = ['A suggestion'];
-
-    renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={false} />);
+    renderWithProviders(
+      <SprkChatSuggestions suggestions={[question('A suggestion?')]} onSelect={mockOnSelect} visible={false} />
+    );
 
     const container = screen.getByTestId('sprkchat-suggestions');
-    // When visible=false, the component applies the "hidden" class which sets
-    // opacity: 0 and pointer-events: none. We verify the container is still
-    // in the DOM (it's not unmounted, just hidden via CSS for animation).
     expect(container).toBeInTheDocument();
-
-    // The component should have the hidden class applied (opacity 0, pointerEvents none).
-    // Fluent makeStyles generates class names, so we verify behavior: the container
-    // should NOT have the visible class characteristics. Since makeStyles classes
-    // are hashed, we check that the element exists but is styled for hidden state.
-    // The key assertion is that the container IS in the DOM (not null-returned),
-    // meaning visibility is controlled by CSS, not conditional rendering.
     expect(container.className).toBeTruthy();
   });
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 7: Keyboard_ArrowRight_MovesFocusToNextChip
-  // ─────────────────────────────────────────────────────────────────────
-
   it('Keyboard_ArrowRight_MovesFocusToNextChip', async () => {
     const user = userEvent.setup();
-    const suggestions = ['First', 'Second', 'Third'];
+    const suggestions = [cap('First'), question('Second?'), cap('Third')];
 
     renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
 
     const chip0 = screen.getByTestId('suggestion-chip-0');
     const chip1 = screen.getByTestId('suggestion-chip-1');
 
-    // Focus the first chip
     chip0.focus();
     expect(document.activeElement).toBe(chip0);
 
-    // Press ArrowRight - focus should move to second chip
     await user.keyboard('{ArrowRight}');
     expect(document.activeElement).toBe(chip1);
   });
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 8: Keyboard_EnterOnChip_CallsOnSelect
-  // ─────────────────────────────────────────────────────────────────────
-
   it('Keyboard_EnterOnChip_CallsOnSelect', async () => {
     const user = userEvent.setup();
-    const suggestions = ['Summarize the key points'];
+    const capItem = cap('Prioritize my tasks');
 
-    renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
+    renderWithProviders(<SprkChatSuggestions suggestions={[capItem]} onSelect={mockOnSelect} visible={true} />);
 
     const chip = screen.getByTestId('suggestion-chip-0');
-
-    // Focus the chip and press Enter
     chip.focus();
     await user.keyboard('{Enter}');
 
-    expect(mockOnSelect).toHaveBeenCalledWith('Summarize the key points');
+    expect(mockOnSelect).toHaveBeenCalledWith(capItem);
   });
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 9: Accessibility_ContainerHasGroupRole
-  // ─────────────────────────────────────────────────────────────────────
-
   it('Accessibility_ContainerHasGroupRole', () => {
-    const suggestions = ['A suggestion'];
-
-    renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
+    renderWithProviders(
+      <SprkChatSuggestions suggestions={[question('A suggestion?')]} onSelect={mockOnSelect} visible={true} />
+    );
 
     const group = screen.getByRole('group');
     expect(group).toBeInTheDocument();
     expect(group).toHaveAttribute('aria-label', 'Follow-up suggestions');
   });
 
-  // ─────────────────────────────────────────────────────────────────────
-  // Test 10: Accessibility_ChipsHaveLabels
-  // ─────────────────────────────────────────────────────────────────────
-
   it('Accessibility_ChipsHaveLabels', () => {
-    // Use a long suggestion to trigger the aria-label (only set when truncated)
     const longText = 'This is a very long suggestion that exceeds the fifty char limit easily';
-    const shortText = 'Short one';
-    const suggestions = [longText, shortText];
+    const suggestions = [question(longText), question('Short one?')];
 
     renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
 
-    // Truncated chip should have aria-label with full text
     const truncatedChip = screen.getByTestId('suggestion-chip-0');
     expect(truncatedChip).toHaveAttribute('aria-label', longText);
 
-    // Non-truncated chip should NOT have aria-label (it's undefined when not truncated)
     const shortChip = screen.getByTestId('suggestion-chip-1');
     expect(shortChip).not.toHaveAttribute('aria-label');
   });

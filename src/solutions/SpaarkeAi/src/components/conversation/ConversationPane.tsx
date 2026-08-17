@@ -2825,6 +2825,21 @@ export function ConversationPane(): React.JSX.Element {
     [dispatchBinding]
   );
 
+  // ── R4 021b: grounded capability follow-up suggestion → Click-path dispatch ──
+  // A CAPABILITY-kind SprkChatSuggestions chip carries a real `targetBindingId`
+  // the model selected from the closed candidate menu (ADR-039). Route it through
+  // the SAME shared `dispatchBinding` seam `handleNextStep` uses — no new dispatch
+  // path (bindingId in, stream out; the server resolves the Binding). SprkChat
+  // owns question/action chips internally; only capability crosses this seam.
+  const handleSuggestionCapability = React.useCallback(
+    (targetBindingId: string): void => {
+      if (targetBindingId) {
+        dispatchBinding(targetBindingId, { slots: undefined });
+      }
+    },
+    [dispatchBinding]
+  );
+
   // R7 12.3a: normalize restored SessionRestoreMessage[] → IChatMessage[].
   const restoredInitialMessages = React.useMemo<IChatMessage[] | undefined>(() => {
     if (!restoreCtx?.recentMessages || restoreCtx.recentMessages.length === 0) return undefined;
@@ -3303,6 +3318,11 @@ export function ConversationPane(): React.JSX.Element {
               // invoke_capability chip's targetBindingId through the shared
               // dispatchConsumer path (see handleNextStep above).
               onNextStep={handleNextStep}
+              // R4 021b: a grounded CAPABILITY follow-up suggestion chip dispatches
+              // its targetBindingId through the SAME shared dispatchBinding path
+              // every consumer chip uses (ADR-039: bindingId in, stream out — no
+              // new dispatch surface). Question/action chips route inside SprkChat.
+              onSuggestionCapabilitySelect={handleSuggestionCapability}
               // FIX #7a: "Open preview" on the persistent "Saved to the DMS" message — opens the File
               // Preview modal for that document (savedPreview metadata carries the id per message).
               onOpenSavedPreview={handleOpenSavedPreview}

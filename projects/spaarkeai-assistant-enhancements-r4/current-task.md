@@ -10,9 +10,18 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | 🔄 **021b RECON DONE, impl pending** (client typed two-kind chip render, sonnet/high FULL). ✅ **12 of 17 done** (021a committed `068a81f9e`). **Checkpointed for a fresh session — 021b plan LOCKED below.** |
-| **Status** | 021a ✅ committed local (`068a81f9e`; 7 unpushed, PR HELD). 021b: `/conflict-check` = **soft pass** (no open PR touches SprkChat/shared-UI/SpaarkeAi). Recon resolved the shared-lib↔host boundary + SSE-parse location (see **021b IMPLEMENTATION PLAN**). Stopping here to avoid mid-surgery context exhaustion (021b = 6-7 files incl. two 2000-3000-line files). |
-| **Next Action** | Execute **021b** per the **021b IMPLEMENTATION PLAN** block below. Start: evolve the typed suggestion shape in `SprkChat/types.ts` + `useSseStream.ts` extractSuggestions. |
+| **Task** | ✅ **021b COMPLETE** (client typed two-kind chip render, sonnet/high FULL). ✅ **13 of 17 done**. Committing locally now (PR HELD). |
+| **Status** | 021a+021b both ✅ local. 021b: 12 files, **374/374 shared-lib tests pass** (40 suggestion-suite tests), ESLint 0 errors, SpaarkeAi surface-gate no new prod error, ConsumerChips untouched. Step 9.5 PASS (independent code-review: no Critical, 3 findings all fixed Path C — action-route test coverage, unroutable-actionId parser guard, doc §5a wording; adr-check ADR-039/012/021/022 clean). |
+| **Next Action** | Commit 021b locally. Then **remaining: 023 → 024 → 040 (needs `--chrome`, owner) → 080 (deploy; MUST create `sprk_groundedtoolallowlist` col + deploy 021a+021b TOGETHER) → 090**. |
+
+### 021b files modified (this session)
+1. `SprkChat/types.ts` — `SprkChatFollowupKind` + `ISprkChatFollowup`; `IChatSseEvent/IChatSseEventData/IUseSseStreamResult/ISprkChatSuggestionsProps.suggestions` string[]→ISprkChatFollowup[]; new optional SprkChat prop `onSuggestionCapabilitySelect(bindingId)`.
+2. `hooks/useSseStream.ts` — `parseSuggestions` now parses typed items + drops untyped/kindless/capability-without-binding/action-without-actionId; state + handler typed.
+3. `SprkChat/SprkChatSuggestions.tsx` — one chip family, two variants (capability/action = brand + trailing → ; question = outline pill, no arrow); onSelect(item); removed `[action:*]` strip; `data-suggestion-kind`.
+4. `SprkChat/SprkChat.tsx` — `handleSuggestionSelect(item)` branches on kind (capability→onSuggestionCapabilitySelect; action→upload/search/select; question→handleSend(label)); prop destructure.
+5. `SpaarkeAi/.../conversation/ConversationPane.tsx` — `handleSuggestionCapability` wired to `chips.dispatchBinding` (same seam onNextStep uses); passed as `onSuggestionCapabilitySelect`.
+6. `docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md` — new §5a (capability vs question chip), retired-`[action:*]` note, code-map refresh.
+7. Tests: `SprkChatSuggestions.test.tsx`, `useSseStream.suggestions.test.ts`, `suggestionsIntegration.test.tsx` rewritten to typed shape + variant/dispatch/negative; `useSseStream.citations.test.ts` + `citationsIntegration.test.tsx` fixtures updated to typed items.
 
 ---
 

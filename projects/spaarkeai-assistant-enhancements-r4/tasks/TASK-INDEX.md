@@ -18,7 +18,7 @@
 | 020 | OBO-identity wording (user-scoped tools) | 2 E2 | FR-05 | sonnet / high | FULL | ❌ | — | ✅ |
 | 021 | ~~Gate free-string `SprkChatSuggestions`~~ | 2 E2 | FR-04 | — | — | — | — | ⛔ SUPERSEDED → 021a + 021b (design delta 2026-08-17) |
 | 021a | Grounded suggestion proposer (BFF) — retire ungrounded generator + typed two-kind output | 2 E2 | FR-04 | opus / high | FULL | ❌ | 012 | ✅ (retired GenerateAndEmitSuggestionsAsync; AssistantSuggestionService.SuggestForConversationAsync + typed SuggestedFollowup + ParseFollowups closed-catalog guard; FilterByContextTypes union pre-filter; two-kind action JSON; typed SSE event; 27/27 tests; publish 44.97 MB; CVE clean; ADR-039 review PASS. 021b renders §9a wire shape; deploy w/ 021b at 080) |
-| 021b | Render typed two-kind chip family (capability vs question) | 2 E2 | FR-04 | sonnet / high | FULL | ❌ | 021a | 🔲 |
+| 021b | Render typed two-kind chip family (capability vs question) | 2 E2 | FR-04 | sonnet / high | FULL | ❌ | 021a | ✅ (one chip family, 2 variants by structural kind; capability→existing dispatchBinding Click-path seam via new optional `onSuggestionCapabilitySelect`; question→send; action→upload/search/select; untyped/unroutable dropped; retired `[action:*]` string-prefix; ASSISTANT-UI-ELEMENT-CRITERIA §5a; 374/374 shared-lib tests, ESLint clean, ConsumerChips untouched; Step 9.5 PASS. Deploy w/ 021a at 080) |
 | 022 | Briefing + Smart To Do launch-registry entries | 2 E2 | FR-06 | sonnet / med | STANDARD | ✅ | — | ✅ |
 | 023 | Follow-on cards, open-tab-gated (Briefing/SmartToDo) | 2 E2 | FR-06 | sonnet / high | FULL | ❌ | 022, 012 | 🔲 |
 | 024 | E2 eval cases (dead-end + card gating) | 2 E2 | FR-10 | sonnet / high | FULL | ✅ | 021b, 023 | 🔲 |

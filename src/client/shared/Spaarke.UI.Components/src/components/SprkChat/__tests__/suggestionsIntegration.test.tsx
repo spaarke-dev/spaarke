@@ -251,7 +251,11 @@ describe('SprkChat - Suggestions Integration', () => {
         type: 'suggestions',
         content: null,
         data: {
-          suggestions: ['Tell me more', 'What are the risks?', 'Summarize key points'],
+          suggestions: [
+            { kind: 'capability', label: 'Prioritize my tasks', targetBindingId: 'binding-1', actionId: null },
+            { kind: 'question', label: 'What are the risks?', targetBindingId: null, actionId: null },
+            { kind: 'question', label: 'Summarize key points', targetBindingId: null, actionId: null },
+          ],
         },
       },
       { type: 'done', content: null },
@@ -271,6 +275,35 @@ describe('SprkChat - Suggestions Integration', () => {
     expect(screen.getByTestId('suggestion-chip-0')).toBeInTheDocument();
     expect(screen.getByTestId('suggestion-chip-1')).toBeInTheDocument();
     expect(screen.getByTestId('suggestion-chip-2')).toBeInTheDocument();
+    // Capability chip acts (arrow); question chips ask (no arrow).
+    expect(screen.getByTestId('suggestion-chip-0')).toHaveAttribute('data-suggestion-kind', 'capability');
+    expect(screen.getByTestId('suggestion-chip-1')).toHaveAttribute('data-suggestion-kind', 'question');
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 1b: legacy untyped string[] suggestions are NEVER rendered
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('sseFlow_LegacyStringSuggestions_NotRendered', async () => {
+    const user = await renderChatWithSession();
+
+    const sseEvents = [
+      { type: 'token', content: 'Here is my response.' },
+      // The retired untyped shape — no `kind`, so nothing may render (no dead-end).
+      { type: 'suggestions', content: null, data: { suggestions: ['Tell me more', 'What are the risks?'] } },
+      { type: 'done', content: null },
+    ];
+
+    await sendMessageAndStream(user, 'Hello', sseEvents);
+
+    await waitFor(
+      () => {
+        expect(screen.getByText('Here is my response.')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    expect(screen.queryByTestId('sprkchat-suggestions')).not.toBeInTheDocument();
   });
 
   // ─────────────────────────────────────────────────────────────────────
@@ -313,7 +346,8 @@ describe('SprkChat - Suggestions Integration', () => {
       {
         type: 'suggestions',
         content: null,
-        data: { suggestions: ['Tell me more', 'Summarize'] },
+        // A QUESTION chip re-enters the loop by sending its label as a message.
+        data: { suggestions: [{ kind: 'question', label: 'Tell me more', targetBindingId: null, actionId: null }] },
       },
       { type: 'done', content: null },
     ];
@@ -342,10 +376,10 @@ describe('SprkChat - Suggestions Integration', () => {
       ])
     );
 
-    // Click a suggestion chip
+    // Click the question chip
     await user.click(screen.getByTestId('suggestion-chip-0'));
 
-    // The suggestion text should appear as a new user message
+    // The question text should appear as a new user message
     await waitFor(
       () => {
         expect(screen.getByText('Tell me more')).toBeInTheDocument();
@@ -373,7 +407,7 @@ describe('SprkChat - Suggestions Integration', () => {
       {
         type: 'suggestions',
         content: null,
-        data: { suggestions: ['Option A', 'Option B'] },
+        data: { suggestions: [{ kind: 'question', label: 'Option A', targetBindingId: null, actionId: null }] },
       },
       { type: 'done', content: null },
     ];
@@ -415,5 +449,112 @@ describe('SprkChat - Suggestions Integration', () => {
 
     // Suggestions should be cleared (second response had no suggestions)
     expect(screen.queryByTestId('sprkchat-suggestions')).not.toBeInTheDocument();
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 5: a CAPABILITY chip dispatches its bindingId via the host seam
+  //         (Click path) — it does NOT send a chat message.
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('sseFlow_CapabilityClick_DispatchesBindingIdViaHostSeam', async () => {
+    const onSuggestionCapabilitySelect = jest.fn();
+    const user = userEvent.setup();
+
+    await act(async () => {
+      renderWithProviders(
+        <SprkChat {...defaultProps} onSuggestionCapabilitySelect={onSuggestionCapabilitySelect} />
+      );
+    });
+
+    await waitFor(() => {
+      const textarea = screen.getByTestId('chat-input-textarea');
+      const nativeTextarea = textarea.querySelector('textarea') || textarea;
+      expect(nativeTextarea).not.toBeDisabled();
+    });
+
+    await sendMessageAndStream(user, 'Hello', [
+      { type: 'token', content: 'Here is my response.' },
+      {
+        type: 'suggestions',
+        content: null,
+        data: { suggestions: [{ kind: 'capability', label: 'Prioritize my tasks', targetBindingId: 'binding-42', actionId: null }] },
+      },
+      { type: 'done', content: null },
+    ]);
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('sprkchat-suggestions')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    const messageCallsBefore = mockFetch.mock.calls.filter(
+      (call: any[]) => typeof call[0] === 'string' && call[0].includes('/messages')
+    ).length;
+
+    // Click the capability chip → the host Click-path seam fires with the bindingId.
+    await user.click(screen.getByTestId('suggestion-chip-0'));
+
+    await waitFor(() => {
+      expect(onSuggestionCapabilitySelect).toHaveBeenCalledWith('binding-42');
+    });
+
+    // A capability dispatch does NOT re-enter the chat /messages stream.
+    const messageCallsAfter = mockFetch.mock.calls.filter(
+      (call: any[]) => typeof call[0] === 'string' && call[0].includes('/messages')
+    ).length;
+    expect(messageCallsAfter).toBe(messageCallsBefore);
+  });
+
+  // ─────────────────────────────────────────────────────────────────────
+  // Test 6: an ACTION chip routes by actionId (search → sends the canned
+  //         search message; migrated legacy [action:*] behavior).
+  // ─────────────────────────────────────────────────────────────────────
+
+  it('sseFlow_ActionSearchClick_SendsSearchMessage', async () => {
+    const user = await renderChatWithSession();
+
+    await sendMessageAndStream(user, 'Hello', [
+      { type: 'token', content: 'Here is my response.' },
+      {
+        type: 'suggestions',
+        content: null,
+        data: { suggestions: [{ kind: 'action', label: 'Search documents', targetBindingId: null, actionId: 'search' }] },
+      },
+      { type: 'done', content: null },
+    ]);
+
+    await waitFor(
+      () => {
+        expect(screen.getByTestId('sprkchat-suggestions')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    await waitFor(() => {
+      const textarea = screen.getByTestId('chat-input-textarea');
+      const nativeTextarea = textarea.querySelector('textarea') || textarea;
+      expect(nativeTextarea).not.toBeDisabled();
+    });
+
+    // Queue the SSE response the search message will trigger.
+    pendingSseResponses.push(
+      createSseStreamResponse([
+        { type: 'token', content: 'Opening search.' },
+        { type: 'done', content: null },
+      ])
+    );
+
+    // Click the action chip → the deterministic 'search' route sends the canned
+    // message (NOT the chip label) as a new user turn.
+    await user.click(screen.getByTestId('suggestion-chip-0'));
+
+    await waitFor(
+      () => {
+        expect(screen.getByText('Browse and search my documents')).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
   });
 });

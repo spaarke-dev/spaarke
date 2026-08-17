@@ -281,14 +281,52 @@ export type ChatSseEventType =
   // entry precedes this event — ADR-040).
   | 'surface_launch';
 
+/**
+ * The structural kind of a follow-up suggestion (spaarkeai-assistant-enhancements-r4
+ * task 021a/021b — grounded, capability-backed suggestions; design delta §5/§5a/§9a).
+ *
+ * Replaces the legacy untyped `suggestions: string[]` wire shape. The kind is
+ * STRUCTURAL (never a keyword heuristic on the label — that heuristic is banned by
+ * ASSISTANT-UI-ELEMENT-CRITERIA), so a genuine action can never render as a
+ * conversational pill and vice-versa:
+ *   - `capability` — "does something": carries a real `targetBindingId` the model
+ *     selected from the closed candidate menu (ADR-039). Clicking dispatches that
+ *     exact Binding via the existing Click path. Guaranteed to work.
+ *   - `question`   — "asks the assistant something": carries only `label`. Clicking
+ *     re-enters the grounded agent loop (safe by construction — ADR-039 grounded
+ *     outcomes: dispatch, cited answer, clarifying question, or honest refusal).
+ *   - `action`     — one of the deterministic missing-context shortcuts keyed off
+ *     `actionId` ∈ {upload, search, select} (the legacy `[action:*]` chips, now
+ *     carried structurally instead of as a string prefix).
+ */
+export type SprkChatFollowupKind = 'capability' | 'question' | 'action';
+
+/**
+ * One typed follow-up suggestion emitted by the `suggestions` SSE event
+ * (021a `ChatSseFollowupItem`, camelCase on the wire). Branch on `kind` — NOT on
+ * the presence of `targetBindingId`/`actionId` (nulls are serialized). Server
+ * authors the label grammar so it agrees with the affordance (imperative for
+ * capability/action, interrogative for question).
+ */
+export interface ISprkChatFollowup {
+  /** Structural kind — drives both routing and the rendered chip variant. */
+  kind: SprkChatFollowupKind;
+  /** Chip text (always present). */
+  label: string;
+  /** The Binding to dispatch via the Click path — present + non-null ONLY for `kind === 'capability'`. */
+  targetBindingId?: string | null;
+  /** The deterministic shortcut id — present + non-null ONLY for `kind === 'action'` ∈ {upload, search, select}. */
+  actionId?: string | null;
+}
+
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
   /** Event type */
   type: ChatSseEventType;
   /** Text content for token events; error message for error; null for done/suggestions/citations */
   content: string | null;
-  /** Suggestions array for "suggestions" events; null/undefined for other event types */
-  suggestions?: string[];
+  /** Typed follow-up items for "suggestions" events; null/undefined for other event types (021a wire shape). */
+  suggestions?: ISprkChatFollowup[];
   /** Structured payload for rich event types (citations). Maps to ChatSseEvent.Data on the server. */
   data?: IChatSseEventData | null;
 }
@@ -304,8 +342,8 @@ export interface IChatSseEvent {
 export interface IChatSseEventData {
   /** Citation items from a "citations" event. */
   citations?: ICitationSseItem[];
-  /** Follow-up suggestion strings from a "suggestions" event (1-3 items, each max 80 chars). */
-  suggestions?: string[];
+  /** Typed follow-up items from a "suggestions" event (1-3 items; 021a `ChatSseFollowupItem[]`). */
+  suggestions?: ISprkChatFollowup[];
 
   // ── plan_preview fields (task 071, Phase 2F) ────────────────────────────────
   /** Unique plan ID echoed back on POST /plan/approve. Only in 'plan_preview' events. */
@@ -1106,6 +1144,28 @@ export interface ISprkChatProps {
   onNextStep?: (chip: INextStepChip) => void;
 
   /**
+   * Callback fired when the user clicks a CAPABILITY follow-up suggestion chip
+   * (spaarkeai-assistant-enhancements-r4 task 021b — grounded, capability-backed
+   * suggestions; design delta §5/§9a).
+   *
+   * Receives the suggestion's `targetBindingId` — a real `sprk_playbookconsumer`
+   * Binding id the model selected from the closed candidate menu (ADR-039). The
+   * host dispatches it through the SAME shared Click path every other consumer
+   * chip uses — `dispatchConsumer(targetBindingId, args)` / `chips.dispatchBinding`
+   * in SpaarkeAi's ConversationPane — exactly as `onNextStep` routes an
+   * `invoke_capability` OutcomeCard chip. SprkChat NEVER calls dispatchConsumer
+   * itself (ADR-012 context-agnostic; the shared lib must not import the host's
+   * dispatch surface).
+   *
+   * Only `capability`-kind suggestions use this seam. `question`-kind chips
+   * re-enter the loop via the internal send path; `action`-kind chips route to
+   * the deterministic upload/search/select shortcuts internally. When this prop
+   * is omitted, capability chips are inert on click (no dead-end — they simply
+   * do nothing rather than mis-dispatching).
+   */
+  onSuggestionCapabilitySelect?: (targetBindingId: string) => void;
+
+  /**
    * Callback fired when a chat attachment finishes client-side extraction and
    * transitions to "ready" status (R4 task 042 / W-4).
    *
@@ -1642,10 +1702,15 @@ export interface ISprkChatHighlightRefineProps {
 
 /** Props for SprkChatSuggestions sub-component. */
 export interface ISprkChatSuggestionsProps {
-  /** Array of suggestion strings to display as clickable chips (max 3 shown). */
-  suggestions: string[];
-  /** Callback fired when a suggestion chip is clicked; receives the full suggestion text. */
-  onSelect: (suggestion: string) => void;
+  /**
+   * Typed follow-up items to display as clickable chips (max 3 shown; 021b).
+   * Rendered as ONE chip family with two learnable variants driven by the
+   * structural `kind`: capability/action = bordered + trailing arrow (they DO
+   * something); question = lighter pill, no arrow (it ASKS).
+   */
+  suggestions: ISprkChatFollowup[];
+  /** Callback fired when a suggestion chip is clicked; receives the full typed item. */
+  onSelect: (item: ISprkChatFollowup) => void;
   /** Controls visibility with fade-in / slide-up animation. */
   visible: boolean;
 }
@@ -1972,8 +2037,8 @@ export interface IUseSseStreamResult {
    * Used to display the animated typing indicator before content arrives.
    */
   isTyping: boolean;
-  /** Follow-up suggestions received from the suggestions SSE event (1-3 strings) */
-  suggestions: string[];
+  /** Typed follow-up suggestions received from the suggestions SSE event (1-3 items; 021a wire shape) */
+  suggestions: ISprkChatFollowup[];
   /** Citation metadata received from the citations SSE event, keyed by citation ID for fast lookup */
   citations: ICitation[];
   /**
