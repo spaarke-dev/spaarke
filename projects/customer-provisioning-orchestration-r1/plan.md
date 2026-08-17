@@ -163,7 +163,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 - **Phase C UAMI migration** — structural refactor of App Service identity + RBAC + Graph roles + Dataverse App User. Blast radius: entire BFF startup path. Mitigation: `code-review` + `adr-check` at Step 9.5 FULL rigor; slot-swap smoke test as acceptance criteria; interim mitigation (dual-slot System-Assigned MI KV RBAC) stays in place until UAMI proven.
 - **Phase H canonical secret-catalog manifest** — single-source generation must produce 4 outputs identically. Manifest generator is Opus 4.8 or Fable 5 tier per model-tier rubric. Alias collapse has BINDING pre-check (§7.9) — never delete `Dataverse-ClientSecret` or `BFF-API-ClientSecret`.
 - **L2 control-plane scaffold** — 19 handlers implementing `IJobHandler`, Cosmos state store, REST + AAD, state-reconciler `BackgroundService`. Blast radius: net-new .NET 10 project. Mitigation: scaffold in dedicated `src/server/services/Sprk.Provisioning.ControlPlane/**`; separate DI/Program.cs from BFF; use existing 13 production handlers as pattern exemplars.
-- **`GraphAppRoles.cs` GUID completion** — 10 of 14 `AppRoleId` null. Wrong GUID → app-only Graph 403s silently → T3 fails. Mitigation: `az` enumeration of Graph resource SP; commit each GUID in a small isolated commit with `az` output cited.
+- **`GraphAppRoles.cs` GUID completion** — 11 of 14 `AppRoleId` null. Wrong GUID → app-only Graph 403s silently → T3 fails. Mitigation: `az` enumeration of Graph resource SP; commit each GUID in a small isolated commit with `az` output cited.
 
 ---
 
@@ -176,7 +176,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 2. Audit AI Search index catalog vs `Deploy-AllIndexes.ps1` (INVENTORY §12)
 3. Reconcile 33 PCF folders → 7 in-use mapping (INVENTORY §12)
 4. Resolve two-source AI seed drift (INVENTORY §12)
-5. Complete 10 of 14 null `AppRoleId` GUIDs in `Infrastructure/Auth/GraphAppRoles.cs` via `az` enumeration
+5. Complete 11 of 14 null `AppRoleId` GUIDs in `Infrastructure/Auth/GraphAppRoles.cs` via `az` enumeration
 6. Publish initial version-compatibility matrix + 6 U-CB customer-comms templates
 7. Audit ~28 non-deployer-listed items in `src/solutions/` (per §11.1a) → publish `notes/solutions-reconciliation-2026-08.md`
 8. Cross-reference `sprk_dataverseenvironment` existing 16 columns against 11 new columns to add (Phase C prep)
@@ -497,7 +497,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 | `IdempotencyService` + Redis | `src/server/api/Sprk.Bff.Api/Services/Jobs/` | Production |
 | Existing 25 Bicep modules | `infrastructure/bicep/modules/` | Production |
 | `scripts/Provision-Customer.ps1` + `Deploy-*Solutions.ps1` + `Register-*` + `Create-New*` | `scripts/` | Production (basis for ports) |
-| `Infrastructure/Auth/GraphAppRoles.cs` (r3 task 062) | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/` | Landed with 10 of 14 GUIDs null (Phase A completion obligation) |
+| `Infrastructure/Auth/GraphAppRoles.cs` (r3 task 062) | `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/` | Landed with 11 of 14 GUIDs null (Phase A completion obligation) |
 | `scripts/naming-conformance-check.ps1` (r3 task 063) | `scripts/` | Landed ✅ |
 
 ---

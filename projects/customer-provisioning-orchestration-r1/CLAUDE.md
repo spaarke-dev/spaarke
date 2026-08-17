@@ -111,7 +111,7 @@ Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rul
 - **MUST NOT** hardcode default tenant in provisioning scripts (§4D I1 / FR-28)
 - **MUST** report BFF publish size + delta in every BFF-touching task's PR description (NFR-01)
 - **MUST** ensure BFF `/health` fails fast at boot on any Tier-1 IOptions misconfig (r3 task 061)
-- **MUST** complete 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` BEFORE first production customer
+- **MUST** complete 11 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` BEFORE first production customer
 - **MUST** enqueue handlers via Service Bus + return 202 Accepted (FR-22 / R20 — no synchronous handler in HTTP path)
 - **MUST** use `PublicContracts/` facade if H0.5 needs AI (ADR-013 forcing-function ArchTest per r3 task 040)
 
@@ -183,7 +183,7 @@ Per root CLAUDE.md §5. r1-specific:
 ## Human Escalation Triggers
 
 Per root CLAUDE.md §6 + §6.5. r1-specific escalation triggers:
-- Any **`GraphAppRoles.cs`** `az` enumeration returning unexpected role IDs (10 of 14 null must be verified before completing)
+- Any **`GraphAppRoles.cs`** `az` enumeration returning unexpected role IDs (11 of 14 null must be verified before completing)
 - Any **KV secret rename/delete** without prior LIVE App Service + KV + Dataverse pre-check (§7.9 BINDING pre-check)
 - Any **tenant-isolation invariant** (I1–I5) failure detected outside expected Phase-A ArchTest work
 - Any **Model 2 customer commitment** trigger (unblocks TF migration path — spec.md § Unresolved Questions)

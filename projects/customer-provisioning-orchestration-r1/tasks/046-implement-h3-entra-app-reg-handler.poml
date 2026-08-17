@@ -71,7 +71,7 @@
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">Declare rigor level (FULL) and load knowledge files. Verify Phase A completion of 10 of 14 null AppRoleId GUIDs in GraphAppRoles.cs (H10 escalation obligation).</step>
+    <step order="0">Declare rigor level (FULL) and load knowledge files. Verify Phase A completion of 11 of 14 null AppRoleId GUIDs in GraphAppRoles.cs (H10 escalation obligation).</step>
     <step order="1">Author H3EntraAppRegHandler.cs — inject IPowerShellRunner, IGraphAppOnlyClient, IIdempotencyService, ICosmosRunStore, IKeyVaultClient.</step>
     <step order="2">Validate parameters: tenantId REQUIRED (§4D I1); reject if missing.</step>
     <step order="3">Invoke hardened Register-EntraAppRegistrations.ps1 with -TenantId + -CustomerId.</step>

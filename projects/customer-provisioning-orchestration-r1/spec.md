@@ -56,7 +56,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 25. **§4.2 handler execution model** (Fable M-9) — fire-and-forget via Service Bus + state-reconciler `BackgroundService` in L2 App Service (addresses App Service 230s HTTP timeout vs 30-min handlers)
 26. **H0 preflight quota checks** (Fable §6-2) — OpenAI regional TPM headroom, Dataverse env-creation rate, subscription vCPU, SPE cert-bootstrap; blocks run before H1 starts
 27. **§4.1a Model 1 vs Model 2 handler behavior differences** (Fable §6-7) — enumerated table (H0/H2a/H2b/H4/H7/H10/H12c/H13 differ per tier)
-28. **`GraphAppRoles.cs` completion** (Fable H-3) — complete 10 of 14 null `AppRoleId` GUIDs via `az` enumeration of Graph resource SP; escalation gate before first production customer
+28. **`GraphAppRoles.cs` completion** (Fable H-3) — complete 11 of 14 null `AppRoleId` GUIDs via `az` enumeration of Graph resource SP; escalation gate before first production customer
 
 **v3.3 additions (owner Q1–Q7 review round + Q5 spike):**
 29. **§4.3a Claude Code operator toolchain** (Q4) — 15-tool matrix (pwsh, bash, WebFetch, az, pac, Dataverse MCP, Azure MCP with fallbacks); operator's own AAD identity (not SP); prereqs check as skill Step 0; fallback matrix for MCP disconnects
@@ -98,7 +98,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 | `src/server/api/Sprk.Bff.Api/Program.cs` | Register H0.5 consent-callback endpoint |
 | `src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/**` (NEW) | `POST /api/onboarding/consent-callback` endpoint (H0.5, D18) |
 | `src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs` | Migrate off `[Obsolete]` options → registry lookup (R5) |
-| `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs` | Complete 10 of 14 null `AppRoleId` GUIDs (r3 task 062 leftover) |
+| `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs` | Complete 11 of 14 null `AppRoleId` GUIDs (r3 task 062 leftover) |
 | `src/server/api/Sprk.Bff.Api/Services/**` (existing) | 5 new ArchTests scan for §4D I1–I5 invariant violations (no code change if compliant) |
 | **NEW** `src/server/services/Sprk.Provisioning.ControlPlane/**` | L2 control-plane .NET 10 App Service — REST API + Cosmos state + state-reconciler `BackgroundService` + 19 `IJobHandler`s + endpoint filters |
 | `infrastructure/bicep/customer.bicep` | Add Cosmos DB + optional SignalR; remove Redis; UAMI param post-Phase C |
@@ -145,7 +145,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 10. **FR-10 (H7)**: 7 per-customer Dataverse env-var values set per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`). **Acceptance**: `environmentvariablevalue` records exist for all 7 with expected values; client startup validates no hardcoded URL fallbacks (per task 024).
 11. **FR-11 (H8)**: SPE container-type + root container provisioned. Uses **confidential-client (app-only) token** with cert bootstrapped from KV (T6 fix — delegated 403s with `public client not allowed`). 24h replication is lead-time item (H0 preflight checks cert-bootstrap done). **Acceptance**: container GET via app-only token succeeds; container ID persisted to Dataverse env-var + KV secret `customer-{customerId}-spe-container-id`.
 12. **FR-12 (H9)**: BFF deployed via `Deploy-BffApi.ps1` + hardened `Deploy-Release.ps1` Phase 4 (`customerId`-driven, no `spaarkedev1` hardcode). Blue-green via staging slot in upgrade mode with rollback via re-swap. **Acceptance**: `/health` returns 200; slot-swap smoke test produces no cold-start KV-ref failures; r3-era gates (analyzers-as-errors + god-class ratchet + 4 new ArchTests + naming-conformance + Graph app-role parity) all pass.
-13. **FR-13 (H10)**: 2 Dataverse Application Users registered (BFF app-reg + UAMI) as System Administrator. Graph app-role parity synced from `GraphAppRoles.cs` constant onto UAMI SP. Interim: PPAC UI + Graph SDK; design target: TF `powerplatform_user`. **Acceptance**: `systemusers?$filter=applicationid eq {uami-app-id}` returns count 1 (T2 verification); UAMI SP `appRoleAssignments` includes all 14 role IDs from `GraphAppRoles.cs` (T3 verification); H10 escalation gate: 10 of 14 null `AppRoleId` GUIDs completed before first production customer.
+13. **FR-13 (H10)**: 2 Dataverse Application Users registered (BFF app-reg + UAMI) as System Administrator. Graph app-role parity synced from `GraphAppRoles.cs` constant onto UAMI SP. Interim: PPAC UI + Graph SDK; design target: TF `powerplatform_user`. **Acceptance**: `systemusers?$filter=applicationid eq {uami-app-id}` returns count 1 (T2 verification); UAMI SP `appRoleAssignments` includes all 14 role IDs from `GraphAppRoles.cs` (T3 verification); H10 escalation gate: 11 of 14 null `AppRoleId` GUIDs completed before first production customer.
 14. **FR-14 (H11)**: User provisioning per identity preset (D6: `B2BGuest` or `NativeAccount`) via r1 registration flow. B2B needs consent-verification gate. **Acceptance**: users created with correct UPN pattern; license assignment succeeds (per r1 FR-11).
 15. **FR-15 (H12a)**: AI seed chain — type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per ADR-039). Authoritative source per artifact declared in declarative seed manifest (resolves two-source drift). **Acceptance**: all seed rows present; no duplicates; playbook consumers resolve to shipped playbooks; `sprk_aimodeldeployment` rows placeholder (H12c will populate).
 16. **FR-16 (H12b, DAG-parallel with H12a)**: App-config seed — DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions. No dependency on H12a. **Acceptance**: `sprk_gridconfiguration` + `sprk_fieldmapping*` + `sprk_workspacelayout` + chart-definition records seeded per declarative manifest.
@@ -249,7 +249,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 - ✅ **MUST** report BFF publish size + delta in every BFF-touching task's PR description (NFR-01)
 - ✅ **MUST** ensure BFF `/health` fails fast at boot on any Tier-1 IOptions misconfig (r3 task 061 landed; NFR-05)
 - ✅ **MUST** grant Graph app-roles onto UAMI SP from `GraphAppRoles.cs` constant (T3 parity per r3 task 062)
-- ✅ **MUST** complete 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` via `az` enumeration BEFORE first production customer provisioning (Phase A escalation gate)
+- ✅ **MUST** complete 11 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` via `az` enumeration BEFORE first production customer provisioning (Phase A escalation gate)
 - ✅ **MUST** run `/conflict-check` before every BFF PR (19 active BFF worktrees per r3 handoff §7)
 - ✅ **MUST** enqueue handlers via Service Bus + return 202 Accepted; no synchronous handler execution in HTTP request path (FR-22 / R20)
 - ✅ **MUST** use `PublicContracts/` facade if H0.5 needs AI capability; MUST NOT inject `IActionResolver` / `IActionRunner` directly
@@ -284,7 +284,7 @@ Spaarke has three generations of provisioning assets (Gen 1 manual guide with 13
 </hot-path-declaration>
 ```
 
-**BFF = Y** — Phase D adds `POST /api/onboarding/consent-callback` endpoint; Phase E migrates `DemoExpirationService` off `[Obsolete]` options; Phase A completes 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs`. Placement Justification per CLAUDE.md §10: **all four load `.claude/constraints/bff-extensions.md`**, use `PublicContracts/` facade if AI needed, verify publish size ≤ 60 MB per PR (NFR-01), update `tests/unit/Sprk.Bff.Api.Tests/` per §10 bullet 6, no new HIGH CVEs (NFR-02). Provisioning handlers register in **L2 control-plane service, not BFF** (§5.2 — BFF DI impact strictly bounded).
+**BFF = Y** — Phase D adds `POST /api/onboarding/consent-callback` endpoint; Phase E migrates `DemoExpirationService` off `[Obsolete]` options; Phase A completes 11 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs`. Placement Justification per CLAUDE.md §10: **all four load `.claude/constraints/bff-extensions.md`**, use `PublicContracts/` facade if AI needed, verify publish size ≤ 60 MB per PR (NFR-01), update `tests/unit/Sprk.Bff.Api.Tests/` per §10 bullet 6, no new HIGH CVEs (NFR-02). Provisioning handlers register in **L2 control-plane service, not BFF** (§5.2 — BFF DI impact strictly bounded).
 
 **SpaarkeAi = N** — no code-page changes; provisioning is server-only + operator-tool scope.
 
@@ -368,7 +368,7 @@ Per design.md §15 (v3.3, 22 items). North star: automated provisioning ≤ 1h p
 
 - **r3 landed** (2026-08-14): tasks 060 (S2S drop), 061 (ValidateOnStart on 24 Tier-1 IOptions), 062 (`GraphAppRoles.cs` constant), 017 (KV federation assessment) all on master ✅
 - **.NET 10 baseline** (2026-08-14 cutover): net10 target framework, Graph SDK v6.5.0 / Kiota 2.0 (`ODataError` catch), analyzers-as-errors ✅
-- **r1 Phase A escalation**: complete 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` via `az` enumeration BEFORE first production customer (H10 blocking)
+- **r1 Phase A escalation**: complete 11 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` via `az` enumeration BEFORE first production customer (H10 blocking)
 - **Operator machine setup** (§4.3a.3): pwsh ≥ 7.4, az ≥ 2.60, pac ≥ 1.35, git ≥ 2.40; operator has `Operator` app-role on L2 control-plane app-reg
 - **Owner directive #3** confirmed (2026-08-15): KV federation full scope in r1 (Phase G + Phase H); UAMI migration in r1 (Phase C); no live-dev remediation
 - **Q5 research spike** (2026-08-16): confirms Graph v6.5.0 + SPE patterns current + TF Power Platform provider v4.1.0 validates D14; no stale-pattern blockers ✅
@@ -426,7 +426,7 @@ Items still needing owner input before or during implementation:
 - [ ] **Model 2 pilot customer commitment** — TF Power Platform provider adoption deferred per M-10 to first-customer engagement. Who / when? — Blocks: FR-08 (H5) + FR-13 (H10) TF migration; Phase D backlog re-scoping
 - [ ] **AI in H0.5** — does H0.5 consent-callback need any AI capability (e.g., initial welcome message analysis)? Currently designed pure consent-capture. — Blocks: whether ADR-013 `PublicContracts/` facade injection is needed
 - [ ] **Phase H external-spa + code-pages `/config.json` scope** — full closure means editing every external-spa + code-page's bootstrap. What surfaces are IN scope? — Blocks: Phase H task decomposition breadth
-- [ ] **`GraphAppRoles.cs` enumeration cadence** — 10 of 14 GUIDs need `az` enumeration. Do this in Phase A (r1 owns) OR request r3 fill in via task 062 follow-up? — Blocks: H10 escalation gate before first production customer
+- [ ] **`GraphAppRoles.cs` enumeration cadence** — 11 of 14 GUIDs need `az` enumeration. Do this in Phase A (r1 owns) OR request r3 fill in via task 062 follow-up? — Blocks: H10 escalation gate before first production customer
 - [ ] **Cost drift H13 threshold** — >20% flags in H13 per §15 #14. Fail run or advisory-only? Currently ambiguous. — Blocks: H13 exit code semantics on cost drift
 
 ---
