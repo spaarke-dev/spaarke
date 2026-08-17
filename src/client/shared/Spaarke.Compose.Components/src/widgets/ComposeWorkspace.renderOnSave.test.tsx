@@ -30,7 +30,7 @@
  */
 
 import * as React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // Fluent's MessageBar uses ResizeObserver, which jsdom lacks.
@@ -209,6 +209,32 @@ jest.mock(
     SendEmailDialog: () => null,
     SprkModal: () => null,
     RichFilePreviewDialog: () => null,
+    // FR-02 (task 030): ComposeWorkspace now mounts <ComposeSaveNameDialog/> (a FormModal preset) for
+    // the first create-on-save of an unnamed draft AND every Save As. Behavioral stub mirroring the
+    // preset contract (open gate, children, submit gated by submitDisabled/busy) so the fork test can
+    // drive the name modal to completion. Closed → renders nothing (the dialog itself returns <></>).
+    FormModal: (props: {
+      open: boolean;
+      onClose: () => void;
+      onSubmit: () => void;
+      title?: string;
+      submitLabel?: string;
+      submitDisabled?: boolean;
+      busy?: boolean;
+      children?: React.ReactNode;
+    }) =>
+      props.open ? (
+        <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
+          {props.children}
+          <button
+            onClick={props.onSubmit}
+            disabled={props.busy || props.submitDisabled}
+            data-testid="mock-form-modal-submit"
+          >
+            {props.submitLabel ?? 'Save'}
+          </button>
+        </div>
+      ) : null,
   }),
   { virtual: true }
 );
@@ -721,9 +747,16 @@ describe('ComposeWorkspace — PDF-sourced save routing (task 042 / FR-06)', () 
     const loadMintedKey = saveRequests[0].body.transientKey;
 
     // Drive the Save split-button's 'new' fork exactly as the real UI does — the consolidated
-    // toolbar lives inside ComposeEditor, whose onSave prop threads the mode into triggerSave.
+    // toolbar lives inside ComposeEditor, whose onSave prop threads the mode into requestSave.
+    // FR-02 (task 030): Save As now opens the name modal FIRST — confirm the seeded name to run the
+    // fork save (the fork identity contract below is unchanged: forkNew + a fresh transient key).
     await act(async () => {
       (editorProps.current.onSave as unknown as (mode?: 'version' | 'new') => void)?.('new');
+      await Promise.resolve();
+    });
+    const forkSubmit = await screen.findByTestId('mock-form-modal-submit');
+    await act(async () => {
+      fireEvent.click(forkSubmit);
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();

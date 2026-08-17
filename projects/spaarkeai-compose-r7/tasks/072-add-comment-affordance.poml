@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Add Comment toolbar affordance wired to shipped machinery (R6 D7 / FR-10)</title>
+    <phase>7 Accepted Defers + Hardening</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx toolbar UI + wires to existing comment machinery; frontend with dark-mode requirements.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>UI entry point onto already-shipped, seam-proven machinery; low ambiguity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeAiToolbar.tsx / ComposeFormatToolbar.tsx (shared Compose spine; also 020/041).</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, react, typescript, fluent-ui</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add an Add Comment toolbar affordance and wire it to the comment round-trip machinery that already shipped + seam-proven in R6
+    (024/026). Only the UI entry point is missing.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Compose toolbar and the shipped comment round-trip path. Follow ADRs strictly.</role>
+
+  <goal>
+    An Add Comment control exists in the Compose toolbar and creates a comment via the existing shipped machinery (no new comment pipeline).
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-10 (R6 D7). Comment machinery shipped + seam-proven in R6 tasks 024/026; only the toolbar entry point is missing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file role="canonical-reference">The R6-shipped comment round-trip machinery (024/026) — wire the affordance to it; do not re-build</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">The Add Comment control MUST use Fluent v9 semantic tokens; verify dark mode (ADR-021).</constraint>
+    <constraint source="project">Wire the affordance to the EXISTING R6 comment machinery (024/026); MUST NOT build a parallel comment pipeline (root §11). MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose comments, toolbar affordance</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/r6-defer-register-consolidated.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load spec FR-10 + locate the shipped comment machinery (024/026).</step>
+    <step order="1">Add an Add Comment control to the toolbar (Fluent v9 tokens).</step>
+    <step order="2">Wire it to the existing comment round-trip path.</step>
+    <step order="3">Add unit tests + ui-tests: the affordance creates a comment via the shipped path.</step>
+    <step order="4">Run jest + ui-tests; verify green.</step>
+    <step order="5">Update TASK-INDEX.md: set 072 status to ✅.</step>
+    <step order="6">Document any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Add Comment creates a comment">
+      <steps>
+        <step>Select text; click Add Comment.</step>
+        <step>Verify a comment is created via the shipped round-trip path.</step>
+      </steps>
+      <expected>Comment created through existing machinery.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode; verify the Add Comment control adapts (Fluent v9 tokens).</step>
+      </steps>
+      <expected>No hard-coded colors; tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</output>
+    <output type="test">Unit + ui-tests for Add Comment</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given selected text, when the user clicks Add Comment, then a comment is created via the shipped R6 machinery.</criterion>
+    <criterion testable="true">The control uses Fluent v9 semantic tokens and adapts in dark mode (ADR-021).</criterion>
+    <criterion testable="true">No parallel comment pipeline was added; jest green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-10.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -101,12 +101,27 @@ public interface IComposeService
     /// paragraph id (two independent walks would otherwise mint different ids for id-less paragraphs);
     /// (2) the canonical content model itself, which the client's imported-save mapper merges editor
     /// state onto and re-posts as <c>SaveComposeDocumentRequest.ContentModel</c> (preserving every
-    /// server-set field). Pure / synchronous — no I/O, no Graph (ADR-007). Fail-closed like
-    /// <see cref="ProjectDocument"/>: an unreadable source returns the original bytes, a Failed HTML
-    /// projection, and a null model — never throws.
+    /// server-set field). Fail-closed like <see cref="ProjectDocument"/>: an unreadable source returns
+    /// the original bytes, a Failed HTML projection, and a null model — never throws.
     /// </summary>
-    ComposeMountProjection ProjectForMount(
+    /// <remarks>
+    /// Task 050 (spaarkeai-compose-r7, FR-06 — PDF import parity): this method is now <b>async</b> and
+    /// forks a PDF source onto the SAME <c>ProjectPdfToDocxAsync</c> intake leg <see cref="LoadAsync"/>
+    /// already uses (<see cref="IsPdfSource"/> → synthesized docx), so a PDF opened via the Browse /
+    /// Assistant-upload doors becomes an editable Compose document exactly as it does via Load. This is a
+    /// documented, project-scoped ADR-007/ADR-013 contract change (NFR-04, ADR Tensions path A):
+    /// <see cref="ProjectForMount"/> was deliberately synchronous / no-I/O, and the <b>docx path stays
+    /// synchronous-fast</b> — the single Azure Document-Intelligence call is reached ONLY on the PDF
+    /// branch, mirroring <see cref="LoadAsync"/>'s own fork. <paramref name="fileName"/> is optional and
+    /// participates only in source detection (bytes-first, so a real PDF is detected even without it) and
+    /// intake diagnostics. On a PDF source, <see cref="ComposeMountProjection.SourceFormat"/> is
+    /// <c>"pdf"</c> and the counted <c>pdf-intake-*</c> degradations ride in
+    /// <see cref="ComposeMountProjection.ContentModelWarnings"/> (the client's honest-lossiness surface),
+    /// mirroring <see cref="LoadComposeDocumentResult"/>.
+    /// </remarks>
+    Task<ComposeMountProjection> ProjectForMount(
         ReadOnlyMemory<byte> content,
+        string? fileName = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -676,8 +691,20 @@ public sealed record ComposeMountProjection
     public ComposeContentModel? ContentModel { get; init; }
 
     /// <summary>Task 013 (012-review F7): the canonical projection's flatten warnings - see
-    /// <see cref="LoadComposeDocumentResult.ContentModelWarnings"/>. Null when clean or failed.</summary>
+    /// <see cref="LoadComposeDocumentResult.ContentModelWarnings"/>. Null when clean or failed.
+    /// Task 050 (FR-06): on a PDF mount the intake's counted <c>pdf-intake-*</c> degradations are
+    /// folded in FIRST (source-level facts), mirroring <see cref="LoadAsync"/>.</summary>
     public IReadOnlyList<ComposeProjectionWarning>? ContentModelWarnings { get; init; }
+
+    /// <summary>
+    /// Task 050 (spaarkeai-compose-r7, FR-06 — PDF import parity): the SOURCE format the mount projected
+    /// from when it was not a native <c>.docx</c>. <c>"pdf"</c> = the mounted source was a PDF and
+    /// <see cref="Content"/> is the docx SYNTHESIZED from its canonical-model projection; null = native
+    /// docx mount (the common case — byte-unchanged). The SAME marker
+    /// <see cref="LoadComposeDocumentResult.SourceFormat"/> carries — the client (task 051) keys the
+    /// honest-lossiness UX + save-as-docx flow off it. ADDITIVE (ADR-040).
+    /// </summary>
+    public string? SourceFormat { get; init; }
 }
 
 /// <summary>Save request payload.</summary>

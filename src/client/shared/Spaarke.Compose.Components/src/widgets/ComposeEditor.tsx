@@ -116,6 +116,7 @@ import {
   subscribeComposeAiToolbarActions,
 } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
+import { matchesDescribeChangeHotkey, matchesFocusChatHotkey } from './composeHotkeys';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
   AgreementReviewSummaryPanel,
@@ -275,7 +276,15 @@ const NON_DOCX_EXTENSION = /\.(pdf|txt|rtf|doc|xlsx?|pptx?|csv|zip|md|html?|json
  *     bytes look like a ZIP (xlsx/pptx are ZIPs too).
  *  2. Otherwise, a real .docx must carry the OOXML ZIP local-file-header magic.
  */
-function isEditableDocx(bytes: ArrayBuffer, fileName: string | undefined): boolean {
+function isEditableDocx(bytes: ArrayBuffer, fileName: string | undefined, sourceFormat?: string | null): boolean {
+  // Task 051 (spaarkeai-compose-r7, FR-06 — PDF import parity): a PDF-sourced mount (sourceFormat==='pdf')
+  // is a server-SYNTHESIZED docx whose display fileName still ends in ".pdf" (e.g. "NDA.pdf"). The bytes ARE
+  // a real .docx (the server intake fork projected the PDF → canonical model → SynthesizeDocument), so trust
+  // the byte signature and do NOT let the .pdf extension route it to reference-only. sourceFormat is set ONLY
+  // when a server intake door (Load / Browse-project / Assistant-upload) successfully forked a PDF, so this
+  // admission is inherently limited to the intake doors — every OTHER non-docx (xlsx/pptx ZIP siblings, txt,
+  // and a raw un-intakeable .pdf that never earned a sourceFormat marker) still routes to reference-only.
+  if (sourceFormat === 'pdf') return isDocxBytes(bytes);
   if (fileName && NON_DOCX_EXTENSION.test(fileName.trim())) return false;
   return isDocxBytes(bytes);
 }
@@ -604,6 +613,14 @@ export interface ComposeEditorProps {
   documentRef?: ComposeEditorDocumentRef;
 
   /**
+   * Task 051 (spaarkeai-compose-r7, FR-06 — PDF import parity): `'pdf'` when the mounted `docxBytes` were
+   * SYNTHESIZED server-side from a PDF (the intake fork on Load / Browse-project / Assistant-upload). The
+   * editor uses this to admit the mount as editable even though `documentRef.fileName` still ends in
+   * `.pdf` — the bytes are a real `.docx`. Null/undefined for a native docx mount (the common case).
+   */
+  sourceFormat?: string | null;
+
+  /**
    * BFF base URL (host only, e.g. `https://host.azurewebsites.net`). Supplied
    * by the host via runtime-config resolution. Required for the heartbeat
    * call. When absent, heartbeat is suppressed (defensive — editor renders
@@ -667,6 +684,14 @@ export interface ComposeEditorProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** FR-01/FR-03 (task 020/040): forwarded to ComposeFormatToolbar's Save dropdown Auto Save toggle.
+   *  `autoSaveEnabled` is the current state; `onAutoSaveToggle` reports toggles. The draft-safe autosave
+   *  behavior itself is Phase 4 (040/041); the toggle renders only when both are wired by the host. */
+  autoSaveEnabled?: boolean;
+  onAutoSaveToggle?: (enabled: boolean) => void;
+  /** FR-03 (task 041): forwarded to ComposeFormatToolbar's save-state indicator — true when the doc has
+   *  unsaved edits (dirty OR an unpersisted transient draft). Undefined → the indicator is not rendered. */
+  hasUnsavedEdits?: boolean;
   /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the toolbar button when set
    *  (the host wires it only for a promoted doc — one that has a sprk_document record to re-profile). */
   onRefreshProfile?: () => void;
@@ -960,6 +985,17 @@ export interface ComposeEditorHandle {
    * Reset internally on each successful serialize() call.
    */
   isDirty(): boolean;
+
+  /**
+   * FR-03 draft-safe autosave (spaarkeai-compose-r7 task 040): the current editor body as plain
+   * HTML (TipTap `editor.getHTML()`), for the CLIENT-ONLY local draft store. Read-only — NO
+   * dirty-flag side effect, NO byte authoring, NO network. The host serializes this to localStorage
+   * on the ~15s dirty-autosave tick and re-seeds it via the `mountDraftHtml` recovery path on reopen
+   * (the same HTML shape the born-in-editor / blank / template / AI-draft mounts already use). Returns
+   * null when the editor is unmounted. Distinct from {@link buildContentModel} (the high-fidelity
+   * save-path model that DOES reset dirty) — the draft store deliberately captures the cheap HTML view.
+   */
+  getDraftHtml(): string | null;
 
   /**
    * FR-04 draft-into-editor (spaarkeai-compose-r2 task 016). Materialize a
@@ -1837,6 +1873,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       importedComments,
       projection,
       documentRef,
+      sourceFormat,
       bffBaseUrl,
       sessionId = '',
       onDirtyChange,
@@ -1848,6 +1885,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onSave,
       canSave,
       isSaving,
+      autoSaveEnabled,
+      onAutoSaveToggle,
+      hasUnsavedEdits,
       onRefreshProfile,
       onReloadFromSource,
       onOpenDocument,
@@ -2131,6 +2171,17 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       };
     }, [redlineClickAnchor]);
 
+    // FR-04 (task 060, UC-5) — the Ctrl+Space / Ctrl+/ "Describe a change" hotkey (registered in the
+    // editor's `editorProps.handleKeyDown` below) reaches its caret-scoped runner through this ref.
+    // The runner is a useCallback defined AFTER useEditor (it needs `promptForInstruction`), while
+    // editorProps closes over the initial render; a ref keeps the handler pointed at the CURRENT runner
+    // (same convention as commentThreadsRef / selectedThreadIdRef). `caretRunSeqRef` dedupes request ids.
+    const caretRunSeqRef = React.useRef(0);
+    const describeChangeAtCaretRef = React.useRef<(() => void) | null>(null);
+    // FR-05 (task 061, UC-6) — Ctrl+Shift+Space emits a cross-pane `conversation.focus_chat_input`
+    // event (reached from the stale-closed editorProps.handleKeyDown via this fresh ref, like above).
+    const focusChatRef = React.useRef<(() => void) | null>(null);
+
     // ----- TipTap editor instance -----------------------------------------
     const editor = useEditor({
       // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) + the R3 paraId identity
@@ -2161,6 +2212,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // contract parity).
           role: 'textbox',
           'aria-multiline': 'true',
+          // FR-04/FR-05 (tasks 060/061) — advertise the editor's keyboard shortcuts via the ARIA
+          // standard `aria-keyshortcuts` (space-separated list, tokens joined by `+`): Ctrl+Space
+          // opens "Describe a change" at the caret; Ctrl+Shift+Space focuses the Assistant chat input.
+          // This is the discoverability "shortcut hint" (screen-reader-advertised, non-intrusive — no
+          // whole-editor hover tooltip, no app-specific shortcut leaked into the shared SprkChat).
+          'aria-keyshortcuts': 'Control+Space Control+Shift+Space',
         },
         // Task 111 requirement 2 — suppress the browser's native context menu
         // inside the Compose editor region and open the AI toolbar at the
@@ -2226,6 +2283,26 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             setFindReplaceOpen(false);
             return true;
           }
+          // FR-05 (task 061, UC-6) — Ctrl+Shift+Space moves focus into the Assistant chat input across
+          // panes. Checked BEFORE the FR-04 branch (both guard Shift, so order is not load-bearing, but
+          // the more specific match reads first). IME-guarded inside `matchesFocusChatHotkey`. Emits a
+          // `conversation.focus_chat_input` PaneEventBus event (via the fresh ref → `emitFocusChat`).
+          if (matchesFocusChatHotkey(event)) {
+            event.preventDefault();
+            focusChatRef.current?.();
+            return true;
+          }
+          // FR-04 (task 060, UC-5) — Ctrl+Space (primary) / Ctrl+/ (fallback) opens the shipped
+          // "Describe a change" instruction dialog for the CURRENT CARET/PARAGRAPH (no selection
+          // required). `matchesDescribeChangeHotkey` owns the IME guard (never fires mid-composition)
+          // + both bindings + the Shift disambiguation; the runner (`runDescribeChangeAtCaret`, reached
+          // via the fresh ref) reuses promptForInstruction + dispatches the same compose-rewrite-instruction
+          // Action — no parallel dialog (root §11). `preventDefault` + return true so Space/`/` never types.
+          if (matchesDescribeChangeHotkey(event)) {
+            event.preventDefault();
+            describeChangeAtCaretRef.current?.();
+            return true;
+          }
           return false;
         },
       },
@@ -2273,7 +2350,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // reference-only state. The editable DOCX path below is unchanged. Nothing
       // is editable here, so report dirty=false (no create-on-save for a
       // reference-only file).
-      if (!isEditableDocx(docxBytes, documentRef?.fileName)) {
+      if (!isEditableDocx(docxBytes, documentRef?.fileName, sourceFormat)) {
         editor.commands.setContent('<p></p>');
         dirtyRef.current = false;
         setReferenceOnly({ fileName: documentRef?.fileName });
@@ -2579,6 +2656,72 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       instructionResolveRef.current = null;
       resolve?.(result);
     }, []);
+
+    // FR-04 (task 060, UC-5) — open "Describe a change" for the CURRENT CARET/PARAGRAPH (no selection),
+    // reached by the Ctrl+Space / Ctrl+/ hotkey registered in `editorProps.handleKeyDown` above. This is
+    // the keyboard-first sibling of `ComposeAiToolbar.handleActionClick` (selection-driven) and of
+    // `dispatchNoteToolRequest` (note-clause-driven): it resolves the enclosing textblock of the collapsed
+    // caret as the edit target, REUSES the shipped `promptForInstruction` dialog to collect the free-text
+    // instruction (no parallel dialog — root §11), and dispatches the SAME `compose-rewrite-instruction`
+    // Action routed to the DOCUMENT session so the result lands as an inline redline (DEF-09). The
+    // bindingId is read from the runtime-merged registry (`getComposeAiToolbarActions()`), so it no-ops
+    // cleanly while the Phase-4 catalog binding is unwired — mirroring the toolbar's own stub gate (it
+    // checks bindingId FIRST so an unwired tool never prompts the user for an instruction it can't run).
+    const runDescribeChangeAtCaret = React.useCallback(async (): Promise<void> => {
+      if (!editor || !enqueueComposeAction || !sessionId) return;
+      const action = getComposeAiToolbarActions().find(a => a.id === 'compose-rewrite-instruction');
+      if (!action?.bindingId) return; // not wired yet (Phase-4 catalog pending) — no-op (mirrors toolbar)
+      // Resolve the enclosing textblock (paragraph) of the collapsed caret as the edit target.
+      const $from = editor.state.selection.$from;
+      const blockStart = $from.start();
+      const blockEnd = $from.end();
+      const rawText = editor.state.doc.textBetween(blockStart, blockEnd, ' ');
+      const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
+      // Reuse the SHIPPED instruction dialog. Cancel/empty ⇒ abort (mirrors toolbar + note-tool paths).
+      const entered = await promptForInstruction(action);
+      if (!entered || !entered.trim()) return;
+      const instruction = entered.trim();
+      void enqueueComposeAction({
+        id: `${action.id}#caret-${(caretRunSeqRef.current += 1)}`,
+        bindingId: action.bindingId,
+        args: {
+          slots: {
+            selectionText,
+            selectionAnchorStart: blockStart,
+            selectionAnchorEnd: blockEnd,
+            documentSpeId: documentRef?.speDriveItemId,
+            documentRecordId: documentRef?.sprkDocumentId,
+            sessionId,
+            instruction,
+          },
+        },
+        // DEF-09: an in-editor EDIT action — route to the document session so the result materializes as
+        // an inline redline (independent of the registry's `materializesInEditor` flag, which the catalog
+        // seed may not preserve — same rationale as `dispatchNoteToolRequest`).
+        documentSessionId: sessionId,
+      }).catch(() => undefined);
+    }, [editor, enqueueComposeAction, sessionId, documentRef, promptForInstruction]);
+
+    // Keep the fresh runner reachable from the (initial-render-closed) editorProps.handleKeyDown, per the
+    // ref convention above (mirrors commentThreadsRef / selectedThreadIdRef assignment effects).
+    React.useEffect(() => {
+      describeChangeAtCaretRef.current = runDescribeChangeAtCaret;
+    }, [runDescribeChangeAtCaret]);
+
+    // FR-05 (task 061, UC-6) — emit the cross-pane focus signal. The editor and the Assistant chat live
+    // in different panes, so the Ctrl+Shift+Space intent crosses via the existing PaneEventBus (ADR-030):
+    // ONE additive `conversation.focus_chat_input` event, no new transport. ConversationPane relays it to
+    // SprkChat's `focusInputSignal` seam → SprkChatInput.focusInput(). Carries NO content — only the
+    // reused `sessionId` identifier (Tier-1 safe, ADR-015). Reached via `focusChatRef` for closure freshness.
+    const emitFocusChat = React.useCallback((): void => {
+      dispatch('conversation', {
+        type: 'focus_chat_input',
+        ...(sessionId ? { sessionId } : {}),
+      });
+    }, [dispatch, sessionId]);
+    React.useEffect(() => {
+      focusChatRef.current = emitFocusChat;
+    }, [emitFocusChat]);
 
     // Task 041 (FR-11 batch reuse) — build + dispatch ONE note-tool request against `threadId`'s
     // LIVE clause span. This IS `runNoteTool`'s prior request-building body (round-8 #3/#4),
@@ -2895,6 +3038,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           };
         },
         isDirty: () => dirtyRef.current,
+        // FR-03 draft-safe autosave (task 040): the cheap HTML view for the CLIENT-ONLY local draft
+        // store. Read-only — no dirty reset, no byte authoring, no network. Null when unmounted.
+        getDraftHtml: () => (editor ? editor.getHTML() : null),
         // FR-04 seam (task 016) now delegates to the FR-16 redline path (task 033):
         // the stored ledger draft renders as a PENDING redline, not a committed
         // insertion. ComposeWorkspace's render-follows-store path calls this.
@@ -3084,6 +3230,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onSave={onSave}
           canSave={canSave}
           isSaving={isSaving}
+          autoSaveEnabled={autoSaveEnabled}
+          onAutoSaveToggle={onAutoSaveToggle}
+          hasUnsavedEdits={hasUnsavedEdits}
           onRefreshProfile={onRefreshProfile}
           onReloadFromSource={onReloadFromSource}
           onOpenDocument={onOpenDocument}
@@ -3092,6 +3241,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           applyTemplateDisabledReason={applyTemplateDisabledReason}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
+          // FR-10 / R6 D7 (task 072) — re-expose the SHIPPED comment machinery: the toolbar "Add
+          // Comment" toggle drives handleToggleComments, which captures the live selection into
+          // pendingCommentRange and opens the ComposeCommentThread composer (below). No new pipeline.
+          commentsOpen={commentsOpen}
+          onToggleComments={handleToggleComments}
           // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is
           // present (in-document advisory threads OR summary findings the host reports). "Review Summary"
           // toggles the host's docked panel; "Review Notes" toggles the right-gutter cards (local state).

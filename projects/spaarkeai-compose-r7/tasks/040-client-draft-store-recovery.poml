@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Client-only local draft store + dirty autosave + crash recovery (FR-03)</title>
+    <phase>4 Draft-Safe Autosave (UC-4)</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx client code + introduces a new client util (draft store); autosave lifecycle with data-loss stakes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New client util with a fully-specified contract (client-only, dirty-only, keyed by task-010 id); well-bounded.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx autosave/dirty lifecycle (shared Compose spine); consumes task-010 identity.</parallel-reason>
+    <deps>010, 030</deps>
+    <tags>frontend, react, typescript</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Add draft-safe autosave that is ON by default and CLIENT-ONLY: a local/session-storage draft keyed by the task-010 stable
+    logical id (`sprkDocumentId ?? speDriveItemId ?? persistedLogicalId`), persisted only when dirty, roughly every ~15s. No
+    server write, no SPE version per tick. On reopen/crash, recover the local draft for the matching logical id. New docs must be
+    named-first (task 030) before any explicit server save; the local draft still protects pre-name work.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in client-side persistence (local/session storage), React effect lifecycles, and the Compose dirty-state machine. Follow ADRs strictly.</role>
+
+  <goal>
+    A small client-only draft store persists a dirty Compose document to local/session storage keyed by the task-010 logical id
+    (~15s, dirty-only), and rehydrates the correct draft on reopen/crash. No BFF surface is touched; no SPE version is created per tick.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-03 (UC-4) + §11 New-Components table. Owner clarification: draft store is CLIENT-ONLY. The "no autosave" invariant
+      (@34, @2789–2791) is being deliberately reversed (ADR Tensions path A). This task is the store + recovery; the indicator +
+      beforeunload guard + invariant/test update is task 041.
+    </background>
+    <relevant-files>
+      <file role="new">Client-only draft store util under src/client/shared/Spaarke.Compose.Components/src/ (localStorage keyed by the task-010 logical id)</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">Task 010 identity accessor `sprkDocumentId ?? speDriveItemId ?? persistedLogicalId` (the draft key)</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx "no autosave" invariant @34 + @2789–2791 (updated in 041, not here)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Stable logical id — the draft-store key.</dependency>
+      <dependency task="030" status="pending">Name-on-save modal — new docs are named-first before explicit server save.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The draft store is CLIENT-ONLY (local/session storage). It MUST NOT write to the BFF or create an SPE version per tick (NFR-03). MUST NOT add a server-side draft store (spec MUST-NOT).</constraint>
+    <constraint source="project">The draft MUST be keyed by the task-010 logical id (`sprkDocumentId ?? speDriveItemId ?? persistedLogicalId`) so a re-mount/reload rehydrates the correct draft rather than orphaning it — reuse that accessor, do not derive a second key.</constraint>
+    <constraint source="project">Autosave persists ONLY when dirty (~15s interval; tunable, not a hard contract). New docs must be named-first (task 030) before any explicit server save; the local draft still protects pre-name work.</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts. Prefer a small new util over expanding an existing broad module (root §11).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>client draft persistence, compose autosave</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load spec FR-03 + task-010 identity accessor.</step>
+    <step order="1">Create the client-only draft store util (get/set/clear) keyed by the task-010 logical id.</step>
+    <step order="2">Wire a dirty-only ~15s autosave effect in ComposeWorkspace.tsx that writes the draft (no server call).</step>
+    <step order="3">On mount/reopen, rehydrate the draft for the matching logical id; on explicit Save success, clear the draft.</step>
+    <step order="4">Add unit tests: dirty edit → draft written ~15s; re-mount → correct draft rehydrated; explicit Save → draft cleared; no BFF call fired.</step>
+    <step order="5">Run jest + ui-tests; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: set 040 status to ✅.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If dirty-tracking cannot distinguish local-draft persistence from a server save (risking a version-per-tick), STOP and escalate (root §6.5) — NFR-03 forbids autosave reaching the BFF.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No autosave/draft store exists — the "no autosave" invariant at ComposeWorkspace.tsx:34 confirms none.</existing>
+    <extension>New small client util (localStorage keyed by the task-010 logical id). No existing module owns draft persistence; extending an unrelated broad module would couple it.</extension>
+    <cost-of-doing-nothing>Unsaved work is lost on crash/close today — the owner's #1 priority; without a draft store there is no recovery path.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Dirty doc auto-drafts + recovers">
+      <steps>
+        <step>Edit a doc so it is dirty; wait ~15s.</step>
+        <step>Verify a local draft exists keyed by the logical id (no network POST fired).</step>
+        <step>Simulate a crash/close and reopen; verify the draft is recovered for the same logical id.</step>
+        <step>Explicitly Save; verify the draft is cleared.</step>
+      </steps>
+      <expected>Dirty content auto-drafts locally, recovers on reopen, and clears on explicit Save; no server version per tick.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Client-only draft store util (new) under src/client/shared/Spaarke.Compose.Components/src/</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">Unit tests for draft persistence + recovery + no-server-call</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a dirty doc with Auto Save on, when ~15s elapse, then a local draft is written keyed by the task-010 logical id and NO BFF call is made.</criterion>
+    <criterion testable="true">Given a crash/close, when the doc is reopened, then the draft is recovered for the matching logical id (not orphaned).</criterion>
+    <criterion testable="true">Given an explicit Save, when it succeeds, then the local draft is cleared.</criterion>
+    <criterion testable="true">Negative: autosave never creates an SPE version per tick and never writes to the BFF (NFR-03).</criterion>
+    <criterion testable="true">jest suite passes; docxBridge.ts not deleted.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-03, §11 table row "Client local-draft recovery store". Device-switch loss is an accepted client-only limitation. Indicator + beforeunload + invariant/test update is task 041.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

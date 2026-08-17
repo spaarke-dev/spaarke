@@ -399,6 +399,25 @@ describe('composeWorkspaceReducer — sourceFormat lifecycle (task 042 / FR-06 P
     expect(composeWorkspaceReducer(base, { kind: 'reset' }).sourceFormat).toBeNull();
   });
 
+  it('task 051 (FR-06 parity): a mountTransient carrying sourceFormat="pdf" (Browse/Upload PDF fork) sets state.sourceFormat', () => {
+    // Task 050 gave the mount doors the PDF fork, so a Browse-project / Assistant-upload mount CAN now be
+    // PDF-sourced. The reducer must carry the marker (drives the editor's editable admission + the PDF
+    // create-on-save routing) — previously mountTransient hardcoded sourceFormat:null.
+    const state = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'mountTransient',
+      docxBytes: bytes(),
+      fileName: 'Corteva NDA.pdf',
+      sessionId: 'browse-pdf-1',
+      transientKey: 'pdf-browse-key',
+      sourceFormat: 'pdf',
+    });
+    expect(state.sourceFormat).toBe('pdf');
+    expect(state.documentRef?.fileName).toBe('Corteva NDA.pdf');
+    expect(state.documentRef?.transientKey).toBe('pdf-browse-key');
+    // A transient PDF mount has no SPE pointer yet — first Save runs create-on-save (routed by sourceFormat).
+    expect(state.documentRef?.speDriveItemId).toBe('');
+  });
+
   it('a NON-pdf save keeps the pre-041 versionId adopt-only-when-null semantics (no regression)', () => {
     let state = loadedState(); // versionId 'v-load' retained from load
     state = composeWorkspaceReducer(state, {

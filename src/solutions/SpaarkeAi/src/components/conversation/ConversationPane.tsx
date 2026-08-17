@@ -755,6 +755,11 @@ export function ConversationPane(): React.JSX.Element {
   // edit).
   const pendingDocumentTurnRef = React.useRef<string | null>(null);
   const [pendingOutboundMessage, setPendingOutboundMessage] = React.useState<string | null>(null);
+  // FR-05 (spaarkeai-compose-r7 task 061, UC-6) — one-slot host→focus nonce passed to <SprkChat>.
+  // Bumped when a cross-pane `conversation.focus_chat_input` event arrives (Compose Ctrl+Shift+Space);
+  // SprkChat's `focusInputSignal` seam focuses the composer once per new value. State (not ref) because
+  // SprkChat re-reads it as a prop.
+  const [focusInputSignal, setFocusInputSignal] = React.useState<number>(0);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -2649,6 +2654,11 @@ export function ConversationPane(): React.JSX.Element {
       // 'create' if unspecified.
       setQuickStartTab(event.quickStartTab ?? "create");
       setQuickStartOpen(true);
+    } else if (event.type === "focus_chat_input") {
+      // FR-05 (spaarkeai-compose-r7 task 061, UC-6): the Compose editor's Ctrl+Shift+Space asks us to
+      // move focus into the chat composer. Bump the one-slot nonce; SprkChat's `focusInputSignal` seam
+      // calls the SprkChatInput `focusInput()` handle. A new value each time so repeated presses re-focus.
+      setFocusInputSignal((n) => n + 1);
     }
   });
 
@@ -3254,6 +3264,7 @@ export function ConversationPane(): React.JSX.Element {
               // decorate seam that attaches the one-turn documentId), then acks so we clear the slot.
               pendingOutboundMessage={pendingOutboundMessage}
               onOutboundConsumed={() => setPendingOutboundMessage(null)}
+              focusInputSignal={focusInputSignal}
               onBeforeSendMessage={handleBeforeSendMessage}
               onMessagesChange={(msgs) => {
                 // CHAT-4: keep the local transcript-length in sync so the get-started cards toggle

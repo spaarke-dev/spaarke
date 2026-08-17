@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>PDF-intake cause discrimination — discriminated facade result (LOW-10 / FR-11)</title>
+    <phase>7 Accepted Defers + Hardening</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF .cs in Services/Ai; consumes PublicContracts; behavior + typed-result change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded refactor of one facade's null boundary into a discriminated result; explicit anchor + no fork.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only Services/Ai/ComposePdfIntakeSource.cs (+ its test) — file-independent from every other R7 task (which live in Services/Compose or the client). Cross-worktree coordination with the Services/Ai sole owner is a /conflict-check gate, not an in-project file overlap.</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, api, backend, ai</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Replace the collapsed single-message null boundary in ComposePdfIntakeSource.cs with a discriminated facade result that
+    distinguishes circuit-open vs timeout vs corrupt, so an intake failure surfaces a cause-specific message instead of one
+    collapsed "unavailable". Consume Services/Ai/PublicContracts/ — do NOT fork Services/Ai (sole owner: spaarke-ai-architecture-redesign-r2).
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Compose PDF intake facade and discriminated result types. Follow ADRs strictly.</role>
+
+  <goal>
+    ComposePdfIntakeSource returns a discriminated result (circuit-open / timeout / corrupt) so callers surface a cause-specific
+    message; the change reuses the existing facade + PublicContracts (no fork).
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-11 (LOW-10). The current null boundary collapses all failure causes into one "unavailable" message. Sole-owner
+      coordination: Services/Ai belongs to spaarke-ai-architecture-redesign-r2 — consume PublicContracts, no fork.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/ComposePdfIntakeSource.cs</file>
+      <file role="canonical-reference">Services/Ai/PublicContracts/ facade types (consume; do not fork Services/Ai internals)</file>
+      <file role="canonical-reference">NullComposePdfIntakeSource@~510-511 (AnalysisServicesModule.cs) typed "PDF intake unavailable" (the collapsed message being discriminated; anchor re-verified 2026-08-15)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate + /conflict-check on Services/Ai.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-032">The discriminated result rides the existing compound-gated NullObject fallback (ADR-032); the "unavailable" (gate-off) case remains distinct from the runtime failure causes.</constraint>
+    <constraint source="project">Consume Services/Ai/PublicContracts/ ONLY; MUST NOT fork Services/Ai internals (sole owner spaarke-ai-architecture-redesign-r2). Run /conflict-check before the PR.</constraint>
+    <constraint source="project">BFF change — state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md); verify publish ≤60 MB (delta vs 001 baseline); no new HIGH CVE. MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pdf intake facade, discriminated result</topic>
+    <files>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; run /conflict-check on Services/Ai; load spec FR-11 + PublicContracts.</step>
+    <step order="1">Replace the collapsed null boundary with a discriminated result (circuit-open / timeout / corrupt) via PublicContracts.</step>
+    <step order="2">Ensure the gate-off "unavailable" case stays distinct from runtime failure causes.</step>
+    <step order="3">Add unit tests mapping each failure cause to its message.</step>
+    <step order="4">Run publish-size + CVE checks; record delta vs 001 baseline in notes/.</step>
+    <step order="5">Run xUnit; verify green.</step>
+    <step order="6">Update TASK-INDEX.md: set 073 status to ✅.</step>
+    <step order="7">Document any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a needed distinction is only available in Services/Ai internals (not PublicContracts), STOP and coordinate with the Services/Ai sole owner (root §6) rather than forking internals.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build/test + publish-size measure for the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ComposePdfIntakeSource.cs</output>
+    <output type="test">Unit tests for cause-specific intake failure messages</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a circuit-open / timeout / corrupt intake failure, when it surfaces, then the message is cause-specific, not one collapsed "unavailable".</criterion>
+    <criterion testable="true">The gate-off case still surfaces the ADR-032 NullObject "PDF intake unavailable" distinctly.</criterion>
+    <criterion testable="true">Only PublicContracts is consumed; Services/Ai internals are not forked.</criterion>
+    <criterion testable="true">Publish ≤60 MB (delta vs 001 baseline); no new HIGH CVE; xUnit green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-11. Reuse the existing facade (do not re-build). Coordinate with spaarke-ai-architecture-redesign-r2 (R2 risk).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

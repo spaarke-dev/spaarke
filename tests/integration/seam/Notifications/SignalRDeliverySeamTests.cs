@@ -333,6 +333,8 @@ public sealed class SignalRDeliverySeamTests
     /// </summary>
     private sealed class FakeGenericEntityService : IGenericEntityService
     {
+        public async Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default)
+            => (await CreateAsync(entity, ct), true); // compose-r7 task 013: interface member; fake delegates to create
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default) => Task.FromResult(Guid.NewGuid());
 
         public Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)

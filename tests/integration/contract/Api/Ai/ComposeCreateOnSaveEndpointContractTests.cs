@@ -120,9 +120,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
 
         // Indexing boundary: sync-OBO indexing succeeds (non-terminal for this assertion).
         _fixture.IndexingMock
@@ -252,9 +252,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
@@ -321,9 +321,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
@@ -437,9 +437,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
 
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(

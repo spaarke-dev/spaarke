@@ -279,8 +279,8 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
                 It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity)null!);
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(newDocumentId);
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((newDocumentId, true));
 
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(

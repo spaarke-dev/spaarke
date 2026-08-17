@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Replace Save SplitButton with Save / Save As dropdown + Auto Save toggle (FR-01)</title>
+    <phase>2 Save Dropdown (UC-2)</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx Fluent v9 toolbar UI; frontend implementation with dark-mode + interaction requirements.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard Fluent v9 toolbar refactor with an explicit reference (existing SplitButton @986–1018) and unchanged enum.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeFormatToolbar.tsx (shared Compose spine; also modified by 041 indicator and 072 add-comment).</parallel-reason>
+    <deps>012</deps>
+    <tags>frontend, react, typescript, fluent-ui</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Replace the two-mode Save split-button in the Compose toolbar with a dropdown offering Save ('version' — append an SPE
+    version to the same document/file), Save As ('new' — create a distinct copy with a uniquified filename, per task 012), and
+    an Auto Save toggle. Map labels only; the ComposeSaveMode enum ('version' | 'new') is unchanged.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in Fluent UI v9 (Menu/MenuButton/Toolbar) and the Compose toolbar. Follow ADRs strictly.</role>
+
+  <goal>
+    ComposeFormatToolbar renders a Save dropdown with Save + Save As + an Auto Save toggle; Save calls onSave('version'), Save As
+    calls onSave('new') (which forks via task 012's uniquify), and the Auto Save toggle controls the FR-03 autosave state.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-01 (UC-2). The current SplitButton @986–1018 conflates the two save modes; the owner wants an explicit dropdown
+      plus an Auto Save toggle (which drives the FR-03 draft-safe autosave introduced in Phase 4).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</file>
+      <file role="canonical-reference">ComposeFormatToolbar.tsx Save SplitButton @986–1018 (the control being replaced)</file>
+      <file role="canonical-reference">compose-contracts.ts ComposeSaveMode = 'version' | 'new' @426 (label mapping only; enum unchanged)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">Save As real-fork uniquify — the 'new' menu item relies on it to avoid silent re-version.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">The dropdown, menu items, and Auto Save toggle in ComposeFormatToolbar MUST use Fluent v9 semantic tokens (no hard-coded colors); verify dark mode adapts (ADR-021).</constraint>
+    <constraint source="ADR-049">Save = append SPE version (ADR-049); the labels MUST NOT imply "Save new version" — Save As is a real fork (task 012), not a version append on the original.</constraint>
+    <constraint source="project">Keep ComposeSaveMode = 'version' | 'new' unchanged — map labels/UX only (Save→'version', Save As→'new').</constraint>
+    <constraint source="project">Reuse the existing triggerSave / onSave path; MUST NOT add a parallel save mechanism (root §11). MUST NOT delete docxBridge.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent v9 toolbar, compose save UX</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 MenuButton/Toolbar" location="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx">Mirror the toolbar's existing Fluent v9 control usage for the new dropdown.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load ADR-021 + spec FR-01.</step>
+    <step order="1">Replace the SplitButton @986–1018 with a Fluent v9 dropdown (Save / Save As) + Auto Save toggle.</step>
+    <step order="2">Wire Save→onSave('version'), Save As→onSave('new'); wire the Auto Save toggle to the FR-03 autosave state prop/callback.</step>
+    <step order="3">Add unit tests for the label→mode mapping and toggle behavior.</step>
+    <step order="4">Run jest; verify green. Run the ui-tests (dark mode + interaction).</step>
+    <step order="5">Update TASK-INDEX.md: set 020 status to ✅.</step>
+    <step order="6">Document any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Save dropdown renders">
+      <steps>
+        <step>Open a Compose document; locate the Save control in the toolbar.</step>
+        <step>Verify the dropdown shows Save, Save As, and an Auto Save toggle.</step>
+        <step>Check the console for errors.</step>
+      </steps>
+      <expected>Dropdown renders with all three affordances, no console errors.</expected>
+    </test>
+    <test name="Save As produces a distinct document">
+      <steps>
+        <step>On a saved doc, choose Save As.</step>
+        <step>Verify a distinct new sprk_document (uniquified filename) is created, not a re-version.</step>
+      </steps>
+      <expected>Save As forks (per task 012); Save appends a version to the same doc.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode.</step>
+        <step>Verify the dropdown/menu/toggle background + text colors adapt (no white-on-white / black-on-black).</step>
+      </steps>
+      <expected>All colors use Fluent v9 semantic tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeFormatToolbar.tsx</output>
+    <output type="test">Unit tests for save label→mode mapping + Auto Save toggle</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The toolbar shows Save + Save As + an Auto Save toggle.</criterion>
+    <criterion testable="true">Save invokes onSave('version') (append SPE version, same doc); Save As invokes onSave('new') and produces a distinct new sprk_document with a uniquified filename — never a silent re-version.</criterion>
+    <criterion testable="true">ComposeSaveMode remains 'version' | 'new'.</criterion>
+    <criterion testable="true">Dark mode: all new controls use Fluent v9 semantic tokens (ADR-021).</criterion>
+    <criterion testable="true">jest suite passes; no console errors on render.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-01. "Save As" replaces R6's "Save New Document" menu item. The Auto Save toggle's behavior is implemented in Phase 4 (040/041); this task wires the control to the state.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
