@@ -45,6 +45,20 @@
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <!-- Service Bus SDK — smoke test constructs ServiceBusClient + receiver
+         directly (task 038 pattern parity with CosmosSmokeTests). Pinned to
+         the same 7.20.2 as the SUT project for a single version across the
+         whole L2 test surface. -->
+    <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />
+    <!-- Options binding — the smoke test wraps ServiceBusModuleOptions in
+         Options.Create(...) to instantiate the enqueuer directly (bypassing
+         DI so the env-guard skip is a single conditional). Pinned to 10.0.9
+         to match Azure.Core 1.60.0's transitive floor (via
+         Microsoft.Extensions.Hosting.Abstractions -> Diagnostics.Abstractions)
+         — same reason Microsoft.Extensions.Logging.Abstractions is pinned
+         to 10.0.9 above. Prevents NU1605 downgrade (TreatWarningsAsErrors
+         inherited from Directory.Build.props). -->
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.9" />
   </ItemGroup>
 
   <ItemGroup>

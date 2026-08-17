@@ -55,6 +55,16 @@
          grants Cosmos DB Built-in Data Contributor to L2 App Service MI). -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
 
+    <!-- Azure Service Bus SDK — L2 handler-enqueue path (task 038). Pinned
+         to 7.20.2 to match BFF's version (single SB SDK across services;
+         same reasoning as Cosmos pin — avoid ambient drift when both are
+         co-hosted in the same solution). Requires DefaultAzureCredential
+         data-plane access — service-bus.bicep + platform-controlplane.bicep
+         wiring binds L2 App Service UAMI with "Azure Service Bus Data
+         Sender" (task 030 RBAC grant). NEVER account-key credential per
+         ADR-028 MI-outbound rule. -->
+    <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />
+
     <!-- Newtonsoft.Json — required BY the Cosmos SDK's build target
          (`Microsoft.Azure.Cosmos.targets` line 72 checks the graph for an
          explicit reference ≥ 10.0.2; the check exists so the SDK doesn't
@@ -87,6 +97,14 @@
        is .gitignore-excluded per Spaarke convention). -->
   <ItemGroup>
     <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!-- Expose internal test seams to the L2 test project (parity with BFF).
+       Currently used by ServiceBusSmokeTests to verify the internal
+       ComputeMessageId helper (FR-22 level-1 idempotency contract) without
+       promoting it to public API. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
   </ItemGroup>
 
 </Project>

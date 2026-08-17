@@ -5,9 +5,10 @@
 //
 // Composition (customer-provisioning-orchestration-r1):
 //   - Minimal API WebApplication builder.
-//   - Module composition (AddAuthModule + AddSwaggerModule + AddCosmosModule)
-//     — extension methods per feature area to avoid god-class DI (parity
-//     with the BFF *Module.cs pattern; respects NFR-07 god-class ratchet).
+//   - Module composition (AddAuthModule + AddSwaggerModule + AddCosmosModule
+//     + AddServiceBusModule) — extension methods per feature area to avoid
+//     god-class DI (parity with the BFF *Module.cs pattern; respects NFR-07
+//     god-class ratchet).
 //   - Auth pipeline: UseAuthentication() → UseAuthorization().
 //   - Swagger UI at /swagger.
 //   - Health endpoints: GET /ping (anon, 200 "ok") + POST /api/runs
@@ -15,14 +16,18 @@
 //
 // WAVE-BY-WAVE LAYERING (do NOT wire beyond your task's scope):
 //   - Task 036 (scaffold):    Auth + Swagger + Health placeholder.
-//   - Task 037 (this task):   Cosmos client + IProvisioningRunRepository
+//   - Task 037:               Cosmos client + IProvisioningRunRepository
 //                             over `spaarke-provisioning/runs` container
 //                             (partition /customerId; ETag concurrency).
-//   - Task 038 (next):        Service Bus client + IJobHandler enqueue path.
+//   - Task 038 (this task):   Service Bus client + IHandlerEnqueuer
+//                             (fleet-scoped queue; DefaultAzureCredential;
+//                             deterministic MessageId for FR-22 level-1
+//                             idempotency; SessionId = CustomerId).
 //   - Task 039 (next):        App Insights exporter (UseAzureMonitor +
 //                             AzureMonitorGuard).
 //   - Wave C5:                Real POST /api/runs handler (replaces the 501
-//                             placeholder) + reconciler background service.
+//                             placeholder) + reconciler background service
+//                             (consumes IHandlerEnqueuer).
 //
 // PLACEMENT: L2 is a PEER service to Sprk.Bff.Api, not a BFF extension
 // (ADR-010 DI minimalism; project MUST NOT rule — no reference to
@@ -43,6 +48,12 @@ builder.Services.AddSwaggerModule();
 // /customerId partition key by construction (§4D I3 / FR-30); replace
 // uses ETag optimistic concurrency (FR-23 I5).
 builder.Services.AddCosmosModule(builder.Configuration);
+// Task 038: Service Bus client + IHandlerEnqueuer over the fleet-scoped
+// queue the BFF's ServiceBusJobProcessor drains. Deterministic MessageId
+// = SHA256(HandlerId|RunId|CustomerId|paramHash) implements FR-22 level-1
+// idempotency; SessionId = CustomerId enables per-customer FIFO ordering
+// (§4D I5). DefaultAzureCredential (UAMI) — never account-key per ADR-028.
+builder.Services.AddServiceBusModule(builder.Configuration);
 
 var app = builder.Build();
 
