@@ -235,18 +235,25 @@ import {
   tokens,
 } from '@fluentui/react-components';
 import { ArrowClockwiseRegular } from '@fluentui/react-icons';
+// Deep (per-module) imports — NOT the root '@spaarke/ui-components' barrel.
+// The barrel maps to dist/index (tsconfig paths), which re-exports SprkChat →
+// pdfjs-dist/pdf.mjs; the PCF's webpack/babel can't transform that ESM module,
+// so a barrel import fails the build. Every other PCF uses deep dist imports
+// (ADR-012 PCF Import Pattern) — RegardingResolver now conforms.
 import {
   PolymorphicPicker as PolymorphicPickerRaw,
+  type IPolymorphicPickerWebApi,
+  type PolymorphicPickerProps,
+  type RecordTypeCatalogEntry,
+} from '@spaarke/ui-components/dist/components/PolymorphicPicker/PolymorphicPicker';
+import {
   buildRecordUrl,
   resolveRecordType,
   resolveRecordDisplayNameFieldName,
   resolveRecordNumberFieldName,
-  type IPolymorphicPickerWebApi,
-  type ITodoRegardingTargetCatalogEntry,
-  type PolymorphicPickerProps,
-  type RecordTypeCatalogEntry,
-  OOB_MODAL_SIZES,
-} from '@spaarke/ui-components';
+} from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
+import type { ITodoRegardingTargetCatalogEntry } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
+import { OOB_MODAL_SIZES } from '@spaarke/ui-components/dist/utils/adapters/oobModalSizes';
 
 /**
  * The shared library's `.d.ts` bundle exposes `PolymorphicPicker` as
