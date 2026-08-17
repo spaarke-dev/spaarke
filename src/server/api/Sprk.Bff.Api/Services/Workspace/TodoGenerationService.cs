@@ -29,6 +29,23 @@ public sealed class TodoGenerationOptions
 
     /// <summary>Budget utilization percentage threshold that triggers a to-do. Default: 85.</summary>
     public decimal BudgetAlertThresholdPercent { get; set; } = 85m;
+
+    /// <summary>
+    /// Feature gate for event-sourced To Do generation — Rules 1 (overdue events) and
+    /// 3 (deadline proximity), which read <c>sprk_event</c>. Default <c>false</c> =
+    /// <b>dry-run</b>: the rules query real events (via <see cref="IEventDataverseService"/>)
+    /// and LOG how many To Dos they would create, but create none — so an operator can
+    /// validate first-run volume, the same-name dedupe, and notification side-effects
+    /// before enabling. Set <c>true</c> to create for real.
+    /// <para>
+    /// Introduced by smart-todo-r5 (2026-08-17, "Option A gated") to fix the latent bug
+    /// where Rules 1 &amp; 3 routed event queries through the composite
+    /// <c>IDataverseService</c> whose <c>QueryEventsAsync</c> is a silent-empty stub, so
+    /// they produced ZERO To Dos. See
+    /// <c>projects/smart-todo-r5/notes/INBOUND-event-sourced-todo-generation-broken.md</c>.
+    /// </para>
+    /// </summary>
+    public bool EnableEventSourcedGeneration { get; set; } = false;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -161,6 +178,14 @@ public sealed class TodoGenerationService : BackgroundService
     // can use the same lifetime semantics (no eager Dataverse touch at host startup).
     private TodoRegardingBuilder? _regardingBuilder;
 
+    // Lazily resolved alongside _dataverse. Rules 1 & 3 (event-sourced) MUST query
+    // events through IEventDataverseService — the REAL sprk_event query lives on
+    // DataverseWebApiService, reachable only via this interface. The composite
+    // IDataverseService (DataverseServiceClientImpl) has only a silent-empty
+    // QueryEventsAsync stub, so routing event queries through _dataverse produced
+    // ZERO To Dos (smart-todo-r5 INBOUND fix, 2026-08-17).
+    private IEventDataverseService? _events;
+
     // ──────────────────────────────────────────────────────────────────────────
     // Constructor
     // ──────────────────────────────────────────────────────────────────────────
@@ -211,6 +236,7 @@ public sealed class TodoGenerationService : BackgroundService
         try
         {
             _dataverse = _serviceProvider.GetRequiredService<IDataverseService>();
+            _events = _serviceProvider.GetRequiredService<IEventDataverseService>();
             var commService = _serviceProvider.GetRequiredService<ICommunicationDataverseService>();
             var builderLogger = _serviceProvider.GetRequiredService<ILogger<TodoRegardingBuilder>>();
             _regardingBuilder = new TodoRegardingBuilder(commService, builderLogger);
@@ -326,12 +352,16 @@ public sealed class TodoGenerationService : BackgroundService
         var skipped = 0;
         var failed = 0;
 
+        var wouldCreate = 0;
+
         _logger.LogDebug("TodoGeneration Rule 1: scanning for overdue events");
 
         IEnumerable<EventEntity> overdueEvents;
         try
         {
-            var (items, _) = await _dataverse!.QueryEventsAsync(
+            // IEventDataverseService (real sprk_event query), NOT the _dataverse
+            // composite whose QueryEventsAsync is a silent-empty stub (INBOUND fix).
+            var (items, _) = await _events!.QueryEventsAsync(
                 dueDateTo: today.AddDays(-1), // duedate < today
                 top: 100,
                 ct: ct);
@@ -358,6 +388,19 @@ public sealed class TodoGenerationService : BackgroundService
                     continue;
                 }
 
+                if (!_options.EnableEventSourcedGeneration)
+                {
+                    // Dry-run gate (default): the reroute above is live so the rule now
+                    // sees real events, but creation stays OFF until an operator validates
+                    // volume / dedupe / notification impact and flips the flag.
+                    wouldCreate++;
+                    _logger.LogInformation(
+                        "TodoGeneration Rule 1 [dry-run]: WOULD create to-do '{Title}' for event {EventId} "
+                        + "(set TodoGeneration:EnableEventSourcedGeneration=true to enable)",
+                        todoTitle, evt.Id);
+                    continue;
+                }
+
                 await CreateTodoAsync(
                     name: todoTitle,
                     regardingEntityName: "sprk_event",
@@ -378,6 +421,13 @@ public sealed class TodoGenerationService : BackgroundService
                     todoTitle, evt.Id);
                 failed++;
             }
+        }
+
+        if (!_options.EnableEventSourcedGeneration && wouldCreate > 0)
+        {
+            _logger.LogInformation(
+                "TodoGeneration Rule 1 [dry-run]: {WouldCreate} to-do(s) would be created "
+                + "once TodoGeneration:EnableEventSourcedGeneration=true", wouldCreate);
         }
 
         return (created, skipped, failed);
@@ -467,6 +517,7 @@ public sealed class TodoGenerationService : BackgroundService
         var failed = 0;
 
         var windowEnd = today.AddDays(_options.DeadlineWindowDays);
+        var wouldCreate = 0;
 
         _logger.LogDebug(
             "TodoGeneration Rule 3: scanning for events due between {From:yyyy-MM-dd} and {To:yyyy-MM-dd}",
@@ -475,7 +526,9 @@ public sealed class TodoGenerationService : BackgroundService
         IEnumerable<EventEntity> upcomingEvents;
         try
         {
-            var (items, _) = await _dataverse!.QueryEventsAsync(
+            // IEventDataverseService (real sprk_event query), NOT the _dataverse
+            // composite whose QueryEventsAsync is a silent-empty stub (INBOUND fix).
+            var (items, _) = await _events!.QueryEventsAsync(
                 dueDateFrom: today,
                 dueDateTo: windowEnd,
                 top: 100,
@@ -508,6 +561,19 @@ public sealed class TodoGenerationService : BackgroundService
                     continue;
                 }
 
+                if (!_options.EnableEventSourcedGeneration)
+                {
+                    // Dry-run gate (default): the reroute above is live so the rule now
+                    // sees real events, but creation stays OFF until an operator validates
+                    // volume / dedupe / notification impact and flips the flag.
+                    wouldCreate++;
+                    _logger.LogInformation(
+                        "TodoGeneration Rule 3 [dry-run]: WOULD create to-do '{Title}' for event {EventId} "
+                        + "(set TodoGeneration:EnableEventSourcedGeneration=true to enable)",
+                        todoTitle, evt.Id);
+                    continue;
+                }
+
                 await CreateTodoAsync(
                     name: todoTitle,
                     regardingEntityName: "sprk_event",
@@ -529,6 +595,13 @@ public sealed class TodoGenerationService : BackgroundService
                     todoTitle, evt.Id);
                 failed++;
             }
+        }
+
+        if (!_options.EnableEventSourcedGeneration && wouldCreate > 0)
+        {
+            _logger.LogInformation(
+                "TodoGeneration Rule 3 [dry-run]: {WouldCreate} to-do(s) would be created "
+                + "once TodoGeneration:EnableEventSourcedGeneration=true", wouldCreate);
         }
 
         return (created, skipped, failed);
