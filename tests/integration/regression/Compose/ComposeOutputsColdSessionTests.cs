@@ -25,9 +25,9 @@ namespace Sprk.Bff.Api.Tests.Integration.Regression.Compose;
 ///   helper GetEntitySetNameAsync and threw NotImplementedException — surfacing as a 500 and the
 ///   client banner "Could not insert AI draft ... (NotImplementedException)".
 ///
-///   Deployed stack:
-///     DataverseWebApiService.GetEntitySetNameAsync         (DataverseWebApiService.cs:1099) — throw
-///     DataverseWebApiService.QueryChildRecordIdsAsync      (DataverseWebApiService.cs:1851)
+///   Deployed stack (line numbers refreshed 2026-08-16 after RED-4 B dead-code deletion):
+///     DataverseWebApiService.GetEntitySetNameAsync         (DataverseWebApiService.cs:176) — still throws
+///     DataverseWebApiService.QueryChildRecordIdsAsync      (DataverseWebApiService.cs:839)
 ///     ChatDataverseRepository.GetMessagesAsync             (ChatDataverseRepository.cs:161)
 ///     ChatDataverseRepository.GetSessionAsync              (ChatDataverseRepository.cs:81)
 ///     ChatSessionManager.GetSessionAsync                   (ChatSessionManager.cs:204)  ← cold path
