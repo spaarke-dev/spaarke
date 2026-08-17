@@ -1063,7 +1063,15 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         expect(navigateToMock).toHaveBeenCalledTimes(1);
       });
 
-      expect(retrieveRecordMock).not.toHaveBeenCalled();
+      // v1.4.9: the click-path URL retrieve (this test's subject) must NOT
+      // fire — Priority 1 (fresh selection) short-circuits it. The unrelated
+      // Row-2 name-fallback may issue a `?$select=sprk_regardingrecordname`
+      // read on mount; assert the URL select specifically was never requested.
+      expect(retrieveRecordMock).not.toHaveBeenCalledWith(
+        expect.anything(),
+        expect.anything(),
+        '?$select=sprk_regardingrecordurl'
+      );
       expect(navigateToMock).toHaveBeenCalledWith(
         expect.objectContaining({
           entityName: 'sprk_matter',
@@ -1145,8 +1153,16 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       expect(() => fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))).not.toThrow();
 
       // Wait for the rejected promise + the fallback warn to fire.
+      // v1.4.9: the URL-click retrieveRecord (this test's subject) shares the
+      // mock with the Row-2 name-fallback retrieveRecord that fires on mount
+      // (regardingRecordNameField is empty + a host row id is present). Assert
+      // the URL-specific call happened rather than a brittle total count.
       await waitFor(() => {
-        expect(retrieveRecordMock).toHaveBeenCalledTimes(1);
+        expect(retrieveRecordMock).toHaveBeenCalledWith(
+          'sprk_todo',
+          '22222222-2222-2222-2222-222222222222',
+          '?$select=sprk_regardingrecordurl'
+        );
       });
       await waitFor(() => {
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cannot open modal'), ...([] as unknown[]));
@@ -2339,6 +2355,137 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       } finally {
         restore();
       }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // v1.4.9 (UAT 2026-08-17) — Row-2 "Regarding Name" blank-display fix
+  //
+  // Repro: number renders but name is BLANK even though sprk_regardingrecordname
+  // IS populated on the row (subgrid "+ New" / auto-detect path). Root cause: the
+  // Name cell single-sourced from the bound pass-through prop
+  // `regardingRecordNameField.raw`, which is empty/stale at render on that path.
+  // Fix: precedence chain bound → selectedTarget (in-session) → webAPI row read.
+  // ---------------------------------------------------------------------------
+
+  describe('v1.4.9 — Row-2 Regarding Name display fallback (UAT 2026-08-17)', () => {
+    test('bound name present → name renders from bound prop (unchanged working path)', () => {
+      const { context } = buildContext({
+        regardingRecordNumberField: 'REAL-2026-123456.01',
+        regardingRecordNameField: 'Real estate transaction analysis',
+      });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.4.9"
+        />
+      );
+
+      expect(screen.getByTestId('regarding-resolver-record-name')).toHaveTextContent(
+        'Real estate transaction analysis'
+      );
+    });
+
+    test('bound name empty + in-session selection → name renders from selectedTarget', async () => {
+      // Manual-pick path: bound regardingRecordNameField.raw is null (framework
+      // has not re-materialized it), but the picker onSelect resolved a name.
+      // The name cell must fall back to selectedTarget.recordName.
+      const { context } = buildContext({
+        regardingRecordNumberField: 'REAL-2026-123456.01',
+        regardingRecordNameField: null,
+      });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.4.9"
+        />
+      );
+
+      // Before selection the name cell is absent (nothing resolved yet).
+      expect(screen.queryByTestId('regarding-resolver-name-cell')).not.toBeInTheDocument();
+
+      // Fire the mock picker's onSelect — populates selectedTarget with the name.
+      fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('regarding-resolver-record-name')).toHaveTextContent('Smith v. Jones');
+      });
+    });
+
+    test('bound name empty + host row has value → name renders from webAPI fallback (auto-detect / fresh load)', async () => {
+      // UPDATE-mode / read-only / fresh-load case: no in-session selection, bound
+      // prop empty, but the row's sprk_regardingrecordname IS populated. The
+      // webAPI fallback reads it directly off the row and displays it.
+      const retrieveRecordMock = jest.fn().mockResolvedValue({
+        sprk_regardingrecordname: 'Real estate transaction analysis',
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        Page: { data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } } },
+      };
+
+      const { context } = buildContext({
+        regardingRecordNumberField: 'REAL-2026-123456.01',
+        regardingRecordNameField: null,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={true}
+          onRecordTypeChanged={() => undefined}
+          version="1.4.9"
+        />
+      );
+
+      await waitFor(() => {
+        expect(retrieveRecordMock).toHaveBeenCalledWith(
+          'sprk_todo',
+          '22222222-2222-2222-2222-222222222222',
+          '?$select=sprk_regardingrecordname'
+        );
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('regarding-resolver-record-name')).toHaveTextContent(
+          'Real estate transaction analysis'
+        );
+      });
+    });
+
+    test('bound name empty + no host row + no selection → name cell stays hidden (graceful blank)', async () => {
+      // CREATE-mode-like / nothing to show: getId() empty → no webAPI read, no
+      // selection. Name cell must remain hidden (no stale/placeholder render).
+      const retrieveRecordMock = jest.fn();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = { Page: { data: { entity: { getId: () => '' } } } };
+
+      const { context } = buildContext({
+        regardingRecordNumberField: 'REAL-2026-123456.01',
+        regardingRecordNameField: null,
+      });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (context as any).webAPI.retrieveRecord = retrieveRecordMock;
+
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.4.9"
+        />
+      );
+
+      await Promise.resolve();
+      await Promise.resolve();
+
+      expect(retrieveRecordMock).not.toHaveBeenCalled();
+      expect(screen.queryByTestId('regarding-resolver-name-cell')).not.toBeInTheDocument();
     });
   });
 });

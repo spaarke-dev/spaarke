@@ -2,6 +2,34 @@
  * RegardingResolverApp — v1.4.0 polymorphic parent picker for any child entity
  * following the N:1 polymorphic pattern.
  *
+ * # v1.4.9 (UAT 2026-08-17 — Row-2 "Regarding Name" blank-display fix)
+ *
+ * Operator UAT (sprk_todo form, RELATED RECORD panel): the "Regarding Number"
+ * value rendered but "Regarding Name" was BLANK even though the row's
+ * `sprk_regardingrecordname` WAS populated (Web API verified) — the regarding
+ * had been set via the subgrid "+ New Task" auto-associate
+ * (detectPrePopulatedParent) path.
+ *
+ * Root cause: the Name cell single-sourced from the bound pass-through property
+ * `context.parameters.regardingRecordNameField.raw`. On the auto-detect path
+ * the denormalized name is committed to the row out-of-band (Xrm.WebApi
+ * .updateRecord in UPDATE mode; setFormTextValue in CREATE mode) rather than
+ * through the PCF's own bound-output channel, so the framework does not reliably
+ * re-materialize that bound prop into the control on the render where the name
+ * should appear — it is empty/stale, and the cell hides (`hasRecordName` false).
+ * The Number cell reads its value identically and shares the same fragility; it
+ * happened to be present in the operator's repro. There was no fallback to the
+ * name the resolver already resolved (`selectedTarget`) or that lives on the row.
+ *
+ * Fix (mirrors the SRFR-043 URL fix — read the field off the row via webAPI when
+ * the form-bound read is unreliable): the Name display now resolves through a
+ * precedence chain — bound `regardingRecordNameField.raw` → in-session
+ * `selectedTarget.recordName` (set by BOTH manual-pick and auto-detect) →
+ * `resolvedName` read directly from the host row via `context.webAPI`
+ * (`?$select=sprk_regardingrecordname`). VIEW-only read, safe under read-only.
+ * The manual-pick and clear flows are unchanged (bound value still wins when
+ * present; nothing writes the name). Number cell left as-is.
+ *
  * # v1.4.0 (SRFR-045 consolidation with AssociationResolver — subgrid auto-detect)
  *
  * Owner clarified use case: the resolver goes on the CHILD form (e.g. sprk_todo,
@@ -245,7 +273,7 @@ import {
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-08-03';
+const BUILD_DATE = '2026-08-17';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -839,6 +867,17 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   const [isWriting, setIsWriting] = React.useState(false);
   const [selectedTarget, setSelectedTarget] = React.useState<IRegardingSelection | null>(null);
 
+  // v1.4.9 (UAT 2026-08-17) — WebAPI-resolved fallback for the Row-2 "Regarding
+  // Name" cell. Mirrors the SRFR-043 URL fix: when the bound pass-through
+  // property `regardingRecordNameField.raw` is empty/stale at render — which
+  // happens on the subgrid "+ New" / detectPrePopulatedParent path where
+  // `sprk_regardingrecordname` is written to the row out-of-band (updateRecord /
+  // setFormTextValue) rather than through the PCF's own bound-output channel —
+  // read the value DIRECTLY from the host row via `context.webAPI`, so the Name
+  // cell is not blank while the DB column IS populated. See the render-time
+  // `displayName` precedence below (bound → in-session selection → row read).
+  const [resolvedName, setResolvedName] = React.useState<string | null>(null);
+
   // v1.4.0 (SRFR-045) — guard against double-firing auto-detect if React
   // re-renders during the effect. `useRef` persists across renders without
   // triggering re-renders itself.
@@ -1179,6 +1218,76 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
     void runAutoDetect();
   }, [catalog, hostEntity, readOnly, writeCtx, onRecordTypeChanged]);
 
+  // ---------------- v1.4.9 (UAT 2026-08-17) Row-2 Name fallback ----------------
+  //
+  // Root cause of the "Regarding Name blank while sprk_regardingrecordname IS
+  // populated" UAT defect: the Name cell single-sources from the bound
+  // pass-through property `regardingRecordNameField.raw`. On the subgrid
+  // "+ New" / detectPrePopulatedParent path the denormalized name is committed
+  // to the row as an out-of-band side effect (Xrm.WebApi.updateRecord in UPDATE
+  // mode; setFormTextValue in CREATE mode) — NOT through the PCF's bound-output
+  // channel — so the framework does not reliably re-materialize
+  // `regardingRecordNameField.raw` into the control on the render where the name
+  // should appear. The Number cell shares this exact fragility; it happened to
+  // render in the operator repro. The display had NO fallback to the value the
+  // resolver already knows (selectedTarget) or that is authoritatively on the
+  // row.
+  //
+  // Fix (mirrors SRFR-043's URL fix): when the bound value is empty at render
+  // AND we have a host record id, read `sprk_regardingrecordname` DIRECTLY from
+  // the row via `context.webAPI` — this reads the row, not a form attribute, so
+  // it is correct even when the bound prop is empty/stale. VIEW-only read; safe
+  // under read-only (parity with the click-handler retrieveRecord).
+  //
+  // Keyed on `selectedTarget` too so the read re-fires after auto-detect /
+  // manual-pick commits the row (covers the write-then-read race). When the
+  // bound value IS present it wins and any stale fallback is cleared.
+  React.useEffect(() => {
+    // Bound value present → it is authoritative; drop any prior fallback.
+    if (typeof boundRecordName === 'string' && boundRecordName.trim().length > 0) {
+      setResolvedName(null);
+      return;
+    }
+
+    // In-session resolved name present (fresh manual-pick OR auto-detect) →
+    // it is current and authoritative; no server round-trip needed. This also
+    // keeps the fresh-selection path free of any WebAPI call.
+    const inSessionName = selectedTarget?.recordName;
+    if (typeof inSessionName === 'string' && inSessionName.trim().length > 0) return;
+
+    const hostRecordId = getHostRecordId();
+    // CREATE mode (no host row) has nothing to read; the in-session
+    // `selectedTarget?.recordName` covers the display there.
+    if (!hostEntity || !hostRecordId) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const webApi = context.webAPI as any;
+    if (!webApi || typeof webApi.retrieveRecord !== 'function') return;
+
+    let cancelled = false;
+    void (async (): Promise<void> => {
+      try {
+        const result = await webApi.retrieveRecord(
+          hostEntity,
+          hostRecordId,
+          '?$select=sprk_regardingrecordname'
+        );
+        const value = result?.sprk_regardingrecordname;
+        if (!cancelled && typeof value === 'string' && value.trim().length > 0) {
+          setResolvedName(value);
+        }
+      } catch (err) {
+        // Record deleted, no privilege, or network error — leave the fallback
+        // unset (graceful blank, NFR-06). Never throws to the host form.
+        console.warn('[RegardingResolver] Name fallback retrieveRecord(sprk_regardingrecordname) failed:', err);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [boundRecordName, hostEntity, context.webAPI, selectedTarget]);
+
   // ---------------- PolymorphicPicker onSelect ----------------
 
   const handlePickerSelect = React.useCallback(
@@ -1399,7 +1508,25 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   );
 
   const hasRecordNumber = typeof boundRecordNumber === 'string' && boundRecordNumber.trim().length > 0;
-  const hasRecordName = typeof boundRecordName === 'string' && boundRecordName.trim().length > 0;
+
+  // v1.4.9 (UAT 2026-08-17) — resolve the Name cell's display value with a
+  // precedence chain instead of single-sourcing the (fragile on the
+  // auto-detect path) bound pass-through prop:
+  //   1. boundRecordName — the bound `regardingRecordNameField.raw`. The normal
+  //      working path; symmetric with how the Number cell reads its value.
+  //   2. selectedTarget?.recordName — the name the resolver just resolved
+  //      in-session (populated by BOTH the manual-pick handler AND the
+  //      auto-detect Phase 1/2b writes). Covers CREATE mode (no row to read).
+  //   3. resolvedName — read straight off the host row via context.webAPI when
+  //      the bound value is empty at render (UPDATE mode / read-only / fresh
+  //      load where selectedTarget is null). Mirrors the SRFR-043 URL fix.
+  const boundName = typeof boundRecordName === 'string' && boundRecordName.trim().length > 0 ? boundRecordName : null;
+  const selectedName =
+    typeof selectedTarget?.recordName === 'string' && selectedTarget.recordName.trim().length > 0
+      ? selectedTarget.recordName
+      : null;
+  const displayName = boundName ?? selectedName ?? resolvedName;
+  const hasRecordName = typeof displayName === 'string' && displayName.trim().length > 0;
 
   // v1.3.1 (SRFR-034 §5) — refresh handler wraps the module-level internal
   // helper as a stable useCallback so the onClick reference is stable across
@@ -1489,7 +1616,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
               Regarding Name
             </Text>
             <Text className={styles.recordName} data-testid="regarding-resolver-record-name">
-              {boundRecordName}
+              {displayName}
             </Text>
           </div>
         )}
