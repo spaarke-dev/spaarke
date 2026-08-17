@@ -62,6 +62,20 @@ param serviceBusQueues array = ['sdap-jobs', 'document-indexing', 'ai-indexing',
 @description('Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually.')
 param bffPrincipalId string = ''
 
+// --- User-Assigned Managed Identity (Phase C — customer-provisioning-orchestration-r1) ---
+
+@description('Resource ID of the customer User-Assigned Managed Identity (from modules/uami.bicep — authored in task 028). Phase C parameter accepted here as a PASS-THROUGH ONLY: this task (027) declares the parameter for downstream consumers (task 029 refactors app-service.bicep to bind slots + `keyVaultReferenceIdentity` PATCH to this UAMI per T1/T5). Leave empty in the current customer.bicep composition — no resource in THIS module binds to it yet. Default empty preserves the pre-Phase-C System-Assigned MI behavior on the deployed BFF app-service.')
+param userAssignedIdentityResourceId string = ''
+
+// --- Optional SignalR (per ADR-032 Null-Object Kill-Switch pattern; ADR-034 realtime spine) ---
+
+@description('Deploy the per-customer Azure SignalR Service resource for the notifications spine (ADR-034). Default false — no resource + downstream BFF resolves the Null-Object variant per ADR-032. Set true to provision the resource; requires the BFF Notifications:SignalRSpine:Enabled flag to be true in the same environment for end-to-end enablement.')
+param signalrEnabled bool = false
+
+@description('SignalR SKU (ignored when signalrEnabled=false). Default Free_F1 for scaffold + dev; production customers requiring realtime bump to Standard_S1 (~$48/mo/unit per notes/pricing-research-2026-08-12.md).')
+@allowed(['Free_F1', 'Standard_S1', 'Premium_P1'])
+param signalrSku string = 'Free_F1'
+
 // --- ACS messaging options (messaging-communication-app-r1, task 012, FR-18) ---
 
 @description('Deploy the per-boundary ACS resource + Event Grid system topic/subscription (messaging). Default false — existing customer provisioning is unchanged until messaging is enabled for the boundary.')
@@ -116,6 +130,10 @@ var acsResourceName = 'sprk-${customerId}-${environmentName}-acs'
 // Serverless SQL API; hosts the `spaarke-ai` database (sessions/prompts/audit/memory/feedback) per
 // docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md. BFF is per-customer's dedicated data plane.
 var cosmosAccountName = take('spaarke-${customerId}-${environmentName}-cosmos', 44)
+
+// SignalR resource: sprk-{customer}-{env}-signalr (per design.md §7.1 naming convention).
+// Only referenced when signalrEnabled=true (ADR-032 Null-Object kill-switch caller-side gate).
+var signalrName = 'sprk-${customerId}-${environmentName}-signalr'
 
 // Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
 var acsDeadLetterContainerName = 'acs-eventgrid-deadletter'
@@ -246,6 +264,32 @@ module acsCommunication 'modules/acs-communication.bicep' = if (deployAcsMessagi
 }
 
 // ============================================================================
+// SIGNALR (OPTIONAL — per ADR-032 Null-Object Kill-Switch pattern)
+// Per-customer Azure SignalR Service for the ADR-034 notifications spine.
+//   - Feature-gated on `signalrEnabled` (default false). When false, NO SignalR
+//     resource is deployed AND the BFF DI container resolves the Null-Object
+//     variant (per ADR-032 P3 Fail-fast Null-Object).
+//   - When true, provisions the resource + grants the BFF Managed Identity the
+//     built-in "SignalR App Server" role (only when bffPrincipalId is non-empty).
+//   - `signalrEnabled=true` in Bicep is the *caller-side* half of the switch; the
+//     BFF-side half is the `Notifications:SignalRSpine:Enabled` config flag. Both
+//     must be true for end-to-end realtime; either false = feature disabled with
+//     no dangling resource + no client-side crash.
+// ============================================================================
+
+module signalr 'modules/signalr.bicep' = if (signalrEnabled) {
+  scope: rg
+  name: 'signalr-${baseName}'
+  params: {
+    signalrName: signalrName
+    location: location
+    signalrSku: signalrSku
+    bffPrincipalId: bffPrincipalId
+    tags: tags
+  }
+}
+
+// ============================================================================
 // OUTPUTS
 // ============================================================================
 
@@ -288,6 +332,19 @@ output acsHostName string = deployAcsMessaging ? acsCommunication.outputs.acsHos
 output acsDataLocation string = deployAcsMessaging ? acsCommunication.outputs.acsDataLocation : ''
 output acsSystemTopicName string = deployAcsMessaging ? acsCommunication.outputs.systemTopicName : ''
 output acsEventSubscriptionName string = deployAcsMessaging ? acsCommunication.outputs.eventSubscriptionName : ''
+
+// --- SignalR (optional; task 027 / ADR-032 / ADR-034) — populated only when signalrEnabled=true ---
+// Uses Bicep null-safe access + coalesce to satisfy BCP318 on conditional module outputs.
+output signalrEnabled bool = signalrEnabled
+output signalrResourceId string = signalr.?outputs.signalrId ?? ''
+output signalrHostName string = signalr.?outputs.signalrHostName ?? ''
+output signalrSkuDeployed string = signalr.?outputs.signalrSku ?? ''
+
+// --- UAMI pass-through (task 027 / Phase C) — echoes the input for downstream module composers ---
+// Task 029 will bind this to app-service.bicep (`identity.userAssignedIdentities` + `keyVaultReferenceIdentity`
+// PATCH); this task only accepts + exposes the parameter so callers can wire it uniformly across the
+// customer stamp without touching every downstream module signature at once.
+output userAssignedIdentityResourceId string = userAssignedIdentityResourceId
 
 // --- Platform cross-reference ---
 output platformKeyVaultName string = platformKeyVaultName

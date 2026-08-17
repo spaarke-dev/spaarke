@@ -4,8 +4,8 @@
   "metadata": {
     "_generator": {
       "name": "bicep",
-      "version": "0.41.2.15936",
-      "templateHash": "4628116456404325806"
+      "version": "0.46.1.21595",
+      "templateHash": "5957775773648253947"
     }
   },
   "parameters": {
@@ -38,9 +38,9 @@
     },
     "platformKeyVaultName": {
       "type": "string",
-      "defaultValue": "sprk-platform-prod-kv",
+      "defaultValue": "[format('sprk-{0}-kv', parameters('environmentName'))]",
       "metadata": {
-        "description": "Name of the platform Key Vault (from platform.bicep deployment) for cross-references"
+        "description": "Name of the platform Key Vault (from platform.bicep deployment) for cross-references. Canonical: sprk-{env}-kv per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § \"KV-Secret & Resource Naming Standard\" R3 + spec.md §7.9 / FR-35 (task 018 drops legacy `-platform-` qualifier from default; matches platform.bicep keyVaultName default). Override supported for codified exceptions per task 020."
       }
     },
     "storageSku": {
@@ -108,6 +108,53 @@
         "description": "Principal ID of the platform BFF App Service Managed Identity (granted Sender on membership topic + Receiver on recon subscription per R3 D3 / FR-2P2.3). Leave empty to skip RBAC assignment — operator must grant manually."
       }
     },
+    "userAssignedIdentityResourceId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Resource ID of the customer User-Assigned Managed Identity (from modules/uami.bicep — authored in task 028). Phase C parameter accepted here as a PASS-THROUGH ONLY: this task (027) declares the parameter for downstream consumers (task 029 refactors app-service.bicep to bind slots + `keyVaultReferenceIdentity` PATCH to this UAMI per T1/T5). Leave empty in the current customer.bicep composition — no resource in THIS module binds to it yet. Default empty preserves the pre-Phase-C System-Assigned MI behavior on the deployed BFF app-service."
+      }
+    },
+    "signalrEnabled": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy the per-customer Azure SignalR Service resource for the notifications spine (ADR-034). Default false — no resource + downstream BFF resolves the Null-Object variant per ADR-032. Set true to provision the resource; requires the BFF Notifications:SignalRSpine:Enabled flag to be true in the same environment for end-to-end enablement."
+      }
+    },
+    "signalrSku": {
+      "type": "string",
+      "defaultValue": "Free_F1",
+      "allowedValues": [
+        "Free_F1",
+        "Standard_S1",
+        "Premium_P1"
+      ],
+      "metadata": {
+        "description": "SignalR SKU (ignored when signalrEnabled=false). Default Free_F1 for scaffold + dev; production customers requiring realtime bump to Standard_S1 (~$48/mo/unit per notes/pricing-research-2026-08-12.md)."
+      }
+    },
+    "deployAcsMessaging": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Deploy the per-boundary ACS resource + Event Grid system topic/subscription (messaging). Default false — existing customer provisioning is unchanged until messaging is enabled for the boundary."
+      }
+    },
+    "acsDataLocation": {
+      "type": "string",
+      "defaultValue": "UnitedStates",
+      "metadata": {
+        "description": "ACS data location for this boundary. IMMUTABLE at create time (design §8.7 / D-01) — residency is achieved by a separate ACS resource per boundary. Choose deliberately at onboarding."
+      }
+    },
+    "acsWebhookEndpointUrl": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "BFF inbound webhook URL the Event Grid chat-event subscription delivers to (task 030 ingress). Required when deployAcsMessaging is true."
+      }
+    },
     "tags": {
       "type": "object",
       "defaultValue": {
@@ -120,14 +167,25 @@
       "metadata": {
         "description": "Tags applied to ALL resources for cost tracking and management"
       }
+    },
+    "keyVaultName": {
+      "type": "string",
+      "defaultValue": "[take(format('sprk-{0}-{1}-kv', parameters('customerId'), parameters('environmentName')), 24)]",
+      "metadata": {
+        "description": "Customer Key Vault name. Canonical per-customer form incorporates customerId per AZURE-RESOURCE-NAMING-CONVENTION.md § \"Multi-Customer Prod Environment\" (customer + env combo isolates per-customer vaults; capped at 24 chars per Key Vault limit). Parameterized by task 018 (was hardcoded `var keyVaultName`) so H4 handler + Phase H seeder address vaults deterministically. Override supported for codified exceptions per task 020 (see naming-exception-registry.md)."
+      }
     }
   },
   "variables": {
     "resourceGroupName": "[format('rg-spaarke-{0}-{1}', parameters('customerId'), parameters('environmentName'))]",
     "baseName": "[format('sprk{0}{1}', parameters('customerId'), parameters('environmentName'))]",
     "storageAccountName": "[take(toLower(replace(format('{0}sa', variables('baseName')), '-', '')), 24)]",
-    "keyVaultName": "[take(format('sprk-{0}-{1}-kv', parameters('customerId'), parameters('environmentName')), 24)]",
-    "serviceBusName": "[format('spaarke-{0}-{1}-sbus', parameters('customerId'), parameters('environmentName'))]"
+    "serviceBusName": "[format('spaarke-{0}-{1}-sbus', parameters('customerId'), parameters('environmentName'))]",
+    "acsResourceName": "[format('sprk-{0}-{1}-acs', parameters('customerId'), parameters('environmentName'))]",
+    "cosmosAccountName": "[take(format('spaarke-{0}-{1}-cosmos', parameters('customerId'), parameters('environmentName')), 44)]",
+    "signalrName": "[format('sprk-{0}-{1}-signalr', parameters('customerId'), parameters('environmentName'))]",
+    "acsDeadLetterContainerName": "acs-eventgrid-deadletter",
+    "effectiveStorageContainers": "[if(parameters('deployAcsMessaging'), union(parameters('storageContainers'), createArray(variables('acsDeadLetterContainerName'))), parameters('storageContainers'))]"
   },
   "resources": [
     {
@@ -149,7 +207,7 @@
         "mode": "Incremental",
         "parameters": {
           "keyVaultName": {
-            "value": "[variables('keyVaultName')]"
+            "value": "[parameters('keyVaultName')]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -167,15 +225,15 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "16492197050070714217"
+              "version": "0.46.1.21595",
+              "templateHash": "1891303817036034052"
             }
           },
           "parameters": {
             "keyVaultName": {
               "type": "string",
               "metadata": {
-                "description": "Name of the Key Vault"
+                "description": "Name of the Key Vault. Canonical: sprk-{env}-kv. Dev exception spaarke-spekvcert per naming-exception-registry.md."
               }
             },
             "location": {
@@ -446,7 +504,7 @@
             "value": "[parameters('storageSku')]"
           },
           "containers": {
-            "value": "[parameters('storageContainers')]"
+            "value": "[variables('effectiveStorageContainers')]"
           },
           "enableTestDocumentLifecycle": {
             "value": false
@@ -461,8 +519,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "9743978895551028508"
+              "version": "0.46.1.21595",
+              "templateHash": "1220428211322270844"
             }
           },
           "parameters": {
@@ -723,8 +781,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "12466162287987081074"
+              "version": "0.46.1.21595",
+              "templateHash": "10595085439683821615"
             }
           },
           "parameters": {
@@ -850,6 +908,408 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
+      "name": "[format('cosmos-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "accountName": {
+            "value": "[variables('cosmosAccountName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "databaseName": {
+            "value": "spaarke-ai"
+          },
+          "appServicePrincipalId": {
+            "value": "[parameters('bffPrincipalId')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "3037118070529064507"
+            }
+          },
+          "parameters": {
+            "accountName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Cosmos DB account"
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the Cosmos DB account"
+              }
+            },
+            "databaseName": {
+              "type": "string",
+              "defaultValue": "spaarke-ai",
+              "metadata": {
+                "description": "Name of the database to create"
+              }
+            },
+            "appServicePrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the App Service managed identity (granted Cosmos DB Built-in Data Contributor)"
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags for the resource"
+              }
+            }
+          },
+          "variables": {
+            "cosmosDataContributorRoleId": "00000000-0000-0000-0000-000000000002"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts",
+              "apiVersion": "2024-05-15",
+              "name": "[parameters('accountName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "GlobalDocumentDB",
+              "properties": {
+                "databaseAccountOfferType": "Standard",
+                "capabilities": [
+                  {
+                    "name": "EnableServerless"
+                  }
+                ],
+                "consistencyPolicy": {
+                  "defaultConsistencyLevel": "Session"
+                },
+                "locations": [
+                  {
+                    "locationName": "[parameters('location')]",
+                    "failoverPriority": 0,
+                    "isZoneRedundant": false
+                  }
+                ],
+                "publicNetworkAccess": "Enabled",
+                "disableLocalAuth": false,
+                "minimalTlsVersion": "Tls12",
+                "backupPolicy": {
+                  "type": "Continuous",
+                  "continuousModeProperties": {
+                    "tier": "Continuous7Days"
+                  }
+                }
+              }
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', parameters('accountName'), parameters('databaseName'))]",
+              "properties": {
+                "resource": {
+                  "id": "[parameters('databaseName')]"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'sessions')]",
+              "properties": {
+                "resource": {
+                  "id": "sessions",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 7776000,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'prompts')]",
+              "properties": {
+                "resource": {
+                  "id": "prompts",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 7776000,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'audit')]",
+              "properties": {
+                "resource": {
+                  "id": "audit",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": -1,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'audit-partitioned')]",
+              "properties": {
+                "resource": {
+                  "id": "audit-partitioned",
+                  "partitionKey": {
+                    "paths": [
+                      "/partitionKey"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": -1,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'memory')]",
+              "properties": {
+                "resource": {
+                  "id": "memory",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": 7776000,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'memory-items')]",
+              "properties": {
+                "resource": {
+                  "id": "memory-items",
+                  "partitionKey": {
+                    "paths": [
+                      "/subjectId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": -1,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}/{2}', parameters('accountName'), parameters('databaseName'), 'feedback')]",
+              "properties": {
+                "resource": {
+                  "id": "feedback",
+                  "partitionKey": {
+                    "paths": [
+                      "/tenantId"
+                    ],
+                    "kind": "Hash",
+                    "version": 2
+                  },
+                  "defaultTtl": -1,
+                  "indexingPolicy": {
+                    "indexingMode": "consistent",
+                    "includedPaths": [
+                      {
+                        "path": "/*"
+                      }
+                    ],
+                    "excludedPaths": [
+                      {
+                        "path": "/\"_etag\"/?"
+                      }
+                    ]
+                  }
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts/sqlDatabases', parameters('accountName'), parameters('databaseName'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('appServicePrincipalId')))]",
+              "type": "Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments",
+              "apiVersion": "2024-05-15",
+              "name": "[format('{0}/{1}', parameters('accountName'), guid(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName')), parameters('appServicePrincipalId'), variables('cosmosDataContributorRoleId')))]",
+              "properties": {
+                "roleDefinitionId": "[format('{0}/sqlRoleDefinitions/{1}', resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName')), variables('cosmosDataContributorRoleId'))]",
+                "principalId": "[parameters('appServicePrincipalId')]",
+                "scope": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "accountName": {
+              "type": "string",
+              "value": "[parameters('accountName')]"
+            },
+            "accountId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName'))]"
+            },
+            "accountEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.DocumentDB/databaseAccounts', parameters('accountName')), '2024-05-15').documentEndpoint]"
+            },
+            "databaseName": {
+              "type": "string",
+              "value": "[parameters('databaseName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
       "name": "[format('membershipTopic-{0}', variables('baseName'))]",
       "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
@@ -871,8 +1331,8 @@
           "metadata": {
             "_generator": {
               "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "14366972124933782234"
+              "version": "0.46.1.21595",
+              "templateHash": "5240251198424067160"
             }
           },
           "parameters": {
@@ -995,6 +1455,389 @@
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName')))]"
       ]
+    },
+    {
+      "condition": "[parameters('deployAcsMessaging')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('acs-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "acsResourceName": {
+            "value": "[variables('acsResourceName')]"
+          },
+          "acsDataLocation": {
+            "value": "[parameters('acsDataLocation')]"
+          },
+          "webhookEndpointUrl": {
+            "value": "[parameters('acsWebhookEndpointUrl')]"
+          },
+          "deadLetterStorageAccountResourceId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.storageAccountId.value]"
+          },
+          "deadLetterContainerName": {
+            "value": "[variables('acsDeadLetterContainerName')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "10352649800283505020"
+            }
+          },
+          "parameters": {
+            "acsResourceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the per-boundary ACS resource (e.g. sprk-{customerId}-acs)."
+              }
+            },
+            "acsDataLocation": {
+              "type": "string",
+              "defaultValue": "UnitedStates",
+              "metadata": {
+                "description": "ACS data location. IMMUTABLE at create time (D-01) — the residency mechanism. e.g. UnitedStates, Europe, Australia, UK."
+              }
+            },
+            "resourceLocation": {
+              "type": "string",
+              "defaultValue": "global",
+              "metadata": {
+                "description": "Control-plane location for the ACS resource and Event Grid system topic (ACS + system topic are always global)."
+              }
+            },
+            "webhookEndpointUrl": {
+              "type": "string",
+              "metadata": {
+                "description": "BFF inbound webhook URL the Event Grid subscription delivers chat events to (task 030 ingress)."
+              }
+            },
+            "includedEventTypes": {
+              "type": "array",
+              "defaultValue": [
+                "Microsoft.Communication.ChatMessageReceivedInThread",
+                "Microsoft.Communication.ChatMessageEditedInThread",
+                "Microsoft.Communication.ChatMessageDeletedInThread",
+                "Microsoft.Communication.ParticipantAddedToThread",
+                "Microsoft.Communication.ParticipantRemovedFromThread"
+              ],
+              "metadata": {
+                "description": "ACS chat event types subscribed from day one (design §8.3)."
+              }
+            },
+            "deadLetterStorageAccountResourceId": {
+              "type": "string",
+              "metadata": {
+                "description": "Resource id of the Storage account used for Event Grid dead-lettering (reuses the customer Storage account)."
+              }
+            },
+            "deadLetterContainerName": {
+              "type": "string",
+              "defaultValue": "acs-eventgrid-deadletter",
+              "metadata": {
+                "description": "Blob container that receives dead-lettered Event Grid events."
+              }
+            },
+            "systemTopicName": {
+              "type": "string",
+              "defaultValue": "[format('{0}-egt', parameters('acsResourceName'))]",
+              "metadata": {
+                "description": "Name of the Event Grid system topic on the ACS resource."
+              }
+            },
+            "eventSubscriptionName": {
+              "type": "string",
+              "defaultValue": "chat-events-to-bff",
+              "metadata": {
+                "description": "Name of the event subscription (chat events -> BFF webhook)."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags applied to all resources."
+              }
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Communication/communicationServices",
+              "apiVersion": "2023-04-01",
+              "name": "[parameters('acsResourceName')]",
+              "location": "[parameters('resourceLocation')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "dataLocation": "[parameters('acsDataLocation')]"
+              }
+            },
+            {
+              "type": "Microsoft.EventGrid/systemTopics",
+              "apiVersion": "2023-12-15-preview",
+              "name": "[parameters('systemTopicName')]",
+              "location": "[parameters('resourceLocation')]",
+              "tags": "[parameters('tags')]",
+              "properties": {
+                "source": "[resourceId('Microsoft.Communication/communicationServices', parameters('acsResourceName'))]",
+                "topicType": "Microsoft.Communication.CommunicationServices"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.Communication/communicationServices', parameters('acsResourceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.EventGrid/systemTopics/eventSubscriptions",
+              "apiVersion": "2023-12-15-preview",
+              "name": "[format('{0}/{1}', parameters('systemTopicName'), parameters('eventSubscriptionName'))]",
+              "properties": {
+                "destination": {
+                  "endpointType": "WebHook",
+                  "properties": {
+                    "endpointUrl": "[parameters('webhookEndpointUrl')]",
+                    "maxEventsPerBatch": 1,
+                    "preferredBatchSizeInKilobytes": 64
+                  }
+                },
+                "filter": {
+                  "includedEventTypes": "[parameters('includedEventTypes')]"
+                },
+                "deadLetterDestination": {
+                  "endpointType": "StorageBlob",
+                  "properties": {
+                    "resourceId": "[parameters('deadLetterStorageAccountResourceId')]",
+                    "blobContainerName": "[parameters('deadLetterContainerName')]"
+                  }
+                },
+                "retryPolicy": {
+                  "maxDeliveryAttempts": 30,
+                  "eventTimeToLiveInMinutes": 1440
+                },
+                "eventDeliverySchema": "EventGridSchema"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.EventGrid/systemTopics', parameters('systemTopicName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "acsResourceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.Communication/communicationServices', parameters('acsResourceName'))]"
+            },
+            "acsHostName": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.Communication/communicationServices', parameters('acsResourceName')), '2023-04-01').hostName]"
+            },
+            "acsDataLocation": {
+              "type": "string",
+              "value": "[parameters('acsDataLocation')]"
+            },
+            "systemTopicName": {
+              "type": "string",
+              "value": "[parameters('systemTopicName')]"
+            },
+            "eventSubscriptionName": {
+              "type": "string",
+              "value": "[parameters('eventSubscriptionName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "condition": "[parameters('signalrEnabled')]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "[format('signalr-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "signalrName": {
+            "value": "[variables('signalrName')]"
+          },
+          "location": {
+            "value": "[parameters('location')]"
+          },
+          "signalrSku": {
+            "value": "[parameters('signalrSku')]"
+          },
+          "bffPrincipalId": {
+            "value": "[parameters('bffPrincipalId')]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "13455298428666400347"
+            }
+          },
+          "parameters": {
+            "signalrName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the SignalR Service resource. Convention: sprk-{customerId}-{env}-signalr per design.md §7.1."
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the SignalR resource. Defaults to the resource-group location."
+              }
+            },
+            "signalrSku": {
+              "type": "string",
+              "defaultValue": "Free_F1",
+              "allowedValues": [
+                "Free_F1",
+                "Standard_S1",
+                "Premium_P1"
+              ],
+              "metadata": {
+                "description": "SignalR SKU. Default Free_F1 (20 conns / 20K messages/day) — safe scaffold; bump to Standard_S1 for production realtime."
+              }
+            },
+            "signalrCapacity": {
+              "type": "int",
+              "defaultValue": 1,
+              "minValue": 1,
+              "maxValue": 100,
+              "metadata": {
+                "description": "SKU capacity (units). Free tier fixed at 1; Standard/Premium scale 1..100."
+              }
+            },
+            "serviceMode": {
+              "type": "string",
+              "defaultValue": "Default",
+              "allowedValues": [
+                "Default",
+                "Serverless",
+                "Classic"
+              ],
+              "metadata": {
+                "description": "Service mode. Default: Default (both server + serverless clients supported); Serverless disables the server-managed hub for pure REST/upstream flows."
+              }
+            },
+            "bffPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the BFF App Service Managed Identity (granted \"SignalR App Server\" role at the SignalR scope). Empty string skips the assignment — operator must grant manually."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags applied to the SignalR resource for cost tracking."
+              }
+            }
+          },
+          "variables": {
+            "signalrAppServerRoleId": "420fcaa2-552c-430f-98ca-3264be4806c7"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.SignalRService/signalR",
+              "apiVersion": "2024-03-01",
+              "name": "[parameters('signalrName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "sku": {
+                "name": "[parameters('signalrSku')]",
+                "capacity": "[parameters('signalrCapacity')]"
+              },
+              "kind": "SignalR",
+              "properties": {
+                "disableLocalAuth": true,
+                "disableAadAuth": false,
+                "tls": {
+                  "clientCertEnabled": false
+                },
+                "features": [
+                  {
+                    "flag": "ServiceMode",
+                    "value": "[parameters('serviceMode')]"
+                  },
+                  {
+                    "flag": "EnableConnectivityLogs",
+                    "value": "True"
+                  },
+                  {
+                    "flag": "EnableMessagingLogs",
+                    "value": "False"
+                  }
+                ],
+                "publicNetworkAccess": "Enabled"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('bffPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.SignalRService/signalR', parameters('signalrName'))]",
+              "name": "[guid(resourceId('Microsoft.SignalRService/signalR', parameters('signalrName')), parameters('bffPrincipalId'), variables('signalrAppServerRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('signalrAppServerRoleId'))]",
+                "principalId": "[parameters('bffPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "BFF App Service MI negotiates + sends via SignalR REST APIs (ADR-034 realtime spine)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.SignalRService/signalR', parameters('signalrName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "signalrName": {
+              "type": "string",
+              "value": "[parameters('signalrName')]"
+            },
+            "signalrId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.SignalRService/signalR', parameters('signalrName'))]"
+            },
+            "signalrHostName": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.SignalRService/signalR', parameters('signalrName')), '2024-03-01').hostName]"
+            },
+            "signalrSku": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.SignalRService/signalR', parameters('signalrName')), '2024-03-01', 'full').sku.name]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
+      ]
     }
   ],
   "outputs": {
@@ -1046,6 +1889,22 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusConnectionString.value]"
     },
+    "cosmosAccountName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('cosmos-{0}', variables('baseName'))), '2025-04-01').outputs.accountName.value]"
+    },
+    "cosmosAccountId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('cosmos-{0}', variables('baseName'))), '2025-04-01').outputs.accountId.value]"
+    },
+    "cosmosAccountEndpoint": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('cosmos-{0}', variables('baseName'))), '2025-04-01').outputs.accountEndpoint.value]"
+    },
+    "cosmosDatabaseName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('cosmos-{0}', variables('baseName'))), '2025-04-01').outputs.databaseName.value]"
+    },
     "membershipTopicName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('membershipTopic-{0}', variables('baseName'))), '2025-04-01').outputs.topicName.value]"
@@ -1053,6 +1912,50 @@
     "membershipReconSubscriptionName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('membershipTopic-{0}', variables('baseName'))), '2025-04-01').outputs.subscriptionName.value]"
+    },
+    "acsMessagingDeployed": {
+      "type": "bool",
+      "value": "[parameters('deployAcsMessaging')]"
+    },
+    "acsResourceId": {
+      "type": "string",
+      "value": "[if(parameters('deployAcsMessaging'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('acs-{0}', variables('baseName'))), '2025-04-01').outputs.acsResourceId.value, '')]"
+    },
+    "acsHostName": {
+      "type": "string",
+      "value": "[if(parameters('deployAcsMessaging'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('acs-{0}', variables('baseName'))), '2025-04-01').outputs.acsHostName.value, '')]"
+    },
+    "acsDataLocation": {
+      "type": "string",
+      "value": "[if(parameters('deployAcsMessaging'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('acs-{0}', variables('baseName'))), '2025-04-01').outputs.acsDataLocation.value, '')]"
+    },
+    "acsSystemTopicName": {
+      "type": "string",
+      "value": "[if(parameters('deployAcsMessaging'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('acs-{0}', variables('baseName'))), '2025-04-01').outputs.systemTopicName.value, '')]"
+    },
+    "acsEventSubscriptionName": {
+      "type": "string",
+      "value": "[if(parameters('deployAcsMessaging'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('acs-{0}', variables('baseName'))), '2025-04-01').outputs.eventSubscriptionName.value, '')]"
+    },
+    "signalrEnabled": {
+      "type": "bool",
+      "value": "[parameters('signalrEnabled')]"
+    },
+    "signalrResourceId": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('signalrEnabled'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('signalr-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'signalrId', 'value'), '')]"
+    },
+    "signalrHostName": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('signalrEnabled'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('signalr-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'signalrHostName', 'value'), '')]"
+    },
+    "signalrSkuDeployed": {
+      "type": "string",
+      "value": "[coalesce(tryGet(if(parameters('signalrEnabled'), reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('signalr-{0}', variables('baseName'))), '2025-04-01'), null()), 'outputs', 'signalrSku', 'value'), '')]"
+    },
+    "userAssignedIdentityResourceId": {
+      "type": "string",
+      "value": "[parameters('userAssignedIdentityResourceId')]"
     },
     "platformKeyVaultName": {
       "type": "string",
