@@ -11,9 +11,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **061 ✅ COMPLETE** (Ctrl+Shift+Space focus chat, FR-05). **Phase 6 hotkeys DONE.** Next: **070** (blank page mounts editable, FR-08) |
-| **Step** | 061 implemented + gated (code-review + adr-check PASS); /conflict-check CLEAR; 642 standalone jest green (+8 predicate tests); +6 CI-only tests (4 Compose + 2 UI); committed. |
-| **Next Action** | Execute **070** (blank page mounts editable) → 071 (restore-from-source no-blank, xhigh) → 072 (add-comment) → 074 (apply-template ETag/404) → 090 wrap-up. |
+| **Task** | **070 ✅ COMPLETE** (Blank page editable, FR-08 — ALREADY SATISFIED; regression guard, NO src change). Next: **071** (restore-from-source no-blank, xhigh) |
+| **Step** | 070 verified premise-stale (D8 doesn't reproduce); regression guard added + gated (code-review + adr-check PASS); 642 standalone jest green; committed. |
+| **Next Action** | Execute **071** (restore-from-source no longer blanks, xhigh, FR-09) → 072 (add-comment) → 074 (apply-template ETag/404) → 090 wrap-up. |
+
+### Task 070 — what shipped (see notes/task-070-notes.md) — ⚠️ NO SRC CHANGE (premise stale)
+**FR-08/D8 is already satisfied by current code — the defect does not reproduce.** Trace: blank + template both go through `mountBornInEditor` → `mountDraftHtml` reducer sets `status:'loaded'` + `docxBytes:null` + `seedHtml:html`; ComposeEditor's docx-mount branch (the ONLY reference-only setter) is unreachable when `docxBytes===null`; `initialHtml='<p></p>'` (len 7 > 0) takes the editable branch identically to the template; no `setEditable(false)`/seedHtml-emptiness gate exists. D8 was resolved by the DEF-08 born-in-editor rework (editable branch present since compose-r4 task 027). Shipped a CI regression guard (`ComposeEditor.blankPageEditable.test.tsx`: blank→editable + template parity + non-docx→reference-only) instead of a fabricated fix (root §6.5 honesty). **Flagged for owner**: if a specific host context still blanks, share the repro. No production change; §11 trivially satisfied.
 
 ### Task 061 — what shipped (see notes/task-061-notes.md)
 Ctrl+Shift+Space (IME-guarded) focuses the Assistant chat across panes via the existing PaneEventBus. Chain: ComposeEditor emits `dispatch('conversation', {type:'focus_chat_input', sessionId})` (ONE additive ADR-030 discriminant) → ConversationPane relays via its existing `usePaneEvent('conversation')` handler → bumps a `focusInputSignal` number-nonce prop on `<SprkChat>` → SprkChat effect (mirrors the proven `pendingOutboundMessage` one-shot seam) calls `inputHandleRef.current.focusInput()` → new `focusInput()` on `ISprkChatInputHandle` focuses the textarea. Added a Shift-guard to task-060's `matchesDescribeChangeHotkey` so Ctrl+Shift+Space doesn't ALSO fire describe-change (disambiguation). Discoverability hint = `aria-keyshortcuts` on the editor textbox (directional adaptation from "hover tooltip"; ADR-012-safe, non-intrusive). 5 files across 4 packages, all additive/extensions (§11). **/conflict-check CLEAR** (no PR/worktree overlap on the shared files vs assistant-r3/r4). No BFF bytes.

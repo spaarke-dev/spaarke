@@ -3,8 +3,8 @@
   <metadata>
     <title>Blank page mounts editable (R6 D8 / FR-08)</title>
     <phase>7 Accepted Defers + Hardening</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx mount/seed path; frontend behavior fix.</rigor-reason>
     <model-tier>sonnet</model-tier>
