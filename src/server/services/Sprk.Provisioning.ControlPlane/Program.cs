@@ -157,6 +157,49 @@ builder.Services.AddSingleton<IUpgradeDriftDetector, AzCliUpgradeDriftDetector>(
 builder.Services.AddSingleton<IBicepTemplateInspector, FileBicepTemplateInspector>();
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 
+// Task 045: H2b AI Search index-provisioning handler + four collaborator
+// seams (ICanonicalIndexCatalog is the retired-lineage guard;
+// IAiSearchIndexProvisioner wraps scripts/ai-search/Deploy-AllIndexes.ps1
+// for Model 2; IAiSearchIndexVerifier calls the AI Search REST API for
+// presence + invariants on both branches; IAiSearchTenantFilterTemplateProvisioner
+// enforces §4D I2 / FR-29 at Model 1 onboarding). All registrations
+// UNCONDITIONAL per ADR-032 — no feature-gate branches. The verifier is
+// registered via AddHttpClient (typed) so DefaultAzureCredential's token
+// cache is shared across handler invocations (ADR-028 UAMI-outbound MUST
+// rule); the wave-C4 stub template provisioner logs the intended template
+// contents + returns Success — swap to a real impl in Wave C5+ without
+// touching H2b or its tests.
+//
+// Placement Justification (CLAUDE.md §10): H2b lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types (ADR-013
+// forcing-function rule — no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H2b owns the §4D I2 (FR-29) enforcement at
+// Model 1 tenant onboarding time — the per-tenant filter template is the
+// PROVISIONING-time half of the tenantId eq filter invariant; the runtime
+// half is enforced by BFF services + the Wave-C6 ArchTest.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-039 (compliance path C — pivot): retired `spaarke-playbook-embeddings`
+//     is rejected structurally by ICanonicalIndexCatalog.RetiredIndexNames +
+//     H2b's pre-check guard. Full retired lineage per task 002 audit § 2.
+//   - ADR-027 Path A: Model 1 shared-tier is documented exception —
+//     TenancyModel drives branch selection (Model1Shared → verifier +
+//     template; Model2Dedicated → provisioner + verifier). Full rationale:
+//     project spec.md § ADR Tensions.
+//   - ADR-028 UAMI outbound: REST verifier + real template store impl use
+//     DefaultAzureCredential; script wrapper delegates to operator `az` chain.
+//   - §4C rollback: retired-index / provisioner-failure / invariant-violation
+//     / shared-index-missing are QuarantineRequired; parameter-missing /
+//     endpoint-missing / template-provisioner-failure are Resumable. Full
+//     mapping inline in H2bAiSearchIndexHandler file header.
+builder.Services.Configure<AiSearchIndexOptions>(
+    builder.Configuration.GetSection(nameof(AiSearchIndexOptions)));
+builder.Services.AddSingleton<ICanonicalIndexCatalog, CanonicalIndexCatalog>();
+builder.Services.AddSingleton<IAiSearchIndexProvisioner, DeployAllIndexesScriptProvisioner>();
+builder.Services.AddHttpClient<IAiSearchIndexVerifier, RestApiAiSearchIndexVerifier>();
+builder.Services.AddSingleton<IAiSearchTenantFilterTemplateProvisioner, StubAiSearchTenantFilterTemplateProvisioner>();
+builder.Services.AddScoped<H2bAiSearchIndexHandler>();
+
 // Task 046: H3 Entra app-registration handler + two collaborator seams
 // (IEntraAppRegProvisioner shells out to hardened
 // scripts/Register-EntraAppRegistrations.ps1 per r1 task 010 commit fea66c023;
