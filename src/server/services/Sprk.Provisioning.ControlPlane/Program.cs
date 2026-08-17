@@ -52,6 +52,7 @@
 
 using Sprk.Provisioning.ControlPlane.Endpoints;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
+using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
@@ -190,6 +191,47 @@ builder.Services.Configure<AiSeedChainOptions>(
 builder.Services.AddSingleton<ISeedManifestReader, FileSeedManifestReader>();
 builder.Services.AddSingleton<ISeedManifestRunner, InvokeSeedManifestScriptRunner>();
 builder.Services.AddScoped<H12aAiSeedChainHandler>();
+
+// Task 071: H12b app-config seed handler + four IAppConfigSeeder registrations
+// (DataGrid + workspace-layout via PowerShellAppConfigSeeder wrapping the
+// existing shipping scripts per task 004 sec 4b decision matrix; field-mapping
+// + chart-def via DeferredAppConfigSeeder pending Wave-C5 mirror authoring per
+// task 004 sec 5b deltas N3 + N5). All registrations UNCONDITIONAL per ADR-032
+// - no feature-gate branches (DeferredAppConfigSeeder is INTERIM behavior, not
+// a feature-gate). DAG-parallel with H12a (task 070) - no cross-dependency;
+// both handlers can fire post-H7.
+//
+// Placement Justification (CLAUDE.md sec 10): H12b lives in L2 (not BFF) per
+// spec sec 5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013
+// forcing-function rule - no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H12b uses IProvisioningRunRepository (task 037)
+// + IHandlerEnqueuer (task 038) + the local IAppConfigSeeder seam; no
+// BFF-facade dependencies. Idempotency key h12b-{customerId}-{SHA256(manifest.yaml)}
+// deliberately mirrors H12a's manifestHash formula so operators reason about
+// ONE manifest state across both parallel handlers.
+//
+// ADR Tension citations for PR description (per CLAUDE.md sec 6.5):
+//   - ADR-004 idempotency: Path C (comply) - CompletedPhases scan is the
+//     Level-3 durable dedup per design.md sec 4.1 preamble; a content change to
+//     manifest.yaml (any byte) produces a new SHA-256 + new key + re-seed on
+//     next invocation. Same shape as sibling H12a (task 070).
+//   - ADR-010 DI minimalism: single AddH12bAppConfigSeedHandler() extension
+//     replaces 6 raw registrations, holding Program.cs god-class-ratchet
+//     margin.
+//   - ADR-028 UAMI outbound: DataGrid + workspace-layout scripts authenticate
+//     via `az login` (operator auth chain via DefaultAzureCredential in-script);
+//     no account keys pass through the PowerShellAppConfigSeeder invocation.
+//   - ADR-032 kill-switch: DeferredAppConfigSeeder is NOT the null-object
+//     kill-switch - it is the intentional interim seeder for scopes without
+//     a repo source (task 004 sec 4b rows 11, 13). When Wave-C5 authors the
+//     field-mapping mirror + consolidated chart-def mirror, the DI
+//     registration lines flip from DeferredAppConfigSeeder to
+//     PowerShellAppConfigSeeder without touching the handler.
+//   - sec 4C rollback: all four scopes classify as Resumable - every wrapped
+//     script is upsert-safe (existence-check-then-insert or PATCH on the
+//     stable per-row id/name key) so post-remediation resume re-drives cleanly.
+//     Full mapping table inline in H12bAppConfigSeedHandler.cs file header.
+builder.Services.AddH12bAppConfigSeedHandler(builder.Configuration);
 
 var app = builder.Build();
 
