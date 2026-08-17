@@ -51,6 +51,7 @@
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Endpoints;
+using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Middleware;
@@ -117,6 +118,40 @@ builder.Services.AddScoped<H05ConsentCaptureHandler>();
 // task 044.
 builder.Services.AddSingleton<ISubscriptionReadinessProbe, NullSubscriptionReadinessProbe>();
 builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
+
+// Task 044: H2a Bicep infra-deploy handler + four collaborator seams
+// (IBicepDeployRunner shells out to scripts/Provision-Customer.ps1;
+// IArmKeyVaultRefProbe + IUpgradeDriftDetector shell out to `az` CLI;
+// IBicepTemplateInspector reads infrastructure/bicep/ on disk). All
+// registrations UNCONDITIONAL per ADR-032 — SignalR is the feature-gated
+// resource, not the handler; the handler passes through the SignalREnabled
+// parameter to the runner unconditionally (Null-Object kill-switch applies
+// to the RESOURCE, not the DI branch — spec MUST rule + design.md §7.2 row 13).
+//
+// Placement Justification (CLAUDE.md §10): H2a lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types (ADR-013
+// forcing-function rule — no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H2a owns silent-fail trap T1 verification
+// per POML acceptance §4B — this is the sole reason H2a exists as a handler
+// wrapping the PS script (script alone leaves T1 as a runtime null-KV-ref
+// timebomb; handler adds ARM read post-condition).
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-027 Path A: Model 1 shared-tier is documented exception —
+//     TenancyModel drives stack selection (Model1Shared → stacks/model1-shared.bicep;
+//     Model2Dedicated → customer.bicep). Full rationale: project spec.md § ADR Tensions.
+//   - ADR-028 UAMI outbound: all four collaborators use `az` CLI's operator
+//     auth chain (DefaultAzureCredential via `az login`); no account keys.
+//   - §4C rollback: partial Bicep deploys are QuarantineRequired (orphaned
+//     resources per design.md §4C example); §4C classification is inline in
+//     H2aBicepInfraDeployHandler file header + the FailAsync helper.
+builder.Services.Configure<BicepInfraDeployOptions>(
+    builder.Configuration.GetSection(nameof(BicepInfraDeployOptions)));
+builder.Services.AddSingleton<IBicepDeployRunner, ProvisionCustomerScriptBicepDeployRunner>();
+builder.Services.AddSingleton<IArmKeyVaultRefProbe, AzCliArmKeyVaultRefProbe>();
+builder.Services.AddSingleton<IUpgradeDriftDetector, AzCliUpgradeDriftDetector>();
+builder.Services.AddSingleton<IBicepTemplateInspector, FileBicepTemplateInspector>();
+builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 
 var app = builder.Build();
 
