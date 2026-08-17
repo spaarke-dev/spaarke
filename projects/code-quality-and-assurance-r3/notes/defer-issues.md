@@ -5,12 +5,21 @@
 | ID | Title | GitHub Issue | Status |
 |----|-------|--------------|--------|
 | DEF-1 | `TodoGenerationService` — 2 of 5 rules (Overdue events, Deadline) silently generate zero To Dos (event query → SDK silent-empty stub) | {URL — to file} | ROUTED → smart-todo-r5 |
-| DEF-2 | `DataverseWebApiService.GetEntitySetNameAsync` **throws `NotImplementedException`**, yet 3 LIVE field-mapping methods call it — field-mapping read/write via the WebApi path throws (correctness) | {URL — to file} | OPEN — decision needed (owner) |
+| DEF-2 | `DataverseWebApiService.GetEntitySetNameAsync` threw `NotImplementedException`, breaking field-mapping read/write via the WebApi path — **FIXED** (implemented; pending live-dev smoke) | {URL — to file} | ✅ FIXED (RED-4 B) — live-verify pending |
 
-## DEF-2 — WebApi field-mapping throws via unimplemented `GetEntitySetNameAsync` (LATENT CORRECTNESS BUG)
+## DEF-2 — WebApi field-mapping threw via unimplemented `GetEntitySetNameAsync` (FIXED 2026-08-16)
+
+> **✅ FIXED (RED-4 B, 2026-08-16, owner-approved "fix now")**: implemented `GetEntitySetNameAsync` on the
+> WebApi impl (`DataverseWebApiService.cs:176`) against the `EntityDefinitions` metadata endpoint, cached,
+> mirroring the proven `GetEntityObjectTypeCodeAsync` pattern; fails LOUD (throws `InvalidOperationException`)
+> on metadata error/missing set-name. Regression: `tests/integration/Spe.Integration.Tests/DataverseWebApiFieldMappingRegressionTests.cs`
+> (LIVE-gated per ADR-038 — runs against spaarke-dev, skips in CI). Structural verification done (full BFF
+> suite green); **behavioral verification is a live-dev smoke** (exercise a field-mapping write against
+> spaarke-dev, or run the gated regression with real Dataverse config). The `#3b` MI migration must preserve
+> the metadata-read permission (`prvReadEntity` / EntityDefinitions read) for the app-user.
 
 **Discovered**: 2026-08-16 during the RED-4 "B" hardening (verified against code at HEAD).
-**Severity**: latent correctness — throws (not silent) when the WebApi field-mapping read/write path executes.
+**Severity**: latent correctness — threw (not silent) when the WebApi field-mapping read/write path executed.
 **Partially mitigated already**: the compose cold-session variant was hit in owner UAT (spaarke-bff-dev) and
 fixed narrowly by removing ONE caller's dead call — see regression `tests/integration/regression/Compose/ComposeOutputsColdSessionTests.cs`. The underlying stub was left throwing.
 
