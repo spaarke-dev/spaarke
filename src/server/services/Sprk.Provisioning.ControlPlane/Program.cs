@@ -59,6 +59,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
+using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -254,6 +255,71 @@ builder.Services.AddHttpClient<IDataverseHealthProbe, DataverseWebApiHealthProbe
 builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 
 
+// Task 047 (Batch 3D): H4 KV secrets-population handler + FOUR collaborator
+// seams (IKvSecretManifest = interim StaticKvSecretManifest pending Phase H
+// task 084's canonical secret-catalog manifest generator; IKvSecretsWriter =
+// az CLI shell-out to `az keyvault secret set/show/delete`;
+// IAppServiceIdentityPatcher = az CLI shell-out to `az webapp update --set
+// keyVaultReferenceIdentity=<UAMI-RID>` on BOTH slots — T1 trap owner;
+// ISlotIdentityRoleGranter = az CLI shell-out to `az role assignment create`
+// against slot System-Assigned MIs — T5 interim trap owner). H4 also REUSES
+// IArmKeyVaultRefProbe from H2a (task 044) for T1 post-condition verify —
+// single source of truth for the T1 trap. All registrations UNCONDITIONAL
+// per ADR-032 — no feature-gate branches. The T5 granter's
+// NoSlotSystemAssignedIdentity outcome is a domain SUCCESS (post-Phase-C
+// UAMI-only steady state), NOT a null-object kill-switch.
+//
+// Placement Justification (CLAUDE.md §10): H4 lives in L2 (not BFF) per spec
+// §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-
+// function rule — no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H4 uses IProvisioningRunRepository (task 037)
+// + the four dedicated seams + reuses IArmKeyVaultRefProbe (task 044); no
+// BFF-facade dependencies. Downstream H7 (env-var population) reads no state
+// from H4 (H4 only mutates App Service + KV, not interStepState); the wave-C5
+// reconciler owns fan-out.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-028 (Path C — comply): all KV writes flow through az CLI's operator
+//     auth chain; T1 PATCH sets keyVaultReferenceIdentity to UAMI on both
+//     prod + staging slots; cleartext secrets NEVER touch handler code (only
+//     pass through IKvSecretsWriter's process boundary). The 21-MUST
+//     keyVaultReferenceIdentity rule is the H4 raison d'être.
+//   - ADR-004 idempotency: 3-level; kv-{customerId}-{secretsVer} is the
+//     Level-3 durable key. Content change to manifest = new secretsVer =
+//     new key = re-seed. Rotation-safe upgrade is the DEFAULT per spec.md
+//     FR-34 H4 row.
+//   - spec.md MUST rule (BINDING pre-check per r3 handoff): H4
+//     BindingNeverDeleteSecrets = { Dataverse-ClientSecret, BFF-API-ClientSecret };
+//     handler refuses any manifest with a Delete op on those two names + fails
+//     QuarantineRequired BEFORE any external write. Fleet-wide OBO + shared-lib
+//     Dataverse still depend on these secrets (#3b credential migration is
+//     r1's task 011, not r1's H4). Writer carries a belt-and-braces guard
+//     (AzCliKvSecretsWriter) so a direct writer call from a future refactor
+//     still refuses the destructive op.
+//   - §7.9 canonical naming (Phase G/H per r3 task 063 handoff): interim
+//     StaticKvSecretManifest returns entries at canonical names (env-agnostic,
+//     one canonical casing). Real Phase H manifest (task 084) swaps via DI
+//     registration change only — H4 handler + tests unchanged.
+//   - §4C rollback: parameter guards + manifest failure = Resumable; BINDING
+//     violation + partial-KV-write + T1 patch/verify failure + cleartext
+//     leak = QuarantineRequired; T5 grant failure = Resumable (INTERIM).
+//     NoSlotSystemAssignedIdentity = SUCCESS (post-Phase-C UAMI structural
+//     steady state).
+//
+// Batch 3D concurrent-write note: task 049 (H6 solution import) committed
+// its own DI block + `using SolutionImport;` at 6b8698461 while this task's
+// Step 9.5 quality gates ran; the H4 block below was re-applied to the
+// post-049 Program.cs snapshot. No functional overlap; both handlers register
+// disjoint seams.
+builder.Services.Configure<KvSecretsPopulationOptions>(
+    builder.Configuration.GetSection(nameof(KvSecretsPopulationOptions)));
+builder.Services.AddSingleton<IKvSecretManifest, StaticKvSecretManifest>();
+builder.Services.AddSingleton<IKvSecretsWriter, AzCliKvSecretsWriter>();
+builder.Services.AddSingleton<IAppServiceIdentityPatcher, AzCliAppServiceIdentityPatcher>();
+builder.Services.AddSingleton<ISlotIdentityRoleGranter, AzCliSlotIdentityRoleGranter>();
+builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
+
+
 // Task 070: H12a AI seed chain handler + two collaborator seams
 // (ISeedManifestReader = on-disk read + SHA-256 hash + defense-in-depth
 // retired-artifact scan; ISeedManifestRunner = pwsh shell-out to task-069's
@@ -331,6 +397,51 @@ builder.Services.AddScoped<H12aAiSeedChainHandler>();
 //     stable per-row id/name key) so post-remediation resume re-drives cleanly.
 //     Full mapping table inline in H12bAppConfigSeedHandler.cs file header.
 builder.Services.AddH12bAppConfigSeedHandler(builder.Configuration);
+
+// Task 049: H6 Package Deployer solution-import handler + 3 collaborator seams
+// (ISolutionCatalog = C#-side mirror of Deploy-DataverseSolutions.ps1's
+// $SolutionImportOrder per task 008 R5 binding; ISolutionImporter shells out
+// to the wave-0 hardened Deploy-DataverseSolutions.ps1 for the 8 authoritative
+// solutions per §11.1a; ISolutionVerifier shells out to `pac solution list`
+// post-import to build the Cosmos interStepState.ImportedSolutions manifest
+// with per-solution version + solutionId). All registrations UNCONDITIONAL
+// per ADR-032 - no feature-gate branches.
+//
+// Placement Justification (CLAUDE.md §10): H6 lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-
+// function rule - no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H6 uses IProvisioningRunRepository (task 037)
+// + the local 3-seam surface; no BFF-facade dependencies. Idempotency key
+// solimport-{customerId}-{catalogHash} follows the H2a bicepVer + H12a
+// manifestHash version-suffix pattern so operators reason about ONE catalog
+// state across re-runs. Downstream H7 (env-var values, task 050 wave 3E)
+// reads from InterStepState.ImportedSolutions - Wave C5 reconciler owns
+// H6 -> H7 fan-out (parity with H5 -> H6 pattern).
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-039 (compliance path C - pivot): retired dispatcher / embeddings
+//     surface is rejected structurally by CanonicalSolutionCatalog.RetiredSolutionUniqueNames
+//     + H6's FindRetiredMatch pre-check. Defense-in-depth against future
+//     accidents; the 8 authoritative solutions do not currently overlap.
+//   - ADR-028 UAMI outbound: PS script uses `pac auth create --clientSecret`
+//     which requires an explicit client secret - Wave C4 reads it from
+//     SolutionImportOptions:ClientSecret; Wave C5 wires the option-binding
+//     to a Key Vault reference (@Microsoft.KeyVault(SecretUri=...)). Cleartext
+//     secret NEVER traverses Cosmos parameters/interStepState (handler passes
+//     via env var to pwsh child process only).
+//   - §4C rollback: auth / rate-limit / quota / timeout / missing-zips /
+//     unknown-invocation → Resumable (no side effect OR PS idempotent on
+//     retry). Partial-import (Tier N failure after Tier N-1) / verification-
+//     failure / retired-artifact-reintroduction → QuarantineRequired (Package
+//     Deployer stage-and-upgrade may leave a holding solution behind on
+//     mid-flight failure; ADR violation surfaces a code-review breakdown).
+//     Full mapping table inline in H6SolutionImportHandler.cs file header.
+builder.Services.Configure<SolutionImportOptions>(
+    builder.Configuration.GetSection(nameof(SolutionImportOptions)));
+builder.Services.AddSingleton<ISolutionCatalog, CanonicalSolutionCatalog>();
+builder.Services.AddSingleton<ISolutionImporter, DeployDataverseSolutionsScriptImporter>();
+builder.Services.AddSingleton<ISolutionVerifier, PacCliSolutionVerifier>();
+builder.Services.AddScoped<H6SolutionImportHandler>();
 
 var app = builder.Build();
 
