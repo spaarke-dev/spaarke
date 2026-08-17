@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Sprk.Provisioning.ControlPlane.Tests — L2 unit + smoke test project.
+
+    Scope (created by task 037):
+      - CosmosSmokeTests: env-guarded (`COSMOS_L2_SMOKE_ENDPOINT`) CRUD
+        round-trip against a real dev Cosmos account. Skipped by default so
+        the CI unit suite never depends on a live Cosmos endpoint. When set,
+        exercises the IProvisioningRunRepository contract end-to-end
+        (create -> read -> replace with ETag -> stale-ETag conflict).
+
+    ADR-038 alignment:
+      - The smoke test is an INTEGRATION test (KEEP path — real Cosmos, no
+        mocks). ADR-038 §2 path #3 (external-integration boundary).
+      - No unit tests over the CosmosClient wire — the SDK is a boundary
+        we do not double-mock (matches BFF Sprk.Bff.Api.Tests posture).
+
+    Publish: IsPackable=false; test-only assembly. Not deployed to any
+    App Service; not referenced by production projects.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <PackageReference Include="xunit" Version="2.9.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="FluentAssertions" Version="6.12.0" />
+    <!-- Aligned with Azure.Core 1.60.0's transitive floor via
+         Microsoft.Extensions.Hosting.Abstractions 10.0.9. Pinned to prevent
+         NU1605 downgrade (TreatWarningsAsErrors is inherited from
+         Directory.Build.props). -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+    <!-- Cosmos SDK is transitively available via the SUT project reference,
+         but the smoke test constructs the CosmosClient directly (bypassing
+         DI so the env-guard skip is a single conditional in one test file). -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane\Sprk.Provisioning.ControlPlane.csproj" />
+  </ItemGroup>
+
+</Project>
