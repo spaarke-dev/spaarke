@@ -4,7 +4,7 @@
     <title>Implement H11 User Provisioning Handler (identity preset — B2BGuest vs NativeAccount per D6)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth'; modifies .cs files; user provisioning + license assignment; auth-sensitive.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -113,7 +113,16 @@
     <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
   </acceptance-criteria>
 
-  <notes>Reference: spec.md FR-14 + NFR-09; design.md §4.1 H11 + D6 identity preset. Reuses DemoProvisioningService 9-step + GraphUserService canonical patterns.</notes>
+  <notes>Reference: spec.md FR-14 + NFR-09; design.md §4.1 H11 + D6 identity preset. Reuses DemoProvisioningService 9-step + GraphUserService canonical patterns.
+
+Completed (2026-08-17, Batch 3F). H11UserProvisioningHandler implements IProvisioningHandler (L2's local
+IJobHandler-shape contract) with two D6 branches: NativeAccount (GraphRestUserProvisioner — POST /users +
+assignLicense, UPN-alt-key idempotency) and B2BGuest (GraphRestB2BInvitationClient POST /invitations +
+GraphRestB2BConsentVerifier consent gate — WaitingOnGate on pending, parity with H3's admin-consent shape).
+InterStepState.ProvisionedUsers added (controlled schema extension, precedent: task 049/050/053). Idempotency
+key users-{customerId}. 16 new unit tests (368/368 total, 0 regressions). Full deviation record (test-file
+location, B2BGuest branch-scope ambiguity resolution, usersJson encoding, NFR-09 Path C) in
+projects/customer-provisioning-orchestration-r1/notes/task-054-deviations.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

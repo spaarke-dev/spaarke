@@ -16,6 +16,7 @@
 
 using System.Text.Json.Serialization;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
+using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 
 namespace Sprk.Provisioning.ControlPlane.Models;
 
@@ -156,4 +157,25 @@ public sealed class InterStepState
     [JsonPropertyName("speContainerId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SpeContainerId { get; set; }
+
+    /// <summary>
+    /// H11-authored list of provisioned user identities (H11 output). One
+    /// entry per user in run.Parameters.NonSecret["usersJson"], recording
+    /// the Graph user object id + UPN (NativeAccount) or invited-guest
+    /// object id + email (B2BGuest) + which D6 identity preset produced it.
+    /// Populated on both the terminal-success write AND the B2BGuest
+    /// WaitingOnGate write (so an operator can see who was invited while
+    /// consent is pending). Null/empty until H11 first runs.
+    /// </summary>
+    /// <remarks>
+    /// CONTROLLED SCHEMA EXTENSION (task 054 / wave C4 Batch 3F). design.md
+    /// §6.2's enumerated interStepState keys did not include a user-
+    /// provisioning slot. Follows the enumerated-keys discipline established
+    /// by task 049's <see cref="ImportedSolutions"/> + task 050's
+    /// <see cref="SpeContainerId"/> additions: a deliberate type extension,
+    /// not an ad-hoc dictionary insert.
+    /// </remarks>
+    [JsonPropertyName("provisionedUsers")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<ProvisionedUserRecord>? ProvisionedUsers { get; set; }
 }
