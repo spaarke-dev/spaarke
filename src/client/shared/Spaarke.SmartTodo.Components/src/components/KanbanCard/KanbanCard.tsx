@@ -42,7 +42,7 @@
 
 import * as React from 'react';
 import { tokens, Text, Button, Checkbox } from '@fluentui/react-components';
-import { PinRegular, PinFilled, Open20Regular } from '@fluentui/react-icons';
+import { PinRegular, PinFilled, Open20Regular, Flag16Filled } from '@fluentui/react-icons';
 
 import { useKanbanCardStyles } from './KanbanCard.styles';
 import type { IKanbanCardTodo } from '../../types/kanban';
@@ -106,6 +106,69 @@ const DUE_BADGE_STYLE: Record<Exclude<DueUrgency, 'none'>, React.CSSProperties> 
     color: tokens.colorNeutralForeground2,
   },
 };
+
+// ---------------------------------------------------------------------------
+// FR-02/FR-03 priority + effort indicators (task 012) — presentation-only
+// surfacing of the `sprk_priority` / `sprk_effort` Choice fields (task 010).
+// Distinct from the SCORE-derived `roundedScore` circle above (which reads
+// `sprk_priorityscore`/`sprk_effortscore`, computed by `computeTodoScore` in
+// the LOCKED `todoScoring.ts`) — these glyphs render the raw user-selected
+// Choice label, not a derived score.
+//
+// `IKanbanCardTodo` (`../../types/kanban.ts`) does not (yet) declare these
+// two fields — widening that shared contract is out of this task's edit
+// scope (`src/components/**` only, per task 012 concurrent-agent boundary).
+// Once Dataverse rows include them (task 010 schema, deployed), reading them
+// via this local structural type is a safe, honest optional access.
+// ---------------------------------------------------------------------------
+
+/** Local structural extension covering the two new Choice fields. */
+interface IKanbanCardPriorityEffortFields {
+  /** sprk_priority Choice: Urgent=100000000, High=100000001, Medium=100000002, Low=100000003. */
+  sprk_priority?: number | null;
+  /** sprk_effort Choice: None=100000000, Very High=100000001, High=100000002, Medium=100000003, Low=100000004. */
+  sprk_effort?: number | null;
+}
+
+/** Priority glyph tone (icon colour + accessible label) per `sprk_priority` option. */
+export function derivePriorityGlyph(
+  value: number | null | undefined
+): { label: string; color: string } | undefined {
+  switch (value) {
+    case 100000000:
+      return { label: 'Urgent', color: tokens.colorStatusDangerForeground1 };
+    case 100000001:
+      return { label: 'High', color: tokens.colorStatusWarningForeground1 };
+    case 100000002:
+      return { label: 'Medium', color: tokens.colorStatusSuccessForeground1 };
+    case 100000003:
+      return { label: 'Low', color: tokens.colorNeutralForeground3 };
+    default:
+      // Unset or an unrecognised value — neutral no-op (no glyph rendered).
+      return undefined;
+  }
+}
+
+/** Effort badge (label + tone) per `sprk_effort` option. */
+export function deriveEffortBadge(
+  value: number | null | undefined
+): { label: string; style: React.CSSProperties } | undefined {
+  switch (value) {
+    case 100000000:
+      return { label: 'None', style: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 } };
+    case 100000001:
+      return { label: 'Very High', style: { backgroundColor: tokens.colorStatusDangerBackground1, color: tokens.colorStatusDangerForeground1 } };
+    case 100000002:
+      return { label: 'High', style: { backgroundColor: tokens.colorPaletteDarkOrangeBackground1, color: tokens.colorPaletteDarkOrangeForeground1 } };
+    case 100000003:
+      return { label: 'Medium', style: { backgroundColor: tokens.colorStatusWarningBackground1, color: tokens.colorStatusWarningForeground1 } };
+    case 100000004:
+      return { label: 'Low', style: { backgroundColor: tokens.colorStatusSuccessBackground1, color: tokens.colorStatusSuccessForeground1 } };
+    default:
+      // Unset or an unrecognised value — neutral no-op (no badge rendered).
+      return undefined;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -188,6 +251,12 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
   const isCompleted = todo.statuscode === 2 || todo.statecode === 1;
   const isPinned = todo.sprk_todopinned === true;
   const dueDateFormatted = dueDate ? formatDueDate(dueDate) : null;
+
+  // FR-02/FR-03 (task 012): priority glyph + effort badge, read from the raw
+  // Choice fields (see the local structural type + helpers above `KanbanCardInner`).
+  const { sprk_priority: priorityChoice, sprk_effort: effortChoice } = todo as unknown as IKanbanCardPriorityEffortFields;
+  const priorityGlyph = derivePriorityGlyph(priorityChoice);
+  const effortBadge = deriveEffortBadge(effortChoice);
 
   // -------------------------------------------------------------------------
   // Handlers
@@ -279,6 +348,8 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
     isPinned ? 'Pinned.' : '',
     dueDateFormatted ? `Due: ${dueDateFormatted}.` : '',
     dueLabel.label ? `${dueLabel.label}.` : '',
+    priorityGlyph ? `Priority: ${priorityGlyph.label}.` : '',
+    effortBadge ? `Effort: ${effortBadge.label}.` : '',
     `To Do Score: ${roundedScore}.`,
   ]
     .filter(Boolean)
@@ -359,10 +430,20 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
 
       {/* Content: title + metadata rows */}
       <div className={styles.contentColumn}>
-        {/* Row 1: Title */}
-        <Text as="span" size={300} weight="semibold" className={titleClassName}>
-          {todo.sprk_name}
-        </Text>
+        {/* Row 1: Title + priority glyph (FR-02) */}
+        <div className={styles.titleRow}>
+          <Text as="span" size={300} weight="semibold" className={titleClassName}>
+            {todo.sprk_name}
+          </Text>
+          {priorityGlyph && (
+            <Flag16Filled
+              style={{ color: priorityGlyph.color, flexShrink: 0 }}
+              role="img"
+              aria-label={`Priority: ${priorityGlyph.label}`}
+              title={`Priority: ${priorityGlyph.label}`}
+            />
+          )}
+        </div>
 
         {/* Row 2: Due date + urgency badge */}
         {(dueDateFormatted || dueLabel.urgency !== 'none') && (
@@ -393,6 +474,16 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
           <div className={styles.metadataRow}>
             <span className={styles.fieldLabel}>Assigned:</span>
             <span className={styles.fieldValue}>{todo.assignedToName}</span>
+          </div>
+        )}
+
+        {/* Row 4: Effort indicator (FR-03) */}
+        {effortBadge && (
+          <div className={styles.metadataRow}>
+            <span className={styles.fieldLabel}>Effort:</span>
+            <InlineBadge style={effortBadge.style} ariaLabel={`Effort: ${effortBadge.label}`}>
+              {effortBadge.label}
+            </InlineBadge>
           </div>
         )}
       </div>

@@ -36,8 +36,15 @@ describe('oobModalSizes', () => {
     });
   });
 
-  it('exposes exactly the three sanctioned size names (no fourth size)', () => {
-    expect(Object.keys(OOB_MODAL_SIZES).sort()).toEqual(['createForm', 'record', 'wizard']);
+  it('exports the fullCover size at exactly 100% x 100% (task 032 / FR-13 escalation)', () => {
+    expect(OOB_MODAL_SIZES.fullCover).toEqual({
+      width: { value: 100, unit: '%' },
+      height: { value: 100, unit: '%' },
+    });
+  });
+
+  it('exposes exactly the four sanctioned size names (record/createForm/wizard/fullCover)', () => {
+    expect(Object.keys(OOB_MODAL_SIZES).sort()).toEqual(['createForm', 'fullCover', 'record', 'wizard']);
   });
 
   it('getOobModalSize(name) returns the same entry as the OOB_MODAL_SIZES map', () => {
@@ -51,6 +58,7 @@ describe('oobModalSizes', () => {
     expect(Object.isFrozen(OOB_MODAL_SIZES.record)).toBe(true);
     expect(Object.isFrozen(OOB_MODAL_SIZES.createForm)).toBe(true);
     expect(Object.isFrozen(OOB_MODAL_SIZES.wizard)).toBe(true);
+    expect(Object.isFrozen(OOB_MODAL_SIZES.fullCover)).toBe(true);
   });
 
   it('imports no React module — the module stays React-free per NFR-04', () => {

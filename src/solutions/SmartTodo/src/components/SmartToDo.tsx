@@ -45,7 +45,18 @@ import {
   MessageBar,
   MessageBarBody,
 } from "@fluentui/react-components";
-import { KanbanBoard, OrientationToggle, type Orientation } from "@spaarke/ui-components";
+import {
+  KanbanBoard,
+  OrientationToggle,
+  type Orientation,
+  // smart-todo-r5 task 011 (FR-02/FR-03) — the SAME shared choice→score
+  // mapping table CreateTodoWizard (CreateTodoStep.tsx) and the sprk_todo
+  // form OnChange webresource resolve through. Quick-add doesn't expose its
+  // own Priority/Effort choice UI yet, so it uses the table's documented
+  // null-defaults (Medium priority / None effort) — see handleAdd below.
+  NULL_DEFAULT_PRIORITY_SCORE,
+  NULL_DEFAULT_EFFORT_SCORE,
+} from "@spaarke/ui-components";
 import { useCurrentContactId } from "@spaarke/smart-todo-components";
 // R4 task 102 (E-1, 2026-06-18) — `KanbanCard` hoisted from this folder into
 // the `@spaarke/smart-todo-components` peer package so the workspace widget
@@ -86,6 +97,7 @@ import { useUserPreferences } from "../hooks/useUserPreferences";
 import { DataverseService } from "../services/DataverseService";
 import { ITodo } from "../types/entities";
 import { computeTodoScore } from "../utils/todoScoreUtils";
+import { matchesTodoSearchQuery } from "../utils/todoSearchUtils";
 import { useOptionalTodoContext } from "../context/TodoContext";
 import type { TodoColumn } from "../types/enums";
 import type { DropResult } from "@hello-pangea/dnd";
@@ -345,6 +357,12 @@ export interface ISmartToDoProps {
    * Back-compat: when omitted or empty string, no filter is applied.
    */
   searchQuery?: string;
+  // task 021's `filter` prop (structured Filter-pane predicate, threaded
+  // into the Dataverse query) — REMOVED smart-todo-r5 UAT 2026-08-17. The
+  // replacement free-text search is `searchQuery` above (client-side only —
+  // see `displayItems` below); the Dataverse query reverted to its
+  // pre-task-021 default (Status {Open, In Progress}, everything else
+  // unfiltered).
 }
 
 // ---------------------------------------------------------------------------
@@ -571,21 +589,24 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Users can now type e.g. "Smith v Jones" or "MAT-2026-01234" and see just
   // the todos related to that matter — without needing to drill from the
   // Matter form's checkmark.
+  //
+  // smart-todo-r5 UAT 2026-08-17 — extended again to match the Assigned-To
+  // contact's display name (`assignedToName`). This closes the gap left by
+  // task 021's structured Filter pane removal (its Assigned-To typeahead
+  // category is gone; a free-text match against the same display name is the
+  // replacement). `assignedToName` is ALREADY populated on every fetched
+  // `ITodo` — `DataverseService.mapTodoFormattedValues` maps the
+  // `_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue`
+  // annotation onto it for every `getActiveTodos` call (see
+  // `services/DataverseService.ts`) — so no query/select change was needed
+  // here. The match predicate itself is extracted to
+  // `utils/todoSearchUtils.ts::matchesTodoSearchQuery` (unit-tested there
+  // directly) rather than inlined, since this component has no existing test
+  // harness to exercise it through.
   const displayItems = React.useMemo(() => {
-    const q = (searchQuery ?? "").trim().toLowerCase();
-    if (!q) return mergedItems;
-    return mergedItems.filter((item) => {
-      const name = (item.sprk_name ?? "").toLowerCase();
-      const desc = (item.sprk_description ?? "").toLowerCase();
-      const regardingName = (item.sprk_regardingrecordname ?? "").toLowerCase();
-      const regardingNumber = (item.sprk_regardingrecordnumber ?? "").toLowerCase();
-      return (
-        name.includes(q) ||
-        desc.includes(q) ||
-        regardingName.includes(q) ||
-        regardingNumber.includes(q)
-      );
-    });
+    const q = searchQuery ?? "";
+    if (!q.trim()) return mergedItems;
+    return mergedItems.filter((item) => matchesTodoSearchQuery(item, q));
   }, [mergedItems, searchQuery]);
 
   const totalCount = displayItems.length;
@@ -640,8 +661,16 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         sprk_name: title,
         statecode: 0,        // Active
         statuscode: 1,       // Open (per task 009)
-        sprk_priorityscore: 50,
-        sprk_effortscore: 10,
+        // smart-todo-r5 task 011 (FR-02/FR-03): quick-add has no Priority/
+        // Effort choice input, so it resolves the shared mapping's
+        // null-defaults (Medium priority → 50, None effort → 50 — Option B
+        // quick-wins-first) rather than the previous hardcoded 50/10 literals
+        // (the old `10` was NOT a documented default anywhere and predates
+        // this mapping). Same table CreateTodoWizard and the sprk_todo form
+        // OnChange webresource resolve through — see
+        // `@spaarke/ui-components/utils/todoScoreMappings.ts`.
+        sprk_priorityscore: NULL_DEFAULT_PRIORITY_SCORE,
+        sprk_effortscore: NULL_DEFAULT_EFFORT_SCORE,
         createdon: new Date().toISOString(),
         modifiedon: new Date().toISOString(),
       };

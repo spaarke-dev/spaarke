@@ -34,14 +34,23 @@ public class TodoGenerationServiceTests
     // ──────────────────────────────────────────────────────────────────────────
 
     private readonly Mock<IDataverseService> _dataverseMock;
+    // Rules 1 & 3 (event-sourced) query events via IEventDataverseService — NOT the
+    // _dataverse composite (whose QueryEventsAsync is a silent-empty stub). The
+    // smart-todo-r5 INBOUND fix (2026-08-17) rerouted them here; these tests mock the
+    // event queries on THIS mock and assert the composite's QueryEventsAsync is never hit.
+    private readonly Mock<IEventDataverseService> _eventsMock;
     private readonly Mock<ICommunicationDataverseService> _commServiceMock;
     private readonly Mock<ILogger<TodoGenerationService>> _loggerMock;
     private readonly Mock<ILogger<TodoRegardingBuilder>> _builderLoggerMock;
     private readonly IOptions<TodoGenerationOptions> _defaultOptions;
+    // Options with the event-sourced generation gate ENABLED — used by tests that assert
+    // Rules 1 & 3 actually CREATE to-dos (default is dry-run: query but create nothing).
+    private readonly IOptions<TodoGenerationOptions> _eventSourcedEnabledOptions;
 
     public TodoGenerationServiceTests()
     {
         _dataverseMock = new Mock<IDataverseService>(MockBehavior.Loose);
+        _eventsMock = new Mock<IEventDataverseService>(MockBehavior.Loose);
         _commServiceMock = new Mock<ICommunicationDataverseService>(MockBehavior.Loose);
         _loggerMock = new Mock<ILogger<TodoGenerationService>>();
         _builderLoggerMock = new Mock<ILogger<TodoRegardingBuilder>>();
@@ -57,6 +66,15 @@ public class TodoGenerationServiceTests
             StartHourUtc = 2,
             DeadlineWindowDays = 14,
             BudgetAlertThresholdPercent = 85m
+        });
+
+        _eventSourcedEnabledOptions = Options.Create(new TodoGenerationOptions
+        {
+            IntervalHours = 24,
+            StartHourUtc = 2,
+            DeadlineWindowDays = 14,
+            BudgetAlertThresholdPercent = 85m,
+            EnableEventSourcedGeneration = true
         });
     }
 
@@ -74,6 +92,7 @@ public class TodoGenerationServiceTests
         // Build a ServiceProvider that resolves IDataverseService as the mock.
         var services = new ServiceCollection();
         services.AddSingleton(_dataverseMock.Object);
+        services.AddSingleton(_eventsMock.Object);
         services.AddSingleton(_commServiceMock.Object);
         var serviceProvider = services.BuildServiceProvider();
 
@@ -88,6 +107,11 @@ public class TodoGenerationServiceTests
         var dataverseField = typeof(TodoGenerationService)
             .GetField("_dataverse", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         dataverseField.SetValue(svc, _dataverseMock.Object);
+
+        // Same for _events (IEventDataverseService) — the real source for Rules 1 & 3.
+        var eventsField = typeof(TodoGenerationService)
+            .GetField("_events", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        eventsField.SetValue(svc, _eventsMock.Object);
 
         // Inject a TodoRegardingBuilder via the internal test seam so creation paths
         // with regarding parents can run without ExecuteAsync's lazy initialization.
@@ -268,19 +292,19 @@ public class TodoGenerationServiceTests
     public async Task RunGenerationPass_WhenTodoAlreadyExists_SkipsCreation()
     {
         // Arrange — simulate a single overdue event + a pre-existing to-do with same title
-        var service = CreateService();
+        var service = CreateService(_eventSourcedEnabledOptions);
         var today = DateTime.UtcNow.Date;
         var overdueEvent = BuildEvent(name: "Contract Review", dueDate: today.AddDays(-3));
         var todoTitle = $"Overdue: {overdueEvent.Name}";
 
         // Rule 1: overdue events query returns the event
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
 
         // Rule 3: deadline proximity — empty
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
@@ -576,12 +600,12 @@ public class TodoGenerationServiceTests
         // Arrange: overdue query throws, but the service should swallow it and continue
         var service = CreateService();
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse connection failed"));
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
@@ -596,16 +620,16 @@ public class TodoGenerationServiceTests
     public async Task RunGenerationPass_WhenSingleTodoCreateFails_OtherItemsStillProcessed()
     {
         // Arrange: two overdue events; first create fails, second should still succeed
-        var service = CreateService();
+        var service = CreateService(_eventSourcedEnabledOptions);
         var event1 = BuildEvent(id: Guid.NewGuid(), name: "Event One", dueDate: DateTime.UtcNow.Date.AddDays(-5));
         var event2 = BuildEvent(id: Guid.NewGuid(), name: "Event Two", dueDate: DateTime.UtcNow.Date.AddDays(-2));
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { event1, event2 }, 2));
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
@@ -633,16 +657,16 @@ public class TodoGenerationServiceTests
     public async Task RunGenerationPass_Rule1_OverdueEvent_CreatesSprkTodoRegardingEvent()
     {
         // Arrange
-        var service = CreateService();
+        var service = CreateService(_eventSourcedEnabledOptions);
         var overdueEvent = BuildEvent(name: "Filing Deadline", dueDate: DateTime.UtcNow.Date.AddDays(-7));
         var expectedTitle = $"Overdue: {overdueEvent.Name}";
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
@@ -672,18 +696,18 @@ public class TodoGenerationServiceTests
     public async Task RunGenerationPass_CompletedOverdueEvent_NotIncluded()
     {
         // Arrange: overdue event with statuscode=5 (Completed) should be skipped
-        var service = CreateService();
+        var service = CreateService(_eventSourcedEnabledOptions);
         var completedEvent = BuildEvent(
             name: "Completed Filing",
             statusCode: 5,
             dueDate: DateTime.UtcNow.Date.AddDays(-3));
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { completedEvent }, 1));
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
@@ -698,6 +722,87 @@ public class TodoGenerationServiceTests
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // INBOUND fix (smart-todo-r5, 2026-08-17): event-sourced reroute + dry-run gate
+    // ──────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task RunGenerationPass_Rule1_WhenEventSourcedDisabled_QueriesEventsButCreatesNothing()
+    {
+        // Arrange — DEFAULT options: EnableEventSourcedGeneration = false = dry-run.
+        var service = CreateService(); // _defaultOptions → flag OFF
+        var overdueEvent = BuildEvent(name: "Overdue Filing", dueDate: DateTime.UtcNow.Date.AddDays(-4));
+
+        _eventsMock
+            .Setup(d => d.QueryEventsAsync(
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new[] { overdueEvent }, 1));
+        _eventsMock
+            .Setup(d => d.QueryEventsAsync(
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Array.Empty<EventEntity>(), 0));
+        SetupIdempotencyQueryEmpty();
+
+        // Act
+        await service.RunGenerationPassAsync(CancellationToken.None);
+
+        // Assert — dry-run: events WERE queried (via the event service), but NOTHING created.
+        _eventsMock.Verify(
+            d => d.QueryEventsAsync(
+                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce);
+        _dataverseMock.Verify(
+            d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task RunGenerationPass_EventSourcedRules_QueryEventsViaEventService_NeverViaComposite()
+    {
+        // Regression guard for the INBOUND bug: Rules 1 & 3 MUST query events through
+        // IEventDataverseService (real impl), NEVER the IDataverseService composite
+        // whose QueryEventsAsync is a silent-empty stub (which produced ZERO To Dos).
+        var service = CreateService(_eventSourcedEnabledOptions);
+        var overdueEvent = BuildEvent(name: "Overdue X", dueDate: DateTime.UtcNow.Date.AddDays(-2));
+        var upcomingEvent = BuildEvent(name: "Upcoming Y", dueDate: DateTime.UtcNow.Date.AddDays(5));
+
+        _eventsMock
+            .Setup(d => d.QueryEventsAsync(
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new[] { overdueEvent }, 1));
+        _eventsMock
+            .Setup(d => d.QueryEventsAsync(
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new[] { upcomingEvent }, 1));
+        SetupIdempotencyQueryEmpty();
+        _dataverseMock
+            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        // Act
+        await service.RunGenerationPassAsync(CancellationToken.None);
+
+        // Assert — the composite QueryEventsAsync is NEVER used for events (the bug).
+        _dataverseMock.Verify(
+            d => d.QueryEventsAsync(
+                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Never);
+        // The event service WAS the source for both rules, and both produced a To Do.
+        _eventsMock.Verify(
+            d => d.QueryEventsAsync(
+                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+        _dataverseMock.Verify(
+            d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(2));
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Rule 3: Deadline proximity → sprk_todo regarding sprk_event, with due date
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -705,18 +810,18 @@ public class TodoGenerationServiceTests
     public async Task RunGenerationPass_Rule3_UpcomingDeadline_CreatesSprkTodoWithDueDateAndRegardingEvent()
     {
         // Arrange
-        var service = CreateService();
+        var service = CreateService(_eventSourcedEnabledOptions);
         var dueDate = DateTime.UtcNow.Date.AddDays(7);
         var upcomingEvent = BuildEvent(name: "Contract Signing", dueDate: dueDate);
         var dueDateStr = dueDate.ToString("yyyy-MM-dd");
         var expectedTitle = $"Deadline: {upcomingEvent.Name} (due {dueDateStr})";
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
-        _dataverseMock
+        _eventsMock
             .Setup(d => d.QueryEventsAsync(
                 null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { upcomingEvent }, 1));
@@ -777,6 +882,9 @@ public class TodoGenerationServiceTests
         options.StartHourUtc.Should().Be(2);
         options.DeadlineWindowDays.Should().Be(14);
         options.BudgetAlertThresholdPercent.Should().Be(85m);
+        options.EnableEventSourcedGeneration.Should().BeFalse(
+            "event-sourced generation (Rules 1 & 3) defaults to dry-run so an operator "
+            + "validates volume before it creates real To Dos (smart-todo-r5 INBOUND fix)");
     }
 
     [Fact]

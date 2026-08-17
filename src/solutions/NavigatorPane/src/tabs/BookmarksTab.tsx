@@ -99,6 +99,8 @@ import {
 import { unpinById } from '../services/pinService';
 import { addBookmark, pinCurrentPage, BookmarkError } from '../services/bookmarkService';
 import { classifyTargets, trimTargetFromRow } from '../services/securityTrimService';
+import { openEntityRecord } from '../services/recordNavigation';
+import { resolveRecordName, resolveViewName } from '../services/nameResolution';
 import { rowIconFor } from '../rowIcon';
 import {
   setPinnedSearchEntries,
@@ -178,11 +180,9 @@ function navigateToRow(xrm: XrmContext, row: NavItemRecord): void {
     case NavItemPageType.EntityRecord:
     default:
       if (row.sprk_targetlogicalname && row.sprk_targetid) {
-        void navigation.navigateTo({
-          pageType: 'entityrecord',
-          entityName: row.sprk_targetlogicalname,
-          entityId: row.sprk_targetid,
-        });
+        // sprk_communication (Email) routes to the Email code page; all other
+        // records open the OOB form (shared rule — see recordNavigation.ts).
+        openEntityRecord(xrm, row.sprk_targetlogicalname, row.sprk_targetid);
       }
       return;
   }
@@ -221,6 +221,66 @@ function rowToSearchEntry(row: NavItemRecord): SearchIndexEntry {
     chipLabel: labelForRow(row),
     target: targetForRow(row),
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic-name enrichment (UAT: Bookmarks show the real record/view name)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The GENERIC (auto-derived) display name a row would carry when no real name
+ * was available at write time — the entity label for a record pin ("Document")
+ * or "{Entity} view" for a view pin. `null` for kinds with no logical target
+ * to resolve (weblink/custom), which are left as-is. Used to decide whether a
+ * row is still showing a placeholder worth upgrading.
+ */
+function genericLabelFor(row: NavItemRecord): string | null {
+  switch (row.sprk_pagetype) {
+    case NavItemPageType.EntityRecord:
+      return formatEntityLabel(row.sprk_targetlogicalname);
+    case NavItemPageType.EntityList:
+      return `${formatEntityLabel(row.sprk_targetlogicalname)} view`;
+    default:
+      return null; // weblink/custom — hostname/page name is the honest label (rename available)
+  }
+}
+
+/**
+ * Upgrade rows whose display name is STILL the generic auto-derived label to
+ * the real record/view name (UAT feedback: Bookmarks should show the record
+ * name, not the type). Only rows whose current name EXACTLY equals their
+ * generic label are touched — a user-renamed row (or one already carrying a
+ * real name) is left alone. Best-effort: a row we can't resolve keeps its
+ * label. Each upgrade is persisted via `renameNavItem` (self-heal, so it sticks
+ * across reloads and feeds the search index). Returns the same array reference
+ * when nothing changed, so the caller can skip a redundant re-render.
+ */
+async function upgradeGenericNames(
+  xrm: XrmContext | undefined,
+  rows: NavItemRecord[]
+): Promise<NavItemRecord[]> {
+  const resolved = await Promise.all(
+    rows.map(async (row): Promise<{ id: string; name: string } | null> => {
+      const generic = genericLabelFor(row);
+      if (!generic || row.sprk_displayname !== generic) return null;
+
+      let name: string | null = null;
+      if (row.sprk_pagetype === NavItemPageType.EntityRecord && row.sprk_targetlogicalname && row.sprk_targetid) {
+        name = await resolveRecordName(xrm, row.sprk_targetlogicalname, row.sprk_targetid);
+      } else if (row.sprk_pagetype === NavItemPageType.EntityList && row.sprk_targetid) {
+        name = await resolveViewName(xrm, row.sprk_targetid);
+      }
+      return name && name !== row.sprk_displayname ? { id: row.sprk_navitemid, name } : null;
+    })
+  );
+
+  const byId = new Map(resolved.filter((u): u is { id: string; name: string } => u !== null).map(u => [u.id, u.name]));
+  if (byId.size === 0) return rows;
+
+  // Persist each upgrade (self-heal) — fire-and-forget, best-effort.
+  for (const [id, name] of byId) void renameNavItem(id, name).catch(() => undefined);
+
+  return rows.map(r => (byId.has(r.sprk_navitemid) ? { ...r, sprk_displayname: byId.get(r.sprk_navitemid) as string } : r));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -410,6 +470,16 @@ export const BookmarksTab: React.FC = () => {
       setStatus('ready');
       // task 070 — report the SAME already-trimmed rows into the shared search index.
       setPinnedSearchEntries(trimmed.map(rowToSearchEntry));
+
+      // UAT: upgrade any row still showing a generic label ("Document",
+      // "Communication view") to the real record/view name. Runs AFTER the
+      // initial paint so the list shows immediately; upgraded names (and the
+      // search index) swap in when resolved. Best-effort + self-healing.
+      void upgradeGenericNames(xrm, trimmed).then(upgraded => {
+        if (!mountedRef.current || upgraded === trimmed) return;
+        setRows(upgraded);
+        setPinnedSearchEntries(upgraded.map(rowToSearchEntry));
+      });
     } catch (err) {
       if (!mountedRef.current) return;
       setErrorMessage(err instanceof Error ? err.message : 'Failed to load pinned items.');

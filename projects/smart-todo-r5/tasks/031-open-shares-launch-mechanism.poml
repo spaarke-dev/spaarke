@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="smart-todo-r5">
+  <metadata>
+    <title>Open existing To Do shares the same launch mechanism as New Task (FR-11)</title>
+    <phase>4: Main-form modal</phase>
+    <gate>030 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Refactors 3 independent navigateTo call sites (SmartTodoApp.tsx, todo.registration.ts, and the new task-030 call site) into one shared function in a shared-lib module consumed across two host surfaces (Code Page + LegalWorkspace widget); modal launch behavior is production-facing. CLAUDE.md §8 FULL trigger (.tsx/.ts, 6+ steps, deps on 3+ tasks incl. cross-surface coordination).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Consolidation/refactor of existing, already-proven navigateTo call sites onto one already-existing shared function family — not net-new architecture. Sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same modal launch path as 030/032/033 — this task directly modifies the call site 030 just created and the two pre-existing Open call sites; concurrent edits would conflict.</parallel-reason>
+    <deps>030</deps>
+    <tags>react, typescript, modal, frontend, refactor</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Consolidate the three independent Xrm.Navigation.navigateTo call sites that open the sprk_todo OOB main form — SmartTodoApp.tsx's openSprkTodoAsLayout1 (open existing, Code Page), todo.registration.ts's FeedSyncBridgeHost.handleOpenTodo (open existing, LegalWorkspace widget), and task 030's new create-mode call (navigateToEntityRecordSurfaceAsync, Code Page) — onto ONE shared launcher function so create and open use identical sizing, chrome, and outcome-signal handling.</prompt>
+
+  <role>SPAARKE platform developer. Expert in cross-frame Xrm.Navigation resolution (window/window.parent/window.top), shared-lib API design (@spaarke/ui-components), and refactoring without behavior regression.</role>
+
+  <goal>ONE function in src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts (extend navigateToEntityRecordSurfaceAsync's EntityRecordSurfaceParams with an optional `entityId?: string` — present = open existing at the `record` OOB size 85%x85%, absent = create at the `createForm` OOB size 70%x80%, both other options identical) is the SOLE OOB sprk_todo main-form launcher for the whole SmartTodo feature. SmartTodoApp.tsx's openSprkTodoAsLayout1, todo.registration.ts's FeedSyncBridgeHost.handleOpenTodo, and task 030's create-mode call site all delegate to this one function; no other file in src/solutions/SmartTodo or src/solutions/LegalWorkspace/src/sections/todo.registration.ts constructs its own navigateTo({pageType:'entityrecord', entityName:'sprk_todo', ...}) call.</goal>
+
+  <context>
+    <background>Spec FR-11 (U-5, owner-confirmed 2026-08-14): "one code path for create + open." Before this task, three call sites exist with drifted behavior: (1) SmartTodoApp.tsx's openSprkTodoAsLayout1 (module-scope function, fire-and-forget, inline `(window.parent as any)?.Xrm ?? (window as any).Xrm` frame resolution, no outcome signal, no defaultValues); (2) todo.registration.ts's FeedSyncBridgeHost.handleOpenTodo (component-scoped closure, same 85%x85% size and target:2/position:1 shape but re-declared inline, no outcome signal); (3) task 030's new navigateToEntityRecordSurfaceAsync call (async, returns NavigateToOutcome with savedEntityReference, uses wizardLaunchers.ts's resolveXrmNavigation() which walks window/window.parent/window.top — a MORE robust frame-walk than (1)'s inline fallback). This task's job is to make navigateToEntityRecordSurfaceAsync (or a thin sibling in the same module) the ONE function all three call, so the close/refresh work in task 033 only has to be written once.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</file>
+      <file role="modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+      <file role="modify">src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/utils/adapters/xrmNavigationServiceAdapter.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">Introduces the create-mode navigateToEntityRecordSurfaceAsync call this task extends to also serve open-mode.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">Path A project-scoped exception continues to apply — this task refactors WHICH function issues the OOB navigateTo call, it does not change the modal family (still OOB, still not SprkModal).</constraint>
+    <constraint source="project">MUST NOT change the effective sizing users see today without a documented reason: open-existing stays at the `record` OOB size (85%x85%); create stays at `createForm` (70%x80%). Task 032 (FR-12/13) is the ONLY task authorized to change these dimensions for the full-cover requirement — do not pre-empt it here.</constraint>
+    <constraint source="project">MUST preserve resolveXrmNavigation()'s window/window.parent/window.top frame-walk (the more robust of the two existing resolvers) as the ONE resolution strategy — do not revert to the simpler inline fallback SmartTodoApp.tsx currently uses.</constraint>
+    <constraint source="project">MUST keep todo.registration.ts's FeedSyncBridgeHost.handleOpenTodo's "no selection → open the full Code Page" branch (ctx.onOpenWizard fallback) intact — this task only touches the todoId-present branch that calls navigateTo directly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-oob-launcher-consolidation</topic>
+    <files>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+    </files>
+    <patterns>
+      <pattern name="resolveXrmNavigation" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts">The frame-walking Xrm resolver (window/window.parent/window.top) already used by navigateToEntityRecordSurfaceAsync — reuse as-is, do not duplicate.</pattern>
+      <pattern name="NavigateToOutcome" location="src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts">The outcome shape (launched/cancelled/savedEntityReference) both create and open should return so task 033 has one contract to hook a refresh onto.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier sonnet, effort high. Re-read wizardLaunchers.ts's navigateToEntityRecordSurfaceAsync + EntityRecordSurfaceParams + NavigateToOutcome, SmartTodoApp.tsx's openSprkTodoAsLayout1, and todo.registration.ts's FeedSyncBridgeHost.handleOpenTodo in full.</step>
+    <step order="1">In wizardLaunchers.ts, add `entityId?: string` to EntityRecordSurfaceParams. In navigateToEntityRecordSurfaceAsync's body: when `entityId` is present, set `pageInput.entityId = cleanId` (strip braces per the existing `.replace(/[{}]/g, '')` convention SmartTodoApp.tsx already uses) and use `OOB_MODAL_SIZES.record.width/height` + `position: 1` in the navOptions; when absent, keep the existing createForm-size, no-position behavior. Do not change the function's exported name if avoidable (minimizes call-site churn) — if a rename is genuinely clearer, update every call site in this same task, not a follow-up.</step>
+    <step order="2">Verify the `entityrecord` navigateTo resolve shape for an OPEN (not create) is compatible with the existing `savedEntityReference` parsing — confirm via Microsoft Learn or the researcher subagent whether an existing-record dialog resolves with the same `{savedEntityReference:[...]}` shape on Save, or differently. Document the finding; adjust the outcome-parsing branch if the shapes differ between create and open.</step>
+    <step order="3">In SmartTodoApp.tsx, replace openSprkTodoAsLayout1's body with a call to the (now entityId-capable) shared function; keep the function's existing name/signature as a thin wrapper if other call sites in this file depend on its synchronous `void`-returning signature, OR update all internal callers (OPEN_TODOS_EVENT listener, useLaunchContext openTodo effect) to the new async signature — pick whichever produces the smaller, clearer diff and document the choice.</step>
+    <step order="4">In todo.registration.ts's FeedSyncBridgeHost.handleOpenTodo, replace the inline `xrm.Navigation.navigateTo(...)` block (todoId-present branch) with the same shared function call, importing it from `@spaarke/ui-components`. Preserve the existing `openForm` defensive fallback branch as-is (that fallback is orthogonal to which primary function is used).</step>
+    <step order="5">Confirm both host contexts (Code Page top-level window vs LegalWorkspace-hosted widget) still resolve Xrm correctly through resolveXrmNavigation()'s frame-walk — this is the highest-risk step (see escalation). Verify via existing unit tests plus, where feasible, a manual smoke in each surface.</step>
+    <step order="6">Update/add unit tests: the shared function is called with entityId for existing-record open (both SmartTodoApp.tsx and todo.registration.ts call sites) and without entityId for create (SmartTodoApp.tsx); sizing differs correctly per branch; both original call sites' surrounding logic (refetch wiring, fallback branches) is unchanged.</step>
+    <step order="7">Grep src/solutions/SmartTodo and src/solutions/LegalWorkspace/src/sections/todo.registration.ts for any remaining direct `navigateTo({ pageType: 'entityrecord', entityName: 'sprk_todo'` construction outside the shared function — must return zero matches.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: mark 031 complete.</step>
+    <step order="9">Document the exact refactor shape (function signature chosen, any Learn/researcher findings on resolve-shape parity) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If consolidating onto resolveXrmNavigation()'s frame-walk reveals that one host context (Code Page iframe vs LegalWorkspace top-level window) needs materially different Xrm-resolution logic that the shared walk does not already cover, STOP and escalate per CLAUDE.md §6 rather than forking the shared function silently — a fork here defeats FR-11's "one code path" requirement and would need explicit sign-off.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Create and open produce visually identical modal chrome">
+      <steps>
+        <step>Open + New Task; observe the modal chrome (target, position, native Save/Save &amp; Close)</step>
+        <step>Open an existing To Do card; observe the modal chrome</step>
+      </steps>
+      <expected>Both are Xrm.Navigation.navigateTo target:2/position:1 dialogs with identical native chrome — only width/height differ per their documented OOB size (createForm vs record) until task 032 unifies sizing.</expected>
+    </test>
+    <test name="Both surfaces refresh on save">
+      <steps>
+        <step>From the SmartTodo Code Page, open and save an existing To Do</step>
+        <step>From the LegalWorkspace widget, open and save an existing To Do</step>
+      </steps>
+      <expected>Both surfaces' kanban/list reflects the change (manual-refresh acceptable at this task; task 033 makes it automatic).</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Trigger both create and open from each surface under webLightTheme, then webDarkTheme</step>
+      </steps>
+      <expected>No Spaarke-authored chrome regression in either theme; zero hex/rgb literals in changed files.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest across Spaarke.UI.Components, SmartTodo, and LegalWorkspace</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/wizardLaunchers.ts</output>
+    <output type="code">src/solutions/SmartTodo/src/SmartTodoApp.tsx</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/todo.registration.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/__tests__/wizardLaunchers.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the sprk_todo OOB launcher, when grepped across src/solutions/SmartTodo and src/solutions/LegalWorkspace/src/sections/todo.registration.ts, then exactly ONE function constructs the `{pageType:'entityrecord', entityName:'sprk_todo'}` navigateTo call.</criterion>
+    <criterion testable="true">Given entityId is supplied, then the shared function opens at the `record` OOB size (85%x85%); given entityId is omitted, then it opens at `createForm` (70%x80%).</criterion>
+    <criterion testable="true">Given the Code Page's card Open and the LegalWorkspace widget's card Open, both invoke the same shared function with the same options shape (modulo entityId).</criterion>
+    <criterion testable="true">Negative: the existing openForm defensive fallback in todo.registration.ts and the "no selection → open Code Page" branch are unchanged.</criterion>
+    <criterion testable="true">All unit tests pass; build is green; zero hex/rgb literals in changed files.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec ref: FR-11 (U-5). This task does NOT implement full-cover sizing (task 032) or the close/refresh contract (task 033) — it only unifies WHICH function issues the navigateTo call, so those two tasks each have exactly one call site to modify instead of three.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

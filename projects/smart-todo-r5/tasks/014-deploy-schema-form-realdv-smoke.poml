@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="smart-todo-r5">
+  <metadata>
+    <title>Deploy schema + form and run real-Dataverse resolver/inheritance smoke (FR-04/FR-20)</title>
+    <phase>2: Schema + scoring + resolver</phase>
+    <gate>011,012,013 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment + integration-test task touching real Dataverse; tags include dataverse/deploy/integration-test; TEST-MODIFYING override row also applies (integration-test tag) per CLAUDE.md §8 — code-review + adr-check run unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified deploy + smoke checklist, not an architectural task.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deploys the combined output of 011/012/013 and depends on all three; not parallelizable with any other Phase 2 task.</parallel-reason>
+    <deps>011,012,013</deps>
+    <tags>dataverse, deploy, integration-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy the Phase 2 schema (010), auto-score handler (011), card UI (012), and RegardingResolver form wiring (013) to the target Dataverse environment, then run a REAL-Dataverse smoke test per PROC-1 (spec FR-20) — NOT the prototype mock, per the exact R4 UAT-5/6 hazard: create a To Do from a parent subgrid (auto-detect path) AND via manual pick, and confirm sprk_regardingrecordtype/id/name/number/url plus the correct per-entity lookup populate, and that the field-mapping engine inherits parent fields at creation.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse solution deployment (dataverse-deploy skill) and real-environment integration verification. Follow NFR-06 (real-DV validation, no reliance on prototype mocks for entity-name correctness) strictly.</role>
+
+  <goal>All Phase 2 changes (schema, form-script, card UI, resolver wiring) are deployed to the target Dataverse environment; a real To Do record created via BOTH the subgrid-auto-detect path and the manual-pick path shows all 5 resolver fields populated correctly and demonstrates field-mapping inheritance at create; no regressions on existing sprk_todo records/forms.</goal>
+
+  <context>
+    <background>Spec FR-20 (PROC-1): any widget/entity change querying Dataverse requires >=1 real create+read against real Dataverse before merge — this task IS that gate for R5's FR-04 work. The exact failure class this guards against is documented in RegardingResolverApp.tsx's history (v1.3.5/v1.3.6): a field absent from the FORM (even if present in schema) makes Xrm.Page.getAttribute return null, silently breaking writes in a way no mock would catch. Task 013 wired the form; this task proves it actually works end-to-end against the real environment, for both the subgrid auto-detect flow (v1.4.0 SRFR-045) and the manual PolymorphicPicker flow.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+      <file role="canonical-reference">src/client/pcf/RegardingResolver/RegardingResolver/handlers/ResolverWriteHandler.ts</file>
+      <file role="canonical-reference">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file role="modify">target Dataverse dev environment (schema + form + webresources deployed)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Auto-score handler must be deployed alongside the form for a coherent smoke pass.</dependency>
+      <dependency task="012" status="pending">Card UI changes must be deployed so the smoke pass can visually confirm the priority/effort glyph on the created record.</dependency>
+      <dependency task="013" status="pending">RegardingResolver form wiring is the primary subject of this smoke test.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-20/NFR-06 scope: the smoke MUST run against real Dataverse, not the prototype mock — entity-name correctness is exactly what mocks cannot catch (per the R4 UAT-5/6 bug class cited in spec).</constraint>
+    <constraint source="project">MUST verify BOTH creation paths (subgrid auto-detect AND manual pick) — RegardingResolverApp.tsx branches on which path fired and each has independent failure modes (CREATE-mode presave bridge vs. UPDATE-mode direct write).</constraint>
+    <constraint source="project">Regression check required: existing sprk_todo records/forms must not break (form publish is a shared-surface change).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>real-dv-smoke</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="real-dv-smoke-gate" location="projects/smart-todo-r5/spec.md">FR-20/PROC-1 — the pre-merge checklist item this task satisfies for R5's own Dataverse-touching FRs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL (TEST-MODIFYING override applies via integration-test tag); load ResolverWriteHandler.ts, RegardingResolverApp.tsx, SPAARKE-FIELD-MAPPING-FRAMEWORK.md.</step>
+    <step order="1">Deploy the sprk_priority/sprk_effort schema (010), the score OnChange webresource + wizard/quick-add changes (011), the card UI (012), and the RegardingResolver form wiring + presave webresource (013) to the target Dataverse dev environment via dataverse-deploy.</step>
+    <step order="2">Publish all customizations; hard-refresh to clear cached form/PCF versions per src/client/pcf/CLAUDE.md deployment workflow.</step>
+    <step order="3">Real-DV smoke path A (subgrid auto-detect): from a parent record (e.g. Matter) subgrid, click "+ new" to create a To Do; verify the entity-specific sprk_regarding{Entity} lookup auto-populates via Dataverse relationship mapping, save, then re-query the record via MCP read_query/describe to confirm sprk_regardingrecordtype/id/name/url/number are all populated (not null).</step>
+    <step order="4">Real-DV smoke path B (manual pick): create a new To Do directly (not from a subgrid), use the RegardingResolver's PolymorphicPicker to manually select a different parent record type, save, then re-query to confirm the same 5 fields populate correctly for the manually-picked target.</step>
+    <step order="5">For both paths, verify the field-mapping engine (SPAARKE-FIELD-MAPPING-FRAMEWORK.md) inherits the expected parent fields onto the new To Do at creation time (not merely that the regarding fields are set).</step>
+    <step order="6">Set sprk_priority/sprk_effort on the created record(s) and confirm sprk_priorityscore/sprk_effortscore update per the task-011 mapping, and that the KanbanCard glyph (task 012) reflects it when viewed in the Code Page / widget.</step>
+    <step order="7">Regression check: open an existing pre-R5 sprk_todo record's form and confirm it still loads without error (form publish did not break existing records).</step>
+    <step order="8">Record the real-DV smoke evidence (record IDs, field values observed) in projects/smart-todo-r5/notes/ per FR-20's documented-gate requirement.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: mark 014 complete.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the real Dataverse entity/field names (e.g. an sprk_regarding{Entity} lookup name, or the primary-name/number field used for display-name resolution) differ from what the code/mock assumed, STOP and file a correction rather than patching around it silently — this is the exact R4 UAT-5/6 bug class this task exists to catch, and the fix belongs in the resolver catalog or schema, not in this smoke task.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">read_query / describe for pre/post-smoke record verification</tool>
+    <tool name="dataverse-deploy">Solution + form + webresource deployment</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">sprk_todo schema + form + webresources deployed to target Dataverse environment</output>
+    <output type="evidence">projects/smart-todo-r5/notes/ real-DV smoke evidence (record IDs + observed field values for both paths)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a To Do created from a parent subgrid (auto-detect), when the record is re-queried via real Dataverse, then sprk_regardingrecordtype/id/name/url/number are all populated with correct values matching the parent.</criterion>
+    <criterion testable="true">Given a To Do created via manual PolymorphicPicker selection, when the record is re-queried via real Dataverse, then the same 5 fields populate correctly for the manually-picked target.</criterion>
+    <criterion testable="true">Given either creation path, when the record is inspected, then the field-mapping engine has inherited the expected parent fields at creation (not merely regarding-field population).</criterion>
+    <criterion testable="true">Given sprk_priority/sprk_effort set on the created record, then sprk_priorityscore/sprk_effortscore reflect the task-011 mapping and the KanbanCard glyph (task 012) displays correctly.</criterion>
+    <criterion testable="true">Negative: an existing pre-R5 sprk_todo record's form still loads without error after the form publish (no regression).</criterion>
+    <criterion testable="true">Negative: if any real entity/field name diverges from the code's assumption, the task STOPS and escalates rather than silently masking the mismatch.</criterion>
+    <criterion testable="true">Real-DV smoke evidence is documented in projects/smart-todo-r5/notes/, satisfying FR-20's "documented pre-merge step" requirement.</criterion>
+  </acceptance-criteria>
+
+  <notes>This task is the FR-20 gate instance for R5's own Dataverse-touching FRs (FR-04 here; FR-06 Assigned-To is satisfied by a later task). See spec.md Success Criteria #3 for the acceptance framing this task closes out.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

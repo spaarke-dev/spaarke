@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="smart-todo-r5">
+  <metadata>
+    <title>PROC-1 — add real-Dataverse smoke pre-merge checklist item (FR-20)</title>
+    <phase>7: Cross-cutting + wrap-up</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include `testing` → CLAUDE.md root §8 TEST-MODIFYING override row forces FULL rigor UNCONDITIONALLY (code-review + adr-check at Step 9.5), even though this task edits a skill checklist rather than test code — the override is tag-triggered, not path-triggered.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified documentation/checklist addition to an existing skill file; no architectural design decision.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>MODIFIES a `.claude/skills/` file (`push-to-github/SKILL.md`) — sub-agents launched via the Agent tool CANNOT write to `.claude/` paths per root CLAUDE.md §3 Sub-Agent Write Boundary. This task's write step MUST run in the MAIN SESSION, not delegated to a sub-agent.</parallel-reason>
+    <deps>none</deps>
+    <tags>process, skill-directives, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a pre-merge checklist item to `.claude/skills/push-to-github/SKILL.md` (recommended, over `merge-to-master`, since push-to-github already runs the "ask user first" quality-check flow at Step 1 and the untracked-file / defer-tracking checks at Steps 1.5/1.6 — this is the natural third addition, not a new skill): if a widget change queries Dataverse entities, the developer MUST have exercised >=1 create+read against REAL Dataverse (not a prototype/mock harness) before merge. Cite the R4 UAT-5/6 evidence (spaarke-prototype harness mocked `sprk_contact`, which does not exist in real Dataverse — real is OOB `contact` — and the mock hid the entity-name bug, burning multiple deploy rounds) as the rationale. This is spec FR-20 / PROC-1 and is a MAIN-SESSION-ONLY `.claude/` write per root CLAUDE.md §3.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Spaarke skill-authoring conventions (frontmatter, Applies-When, numbered Workflow steps, Failure Modes table) and in the root CLAUDE.md §3 sub-agent write boundary. Follow ADRs strictly.</role>
+
+  <goal>`.claude/skills/push-to-github/SKILL.md` contains a new, clearly-numbered checklist step (e.g. "Step 1.7: Real-Dataverse Smoke Check for Widget/Dataverse Changes") in the same style as the existing Step 1.5 (Untracked Source Files) and Step 1.6 (Defer/Issue Tracking Audit): it names the requirement (>=1 real create+read for any Dataverse-querying widget change), cites the R4 UAT-5/6 evidence, and is explicitly a reviewer-judgment prompt inside the existing "ask user first" pre-flight flow — NOT a new blocking CI script or a new standalone skill/slash-command.</goal>
+
+  <context>
+    <background>Spec FR-20 (PROC-1): "Add a checklist item to `/push-to-github` or `/merge-to-master`: any widget change querying Dataverse entities requires >=1 create+read against real Dataverse before merge." design.md's PROC-1 section (line ~241-247) documents the concrete failure this guards against: R4 UAT rounds 5-6 burned multiple deploy cycles because the spaarke-prototype harness mocked a `sprk_contact` entity that does not exist in real Dataverse (the real entity is the OOB `contact`); the mock hid this entity-name bug until it reached a real environment. R5's own Dataverse-touching FRs (FR-04 RegardingResolver wiring, verified by task 014's real-DV smoke; FR-06 Assigned-To typeahead) satisfy this new gate by example, but the gate itself must be documented process, not just this project's own practice, so future projects inherit it.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/push-to-github/SKILL.md</file>
+      <file role="canonical-reference">.claude/skills/push-to-github/references/pr-template.md</file>
+      <file role="new">.claude/CHANGELOG.md</file>
+      <file role="canonical-reference">projects/smart-todo-r5/tasks/014-deploy-schema-form-realdv-smoke.poml</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">MAIN-SESSION-ONLY: this task writes to `.claude/skills/push-to-github/SKILL.md`. Per root CLAUDE.md §3 (Sub-Agent Write Boundary), sub-agents launched via the Agent tool CANNOT write to `.claude/` paths. A sub-agent MAY be used to draft/audit the proposed checklist wording, but the Edit itself MUST be applied in the main session.</constraint>
+    <constraint source="spec">FR-20 acceptance is explicit: "the gate exists as a documented pre-merge step (skill checklist or lightweight `/real-dv-smoke`)." Per root CLAUDE.md §11 (Component Justification — Default to Reuse), prefer extending the existing `push-to-github` skill over authoring a brand-new `/real-dv-smoke` skill/command — a new skill is new surface requiring a §11 three-question justification that the "extend existing X" answer already defeats (push-to-github's Step 1 pre-flight flow is the exact right home).</constraint>
+    <constraint source="project">The gate MUST remain reviewer-judgment (part of the existing "ask user first" pre-flight quality-check pattern used by Steps 1.5/1.6), NOT a blocking CI script — this mirrors how `/test-diet` and the defer-tracking audit are wired (advisory, surfaced to the user, not auto-enforced).</constraint>
+    <constraint source="ai-procedure-maintenance">Every PR touching `.claude/` skill files MUST add an entry to `.claude/CHANGELOG.md` per root CLAUDE.md §18 footer convention — add a `[smart-todo-r5]` entry under `### Changed` for the `push-to-github` skill modification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Real-DV smoke gate authoring (PROC-1 / FR-20)</topic>
+    <files>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/README.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>projects/smart-todo-r5/design.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/push-to-github/SKILL.md</file>
+      <file>.claude/skills/ai-procedure-maintenance/SKILL.md</file>
+      <file>.claude/CHANGELOG.md</file>
+    </files>
+    <patterns>
+      <pattern name="advisory-pre-flight-checklist" location=".claude/skills/push-to-github/SKILL.md#step-15-defer--issue-tracking-audit-mandatory-when-inside-a-project">Step 1.5/1.6 are the existing "ask user first, surface a WARNING, require explicit decision, do not silently proceed" shape to copy for the new Step 1.7.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare RIGOR: FULL (testing-tag override per CLAUDE.md §8). Load spec FR-20, design.md PROC-1 section, and `.claude/skills/push-to-github/SKILL.md` in full (Steps 1, 1.5, 1.6). Confirm MAIN SESSION for the write step.</step>
+    <step order="1">Draft the new checklist step content: name it "Step 1.7: Real-Dataverse Smoke Check (Widget/Dataverse Changes)"; state the requirement, cite the R4 UAT-5/6 `sprk_contact`-vs-`contact` evidence, and phrase it as an advisory prompt matching the Step 1.5/1.6 tone (WARN → list affected files → ask user for explicit decision → do not silently proceed).</step>
+    <step order="2">Insert the new step into `.claude/skills/push-to-github/SKILL.md` immediately after the existing Step 1.6 (Defer / Issue Tracking Audit) and before Step 2 (Review Changes), renumbering nothing else.</step>
+    <step order="3">Add a one-line pointer in the skill's "Tips for AI" section referencing the new Step 1.7, consistent with how Step 1.5's untracked-file check is called out there.</step>
+    <step order="4">Add a `.claude/CHANGELOG.md` entry under the current `[Unreleased]`/latest section noting the `push-to-github` skill change, attributed to `smart-todo-r5` task 060.</step>
+    <step order="5">Verify the addition does not turn the gate into a blocking mechanism — re-read the new text and confirm it follows the "ask user first" advisory pattern, not a hard STOP/fail.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: mark 060 status to the appropriate symbol per progress.</step>
+    <step order="7">Document any deviation (e.g. if `merge-to-master` was chosen instead of `push-to-github`, or a new skill was authored instead of an extension) in `projects/smart-todo-r5/notes/`, with rationale.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If satisfying FR-20 seems to require a blocking CI script (mechanized enforcement) rather than a reviewer-judgment checklist step, STOP and escalate per CLAUDE.md §6 — the spec and design explicitly frame this as advisory, and mechanizing it is a design change beyond this task's authorized scope.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">git status/diff for verifying the skill-file edit scope</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/skills/push-to-github/SKILL.md</output>
+    <output type="docs">.claude/CHANGELOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `.claude/skills/push-to-github/SKILL.md`, when read, then it contains a new numbered step requiring >=1 real create+read against real Dataverse before merge for any widget change querying Dataverse entities.</criterion>
+    <criterion testable="true">Given the new step's text, when read, then it explicitly cites the R4 UAT-5/6 `sprk_contact`-vs-OOB-`contact` evidence as the rationale.</criterion>
+    <criterion testable="true">Given the new step, when compared against Steps 1.5/1.6, then it follows the same advisory ("ask user first", non-blocking) pattern rather than a hard-fail/blocking-CI pattern.</criterion>
+    <criterion testable="true">Given root CLAUDE.md §3, when the write is applied, then it was applied by the MAIN SESSION (not a sub-agent Edit call) — no sub-agent write-denial error occurred because none was attempted.</criterion>
+    <criterion testable="true">Given root CLAUDE.md §11, when reviewed, then no new skill/slash-command file was created for this gate unless the task explicitly escalated and got sign-off to do so.</criterion>
+    <criterion testable="true">`.claude/CHANGELOG.md` has a new entry documenting this skill change.</criterion>
+    <criterion testable="true">Negative: the new checklist step does not add a `dotnet`/CI script invocation or otherwise turn merge into a hard-blocked state — R5's own FR-04/FR-06 real-DV work (task 014 and the Assigned-To task) remain the worked examples, not enforcement code.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-20 / design.md PROC-1. This task produces the PROCESS artifact (the documented gate); task 014 is a separate task that already exercises FR-04's real-DV smoke as a worked example of the gate in action. No code changes — `.claude/` skill-doc edit only, hence MAIN-SESSION-ONLY per §3.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

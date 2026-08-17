@@ -61,7 +61,7 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { WidgetErrorBoundary, OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync } from "@spaarke/ui-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
 import type { IFeedSyncBridge, SmartTodoWidgetProps } from "@spaarke/smart-todo-components";
@@ -126,69 +126,91 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
   // Open behaviour splits by selection state:
   //
   //   - todoId PRESENT → open the OOB sprk_todo record FORM at Layout 1 via
-  //     `Xrm.Navigation.navigateTo({pageType:'entityrecord', ...}, {target:2,
-  //     position:1, width:85%, height:85%})` per ai-spaarke-ai-workspace-UI-r2
-  //     FR-13/FR-20 (85% × 85% is the binding modal size standard; was 80% × 80%
-  //     under the pre-R2 UAT 2026-06-21 round 5 fix). `target: 2` = dialog mode
-  //     (modal overlay over the current page); the current SpaarkeAi page stays
-  //     mounted so when the dialog closes, the user is back exactly where they
-  //     were (widget context preserved).
+  //     the shared `navigateToEntityRecordSurfaceAsync` launcher (task 031 /
+  //     spec FR-11 — "one code path for create + open"; consolidates this
+  //     call site's previously-inline `Xrm.Navigation.navigateTo` onto the
+  //     SAME function `SmartTodoApp.tsx`'s open path + task 030's create path
+  //     use). The launcher applies Layout 1 sizing (85% × 85%, centered,
+  //     dialog target — ai-spaarke-ai-workspace-UI-r2 FR-13/FR-20) and the
+  //     frame-walking `resolveXrmNavigation()` resolver (window/parent/top —
+  //     strictly more robust than this file's prior single-frame
+  //     `globalThis.Xrm` check). `target: 2` = dialog mode (modal overlay
+  //     over the current page); the current SpaarkeAi page stays mounted so
+  //     when the dialog closes, the user is back exactly where they were
+  //     (widget context preserved).
   //
   //   - todoId ABSENT  → open the SmartTodo Code Page (no launch data) so
   //     `useLaunchContext` returns undefined → app renders its default 3-col
   //     Kanban view (no auto-modal). This preserves "user wants to just open
-  //     the full app" without forcing a card selection first.
+  //     the full app" without forcing a card selection first. UNCHANGED by
+  //     task 031 (constraint: "no selection" branch stays intact).
   //
-  // Falls back to openForm (page-nav) if Xrm.Navigation.navigateTo is somehow
-  // unavailable — defensive only, should not happen inside MDA.
+  // Falls back to openForm (page-nav) if the launcher reports no reachable
+  // Xrm host (`outcome.launched === false`) — defensive only, should not
+  // happen inside MDA. This fallback predates task 031 and is preserved
+  // as-is; it is orthogonal to which primary function issues the
+  // entityrecord navigateTo call (that part is now the ONE shared launcher).
   const handleOpenTodo = React.useCallback(
     (todoId?: string) => {
       if (todoId) {
-        // Loose typing — the shared lib doesn't pull in @types/xrm.
-        const xrm = (globalThis as unknown as {
-          Xrm?: {
-            Navigation?: {
-              navigateTo?: (page: unknown, opts?: unknown) => Promise<unknown>;
-              openForm?: (opts: unknown) => Promise<unknown>;
+        void navigateToEntityRecordSurfaceAsync({
+          entityName: "sprk_todo",
+          entityId: todoId,
+        }).then((outcome) => {
+          if (outcome.launched) {
+            // task 033 (FR-14) — the OOB form dialog closed. An existing-record
+            // OPEN never resolves with `savedEntityReference` (CREATE-only, per
+            // MS Learn — see wizardLaunchers.ts outcome-shape note), so there is
+            // no reliable save-vs-cancel signal; refetch UNCONDITIONALLY so a
+            // Save & Close reflects in the widget's list without a manual
+            // reload. A redundant refetch on cancel is tolerable; a missing one
+            // on save is not. The promise resolves AFTER Save & Close commits,
+            // so the refetch reads committed data.
+            //
+            //  - `refetchRef.current` is the AUTHORITATIVE refresh for THIS
+            //    widget (re-queries the list; reflects edits AND completions).
+            //  - `feedSync.notifyChange(todoId, true)` fans the change out to
+            //    sibling blocks (ActivityFeed / other SmartTodo instances) that
+            //    subscribe to FeedTodoSyncContext. `isActive: true` is the
+            //    CONSERVATIVE choice: a subscriber treats `true` as
+            //    "reconcile-by-refetch, no-op if already listed" but treats
+            //    `false` as "REMOVE this todo now" (see useTodoItems.ts). Since
+            //    we cannot know from the resolve value whether the user
+            //    completed the todo, `false` could wrongly drop a still-active
+            //    row cross-block, whereas `true` at worst leaves a
+            //    just-completed row until the sibling's own next refresh
+            //    (tolerable staleness, never data loss).
+            refetchRef.current?.();
+            feedSync.notifyChange(todoId, true);
+            return;
+          }
+
+          // Loose typing — the shared lib doesn't pull in @types/xrm.
+          const xrm = (globalThis as unknown as {
+            Xrm?: {
+              Navigation?: {
+                openForm?: (opts: unknown) => Promise<unknown>;
+              };
             };
-          };
-        }).Xrm;
-        if (xrm?.Navigation?.navigateTo) {
-          // Layout 1 (R2 FR-20 binding): 85% × 85%, centered, dialog target.
-          // Sourced from oobModalSizes.ts's `record` size (spec FR-11/FR-18,
-          // task 090) — was an independent 85%×85% literal, now can't drift.
-          void xrm.Navigation.navigateTo(
-            {
-              pageType: "entityrecord",
+          }).Xrm;
+          if (xrm?.Navigation?.openForm) {
+            // Defensive — page-nav fallback only.
+            void xrm.Navigation.openForm({
               entityName: "sprk_todo",
               entityId: todoId,
-            },
-            {
-              target: 2,
-              position: 1, // 1 = center
-              width: OOB_MODAL_SIZES.record.width,
-              height: OOB_MODAL_SIZES.record.height,
-            },
+              openInNewWindow: false,
+            });
+            return;
+          }
+          // Nothing more to do — Xrm.Navigation isn't available. (The pre-R2
+          // Code-Page-hop last-resort fallback was retired per R2 FR-13; it
+          // routed through `openTodo` launch context to open the retired
+          // iframe modal, which no longer exists.)
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[todo.registration] Xrm.Navigation unavailable; cannot open sprk_todo",
           );
-          return;
-        }
-        if (xrm?.Navigation?.openForm) {
-          // Defensive — page-nav fallback only.
-          void xrm.Navigation.openForm({
-            entityName: "sprk_todo",
-            entityId: todoId,
-            openInNewWindow: false,
-          });
-          return;
-        }
-        // Nothing more to do — Xrm.Navigation isn't available. (The pre-R2
-        // Code-Page-hop last-resort fallback was retired per R2 FR-13; it
-        // routed through `openTodo` launch context to open the retired
-        // iframe modal, which no longer exists.)
-        // eslint-disable-next-line no-console
-        console.warn(
-          "[todo.registration] Xrm.Navigation unavailable; cannot open sprk_todo",
-        );
+        });
         return;
       }
 
@@ -198,7 +220,9 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
         height: { value: 85, unit: "%" },
       });
     },
-    [ctx],
+    // `feedSync` added (task 033) — the todoId branch now fans the post-close
+    // change out via `feedSync.notifyChange`. `refetchRef` is a ref (no dep).
+    [ctx, feedSync],
   );
 
   const handleAddTodo = React.useCallback(() => {
@@ -310,6 +334,12 @@ export const todoRegistration: SectionRegistration = {
       id: "todo",
       type: "content",
       title: "Smart To Do",
+      // `hideTitle` suppresses the SectionPanel header bar while keeping `title`
+      // for aria-labels. SmartTodoWidget renders its OWN `<PaneHeader
+      // title="Smart To Do" />`, so without this the workspace stacked two
+      // identical "Smart To Do" titles (UAT #4, 2026-08-17 — operator: "remove
+      // the top 'Smart To Do', only use the title in the code page itself").
+      hideTitle: true,
       style: { overflow: "hidden" },
       renderContent: () => React.createElement(FeedSyncBridgeHost, { ctx }),
     };

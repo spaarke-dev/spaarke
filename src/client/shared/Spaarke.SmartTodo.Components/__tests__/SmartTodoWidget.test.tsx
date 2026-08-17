@@ -1,13 +1,28 @@
 /**
- * SmartTodoWidget — query-builder smoke tests.
+ * SmartTodoWidget — query-builder tests + orientation-default test.
  *
- * Run-time render tests (loading / empty / populated / error) require Jest +
- * jsdom + Fluent v9 test setup; the `@spaarke/smart-todo-components` peer
- * package ships type-check only (`build: tsc --noEmit`) — there is no Jest
- * config in this initial 0.1.0 release. These tests are kept in source as
- * pure-function exercises against `buildSmartTodoQuery`, so they can be
- * picked up later either by the peer package (when it gets Jest config) or
- * inlined into the LW shim's existing Jest run.
+ * smart-todo-r5 task 040: converted from this file's original Jest-less
+ * `assert()`-based smoke-test harness (no Jest runner existed in this
+ * package before task 040 wired one — see `jest.config.cjs`) to real Jest
+ * `describe`/`it`/`expect`. Running the ORIGINAL assertions verbatim for the
+ * first time (they had never actually executed) surfaced real drift: the
+ * original harness called `buildSmartTodoQuery({ userId: 'u1' })` and
+ * expected an `_ownerid_value eq u1` "owner clause". The function's actual
+ * current signature (post UAT 2026-06-20 assignedto-contact migration, see
+ * this file's own docblock above `buildSmartTodoQuery`) takes `contactId`,
+ * not `userId`, and emits `_sprk_assignedto_value eq <contactId>`, not
+ * `_ownerid_value`. With the stale `userId` key, `opts.contactId` was always
+ * `undefined`, so every one of these test calls actually exercised the
+ * SECURITY zero-row fallback branch (`sprk_todoid eq
+ * 00000000-0000-0000-0000-000000000000`) instead of the intended path —
+ * silently, since nothing ever ran it. This file corrects the input key to
+ * `contactId` and the expected field to `_sprk_assignedto_value`, matching
+ * current code (root CLAUDE.md §2: code wins, docs/tests lag) — the
+ * BEHAVIORAL intent of each assertion (zero legacy refs, statuscode/
+ * statecode pinning, regarding-precedence, assignee clause, scope='all' BU
+ * clause, select projection) is unchanged from the original harness; only
+ * the stale parameter name and the (also stale) `_ownerid_value` field name
+ * are corrected. See projects/smart-todo-r5/notes/task-040-test-infra.md.
  *
  * R4 spec FR-02 acceptance:
  *   - Zero `sprk_event` references in the emitted query.
@@ -21,78 +36,103 @@
  *   `?$select=sprk_todoid,sprk_name,...&$filter=_sprk_regardingmatter_value
  *    %20eq%20<matterId>%20and%20statecode%20eq%200%20and%20(statuscode%20eq
  *    %201%20or%20statuscode%20eq%20659490001)&$orderby=...&$top=100`
+ *
+ * smart-todo-r5 task 024 (U-2 / FR-09, 2026-08-15): the widget's default
+ * orientation changed from 'vertical' (stacked rows) to 'horizontal'
+ * (side-by-side columns — left/center/right), matching the mockup intent
+ * and the Code Page's existing default. This is a pure-VALUE check of the
+ * single-source-of-truth constant `SmartTodoWidget`'s `useState<Orientation>`
+ * seeds from — a true render-level assertion (mount + inspect the
+ * `KanbanBoard` region) is a separate, larger render-test surface this task
+ * does not add (would require Fluent v9 provider + `@hello-pangea/dnd` mount
+ * scaffolding beyond this file's existing pure-function scope); the
+ * underlying flip mechanism itself is already covered by
+ * `Spaarke.UI.Components/.../Kanban/__tests__/KanbanBoard.test.tsx`'s
+ * "keeps the same column structure across orientation flips".
+ *
+ * `@spaarke/ui-components` is mocked (module-boundary pattern, mirroring
+ * `FilterPane.test.tsx`) because its barrel (`dist/index.js` ->
+ * `services/index.js`) unconditionally requires `@spaarke/sdap-client`,
+ * which is not built as a dist package in this worktree. `SmartTodoWidget`
+ * only imports `OrientationToggle` / `MicrosoftToDoIcon` (both unrendered by
+ * these pure-function tests) - the mock keeps the suite hermetic to
+ * `buildSmartTodoQuery` and `SMART_TODO_WIDGET_DEFAULT_ORIENTATION` without
+ * pulling in the unrelated SDAP dependency chain.
  */
+
+jest.mock('@spaarke/ui-components', () => ({
+  OrientationToggle: () => null,
+  MicrosoftToDoIcon: () => null,
+}));
 
 import {
   buildSmartTodoQuery,
   TODO_STATUSCODE_OPEN,
   TODO_STATUSCODE_IN_PROGRESS,
+  SMART_TODO_WIDGET_DEFAULT_ORIENTATION,
 } from '../src/widgets/SmartTodoWidget/SmartTodoWidget';
 
-// Lightweight assert helpers — kept dependency-free so these compile cleanly
-// even before Jest is wired into this peer package.
-function assert(cond: boolean, msg: string): void {
-  if (!cond) {
-    // eslint-disable-next-line no-console
-    console.error(`[SmartTodoWidget.test] FAIL: ${msg}`);
-    throw new Error(msg);
-  }
-}
-
-export function runQueryBuilderSmokeTests(): void {
-  // ── Test 1: zero legacy references ────────────────────────────────────────
-  const q1 = buildSmartTodoQuery({ userId: 'u1' });
-  assert(!q1.includes('sprk_event'), 'Query must not reference sprk_event');
-  assert(!q1.includes('sprk_todoflag'), 'Query must not reference sprk_todoflag');
-
-  // ── Test 2: statuscode + statecode pinned ─────────────────────────────────
-  const decoded1 = decodeURIComponent(q1);
-  assert(decoded1.includes(`statuscode eq ${TODO_STATUSCODE_OPEN}`), 'Query must filter statuscode eq Open(1)');
-  assert(
-    decoded1.includes(`statuscode eq ${TODO_STATUSCODE_IN_PROGRESS}`),
-    'Query must filter statuscode eq InProgress(659490001)'
-  );
-  assert(decoded1.includes('statecode eq 0'), 'Query must filter statecode eq 0');
-
-  // ── Test 3: regarding context filter takes precedence ─────────────────────
-  const q2 = buildSmartTodoQuery({
-    userId: 'u1',
-    regardingContext: { entityLogicalName: 'sprk_matter', recordId: 'M1' },
+describe('buildSmartTodoQuery — query-builder tests (FR-02 acceptance)', () => {
+  it('emits zero legacy sprk_event/sprk_todoflag references', () => {
+    const query = buildSmartTodoQuery({ contactId: 'c1' });
+    expect(query).not.toContain('sprk_event');
+    expect(query).not.toContain('sprk_todoflag');
   });
-  const decoded2 = decodeURIComponent(q2);
-  assert(
-    decoded2.includes('_sprk_regardingmatter_value eq M1'),
-    'Query must include regarding-matter filter when context is sprk_matter'
-  );
-  assert(!decoded2.includes('_ownerid_value'), 'Owner clause must NOT be emitted when regarding context supplied');
 
-  // ── Test 4: owner clause when no regarding context ────────────────────────
-  const q3 = buildSmartTodoQuery({ userId: 'u1' });
-  const decoded3 = decodeURIComponent(q3);
-  assert(decoded3.includes('_ownerid_value eq u1'), 'Owner clause must be emitted when no regarding context');
-
-  // ── Test 5: scope=all uses business-unit OR ───────────────────────────────
-  const q4 = buildSmartTodoQuery({
-    userId: 'u1',
-    scope: 'all',
-    businessUnitId: 'bu1',
+  it('pins statuscode to {Open, In Progress} and statecode to Active', () => {
+    const query = buildSmartTodoQuery({ contactId: 'c1' });
+    const decoded = decodeURIComponent(query);
+    expect(decoded).toContain(`statuscode eq ${TODO_STATUSCODE_OPEN}`);
+    expect(decoded).toContain(`statuscode eq ${TODO_STATUSCODE_IN_PROGRESS}`);
+    expect(decoded).toContain('statecode eq 0');
   });
-  const decoded4 = decodeURIComponent(q4);
-  assert(decoded4.includes('_owningbusinessunit_value eq bu1'), "Scope='all' must include business-unit OR clause");
 
-  // ── Test 6: select projection has the required fields ─────────────────────
-  assert(q1.includes('sprk_todoid'), 'Select must include sprk_todoid');
-  assert(q1.includes('sprk_name'), 'Select must include sprk_name');
-  assert(q1.includes('sprk_duedate'), 'Select must include sprk_duedate');
-  assert(q1.includes('statuscode'), 'Select must include statuscode');
+  it('regarding context filter takes precedence over the assignee clause', () => {
+    const query = buildSmartTodoQuery({
+      contactId: 'c1',
+      regardingContext: { entityLogicalName: 'sprk_matter', recordId: 'M1' },
+    });
+    const decoded = decodeURIComponent(query);
+    expect(decoded).toContain('_sprk_regardingmatter_value eq M1');
+    // `_sprk_assignedto_value` still appears in $select (it's always
+    // projected) — check the FILTER clause specifically doesn't use it.
+    expect(decoded).not.toContain('_sprk_assignedto_value eq');
+  });
 
-  // eslint-disable-next-line no-console
-  console.info('[SmartTodoWidget.test] All query-builder smoke tests passed.');
-}
+  it('emits the assignee clause when no regarding context is supplied', () => {
+    const query = buildSmartTodoQuery({ contactId: 'c1' });
+    const decoded = decodeURIComponent(query);
+    expect(decoded).toContain('_sprk_assignedto_value eq c1');
+  });
 
-// Module-eval auto-run is gated to a Node.js env so test consumers can import
-// this file without side effects. When the peer package gets Jest wired,
-// replace this gate with `describe`/`it` blocks.
-if (typeof process !== 'undefined' && process.env?.SMART_TODO_WIDGET_SMOKE === '1') {
-  runQueryBuilderSmokeTests();
-}
+  it('with no contactId and no regarding context, falls back to the SECURITY zero-row guard (never all active todos)', () => {
+    // Per this file's buildSmartTodoQuery docblock: showing other people's
+    // todos to an unresolved user is a data-isolation breach — the function
+    // must never silently fall back to "all active sprk_todos system-wide".
+    const query = buildSmartTodoQuery({});
+    const decoded = decodeURIComponent(query);
+    expect(decoded).toContain('sprk_todoid eq 00000000-0000-0000-0000-000000000000');
+    expect(decoded).not.toContain('_sprk_assignedto_value eq');
+  });
+
+  it("scope='all' includes the business-unit OR clause", () => {
+    const query = buildSmartTodoQuery({ contactId: 'c1', scope: 'all', businessUnitId: 'bu1' });
+    const decoded = decodeURIComponent(query);
+    expect(decoded).toContain('_owningbusinessunit_value eq bu1');
+    expect(decoded).toContain('_sprk_assignedto_value eq c1');
+  });
+
+  it('the $select projection includes the required fields', () => {
+    const query = buildSmartTodoQuery({ contactId: 'c1' });
+    expect(query).toContain('sprk_todoid');
+    expect(query).toContain('sprk_name');
+    expect(query).toContain('sprk_duedate');
+    expect(query).toContain('statuscode');
+  });
+});
+
+describe('SmartTodoWidget — default orientation (FR-09 / U-2)', () => {
+  it("SMART_TODO_WIDGET_DEFAULT_ORIENTATION is 'horizontal' (side-by-side columns: Today/Tomorrow/Future left/center/right)", () => {
+    expect(SMART_TODO_WIDGET_DEFAULT_ORIENTATION).toBe('horizontal');
+  });
+});
