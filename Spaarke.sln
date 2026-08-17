@@ -29,6 +29,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spaarke.Scheduling", "src\s
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Spaarke.Scheduling.Tests", "tests\unit\Spaarke.Scheduling.Tests\Spaarke.Scheduling.Tests.csproj", "{7FF30C9A-F8EE-4043-BECF-FCBFDA2E5AC2}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "services", "services", "{4EA1A6B6-D2C0-45E1-8F0C-2A3D5F71B884}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Sprk.Provisioning.ControlPlane", "src\server\services\Sprk.Provisioning.ControlPlane\Sprk.Provisioning.ControlPlane.csproj", "{AD99C354-FD74-4B29-829D-354CA1922B79}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -111,6 +115,18 @@ Global
 		{7FF30C9A-F8EE-4043-BECF-FCBFDA2E5AC2}.Release|x64.Build.0 = Release|Any CPU
 		{7FF30C9A-F8EE-4043-BECF-FCBFDA2E5AC2}.Release|x86.ActiveCfg = Release|Any CPU
 		{7FF30C9A-F8EE-4043-BECF-FCBFDA2E5AC2}.Release|x86.Build.0 = Release|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Debug|x64.Build.0 = Debug|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Debug|x86.Build.0 = Debug|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Release|x64.ActiveCfg = Release|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Release|x64.Build.0 = Release|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Release|x86.ActiveCfg = Release|Any CPU
+		{AD99C354-FD74-4B29-829D-354CA1922B79}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -127,5 +143,7 @@ Global
 		{1FFB4C5D-F395-45A3-AA0B-05679ED04552} = {9ADF2C08-C2F6-4F90-9AD1-056E622C5EE2}
 		{575CEF51-EFF0-4E8A-8B82-7D38561FC16A} = {1FFB4C5D-F395-45A3-AA0B-05679ED04552}
 		{7FF30C9A-F8EE-4043-BECF-FCBFDA2E5AC2} = {8E42C3A5-4F85-4A32-8CC1-7FE89B372F33}
+		{4EA1A6B6-D2C0-45E1-8F0C-2A3D5F71B884} = {9ADF2C08-C2F6-4F90-9AD1-056E622C5EE2}
+		{AD99C354-FD74-4B29-829D-354CA1922B79} = {4EA1A6B6-D2C0-45E1-8F0C-2A3D5F71B884}
 	EndGlobalSection
 EndGlobal
