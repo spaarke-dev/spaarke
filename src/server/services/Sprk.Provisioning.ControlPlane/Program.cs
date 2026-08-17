@@ -60,6 +60,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 using Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
+using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
@@ -702,6 +703,76 @@ builder.Services.AddScoped<H11UserProvisioningHandler>();
 //     (parity with H7's reasoning). Full mapping table inline in
 //     H12cRuntimeReferencesHandler.cs file header.
 builder.Services.AddH12cRuntimeReferencesHandler(builder.Configuration);
+
+// Task 073 (Batch 3F): H14 post-deploy integration wiring handler (parent) +
+// its 3 DAG-parallel sub-handlers (H14a Exchange ApplicationAccessPolicy —
+// T4 silent-fail trap owner; H14b Graph webhook subscriptions; H14c Dataverse
+// service-endpoint webhook) + FOUR collaborator seams (IExchangePolicyApplier
+// = ExchangePolicyScriptApplier shells out to the new
+// scripts/Set-ExchangeApplicationAccessPolicy.ps1 — Exchange Online has no
+// REST surface for ApplicationAccessPolicy management; IKvSecretReader =
+// AzCliKvSecretReader reads back the H4-provisioned Communication-Webhook-
+// SigningKey HMAC secret [a NEW narrow read-only seam — IKvSecretsWriter
+// (H4) is write-only; see IKvSecretReader.cs for the full CLAUDE.md §11
+// component-justification]; IGraphSubscriptionCreator = GraphRestSubscription
+// Creator issues real Graph REST /subscriptions calls (list-then-create-or-
+// renew, idempotent); IServiceEndpointWebhookRegistrar = DataverseWebApi
+// ServiceEndpointWebhookRegistrar issues real Dataverse Web API upserts
+// against serviceendpoints). Registered via a single
+// AddH14IntegrationWiringHandler() extension method (IntegrationWiringModule.cs)
+// — parity with H12b/H12c's god-class-ratchet pattern + this batch's
+// dispatcher note that Program.cs is a SHARED file across 3 parallel Batch 3F
+// siblings (054 H11, 072 H12c, 073 H14). All registrations UNCONDITIONAL per
+// ADR-032 — no feature-gate branches.
+//
+// Placement Justification (CLAUDE.md §10): H14 lives in L2 (not BFF) per spec
+// §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-
+// function rule — no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H14 uses IProvisioningRunRepository (task 037)
+// + the four dedicated seams; no BFF-facade dependencies. H14a/H14b/H14c do
+// NOT touch Cosmos themselves — H14 (parent) owns the single read + single
+// write to avoid a guaranteed ETag race across 3 TRUE-parallel in-process
+// sub-invocations against the same ProvisioningRun document (full rationale
+// in H14aExchangePolicySubHandler.cs file header "PARENT-OWNS-COSMOS DESIGN").
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - NFR-09 (Path C — pivot to comply in spirit, NOT a literal SDK
+//     dependency): H14b's GraphRestSubscriptionCreator parity with H10's
+//     file-header "NFR-09 IMPLEMENTATION NOTE" — raw HttpClient +
+//     DefaultAzureCredential surfaces the same HTTP-status + response-body
+//     diagnostic NFR-09 asks the BFF's Microsoft.Graph SDK ODataError catch
+//     to carry, without adding a new SDK dependency to L2.
+//   - ADR-004 (Path C — pivot to comply IN SPIRIT): H14 is ONE IJobHandler-
+//     shape impl that internally dispatches 3 sub-steps via Task.WhenAll —
+//     each sub-step still returns its OWN HandlerResult + has its OWN
+//     deterministic idempotency key (h14-{customerId}-{subStep}-{hash} per
+//     POML constraint); the PARENT owns the single Cosmos write that
+//     aggregates all 3 outcomes. Full rationale in
+//     H14IntegrationWiringHandler.cs file header "SINGLE-WRITER DAG-PARALLEL
+//     DESIGN".
+//   - CLAUDE.md §11 component justification (Path C — new narrow seam):
+//     IKvSecretReader is a NEW read-only seam rather than widening H4's
+//     IKvSecretsWriter (write-only manifest contract) with an unrelated read
+//     concern only H14 needs. Full 3-question justification in
+//     IKvSecretReader.cs file header.
+//   - T4 (spec.md FR-33): H14a's IExchangePolicyApplier.ApplyAsync owns the
+//     FULL action-and-verify sequence — 0/1 present creates the missing
+//     entries; 2+ present VERIFIES parity and reports Drift (QuarantineRequired)
+//     rather than silently overwriting. Post-condition verification happens
+//     via the SAME Get-ApplicationAccessPolicy re-query the script uses to
+//     decide the outcome — no separate out-of-band verify step exists to drift
+//     out of sync with the action step.
+//   - §4C rollback: parameter guards + missing upstream InterStepState fields
+//     = Resumable; T4 drift (H14a) = QuarantineRequired (no silent overwrite);
+//     Graph subscription / Dataverse serviceendpoint create-or-renew failures
+//     = RetryableWithCleanup (both seams are individually idempotent — a full
+//     re-run safely completes partial state). Full mapping table inline in
+//     H14IntegrationWiringHandler.cs file header.
+//
+// Deviations from the task POML's literal wording (Path C pivot-to-comply,
+// documented per CLAUDE.md §6.5) are recorded in
+// projects/customer-provisioning-orchestration-r1/notes/task-073-h14-deviations.md.
+builder.Services.AddH14IntegrationWiringHandler(builder.Configuration);
 
 var app = builder.Build();
 

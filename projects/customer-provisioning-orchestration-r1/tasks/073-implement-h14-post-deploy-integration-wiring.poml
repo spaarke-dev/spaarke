@@ -3,8 +3,8 @@
   <metadata>
     <title>Implement H14 post-deploy integration wiring handler (2 Exchange policies + Graph webhooks + service-endpoint webhooks — DAG-parallel sub-steps)</title>
     <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth','dataverse'; handler in the DAG whose failure blocks post-deploy readiness. FR-19 acceptance scope; T4 silent-fail trap owned here.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -114,7 +114,24 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
   </acceptance-criteria>
 
-  <notes>Reference: spec.md FR-19 + T4 + r3 task 060 (S2S drop) + Q5 spike (R22 Exchange RBAC deferred to r2).</notes>
+  <notes>Reference: spec.md FR-19 + T4 + r3 task 060 (S2S drop) + Q5 spike (R22 Exchange RBAC deferred to r2).
+
+COMPLETION SUMMARY (2026-08-17): H14IntegrationWiringHandler (parent, HandlerId "H14") + 3 sub-handlers
+(H14aExchangePolicySubHandler / H14bGraphWebhookSubHandler / H14cDataverseWebhookSubHandler) implemented under
+src/server/services/Sprk.Provisioning.ControlPlane/Handlers/IntegrationWiring/, registered via a single
+AddH14IntegrationWiringHandler() DI extension (IntegrationWiringModule.cs) wired into Program.cs. 4 new seams
+(IExchangePolicyApplier, IKvSecretReader [new — reads H4's Communication-Webhook-SigningKey back], IGraphSubscriptionCreator,
+IServiceEndpointWebhookRegistrar) each with a production impl + test fakes. New PS script
+scripts/Set-ExchangeApplicationAccessPolicy.ps1 implements the T4 action-and-verify sequence with a structured
+JSON result contract. 3 documented Path C/A deviations in
+projects/customer-provisioning-orchestration-r1/notes/task-073-h14-deviations.md (single-writer parent-owns-Cosmos
+design to avoid a guaranteed ETag race across Task.WhenAll; run-parameter-supplied Graph resource targets instead
+of a hardcoded catalog; Options-configurable Dataverse serviceendpoint option-set values) + 1 new ADR-028 Path A
+tension added to spec.md (H14a Exchange PS app-only cert auth — no MI equivalent exists for Exchange Online
+Management). 24 new unit tests across 5 test files (H14a/b/c sub-handler tests + parent orchestration tests +
+secret-redaction tests). Security hardening applied post-code-review: HMAC secret redaction from HTTP error
+diagnostics (defense-in-depth against a theoretical Graph/Dataverse error-response echo) + ILogger added to
+DataverseWebApiServiceEndpointWebhookRegistrar for parity. Build 0/0, tests 428/428 (up from 423/423 pre-fix).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
