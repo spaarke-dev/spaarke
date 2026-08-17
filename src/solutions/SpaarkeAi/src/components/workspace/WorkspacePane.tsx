@@ -545,8 +545,21 @@ export function WorkspacePane(): React.JSX.Element {
   const [composeReviewRunningInBackground, setComposeReviewRunningInBackground] = React.useState(false);
 
   /** Sync React state with the current manager snapshot. */
+  // task 023 (FR-06) — open embedded-layout snapshot broadcaster. Held in a ref so
+  // `syncState` (below) stays [] -stable; the real implementation (which closes over
+  // `dispatch`) is installed by the effect near `broadcastActiveTabChange`. No-op until then.
+  const broadcastTabsSnapshotRef = React.useRef<(tabs: readonly WorkspaceTab[]) => void>(() => {});
+
   const syncState = React.useCallback((): void => {
-    setTabState(managerRef.current.getSnapshot());
+    const snapshot = managerRef.current.getSnapshot();
+    setTabState(snapshot);
+    // task 023 (FR-06): broadcast the open embedded-layout id set on EVERY tab-set
+    // mutation (this is the single choke point every add/close/restore funnels through)
+    // so the Assistant's ConversationPane can gate its "open Daily Briefing / Smart To Do"
+    // follow-on cards on already-open state — WITHOUT reaching into this pane's private
+    // tab manager (panes stay bus-decoupled, ADR-030). Via a ref so `syncState` keeps its
+    // stable [] identity (it's called from ~10 imperative sites + effects).
+    broadcastTabsSnapshotRef.current(snapshot.tabs);
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -710,6 +723,26 @@ export function WorkspacePane(): React.JSX.Element {
   React.useEffect(() => {
     activeTabChangeRef.current = broadcastActiveTabChange;
   }, [broadcastActiveTabChange]);
+
+  // task 023 (FR-06) — broadcast the open embedded-layout id set for sibling-pane
+  // open-tab gating. Only `widgetType: 'workspace'` tabs (embedded LegalWorkspaceApp
+  // layouts — Daily Briefing / Smart To Do / Calendar / …) carry a `widgetData.layoutId`;
+  // every other tab kind (document viewers, Compose, wizards) contributes nothing, so the
+  // emitted set is exactly the open layouts. Installed into the ref `syncState` calls.
+  const broadcastTabsSnapshot = React.useCallback(
+    (tabs: readonly WorkspaceTab[]): void => {
+      const openLayoutIds = tabs
+        .filter((t) => t.widgetType === 'workspace')
+        .map((t) => (t.widgetData as { layoutId?: string } | null)?.layoutId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0);
+      dispatch('workspace', { type: 'workspace_tabs_snapshot', openLayoutIds });
+    },
+    [dispatch]
+  );
+
+  React.useEffect(() => {
+    broadcastTabsSnapshotRef.current = broadcastTabsSnapshot;
+  }, [broadcastTabsSnapshot]);
 
   // On unmount: cancel any pending timer to avoid late writes against a stale
   // session id. The in-memory snapshot is discarded; the most recent

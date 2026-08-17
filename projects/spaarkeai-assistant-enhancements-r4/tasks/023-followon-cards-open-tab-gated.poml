@@ -3,8 +3,8 @@
   <metadata>
     <title>Follow-on cards to open Briefing/Smart To Do — gated on not-already-open (FR-06)</title>
     <phase>2 — E2 follow-ons</phase>
-    <gate>startable</gate>
-    <status>pending</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Edits the ConversationPane transcriptFooter / useConsumerChips spine — a sequential SpaarkeAi spine shared with active worktrees; requires code-review + adr-check.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -68,7 +68,14 @@
     <criterion testable="true">The follow-ons are CARDS, not chips (per ASSISTANT-UI-ELEMENT-CRITERIA).</criterion>
     <criterion testable="true">When both cards are present, the stack is collapsed behind one disclosure header.</criterion>
   </acceptance-criteria>
-  <notes>Cards, not chips (persistent act-on items). Gate on the R3 open-tab awareness to avoid duplicate tabs. Clicking dispatches the task-022 single-surface entries via the generic workspace-tab path — no per-card branch. Dep 012 supplies the FR-01 answer these cards follow; dep 022 supplies the launch entries. /conflict-check with compose-r5/r6 + assistant-r3 before the PR (shared ConversationPane spine).</notes>
+  <notes>Cards, not chips (persistent act-on items). Gate on the R3 open-tab awareness to avoid duplicate tabs. Clicking dispatches the task-022 single-surface entries via the generic workspace-tab path — no per-card branch. Dep 012 supplies the FR-01 answer these cards follow; dep 022 supplies the launch entries. /conflict-check with compose-r5/r6 + assistant-r3 before the PR (shared ConversationPane spine).
+
+  ── COMPLETION (2026-08-17, sonnet/high FULL) ──
+  OWNER ESCALATION (§6.5): the POML premise "reuse R3 open-tab awareness (workspace-state block)" was factually wrong — NO client-side layoutId-keyed open-tab set existed (ConversationPane tracked only the ACTIVE tab; the `openTabs` resolver input is a hardcoded `[]` stub; the bus emitted no open/close snapshot). Owner chose (1) CLIENT LAUNCHER on the `list-tasks` FR-01 surface_launch (structural consumerType signal, no keyword heuristic; NO new Dataverse Bindings/chipTransitions → 080 scope UNCHANGED); (2) ADDITIVE WorkspacePane→bus open-layouts snapshot event (scope grew to WorkspacePane.tsx + ai-widgets event union — /conflict-check showed no open PR on either).
+
+  IMPLEMENTED (7 files): (a) `PaneEventTypes.ts` — additive `workspace_tabs_snapshot { openLayoutIds }` on WorkspacePaneEvent (ADR-030). (b) `WorkspacePane.tsx` — broadcast the open `widgetType:'workspace'` layoutId set at the single `syncState` choke point (via ref → syncState stays []-stable). (c) `WorkspaceLauncherCard.tsx` (NEW) — dumb presentational card (icon/title/desc/trailing-arrow; ADR-021 tokens-only; hover only on the clickable region; no code in label). (d) `agendaFollowOnCards.tsx` (NEW) — pure `buildAgendaFollowOnSlots({armed,openLayoutIds,onOpenSurface})` → 2 gated ProactiveCardSlots; layoutId + display title read from the task-022 registry (`resolveSurfaceLaunch`) — no re-hardcoded GUID. (e) `ConversationPane.tsx` — `agendaFollowOnArmed` (armed when handleSurfaceLaunch fires for `list-tasks`; reset on new session) + `openLayoutIds` state (from the snapshot subscriber, with a referential-equality guard so unrelated tab mutations don't re-render); slots spread into the existing `ProactiveCardStack` (collapse-2+-behind-one-header for free). Click → the SAME `handleSurfaceLaunch({consumerType})` → 022 registry (no per-card branch). "No duplicate tab" is guaranteed by WorkspacePane's existing layoutId de-dupe independent of the gate. (f) test `agendaFollowOnCards.test.tsx` — all 5 acceptance criteria (armed/unarmed, briefing-open-suppressed, smart-todo-open-suppressed, both-open-none, click-dispatches-by-consumerType, both→one-disclosure-header, lone→unwrapped).
+
+  VERIFY: surface-gate typecheck — my 5 production files 0 errors (test file carries only the same baseline "Cannot find module 'react'" noise dozens of sibling tests have). Local jest/eslint unavailable in this worktree (hoisted deps absent — CI runs both; matches 021b). Step 9.5: code-review 1 finding fixed Path C (re-render perf guard); adr-check ADR-039 (structural consumerType signal, no keyword heuristic, no new decider) / ADR-021 / ADR-012 / ADR-030 / NFR-07 all clean. Client-only — no BFF publish/CVE impact. Deploy: no new Dataverse data; ships with the SpaarkeAi rebuild at 080.</notes>
   <ui-tests>
     <test name="Card suppressed when tab already open">
       <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>

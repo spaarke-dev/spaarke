@@ -109,6 +109,8 @@ import { useDocumentPerItemCards } from "./DocumentPerItemCards";
 // plus the stack-collapse wrapper for multiple simultaneous proactive card slots.
 import { resolveFollowOnElementTypeForActiveItemType } from "./followOnElementType";
 import { ProactiveCardStack } from "./ProactiveCardStack";
+// task 023 (FR-06): open-tab-gated follow-on launcher cards (Daily Briefing / Smart To Do).
+import { buildAgendaFollowOnSlots } from "./agendaFollowOnCards";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
@@ -967,6 +969,14 @@ export function ConversationPane(): React.JSX.Element {
   // client-projectable (buildChipPreference gives stated precedence when non-empty). `chipUsageTick`
   // bumps after each dispatch so the preference re-reads usage and the next chip strip re-ranks.
   const [chipUsageTick, setChipUsageTick] = React.useState(0);
+  // task 023 (FR-06) — follow-on launcher-card gating state.
+  //  - `agendaFollowOnArmed`: set true once the FR-01 task-agenda answer's `list-tasks`
+  //    surface_launch fires (structural signal in handleSurfaceLaunch — no keyword heuristic,
+  //    ADR-039); session-scoped (reset in handleSessionCreated).
+  //  - `openLayoutIds`: the live set of open embedded-layout tab ids, fed by WorkspacePane's
+  //    additive `workspace_tabs_snapshot` bus event — the open-tab awareness the cards gate on.
+  const [agendaFollowOnArmed, setAgendaFollowOnArmed] = React.useState(false);
+  const [openLayoutIds, setOpenLayoutIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const chipDisplayPreference = React.useMemo(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- chipUsageTick is the intended recompute trigger
     () => buildChipPreference(/* statedOrder seam */ null),
@@ -1264,6 +1274,14 @@ export function ConversationPane(): React.JSX.Element {
       // The capability that opens a workspace tab drafts nothing — ignore any payload.
       const surfaceEntry = resolveSurfaceLaunch(payload.consumerType);
       if (surfaceEntry && (surfaceEntry.kind === "workspace-tab" || surfaceEntry.kind === "layout")) {
+        // task 023 (FR-06): the FR-01 task-agenda answer opens the My Tasks grid via a
+        // `list-tasks` surface_launch — the STRUCTURAL signal (consumerType match, not a
+        // keyword heuristic; ADR-039) that arms the Daily Briefing / Smart To Do follow-on
+        // launcher cards. Session-scoped; the open-tab gate + WorkspacePane's own layoutId
+        // de-dupe keep it from ever offering (or opening a duplicate of) an already-open tab.
+        if (payload.consumerType === "list-tasks") {
+          setAgendaFollowOnArmed(true);
+        }
         dispatch("workspace", {
           type: "widget_load",
           widgetType: surfaceEntry.surface,
@@ -2561,6 +2579,9 @@ export function ConversationPane(): React.JSX.Element {
       // R5-D (2026-07-07): the execution-trace replay buffer is session-scoped —
       // a fresh session must not replay the previous session's tool calls.
       clearExecutionTraceBuffer();
+      // task 023 (FR-06): a fresh session has no task-agenda answer yet — disarm the
+      // Daily Briefing / Smart To Do follow-on cards until the next FR-01 answer.
+      setAgendaFollowOnArmed(false);
       // task 022: a fresh session has no pending "Review an NDA" card.
       setNdaReviewFile(null);
       // task 064: reset the resolved consumerType to the default alongside the file — keeps the
@@ -2683,6 +2704,21 @@ export function ConversationPane(): React.JSX.Element {
   // A seed WITHOUT the hand-off fields (every non-wizard compose open — upload door, Browse,
   // "Open in Compose", revise mounts) returns immediately: zero behavior change.
   usePaneEvent("workspace", (event) => {
+    // task 023 (FR-06) — open-tab awareness: WorkspacePane broadcasts the open embedded-layout
+    // id set (additive `workspace_tabs_snapshot`) on every tab-set mutation. Track it so the
+    // Daily Briefing / Smart To Do follow-on cards can suppress themselves when their target
+    // layout tab is already open. Additive discriminant — return early (nothing else reads it).
+    if ((event as { type?: string }).type === "workspace_tabs_snapshot") {
+      const ids = (event as { openLayoutIds?: readonly string[] }).openLayoutIds ?? [];
+      // Referential-equality guard: this event fires on EVERY tab mutation (incl. unrelated
+      // document/compose tabs), but the layout set rarely changes — return the SAME set when it's
+      // unchanged so React bails out and this large component does not re-render needlessly.
+      setOpenLayoutIds((prev) =>
+        prev.size === ids.length && ids.every((id) => prev.has(id)) ? prev : new Set(ids)
+      );
+      return;
+    }
+
     // task 010 (FR-A1) — active-tab focus-stamp. Extend the existing `workspace` subscription
     // (rather than adding a second bus subscription, per ADR-030's single-subscriber-per-concern
     // convention already followed by this handler) with an `active_widget_changed` branch that
@@ -2890,6 +2926,20 @@ export function ConversationPane(): React.JSX.Element {
   // the compose-context doc-action chips (Summarize / Add-to-DMS / Draft-email) are the relevant
   // next-steps, so they REPLACE the generic consumer cards instead of stacking a second row. Once
   // the user acts (handleDocAction clears reviseChipsPending), the consumer cards resume.
+  // task 023 (FR-06) — build the gated agenda follow-on launcher slots. Pure/memoized;
+  // each slot is null until armed AND its target layout tab is closed (open-tab gate).
+  // Click routes through the SAME `handleSurfaceLaunch` the create/list-tasks paths use
+  // (registry-driven; no per-card dispatch branch).
+  const agendaFollowOnSlots = React.useMemo(
+    () =>
+      buildAgendaFollowOnSlots({
+        armed: agendaFollowOnArmed,
+        openLayoutIds,
+        onOpenSurface: (consumerType: string) => handleSurfaceLaunch({ consumerType }),
+      }),
+    [agendaFollowOnArmed, openLayoutIds, handleSurfaceLaunch]
+  );
+
   const transcriptFooter = React.useMemo(
     () => (
       <>
@@ -2901,7 +2951,12 @@ export function ConversationPane(): React.JSX.Element {
             are additionally gated on `activeItemFollowOnType === 'card'` — the DETERMINISTIC resolution
             read through task-022's `perItemCards` + task-040's `getWidgetInteractionPattern` (never
             message text, never a keyword) — a belt-and-suspenders check against the SAME registration
-            contract those hooks already read internally. */}
+            contract those hooks already read internally.
+
+            task 023 (FR-06): the two agenda follow-on launcher cards (Daily Briefing / Smart To Do)
+            join as additional slots — each null (suppressed) until the FR-01 answer arms them AND its
+            target layout tab is closed. Feeding them as INDEPENDENT slots gets the "collapse both
+            behind one disclosure header" behavior for free from `ProactiveCardStack`. */}
         <ProactiveCardStack
           slots={[
             {
@@ -2926,6 +2981,7 @@ export function ConversationPane(): React.JSX.Element {
               key: "document-per-item",
               node: activeItemFollowOnType === "card" ? documentPerItemCards.cardSlot : null,
             },
+            ...agendaFollowOnSlots,
           ]}
         />
         {reviseChipsPending ? (
@@ -2962,6 +3018,7 @@ export function ConversationPane(): React.JSX.Element {
       chips.consumerChipsSlot,
       chips.hasChips,
       handleRefreshSuggestions,
+      agendaFollowOnSlots,
     ]
   );
 
