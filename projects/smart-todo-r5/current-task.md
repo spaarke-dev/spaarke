@@ -9,10 +9,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **15 of 28 DONE** (013 ✅) + **014 deploy done / smoke pending**: 001 002 003 010 · 020 024 042 · 011 012 022 · 021 023 034 · 040 · **013**. |
-| **Step** | **013 ✅ COMPLETE** — presave OnLoad handler registered+published on live To Do form via 014's solution-import deploy. **014 🔄** — DEPLOY DONE + verified (score webresource `sprk_todo_score_onchange` created `3f7f07ab…`; presave+score OnLoad handlers live on form eca59df4…; published). **Real-DV interactive smoke (steps 3–7) PENDING — needs operator in MDA browser** (subgrid-create + PolymorphicPicker + visual glyph). See `notes/task-014-deploy-and-smoke.md`. |
-| **Status** | in-progress — 014 awaiting operator browser smoke; then I MCP-verify the created records. |
-| **Next Action** | **Operator runs the 014 smoke script** (Path A subgrid-create from a Matter; Path B manual-pick a Project; set Priority/Effort; open a pre-R5 To Do for regression) → give me the created To Do name(s)/GUID(s) → I verify 5 resolver fields + scores + field-mapping inheritance via MCP and close 014. **KEY DEPLOY FACT**: direct Web API PATCH of `systemform` is a silent no-op in spaarkedev1 — form edits require `pac` solution export/edit/import (used here; applies to Phase-4 form tasks 030/031/032). Remaining after 014: **025** deploy (Code Page+widget), modal spine **030→033**, **035** deploy, ribbon **050→052**, **060** smoke, **090** wrap-up. |
+| **Task** | **19 of 28 DONE/code-done**: 001 002 003 010 · 020 021 022 023 024 · 011 012 013 034 040 042 · **030 031** ✅ · **032** code-done · **050** edit-done. **033** 🔄 running (opus). |
+| **Step** | Modal spine nearly complete: 030 ✅ (New Task→OOB create modal), 031 ✅ (unified create+open launcher `navigateToEntityRecordSurfaceAsync`), 032 code ✅ (fullCover 100×100 + formId seam; header-hide = form-clone deploy documented), **033 running** (Save&Close→refetch; create gates on savedEntityReference [done by 030], open refetches unconditionally on close per 031 finding). All code committed+pushed through `c95b1179d`. |
+| **Status** | in-progress — 033 (opus capstone) running in background; then a single DEPLOY PHASE. |
+| **Next Action** | Verify+commit 033 when it returns → then run the **DEPLOY BATCH** (below) as one pass. **KEY DEPLOY FACT**: direct Web API PATCH of `systemform` is a silent no-op in spaarkedev1 — form edits require the `pac` solution export→edit→import roundtrip (proven in 014; scripts in scratchpad). |
+
+### 🚚 DEFERRED DEPLOY BATCH (run as one pass after 033, then ONE operator UAT)
+| Item | Deploy action (mine, via pac) | Operator UAT |
+|---|---|---|
+| **014** | (form handlers already live) | create-path resolver smoke: subgrid-create from Matter + manual-pick Project; verify 5 regarding fields + scores |
+| **032 header-hide** | clone "To Do main form"→"…- Modal" + add OnLoad `sprk_todo_modal_header_hide` webresource (`headerSection.set*Visible(false)`) + solution import; wire clone GUID into `wizardLaunchers.ts` formId seam (recipe in `notes/task-032-fullcover-header.md`) | header hidden, Save&Close reachable, full-cover |
+| **025** | build+deploy SmartTodo Code Page + widget (020-024 + 030-033 client work) | Code Page visual QA (top bar, filter pane, completed toggle, coloring, orientation) |
+| **035** | (modal spine deploys with 025's Code Page) | create/open modal + Save&Close refresh (033 UAT script) |
+| **050** | export `spaarke_insights` → apply RibbonDiff edit → import (`notes/task-050`) | Matter "Create To Do" shows checkmark icon |
+
+### 🔜 Remaining after deploy batch
+**041** (Playwright NFR — needs 025 deployed), **051→052** (5-entity ribbon clone + deploy), **060** (real-DV smoke gate — edits `.claude/skills/push-to-github`, MAIN-SESSION-ONLY §3), **090** (wrap-up: test-diet, close #508, defer-issues GH URLs, archive).
 
 ### Disjoint-partition ledger (subagents share ONE worktree — never co-edit a file)
 - **useKanbanColumns.ts** touched by 022 AND 023 → never same wave.
