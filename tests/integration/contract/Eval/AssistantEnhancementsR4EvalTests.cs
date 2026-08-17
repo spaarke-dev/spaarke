@@ -254,6 +254,68 @@ public class AssistantEnhancementsR4EvalTests
     }
 
     // -------------------------------------------------------------------------
+    // E2 — the FR-04 no-dead-end follow-on grounding (task 024)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The FR-04 "no dead-end follow-on" structural guard, grounded in the merge gate. The follow-on
+    /// SUGGESTER (<c>suggest-followups</c> Action, run by <c>AssistantSuggestionService</c>) is a GROUNDED
+    /// PROPOSER over a CLOSED candidate set — the exact property that makes a dead-end (the P2 "Help me
+    /// prioritize my tasks" chip that promised an unwired action) structurally impossible: a capability
+    /// suggestion's id is copied verbatim from a supplied candidate and any off-catalog id is DROPPED, and
+    /// the output is the typed two-kind {capability|question} contract that RETIRED the ungrounded
+    /// free-string generator. A revert to the free-string generator (or dropping the closed-candidate /
+    /// typed-kind contract) — i.e. re-introducing the dead-end — fails one of these assertions.
+    ///
+    /// This is the catalog/prompt-CONTRACT anchor (the analog of <see cref="ListTasksAction_DeclaresAdvisoryGroundedRecommendTier_NotAckOnly"/>
+    /// for FR-01); it is distinct from — and complementary to — the SERVICE-logic guards in
+    /// <c>AssistantSuggestionServiceTests</c> (021a: off-catalog drop, typed kinds, cadence, scope) and the
+    /// CLIENT-render guards in the SprkChat suggestion suites (021b: untyped/unbacked dropped, typed rendered).
+    /// FR-04's dispatch anchor (that "help me prioritize my tasks" routes to a REAL capability, never a
+    /// phantom) is the existing golden case AR4-003.
+    /// </summary>
+    [Fact]
+    public void SuggestFollowupsAction_IsGroundedTypedTwoKindProposer_NoDeadEndFreeString()
+    {
+        // The grounded proposer is catalog-grounded: assistant-suggest is a real ConsumerTypes constant
+        // (the Action the suggestion path runs) — not an invented capability name.
+        ConsumerTypes.All.Should().Contain(ConsumerTypes.AssistantSuggest,
+            "the grounded follow-on proposer runs the 'assistant-suggest' Action — it must be a real catalog constant");
+
+        var actionPath = Path.Combine(FindRepoRoot(), "infra", "dataverse", "actions", "suggest-followups.action.json");
+        File.Exists(actionPath).Should().BeTrue($"the grounded follow-on suggester Action mirror must exist at {actionPath}");
+        using var doc = JsonDocument.Parse(File.ReadAllText(actionPath), new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip });
+        var root = doc.RootElement;
+
+        // TYPED TWO-KIND closed output contract (the shape that replaced the untyped free-string strings).
+        var item = root.GetProperty("outputSchema").GetProperty("properties").GetProperty("suggestions")
+            .GetProperty("items");
+        item.GetProperty("additionalProperties").GetBoolean().Should().BeFalse(
+            "the follow-on output is a CLOSED contract — no free-form fields (the untyped free-string path is retired)");
+        var kindEnum = item.GetProperty("properties").GetProperty("kind").GetProperty("enum")
+            .EnumerateArray().Select(e => e.GetString()).ToList();
+        kindEnum.Should().BeEquivalentTo(new[] { "capability", "question" },
+            "every follow-on is one of exactly two typed kinds — a capability (real bindingId) or a question " +
+            "(re-enters the grounded loop); an untyped 'action-looking' free string cannot be formed");
+
+        // CLOSED-CANDIDATE grounding in the prompt: a capability id is copied verbatim from the supplied
+        // candidates and any non-candidate id is dropped downstream — the no-dead-end guarantee.
+        var systemPrompt = root.GetProperty("systemPrompt").GetString();
+        systemPrompt.Should().NotBeNullOrWhiteSpace();
+        systemPrompt!.Should().MatchRegex("(?i)copied? (exactly|verbatim)",
+            "a capability suggestion's targetBindingId is copied verbatim from a supplied candidate (no invented ids)");
+        systemPrompt.Should().MatchRegex("(?i)drop",
+            "the prompt states that an off-catalog id is DROPPED downstream — a suggestion for an unwired " +
+            "capability cannot survive (the structural death of the P2 dead-end)");
+        systemPrompt.Should().MatchRegex("(?i)never invent|never dispatch|proposing, not doing|proposer",
+            "the suggester is a grounded PROPOSER, not a dispatcher/inventor — it selects what to OFFER from the closed set");
+
+        _output.WriteLine(
+            $"FR-04 grounded: suggest-followups is a closed-candidate typed two-kind proposer " +
+            $"(kinds=[{string.Join(", ", kindEnum)}], additionalProperties=false) — no free-string dead-end path.");
+    }
+
+    // -------------------------------------------------------------------------
     // E3 — the P3 feedback→memory→bias loop grounding (FR-08/09, task 033)
     // -------------------------------------------------------------------------
 

@@ -3,8 +3,8 @@
   <metadata>
     <title>E2 eval cases — dead-end suppression + card gating (FR-10)</title>
     <phase>2 — E2 follow-ons</phase>
-    <gate>startable</gate>
-    <status>pending</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING — adds eval/test coverage; per CLAUDE.md the test-modifying override makes code-review + adr-check unconditional at Step 9.5.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -63,7 +63,18 @@
     <criterion testable="true">A reintroduced dead-end suggestion fails the FR-04 case (negative).</criterion>
     <criterion testable="true">An ungated card (that would open a duplicate tab) fails the FR-06 case (negative).</criterion>
   </acceptance-criteria>
-  <notes>Deps 021 + 023 must land first (behavior to cover). Cover both FR-04 and FR-06 with genuine negative regression guards per ADR-038 (no scaffolding/DI/ctor-null tests). Add "prioritize my tasks" to the ADR-039 golden-utterance suite as an FR-01-backed case. /conflict-check before the PR.</notes>
+  <notes>Deps 021 + 023 must land first (behavior to cover). Cover both FR-04 and FR-06 with genuine negative regression guards per ADR-038 (no scaffolding/DI/ctor-null tests). Add "prioritize my tasks" to the ADR-039 golden-utterance suite as an FR-01-backed case. /conflict-check before the PR.
+
+  ── COMPLETION (2026-08-17, sonnet/high FULL, TEST-MODIFYING) ──
+  KEY FINDING: the FR-04/FR-06 regression guards were ALREADY authored WITH their features (the ADR-038-preferred pattern — tests land in the feature PR, not a separate task): 021a `AssistantSuggestionServiceTests` (service off-catalog drop / typed kinds / cadence / scope), 021b SprkChat suggestion suites (client untyped/unbacked drop, typed render), 023 `agendaFollowOnCards.test.tsx` (FR-06 card open-tab gating — suppressed-when-open negatives), and 013 golden case AR4-003 ("help me prioritize my tasks" → real list-tasks capability). Per ADR-038's BINDING anti-scaffolding rule + §11, duplicating these would be build-class waste (deleted at /test-diet).
+
+  DELIVERED (the one guard the golden-utterance gate genuinely owed + the auditable FR-10 map):
+  (1) `AssistantEnhancementsR4EvalTests.cs` — NEW fact `SuggestFollowupsAction_IsGroundedTypedTwoKindProposer_NoDeadEndFreeString` (FR-04 no-dead-end CONTRACT anchor): grounds the `suggest-followups` Action as a closed-candidate, typed two-kind {capability|question} proposer with the verbatim-copy + drop-off-catalog prompt rules — a revert to the retired ungrounded free-string generator fails it. The catalog/prompt-contract analog of the E1 `ListTasksAction_Declares...` fact; distinct from 021a's service-logic test. Joins the `Category=GoldenUtteranceEval` merge gate. **8/8 R4 eval tests pass** (dotnet test, net10). Build 0 errors.
+  (2) `tests/integration/contract/Eval/README.md` — refreshed the stale "SCAFFOLDED, no harness" section (013 built it) + added the "E2 (task 024) FR-04 / FR-06 coverage map" table mapping each acceptance criterion → its guarding test + the negative-guard property, and documenting that FR-06 is pure client UX (no golden-utterance-gate home by design).
+  (3) `behavior-gap-register.md` — P2 row Status → ✅ with the FR-10 guard citation + an E2 coverage-map note + the deferred residual.
+  (4) `notes/defer-issues.md` (NEW) — D-024-01: no end-to-end contract test for the typed `ChatEndpoints` SSE `suggestions` frame (needs the live-agent streaming harness the deterministic eval suite avoids; typed shape guarded structurally at Action-contract + service + client-parse layers instead). GitHub Issue to be filed at PR time.
+
+  ACCEPTANCE: all 4 criteria met — FR-04 cases present+pass (AR4-003 + new fact), FR-06 present+pass (023), reintroduced dead-end fails FR-04 (new fact + 021a drop), ungated card fails FR-06 (023). Step 9.5: code-review (maintain-class KEEP-path fact, no B1–B17 antipattern) + adr-check (ADR-038/039) PASS. No BFF source touched (test + docs only) — no publish/CVE impact.
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
