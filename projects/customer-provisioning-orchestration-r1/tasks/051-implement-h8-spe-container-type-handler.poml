@@ -3,8 +3,8 @@
   <metadata>
     <title>Implement H8 SPE Container-Type + Root Container Handler (confidential-client cert per T6)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth'; modifies .cs files; owns T6 silent-fail trap (confidential-client cert); provisions SPE container-type (24h replication lead-time).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -119,7 +119,28 @@
     <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
   </acceptance-criteria>
 
-  <notes>Reference: spec.md FR-11 + FR-33 (T6) + MUST rules + NFR-09 + §4D I4/I5; design.md §4.1 H8 (v3.3 SPE privilege footnote) + §4B T6. Phase B cert-bootstrap script hardening is a prerequisite.</notes>
+  <notes>Reference: spec.md FR-11 + FR-33 (T6) + MUST rules + NFR-09 + §4D I4/I5; design.md §4.1 H8 (v3.3 SPE privilege footnote) + §4B T6. Phase B cert-bootstrap script hardening is a prerequisite.
+
+COMPLETION SUMMARY (2026-08-17):
+Implemented as 9 new C# files under Handlers/SpeContainerType/ (handler + 3 collaborator
+seams: ISpeContainerTypeProvisioner/CreateNewContainerTypeScriptProvisioner,
+ISpeContainerVerifier/SpeContainerAppOnlyVerifier, ISpeContainerIdKvWriter/
+AzCliSpeContainerIdKvWriter + options + rejection codes), 1 new PS script
+(scripts/Get-SpeContainerMetadata-AppOnly.ps1 — T6-compliant app-only GET verification,
+since the existing Get-ContainerMetadata.ps1 uses delegated auth), 1 test file (21 tests,
+all passing), and a narrow Program.cs DI hunk. dotnet build 0/0; full
+Sprk.Provisioning.ControlPlane.Tests suite 335/335 passing. Step 9.5 gates: code-review
+0 Critical/0 Warning, adr-check 0 Violations/0 Warnings (both ADR-004/010/013/028/036/044
+compliant).
+
+3 Path C deviations from literal POML wording (root container via -CreateTestContainer
+not New-BusinessUnitContainer.ps1; Dataverse env-var persistence via Cosmos
+InterStepState.SpeContainerId + H7's existing consumption contract, not a direct
+Dataverse write; KV secret name SPE-ContainerTypeId not customer-{customerId}-spe-
+container-id) — full writeup in notes/task-051-h8-deviations.md. Cross-task discovery:
+sibling task 050 (H7) had already extended InterStepState with a SpeContainerId field
+expecting H8 to populate it; H8 was updated during the ADR-check gate to honor that
+contract.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

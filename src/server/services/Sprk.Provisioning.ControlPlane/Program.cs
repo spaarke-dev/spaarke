@@ -58,8 +58,10 @@ using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
+using Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -442,6 +444,106 @@ builder.Services.AddSingleton<ISolutionCatalog, CanonicalSolutionCatalog>();
 builder.Services.AddSingleton<ISolutionImporter, DeployDataverseSolutionsScriptImporter>();
 builder.Services.AddSingleton<ISolutionVerifier, PacCliSolutionVerifier>();
 builder.Services.AddScoped<H6SolutionImportHandler>();
+
+// Task 050: H7 Dataverse env-var values handler + 1 collaborator seam
+// (IEnvVarValuesWriter issues direct Dataverse Web API REST calls — find
+// environmentvariabledefinition by schema name, then PATCH-if-exists /
+// POST-if-not on environmentvariablevalues — replicating
+// scripts/Provision-Customer.ps1 Step 8's sequence in C#). Registration is
+// UNCONDITIONAL per ADR-032 — no feature-gate branches. Auth is confidential-
+// client (BFF app-reg client-credentials via Azure.Identity.ClientSecretCredential),
+// the SAME identity + pattern H6 uses — the MI-Dataverse App User (H10) has
+// not yet been created at H7's point in the DAG (H10 runs AFTER H7 per
+// design.md §4.1: "H5 → H6 (solutions) → H7 → H10 (app-user) → H11").
+//
+// Placement Justification (CLAUDE.md §10): H7 lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-
+// function rule - no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H7 uses IProvisioningRunRepository (task 037)
+// + the single IEnvVarValuesWriter seam; no BFF-facade dependencies.
+// Idempotency key envvars-{customerId}-{configVer} follows the H6 catalogHash
+// / H4 secretsVer version-suffix pattern — configVer is a SHA-256 hash of the
+// 7 resolved (schemaName, value) pairs so any upstream-state or operator-
+// parameter change forces a re-write. Downstream H10 (app user, task 053)
+// consumes no state from H7 (H7 only mutates the target Dataverse env's
+// environmentvariablevalue records, not interStepState) - the wave-C5
+// reconciler owns H7 -> H10 fan-out.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-028 (Path C - comply): confidential-client credentials flow through
+//     EnvVarValuesOptions:ClientSecret (wave-C5 KV wiring); cleartext secret
+//     NEVER traverses Cosmos parameters/interStepState (options-bound only,
+//     parity with SolutionImportOptions:ClientSecret).
+//   - ADR-004 idempotency: Path C (comply) - CompletedPhases scan is the
+//     Level-3 durable dedup; configVer content-hash forces re-write on any
+//     resolved-value change (parity with H6's catalogHash).
+//   - §4C rollback: EVERY H7 failure mode classifies Resumable - every
+//     environmentvariablevalue write is a natural upsert (PATCH-if-exists /
+//     POST-if-not), so a full handler retry after ANY failure is always safe
+//     with no cleanup required. No QuarantineRequired path exists for H7.
+//     Full mapping table inline in H7DataverseEnvVarValuesHandler.cs file header.
+builder.Services.Configure<EnvVarValuesOptions>(
+    builder.Configuration.GetSection(nameof(EnvVarValuesOptions)));
+builder.Services.AddHttpClient<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
+builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
+
+// Task 051 (Batch 3E): H8 SPE container-type + root-container handler + THREE
+// collaborator seams (ISpeContainerTypeProvisioner shells out to the task-011
+// T6-hardened scripts/Create-NewContainerType.ps1 -CreateTestContainer — the
+// -CreateTestContainer switch creates the container-type AND a root container
+// in one Graph-only invocation, avoiding a chicken-and-egg dependency on H5/H6
+// Dataverse business-unit rows that don't exist yet at H8's point in the DAG;
+// ISpeContainerVerifier shells out to the NEW scripts/Get-SpeContainerMetadata-AppOnly.ps1
+// — a T6-compliant app-only GET (the existing Get-ContainerMetadata.ps1 uses a
+// DELEGATED `az account get-access-token` and would defeat the T6 post-condition
+// check); ISpeContainerIdKvWriter persists the real container-type id to the
+// customer KV `SPE-ContainerTypeId` slot H4's manifest pre-creates with a
+// placeholder). All registrations UNCONDITIONAL per ADR-032 — no feature-gate
+// branches.
+//
+// Placement Justification (CLAUDE.md §10): H8 lives in L2 (not BFF) per spec
+// §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-function
+// rule — no IActionResolver, IActionRunner, IOpenAiClient, IPlaybookService
+// injection). H8 uses IProvisioningRunRepository (task 037) + the three
+// dedicated seams; owning-app id is read from InterStepState.BffAppRegId (H3
+// output) rather than a run parameter — H8 owns no fallback path to create the
+// app registration itself. Idempotency key spe-{customerId} is deliberately
+// customerId-ONLY (version-independent, unlike H4/H6/H12a's content-hash
+// suffix) — design.md line 1158 marks the SPE container-type "Never rotate;
+// container = data": a repeat/upgrade run for the same customer MUST NOT
+// re-create a container-type.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - spec.md MUST rule (T6, FR-33): confidential-client (app-only) cert-based
+//     token is the ONLY auth path — enforced in BOTH the provisioner (creation)
+//     and the verifier (post-condition GET), each independently detecting a
+//     delegated-token trap signature ("public client not allowed") or missing
+//     "T6 cleared" evidence markers and classifying QuarantineRequired +
+//     TrapT6DelegatedTokenDetected rather than a routine Resumable failure.
+//   - CLAUDE.md §11 component justification (Path C — extend where possible):
+//     ISpeContainerIdKvWriter is a NEW narrow seam rather than reusing H4's
+//     IKvSecretsWriter directly — AzCliKvSecretsWriter's production value
+//     resolution is an INTERIM Phase-H placeholder with no caller-supplied-
+//     value code path (see ISpeContainerIdKvWriter.cs header for the full
+//     three-question justification). H8 writes to the SAME canonical secret
+//     NAME (`SPE-ContainerTypeId`) H4's manifest already reserves.
+//   - §4C rollback: parameter guards + missing H3 owning-app-id + non-T6
+//     provisioning failure + provisioner infra fault + incomplete outputs =
+//     Resumable (no confirmed external side effect, or side effect not yet
+//     attempted). T6 trap (either stage) + non-T6 verification failure +
+//     verifier infra fault + KV write failure/infra fault = QuarantineRequired
+//     (external SPE resource created; post-condition unconfirmed or unpersisted).
+//     Full mapping table inline in H8SpeContainerTypeHandler.cs file header.
+//
+// Deviations from the task POML's literal wording (Path C pivot-to-comply,
+// documented per CLAUDE.md §6.5) are recorded in
+// projects/customer-provisioning-orchestration-r1/notes/task-051-h8-deviations.md.
+builder.Services.Configure<SpeContainerTypeOptions>(
+    builder.Configuration.GetSection(nameof(SpeContainerTypeOptions)));
+builder.Services.AddSingleton<ISpeContainerTypeProvisioner, CreateNewContainerTypeScriptProvisioner>();
+builder.Services.AddSingleton<ISpeContainerVerifier, SpeContainerAppOnlyVerifier>();
+builder.Services.AddSingleton<ISpeContainerIdKvWriter, AzCliSpeContainerIdKvWriter>();
+builder.Services.AddScoped<H8SpeContainerTypeHandler>();
 
 var app = builder.Build();
 
