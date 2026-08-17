@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H14 post-deploy integration wiring handler (2 Exchange policies + Graph webhooks + service-endpoint webhooks — DAG-parallel sub-steps)</title>
+    <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth','dataverse'; handler in the DAG whose failure blocks post-deploy readiness. FR-19 acceptance scope; T4 silent-fail trap owned here.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single IJobHandler with 3 DAG-parallel sub-handlers (Exchange policies, Graph webhooks, Dataverse service-endpoint webhooks); requires care in T4 action-and-verify semantics but well-specified. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>047, 053</deps>
+    <tags>l2-controlplane, job-handler, auth, dataverse, azure-deployment</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H14 post-deploy integration wiring handler as an IJobHandler in the L2 control plane per spec.md FR-19. H14 has 3 DAG-parallel sub-handlers: (a) 2 Exchange ApplicationAccessPolicy — one for BFF app-reg + one for UAMI, T4 action-and-verify semantics (on 0 or 1 → create; on 2+ → verify AppIds match else fail with drift diagnostic); (b) Graph webhook subscriptions per Communication/Email module with HMAC signing keys from H4 (task 047); (c) Dataverse service-endpoint webhooks. S2S consent sub-step (d) explicitly NOT included (r3 task 060 dropped). Idempotency key: h14-{customerId}-{subStep}-{hash}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract (ADR-004), Exchange Set-ApplicationAccessPolicy PowerShell semantics, Graph webhook subscription lifecycle (Microsoft.Graph v6), Dataverse service-endpoint plugin webhooks, and HMAC signing keys from KV. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14IntegrationWiringHandler.cs exists, implements IJobHandler, decomposes into 3 DAG-parallel sub-handlers (H14a Exchange, H14b Graph webhooks, H14c Dataverse webhooks), registers in L2 DI, and each sub-handler asserts idempotency + reports outcome. T4 action-and-verify semantics enforced by H14a. Unit tests cover happy paths + T4 drift-diagnostic path.</goal>
+
+  <context>
+    <background>Per spec.md FR-19 + T4 + design.md §4.1 H14 row + §4B trap catalog: H14 is the LAST handler before H13 acceptance. Its 3 sub-handlers wire the customer environment into external systems (Exchange for mailflow, Graph for change notifications, Dataverse plugins for webhooks). T4 is the silent-fail trap where policy count == 2+ but principals don't match — H14a explicitly detects this drift. r3 task 060 dropped S2S — so no (d) sub-step; do NOT re-introduce.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14IntegrationWiringHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14aExchangePolicySubHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14bGraphWebhookSubHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14cDataverseWebhookSubHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14IntegrationWiringHandler.Tests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="047" status="pending">H4 KV secrets population — provides HMAC signing keys consumed by H14b</dependency>
+      <dependency task="053" status="pending">H10 Dataverse App User + Graph app-role parity — H14 assumes UAMI has Exchange.ManageAsApp role</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-19">SCOPE: 3 sub-handlers only — Exchange policies + Graph webhooks + Dataverse service-endpoint webhooks; S2S consent (d) explicitly NOT included per r3 task 060.</constraint>
+    <constraint source="spec.md T4">SCOPE: Exchange policy count semantics: 0 or 1 → create missing; 2+ → verify BOTH principals match BFF-app-reg + UAMI; if not, fail with drift diagnostic. No silent overwrite.</constraint>
+    <constraint source="ADR-004">SCOPE: H14 is one IJobHandler that spawns 3 sub-handlers via internal DAG-parallel dispatch; each sub-handler has its own idempotency key.</constraint>
+    <constraint source="ADR-010">SCOPE: Registers in L2 control-plane DI container, NOT the BFF.</constraint>
+    <constraint source="ADR-036">SCOPE: 3-level idempotency per sub-handler (MessageId + Redis lock + deterministic key h14-{customerId}-{subStep}-{hash}).</constraint>
+    <constraint source="spec.md §4D I5">SCOPE: Graph SDK calls in H14b pass explicit tenantId; Exchange PS invocations use per-tenant scoped credentials.</constraint>
+    <constraint source="project">SCOPE: HMAC signing keys for Graph webhooks come from H4-populated KV secrets (task 047); do NOT generate ad-hoc keys in H14.</constraint>
+    <constraint source="project">SCOPE: NFR-09 — Graph SDK v6 / Kiota 2.0 — catch ODataError (not ServiceException).</constraint>
+    <constraint source="CLAUDE.md-§6.5">SCOPE: R22 Exchange RBAC-for-Applications migration is Phase D backlog for r2 (NOT r1) — H14a uses current Set-ApplicationAccessPolicy pattern; coexistence safe per Q5 spike.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H14 post-deploy integration wiring with 3 DAG-parallel sub-handlers</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reference handler shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Any handler is a shape exemplar.</pattern>
+      <pattern name="3-level idempotency" location="src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs">Reuse the shared idempotency stack per sub-handler.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-19 + T4 + design.md §4.1 H14 row.</step>
+    <step order="1" name="Author main">Author H14IntegrationWiringHandler.cs as the parent; dispatches 3 sub-handlers in parallel via internal DAG.</step>
+    <step order="2" name="H14a Exchange">Author H14aExchangePolicySubHandler.cs — Get-ApplicationAccessPolicy; 0/1 → New-ApplicationAccessPolicy for missing; 2+ → verify AppIds match; else fail with drift diagnostic (T4 semantics).</step>
+    <step order="3" name="H14b Graph webhooks">Author H14bGraphWebhookSubHandler.cs — read HMAC signing keys from KV (H4 provisioned per task 047); create/update Graph subscriptions per Communication/Email module. Use Graph v6 with explicit tenantId (I5); catch ODataError.</step>
+    <step order="4" name="H14c Dataverse webhooks">Author H14cDataverseWebhookSubHandler.cs — register Dataverse service-endpoint webhook records with signing keys.</step>
+    <step order="5" name="No S2S">Explicit code assertion: no S2S consent sub-step present; startup verification.</step>
+    <step order="6" name="Register">Register all 4 handlers (main + 3 sub) in L2 Program.cs DI.</step>
+    <step order="7" name="Tests">Unit tests: H14a T4 drift path (2 policies, mismatched principals → fail with drift diagnostic); H14a happy (0 → creates 2); H14b happy; H14c happy; idempotency per sub-handler.</step>
+    <step order="8" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: task 073 → ✅.</step>
+    <step order="10" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Closest neighbors: 13 production IJobHandlers under src/server/api/Sprk.Bff.Api/Services/Jobs/**. Grep for `IntegrationWiring` or `Exchange*Handler` returns none. No existing post-deploy integration handler.</existing>
+    <extension>No — H14 orchestrates 3 distinct external-system integrations (Exchange PS, Graph webhooks, Dataverse webhooks) that each have their own auth ceremony + T4-style drift semantics. Extending a single-integration handler would violate ADR-004's "one message one handler one outcome" for sub-integrations.</extension>
+    <cost-of-doing-nothing>Without H14, the customer environment reaches Setup Status = Ready but Exchange mailflow, Graph change notifications, and Dataverse webhooks are all unconfigured. Communication/Email module fails silently at first user interaction; T4 policy drift persists (spec.md §4B T4 explicitly cites this failure mode). H14 IS the last-mile integration handler.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14IntegrationWiringHandler.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14aExchangePolicySubHandler.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14bGraphWebhookSubHandler.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14cDataverseWebhookSubHandler.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (DI registration)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H14IntegrationWiringHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">H14 dispatches H14a + H14b + H14c in parallel; each sub-handler implements IJobHandler and registers in L2 DI.</criterion>
+    <criterion testable="true">H14a: given 0 policies exist, when it runs, then it creates 2 (BFF app-reg + UAMI).</criterion>
+    <criterion testable="true">H14a: given 2 policies exist with matching principals, when it runs, then it verifies + no-ops.</criterion>
+    <criterion testable="true">H14a: given 2 policies exist with mismatched principals (T4 drift), when it runs, then it FAILS with a drift-diagnostic message listing expected vs actual AppIds — does NOT silently overwrite.</criterion>
+    <criterion testable="true">H14b: creates Graph subscriptions per Communication/Email module using HMAC keys from KV (H4-provisioned); uses Graph v6 with explicit tenantId + catches ODataError.</criterion>
+    <criterion testable="true">H14c: registers Dataverse service-endpoint webhooks with correct signing keys.</criterion>
+    <criterion testable="true">S2S consent sub-step (d) is NOT present; startup verification confirms zero references to Dataverse S2S app-reg.</criterion>
+    <criterion testable="true">Idempotency: second invocation with same manifestHash is a no-op per sub-handler.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-19 + T4 + r3 task 060 (S2S drop) + Q5 spike (R22 Exchange RBAC deferred to r2).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

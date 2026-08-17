@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="065" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Phase A audit sweep of every BFF service touching AI Search / Cosmos / Graph / SPE (I2-I5 compliance)</title>
+    <phase>C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api','testing','integration-test'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Sweeps entire BFF service surface for tenant-isolation invariant compliance.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Broad-scope audit requiring careful trace through every AI Search / Cosmos / Graph / SPE call site; must NOT miss any. Step 3.5.5b sonnet @ xhigh justified per project CLAUDE.md model-tier defaults.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>064</deps>
+    <tags>bff-api, testing, integration-test, l2-controlplane, auth</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Sweep every BFF service touching AI Search, Cosmos, Graph, and SPE for §4D I2/I3/I4/I5 tenant-isolation compliance beyond the 2 Fable-spot-checked services (ReferenceRetrievalService line 316, RecordSearchService line 257 per spec.md FR-12). Enumerate every call site, verify invariant compliance, and fix any violations found. Publish results at projects/customer-provisioning-orchestration-r1/notes/tenant-isolation-audit-2026-XX.md with call-site inventory + verdict per invariant per site.</prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF service architecture (Services/**), AI Search client usage patterns, Cosmos SDK partition-key semantics, Graph client acquisition patterns, and SPE container-ID resolution via ITenantContainerResolver. Follow ADRs strictly.</role>
+
+  <goal>Audit report at projects/customer-provisioning-orchestration-r1/notes/tenant-isolation-audit-2026-XX.md enumerates every AI Search .Search*Async / Cosmos SDK Container.* / Graph client construction / SPE container-ID reference site in src/server/**, records per-site verdict (compliant / fixed / N/A), and lists remediation PRs for any violations. Task 064 ArchTests then PASS against remediated code.</goal>
+
+  <context>
+    <background>Per spec.md FR-29 + Q6 audit sweep note: Fable review spot-checked 2 services and confirmed I2 compliance; the audit sweep confirms compliance across the ENTIRE service surface. Any violation found becomes a fix commit before task 064 ArchTests are declared clean. This closes the "we checked 2, hope the other N are compliant" trust gap.</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/tenant-isolation-audit-2026-XX.md</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/**/*.cs (any file needing remediation)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs (baseline I2-compliant)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="064" status="pending">5 ArchTests exist so sweep can validate via `dotnet test`</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-29">SCOPE (I2): Every AI Search call site MUST have unconditional `tenantId eq` filter; audit enumerates each site.</constraint>
+    <constraint source="spec.md FR-30">SCOPE (I3): Every Cosmos SDK call site MUST have explicit PartitionKey argument; audit enumerates each site.</constraint>
+    <constraint source="spec.md FR-31">SCOPE (I4): SPE container-ID resolution MUST go through single ITenantContainerResolver service; audit verifies no direct string-literal container IDs.</constraint>
+    <constraint source="spec.md FR-32">SCOPE (I5): Graph token acquisition MUST be per-tenant scoped; audit verifies no `.default`-only paths.</constraint>
+    <constraint source="ADR-038">SCOPE: Remediation is code + test change; test-modifying tasks trigger unconditional code-review + adr-check at Step 9.5 per root CLAUDE.md §8 override row.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: Any BFF file modification triggers §10 BFF Hygiene checklist — /conflict-check before PR + publish-size report + no new HIGH CVEs + PR description cites this audit.</constraint>
+    <constraint source="project">SCOPE: If no violations found, audit report still MUST be published (evidence-of-checking); a passing audit is a first-class deliverable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Tenant-isolation audit sweep across BFF service surface (§4D I2-I5)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Baseline I2-compliant AI Search call" location="src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs">Line 316 — reference shape for tenantId-filtered Search call.</pattern>
+      <pattern name="Baseline I2-compliant AI Search call" location="src/server/api/Sprk.Bff.Api/Services/">RecordSearchService — line 257 per spec.md FR-12 baseline.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-29..FR-32 + this project's CLAUDE.md.</step>
+    <step order="1" name="Enumerate I2">Grep src/server/** for AI Search Search*Async invocations; enumerate each call site with file:line.</step>
+    <step order="2" name="Enumerate I3">Grep src/server/** for Container.ReadItemAsync/CreateItemAsync/UpsertItemAsync/GetItemQueryIterator invocations; enumerate each call site.</step>
+    <step order="3" name="Enumerate I4">Grep src/server/api/Sprk.Bff.Api/Services/** for string literals matching SPE container-ID pattern OR references to container-ID fields; enumerate each site.</step>
+    <step order="4" name="Enumerate I5">Grep for GraphServiceClient / GraphClientFactory construction sites; enumerate each token-acquisition path.</step>
+    <step order="5" name="Verdict">For each call site, record: compliant (cite baseline shape match) | violation (cite what fails and remediation plan) | N/A (justify).</step>
+    <step order="6" name="Remediate">For each violation, apply the fix (add filter, add PartitionKey, route through ITenantContainerResolver, add explicit tenantId).</step>
+    <step order="7" name="Verify">Run dotnet test tests/Spaarke.ArchTests/ — all 5 I1-I5 tests PASS.</step>
+    <step order="8" name="Report">Write notes/tenant-isolation-audit-2026-XX.md with per-site table + verdict + remediation summary.</step>
+    <step order="9" name="Publish size">If any BFF code changed, run publish-size measurement + report delta per NFR-01.</step>
+    <step order="10" name="Index update">Update TASK-INDEX.md: task 065 → ✅.</step>
+    <step order="11" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If audit surfaces a violation whose remediation would break an existing contract (e.g., a legacy Search call that intentionally spans tenants for a fleet-scoped feature), STOP and escalate per CLAUDE.md §6.5 rather than adding a broad exception. The invariant is BINDING; exceptions require documented Path A per §6.5.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test BFF + ArchTests</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/tenant-isolation-audit-2026-XX.md</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/**/*.cs (any remediated files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit report exists at notes/tenant-isolation-audit-2026-XX.md; every AI Search / Cosmos / Graph / SPE call site in src/server/** is enumerated with file:line + verdict.</criterion>
+    <criterion testable="true">All 5 task-064 ArchTests (I1-I5) PASS on the post-audit codebase — dotnet test tests/Spaarke.ArchTests/ exits 0.</criterion>
+    <criterion testable="true">Every violation surfaced in the audit has a corresponding remediation commit; audit report links commit SHAs.</criterion>
+    <criterion testable="true">If BFF code changed, publish-size delta is measured and reported per NFR-01.</criterion>
+    <criterion testable="true">Negative: audit does NOT skip any BFF service directory under src/server/api/Sprk.Bff.Api/Services/** — coverage verified by cross-referencing directory count vs report table.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-29..FR-32 + Q6 owner clarification + task 064 ArchTests. This is the "checked all of them" evidence for §4D compliance.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

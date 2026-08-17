@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Extend customer.bicep — add Cosmos DB + optional SignalR; remove Redis; UAMI param</title>
+    <phase>C Wave C2 — Bicep + UAMI</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment-touching Bicep change to the customer stamp — blast radius: every customer environment consumes this. task-create Step 3.5.5 FULL (azure-deployment scope; changes irreversible for deployed environments unless rolled forward).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical Bicep authoring against existing module patterns (cosmos-db.bicep, signalr, key-vault-role-assignment are all established); no architectural judgment for this specific composition — brief rubric "Bicep authoring / refactoring in Wave C2 = opus / high" applies for uami.bicep + app-service.bicep refactor + RBAC migration + platform.bicep rebuild; this customer.bicep extension is composition, not net-new pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC2-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure, bicep, azure-deployment, deploy</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend infrastructure/bicep/customer.bicep to add: (a) Cosmos DB per-customer (BFF prereq per R11 — invoke modules/cosmos-db.bicep with the customer's naming context); (b) optional SignalR feature-gated per ADR-032 P1/P2/P3 pattern (Notifications:SignalRSpine:Enabled flag drives inclusion); (c) accept a userAssignedIdentityResourceId parameter (post-Phase C consumption by app-service.bicep in task 029) — pass through only, no wiring here. Explicitly remove Redis provisioning from customer.bicep — Redis is per-environment via scripts/Deploy-RedisCache.ps1 (Q-E FR-12).</prompt>
+  <role>SPAARKE platform developer with Bicep + Azure resource composition expertise. Follow ADR-032 Null-Object kill-switch pattern for the SignalR conditional; follow the existing modules/ conventions.</role>
+  <goal>infrastructure/bicep/customer.bicep declares the Cosmos DB per-customer module invocation + optional SignalR module invocation gated on a boolean parameter + accepts a userAssignedIdentityResourceId param — and NO LONGER declares Redis. az bicep build passes cleanly; az deployment group what-if against a dev subscription surfaces the intended resource additions/removals; no cross-region hardcoding.</goal>
+
+  <context>
+    <background>Spec FR-04 (H2a) + design.md §7.2: per-customer resources include Cosmos DB (BFF startup depends on it — R11), optional SignalR (per-customer realtime), OpenAI + AI Search + Doc Intelligence + App Insights/Log Analytics. Redis was removed from per-customer in v3.2 (Q-E FR-12) — deployed at environment scope via scripts/Deploy-RedisCache.ps1. UAMI is a Phase C parameter for post-C2 slot binding.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/customer.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/cosmos-db.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/openai.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/ai-search.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/redis.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/parameters/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite r1 task — Wave C2 kickoff. Task 024 authors the Cosmos schema (database + container); this task invokes the cosmos-db.bicep module for the account.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-032">Scope: the SignalR module invocation MUST follow the Null-Object kill-switch pattern P1/P2/P3 — feature flag Notifications:SignalRSpine:Enabled gates inclusion; when disabled, no SignalR resource is deployed AND downstream BFF DI resolves the Null-Object variant.</constraint>
+    <constraint source="ADR-027">Scope: this customer.bicep is Model 2 dedicated-stamp composition; Model 1 shared-tier composition lives in stacks/model1-shared.bicep (task 032). Do NOT introduce Model 1 conditionals into customer.bicep (avoids the shared-vs-dedicated conditional-registration anti-pattern per spec.md § New Components row 5).</constraint>
+    <constraint source="project">Q-E FR-12: MUST NOT provision Redis per-customer. Remove any redis.bicep module invocation from customer.bicep; leave modules/redis.bicep in place (used by env-scope Deploy-RedisCache.ps1).</constraint>
+    <constraint source="project">Scope (this task only): pass the userAssignedIdentityResourceId parameter THROUGH — do NOT wire it into app-service.bicep here (that is task 029). Verify the param is declared, defaulted safely (empty string acceptable), and available to downstream modules by name.</constraint>
+    <constraint source="project">MUST report absolute + delta publish-size impact if any BFF change is triggered (none expected — bicep-only) per CLAUDE.md §10 NFR-01. If zero, state "IaC-only, zero publish-size delta" in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>customer.bicep per-customer stamp composition</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing customer.bicep composition" location="infrastructure/bicep/customer.bicep">Existing 254-line module composes openai + ai-search + doc-intelligence + app-insights + storage + app-service. Extend, do not recreate.</pattern>
+      <pattern name="SignalR feature-gated ADR-032" location=".claude/adr/ADR-032-bff-nullobject-kill-switch.md">P1/P2/P3 mechanism — when disabled, no bicep resource + Null-Object DI in BFF.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason — azure-deployment scope). Load spec.md FR-04, design.md §7.2, ADR-027, ADR-032, azure-deployment.md.</step>
+    <step order="1">Read existing customer.bicep (all 254 lines) to catalog the current module invocations + parameter surface.</step>
+    <step order="2">Add a userAssignedIdentityResourceId parameter (default empty string) — do NOT bind it into any module in this task.</step>
+    <step order="3">Add a signalrEnabled boolean parameter (default false); invoke modules/signalr (or membership-topic.bicep if that is the SignalR module — inspect to confirm) ONLY when signalrEnabled is true.</step>
+    <step order="4">Add a Cosmos DB module invocation — modules/cosmos-db.bicep — with the customer-scoped naming context per §7.1. Confirm collision-free with task 024's spaarke-provisioning database (which lives in a different account per §5.3).</step>
+    <step order="5">Remove the existing redis.bicep module invocation from customer.bicep (search for "modules/redis.bicep" and delete the invocation + its params). Keep modules/redis.bicep on disk — it is still called by scripts/Deploy-RedisCache.ps1 at env scope.</step>
+    <step order="6">Run az bicep build customer.bicep — verify 0 errors, 0 warnings.</step>
+    <step order="7">Run az deployment group what-if against a dev-subscription dry-run — verify the diff shows: +Cosmos, +SignalR (only if enabled param true), -Redis.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document deviation (e.g. Cosmos account naming convention nuance, signalR module resolution) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing customer.bicep declares any implicit downstream RBAC that depends on the removed Redis resource, STOP and escalate per CLAUDE.md §6 rather than removing Redis + leaving dangling RBAC — this is the class of silent failure that broke prior deploys.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/customer.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the modified customer.bicep, az bicep build succeeds with 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given az deployment group what-if against dev, the diff shows Cosmos DB added, Redis removed, and SignalR present only when signalrEnabled=true.</criterion>
+    <criterion testable="true">Given the parameter surface, userAssignedIdentityResourceId is declared and passable but NOT bound to any resource in this task.</criterion>
+    <criterion testable="true">Negative: no changes to modules/redis.bicep itself (still used at env scope by Deploy-RedisCache.ps1).</criterion>
+    <criterion testable="true">Negative: no Model 1 shared-tier conditionals introduced (per ADR-027 scope constraint — that composition lives in stacks/model1-shared.bicep).</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-04 acceptance + design.md §7.2. Cosmos account is per-customer; the spaarke-provisioning database (task 024) lives in a SEPARATE control-plane Cosmos account (per §5.3 different stores different concerns) — do NOT collide the two. Coordinate with task 029 which will consume userAssignedIdentityResourceId to bind app-service to UAMI.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

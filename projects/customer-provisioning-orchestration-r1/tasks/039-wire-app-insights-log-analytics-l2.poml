@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Wire App Insights + Log Analytics for L2 — mutating endpoints audit-log actor tid (NFR-11)</title>
+    <phase>C Wave C3 — L2 Control-Plane Scaffold</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>l2-controlplane tag + auth-adjacent (audit log carries actor tid claim from JWT) + NFR-11 auditable-operator-action compliance. task-create Step 3.5.5 FULL (l2-controlplane; NEW surface; downstream endpoints depend on structured logging + trace correlation).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brief rubric: "Sonnet 5 @ high" — mechanical App Insights + Log Analytics wiring against well-known Microsoft.ApplicationInsights.AspNetCore APIs. No architectural judgment vs BFF-side patterns; the audit-log middleware is a small, well-specified authoring task.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC3-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deps on task 036 (project scaffold + Program.cs). Touches Program.cs — sequential with tasks 037/038 to avoid merge conflict.</parallel-reason>
+    <deps>036</deps>
+    <tags>l2-controlplane, azure, api, auth</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Wire App Insights + Log Analytics for the L2 control plane: (a) add Modules/TelemetryModule.cs registering AddApplicationInsightsTelemetry() with the platform-controlplane App Insights instrumentation key from IConfiguration (task 033 provisions the App Insights + Log Analytics resources); (b) add Middleware/AuditLogMiddleware.cs that intercepts every mutating endpoint (POST/PUT/DELETE/PATCH) and emits an App Insights custom event AuditableAction with properties (Actor.Tid, Actor.Oid, Actor.AppRole, HttpMethod, Path, RouteValues, StatusCode, TraceId). NFR-11: every mutating endpoint audit-logs the actor's tid claim.</prompt>
+  <role>SPAARKE platform developer with App Insights + ASP.NET Core middleware expertise. Understand NFR-11: Claude Code operator auths via own AAD identity (az login), NOT a service principal, so the actor tid + oid are meaningful audit-trail identifiers.</role>
+  <goal>src/server/services/Sprk.Provisioning.ControlPlane/Modules/TelemetryModule.cs + Middleware/AuditLogMiddleware.cs exist; TelemetryClient is registered in DI; every mutating endpoint (POST/PUT/DELETE/PATCH) automatically emits an AuditableAction custom event; dotnet build passes; a smoke test with a mock JWT confirms the event lands in App Insights with the expected properties.</goal>
+
+  <context>
+    <background>Spec NFR-11 + spec.md §4.3a.2: operator authenticates via own AAD identity (not SP); every mutating L2 endpoint audit-logs to App Insights with actor tid. Log Analytics workspace (task 033) is the retention target. Without this wiring, provisioning operations have NO durable audit trail — a compliance red flag for any regulated customer and a debugging blocker when a run fails mysteriously.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Modules/TelemetryModule.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Middleware/AuditLogMiddleware.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/ (BFF App Insights wiring — read for reference)</file>
+      <file role="canonical-reference">infrastructure/bicep/platform-controlplane.bicep (task 033 App Insights resource)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold + Program.cs + module composition.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: audit-log middleware reads actor claims from the validated JWT (Bearer token). Claim keys per Microsoft standard: tid = tenant, oid = object ID, roles = app-role assignments. Do NOT log the raw JWT — extract claims + emit as properties only.</constraint>
+    <constraint source="project">NFR-11 acceptance: every mutating L2 endpoint audit-logs to App Insights with actor tid. Mutating = POST/PUT/DELETE/PATCH. Exception: /ping is GET (unauthenticated); /swagger is GET; neither audit-logged.</constraint>
+    <constraint source="project">Scope (this task only): telemetry wiring + audit middleware. Do NOT wire Cosmos (task 037) or Service Bus (task 038). Do NOT implement any endpoint (deferred to Wave C5).</constraint>
+    <constraint source="project">MUST NOT log request/response body content — payload may contain KV URI refs or PII. Log route values + status code + trace correlation only.</constraint>
+    <constraint source="project">MUST configure App Insights sampling to at-least-record-100%-of-mutating-endpoints per NFR-11 (audit trail is not sampleable). Verify via TelemetryProcessor filter or by setting AdaptiveSamplingTelemetryProcessor exclusion for custom event AuditableAction.</constraint>
+    <constraint source="project">Publish-size impact reported per L2's own baseline (not BFF NFR-01).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Microsoft.ApplicationInsights.AspNetCore; ASP.NET Core middleware; JWT claim extraction; audit sampling</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF App Insights wiring" location="src/server/api/Sprk.Bff.Api/">Read for reference — mirror AddApplicationInsightsTelemetry composition + TelemetryProcessor customization patterns.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason — l2-controlplane + auth + NFR-11 compliance). Load spec.md NFR-11 + §4.3a.2, ADR-028.</step>
+    <step order="1">Add PackageReference for Microsoft.ApplicationInsights.AspNetCore (latest stable — verify zero HIGH CVE) — likely already present from task 036 Step 2 deferred wire.</step>
+    <step order="2">Author Modules/TelemetryModule.cs: extension method AddTelemetryModule(this IServiceCollection services, IConfiguration config) invoking services.AddApplicationInsightsTelemetry() with the ConnectionString from config (ApplicationInsights:ConnectionString app-setting bound to KV secret ref).</step>
+    <step order="3">Configure sampling — AdaptiveSamplingTelemetryProcessor excludes custom event name "AuditableAction" so audit records are never dropped.</step>
+    <step order="4">Author Middleware/AuditLogMiddleware.cs: intercepts HttpContext; if request method ∈ {POST, PUT, DELETE, PATCH} AND response.StatusCode is set, emit TelemetryClient.TrackEvent("AuditableAction", properties: {Actor.Tid, Actor.Oid, Actor.AppRole, HttpMethod, Path, RouteValues, StatusCode, TraceId}). Extract Actor.* from httpContext.User.Claims (tid, oid, roles).</step>
+    <step order="5">Wire the middleware into Program.cs pipeline AFTER UseAuthentication + UseAuthorization (so claims are populated) and BEFORE endpoint routing.</step>
+    <step order="6">Author a smoke test at src/server/services/Sprk.Provisioning.ControlPlane.Tests/AuditLogMiddlewareTests.cs that constructs a WebApplicationFactory with a mock JWT (claims tid=..., oid=..., roles=[Operator]), issues a POST /api/runs, and asserts (via a captured TelemetryChannel) the AuditableAction event is emitted with the expected properties.</step>
+    <step order="7">Run dotnet build + dotnet test — verify 0 errors + 0 warnings + test green.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document deviation (e.g. sampling-exclusion mechanism nuance, claim-key mapping) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the actor tid claim is not present in the validated JWT for a mutating endpoint (should be present for both operator-user tokens and SP tokens), STOP and escalate per CLAUDE.md §6 — NFR-11 requires tid on every audit record; a missing claim is a spec-vs-implementation mismatch.</trigger>
+    <trigger>If Adaptive sampling still drops AuditableAction events under load in the smoke test, STOP and escalate — audit records must be 100%-recorded per NFR-11.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Modules/TelemetryModule.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Middleware/AuditLogMiddleware.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (updated composition)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/AuditLogMiddlewareTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given dotnet build, 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given a POST request with a valid Operator-role JWT, the AuditLogMiddleware emits an AuditableAction custom event with Actor.Tid, Actor.Oid, Actor.AppRole, HttpMethod=POST, Path, StatusCode, TraceId properties.</criterion>
+    <criterion testable="true">Given a GET /ping request, NO AuditableAction event is emitted (GET is not mutating).</criterion>
+    <criterion testable="true">Given an unauthenticated POST that fails at 401, an AuditableAction event IS emitted with StatusCode=401 and Actor.Tid null — auth failures are audit-worthy.</criterion>
+    <criterion testable="true">Given adaptive sampling turned on under load, AuditableAction events are never dropped (verified by injecting 1000 events into a test TelemetryChannel).</criterion>
+    <criterion testable="true">Negative: no request/response body content is logged (grep the middleware for any body-read call — 0 results).</criterion>
+    <criterion testable="true">Negative: no Cosmos or Service Bus wiring in this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md NFR-11 + §4.3a.2. The audit event schema (AuditableAction with Actor.* properties) becomes the queryable contract for compliance reporting; downstream Wave C5 endpoints depend on this shape for POST /api/runs/{id}/clear-quarantine audit-log (spec.md FR-24 §4C acceptance — clear-quarantine requires reason + audit-log to App Insights).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

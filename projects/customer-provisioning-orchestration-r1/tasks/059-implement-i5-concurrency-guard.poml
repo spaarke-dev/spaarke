@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="059" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement I5 concurrency guard — same-customer serialization via sprk_currentrunid optimistic upsert</title>
+    <phase>C Wave C5 — L2 REST + Reconciler</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse'; enforces §4D I5 tenant-isolation invariant + FR-23 concurrency guard; a bug here allows same-customer double-provision.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped optimistic-concurrency implementation over a single Dataverse column (sprk_currentrunid); requires careful reasoning through all race windows. Step 3.5.5b sonnet @ xhigh justified per complex brownfield criteria (must trace every place the column is read/written).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>023, 058</deps>
+    <tags>l2-controlplane, job-handler, dataverse, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the I5 concurrency guard per spec.md FR-23 + §4D. When a new provisioning run starts (POST /api/runs), the L2 control plane MUST attempt an optimistic upsert of `sprk_dataverseenvironment.sprk_currentrunid` from `null → newRunId` for the target customer's registry row. On conflict (row already has a non-null currentRunId belonging to a different run), the endpoint returns 409 Conflict to the caller with the winning run ID in the response body. On run completion / cancellation / failure, sprk_currentrunid MUST be cleared back to null. Cross-customer runs are unaffected — I5 is intentionally per-customer serialization only.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse alternate-key upserts, optimistic concurrency using Dataverse ETag semantics (If-Match / row-version), IDataverseService contract, and the L2 REST endpoint layer. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Concurrency/CustomerRunGuard.cs exists as ICustomerRunGuard with an implementation that: (a) TryAcquireAsync(customerId, runId) → returns success on null → newRunId, returns Conflict(winningRunId) on any existing non-null value; (b) ReleaseAsync(customerId, runId) → clears the column back to null iff the current value matches runId (no-op otherwise). POST /api/runs invokes TryAcquireAsync before enqueueing H0; on Conflict, returns 409 to caller with winningRunId in response body. Terminal-state handlers (H13 success, cancel, failure) invoke ReleaseAsync. Integration tests cover concurrent-acquire-conflict + terminal-state-release.</goal>
+
+  <context>
+    <background>Per spec.md FR-23 + §4D I5 + design.md §4.2: the platform serializes runs per customer to prevent partial-state corruption when two concurrent provisions target the same environment. Cross-customer runs run in parallel — I5 does NOT globally serialize. sprk_currentrunid on the registry table is the single source of truth; task 023 defines the column; this task wires the guard around it.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Concurrency/CustomerRunGuard.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Concurrency/ICustomerRunGuard.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Concurrency/CustomerRunGuard.Tests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="023" status="pending">sprk_dataverseenvironment.sprk_currentrunid column exists (Wave C1)</dependency>
+      <dependency task="058" status="pending">State-reconciler + Cosmos state store are in place</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-23">SCOPE: Same-customer runs are serialized via sprk_currentrunid optimistic upsert (null → newRunId); conflict = 409 with winning run ID; cross-customer runs are parallel.</constraint>
+    <constraint source="spec.md §4D I5">SCOPE: This guard implements one of the 5 binding tenant-isolation invariants — verified by the ArchTest suite (task 064).</constraint>
+    <constraint source="ADR-044">SCOPE: sprk_currentrunid GUID values follow the Dataverse GUID canonicalization contract (lowercase, no braces).</constraint>
+    <constraint source="project">SCOPE: Do NOT use a Redis lock or an in-memory lock as the primary guard — the guard MUST be durable across L2 instance restarts. The single source of truth is Dataverse sprk_currentrunid.</constraint>
+    <constraint source="project">SCOPE: TryAcquireAsync is idempotent for the same (customerId, runId) tuple — a re-call with the same runId returns success without error, not conflict.</constraint>
+    <constraint source="project">SCOPE: ReleaseAsync clears the column ONLY IF the current value matches the caller's runId — protects against a stale caller clearing a different run's grab.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: If the guard needs to consume IDataverseService, do NOT downcast (per r3 task 028) — use the UnwrapServiceClient extension.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Same-customer serialization via Dataverse optimistic concurrency on sprk_currentrunid</topic>
+    <files>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dataverse ETag / optimistic upsert" location="src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs">Existing shape for If-Match / row-version-guarded Dataverse writes; copy for sprk_currentrunid guard.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-23 + §4D I5 + this project's CLAUDE.md.</step>
+    <step order="1" name="Inventory">Read task 023 registry column definition. Grep RunsEndpoints.cs (task 057) for the enqueue path where TryAcquire must fire.</step>
+    <step order="2" name="Interface">Author ICustomerRunGuard with TryAcquireAsync + ReleaseAsync signatures.</step>
+    <step order="3" name="Implementation">Author CustomerRunGuard.cs — inject IDataverseService; TryAcquireAsync uses ETag-guarded update from null → newRunId; ReleaseAsync uses ETag-guarded update from newRunId → null with match check.</step>
+    <step order="4" name="Endpoint wire">Modify RunsEndpoints.cs POST /api/runs to invoke TryAcquireAsync before enqueue; on Conflict, return 409 with winningRunId in response body.</step>
+    <step order="5" name="Release path">Wire ReleaseAsync into terminal-state transitions: H13 success path, cancel-run path, failure/quarantine path (integrate with reconciler task 058 state transitions).</step>
+    <step order="6" name="Tests">Author CustomerRunGuard.Tests.cs: (a) happy acquire; (b) concurrent-acquire returns Conflict with winning runId; (c) re-acquire with same runId is idempotent success; (d) release-match clears column; (e) release-mismatch is no-op.</step>
+    <step order="7" name="ArchTest hook">Verify task 064 I5 ArchTest is aware of this guard as the sanctioned pattern.</step>
+    <step order="8" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: task 059 → ✅.</step>
+    <step order="10" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Concurrency/ICustomerRunGuard.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Concurrency/CustomerRunGuard.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.cs (edit — invoke TryAcquireAsync)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Concurrency/CustomerRunGuard.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given sprk_currentrunid is null for customer C, when TryAcquireAsync(C, runA) is invoked, then result = Success and the column value = runA.</criterion>
+    <criterion testable="true">Given sprk_currentrunid = runA for customer C, when TryAcquireAsync(C, runB) is invoked concurrently, then result = Conflict with winningRunId = runA; the column value remains runA.</criterion>
+    <criterion testable="true">Given sprk_currentrunid = runA for customer C, when TryAcquireAsync(C, runA) is re-invoked (idempotent), then result = Success without conflict.</criterion>
+    <criterion testable="true">Given sprk_currentrunid = runA, when ReleaseAsync(C, runA) is invoked, then the column is cleared to null.</criterion>
+    <criterion testable="true">Given sprk_currentrunid = runA, when ReleaseAsync(C, runB) is invoked with mismatched runId, then the column remains runA (no-op).</criterion>
+    <criterion testable="true">Cross-customer: TryAcquireAsync(C1, runX) + TryAcquireAsync(C2, runY) BOTH succeed (I5 is per-customer only).</criterion>
+    <criterion testable="true">Negative: POST /api/runs with a customerId that already has an in-flight run returns HTTP 409 Conflict with the winning runId in the JSON response body.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-23 + §4D I5 + design.md §4.2. Consumed by task 060 (I6 crash recovery — released runs should be re-acquirable by the crash-recovery scan).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

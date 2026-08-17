@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author NEW infrastructure/bicep/modules/uami.bicep — per-customer User-Assigned Managed Identity module</title>
+    <phase>C Wave C2 — Bicep + UAMI</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Structural authoring of the module that becomes the identity for every per-customer BFF App Service (both slots) + the RBAC-migration target for KV/Storage/Cognitive/Cosmos roles + the Dataverse App User principal + the Graph app-role grant target. Blast radius: every customer environment. task-create Step 3.5.5 FULL (auth tag; §10 §F.1 asymmetric-registration rule adjacent; NEW surface).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric "Bicep authoring / refactoring in Wave C2 = opus / high (high-blast-radius — every customer environment consumes this)". This module is the structural fix for T5 slot-swap 503; parameter surface + output contract must be right first time because 4 downstream tasks (029/030 + H4 + H10) consume it.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC2-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure, bicep, azure-deployment, auth, deploy</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author NEW infrastructure/bicep/modules/uami.bicep declaring a per-customer User-Assigned Managed Identity. Outputs MUST include: resource ID (for App Service identity binding + KV keyVaultReferenceIdentity PATCH), principal ID (for RBAC role assignments), clientId (for app-only Graph token acquisition + Dataverse App User application ID). Parameter surface: name + location + tags. This is a structural pre-req to T5 elimination (spec.md § New Components row 4) — the same UAMI resource ID will be bound to BOTH production + staging slots in task 029.</prompt>
+  <role>SPAARKE platform developer with Bicep module authoring expertise. Author for durability — this module is the identity every downstream per-customer resource attaches to. Follow ADR-028 21-MUSTs (UAMI-first, no System-Assigned MI on new resources).</role>
+  <goal>infrastructure/bicep/modules/uami.bicep exists, declares Microsoft.ManagedIdentity/userAssignedIdentities with a parameter surface for name + location + tags, outputs (resourceId, principalId, clientId). az bicep build succeeds; the module is consumable from customer.bicep + platform-controlplane.bicep + model1-shared.bicep in later tasks.</goal>
+
+  <context>
+    <background>Spec FR-37 + spec.md § New Components row 4 + design.md §7 (auth-azure-resources): app-service.bicep today emits System-Assigned MI (identity: enableManagedIdentity) — this identity is DIFFERENT between prod + staging slots + rotates on any App Service delete/recreate, so KV RBAC grants + Dataverse App User registration + Graph app-role assignments all drift silently. UAMI is one long-lived identity that survives App Service redeploys and can bind to both slots — the pre-req structural fix for T5 slot-swap 503 windows. Without this module, T5 persists forever + task 011 #3b (BFF shared-lib ClientSecret→MI migration) is blocked because it needs an identity that outlives App Service instances.</background>
+    <relevant-files>
+      <file role="new">infrastructure/bicep/modules/uami.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/app-service.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/key-vault.bicep</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite r1 task — Wave C2 kickoff. Directly consumed by tasks 029 (app-service binding), 030 (RBAC migration), 031/032/033 (platform composition).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: UAMI is the identity Spaarke's 21 MUSTs mandate for App Service (per FR-37 + spec.md § New Components row 4). NEVER co-emit System-Assigned MI on the same App Service — the two coexisting are the anti-pattern this module eliminates.</constraint>
+    <constraint source="project">Scope (this task only): author the UAMI resource + outputs — do NOT modify app-service.bicep (task 029) and do NOT emit RBAC role assignments (task 030). Keep this module focused on the identity object only.</constraint>
+    <constraint source="project">MUST output resourceId + principalId + clientId — all three are consumed downstream: resourceId for App Service identity binding + keyVaultReferenceIdentity PATCH; principalId for role assignments; clientId for Graph token acquisition scope + Dataverse App User application ID.</constraint>
+    <constraint source="project">MUST accept a tags param + apply Spaarke's standard tag envelope (env, customerId, owner) — do NOT hardcode tags.</constraint>
+    <constraint source="project">MUST follow the modules/*.bicep naming + parameter conventions — inspect app-service.bicep + key-vault.bicep for the local dialect (camelCase params, name suffix optional, location default = resourceGroup().location).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure Bicep UAMI module authoring; ADR-028 auth ceremony</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing modules/*.bicep conventions" location="infrastructure/bicep/modules/">Match parameter naming, output shape, and description conventions of sibling modules (key-vault.bicep, app-service.bicep are closest sibling exemplars).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason). Load ADR-028, auth-azure-resources.md, spec.md FR-37 + § New Components row 4.</step>
+    <step order="1">Inspect modules/app-service.bicep + modules/key-vault.bicep for local Bicep conventions (param shape, output shape, description style).</step>
+    <step order="2">Author infrastructure/bicep/modules/uami.bicep: resource of type Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31 (or current stable API version); params (name, location, tags); outputs (resourceId = uami.id, principalId = uami.properties.principalId, clientId = uami.properties.clientId).</step>
+    <step order="3">Add descriptive comments citing FR-37 + T5 elimination intent so future readers understand the module's structural purpose.</step>
+    <step order="4">Run az bicep build modules/uami.bicep — verify 0 errors, 0 warnings.</step>
+    <step order="5">Author a minimal consumer test (a temporary .bicepparam or scratch consumer .bicep) confirming the outputs are typed strings + accessible.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document deviation (e.g. API-version selection rationale) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If UAMI resource cannot bind to both App Service slots in a downstream configuration test (task 029), STOP and escalate per CLAUDE.md §6 — do NOT invent a second UAMI-per-slot workaround; the T5 fix requires ONE identity across both slots.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None. Grep of infrastructure/bicep/modules/ for "userAssignedIdentities" returns no existing module. app-service.bicep currently emits System-Assigned MI (identity: enableManagedIdentity) — spec.md § New Components row 4 documents this as the T5 anti-pattern.</existing>
+    <extension>No — extending System-Assigned MI cannot bind one identity to both slots (T5 is intrinsic to SA-MI). UAMI is a structurally different resource type with different attach semantics; a new module is the only path.</extension>
+    <cost-of-doing-nothing>Without uami.bicep, T5 slot-swap 503 window persists forever (KV RBAC grants + Dataverse App User + Graph app-roles all attach to the wrong-slot's System-Assigned MI after every swap). Task 011 #3b (BFF shared-lib ClientSecret→MI migration) is blocked because it needs an identity that outlives App Service instances. spec.md § New Components row 4 is the concrete cost.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/uami.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the new module, az bicep build succeeds with 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given the module's output declarations, resourceId + principalId + clientId are all typed string and referenced from a scratch consumer resolve cleanly.</criterion>
+    <criterion testable="true">Given the parameter surface, tags is a parameter (not hardcoded) and location defaults to resourceGroup().location.</criterion>
+    <criterion testable="true">Negative: this task adds NO other resources (no RBAC, no App Service binding) — module is identity-only.</criterion>
+    <criterion testable="true">Negative: no changes to modules/app-service.bicep in this task (that is task 029).</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-37 + § New Components row 4 + design.md §7 auth ceremony. Task 029 consumes uami.outputs.resourceId to bind BOTH production + staging App Service slots. Task 030 consumes uami.outputs.principalId to migrate all RBAC. H4 handler consumes resourceId to PATCH keyVaultReferenceIdentity. H10 handler consumes clientId to register the Dataverse App User + grant Graph app-roles.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H11 User Provisioning Handler (identity preset — B2BGuest vs NativeAccount per D6)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth'; modifies .cs files; user provisioning + license assignment; auth-sensitive.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler reuses r1 registration flow (DemoProvisioningService 9-step + GraphUserService); complete spec (FR-14); identity-preset branching is deterministic; not cross-cutting.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 053</deps>
+    <tags>l2-controlplane, job-handler, auth, dataverse</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H11 user-provisioning handler as an IJobHandler in the L2 control-plane. H11 reuses the r1 registration flow (DemoProvisioningService 9-step + GraphUserService) for user creation + UPN + license assignment. Identity preset branch per D6: B2BGuest (customer users as B2B guests in Spaarke tenant) vs NativeAccount (users native to customer tenant). B2BGuest requires a consent-verification gate. Idempotency key: users-{customerId}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Microsoft Graph SDK v6 user creation + license assignment, B2B guest invitation flow, DemoProvisioningService.cs 9-step pattern, and identity preset D6 semantics. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H11UserProvisioningHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) reads identity preset (B2BGuest or NativeAccount) from ProvisioningRun.parameters; (b) for each user in parameters.users, invokes GraphUserService pattern to create user with correct UPN + license assignment; (c) for B2BGuest preset, additionally invokes B2B invitation + consent-verification gate; (d) writes provisioned userIds to Cosmos interStepState; (e) asserts idempotency key users-{customerId}. Unit tests cover B2BGuest happy path (consent verified), NativeAccount happy path, B2B consent-pending WaitingOnGate, license-assignment failure, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-14 + design.md §4.1 H11 + D6 identity preset: r1 registration flow already includes DemoProvisioningService (9-step) + GraphUserService (user + UPN + license). H11 wraps these in an IJobHandler with identity-preset branching. B2BGuest needs a consent-verification gate (customer admin must accept B2B invitation).</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H11UserProvisioningHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H11UserProvisioningHandler.Tests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs (9-step pattern)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/GraphUserService.cs (user + UPN + license)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="053" status="pending">H10 App User + Graph parity — UAMI must be provisioned to grant licenses</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-028">21 MUSTs — user creation via delegated OR app-only Graph per identity preset semantics.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget.</constraint>
+    <constraint source="ADR-044">userIds written to Cosmos follow GUID canonicalization.</constraint>
+    <constraint source="project">Idempotency key: users-{customerId} — user provisioning is per-customer; user-level idempotency via UPN alt-key inside Graph SDK.</constraint>
+    <constraint source="project">Identity preset per D6: B2BGuest vs NativeAccount; branch behavior enumerated in ProvisioningRun.parameters.identityPreset.</constraint>
+    <constraint source="project">B2BGuest branch: consent-verification gate — if invitations pending acceptance, WaitingOnGate (not Failed).</constraint>
+    <constraint source="spec.md §4D I1">tenantId flows explicitly per identity preset (Model 1: Spaarke tenant; Model 2: customer tenant); no default.</constraint>
+    <constraint source="spec.md §4D I5">Graph token per-tenant scoped for user creation.</constraint>
+    <constraint source="spec.md NFR-09">Graph SDK calls catch ODataError.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler wrapping r1 registration flow with identity-preset branching</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+      <pattern name="demo-provisioning-9-step" location="src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningService.cs">Canonical 9-step user-provisioning pattern.</pattern>
+      <pattern name="graph-user-service" location="src/server/api/Sprk.Bff.Api/Services/Registration/GraphUserService.cs">User creation + UPN + license pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H11UserProvisioningHandler.cs — inject IGraphUserService, IB2BInvitationClient, IIdempotencyService, ICosmosRunStore.</step>
+    <step order="2">Read identityPreset from ProvisioningRun.parameters (B2BGuest or NativeAccount).</step>
+    <step order="3">For each user: NativeAccount branch → GraphUserService.CreateUser + AssignLicense.</step>
+    <step order="4">For each user: B2BGuest branch → B2B invitation via Graph; queue consent-verification gate.</step>
+    <step order="5">If B2B consents pending, run status = WaitingOnGate with gate "B2BConsent" (not Failed).</step>
+    <step order="6">Write provisioned userIds to Cosmos interStepState.</step>
+    <step order="7">Author unit tests: (a) NativeAccount happy path, (b) B2BGuest happy path — consent verified, (c) B2BGuest consent-pending → WaitingOnGate, (d) license assignment failure, (e) idempotency.</step>
+    <step order="8">Register in L2 Program.cs DI.</step>
+    <step order="9">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="10">Update TASK-INDEX.md: change task 054 status from 🔲 to ✅.</step>
+    <step order="11">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Closest neighbor: DemoProvisioningService.cs (r1 9-step pattern) + GraphUserService.cs (user + UPN + license). Both are BFF services; H11 wraps them from L2 without importing BFF DLLs directly (L2 has its own equivalents or uses IGraphUserService abstraction).</existing>
+    <extension>No — L2 can't extend BFF's DemoProvisioningService directly (ADR-010 boundary + L2 has separate DI). H11 is a new handler consuming the pattern.</extension>
+    <cost-of-doing-nothing>Without H11, user provisioning is manual per-customer, breaking the D3 single-pipeline promise. B2B consent-verification gate cannot be resumable — every consent-pending state would require operator re-invocation.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H11UserProvisioningHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H11UserProvisioningHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given identityPreset == "NativeAccount" and users list in ProvisioningRun.parameters, when HandleAsync runs, then all users are created via Graph with correct UPN patterns AND license assignment succeeds (per r1 FR-11 pattern).</criterion>
+    <criterion testable="true">Given identityPreset == "B2BGuest" and users list, when HandleAsync runs, then B2B invitations are sent AND consent-verification gate is queued.</criterion>
+    <criterion testable="true">Given B2B invitations pending acceptance, when HandleAsync completes invitations, then run status = WaitingOnGate with gate "B2BConsent" (not Failed).</criterion>
+    <criterion testable="true">Negative: given license assignment fails (insufficient licenses in tenant), when HandleAsync runs, then it fails with distinct code "LicenseAssignmentFailed" naming the user.</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId — second call is a no-op (users-{customerId} match + UPN alt-key in Graph).</criterion>
+    <criterion testable="true">Negative: H11 invoked without tenantId parameter returns failure (§4D I1); Graph tokens per-tenant scoped (§4D I5).</criterion>
+    <criterion testable="true">Graph SDK calls catch ODataError (NFR-09).</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-14 + NFR-09; design.md §4.1 H11 + D6 identity preset. Reuses DemoProvisioningService 9-step + GraphUserService canonical patterns.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

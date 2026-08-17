@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Refactor DemoExpirationService.cs off [Obsolete] DemoProvisioningOptions.Environments/DefaultEnvironment → DataverseEnvironmentService</title>
+    <phase>E DemoExpirationService Migration</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api'; modifies BFF service .cs file; existing frozen-file per NFR-07 god-class ratchet (+100 LOC grace). R5 carry-over acceptance scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield refactor from [Obsolete] options-based config lookup to DataverseEnvironmentService injection; requires tracing every consumer of the obsolete options; god-class ratchet careful edit. Step 3.5.5b sonnet @ xhigh justified per project CLAUDE.md model-tier defaults (complex brownfield).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, dataverse, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Refactor src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs off the [Obsolete] DemoProvisioningOptions.Environments + DefaultEnvironment properties and onto DataverseEnvironmentService (r3-landed registry lookup service). Preserve the expiration-flow semantics unchanged (no functional regression). Respect god-class ratchet +100 LOC grace per NFR-07 — this file is on the frozen list; the refactor must NOT expand the file beyond its baseline + 100 LOC. Existing unit tests must pass; add new tests to cover the DataverseEnvironmentService interaction if not covered.</prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF Services/Registration/ layer, [Obsolete] attribute semantics, DataverseEnvironmentService contract (r3-landed), and god-class ratchet compliance. Follow ADRs strictly.</role>
+
+  <goal>DemoExpirationService.cs uses DataverseEnvironmentService for environment lookup — zero references to DemoProvisioningOptions.Environments or DefaultEnvironment. All existing DemoExpirationService tests pass. New tests cover DataverseEnvironmentService interaction. File remains within god-class ratchet frozen-baseline + 100 LOC grace. Publish-size delta reported per NFR-01.</goal>
+
+  <context>
+    <background>Per spec.md R5 carry-over + PROJECT-UPDATE + task-042 R5 note: DemoProvisioningOptions.Environments + DefaultEnvironment were marked [Obsolete] when DataverseEnvironmentService was introduced (r3 or earlier). DemoExpirationService is one of the remaining consumers — this task migrates it. RegistrationEndpoints.cs (task 081) is the other consumer. Both must be clean before task 082 deletes the underlying App Service config keys.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DemoProvisioningOptions.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/DemoExpirationServiceTests.cs (if new tests needed)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">DataverseEnvironmentService exists (r3-landed)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md R5">SCOPE: Refactor DemoExpirationService off [Obsolete] DemoProvisioningOptions.Environments/DefaultEnvironment → DataverseEnvironmentService.</constraint>
+    <constraint source="NFR-07">SCOPE: DemoExpirationService.cs is on the god-class-ratchet frozen list — refactor MUST NOT expand file beyond frozen-baseline + 100 LOC grace. Prefer helper extraction to a new file if lines added exceeds grace.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching task — MUST load .claude/constraints/bff-extensions.md; /conflict-check before PR; publish-size delta reported per NFR-01; update tests/unit/Sprk.Bff.Api.Tests/ per §10 bullet 6; no new HIGH CVEs.</constraint>
+    <constraint source="NFR-05">SCOPE: If refactor introduces a new IOptions&lt;T&gt;, classify per Tier 1/2/3 and either validate-on-start OR add to Tier-2 exemption per task-061-config-validation-classification.md. Likely no new options — DataverseEnvironmentService is the replacement, not additional config.</constraint>
+    <constraint source="NFR-06">SCOPE: Analyzers-as-errors — file must have zero warnings post-refactor; CS8601/CS8604 nullable are errors.</constraint>
+    <constraint source="project">SCOPE: Do NOT remove DemoProvisioningOptions.Environments/DefaultEnvironment properties themselves in this task — task 082 owns Azure App Service config removal + eventual code cleanup once both consumers (this task + 081) migrate.</constraint>
+    <constraint source="project">SCOPE: Do NOT downcast IDataverseService (per r3 task 028 constraint) — use the UnwrapServiceClient extension.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>DemoExpirationService refactor off [Obsolete] options → DataverseEnvironmentService</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="God-class ratchet compliance" location=".claude/patterns/testing/god-class-ratchet.md">Existing GodClassGuardTests uses baseline + 100 LOC grace — read this pattern BEFORE editing DemoExpirationService.</pattern>
+      <pattern name="DataverseEnvironmentService injection" location="src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs">r3-landed contract — inject via constructor and consume registry lookups.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md R5 + NFR-07 + .claude/constraints/bff-extensions.md.</step>
+    <step order="1" name="Baseline">Grep DemoExpirationService.cs for DemoProvisioningOptions.Environments AND DefaultEnvironment usages; enumerate each site.</step>
+    <step order="2" name="Ratchet baseline">Note the current LOC count of DemoExpirationService.cs (baseline for +100 grace check).</step>
+    <step order="3" name="Refactor">Inject IDataverseEnvironmentService via constructor; replace each obsolete-option usage with the equivalent DataverseEnvironmentService call.</step>
+    <step order="4" name="LOC check">Verify final LOC ≤ baseline + 100; if exceeded, extract helper into a new file rather than growing DemoExpirationService.cs.</step>
+    <step order="5" name="Tests">Run existing DemoExpirationServiceTests.cs — must pass unchanged (behavior preserved). Add new tests covering DataverseEnvironmentService interaction if not already covered.</step>
+    <step order="6" name="Analyzer sweep">dotnet build — zero warnings; dotnet format.</step>
+    <step order="7" name="Publish size">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and report absolute size + delta per NFR-01.</step>
+    <step order="8" name="CVE sweep">Run `dotnet list package --vulnerable --include-transitive` — zero HIGH.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: task 080 → ✅.</step>
+    <step order="10" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, and publish-size the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Registration/DemoExpirationService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Registration/DemoExpirationServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep DemoExpirationService.cs for `DemoProvisioningOptions.Environments` and `DefaultEnvironment` returns ZERO matches.</criterion>
+    <criterion testable="true">DataverseEnvironmentService is injected via constructor and used for environment lookup.</criterion>
+    <criterion testable="true">All existing DemoExpirationServiceTests.cs pass unchanged (behavior preserved).</criterion>
+    <criterion testable="true">DemoExpirationService.cs LOC ≤ baseline + 100 (god-class ratchet grace); GodClassGuardTests passes.</criterion>
+    <criterion testable="true">dotnet build exits 0 with zero warnings (NFR-06 analyzers-as-errors).</criterion>
+    <criterion testable="true">BFF publish-size delta reported per NFR-01; delta contributes to Phase C/D/E combined &lt;~0.5 MB budget.</criterion>
+    <criterion testable="true">Zero new HIGH CVEs per `dotnet list package --vulnerable --include-transitive`.</criterion>
+    <criterion testable="true">Negative: refactor does NOT remove the [Obsolete] options themselves (task 082 owns removal); this task only stops consuming them.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md R5 + NFR-07 + task 081 (parallel consumer) + task 082 (config cleanup).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author Cosmos DB spaarke-provisioning database + runs container schema (+ C# POCO)</title>
+    <phase>C Wave C1 — Registry Schema + Cosmos Model</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new persistent data store carrying all provisioning-run state; downstream consumers (L2 REST, state-reconciler, crash recovery, §4C quarantine state) all depend on this shape — task-create Step 3.5.5 FULL (new surface + &gt;3 downstream deps + creates test-modifying dep).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical bicep authoring for Cosmos DB serverless + a straightforward C# POCO layer against a fully-specified schema (design.md §6.2). No architectural judgment — spec.md §Assumptions "Sonnet 5 @ high for Cosmos schema".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC1-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure, bicep, azure-deployment, dataverse, l2-controlplane</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the Cosmos DB spaarke-provisioning database + runs container schema per design.md §6.2: partition key /customerId, TTL 365 days (31536000 s), enumerated gateStates and interStepState per the design's state-transition tables, secrets in parameters stored ONLY as KV URI references (never cleartext). Deliverables: (a) bicep module addition/update at infrastructure/bicep/modules/cosmos-db.bicep OR a new modules/cosmos-provisioning.bicep declaring the database+container with the correct partition + TTL + throughput settings; (b) C# POCO layer at src/server/services/Sprk.Provisioning.ControlPlane/Models/ProvisioningRun.cs (and adjacent sibling types for GateState / InterStepState / RunParameters / Quarantine) modeling every field per §6.2 with JSON-serialization attributes consistent with Cosmos SDK usage.</prompt>
+  <role>SPAARKE platform developer with Cosmos DB serverless data-model expertise and .NET 10 POCO design. Follow the KV URI reference pattern (@Microsoft.KeyVault(...)) for anything secret; do NOT permit a raw string secret in the parameters shape at the type level.</role>
+  <goal>A bicep artifact declares the spaarke-provisioning database + runs container with partition /customerId, TTL 365d, correct index policy; a C# POCO layer models ProvisioningRun with strongly-typed GateState (enum) + InterStepState (enum) + Parameters (KV-URI-ref only) matching design.md §6.2; the types compile cleanly under net10.0 with analyzers-as-errors.</goal>
+
+  <context>
+    <background>Spec FR-27 + design.md §6.2: the L2 control-plane's entire state store is this container. Cosmos partition /customerId satisfies §4D I3 (partition-key predicate on every read/write). TTL 365d matches the audit-retention target. gateStates + interStepState enumerations are the state-transition contract the reconciler advances. Storing raw secrets in Cosmos rows is a CATASTROPHIC leak vector — §4D-adjacent invariant preserved by KV URI reference discipline (@Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=...)) enforced at the type level, then verified by task 025 ArchTest.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/modules/cosmos-db.bicep</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Models/ProvisioningRun.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Models/GateState.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Models/InterStepState.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Models/RunParameters.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Models/KeyVaultSecretRef.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite r1 task — Wave C1 kickoff.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: any secret referenced in Cosmos parameters MUST be a KV URI reference (@Microsoft.KeyVault(VaultName=...;SecretName=...)) — comply with ADR-028's 21 MUSTs (no cleartext secrets outside KV).</constraint>
+    <constraint source="ADR-036">Scope: this Cosmos client scaffolding is L2-owned; do NOT touch the existing BFF-owned Cosmos client patterns beyond citing them as reference for wiring in task 037.</constraint>
+    <constraint source="spec">FR-27 acceptance: partition-key predicate on every read/write is preserved (this task only defines the shape; task 037 wires the client). Secrets in parameters stored as KV URI refs only — the POCO's RunParameters.Secrets property MUST be typed as IDictionary&lt;string, KeyVaultSecretRef&gt;, NOT string.</constraint>
+    <constraint source="project">Scope (this task only): schema + POCO authoring — do NOT wire the Cosmos client into DI (that is task 037) and do NOT scaffold the .NET project (that is task 036); if the folder does not yet exist, create the Models subfolder as a placeholder to be picked up by task 036.</constraint>
+    <constraint source="project">MUST use JSON attribute naming that matches design.md §6.2 field names verbatim (e.g. runId, customerId, currentPhase, gateStates, interStepState, parameters, quarantine, createdOn).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cosmos DB serverless bicep + ProvisioningRun POCO layer</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/data.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing cosmos-db.bicep module" location="infrastructure/bicep/modules/cosmos-db.bicep">Reuse existing serverless account pattern; add a new database + container scoped to spaarke-provisioning without breaking the existing runtime Cosmos usage per §5.3 (different stores per concern).</pattern>
+      <pattern name="KV URI reference pattern" location="docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md">@Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=...) — this is the ONLY permitted form for a secret in Cosmos parameters.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason). Load spec.md FR-27, design.md §6.2 (Cosmos schema + state-transition tables), CLAUDE.md.</step>
+    <step order="1">Confirm the existing cosmos-db.bicep module — either extend with a spaarke-provisioning database + runs container OR add modules/cosmos-provisioning.bicep as a sibling. Preserve the existing runtime Cosmos usage (per §5.3 — orchestration is a different store).</step>
+    <step order="2">Declare the database name = spaarke-provisioning; container name = runs; partition key = /customerId; TTL = 31536000 (365 days); default index policy suitable for the querying patterns in §6.2 (composite indexes for status + createdOn, tenantId lookup if any).</step>
+    <step order="3">Scaffold the Models subfolder under src/server/services/Sprk.Provisioning.ControlPlane/ with the 5 POCOs enumerated in &lt;relevant-files&gt;.</step>
+    <step order="4">Model ProvisioningRun with all §6.2 fields; use System.Text.Json attributes matching field-name casing; use nullable-reference discipline consistent with NFR-06 analyzers-as-errors.</step>
+    <step order="5">Model GateState + InterStepState as C# enums that match the design's enumerations exactly; add a QuarantineState property + reason field per §4C.</step>
+    <step order="6">Model RunParameters with Secrets = IDictionary&lt;string, KeyVaultSecretRef&gt;; KeyVaultSecretRef has (VaultName, SecretName, VersionId?) — NEVER a raw Value property.</step>
+    <step order="7">Verify bicep compiles (az bicep build); verify C# types compile (dotnet build, but only after task 036 exists — this task may end at "types authored, compilation deferred to task 036 scaffold step").</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation (e.g. cosmos-db.bicep decisions, TTL nuance) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If design.md §6.2 gate/inter-step state enum values or field names differ from what you can implement cleanly with System.Text.Json defaults, STOP and escalate per CLAUDE.md §6 — do NOT paraphrase or invent field names.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None. BFF's runtime Cosmos container is per-customer + tenant-scoped runtime data (AI sessions/prompts/audit); provisioning-run state is fleet-scoped orchestration state — spec.md § New Components table row 2 documents this explicitly. Grep of infrastructure/bicep for "spaarke-provisioning" returns none.</existing>
+    <extension>No — mixing runtime tenant data with orchestration state would break §4D I3 partition-key scoping (runtime uses /tenantId; orchestration uses /customerId) and Cosmos-partition-key discipline. Distinct concerns require distinct containers.</extension>
+    <cost-of-doing-nothing>Without this container, either share BFF Cosmos (breaks I3 partition discipline) or invent a state file (breaks I5 concurrency, I6 crash recovery, R20 execution model). Every provisioning run would lose crash-recovery + serialization guarantees; concurrent same-customer runs would race with no 409 signal. spec.md § New Components table row 2 is the concrete cost.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/cosmos-db.bicep (extended) OR infrastructure/bicep/modules/cosmos-provisioning.bicep (new)</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Models/ProvisioningRun.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Models/GateState.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Models/InterStepState.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Models/RunParameters.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Models/KeyVaultSecretRef.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the bicep artifact, az bicep build succeeds with 0 errors and 0 warnings.</criterion>
+    <criterion testable="true">Given a dry-run az deployment group what-if, the database name is spaarke-provisioning, container name is runs, partitionKey is /customerId, defaultTtl is 31536000.</criterion>
+    <criterion testable="true">Given the C# POCOs, RunParameters.Secrets is typed as IDictionary&lt;string, KeyVaultSecretRef&gt; and KeyVaultSecretRef has NO string Value property (compile-time cleartext-secret prevention).</criterion>
+    <criterion testable="true">Given the C# POCOs, all §6.2 field names appear as JsonPropertyName attribute values verbatim (runId, customerId, currentPhase, gateStates, interStepState, parameters, quarantine, createdOn).</criterion>
+    <criterion testable="true">Negative: no DI registration is added in this task (deferred to task 037); no Cosmos client is instantiated at runtime.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-27 + design.md §6.2. Task 025 (ArchTest) verifies the cleartext-secret-prevention invariant; task 037 wires the Cosmos client into L2 DI. Coordinate with task 023: sprk_currentrunid on the Dataverse registry stores the ID of the ProvisioningRun in this container (cross-reference, not FK).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

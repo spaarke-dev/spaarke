@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Audit AI Search index catalog vs scripts/ai-search/Deploy-AllIndexes.ps1 (7 canonical); flag drift</title>
+    <phase>A Doc Consolidation + Audits</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Read-only audit + note output; no code changes; no tests. Per root CLAUDE.md §8 rigor table, inventory/checklist creation is MINIMAL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard audit with a clear reference authority (Deploy-AllIndexes.ps1). No cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>groupA-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs, audit, ai</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Audit every AI Search index reference in the repo against the authoritative catalog defined by scripts/ai-search/Deploy-AllIndexes.ps1 (7 canonical indexes per FR-05: files, discovery, records, rag-references, insights, session-files, invoices; spaarke-playbook-embeddings retired; spaarke-knowledge-index archived). Publish notes/ai-search-catalog-audit-2026-08.md listing every drift point (references to retired/archived indexes, undocumented indexes, casing mismatches). Read-only audit — do NOT modify anything.
+  </prompt>
+
+  <role>SPAARKE platform documentation + audit engineer. Familiar with Azure AI Search index conventions, Spaarke's per-tenant filter invariant (§4D I2 / FR-29), and the r3-era retirement of spaarke-playbook-embeddings + archival of spaarke-knowledge-index.</role>
+
+  <goal>projects/customer-provisioning-orchestration-r1/notes/ai-search-catalog-audit-2026-08.md exists documenting: (a) the 7 canonical indexes per Deploy-AllIndexes.ps1, (b) every code/doc reference to a retired/archived index (spaarke-playbook-embeddings, spaarke-knowledge-index), (c) every casing / naming inconsistency across BFF/scripts/docs, (d) recommended remediation (in-scope for later tasks — not for this audit).</goal>
+
+  <context>
+    <background>
+Per spec.md FR-05 (H2b provisions 7 canonical indexes) + R9 (index catalog drift) + design.md §8.2. spaarke-playbook-embeddings was retired per ADR-039 dispatcher-retirement; spaarke-knowledge-index was archived. Fable spot-check found tenant-isolation invariant compliance in 2 services only (ReferenceRetrievalService, RecordSearchService) — the wider audit sweep is Phase A prep for the Wave C6 tenant-isolation ArchTest work.
+    </background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/ai-search-catalog-audit-2026-08.md</file>
+      <file role="canonical-reference">scripts/ai-search/Deploy-AllIndexes.ps1</file>
+      <file role="canonical-reference">docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/</file>
+      <file role="canonical-reference">.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase A is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Read-only audit. Do NOT modify any script/code/index/config as part of this task; remediation happens in later dedicated tasks.</constraint>
+    <constraint source="spec.md">SCOPE: The catalog authority is scripts/ai-search/Deploy-AllIndexes.ps1 (per plan.md § Discovered Resources); if any other doc disagrees, note the drift — do NOT edit the doc during this audit.</constraint>
+    <constraint source="ADR-039">SCOPE: spaarke-playbook-embeddings MUST be flagged as retired anywhere it appears; spaarke-knowledge-index MUST be flagged as archived. These are the two retired/archived indexes per ADR-039 + FR-P2-06.</constraint>
+    <constraint source="project">SCOPE: The output note MUST enumerate ALL 7 canonical indexes by exact name + purpose; a partial list is a defect.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure AI Search + Spaarke catalog conventions</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>scripts/ai-search/Deploy-AllIndexes.ps1</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke audit-note structure" location="projects/*/notes/*-audit-*.md">Front-matter (Purpose + Date + Author) → Enumeration (canonical set) → Drift findings table → Recommendations.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load spec.md FR-05 + design.md §8.2 + Deploy-AllIndexes.ps1.</step>
+    <step order="1" name="Enumerate canonical">Read Deploy-AllIndexes.ps1 top-to-bottom; extract the exact index-name list; produce the authoritative 7-index table with purpose + per-index invariants (required filterable fields, vector fields, forbidden fields).</step>
+    <step order="2" name="Grep sweep">Grep the repo for each canonical index name AND each retired/archived name (spaarke-playbook-embeddings, spaarke-knowledge-index); collect every hit with file:line context.</step>
+    <step order="3" name="BFF-services sweep">Extend the grep sweep across src/server/api/Sprk.Bff.Api/Services/ for AI-Search client calls (`.Search(`, `SearchClient`, `SearchIndexClient`) noting which index each call targets.</step>
+    <step order="4" name="Docs sweep">Grep docs/ and .claude/ for AI Search index references; flag any that list retired/archived indexes as active.</step>
+    <step order="5" name="Draft findings">Compile drift findings table: (file, line, reference type, drift class, recommended fix). Group by severity.</step>
+    <step order="6" name="Publish">Write projects/customer-provisioning-orchestration-r1/notes/ai-search-catalog-audit-2026-08.md.</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: set task 002 status to ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No prior ai-search catalog audit note exists in projects/customer-provisioning-orchestration-r1/notes/. Nearest neighbor: docs/architecture/AI-SEARCH-INDEX-CATALOG.md is a stated catalog but per plan.md Discovered Resources may itself contain drift.</existing>
+    <extension>No — AI-SEARCH-INDEX-CATALOG.md is a general repo doc; this audit specifically compares repo references vs script authority for the r1 provisioning gate. Extending the general doc would conflate authority with audit finding.</extension>
+    <cost-of-doing-nothing>Without the audit, Wave C6 tenant-isolation ArchTest (I2 unconditional tenantId filter) has no baseline for the "wider than 2 Fable-spot-checked services" sweep that spec.md FR-29 mandates. Retired-index references also fail H2b idempotency verification in Wave C4.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">grep / rg across repo</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/ai-search-catalog-audit-2026-08.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the note, when reading Section "Canonical 7", then all 7 exact index names from Deploy-AllIndexes.ps1 are listed with per-index invariants.</criterion>
+    <criterion testable="true">Given the note, when reading the Drift Findings table, then every occurrence of spaarke-playbook-embeddings and spaarke-knowledge-index in the repo is enumerated with file:line.</criterion>
+    <criterion testable="true">Given the note, when scanning Recommendations, then each is scoped to a later dedicated task or explicitly marked "out of scope for r1".</criterion>
+    <criterion testable="true">Negative: git diff shows only the new notes file — no script/code/config modified.</criterion>
+    <criterion testable="true">Negative: the note does NOT prescribe remediation edits inline (audit-only per constraint).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-05, R9, ADR-039. Feeds Wave C6 tenant-isolation ArchTest (I2 unconditional tenantId filter) and Wave C4 H2b handler verifier.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="067" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author nightly Graph app-role parity ArchTest — reads GraphAppRoles.cs + queries UAMI SP appRoleAssignments + fails on mismatch (coordinated PR with ci-cd-r1)</title>
+    <phase>C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'testing','integration-test','auth','ci-workflows'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Also T3 silent-fail trap parity — a mismatch means Graph 403s silently in production.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Focused ArchTest authoring against GraphAppRoles.cs constant + Graph SDK query for UAMI SP appRoleAssignments; coord-PR spec authoring is doc-only. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Task is a coordinated PR with ci-cd-unit-test-remediation-r1 worktree per r3 task-042-063-ci-gate-wiring-deferral.md; must not merge in isolation. Also touches .github/workflows/** which is owned by that worktree.</parallel-reason>
+    <deps>005, 053, 064</deps>
+    <tags>testing, integration-test, auth, azure-deployment</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author a nightly ArchTest that reads the 14-role Infrastructure/Auth/GraphAppRoles.cs constant and queries the UAMI service principal's appRoleAssignments via Graph SDK, failing on mismatch (either missing or extra roles). Sequence into r3 forcing-functions via a coordinated PR with `ci-cd-unit-test-remediation-r1` per r3 task-042-063-ci-gate-wiring-deferral.md — do NOT edit .github/workflows/** in isolation; author the coord-PR spec at projects/customer-provisioning-orchestration-r1/notes/graph-app-role-parity-coord-pr.md.</prompt>
+
+  <role>SPAARKE platform test engineer. Expert in Microsoft.Graph SDK v6, appRoleAssignments query patterns, GraphAppRoles.cs constant shape (r3 task 062), and coord-PR authoring for cross-worktree CI wiring. Follow ADRs strictly.</role>
+
+  <goal>File tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/GraphAppRoleParityTest.cs exists as an integration test (nightly cadence, not per-PR) that: (a) reads GraphAppRoles.cs constant reflectively; (b) queries UAMI SP appRoleAssignments via Graph SDK v6 with explicit tenantId; (c) compares the two sets; (d) fails with a diff-formatted message if missing or extra. Coord-PR spec at notes/graph-app-role-parity-coord-pr.md describes the .github/workflows/** wiring diff for the ci-cd-r1 worktree to apply.</goal>
+
+  <context>
+    <background>Per spec.md FR-13 + T3 + r3 task 062: GraphAppRoles.cs is a compile-time constant of 14 role IDs the UAMI SP MUST have appRoleAssignments for. Drift (someone revokes a role in Azure Portal, or GraphAppRoles.cs adds a role and H10 hasn't run) is a T3 silent-fail — Graph 403s at runtime. Nightly parity check catches drift within 24h. Per r3 task-042-063-ci-gate-wiring-deferral.md, .github/workflows/** wiring is coordinated with the ci-cd-r1 worktree, not edited in isolation.</background>
+    <relevant-files>
+      <file role="new">tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/GraphAppRoleParityTest.cs</file>
+      <file role="new">tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/Sprk.Provisioning.ControlPlane.NightlyTests.csproj</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/graph-app-role-parity-coord-pr.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">GraphAppRoles.cs 14 GUIDs completed via `az` enumeration (Phase A)</dependency>
+      <dependency task="053" status="pending">H10 handler grants roles onto UAMI SP</dependency>
+      <dependency task="064" status="pending">ArchTest suite baseline exists (I1-I5)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-13">SCOPE: Test verifies UAMI SP appRoleAssignments equals the GraphAppRoles.cs 14-role set exactly (no missing, no extra).</constraint>
+    <constraint source="spec.md T3">SCOPE: This is a silent-fail-trap safety net — T3 (UAMI SP role parity) is normally verified by H10 handler post-condition per FR-13; the nightly test catches drift AFTER provisioning.</constraint>
+    <constraint source="spec.md §4D I5">SCOPE: Graph SDK query MUST pass explicit tenantId — no `.default`-only scope; enforces I5.</constraint>
+    <constraint source="ADR-038">SCOPE: Integration test (nightly cadence, NOT per-PR — Graph API latency + rate limits make per-PR untenable); sequenced into r3 KEEP paths per ADR-038 §7.</constraint>
+    <constraint source="project">SCOPE: Coord-PR spec at notes/graph-app-role-parity-coord-pr.md describes the .github/workflows/** wiring diff for ci-cd-r1 to apply; do NOT edit .github/workflows/** in this task.</constraint>
+    <constraint source="project">SCOPE: Test failure message MUST be a diff (missing roles + extra roles listed by displayName + GUID) so the operator can act without reading a debugger.</constraint>
+    <constraint source="CLAUDE.md-§6.5">SCOPE: Coordinated PR with ci-cd-r1 is Path C compliance (ci-workflows=Y per hot-path declaration); do NOT unilaterally merge to .github/workflows/**.</constraint>
+    <constraint source="project">SCOPE: NFR-09 — Graph SDK v6 / Kiota 2.0 error type; catch ODataError (not ServiceException); ResponseStatusCode is int; ResponseHeaders is dict.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Nightly Graph app-role parity ArchTest with coord-PR ci-wiring</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Graph SDK v6 appRoleAssignments query" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/">Existing Graph client factory + query patterns; verify explicit tenantId per I5.</pattern>
+      <pattern name="GraphAppRoles.cs constant shape" location="src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs">14 (Resource, AppRoleId, DisplayName) tuples; reflectively enumerate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-13 + T3 + NFR-09 + r3 task-042-063-ci-gate-wiring-deferral.md.</step>
+    <step order="1" name="Read constant">Read GraphAppRoles.cs — enumerate the (Resource, AppRoleId, DisplayName) tuples.</step>
+    <step order="2" name="Scaffold project">Create tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/ .csproj referencing BFF project (for GraphAppRoles.cs constant) + Microsoft.Graph v6 + xUnit.</step>
+    <step order="3" name="Test">Author GraphAppRoleParityTest.cs — reflectively read GraphAppRoles.cs; construct Graph client with explicit tenantId (I5); query GET /servicePrincipals/{uami-sp-id}/appRoleAssignments; compare sets; assert equality; on failure, emit diff.</step>
+    <step order="4" name="Error handling">Wrap Graph calls in try/catch ODataError (Graph v6 / Kiota 2.0 error type per NFR-09) — surface ResponseStatusCode + first-line message.</step>
+    <step order="5" name="Coord-PR spec">Write notes/graph-app-role-parity-coord-pr.md describing the .github/workflows/** wiring: a nightly-scheduled workflow that runs `dotnet test tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/` with auth secrets from GH Actions secrets; env-vars UAMI_SP_OBJECT_ID + AZURE_TENANT_ID.</step>
+    <step order="6" name="Verify local">dotnet build + dotnet test the nightly project against dev tenant/UAMI — verify parity check works.</step>
+    <step order="7" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: task 067 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Graph SDK v6 / Kiota 2.0 query for appRoleAssignments returns an unexpected shape, OR if the ci-cd-r1 worktree responds to the coord-PR with a scope conflict that would delay wiring beyond Phase F acceptance, STOP and escalate per CLAUDE.md §6. Do NOT unilaterally edit .github/workflows/** to bypass coord (that would violate the r3 handoff constraint).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the nightly project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/GraphAppRoleParityTest.cs</output>
+    <output type="test">tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/Sprk.Provisioning.ControlPlane.NightlyTests.csproj</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/graph-app-role-parity-coord-pr.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GraphAppRoleParityTest reads all 14 (Resource, AppRoleId, DisplayName) tuples from GraphAppRoles.cs reflectively.</criterion>
+    <criterion testable="true">Given the UAMI SP has exactly the 14 role IDs in GraphAppRoles.cs, when the test runs, then it PASSES.</criterion>
+    <criterion testable="true">Given the UAMI SP is missing 1+ role IDs, when the test runs, then it FAILS with a diff message listing the missing roles by displayName + GUID.</criterion>
+    <criterion testable="true">Given the UAMI SP has 1+ extra role IDs beyond GraphAppRoles.cs, when the test runs, then it FAILS with a diff message listing the extra roles.</criterion>
+    <criterion testable="true">Graph SDK query passes an explicit tenantId parameter (I5 compliance); ArchTest I5 in task 064 does NOT flag this test as a violation.</criterion>
+    <criterion testable="true">Graph exceptions are caught as ODataError (Graph v6 / Kiota 2.0 per NFR-09), not ServiceException.</criterion>
+    <criterion testable="true">Coord-PR spec at notes/graph-app-role-parity-coord-pr.md describes the .github/workflows/** wiring (nightly cron schedule + auth env-vars); does NOT edit workflow files directly.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0 (against dev tenant); zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-13 + T3 + NFR-09 + r3 task-042-063-ci-gate-wiring-deferral.md. Coord-PR consumed by task 088 (Phase H CI wiring).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H12c runtime references handler — sprk_aimodeldeployment rows point at customer or shared OpenAI</title>
+    <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','ai','dataverse'; handler in the DAG whose failure blocks Setup Status = Ready. FR-17 acceptance scope; tier-branch (Model 1 vs Model 2) is critical for cost + isolation semantics.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component IJobHandler with tier-branching logic per §4.1a Model 1/2 differences table; well-specified. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>044, 070, 071</deps>
+    <tags>l2-controlplane, job-handler, ai, dataverse</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H12c runtime references handler as an IJobHandler in the L2 control plane per spec.md FR-17. H12c populates sprk_aimodeldeployment rows (placeholders seeded by H12a) with real endpoint URIs: for Model 2 (dedicated stamp) → customer's OpenAI endpoint from H2a; for Model 1 (shared tier) → shared platform OpenAI with per-tenant metering attribution wired. Idempotency key: h12c-{customerId}-{tenancyModel}-{endpointHash}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract (ADR-004), Dataverse alternate-key upsert, Azure OpenAI endpoint discovery via ARM, sprk_aimodeldeployment schema, and Model 1/2 tier-branching per §4.1a. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12cRuntimeReferencesHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) reads sprk_dataverseenvironment.sprk_tenancymodel; (b) for Model 2, reads customer OpenAI endpoint from H2a-provisioned resource; (c) for Model 1, reads shared platform OpenAI endpoint + wires per-tenant metering attribution (task 077); (d) upserts sprk_aimodeldeployment rows with endpoint URI values; (e) asserts idempotency. Unit tests cover Model 1, Model 2, and idempotency paths.</goal>
+
+  <context>
+    <background>Per spec.md FR-17 + §4.1a Model 1 vs Model 2 handler-differences table + design.md §4.1 H12c row: H12a seeded sprk_aimodeldeployment PLACEHOLDER rows. H12c populates them with real endpoint URIs. Tier determines the endpoint source: Model 2 uses the customer's dedicated OpenAI (from H2a); Model 1 uses shared platform OpenAI with per-tenant metering keyed on tenantId (task 077). BFF's AzureOpenAIOptions.Endpoint resolves via env-var lookup + sprk_aimodeldeployment join — so H12c is the last mile that makes AI actually work per customer.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12cRuntimeReferencesHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12cRuntimeReferencesHandler.Tests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="044" status="pending">H2a Bicep infra deploy — provides customer OpenAI endpoint for Model 2</dependency>
+      <dependency task="070" status="pending">H12a seeded sprk_aimodeldeployment placeholder rows</dependency>
+      <dependency task="071" status="pending">H12b app-config seed complete (no direct dep but DAG placement follows both)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-17">SCOPE: sprk_aimodeldeployment rows point at correct OpenAI endpoint per tenancy tier; BFF AzureOpenAIOptions.Endpoint resolves via env-var lookup + join.</constraint>
+    <constraint source="spec.md §4.1a">SCOPE: Model 1 uses shared platform OpenAI with per-tenant metering; Model 2 uses dedicated customer OpenAI from H2a.</constraint>
+    <constraint source="ADR-004">SCOPE: Single IJobHandler; one message, one handler, one outcome.</constraint>
+    <constraint source="ADR-020">SCOPE: Endpoint values MUST reference the pinned model deployment versions per §7.4 (gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large v1).</constraint>
+    <constraint source="ADR-010">SCOPE: Registers in L2 control-plane DI container, NOT the BFF.</constraint>
+    <constraint source="ADR-036">SCOPE: 3-level idempotency (MessageId + Redis lock + deterministic key h12c-{customerId}-{tenancyModel}-{endpointHash}).</constraint>
+    <constraint source="spec.md §4D I3">SCOPE: All Cosmos + Dataverse operations use partition-key / alternate-key predicates; no cross-partition drift.</constraint>
+    <constraint source="project">SCOPE: For Model 1, metering-layer wiring integrates with task 077 (per-tenant token metering); Model 1 rows carry a metering-attribution tenantId field.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H12c runtime references handler with Model 1/2 tier branch</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-020-versioning.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reference handler shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Any handler is a shape exemplar.</pattern>
+      <pattern name="Dataverse alt-key upsert" location="src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs">Reuse for sprk_aimodeldeployment upsert.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-17 + §4.1a + task 044 H2a output shape.</step>
+    <step order="1" name="Author">Author H12cRuntimeReferencesHandler.cs — inject IIdempotencyService, ICosmosRunStore, IDataverseService, IArmOpenAiEndpointReader.</step>
+    <step order="2" name="Tier branch">HandleAsync reads customer.sprk_tenancymodel; branches Model 1 vs Model 2 per §4.1a.</step>
+    <step order="3" name="Model 2 path">Read H2a-provisioned OpenAI endpoint from customer resource group; upsert sprk_aimodeldeployment rows with dedicated endpoint URIs (pinned model versions per ADR-020).</step>
+    <step order="4" name="Model 1 path">Read shared platform OpenAI endpoint from platform config; upsert sprk_aimodeldeployment rows with shared endpoint + metering-attribution tenantId field (integrates with task 077).</step>
+    <step order="5" name="Register">Register in L2 Program.cs DI.</step>
+    <step order="6" name="Tests">Unit tests: Model 2 happy; Model 1 happy; idempotency (second invocation same-key no-op); tier-branch coverage (both paths tested).</step>
+    <step order="7" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: task 072 → ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12cRuntimeReferencesHandler.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (DI registration)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12cRuntimeReferencesHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">H12cRuntimeReferencesHandler implements IJobHandler and registers in L2 DI.</criterion>
+    <criterion testable="true">Given customer.sprk_tenancymodel = Model2Dedicated, when HandleAsync runs, then sprk_aimodeldeployment rows are upserted with the customer's dedicated OpenAI endpoint URIs.</criterion>
+    <criterion testable="true">Given customer.sprk_tenancymodel = Model1Shared, when HandleAsync runs, then sprk_aimodeldeployment rows are upserted with the shared platform OpenAI endpoint + metering-attribution tenantId.</criterion>
+    <criterion testable="true">Endpoint URIs reference pinned model deployment versions per ADR-020 (gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large v1).</criterion>
+    <criterion testable="true">Idempotency key = h12c-{customerId}-{tenancyModel}-{endpointHash}; second invocation same-key is a no-op.</criterion>
+    <criterion testable="true">Negative: HandleAsync invoked with unknown tenancyModel value returns Failed with clear diagnostic; does NOT upsert.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-17 + §4.1a + ADR-020 + design.md §4.1 H12c row. Interlocks with task 077 (per-tenant metering) for Model 1 attribution.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

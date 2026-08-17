@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H7 Dataverse Env-Var Values Handler (7 canonical per §10.3, no hardcoded URL fallbacks)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse','config'; modifies .cs files; seeds 7 canonical env-vars that downstream Model-Driven Apps + Code Pages consume.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler seeds 7 well-defined env-var records; complete spec (FR-10 + §10.3); not cross-cutting.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 049</deps>
+    <tags>l2-controlplane, job-handler, dataverse, config</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H7 Dataverse env-var values handler as an IJobHandler in the L2 control-plane. H7 sets 7 per-customer Dataverse env-var values per §10.3: sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId, sprk_AzureOpenAiEndpoint, sprk_ShareLinkBaseUrl, sprk_SharePointEmbeddedContainerId. Client startup validates NO hardcoded URL fallbacks (per task 024 — client fails fast if any missing). Idempotency key: envvars-{customerId}-{configVer}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Dataverse Web API environmentvariablevalue records, config-driven seeding without hardcoded fallbacks, and cross-env token cache pattern for Dataverse. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H7DataverseEnvVarValuesHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) reads target values from Cosmos interStepState (bffAppRegId from H3, dataverseEnvUrl from H5, openAiEndpoint from H2a, speContainerId from H8 (deferred: run sequential-after-H8 alternative)); (b) upserts environmentvariablevalue records for all 7 canonical names; (c) verifies no hardcoded URL fallbacks — client startup validation contract; (d) asserts idempotency key envvars-{customerId}-{configVer}. Unit tests cover happy path (all 7 seeded), missing-upstream-state failure, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-10 + design.md §10.3: 7 canonical Dataverse env-vars gate MDA + Code Page startup. Task 024 (r1-lineage) established client-fails-fast contract: no URL fallback strings. H7 seeds these values from prior handlers' Cosmos interStepState outputs.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H7DataverseEnvVarValuesHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H7DataverseEnvVarValuesHandler.Tests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="049" status="pending">H6 solution import — solutions define the env-var records H7 upserts into</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget.</constraint>
+    <constraint source="ADR-044">Env-var record GUIDs written to Cosmos interStepState follow canonicalization.</constraint>
+    <constraint source="project">Idempotency key: envvars-{customerId}-{configVer} — configVer is seed manifest hash.</constraint>
+    <constraint source="project">7 canonical env-var names per §10.3 (exact spelling): sprk_BffApiBaseUrl, sprk_BffApiAppId, sprk_MsalClientId, sprk_TenantId, sprk_AzureOpenAiEndpoint, sprk_ShareLinkBaseUrl, sprk_SharePointEmbeddedContainerId.</constraint>
+    <constraint source="project">Client startup validation contract (task 024): NO hardcoded URL fallbacks — if any env-var missing, client fails fast at startup. H7 pre-condition: all 7 upstream values available in Cosmos interStepState; fail deploy if not.</constraint>
+    <constraint source="spec.md §4D I1">tenantId flows through explicitly; no default tenant fallback.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler for Dataverse env-var seeding from upstream handler state</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+      <pattern name="dataverse-token-cache" location="src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs">Cross-env token cache for Dataverse Web API access.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H7DataverseEnvVarValuesHandler.cs — inject IDataverseWebApiClient, ICosmosRunStore, IIdempotencyService.</step>
+    <step order="2">Read upstream state from Cosmos interStepState: bffAppRegId (H3), dataverseEnvUrl (H5), openAiEndpoint (H2a); tenantId + shareLinkBaseUrl from ProvisioningRun.parameters; speContainerId from H8 output (deferred — H8 runs before H7 in DAG per §4.1 dependencies).</step>
+    <step order="3">Fail deploy with "MissingUpstreamState" if any required value is null.</step>
+    <step order="4">Upsert 7 environmentvariablevalue records via Dataverse Web API using the canonical env-var names.</step>
+    <step order="5">Author unit tests: happy path (all 7 seeded), missing upstream state fails, idempotency (second run = no-op via upsert alt-key).</step>
+    <step order="6">Register in L2 Program.cs DI.</step>
+    <step order="7">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="8">Update TASK-INDEX.md: change task 050 status from 🔲 to ✅.</step>
+    <step order="9">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No existing L2 handler for env-var seeding. Closest neighbor: RegistrationDataverseService.cs for Dataverse Web API access pattern.</existing>
+    <extension>No — env-var seeding needs idempotent 3-level upsert + Cosmos state read + tenant-scoped Dataverse access. Ad-hoc scripts don't provide DAG advancement.</extension>
+    <cost-of-doing-nothing>Without H7, MDA + Code Pages fail at startup because the 7 canonical env-vars are missing (client-fails-fast contract per task 024). Every deploy would require manual operator env-var seeding, breaking the D3 pipeline promise.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H7DataverseEnvVarValuesHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H7DataverseEnvVarValuesHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all upstream Cosmos interStepState populated, when HandleAsync runs, then all 7 environmentvariablevalue records exist with expected values (queried via Dataverse Web API `environmentvariablevalues`).</criterion>
+    <criterion testable="true">Negative: given any of {bffAppRegId, dataverseEnvUrl, openAiEndpoint, tenantId, speContainerId} missing from Cosmos interStepState, when HandleAsync runs, then it fails with "MissingUpstreamState" naming the missing key.</criterion>
+    <criterion testable="true">Client startup validation (task 024 contract): after H7, client startup does NOT throw due to hardcoded URL fallbacks — sample MDA + Code Page bootstrap succeeds.</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId + configVer — second call is a no-op (envvars-{customerId}-{configVer} match); upsert alt-key ensures no duplicate records.</criterion>
+    <criterion testable="true">All 7 canonical env-var names present (spelling exact per §10.3); test enumerates + verifies.</criterion>
+    <criterion testable="true">Negative: H7 invoked without tenantId parameter returns failure (§4D I1).</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-10 + §10.3 canonical list + task 024 client-fails-fast contract; design.md §4.1 H7. H7 depends on H8 for speContainerId (DAG re-order per §4.1: H8 completes before H7).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

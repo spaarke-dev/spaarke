@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H3 Entra App Registration Handler (BFF app-reg + 14 grants; S2S dropped)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth'; modifies .cs files; auth-sensitive (Entra app-reg + Graph permission grants); FULL rigor triggered by auth tag per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler wraps hardened scripts/Register-EntraAppRegistrations.ps1 (post-Phase B); complete spec (FR-06); 14 grants sourced from GraphAppRoles.cs constant; not cross-cutting.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 044</deps>
+    <tags>l2-controlplane, job-handler, auth, powershell</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H3 Entra app-registration handler as an IJobHandler in the L2 control-plane. H3 invokes the hardened scripts/Register-EntraAppRegistrations.ps1 (post-Phase B) to provision the single BFF app-registration with ~14 Graph + Dynamics permission grants per Infrastructure/Auth/GraphAppRoles.cs. Sign-in audience is AzureADMultipleOrgs (v3 change enabling Model 2 consent). Client secret stored as KV URI reference. S2S Dataverse app-reg is explicitly NOT provisioned (r3 task 060 dropped). Admin-consent gate verified via Graph query. Idempotency key: appreg-{customerId}-{tenantId}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Microsoft Graph SDK v6 / Kiota 2.0 error type (ODataError), Entra app-reg permission grants + admin-consent flow, ADR-028 auth ceremony, and idempotent PS script invocation. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H3EntraAppRegHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) invokes hardened Register-EntraAppRegistrations.ps1 with mandatory -TenantId (no default per §4D I1); (b) creates the single BFF app-registration with AzureADMultipleOrgs sign-in audience; (c) grants all 14 permissions from GraphAppRoles.cs constant idempotently; (d) stores client secret as `@Microsoft.KeyVault(...)` reference in platform KV; (e) does NOT provision S2S Dataverse app-reg (r3 task 060 removal); (f) verifies admin consent via Graph `oauth2PermissionGrants` query; (g) writes bffAppRegId to Cosmos interStepState; (h) asserts idempotency key appreg-{customerId}-{tenantId}. Unit tests cover happy path, admin-consent-pending gate branch, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-06 + design.md §4.1 H3 row: current Register-EntraAppRegistrations.ps1 had a hardcoded default tenant (line 63, fixed in commit 1834b77bc per §4D I1). Phase B hardened the script for full 14-grant idempotency. H3 wraps the hardened script + adds admin-consent verification gate. S2S Dataverse app-reg dropped per r3 task 060 (zero code consumers).</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H3EntraAppRegHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H3EntraAppRegHandler.Tests.cs</file>
+      <file role="canonical-reference">scripts/Register-EntraAppRegistrations.ps1</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="044" status="pending">H2a Bicep deploy — must complete for KV to exist before secret storage</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-028">Auth ceremony follows the 21 MUSTs. Client secret stored as KV URI reference; NEVER in cleartext in Cosmos parameters.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget.</constraint>
+    <constraint source="ADR-044">bffAppRegId written to Cosmos interStepState follows GUID canonicalization.</constraint>
+    <constraint source="project">Provision only ONE Entra app registration per customer (BFF API); do NOT re-introduce Dataverse S2S app-reg (spec.md MUST rule; r3 task 060).</constraint>
+    <constraint source="project">Idempotency key: appreg-{customerId}-{tenantId} — tenantId is the customer tenant (Model 2) or Spaarke tenant (Model 1).</constraint>
+    <constraint source="project">Admin-consent gate (spec.md FR-06 acceptance): after grants, query Graph `oauth2PermissionGrants` for the BFF app-reg; if grants missing, mark gate Pending and pause pipeline (NOT fail).</constraint>
+    <constraint source="spec.md §4D I1">-TenantId is MANDATORY on the invoked PS script; no default tenant fallback. Handler validates parameter before invoking.</constraint>
+    <constraint source="spec.md NFR-09">Graph v6 / Kiota 2.0 error type: catch ODataError (not ServiceException); ResponseStatusCode is int; ResponseHeaders is dict.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler wrapping hardened Entra app-reg script with admin-consent gate</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+      <pattern name="auth-obo-flow" location=".claude/patterns/auth/">Auth ceremony patterns for Graph app-only + OBO flows.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files. Verify Phase A completion of 10 of 14 null AppRoleId GUIDs in GraphAppRoles.cs (H10 escalation obligation).</step>
+    <step order="1">Author H3EntraAppRegHandler.cs — inject IPowerShellRunner, IGraphAppOnlyClient, IIdempotencyService, ICosmosRunStore, IKeyVaultClient.</step>
+    <step order="2">Validate parameters: tenantId REQUIRED (§4D I1); reject if missing.</step>
+    <step order="3">Invoke hardened Register-EntraAppRegistrations.ps1 with -TenantId + -CustomerId.</step>
+    <step order="4">Store client secret as KV URI reference (`@Microsoft.KeyVault(...)`) — NEVER write cleartext to Cosmos.</step>
+    <step order="5">Verify admin consent via Graph `oauth2PermissionGrants` query; wrap Graph SDK calls in try/catch ODataError (NFR-09).</step>
+    <step order="6">If consent missing, mark run status = WaitingOnGate with gate "AdminConsent" pending; do NOT fail.</step>
+    <step order="7">Write bffAppRegId to Cosmos interStepState.</step>
+    <step order="8">Author unit tests: happy path, admin-consent-pending branch, S2S accidental provisioning = fail, cleartext secret leak detection, idempotency.</step>
+    <step order="9">Register in L2 Program.cs DI.</step>
+    <step order="10">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="11">Update TASK-INDEX.md: change task 046 status from 🔲 to ✅.</step>
+    <step order="12">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Closest neighbor: scripts/Register-EntraAppRegistrations.ps1 (PS script; hardened in Phase B). No existing IJobHandler for Entra app-reg. GraphAppRoles.cs is the compile-time constant for the 14 grants.</existing>
+    <extension>No — the PS script must be invocable as a resumable, idempotent L2 handler that also owns the admin-consent gate (a WaitingOnGate state, not a fail). PS script alone can't wait on a gate + resume.</extension>
+    <cost-of-doing-nothing>Without H3 as a handler, admin-consent flow lacks a resumable gate — every consent-pending state requires manual operator intervention to re-invoke the script. Also, the 14-grant idempotency is not guaranteed at handler level, risking partial grants + silent Graph 403s downstream (T3-adjacent trap).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H3EntraAppRegHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H3EntraAppRegHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given valid customerId + tenantId parameters, when HandleAsync runs, then the hardened PS script creates one BFF app-reg (AzureADMultipleOrgs audience) with all 14 grants from GraphAppRoles.cs, and Graph oauth2PermissionGrants returns them.</criterion>
+    <criterion testable="true">Negative: H3 invoked without tenantId parameter returns failure with distinct code "TenantIdRequired" (§4D I1); no PS script fired.</criterion>
+    <criterion testable="true">Negative: H3 accidentally provisions an S2S Dataverse app-reg (would violate spec.md MUST rule) — deploy fails with distinct code "S2SAppRegForbidden".</criterion>
+    <criterion testable="true">Client secret is stored as KV URI reference; Cosmos parameters/interStepState contain NO cleartext secret string matching any known secret pattern.</criterion>
+    <criterion testable="true">Admin-consent gate: given consent NOT granted post-provision, when Graph oauth2PermissionGrants returns fewer than 14 grants, then run transitions to WaitingOnGate with gate "AdminConsent" pending (not Failed).</criterion>
+    <criterion testable="true">Graph SDK calls catch ODataError (not ServiceException) per NFR-09 net10 cutover; ResponseStatusCode treated as int.</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId + tenantId — second call is a no-op (appreg-{customerId}-{tenantId} match); PS script skips existing app-reg + grants.</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-06 + MUST rules (S2S dropped, TenantId mandatory) + NFR-09; design.md §4.1 H3 + §4B (T3-adjacent). GraphAppRoles.cs 10-of-14-GUIDs completion is a Phase A escalation obligation BEFORE first production customer.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Refactor RegistrationEndpoints.cs lines 466/468/469 to use DataverseEnvironmentService (remove 4 [Obsolete] warnings)</title>
+    <phase>E DemoExpirationService Migration</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api'; modifies BFF endpoint .cs file; R5 carry-over. Test-modifying if new tests added.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Focused 4-line refactor at specific known line ranges; well-scoped. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>080</deps>
+    <tags>bff-api, dataverse, testing</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Refactor src/server/api/Sprk.Bff.Api/Api/RegistrationEndpoints.cs lines 466/468/469 to use DataverseEnvironmentService instead of the [Obsolete] DemoProvisioningOptions.Environments/DefaultEnvironment properties. Remove the 4 [Obsolete] warnings this generates. Preserve endpoint behavior; do NOT change the endpoint contract. Add/update tests as needed. This is the sibling refactor to task 080 (DemoExpirationService).</prompt>
+
+  <role>SPAARKE platform developer. Expert in BFF Api/Registration/ endpoint layer, DataverseEnvironmentService contract, and endpoint filter shape. Follow ADRs strictly.</role>
+
+  <goal>RegistrationEndpoints.cs lines 466/468/469 use DataverseEnvironmentService; 4 [Obsolete] warnings resolved; endpoint behavior preserved; existing endpoint tests pass; publish-size delta reported per NFR-01.</goal>
+
+  <context>
+    <background>Per spec.md R5 carry-over + plan.md Phase E: RegistrationEndpoints.cs has 4 [Obsolete] warnings at lines 466, 468, 469 consuming DemoProvisioningOptions.Environments/DefaultEnvironment. Task 080 refactored DemoExpirationService; this task refactors RegistrationEndpoints. Both together unblock task 082 (Azure config removal).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/RegistrationEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Api/RegistrationEndpointsTests.cs (if applicable)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="080" status="pending">DemoExpirationService refactored (parallel consumer complete)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md R5">SCOPE: Remove 4 [Obsolete] warnings at RegistrationEndpoints.cs lines 466/468/469 via DataverseEnvironmentService migration.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching task — load .claude/constraints/bff-extensions.md; /conflict-check before PR; publish-size delta reported per NFR-01; update tests/unit/Sprk.Bff.Api.Tests/ per §10 bullet 6.</constraint>
+    <constraint source="NFR-06">SCOPE: Analyzers-as-errors — file must have zero warnings post-refactor.</constraint>
+    <constraint source="project">SCOPE: Do NOT change endpoint contract (route, method, response shape, auth); this is a pure internal refactor.</constraint>
+    <constraint source="project">SCOPE: If endpoint tests do not currently cover the DataverseEnvironmentService interaction, ADD tests — do not skip.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>RegistrationEndpoints refactor off [Obsolete] options → DataverseEnvironmentService</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="DataverseEnvironmentService usage" location="src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs">Same pattern as task 080 — inject and consume via method calls.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md R5 + .claude/constraints/bff-extensions.md.</step>
+    <step order="1" name="Inventory">Read RegistrationEndpoints.cs lines 460-475; identify each [Obsolete] usage.</step>
+    <step order="2" name="Refactor">Replace DemoProvisioningOptions.Environments/DefaultEnvironment with DataverseEnvironmentService method calls at each site.</step>
+    <step order="3" name="Tests">Run existing RegistrationEndpointsTests.cs — must pass unchanged. Add coverage for DataverseEnvironmentService interaction if missing.</step>
+    <step order="4" name="Analyzer sweep">dotnet build — verify zero warnings (was 4, target 0).</step>
+    <step order="5" name="Publish size">Run publish + report size + delta per NFR-01.</step>
+    <step order="6" name="CVE sweep">`dotnet list package --vulnerable --include-transitive` — zero HIGH.</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: task 081 → ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size the BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/RegistrationEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/RegistrationEndpointsTests.cs (if updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep RegistrationEndpoints.cs for DemoProvisioningOptions.Environments and DefaultEnvironment returns ZERO matches.</criterion>
+    <criterion testable="true">Post-refactor dotnet build shows zero [Obsolete] warnings on this file (was 4).</criterion>
+    <criterion testable="true">All existing RegistrationEndpointsTests.cs pass unchanged.</criterion>
+    <criterion testable="true">Endpoint contract (route, method, response shape, auth) unchanged — integration test coverage verifies.</criterion>
+    <criterion testable="true">BFF publish-size delta reported per NFR-01.</criterion>
+    <criterion testable="true">Zero new HIGH CVEs.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md R5 + task 080 sibling refactor. Both together unblock task 082.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

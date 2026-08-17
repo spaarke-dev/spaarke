@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Add Cosmos DB provisioning module invocation to customer.bicep prep (Wave C2 refactor basis)</title>
+    <phase>B Gap Automation Script Hardening</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies existing Bicep file; new module invocation; azure-deployment tag. Per root CLAUDE.md §8, Bicep + azure-deployment work with explicit constraints = STANDARD. Loads .claude/constraints/azure-deployment.md.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped Bicep module wire-up with existing modules/cosmos-db.bicep as canonical reference. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>groupB-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bicep, azure-deployment, deploy</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Prep customer.bicep for Cosmos DB per-customer provisioning per spec.md FR-04 + R11 + Wave C2. Wire the existing infrastructure/bicep/modules/cosmos-db.bicep module into infrastructure/bicep/customer.bicep with the required params (partition config, TTL, indexing) so downstream Wave C2 refactor lands cleanly. Per §5.2 CLAUDE.md and spec MUST rule: Cosmos DB MUST be per-customer (BFF prereq — will not start without it, R11); Redis is NOT provisioned per-customer (removed per Q-E FR-12).
+  </prompt>
+
+  <role>SPAARKE platform infrastructure engineer fluent with Azure Bicep, Cosmos DB SQL-API provisioning, and Spaarke's customer.bicep composition. Follow ADR-032 (Null-Object kill-switch for feature-gated resources) if any conditional emerges.</role>
+
+  <goal>infrastructure/bicep/customer.bicep imports and invokes infrastructure/bicep/modules/cosmos-db.bicep for per-customer Cosmos deployment with correct params (partition, TTL, throughput mode). Bicep `az bicep build` succeeds. Deploy dry-run via `az deployment group what-if` shows Cosmos being created for a new customer. Redis provisioning is NOT introduced (BINDING per spec MUST rule + Q-E FR-12).</goal>
+
+  <context>
+    <background>
+Per spec.md FR-04 + R11 + § MUST rules + design.md § handlers H2a + § New Components row 2. Cosmos DB has been absent from customer.bicep (R11 risk); BFF startup fails without it. Q-E FR-12 removed Redis from per-customer provisioning. This task lands the Cosmos wire-up so Wave C2 refactor (Phase C) has clean baseline. Full Wave C2 also adds OpenAI, AI Search, Doc Intelligence, App Insights, optional SignalR — those are Wave C2's scope, NOT this task's.
+    </background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/customer.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/cosmos-db.bicep</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase B is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Cosmos DB MUST be provisioned per-customer (BFF prereq per R11). Do NOT make Cosmos conditional.</constraint>
+    <constraint source="spec.md">SCOPE: Redis MUST NOT be provisioned per-customer (Q-E FR-12 removal). If any Redis reference exists in customer.bicep, this task removes it as part of the prep pass.</constraint>
+    <constraint source="spec.md">SCOPE: This task ONLY wires Cosmos. Do NOT add OpenAI / AI Search / Doc Intelligence / App Insights / SignalR — those are Wave C2 scope (Phase C).</constraint>
+    <constraint source="ADR-032">SCOPE: If any conditional/feature-gated resource is touched here (e.g., pre-existing SignalR flag), it MUST follow ADR-032 Null-Object P1/P2/P3 pattern. However, per prior constraint this task avoids adding SignalR.</constraint>
+    <constraint source="project">SCOPE: `az bicep build infrastructure/bicep/customer.bicep` MUST exit 0 after change; `az deployment group what-if` against a test RG MUST show Cosmos being created.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Bicep + Cosmos SQL API + azure-deployment constraints</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>infrastructure/bicep/modules/cosmos-db.bicep</file>
+    </files>
+    <patterns>
+      <pattern name="Bicep module invocation" location="infrastructure/bicep/customer.bicep">module cosmos '../modules/cosmos-db.bicep' = { name: 'cosmos-{customer}'; params: {...} }.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load azure-deployment.md + design.md H2a + cosmos-db.bicep contract.</step>
+    <step order="1" name="Baseline">Read customer.bicep + modules/cosmos-db.bicep; identify parameter contract of the module + expected outputs.</step>
+    <step order="2" name="Redis cleanup">Grep customer.bicep for Redis references; remove any per Q-E FR-12 (should already be removed but verify).</step>
+    <step order="3" name="Wire Cosmos module">Add module invocation with correct params (databaseName, containerName, partitionKeyPath for runs = `/customerId`, TTL, throughput mode). Follow existing module-invocation style in the file.</step>
+    <step order="4" name="Build verification">Run `az bicep build infrastructure/bicep/customer.bicep`; verify exit 0 and no warnings introduced.</step>
+    <step order="5" name="What-if verification">Run `az deployment group what-if` against a dev RG; verify plan shows Cosmos account + database + container creation.</step>
+    <step order="6" name="Naming compliance">Verify Cosmos resource names follow docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md (parameterized, not hardcoded — foundational for Phase G).</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: set task 014 status to ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI + Bicep for build + what-if</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/customer.bicep (Cosmos module wired in)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given customer.bicep, when running `az bicep build`, then exit 0 with no new warnings.</criterion>
+    <criterion testable="true">Given `az deployment group what-if -g {dev-rg} -f infrastructure/bicep/customer.bicep`, when running, then the plan output includes Cosmos DB account + database + container being created.</criterion>
+    <criterion testable="true">Given customer.bicep, when grepping for Redis references, then zero remain (Q-E FR-12).</criterion>
+    <criterion testable="true">Given customer.bicep, when scanning module invocations, then Cosmos module is invoked with unconditional (non-feature-gated) call — no `if (flag)` wrapper.</criterion>
+    <criterion testable="true">Negative: git diff scope = customer.bicep only. No changes to platform.bicep, app-service.bicep, or other modules (Wave C2 owns those).</criterion>
+    <criterion testable="true">Negative: no OpenAI / AI Search / Doc Intelligence / App Insights / SignalR invocation added here (Wave C2 scope).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-04 + R11 + § MUST rules. Wave C2 will extend to add OpenAI/AI Search/Doc Intelligence/App Insights/SignalR + UAMI param post-Phase C.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
