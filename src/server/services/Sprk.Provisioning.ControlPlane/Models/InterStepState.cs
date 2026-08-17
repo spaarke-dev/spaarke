@@ -76,10 +76,28 @@ public sealed class InterStepState
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? CosmosEndpoint { get; set; }
 
-    /// <summary>Dataverse `systemuser` GUID for the MI-Dataverse App User (H10 output).</summary>
+    /// <summary>Dataverse `systemuser` GUID for the MI/UAMI Dataverse App User (H10 output; T2 trap subject).</summary>
     [JsonPropertyName("systemUserId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SystemUserId { get; set; }
+
+    /// <summary>
+    /// Dataverse `systemuser` GUID for the BFF app-registration's Dataverse App
+    /// User (H10 output).
+    /// </summary>
+    /// <remarks>
+    /// CONTROLLED SCHEMA EXTENSION (task 053 / wave C4): design.md §6.2 names
+    /// a single <c>systemUserId</c> key. H10 registers TWO App Users (BFF
+    /// app-reg + UAMI); the pre-existing <c>systemUserId</c> field's doc
+    /// comment already scoped it to the "MI-Dataverse App User" (the T2 trap
+    /// subject), so this field is a deliberate, minimal addition for the
+    /// second registration — parity with task 049's <c>ImportedSolutions</c>
+    /// controlled-extension precedent (an explicit type extension, not an
+    /// ad-hoc dictionary insert).
+    /// </remarks>
+    [JsonPropertyName("bffAppRegSystemUserId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BffAppRegSystemUserId { get; set; }
 
     /// <summary>Correlation ID emitted by the SPE consent-callback (H0.5 output; used by H8/H10 to correlate the consent flow).</summary>
     [JsonPropertyName("speConsentCorrelationId")]
@@ -109,4 +127,33 @@ public sealed class InterStepState
     [JsonPropertyName("importedSolutions")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public IList<ImportedSolutionRecord>? ImportedSolutions { get; set; }
+
+    /// <summary>
+    /// SharePoint Embedded root container ID for the customer (H8 output).
+    /// Distinct from <see cref="ContainerTypeId"/> — the container-TYPE is a
+    /// template GUID; this is the actual per-customer root container/drive
+    /// identifier (design.md §7.7 row 12 storage format —
+    /// <c>b!...</c>-style Drive ID). Consumed by H7 (env-var values — task
+    /// 050) as the value written to Dataverse env-var
+    /// <c>sprk_SharePointEmbeddedContainerId</c> (design.md §10.3 row 7).
+    /// </summary>
+    /// <remarks>
+    /// CONTROLLED SCHEMA EXTENSION (task 050 / wave 3E). design.md §6.2's
+    /// enumerated interStepState keys did not include a slot for the SPE
+    /// root container id (only <c>containerTypeId</c>, the type template).
+    /// Follows the enumerated-keys discipline established by task 049's
+    /// <see cref="ImportedSolutions"/> addition: a deliberate type extension,
+    /// not an ad-hoc dictionary insert. H8 (task 051, wave C4 Batch 3E,
+    /// parallel-authored alongside this field) is the intended writer of this
+    /// slot — H8's own POML step 6 currently only documents writing the
+    /// Dataverse env-var + KV secret directly, NOT this Cosmos field; H7
+    /// treats a missing value here as <c>MissingUpstreamState</c> (Resumable)
+    /// so the run naturally waits for H8 (or an operator patch) to populate
+    /// it rather than guessing. See
+    /// projects/customer-provisioning-orchestration-r1/notes/task-050-deviations.md
+    /// for the cross-task coordination note.
+    /// </remarks>
+    [JsonPropertyName("speContainerId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SpeContainerId { get; set; }
 }

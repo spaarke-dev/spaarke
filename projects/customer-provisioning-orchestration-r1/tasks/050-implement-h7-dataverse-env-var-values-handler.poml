@@ -4,7 +4,7 @@
     <title>Implement H7 Dataverse Env-Var Values Handler (7 canonical per §10.3, no hardcoded URL fallbacks)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse','config'; modifies .cs files; seeds 7 canonical env-vars that downstream Model-Driven Apps + Code Pages consume.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -105,7 +105,27 @@
     <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
   </acceptance-criteria>
 
-  <notes>Reference: spec.md FR-10 + §10.3 canonical list + task 024 client-fails-fast contract; design.md §4.1 H7. H7 depends on H8 for speContainerId (DAG re-order per §4.1: H8 completes before H7).</notes>
+  <notes>Reference: spec.md FR-10 + §10.3 canonical list + task 024 client-fails-fast contract; design.md §4.1 H7. H7 depends on H8 for speContainerId (DAG re-order per §4.1: H8 completes before H7).
+
+COMPLETION NOTES (2026-08-17): Implemented as 5 new files under Handlers/EnvVarValues/ (H7DataverseEnvVarValuesHandler.cs,
+IEnvVarValuesWriter.cs, DataverseWebApiEnvVarValuesWriter.cs, EnvVarValuesOptions.cs, EnvVarValuesRejectionCodes.cs) +
+1 test file (Sprk.Provisioning.ControlPlane.Tests/Handlers/H7DataverseEnvVarValuesHandlerTests.cs, 26 tests) +
+1 controlled InterStepState.cs schema extension (SpeContainerId field) + Program.cs DI registration (unconditional
+per ADR-032). All 7 canonical env-vars upserted via direct Dataverse Web API REST calls (find-definition-by-schema-name
+then PATCH/POST), replicating scripts/Provision-Customer.ps1 Step 8's sequence in C#. Auth: confidential-client
+(BFF app-reg ClientSecretCredential), same pattern as H6 — MI-Dataverse App User (H10) doesn't exist yet at H7's
+DAG position. Idempotency key envvars-{customerId}-{configVer}; configVer = SHA-256 of the 7 resolved (schemaName,
+value) pairs. Every failure mode classifies Resumable (all writes are natural upserts — no QuarantineRequired path).
+4 documented deviations (Path C, all pivot-to-comply) recorded in
+projects/customer-provisioning-orchestration-r1/notes/task-050-deviations.md: (D1) 5-of-7 hard-required field set
+per design.md §10.2 defaults vs POML's "all 7" prose; (D2) confidential-client auth vs az-cli/MI; (D3) new
+InterStepState.SpeContainerId field + cross-task coordination note re: task 051/H8; (D4) test file placed in the
+separate Tests project per established codebase convention. Quality gates: code-review found 1 real bug during
+review (definition-lookup non-success fallthrough could mis-classify/lose schemaName context on unclassified HTTP
+status codes) — fixed before commit; 0 Critical after fix. adr-check: 0 violations (ADR-004/010/036/044/028 all
+compliant; ADR-044 note: tenantId/bffAppRegId values are written into Dataverse environmentvariablevalue.value
+text fields, not @odata.bind or AI Search filters — ADR-044's canonicalization boundary rules don't apply here).
+335 total L2 tests passing (26 new). dotnet build: 0 warnings / 0 errors (TreatWarningsAsErrors).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

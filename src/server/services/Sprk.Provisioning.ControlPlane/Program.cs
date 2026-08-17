@@ -56,6 +56,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
+using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 using Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
@@ -544,6 +545,60 @@ builder.Services.AddSingleton<ISpeContainerTypeProvisioner, CreateNewContainerTy
 builder.Services.AddSingleton<ISpeContainerVerifier, SpeContainerAppOnlyVerifier>();
 builder.Services.AddSingleton<ISpeContainerIdKvWriter, AzCliSpeContainerIdKvWriter>();
 builder.Services.AddScoped<H8SpeContainerTypeHandler>();
+
+// Task 053 (Batch 3E): H10 Dataverse App User + Graph app-role parity handler
+// (T2 + T3 silent-fail trap owner) + FIVE collaborator seams
+// (IGraphAppRolesRegistry = L2GraphAppRolesRegistry, a compiled mirror of
+// Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles — L2 cannot reference the BFF
+// assembly per ADR-010 / project MUST rule, so the 14-role catalog is
+// duplicated as its own DI-registered source of truth; IDataverseAppUserCreator
+// = DataverseWebApiAppUserCreator issues real Dataverse Web API systemusers
+// upsert + role-association calls for BOTH the BFF app-reg and the UAMI;
+// IDataverseAppUserVerifier = DataverseWebApiAppUserVerifier is the INDEPENDENT
+// T2 post-registration re-query; IGraphAppRoleGranter = GraphRestAppRoleGranter
+// grants the 14 roles onto the UAMI SP via raw Graph REST calls (same endpoint
+// shapes as scripts/Grant-GraphAppRoles.ps1, task 015); IGraphAppRoleParityVerifier
+// = GraphRestAppRoleParityVerifier is the INDEPENDENT T3 post-grant re-query).
+// All registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+//
+// Placement Justification (CLAUDE.md §10): H10 lives in L2 (not BFF) per spec
+// §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-function
+// rule — no IActionResolver, IActionRunner, IOpenAiClient, IPlaybookService
+// injection). H10 uses IProvisioningRunRepository (task 037) + the five
+// dedicated seams; reads bffAppRegId/miClientId/miObjectId/dataverseEnvUrl from
+// InterStepState (H3/H2a/H5-H6 outputs) rather than run parameters — H10 owns
+// no fallback path to (re)create any of those upstream resources. Idempotency
+// key appuser-{customerId} is deliberately customerId-ONLY (version-independent,
+// parity with H5/H8) — App User registration + Graph role parity are per-
+// customer steady state, not a versioned artifact.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - NFR-09 (Path C — pivot to comply in spirit, NOT a literal SDK dependency):
+//     see H10DataverseAppUserGraphParityHandler.cs file-header "NFR-09
+//     IMPLEMENTATION NOTE" — raw HttpClient + DefaultAzureCredential (parity
+//     with every other Wave-C4 Graph/Dataverse collaborator) surfaces the same
+//     HTTP-status + response-body diagnostic information NFR-09 asks the BFF's
+//     Microsoft.Graph SDK ODataError catch to carry, without adding a new SDK
+//     dependency to L2 for a 2-GET/1-POST REST surface already validated by
+//     task 015's script.
+//   - ADR-028 UAMI-outbound + §4D I5 explicit-tenant: every Dataverse + Graph
+//     token acquisition uses DefaultAzureCredential with TenantId = the run's
+//     explicit tenantId parameter — never an ambient default-tenant credential.
+//   - §4C rollback: T2 + T3 post-condition MISMATCHES are QuarantineRequired
+//     (silent-fail traps — the whole reason these two independent re-queries
+//     exist); a raw Graph GRANT-CALL failure is RetryableWithCleanup (grants
+//     are individually idempotent — a full re-run safely completes partial
+//     state) — the two failure modes are DELIBERATELY different classes.
+//     Full mapping table inline in H10DataverseAppUserGraphParityHandler.cs
+//     file header.
+builder.Services.Configure<H10DataverseAppUserGraphParityOptions>(
+    builder.Configuration.GetSection(nameof(H10DataverseAppUserGraphParityOptions)));
+builder.Services.AddSingleton<IGraphAppRolesRegistry, L2GraphAppRolesRegistry>();
+builder.Services.AddHttpClient<IDataverseAppUserCreator, DataverseWebApiAppUserCreator>();
+builder.Services.AddHttpClient<IDataverseAppUserVerifier, DataverseWebApiAppUserVerifier>();
+builder.Services.AddHttpClient<IGraphAppRoleGranter, GraphRestAppRoleGranter>();
+builder.Services.AddHttpClient<IGraphAppRoleParityVerifier, GraphRestAppRoleParityVerifier>();
+builder.Services.AddScoped<H10DataverseAppUserGraphParityHandler>();
 
 var app = builder.Build();
 
