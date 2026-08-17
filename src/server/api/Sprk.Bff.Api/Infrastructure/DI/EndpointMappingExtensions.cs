@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Workspace;
+using Sprk.Bff.Api.Endpoints.Onboarding;   // task 042 — H0.5 consent-callback (customer-provisioning-r1)
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -358,6 +359,13 @@ public static class EndpointMappingExtensions
 
         // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection
         app.MapRegistrationEndpoints();
+
+        // Onboarding — H0.5 consent-callback (customer-provisioning-orchestration-r1, task 042).
+        // POST /api/onboarding/consent-callback — Anonymous + HMAC-SHA256 signature verified.
+        // Captures the customer admin tid from the Microsoft admin-consent redirect and enqueues
+        // the L2 provisioning pipeline via Service Bus. See Endpoints/Onboarding/OnboardingModule.cs
+        // and design.md D18 + §4.3a.2 for the Anonymous+HMAC exception rationale.
+        app.MapConsentCallbackEndpoint();
 
         // R3 task 020 (FR-2.6) — Admin background-job inspection endpoints.
         // GET /api/admin/jobs               — list registered jobs + status summary
