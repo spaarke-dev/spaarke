@@ -25,7 +25,7 @@
 | 060 | Ctrl+Space "Describe a change" at caret (IME-guarded) | 6 | ✅ | FULL | sonnet | high | ❌ spine | 001 | FR-04 |
 | 061 | Ctrl+Shift+Space focus chat — focusInput() + PaneEventBus | 6 | ✅ | FULL | sonnet | high | ❌ spine/coord | 001 | FR-05 |
 | 070 | Blank page mounts editable | 7 | ✅ | FULL | sonnet | high | ❌ spine | 001 | FR-08 |
-| 071 | Restore from Source no longer blanks | 7 | 🔲 | FULL | sonnet | **xhigh** | ❌ spine | 011 | FR-09 |
+| 071 | Restore from Source no longer blanks | 7 | ✅ | FULL | sonnet | **xhigh** | ❌ spine | 011 | FR-09 |
 | 072 | Add Comment toolbar affordance | 7 | 🔲 | FULL | sonnet | high | ❌ spine | 001 | FR-10 |
 | 073 | PDF-intake cause discrimination (LOW-10) | 7 | ✅ | FULL | sonnet | high | ✅ Group B | 001 | FR-11 |
 | 074 | apply-template ETag/If-Match + typed-404 | 7 | 🔲 | FULL | sonnet | high | ❌ spine | 001 | FR-12 |

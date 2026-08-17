@@ -11,9 +11,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **070 ✅ COMPLETE** (Blank page editable, FR-08 — ALREADY SATISFIED; regression guard, NO src change). Next: **071** (restore-from-source no-blank, xhigh) |
-| **Step** | 070 verified premise-stale (D8 doesn't reproduce); regression guard added + gated (code-review + adr-check PASS); 642 standalone jest green; committed. |
-| **Next Action** | Execute **071** (restore-from-source no longer blanks, xhigh, FR-09) → 072 (add-comment) → 074 (apply-template ETag/404) → 090 wrap-up. |
+| **Task** | **071 ✅ COMPLETE** (Reload-from-source no-blank, FR-09 — root-caused + fixed). Next: **072** (add-comment toolbar affordance, FR-10) |
+| **Step** | 071 root-caused (loadSucceeded didn't stamp driveId → reload lost the drive → !loadDriveId reset → blank); fixed + gated (code-review + adr-check PASS); 645 standalone jest green (+3 reducer tests); committed. |
+| **Next Action** | Execute **072** (add-comment toolbar affordance, FR-10) → 074 (apply-template ETag/404, FR-12) → 090 wrap-up. |
+
+### Task 071 — what shipped (see notes/task-071-notes.md)
+**Root cause of R6 D4 "Reload from source blanks + asks for re-upload":** the BFF Load response carries an authoritative `payload.driveId`, but `loadSucceeded` never stamped it onto `documentRef` (unlike `saveSucceeded`, which does — line 753). So a BU-container/PDF-sourced/promoted doc had `documentRef.driveId=undefined` after load; on Reload-from-source (`requestLoad`), `loadDriveId = documentRef.driveId ?? effectiveDriveId` went falsy → the `!loadDriveId → dispatch({kind:'reset'})` branch → INITIAL_STATE → "re-upload" empty state. **Fix (pure client mount-state):** stamp `driveId: payload.driveId` in `loadSucceeded` (action field + reducer documentRef spread, mirroring the shipped saveSucceeded stamp). Reload now retains the drive → fetches → repopulates. Escalation trigger did NOT fire (no server round-trip added; the reload's round-trip is the feature). +3 standalone reducer tests. No BFF bytes. Reuses the existing requestLoad path (§11).
 
 ### Task 070 — what shipped (see notes/task-070-notes.md) — ⚠️ NO SRC CHANGE (premise stale)
 **FR-08/D8 is already satisfied by current code — the defect does not reproduce.** Trace: blank + template both go through `mountBornInEditor` → `mountDraftHtml` reducer sets `status:'loaded'` + `docxBytes:null` + `seedHtml:html`; ComposeEditor's docx-mount branch (the ONLY reference-only setter) is unreachable when `docxBytes===null`; `initialHtml='<p></p>'` (len 7 > 0) takes the editable branch identically to the template; no `setEditable(false)`/seedHtml-emptiness gate exists. D8 was resolved by the DEF-08 born-in-editor rework (editable branch present since compose-r4 task 027). Shipped a CI regression guard (`ComposeEditor.blankPageEditable.test.tsx`: blank→editable + template parity + non-docx→reference-only) instead of a fabricated fix (root §6.5 honesty). **Flagged for owner**: if a specific host context still blanks, share the repro. No production change; §11 trivially satisfied.

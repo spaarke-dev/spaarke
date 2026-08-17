@@ -318,6 +318,13 @@ export type ComposeWorkspaceAction =
       // onto documentRef.composeLogicalId so the recovered identity survives re-mount. Undefined for a
       // native stored-doc load (identity comes from speDriveItemId/sprkDocumentId).
       composeLogicalId?: string;
+      // FR-09 (task 071): the AUTHORITATIVE drive the doc was loaded from (the BFF Load response's
+      // required `driveId`). Stamped onto documentRef so a subsequent Reload-from-source (requestLoad)
+      // targets the drive the doc actually LIVES in — a doc in a BU-container drive the host `driveId`
+      // prop doesn't identify would otherwise lose its drive on reload and hit the `!loadDriveId → reset`
+      // blank branch (the R6 D4 "Reload from source blanks + asks for re-upload" root cause). Mirrors the
+      // saveSucceeded create-on-save re-target stamp (UAT-2026-07-19 P2).
+      driveId?: string;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -536,6 +543,11 @@ export function composeWorkspaceReducer(
               // (transient) load; preserved from state for a native stored-doc load (where identity
               // comes from speDriveItemId/sprkDocumentId and this stays undefined).
               composeLogicalId: action.composeLogicalId ?? state.documentRef.composeLogicalId,
+              // FR-09 (task 071): stamp the AUTHORITATIVE load-time drive so a later Reload-from-source
+              // targets where the doc lives (never the `!loadDriveId → reset` blank). Mirrors the
+              // saveSucceeded stamp below; a defensive empty/undefined falls back to the existing value.
+              driveId:
+                action.driveId && action.driveId.length > 0 ? action.driveId : state.documentRef.driveId,
             }
           : state.documentRef,
         errorMessage: null,

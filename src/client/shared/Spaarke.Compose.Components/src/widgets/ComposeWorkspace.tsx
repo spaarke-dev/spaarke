@@ -1181,6 +1181,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // FR-07(b) (task 010): a PDF-sourced load is a transient (create-on-save) document — give it
           // a persisted non-rotating logical id so draft recovery + dedup key off a stable value.
           composeLogicalId: payload.sourceFormat === 'pdf' ? startNewComposeLogicalId() : undefined,
+          // FR-09 (task 071): stamp the AUTHORITATIVE drive this doc was loaded from so a later
+          // Reload-from-source (requestLoad) fetches from where the doc LIVES, never falling into the
+          // `!loadDriveId → reset` blank branch (the R6 D4 root cause). `payload.driveId` is required
+          // on the Load response.
+          driveId: payload.driveId,
         });
       } catch (err) {
         if (ac.signal.aborted) return;

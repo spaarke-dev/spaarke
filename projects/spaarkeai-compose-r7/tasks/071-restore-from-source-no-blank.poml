@@ -3,8 +3,8 @@
   <metadata>
     <title>Restore from Source no longer blanks the page (R6 D4 / FR-09)</title>
     <phase>7 Accepted Defers + Hardening</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx mount lifecycle; brownfield root-cause not solved in R6.</rigor-reason>
     <model-tier>sonnet</model-tier>
