@@ -4,7 +4,7 @@
     <title>Open existing To Do shares the same launch mechanism as New Task (FR-11)</title>
     <phase>4: Main-form modal</phase>
     <gate>030 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Refactors 3 independent navigateTo call sites (SmartTodoApp.tsx, todo.registration.ts, and the new task-030 call site) into one shared function in a shared-lib module consumed across two host surfaces (Code Page + LegalWorkspace widget); modal launch behavior is production-facing. CLAUDE.md §8 FULL trigger (.tsx/.ts, 6+ steps, deps on 3+ tasks incl. cross-surface coordination).</rigor-reason>
     <model-tier>sonnet</model-tier>

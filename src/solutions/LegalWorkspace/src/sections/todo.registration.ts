@@ -61,7 +61,7 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { WidgetErrorBoundary, OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync } from "@spaarke/ui-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
 import type { IFeedSyncBridge, SmartTodoWidgetProps } from "@spaarke/smart-todo-components";
@@ -126,69 +126,65 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
   // Open behaviour splits by selection state:
   //
   //   - todoId PRESENT → open the OOB sprk_todo record FORM at Layout 1 via
-  //     `Xrm.Navigation.navigateTo({pageType:'entityrecord', ...}, {target:2,
-  //     position:1, width:85%, height:85%})` per ai-spaarke-ai-workspace-UI-r2
-  //     FR-13/FR-20 (85% × 85% is the binding modal size standard; was 80% × 80%
-  //     under the pre-R2 UAT 2026-06-21 round 5 fix). `target: 2` = dialog mode
-  //     (modal overlay over the current page); the current SpaarkeAi page stays
-  //     mounted so when the dialog closes, the user is back exactly where they
-  //     were (widget context preserved).
+  //     the shared `navigateToEntityRecordSurfaceAsync` launcher (task 031 /
+  //     spec FR-11 — "one code path for create + open"; consolidates this
+  //     call site's previously-inline `Xrm.Navigation.navigateTo` onto the
+  //     SAME function `SmartTodoApp.tsx`'s open path + task 030's create path
+  //     use). The launcher applies Layout 1 sizing (85% × 85%, centered,
+  //     dialog target — ai-spaarke-ai-workspace-UI-r2 FR-13/FR-20) and the
+  //     frame-walking `resolveXrmNavigation()` resolver (window/parent/top —
+  //     strictly more robust than this file's prior single-frame
+  //     `globalThis.Xrm` check). `target: 2` = dialog mode (modal overlay
+  //     over the current page); the current SpaarkeAi page stays mounted so
+  //     when the dialog closes, the user is back exactly where they were
+  //     (widget context preserved).
   //
   //   - todoId ABSENT  → open the SmartTodo Code Page (no launch data) so
   //     `useLaunchContext` returns undefined → app renders its default 3-col
   //     Kanban view (no auto-modal). This preserves "user wants to just open
-  //     the full app" without forcing a card selection first.
+  //     the full app" without forcing a card selection first. UNCHANGED by
+  //     task 031 (constraint: "no selection" branch stays intact).
   //
-  // Falls back to openForm (page-nav) if Xrm.Navigation.navigateTo is somehow
-  // unavailable — defensive only, should not happen inside MDA.
+  // Falls back to openForm (page-nav) if the launcher reports no reachable
+  // Xrm host (`outcome.launched === false`) — defensive only, should not
+  // happen inside MDA. This fallback predates task 031 and is preserved
+  // as-is; it is orthogonal to which primary function issues the
+  // entityrecord navigateTo call (that part is now the ONE shared launcher).
   const handleOpenTodo = React.useCallback(
     (todoId?: string) => {
       if (todoId) {
-        // Loose typing — the shared lib doesn't pull in @types/xrm.
-        const xrm = (globalThis as unknown as {
-          Xrm?: {
-            Navigation?: {
-              navigateTo?: (page: unknown, opts?: unknown) => Promise<unknown>;
-              openForm?: (opts: unknown) => Promise<unknown>;
+        void navigateToEntityRecordSurfaceAsync({
+          entityName: "sprk_todo",
+          entityId: todoId,
+        }).then((outcome) => {
+          if (outcome.launched) return;
+
+          // Loose typing — the shared lib doesn't pull in @types/xrm.
+          const xrm = (globalThis as unknown as {
+            Xrm?: {
+              Navigation?: {
+                openForm?: (opts: unknown) => Promise<unknown>;
+              };
             };
-          };
-        }).Xrm;
-        if (xrm?.Navigation?.navigateTo) {
-          // Layout 1 (R2 FR-20 binding): 85% × 85%, centered, dialog target.
-          // Sourced from oobModalSizes.ts's `record` size (spec FR-11/FR-18,
-          // task 090) — was an independent 85%×85% literal, now can't drift.
-          void xrm.Navigation.navigateTo(
-            {
-              pageType: "entityrecord",
+          }).Xrm;
+          if (xrm?.Navigation?.openForm) {
+            // Defensive — page-nav fallback only.
+            void xrm.Navigation.openForm({
               entityName: "sprk_todo",
               entityId: todoId,
-            },
-            {
-              target: 2,
-              position: 1, // 1 = center
-              width: OOB_MODAL_SIZES.record.width,
-              height: OOB_MODAL_SIZES.record.height,
-            },
+              openInNewWindow: false,
+            });
+            return;
+          }
+          // Nothing more to do — Xrm.Navigation isn't available. (The pre-R2
+          // Code-Page-hop last-resort fallback was retired per R2 FR-13; it
+          // routed through `openTodo` launch context to open the retired
+          // iframe modal, which no longer exists.)
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[todo.registration] Xrm.Navigation unavailable; cannot open sprk_todo",
           );
-          return;
-        }
-        if (xrm?.Navigation?.openForm) {
-          // Defensive — page-nav fallback only.
-          void xrm.Navigation.openForm({
-            entityName: "sprk_todo",
-            entityId: todoId,
-            openInNewWindow: false,
-          });
-          return;
-        }
-        // Nothing more to do — Xrm.Navigation isn't available. (The pre-R2
-        // Code-Page-hop last-resort fallback was retired per R2 FR-13; it
-        // routed through `openTodo` launch context to open the retired
-        // iframe modal, which no longer exists.)
-        // eslint-disable-next-line no-console
-        console.warn(
-          "[todo.registration] Xrm.Navigation unavailable; cannot open sprk_todo",
-        );
+        });
         return;
       }
 

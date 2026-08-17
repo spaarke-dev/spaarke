@@ -33,7 +33,7 @@
 
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
-import { CreateTodoWizard, OOB_MODAL_SIZES } from "@spaarke/ui-components";
+import { CreateTodoWizard, navigateToEntityRecordSurfaceAsync } from "@spaarke/ui-components";
 import type { Orientation, ToolbarAction } from "@spaarke/ui-components";
 import {
   createXrmDataService,
@@ -64,7 +64,9 @@ import { launchNewTaskCreateForm } from "./services/newTaskLauncher";
 // SmartTodoViewMode type import removed 2026-06-19 — see viewMode removal above.
 
 // ---------------------------------------------------------------------------
-// R2 FR-13 — Layout 1 open helper
+// R2 FR-13 — Layout 1 open helper (task 031 / FR-11: delegates to the shared
+// `navigateToEntityRecordSurfaceAsync` launcher instead of an inline
+// `Xrm.Navigation.navigateTo` call — see wizardLaunchers.ts)
 //
 // Opens the OOB `sprk_todo` main form at Layout 1 (85% × 85% centered modal via
 // `Xrm.Navigation.navigateTo`). Replaces the R4 iframe-hosted `<SmartTodoModal>`
@@ -75,32 +77,27 @@ import { launchNewTaskCreateForm } from "./services/newTaskLauncher";
 // `useLaunchContext` openTodo effect. Both funnel through this helper so the
 // Layout 1 geometry (FR-20 binding: 85% × 85%, position 1, target 2) stays in
 // one place.
+//
+// Kept as a thin sync/void wrapper (task 031 step 3 decision — see
+// notes/task-031-launcher-consolidation.md): both callers below are
+// fire-and-forget event handlers with no interest in the async outcome, so
+// wrapping here is the smaller diff vs. threading `Promise<NavigateToOutcome>`
+// through two call sites for no behavioral gain. The shared launcher now owns
+// BOTH the frame-walking Xrm resolution (`resolveXrmNavigation` — strictly
+// more robust than this file's prior inline `window.parent ?? window` guess)
+// and the `record` OOB sizing; this wrapper only preserves the "unavailable"
+// console diagnostic the pre-031 inline call used to emit.
 // ---------------------------------------------------------------------------
 
 function openSprkTodoAsLayout1(todoId: string): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = (window.parent as any)?.Xrm ?? (window as any).Xrm;
-  if (!xrm?.Navigation?.navigateTo) {
-    // eslint-disable-next-line no-console
-    console.warn("[SmartTodoApp] Xrm.Navigation.navigateTo unavailable; open aborted.");
-    return;
-  }
-  const cleanId = todoId.replace(/[{}]/g, "");
-  // `record` OOB size (85%×85%) — sourced from oobModalSizes.ts (spec
-  // FR-11/FR-18, task 090); was an independent 85%×85% literal.
-  void Promise.resolve(
-    xrm.Navigation.navigateTo(
-      { pageType: "entityrecord", entityName: "sprk_todo", entityId: cleanId },
-      {
-        target: 2,
-        position: 1,
-        width: OOB_MODAL_SIZES.record.width,
-        height: OOB_MODAL_SIZES.record.height,
-      },
-    ),
-  ).catch((err: unknown) => {
-    // eslint-disable-next-line no-console
-    console.error("[SmartTodoApp] navigateTo failed:", err);
+  void navigateToEntityRecordSurfaceAsync({
+    entityName: "sprk_todo",
+    entityId: todoId,
+  }).then((outcome) => {
+    if (!outcome.launched) {
+      // eslint-disable-next-line no-console
+      console.warn("[SmartTodoApp] Xrm.Navigation.navigateTo unavailable; open aborted.");
+    }
   });
 }
 

@@ -371,28 +371,66 @@ export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams
 }
 
 /**
- * Options for launching an OOB entity create form in a modal (design §3 /
+ * Options for launching an OOB entity record surface in a modal (design §3 /
  * MODAL-DECISION-CRITERIA — the To Do route).
+ *
+ * Consolidated by smart-todo-r5 task 031 (spec FR-11 — "one code path for
+ * create + open"): this is now the SOLE OOB `sprk_todo` main-form launcher,
+ * serving BOTH the CREATE surface (`entityId` absent, task 030) and the OPEN
+ * surface (`entityId` present, task 031). Only sizing/position/outcome-shape
+ * differ per branch — see `navigateToEntityRecordSurfaceAsync` below.
  */
 export interface EntityRecordSurfaceParams {
   /** Entity logical name (e.g. `sprk_todo`). */
   entityName: string;
-  /** Dialog title. */
-  title: string;
+  /**
+   * Existing record ID to OPEN (present = open at the `record` OOB size,
+   * 85%×85%, centered — task 031 / FR-11). Absent = CREATE a new record at
+   * the `createForm` OOB size (70%×80% — task 030 / FR-10). Braces are
+   * stripped internally (`{...}` registry-format GUIDs are accepted).
+   */
+  entityId?: string;
+  /**
+   * Dialog title. Optional — when omitted, no `title` navOption is sent
+   * (matches the pre-consolidation OPEN call sites, which never set a title;
+   * the CREATE call site always supplies one).
+   */
+  title?: string;
   /**
    * Default field values to pre-populate the create form (thinner OOB pre-seed —
    * OOB forms accept default-value params only, design §3). Attribute-logical-name
-   * keyed. Optional.
+   * keyed. Optional. Only meaningful on the CREATE branch (no current caller
+   * combines this with `entityId`).
    */
   defaultValues?: Record<string, unknown>;
 }
 
 /**
- * Launch an OOB entity create form (`pageType:'entityrecord'`) in a modal and
- * RESOLVE with the saved-entity reference when a record is created (the OOB-form
- * return path — an OOB form has no custom code to write the sessionStorage
- * result, so its outcome rides the `navigateTo` resolve value). REUSES the same
- * frame-walking resolver + modal options as the wizard path.
+ * Launch an OOB entity record surface (`pageType:'entityrecord'`) in a modal —
+ * CREATE mode when `params.entityId` is absent (`createForm` OOB size,
+ * 70%×80%, no position override), OPEN-EXISTING mode when present (`record`
+ * OOB size, 85%×85%, `position: 1` centered — per
+ * `.claude/patterns/ui/record-modal-selection.md` Layout 1). REUSES the same
+ * frame-walking resolver + modal-option shape for both branches — the ONE
+ * `sprk_todo` OOB main-form launcher (task 031, spec FR-11).
+ *
+ * Outcome-shape parity (task 031 step 2 research — Microsoft Learn
+ * `Xrm.Navigation.navigateTo` reference, "Return value" section, verified
+ * 2026-08-16): "An object is passed only if the `pageType` = `entityRecord`
+ * and you opened the form in CREATE mode." An existing-record OPEN always
+ * resolves with NO result object on dialog close, whether the user saved or
+ * cancelled — there is no `savedEntityReference` to inspect and no reliable
+ * way to distinguish save-vs-cancel from the resolve value alone. So the two
+ * branches populate `NavigateToOutcome` differently:
+ *   - CREATE: `savedEntityReference` present on save; `cancelled: true` when
+ *     the resolve carries no reference (unchanged from pre-031 behavior).
+ *   - OPEN: a successful resolve (dialog closed, no error) returns a plain
+ *     `{ launched: true }` — no `cancelled` flag, no `savedEntityReference`.
+ *     Callers that need a post-open refresh signal (task 033) MUST refresh
+ *     unconditionally on `launched: true` rather than gating on `cancelled`.
+ *   - Both branches: a rejected/erroring promise still returns
+ *     `{ launched: true, cancelled: true }` (dialog error, not a normal
+ *     save/cancel close).
  */
 export async function navigateToEntityRecordSurfaceAsync(
   params: EntityRecordSurfaceParams
@@ -401,29 +439,52 @@ export async function navigateToEntityRecordSurfaceAsync(
   if (nav === null) {
     return { launched: false };
   }
+  const isOpenExisting = typeof params.entityId === 'string' && params.entityId.length > 0;
   const pageInput: Record<string, unknown> = {
     pageType: 'entityrecord',
     entityName: params.entityName,
   };
-  // OOB pre-seed: `data` on an entityrecord create pageInput pre-populates form
+  if (isOpenExisting) {
+    // Strip braces per the pre-031 SmartTodoApp.tsx convention — registry
+    // format `{...}` GUIDs are accepted by callers, `entityId` wants bare.
+    pageInput.entityId = (params.entityId as string).replace(/[{}]/g, '');
+  }
+  // OOB pre-seed: `data` on an entityrecord pageInput pre-populates form
   // fields with default values (the documented createFromEntity/default-value seam).
   if (params.defaultValues && Object.keys(params.defaultValues).length > 0) {
     pageInput.data = params.defaultValues;
   }
+  const navOptions: Record<string, unknown> = isOpenExisting
+    ? {
+        // `record` OOB size (85% × 85%) + centered position — Layout 1
+        // (record-modal-selection.md), task 031 / spec FR-11.
+        target: DEFAULT_TARGET,
+        position: 1,
+        width: OOB_MODAL_SIZES.record.width,
+        height: OOB_MODAL_SIZES.record.height,
+      }
+    : {
+        // `createForm` OOB size (70% × 80%) — this launches an OOB entity
+        // CREATE form (`pageType: 'entityrecord'`, no existing entityId), the
+        // exact scenario `createForm` was named for (spec FR-11), NOT the
+        // `wizard` (60% × 70%) webresource size the rest of this module uses.
+        // Verified zero existing callers depend on the prior 60%×70% fallback
+        // (task 090 repo-wide grep) — see notes/task-090-completion.md.
+        target: DEFAULT_TARGET,
+        width: OOB_MODAL_SIZES.createForm.width,
+        height: OOB_MODAL_SIZES.createForm.height,
+      };
+  if (params.title !== undefined) {
+    navOptions.title = params.title;
+  }
   try {
-    // `createForm` OOB size (70% × 80%) — this launches an OOB entity CREATE
-    // form (`pageType: 'entityrecord'`, no existing entityId), the exact
-    // scenario `createForm` was named for (spec FR-11), NOT the `wizard`
-    // (60% × 70%) webresource size the rest of this module uses. Verified
-    // zero existing callers depend on the prior 60%×70% fallback (task 090
-    // repo-wide grep) — see notes/task-090-completion.md.
-    const result: any = await nav.navigateTo(pageInput, {
-      target: DEFAULT_TARGET,
-      width: OOB_MODAL_SIZES.createForm.width,
-      height: OOB_MODAL_SIZES.createForm.height,
-      title: params.title,
-    });
-    // entityrecord resolves with `{ savedEntityReference: [{ id, entityType, name }] }`
+    const result: any = await nav.navigateTo(pageInput, navOptions);
+    if (isOpenExisting) {
+      // See outcome-shape-parity note above — an existing-record open never
+      // carries savedEntityReference; a clean resolve just means "closed".
+      return { launched: true };
+    }
+    // entityrecord CREATE resolves with `{ savedEntityReference: [{ id, entityType, name }] }`
     // when the user saved; undefined/empty when they cancelled.
     const ref = Array.isArray(result?.savedEntityReference) ? result.savedEntityReference[0] : undefined;
     if (ref?.id) {
