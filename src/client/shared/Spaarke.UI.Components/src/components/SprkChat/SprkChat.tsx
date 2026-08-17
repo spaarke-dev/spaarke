@@ -2548,7 +2548,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // (`lastFocusSignalRef` records the value acted on so re-renders with the same nonce never re-fire).
   // Undefined ⇒ no-op (existing consumers unchanged). No session/stream gate — focusing the input is
   // always safe and is exactly what the user asked for (unlike a send).
-  const lastFocusSignalRef = React.useRef<number | undefined>(undefined);
+  // Seed the ref with the MOUNT-TIME value (not `undefined`): a host that inits the nonce to a number
+  // (e.g. ConversationPane's `useState(0)`) passes that value on first commit. Baselining it here means
+  // the initial nonce is already-consumed, so only a LATER bump moves focus — otherwise focus would be
+  // stolen into the composer on first mount (regression caught in the R7 wrap-up holistic review).
+  const lastFocusSignalRef = React.useRef<number | undefined>(focusInputSignal);
   React.useEffect(() => {
     if (focusInputSignal === undefined) return;
     if (lastFocusSignalRef.current === focusInputSignal) return;
