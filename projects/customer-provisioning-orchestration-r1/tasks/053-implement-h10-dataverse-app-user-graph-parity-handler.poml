@@ -4,7 +4,7 @@
     <title>Implement H10 Dataverse App User + Graph App-Role Parity Handler (T2 + T3 owner)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth','dataverse'; modifies .cs files; owns T2 + T3 silent-fail traps; touches App User registration + Graph app-role parity — auth-sensitive.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -132,4 +132,31 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-08-17 (Batch 3E, parallel sibling of tasks 050/051).
+    H10DataverseAppUserGraphParityHandler.cs implements IProvisioningHandler with
+    5 collaborator seams (IGraphAppRolesRegistry/L2GraphAppRolesRegistry — compiled
+    mirror of GraphAppRoles.cs since L2 cannot reference the BFF assembly;
+    IDataverseAppUserCreator/DataverseWebApiAppUserCreator — real Dataverse Web API
+    systemusers upsert for both BFF app-reg + UAMI; IDataverseAppUserVerifier
+    /DataverseWebApiAppUserVerifier — T2 independent post-condition re-query;
+    IGraphAppRoleGranter/GraphRestAppRoleGranter — real Graph REST grant calls
+    mirroring scripts/Grant-GraphAppRoles.ps1's endpoint shapes;
+    IGraphAppRoleParityVerifier/GraphRestAppRoleParityVerifier — T3 independent
+    post-grant re-query). H10 escalation gate fires BEFORE any Dataverse/Graph
+    write on any null AppRoleId. T2 mismatch + T3 partial both classify
+    QuarantineRequired; a raw Graph grant-call failure classifies
+    RetryableWithCleanup (deliberately distinct — grants are individually
+    idempotent). Extended InterStepState with BffAppRegSystemUserId (controlled
+    schema extension, parity with task 049/050 precedent). 17 new unit tests, all
+    passing (352 total L2 tests, 0 failures). Zero new NuGet packages / zero new
+    CVEs. 4 deviations documented in
+    projects/customer-provisioning-orchestration-r1/notes/task-053-h10-deviations.md
+    (test-file location Path C; InterStepState extension; NFR-09 raw-HTTP Path C;
+    App-User-creation-mechanism POML-literal-over-ambiguous-design-footnote).
+    Program.cs DI block added as a narrow hunk after siblings' (050 H7, 051 H8)
+    blocks — no conflicts, both siblings' registrations read + preserved intact
+    before this task's own edit.
+  </notes>
 </task>
