@@ -4,7 +4,7 @@
     <title>Resolve two-source AI seed drift (scripts/seed-data MVP vs infra/dataverse R7); publish resolution note</title>
     <phase>A Doc Consolidation + Audits</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Read-only audit but with a decision component (which source becomes authoritative per H12a declarative manifest); output steers Phase C' H12a implementation. Per root CLAUDE.md §8 rigor table, tasks with explicit constraints + Phase-2+ downstream consumers = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -103,7 +103,7 @@ Per spec.md FR-15 + R14 + design.md §11.3 + INVENTORY §12. Two-source drift ar
     <criterion testable="true">Negative: no decision row reintroduces the retired dispatcher or spaarke-playbook-embeddings index (per ADR-039).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-15 + FR-16 + R14 + ADR-039. Directly feeds Phase C' H12a manifest authoring.</notes>
+  <notes>Spec FR-15 + FR-16 + R14 + ADR-039. Directly feeds Phase C' H12a manifest authoring. COMPLETED 2026-08-17 by task-execute Wave 0 Batch 1 sub-agent. Deliverable: projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md — 13 artifact types resolved (9 FR-15 + 4 FR-16), each with authoritative source + evidence-cited rationale + Phase C' migration deltas (M1–M12 for H12a, N1–N5 for H12b). Escalation trigger not fired — no ambiguity. git diff shows only the new note file (no seed scripts/data modified). ADR-039 invariants preserved (no dispatcher, no spaarke-playbook-embeddings index).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
