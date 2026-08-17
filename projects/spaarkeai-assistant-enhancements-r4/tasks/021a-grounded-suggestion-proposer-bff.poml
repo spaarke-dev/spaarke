@@ -4,9 +4,33 @@
     <title>Grounded follow-on suggestion proposer (BFF) — retire the ungrounded generator; generalize the grounded proposer to the conversational moment (FR-04)</title>
     <phase>2 — E2 follow-ons</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <!-- Splits the original task 021 (per notes/021-grounded-suggestions-design-delta.md, owner-approved 2026-08-17).
          021a = the BFF half (this file); 021b = the client render half. Close coordination on the typed SSE wire contract. -->
+    <!-- COMPLETED 2026-08-17 (opus/high FULL). Retired the ungrounded free-string generator
+         (ChatEndpoints.GenerateAndEmitSuggestionsAsync — no capability menu, untyped strings, the P2 dead-end) and
+         generalized the grounded proposer (AssistantSuggestionService) to the conversational moment. 4 files:
+         (1) ConsumerRoutingService.FilterByContextTypes — deterministic UNION context pre-filter (ADR-039 aid,
+         widened from one type to the open-tab union). (2) AssistantSuggestionService — typed
+         SuggestedFollowup{Capability,Question} + SuggestForConversationAsync (conversation tail + union candidate
+         scope + active-tab server-derived content) + typed ParseFollowups (closed-catalog guard preserved: an
+         off-catalog capability id is dropped; a question re-enters the loop, no id); proactive SuggestAsync
+         contract UNCHANGED (capability-only). (3) suggest-followups.action.json — two-kind output schema
+         (kind=capability|question, OpenAI-strict-safe all-fields-present) + optional conversationTail input +
+         rewritten split-instruction prompt (imperative=capability / interrogative=question; PROACTIVE moment =
+         capabilities-only, closes review W1); proactive operand byte-identical. (4) ChatEndpoints — ONE predictable
+         grounded pass per turn (removed the <150-char skip + the keyword-hijack mutual-exclusion + the separate
+         proactive trigger); typed "suggestions" SSE event (ChatSseFollowupItem: capability|question|action —
+         the [action:*] string encoding re-typed as an 'action' kind); merge order actions→capability→question;
+         emits nothing when empty (absence = meaningful). Best-effort 4s timeout (ADR-019 — never breaks the turn).
+         14 new unit tests (8 conversational/two-kind/cadence/union-scope + 6 union-filter); existing 7 proactive
+         tests still green (backward-compatible refactor). BFF build 0 err; 27/27 touched tests; publish 44.97 MB
+         compressed incl PDBs (Δ +0.01 vs 44.96 baseline, no new pkgs, ≤60); CVE clean. Step 9.5 CLEAN
+         (independent ADR-039 review: no Critical; W1 fixed via prompt; ADR-039/040/015/013 compliant).
+         COORDINATION: 021b renders the typed SSE shape — LOCKED in notes/021-grounded-suggestions-design-delta.md
+         §9a. MERGE-ORDER GATE (review W2): 021a must NOT deploy ahead of 021b (the wire shape changed string[]→
+         typed); deploy together at task 080. FR-04 golden-utterance eval case (review S3) is task 024's deliverable
+         (E2 eval, deps 021b+023 — the no-dead-end behavior is user-observable only after 021b renders). -->
     <rigor>FULL</rigor>
     <rigor-reason>Retires a live suggestion-generation path + changes the SSE `suggestions` wire contract on the shared chat surface (hot-path BFF + ADR-039 grounded-proposer boundary); requires code-review + adr-check.</rigor-reason>
     <model-tier>opus</model-tier>

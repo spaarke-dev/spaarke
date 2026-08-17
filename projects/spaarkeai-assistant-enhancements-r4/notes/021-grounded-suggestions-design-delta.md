@@ -154,6 +154,32 @@ Remaining author follow-ups (not owner-blocking): (a) does the after-a-capabilit
 
 ---
 
+## 9a. 021a → 021b WIRE CONTRACT (LOCKED by 021a implementation, 2026-08-17)
+
+021a (BFF) landed the typed SSE shape below. **021b (client) renders THIS.** The BFF+client deploy together (task 080); the PR is held, so there is no mid-deploy break.
+
+**Event**: SSE `type: "suggestions"` (event NAME unchanged — the client already listens for it). The `data` payload shape CHANGED from `{ suggestions: string[] }` → `{ suggestions: FollowupItem[] }`. The untyped `string[]` payload is fully retired; the ungrounded generator AND the `[action:*]` string-prefix encoding are gone.
+
+**Payload** (`ChatSseSuggestionsData` → `ChatSseFollowupItem[]`, camelCase on the wire):
+```ts
+type FollowupItem = {
+  kind: "capability" | "question" | "action";
+  label: string;                 // chip text (always present)
+  targetBindingId?: string|null; // present+non-null ONLY for kind==="capability"
+  actionId?: string|null;        // present+non-null ONLY for kind==="action" ∈ {upload,search,select}
+};
+// event: { type: "suggestions", content: null, data: { suggestions: FollowupItem[] } }
+```
+Notes for 021b:
+- Nulls ARE serialized (e.g. a capability item has `actionId: null`). Branch on `kind`, not on presence.
+- **Ordering** is server-authoritative: `action` items first, then `capability`, then `question` (design §5a "actions first, then questions"; capabilities are the DO items). Render in received order.
+- **Routing by kind** (structural — NEVER a keyword heuristic on the label; that heuristic is banned by `ASSISTANT-UI-ELEMENT-CRITERIA`):
+  - `capability` → dispatch `targetBindingId` via the existing Click path (`invoke(bindingId,args)`), same as `ConsumerChips`.
+  - `question` → send `label` as a new chat message (re-enters the grounded loop).
+  - `action` → the legacy special-route by `actionId`: `upload`→file-input flow, `search`→document-search pane, `select`→matter picker (the old `handleSuggestionSelect` `[action:*]` branch, now keyed off `actionId` instead of parsing the string prefix).
+- **Visual (design §5a)**: ONE chip family, variants by `kind`. Capability + action = bordered + trailing **→** (they DO something); question = lighter pill, **no arrow** (it ASKS). Label grammar already agrees (BFF authors imperative labels for capability/action, interrogative for question). Empty `suggestions` events are NOT emitted (absence = "nothing relevant").
+- The old client code that parsed `data.suggestions` as `string[]` (and the `[action:` prefix branch) must be replaced with the typed reader above.
+
 ## 10. Recommendation
 
 Adopt the grounded-proposer consolidation (M1–M5), keep conversational-question chips, re-scope 021 into a BFF + client pair with a short `spec.md` FR-04 update, and file the `[action:*]` keyword fold-in + any repeatedly-wanted-but-unbacked suggestions to the behavior-gap register. This delivers "smart **and** guaranteed to work," reuses machinery you already shipped, and *removes* a fragile surface rather than adding one.

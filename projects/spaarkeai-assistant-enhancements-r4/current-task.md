@@ -10,9 +10,31 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | ✅ **033 COMPLETE** (E3 eval + bounds, FR-09/10). ✅ **11 of 17 done**: 001, 010, 011, 012, 013, 020, 022, 030, 031, 032, 033. **E1 spine ✅ · E3 loop ✅**. 021 SUPERSEDED → 021a/021b. |
-| **Status** | 033: extended the R4 golden-utterance family (013) with the `preference-loop` family + AR4-020 P3-loop case + a `PreferenceLoop_...` grounding test in the GoldenUtteranceEval merge gate (grounds the loop vs the REAL catalog; confirmed-only; off-list inert; DATA-guard). Negative check confirmed. TEST-ONLY. Full gate **155/155**; build 0 err. Step 9.5 CLEAN. All work committed locally (**NOT pushed; PR HELD** per owner). |
-| **Next Action** | See **FRESH SESSION START HERE** below. Remaining: **E2** 021a→021b→023→024 · **040** (D9, needs `--chrome`) · **080** deploy · **090** wrap-up. |
+| **Task** | ✅ **021a COMPLETE** (BFF grounded proposer, FR-04). ✅ **12 of 17 done**. **NEXT: 021b** (client typed two-kind chip render, sonnet/high). |
+| **Status** | 021a done + committed locally: retired ungrounded generator; AssistantSuggestionService.SuggestForConversationAsync + typed SuggestedFollowup + ParseFollowups; FilterByContextTypes union pre-filter; two-kind action JSON; typed `suggestions` SSE event. 27/27 tests; publish 44.97 MB (Δ+0.01); CVE clean; Step 9.5 CLEAN (independent ADR-039 review, no Critical, W1 fixed). **NOT pushed; PR HELD.** |
+| **Next Action** | **021b** — render the typed two-kind chip family. **Wire contract LOCKED in [`notes/021-grounded-suggestions-design-delta.md` §9a](notes/021-grounded-suggestions-design-delta.md)** (capability→Click-path dispatch by targetBindingId; question→re-send label; action→special-route by actionId; one chip family, arrow=capability/action, no-arrow=question). Client files: SprkChatSuggestions.tsx + SprkChat.tsx handleSuggestionSelect. `/conflict-check` (SprkChat hot-path, compose-r5/r6). |
+
+---
+
+## 021a DESIGN LOCKED (2026-08-17, opus/high FULL) — de-risked by code study
+
+**Conflict-check**: soft pass — hot-path BFF touched; NO open PR overlaps ChatEndpoints.cs / AssistantSuggestionService.cs / suggest-followups.action.json / SSE models (PR #508 = Events/SmartTodo client; dependabot = csproj; compose-r5/r6 no open PR). PR is HELD anyway.
+
+**Key code facts (traced):**
+- `## Input` renders the operand `JsonElement` VERBATIM (`PromptInputSection.Render`) — the action's `input` schema is DESCRIPTIVE, not a runtime template. ⇒ adding an optional `conversationTail` to the CONVERSATIONAL operand does NOT touch the proactive `/suggest` operand (unchanged). No breakage.
+- `AssistantSuggestionService` = the reference grounded proposer (candidate menu via `IConsumerRoutingService.ListTextProjectableBindingsAsync` + `FilterByContextType`; `BuildInput`; `ParseSuggestions` drops off-catalog ids). Registered `AddScoped` → injectable into `SendMessageAsync` via `[FromServices]`.
+- `WidgetContextTypeResolver.ResolveOpenTabContextTypes(liveTabs)` already gives the open-tab context-type UNION (R3 tool-economy). `SendMessageAsync` has `liveTabs` + `request.ActiveContext?.{ContextType,TabId}` + `request.Message` + `fullResponse` + `tenantId` + `session` in scope.
+- After-response emit (ChatEndpoints ~963-1022): 3 hidden skips = (1) `EmitMissingContextChipsIfNeededAsync` keyword hijack (mutually-exclusive `[action:*]` chips), (2) `>=150`-char skip, (3) 2s timeout. Untyped event `ChatSseSuggestionsData(string[])` at 3271 (generator) + 3417 (action chips). No outputschema mirror for suggest-followups. `Truncate` only used by the generator.
+
+**LOCKED DECISIONS:**
+1. **Typed SSE**: keep event type string `"suggestions"`, change `ChatSseSuggestionsData` payload `string[]` → `ChatSseFollowupItem[]` where `ChatSseFollowupItem(Kind, Label, TargetBindingId?, ActionId?)`. THREE kinds: `capability` (targetBindingId→Click-path dispatch), `question` (label→re-enter loop), `action` (actionId∈{upload,search,select}→client special-route; the `[action:*]` chips RE-TYPED, "as-is" behaviorally, NOT folded into the grounded menu = still deferred). Fully retires the untyped `string[]` event (AC met). `reason` stays dev-only, NOT on the wire.
+2. **Generalize service**: add `SuggestedFollowupKind{Capability,Question}` + `SuggestedFollowup(Kind,TargetBindingId?,Label,Reason?)`; add `SuggestForConversationAsync(sessionId,tenantId,userMessage,assistantResponse,activeContextType,activeTabId,openTabContextTypes,ct)` → typed list. Candidate menu = union-filter over openTabContextTypes (+active type). Reuse `BuildActiveTabAsync`. Operand adds `conversationTail`. Keep `SuggestAsync` (proactive) returning `SuggestedChip` (map capability-kind only; questions dropped → proactive contract stable).
+3. **Two-kind output schema** (OpenAI-strict-safe): item = `{kind(enum capability|question), targetBindingId(string, ""=question), label, reason}` ALL present/required. `ParseFollowups` infers kind if absent (targetBindingId non-blank→capability). Capability off-catalog id → dropped (existing guard preserved). Update systemPrompt (conversational moment + 2-kind split + label grammar: imperative=capability, interrogative=question) + example.
+4. **ConsumerRoutingService**: add static `FilterByContextTypes(candidates, IEnumerable<string>)` (union; mirrors `FilterByContextType`).
+5. **ChatEndpoints cadence**: remove `GenerateAndEmitSuggestionsAsync`+`SuggestionsTimeoutMs`+`>=150` skip. Refactor `EmitMissingContextChipsIfNeededAsync`→`BuildMissingContextActionChips` (returns items, doesn't write). ONE predictable pass: build action items (missing-context) + run conversational proposer (best-effort, timeout ~4s) → MERGE (actions→capability→question) → emit ONE typed `"suggestions"` event, or NONE if empty (absence = meaningful). No mutual-exclusion (fixes hijack), no length skip.
+
+**Files**: (1) AssistantSuggestionService.cs (2) ConsumerRoutingService.cs (3) infra/dataverse/actions/suggest-followups.action.json (4) ChatEndpoints.cs + tests in tests/unit + tests/integration/seam. **Coordinate typed SSE shape with 021b.**
+
 
 ---
 
@@ -22,8 +44,8 @@
 
 **Done (11/17)**: E1 spine **010→011→012→013 ✅** (the P1 grounded-recommend core: advisory `list-tasks` + `AdvisoryCapabilityRunner` nested turn + dispatch routing + eval). E3 loop **030→031→032→033 ✅** (Preference type + feedback→memory capture + governed injection-safe preference-producer + eval). Plus 001, 020, 022.
 
-**Remaining (6 tasks), in recommended order:**
-1. **021a** (BFF, opus/high) → **021b** (client, sonnet/high) — the **suggestion consolidation** (FR-04). Design is LOCKED in [`notes/021-grounded-suggestions-design-delta.md`](notes/021-grounded-suggestions-design-delta.md) (owner-approved): retire the ungrounded free-string generator; run ONE grounded proposer pass per turn emitting a TYPED two-kind structure — **capability** chips (real `targetBindingId`, arrow) + **question** chips (text, no arrow); reuse `AssistantSuggestionService`. 021a POML has the full blueprint. `/conflict-check` (SprkChat hot-path, compose-r5/r6).
+**Remaining (5 tasks), in recommended order:**
+1. ✅ **021a DONE** (2026-08-17). **→ 021b** (client, sonnet/high) NEXT — render the TYPED two-kind chips. Wire contract LOCKED in [`notes/021-grounded-suggestions-design-delta.md` §9a](notes/021-grounded-suggestions-design-delta.md): `suggestions` SSE `data.suggestions` is now `FollowupItem[]` (kind=capability|question|action). capability→Click-path dispatch(targetBindingId); question→re-send label; action→special-route(actionId: upload/search/select). ONE chip family, arrow=capability/action, no-arrow=question. Retire the old `string[]` + `[action:*]`-prefix parse. `/conflict-check` (SprkChat, compose-r5/r6). **Merge-order gate: 021b must deploy WITH 021a (task 080) — not before.**
 2. **023** (client, FR-06) — follow-on cards (Briefing/SmartToDo), open-tab-gated. Dep 022✅+012✅. NOTE: 012 deferred `chipTransitions` to here.
 3. **024** (eval, FR-10) — E2 eval cases. Dep 021b+023.
 4. **040** (D9, FR-11) — **needs a live-DOM `--chrome` session → NOT autonomous** (owner involvement). Confirm D9 still repros after the merged partial fix first.
