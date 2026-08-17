@@ -51,6 +51,7 @@
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Endpoints;
+using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
@@ -152,6 +153,43 @@ builder.Services.AddSingleton<IArmKeyVaultRefProbe, AzCliArmKeyVaultRefProbe>();
 builder.Services.AddSingleton<IUpgradeDriftDetector, AzCliUpgradeDriftDetector>();
 builder.Services.AddSingleton<IBicepTemplateInspector, FileBicepTemplateInspector>();
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
+
+// Task 070: H12a AI seed chain handler + two collaborator seams
+// (ISeedManifestReader = on-disk read + SHA-256 hash + defense-in-depth
+// retired-artifact scan; ISeedManifestRunner = pwsh shell-out to task-069's
+// scripts/seed-data/Invoke-SeedManifest.ps1 -Live). All registrations
+// UNCONDITIONAL per ADR-032 — no feature-gate branches.
+//
+// Placement Justification (CLAUDE.md §10): H12a lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-
+// function rule — no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H12a is the terminal AI-domain seeder per
+// spec.md FR-15 — it wraps the task-069 PS orchestrator with Cosmos state
+// management + idempotency (h12a-{customerId}-{SHA256(manifest.yaml)}) +
+// defense-in-depth retired-artifact check that layers on top of the
+// orchestrator's own retiredArtifacts enforcement.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-039 (single AI routing surface): manifest defense-in-depth scan
+//     rejects any artifact declaration referencing spaarke-playbook-embeddings,
+//     multinode, or dispatcher — even if task 069's Invoke-SeedManifest.ps1
+//     is hand-edited to bypass its own retired-check. This is redundant with
+//     the orchestrator but intentional; ADR-039 amendment 2026-07-05 raises
+//     the bar for "MUST NOT land new capability on the frozen node-graph
+//     engine" enough to warrant two independent gates.
+//   - ADR-004 idempotency: the handler is Path C (comply) — CompletedPhases
+//     scan is the Level-3 durable dedup per design.md §4.1 preamble; a
+//     content change to manifest.yaml (any byte) produces a new SHA-256 +
+//     new key + re-seed on next invocation (upgrade path).
+//   - ADR-028 UAMI outbound: the PS orchestrator + downstream per-artifact
+//     seeders authenticate via `az login` (operator auth chain via
+//     DefaultAzureCredential in-script); no account keys pass through the
+//     runner.
+builder.Services.Configure<AiSeedChainOptions>(
+    builder.Configuration.GetSection(nameof(AiSeedChainOptions)));
+builder.Services.AddSingleton<ISeedManifestReader, FileSeedManifestReader>();
+builder.Services.AddSingleton<ISeedManifestRunner, InvokeSeedManifestScriptRunner>();
+builder.Services.AddScoped<H12aAiSeedChainHandler>();
 
 var app = builder.Build();
 
