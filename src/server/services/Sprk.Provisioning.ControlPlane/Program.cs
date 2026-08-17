@@ -56,6 +56,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
+using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Middleware;
@@ -232,6 +233,24 @@ builder.Services.Configure<EntraAppRegOptions>(
 builder.Services.AddSingleton<IEntraAppRegProvisioner, RegisterEntraAppRegScriptProvisioner>();
 builder.Services.AddSingleton<IAdminConsentVerifier, NullAdminConsentVerifier>();
 builder.Services.AddScoped<H3EntraAppRegHandler>();
+
+
+// Task 048: H5 Dataverse env creation handler + 2 collaborator seams
+// (IDataverseEnvCreator wraps `pac admin create-environment` interim per
+// design.md § 4.1 H5 row + M-10 TF Power Platform deferral;
+// IDataverseHealthProbe polls Web API `WhoAmI` via DefaultAzureCredential
+// until Reachable — implements the Pending→Verified gate for the long-
+// running Dataverse env-creation flow).
+//
+// DISPATCHER-INSERTED (task 048 agent completed without committing due to
+// Batch 3C shared-worktree Program.cs write race; task 071's git-checkout
+// HEAD -- Program.cs discarded 048's staged edits. Files on disk are correct;
+// this DI block re-adds the registration per H2b/H3/H12a pattern).
+builder.Services.Configure<DataverseEnvCreationOptions>(
+    builder.Configuration.GetSection(nameof(DataverseEnvCreationOptions)));
+builder.Services.AddSingleton<IDataverseEnvCreator, PacAdminDataverseEnvCreator>();
+builder.Services.AddHttpClient<IDataverseHealthProbe, DataverseWebApiHealthProbe>();
+builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
 
 
 // Task 070: H12a AI seed chain handler + two collaborator seams
