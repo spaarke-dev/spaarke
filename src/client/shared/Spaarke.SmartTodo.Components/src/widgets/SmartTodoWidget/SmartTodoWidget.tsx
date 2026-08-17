@@ -187,6 +187,7 @@ export function buildSmartTodoQuery(opts: {
     'sprk_name',
     'sprk_description',
     'sprk_duedate',
+    'sprk_priority',
     'sprk_priorityscore',
     'sprk_effortscore',
     'sprk_todocolumn',
@@ -194,6 +195,8 @@ export function buildSmartTodoQuery(opts: {
     'statecode',
     'statuscode',
     '_sprk_assignedto_value',
+    'sprk_regardingrecordname',
+    'sprk_regardingrecordnumber',
     'createdon',
     'modifiedon',
   ].join(',');
@@ -496,7 +499,20 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
       .retrieveMultipleRecords('sprk_todo', query)
       .then(result => {
         if (cancelled) return;
-        const entities = (result.entities ?? []) as ITodoRecord[];
+        // Map Dataverse formatted-value annotations onto named fields so the
+        // SHARED KanbanCard renders identically to the Code Page: the "Assigned:"
+        // line (from the assignee lookup's formatted value) and the locale date.
+        // (`retrieveMultipleRecords` returns these `@…FormattedValue` annotations
+        // by default; `sprk_priority` — which drives the priority flag — and the
+        // regarding text come back directly via the widened $select.)
+        const FV = '@OData.Community.Display.V1.FormattedValue';
+        const entities = (result.entities ?? []).map((e: Record<string, unknown>) => ({
+          ...e,
+          assignedToName:
+            (e[`_sprk_assignedto_value${FV}`] as string | undefined) ?? (e['assignedToName'] as string | undefined),
+          dueDateFormatted:
+            (e[`sprk_duedate${FV}`] as string | undefined) ?? (e['dueDateFormatted'] as string | undefined),
+        })) as ITodoRecord[];
         setItems(entities);
         setIsLoading(false);
         setError(null);
