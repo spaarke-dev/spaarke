@@ -91,9 +91,24 @@ this is a decision for the owner, not a silent expansion.
   recoverable head-clobber on a rare concurrent-apply-vs-save race, already backstopped by SPE version
   history.
 
-## Status
+## Status — RESOLVED
 
-- **Item 1 (typed-404)**: DONE + committed. code-review PASS, adr-check PASS (ADR-019 typed ApiError; §11
-  modify-only; NFR-06 intact; no BFF bytes).
-- **Item 2 (If-Match)**: awaiting owner decision (Path A vs B/C). 074 is NOT marked ✅ until resolved.
+- **Item 1 (typed-404)**: DONE + committed (`3faba8c1b`). code-review PASS, adr-check PASS (ADR-019 typed
+  ApiError; §11 modify-only; NFR-06 intact; no BFF bytes).
+- **Item 2 (If-Match)**: **OWNER APPROVED PATH A (2026-08-17, Ralph).** Documented exception: apply-template
+  rides the SAME server-side concurrency model as save (no client-supplied If-Match, per the deliberate
+  ComposeService design at 1177-1184 + the design-deferred Graph-If-Match candidate at 1482-1485). The
+  residual server-side read→write TOCTOU (concurrent sibling-tab save vs apply) is a RARE, RECOVERABLE
+  head-clobber — backstopped by SPE version history (the newer save remains in the version list) + the
+  client's saved/non-dirty apply guard. The architecture-consistent server-side If-Match hardening (shared
+  `SpeFileStore.ReplaceFileContentAsUserAsync` facade change) is DEFERRED to a scoped BFF follow-up (filed
+  via `/defer` → `notes/defer-issues.md` + GitHub Issue). 074 marked complete.
 - Scope did NOT expand into r8 template storage/picker.
+
+### §6.5 documented-exception record (for the 090 wrap-up PR)
+
+- **Rule deviated from**: no write-time concurrency precondition on apply-template's SPE replace.
+- **Rationale**: consistent with the shipped ComposeService concurrency model (deliberate client-If-Match
+  rejection + design-deferred Graph-If-Match); residual race is rare + recoverable (SPE version history).
+- **Owner sign-off**: Ralph, 2026-08-17. **Follow-up**: server-side If-Match hardening deferred (see
+  `notes/defer-issues.md`). Cite this record in the 090 wrap-up PR description.
