@@ -16,10 +16,12 @@
 | 012 | Advisory task-agenda capability + nested-turn runner | 1 E1 tier | FR-01 | opus / high | FULL | ❌ | 010, 011 | ✅ (advisory list-tasks + AdvisoryCapabilityRunner + dispatch routing; 9 seam tests, publish 43.67 MB, CVE clean) |
 | 013 | E1 eval cases (task-agenda golden utterances) | 1 E1 tier | FR-10 | sonnet / high | FULL | ✅ | 012 | ✅ (AR4-001/002/003 + AssistantEnhancementsR4EvalTests, 6 structural DoD assertions, GoldenUtteranceEval gate 154/154, negative check confirmed) |
 | 020 | OBO-identity wording (user-scoped tools) | 2 E2 | FR-05 | sonnet / high | FULL | ❌ | — | ✅ |
-| 021 | Gate free-string `SprkChatSuggestions` | 2 E2 | FR-04 | sonnet / high | FULL | ❌ | 012, 022 | 🔲 |
+| 021 | ~~Gate free-string `SprkChatSuggestions`~~ | 2 E2 | FR-04 | — | — | — | — | ⛔ SUPERSEDED → 021a + 021b (design delta 2026-08-17) |
+| 021a | Grounded suggestion proposer (BFF) — retire ungrounded generator + typed two-kind output | 2 E2 | FR-04 | opus / high | FULL | ❌ | 012 | 🔲 |
+| 021b | Render typed two-kind chip family (capability vs question) | 2 E2 | FR-04 | sonnet / high | FULL | ❌ | 021a | 🔲 |
 | 022 | Briefing + Smart To Do launch-registry entries | 2 E2 | FR-06 | sonnet / med | STANDARD | ✅ | — | ✅ |
 | 023 | Follow-on cards, open-tab-gated (Briefing/SmartToDo) | 2 E2 | FR-06 | sonnet / high | FULL | ❌ | 022, 012 | 🔲 |
-| 024 | E2 eval cases (dead-end + card gating) | 2 E2 | FR-10 | sonnet / high | FULL | ✅ | 021, 023 | 🔲 |
+| 024 | E2 eval cases (dead-end + card gating) | 2 E2 | FR-10 | sonnet / high | FULL | ✅ | 021b, 023 | 🔲 |
 | 030 | `Preference` MemoryFactType + wire map | 3 E3 loop | FR-07 | opus / high | FULL | ❌ | — | ✅ |
 | 031 | Feedback→memory pipeline | 3 E3 loop | FR-08 | opus / high | FULL | ❌ | 030 | 🔲 |
 | 032 | Governed narrow-allow-list preference-producer | 3 E3 loop | FR-09 | opus / xhigh | FULL | ❌ | 030 | 🔲 |
@@ -37,7 +39,7 @@
 | Foundation | 001 | — | Register + eval harness (new files). `parallel-safe:true`. |
 | Wave 1 — E1 spine | 010 → 011 → 012 → 013 | 001 | `Services/Ai` catalog/pre-filter spine → **sequential** (`parallel-safe:false`); 013 = eval (safe). |
 | Wave 1 — independent | 020, 022, 030, 040 | — | Alongside E1: 020 OBO wording (BFF, disjoint), 022 registry entries (client, additive, safe), 030 memory enum (BFF Memory), 040 D9 (client). BFF ones `parallel-safe:false` → dispatch as slots free. |
-| Wave 2 — E2 client | 021 → 023 → 024 | 012, 022 | `SprkChat`/`ConversationPane` spine → **sequential** (`parallel-safe:false`); 024 = eval (safe). |
+| Wave 2 — E2 | 021a → 021b → 023 → 024 | 012, 022 | 021 SUPERSEDED → 021a (BFF grounded proposer) → 021b (client typed chips); then 023 cards, 024 eval. `SprkChat`/`ConversationPane`/`ChatEndpoints` spine → **sequential** (`parallel-safe:false`); 024 = eval (safe). See `notes/021-grounded-suggestions-design-delta.md`. |
 | Wave 3 — E3 | 031, 032 → 033 | 030 | 031 feedback→memory, 032 producer (injection-defense) — coordinate BFF; 033 = eval/tests (safe). |
 | Deploy | 080 | all code | Owner-gated; BFF + `sprk_spaarkeai` together. |
 | Wrap-up | 090 | 080 | `/test-diet` gate. |
@@ -52,7 +54,7 @@
 
 `001 → 010 → 011 → 012 → 013` is the E1 grounded-recommend value-proving spine. E2 depends on 012 (so "prioritize" maps to the advisory capability) + 022. E3 (030 → 031/032 → 033) is independent of E1/E2. E4 (040) is fully independent.
 
-Longest chain: **001 → 010 → 011 → 012 → 021 → 023 → 024 → 080 → 090** (≈9 links).
+Longest chain: **001 → 010 → 011 → 012 → 021a → 021b → 023 → 024 → 080 → 090** (≈10 links).
 
 ---
 

@@ -3,8 +3,17 @@
   <metadata>
     <title>Gate free-string SprkChatSuggestions on a backing capability (FR-04)</title>
     <phase>2 — E2 follow-ons</phase>
-    <gate>startable</gate>
-    <status>pending</status>
+    <gate>superseded</gate>
+    <status>superseded</status>
+    <!-- SUPERSEDED 2026-08-17 by 021a (BFF) + 021b (client), per notes/021-grounded-suggestions-design-delta.md
+         (owner-approved). Investigation proved the client-only "gate the free strings" framing hits the escalation
+         trigger: a plain SSE free-string carries NO structural backing signal, so backed-vs-unbacked cannot be
+         distinguished client-side without a banned keyword heuristic. The owner's stronger requirement — keep the
+         LLM's contextual intelligence while making dead-ends structurally impossible — is met by consolidating onto
+         the GROUNDED PROPOSER (AssistantSuggestionService already selects over the real context-scoped catalog + drops
+         hallucinated ids). Reshaped into: 021a (BFF — retire the ungrounded generator, generalize the grounded proposer
+         to the conversational moment, typed two-kind {capability|question} output, predictable cadence) + 021b (client —
+         render the typed two-variant chip family + ASSISTANT-UI-ELEMENT-CRITERIA update). spec.md FR-04 note added. -->
     <rigor>FULL</rigor>
     <rigor-reason>Frontend change on the shared SprkChat surface affecting suggestion rendering across all SprkChat consumers; touches the SpaarkeAi spine; requires code-review + adr-check.</rigor-reason>
     <model-tier>sonnet</model-tier>
