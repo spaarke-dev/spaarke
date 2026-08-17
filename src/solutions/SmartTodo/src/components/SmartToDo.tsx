@@ -97,7 +97,9 @@ import { useUserPreferences } from "../hooks/useUserPreferences";
 import { DataverseService } from "../services/DataverseService";
 import { ITodo } from "../types/entities";
 import { computeTodoScore } from "../utils/todoScoreUtils";
-import { matchesTodoSearchQuery } from "../utils/todoSearchUtils";
+// Shared search predicate (§11 — single source in the shared lib; the widget uses
+// the same one). Moved out of this solution 2026-08-17 so both surfaces converge.
+import { matchesTodoSearchQuery } from "@spaarke/smart-todo-components";
 import { useOptionalTodoContext } from "../context/TodoContext";
 import type { TodoColumn } from "../types/enums";
 import type { DropResult } from "@hello-pangea/dnd";

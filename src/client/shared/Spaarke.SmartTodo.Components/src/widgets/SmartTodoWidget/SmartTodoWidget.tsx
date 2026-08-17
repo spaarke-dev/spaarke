@@ -105,16 +105,16 @@ import {
   type InputOnChangeData,
 } from '@fluentui/react-components';
 import { ArrowClockwiseRegular, Add20Regular, Open20Regular, Search20Regular } from '@fluentui/react-icons';
-import {
-  OrientationToggle,
-  type Orientation,
-  MicrosoftToDoIcon,
-} from '@spaarke/ui-components';
+import { OrientationToggle, type Orientation, MicrosoftToDoIcon } from '@spaarke/ui-components';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
 import type { IKanbanDataverseService } from '../../types/kanban';
 import { SmartTodoKanban } from '../../components/SmartTodoKanban';
+// Shared search predicate (§11 — same one the Code Page uses; matches name /
+// description / regarding / assigned-to / DATE). Relative import (not the package
+// root) to avoid a self-referential barrel cycle.
+import { matchesTodoSearchQuery } from '../../utils/todoSearchUtils';
 import { useCurrentContactId } from '../../hooks/useCurrentContactId';
 
 // ---------------------------------------------------------------------------
@@ -562,19 +562,17 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   }, [items.length, onBadgeCountChange]);
 
   // -------------------------------------------------------------------------
-  // In-memory search filter — case-insensitive substring match across
-  // `sprk_name` (subject) and `sprk_description`. Cheap to include both
-  // since `description` is already in the $select.
+  // In-memory search filter — uses the SHARED `matchesTodoSearchQuery` predicate
+  // (§11), so the widget matches the SAME fields as the Code Page: name,
+  // description, regarding-record name/number, assigned-to, and the blended DATE
+  // search (e.g. "august 18", "aug", "8/18"). Previously the widget had its own
+  // inline predicate that matched only name + description (smart-todo-r5
+  // follow-up 2026-08-17).
   // -------------------------------------------------------------------------
 
   const filteredItems = React.useMemo(() => {
-    const q = appliedQuery.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(item => {
-      const name = (item.sprk_name ?? '').toLowerCase();
-      const desc = (item.sprk_description ?? '').toLowerCase();
-      return name.includes(q) || desc.includes(q);
-    });
+    if (!appliedQuery.trim()) return items;
+    return items.filter(item => matchesTodoSearchQuery(item, appliedQuery));
   }, [items, appliedQuery]);
 
   // Prune stale selections when the visible list changes (search filter,
