@@ -27,13 +27,15 @@ namespace Sprk.Bff.Api.Infrastructure.Auth;
 /// </para>
 /// <para>
 /// <b>AppRoleId (GUID) provenance</b>: per this task's escalation rule, GUIDs are NOT shipped from
-/// memory. Only the three GUIDs authoritatively present in-repo (from
-/// <c>scripts/Setup-EntraInfrastructure.ps1</c>, the Microsoft Graph well-known application-permission
-/// IDs for the self-service-registration subsystem) are populated. The remaining
-/// <see cref="GraphAppRole.AppRoleId"/> values are <c>null</c> pending confirmation from a live §5a
-/// enumeration of the Graph resource SP (<see cref="GraphResourceAppId"/>) — a wrong GUID in the
-/// single source of truth would propagate to every future provisioning run, which is worse than the
-/// current drift. <see cref="Value"/> is the stable match key in the interim.
+/// memory. <b>All 14 GUIDs are populated as of 2026-08-17</b> (r1 task 005): the 11 SPE / Directory /
+/// Email GUIDs were confirmed via live <c>az ad sp show</c> enumeration against the Microsoft Graph
+/// resource SP (<see cref="GraphResourceAppId"/>) by <c>ralph.schroeder@spaarke.com</c> against tenant
+/// <c>a221a95e-6abc-4434-aecc-e48338a1b2f2</c> (see per-GUID commits for each cited invocation +
+/// result); the 3 self-service-registration GUIDs were sourced pre-r1 from
+/// <c>scripts/Setup-EntraInfrastructure.ps1</c>. <see cref="GraphAppRole.AppRoleId"/> remains
+/// declared as <c>string?</c> for schema stability. <see cref="Value"/> is the stable match key. Do
+/// NOT change any GUID without a fresh live re-enumeration — a wrong GUID in the single source of
+/// truth propagates to every future provisioning run.
 /// </para>
 /// </remarks>
 public static class GraphAppRoles
@@ -123,9 +125,10 @@ public static class GraphAppRoles
 
     /// <summary>
     /// One expected Graph application role. <see cref="Value"/> is the stable match key;
-    /// <see cref="AppRoleId"/> is the Graph well-known role GUID (nullable pending live §5a
-    /// confirmation — see the class remarks). <see cref="ModuleConditional"/> roles are only required
-    /// when their <see cref="OwningModule"/> is enabled (e.g. <c>Mail.*</c> only with Email/Communication).
+    /// <see cref="AppRoleId"/> is the Graph well-known role GUID (populated for all 14 roles as of
+    /// 2026-08-17 per r1 task 005; nullable type retained for schema stability — see class remarks).
+    /// <see cref="ModuleConditional"/> roles are only required when their <see cref="OwningModule"/>
+    /// is enabled (e.g. <c>Mail.*</c> only with Email/Communication).
     /// </summary>
     public sealed record GraphAppRole(
         string Value,
