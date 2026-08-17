@@ -1,18 +1,21 @@
 /**
- * monitoredService.test.ts (task 052, spec FR-09 / OQ-1b)
+ * monitoredService.test.ts (task 052, spec FR-09 / OQ-1b; revised post-UAT
+ * 2026-08-15 for ACCESS-BASED scoping)
  *
- * Covers the task POML's closed acceptance-criteria set:
- *   - Lists the current user's `sprk_monitor=true` records, OWNER-scoped
- *     (see `monitoredService.ts` module docblock "Scoping" — assigned-to-me
- *     is escalated/deferred for r1, not implemented here).
+ * Covers the module contract:
+ *   - Lists `sprk_monitor=true` records the current user CAN ACCESS, across
+ *     MONITOR_ENTITY_SET. Scope is access-based (owner ∪ BU ∪ team ∪ shared),
+ *     resolved server-side by Dataverse security trimming — the query carries
+ *     NO `_ownerid_value` clause (that owner-equality filter returned nothing
+ *     for BU-owned production records; see `monitoredService.ts` "Scoping").
  *   - Merges N per-entity queries across `MONITOR_ENTITY_SET`.
- *   - Negative: a record with `sprk_monitor=true` NOT owned by the current
- *     user does not appear (the filter excludes it server-side).
+ *   - Negative: a `sprk_monitor=true` record the user CANNOT access does not
+ *     appear (the platform trims it server-side — modeled here by `accessible`).
+ *   - Negative: a `sprk_monitor=false` record does not appear.
  *   - Negative: an entity with no matching results / a throwing entity
  *     contributes nothing, with no error propagated.
  *   - No Xrm / no current-user id: resolves to `[]`, never throws.
- *   - Every query filters BOTH `sprk_monitor eq true` AND
- *     `_ownerid_value eq {userId}` — never a monitor-only or owner-only query.
+ *   - Every query filters `sprk_monitor eq true` and NEVER `_ownerid_value`.
  *   - `sprk_communication` (which carries a DIFFERENT field, `sprk_ismonitored`)
  *     is never queried by this module.
  *   - Read-only: no `createRecord`/`updateRecord`/`deleteRecord` call is ever
@@ -37,7 +40,6 @@ import {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CURRENT_USER_ID = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
-const OTHER_USER_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
 
 const PRIMARY_NAME_FIELD: Record<string, string> = {
   sprk_matter: 'sprk_matternumber',
@@ -52,17 +54,18 @@ const PRIMARY_NAME_FIELD: Record<string, string> = {
 interface FakeRecord {
   id: string;
   name?: string;
-  /** The record's actual owner — used by the fake server to decide whether
-   * the `_ownerid_value eq {userId}` filter clause would match it. */
-  ownerId?: string;
-  /** The record's actual `sprk_monitor` value — used by the fake server to
-   * decide whether the `sprk_monitor eq true` filter clause would match it. */
+  /** The record's actual `sprk_monitor` value — the fake server applies the
+   * `sprk_monitor eq true` clause against it. Defaults to true. */
   monitor?: boolean;
+  /** Whether the current user can READ this row — models Dataverse's server-
+   * side security trim (owner ∪ BU ∪ team ∪ shared). A non-accessible row is
+   * simply never returned by `retrieveMultipleRecords`. Defaults to true. */
+  accessible?: boolean;
 }
 
 interface FakeXrmOptions {
   /** Rows "in the org" per monitor-set entity — the fake server applies the
-   * query's filter clauses itself so tests assert real filtering behavior. */
+   * monitor clause + the access trim itself so tests assert real behavior. */
   recordsByEntity?: Partial<Record<string, FakeRecord[]>>;
   /** Entities whose query should reject (simulates missing entity / no privilege). */
   throwingEntities?: string[];
@@ -80,17 +83,17 @@ function buildFakeXrm(options: FakeXrmOptions = {}) {
     if (throwingEntities.has(entity)) {
       throw new Error(`Simulated failure for ${entity}`);
     }
-    // Every Monitored query MUST filter on both sprk_monitor and ownerid.
-    if (!query?.includes('sprk_monitor eq true') || !query?.includes('_ownerid_value eq')) {
+    // Every Monitored query MUST filter sprk_monitor, and MUST NOT carry an
+    // owner-equality clause (access is resolved by the platform's trim).
+    if (!query?.includes('sprk_monitor eq true') || query.includes('_ownerid_value')) {
       return { entities: [] };
     }
     const idField = `${entity}id`;
     const nameField = PRIMARY_NAME_FIELD[entity];
     const rows = recordsByEntity[entity] ?? [];
-    // Simulate server-side filtering: only rows matching BOTH clauses are returned.
-    const matching = rows.filter(
-      r => (r.monitor ?? true) === true && (r.ownerId ?? CURRENT_USER_ID) === CURRENT_USER_ID
-    );
+    // Server-side behavior: monitor clause + security trim (inaccessible rows
+    // are never returned to this user).
+    const matching = rows.filter(r => (r.monitor ?? true) === true && (r.accessible ?? true) === true);
     return {
       entities: matching.map(r => ({
         [idField]: r.id,
@@ -161,11 +164,11 @@ describe('monitoredService — listMonitoredByMe', () => {
     expect(MONITOR_ENTITY_SET).not.toContain('sprk_communication');
   });
 
-  it('lists the user\'s owned, monitor=true records across the entity set', async () => {
+  it('lists the monitor=true records the user can access across the entity set', async () => {
     installMockXrm({
       recordsByEntity: {
-        sprk_matter: [{ id: 'matter-1', name: 'MTR-001', ownerId: CURRENT_USER_ID, monitor: true }],
-        sprk_document: [{ id: 'doc-1', name: 'Contract.docx', ownerId: CURRENT_USER_ID, monitor: true }],
+        sprk_matter: [{ id: 'matter-1', name: 'MTR-001', monitor: true }],
+        sprk_document: [{ id: 'doc-1', name: 'Contract.docx', monitor: true }],
       },
     });
 
@@ -180,7 +183,7 @@ describe('monitoredService — listMonitoredByMe', () => {
     );
   });
 
-  it('every query filters BOTH sprk_monitor eq true AND _ownerid_value eq {userId} with a top-per-entity cap', async () => {
+  it('every query filters sprk_monitor eq true (NEVER _ownerid_value) with a top-per-entity cap', async () => {
     const fakeXrm = installMockXrm();
 
     await listMonitoredByMe();
@@ -190,14 +193,15 @@ describe('monitoredService — listMonitoredByMe', () => {
       const [entity, query] = call as [string, string];
       expect(MONITOR_ENTITY_SET as readonly string[]).toContain(entity);
       expect(query).toContain('sprk_monitor eq true');
-      expect(query).toContain(`_ownerid_value eq ${CURRENT_USER_ID}`);
+      // Access is resolved by the platform trim — never an owner-equality clause.
+      expect(query).not.toContain('_ownerid_value');
       expect(query).toContain(`$top=${MONITORED_TOP_PER_ENTITY}`);
     }
   });
 
   it('never queries sprk_communication (different field, sprk_ismonitored) or audit', async () => {
     const fakeXrm = installMockXrm({
-      recordsByEntity: { sprk_matter: [{ id: 'm1', name: 'MTR-002', ownerId: CURRENT_USER_ID, monitor: true }] },
+      recordsByEntity: { sprk_matter: [{ id: 'm1', name: 'MTR-002', monitor: true }] },
     });
 
     await listMonitoredByMe();
@@ -210,7 +214,7 @@ describe('monitoredService — listMonitoredByMe', () => {
 
   it('is read-only: never issues createRecord/updateRecord/deleteRecord', async () => {
     const fakeXrm = installMockXrm({
-      recordsByEntity: { sprk_matter: [{ id: 'm1', name: 'MTR-003', ownerId: CURRENT_USER_ID, monitor: true }] },
+      recordsByEntity: { sprk_matter: [{ id: 'm1', name: 'MTR-003', monitor: true }] },
     });
 
     await listMonitoredByMe();
@@ -221,30 +225,30 @@ describe('monitoredService — listMonitoredByMe', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────
-  // Negative: not-owned monitor=true record is excluded (task acceptance criterion)
+  // Negative: inaccessible / unmonitored records are excluded
   // ───────────────────────────────────────────────────────────────────────
 
-  it('negative: a monitor=true record NOT owned by the current user does not appear', async () => {
+  it('negative: a monitor=true record the user CANNOT access does not appear (platform trim)', async () => {
     installMockXrm({
       recordsByEntity: {
         sprk_matter: [
-          { id: 'mine', name: 'MTR-MINE', ownerId: CURRENT_USER_ID, monitor: true },
-          { id: 'not-mine', name: 'MTR-OTHER', ownerId: OTHER_USER_ID, monitor: true },
+          { id: 'visible', name: 'MTR-VISIBLE', monitor: true, accessible: true },
+          { id: 'no-access', name: 'MTR-HIDDEN', monitor: true, accessible: false },
         ],
       },
     });
 
     const items = await listMonitoredByMe();
 
-    expect(items.map(i => i.targetId)).toEqual(['mine']);
+    expect(items.map(i => i.targetId)).toEqual(['visible']);
   });
 
-  it('negative: a record owned by the current user but monitor=false does not appear', async () => {
+  it('negative: an accessible record with monitor=false does not appear', async () => {
     installMockXrm({
       recordsByEntity: {
         sprk_document: [
-          { id: 'monitored', name: 'Monitored.docx', ownerId: CURRENT_USER_ID, monitor: true },
-          { id: 'unmonitored', name: 'Unmonitored.docx', ownerId: CURRENT_USER_ID, monitor: false },
+          { id: 'monitored', name: 'Monitored.docx', monitor: true },
+          { id: 'unmonitored', name: 'Unmonitored.docx', monitor: false },
         ],
       },
     });
@@ -261,7 +265,7 @@ describe('monitoredService — listMonitoredByMe', () => {
   it('negative: an entity with no matching results contributes nothing, no error', async () => {
     installMockXrm({
       recordsByEntity: {
-        sprk_matter: [{ id: 'm1', name: 'MTR-004', ownerId: CURRENT_USER_ID, monitor: true }],
+        sprk_matter: [{ id: 'm1', name: 'MTR-004', monitor: true }],
       },
     });
 
@@ -273,7 +277,7 @@ describe('monitoredService — listMonitoredByMe', () => {
   it('negative: an entity whose query throws contributes nothing, no error propagated', async () => {
     installMockXrm({
       recordsByEntity: {
-        sprk_document: [{ id: 'd1', name: 'Doc.docx', ownerId: CURRENT_USER_ID, monitor: true }],
+        sprk_document: [{ id: 'd1', name: 'Doc.docx', monitor: true }],
       },
       throwingEntities: ['sprk_matter', 'sprk_project'],
     });
@@ -287,7 +291,7 @@ describe('monitoredService — listMonitoredByMe', () => {
     installMockXrm({
       withoutEntityMetadata: true,
       recordsByEntity: {
-        sprk_workassignment: [{ id: 'w1', ownerId: CURRENT_USER_ID, monitor: true }],
+        sprk_workassignment: [{ id: 'w1', monitor: true }],
       },
     });
 
