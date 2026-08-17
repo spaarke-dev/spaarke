@@ -311,7 +311,7 @@ Enumerated `gateStates` + `interStepState` shapes per `design.md` §6.2.
 
 ### 4.5 Registry extension — `sprk_dataverseenvironment`
 
-11 new columns added by this project (see FR-26 / design.md §3.3):
+12 new columns added by this project (see FR-26 / design.md §6.1):
 
 - `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid`, `sprk_provisionedon`
 - `sprk_currentrunid` (I5 concurrency serialization)

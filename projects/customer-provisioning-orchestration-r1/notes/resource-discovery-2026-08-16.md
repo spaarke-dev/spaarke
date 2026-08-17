@@ -101,7 +101,7 @@ r1 will invoke these:
 - `azure-deploy` — H2a/H4 (401 LOC Bicep + KV secrets)
 - `deploy-new-release` — **REFERENCE MODEL** for new `/provision-environment` L3 skill (Phase D per §4.3a.4)
 - `dataverse-deploy` — H6 (managed solution import)
-- `dataverse-create-schema` — FR-26 (11 new columns)
+- `dataverse-create-schema` — FR-26 (12 new columns; reconciled 2026-08-17 by task 023 per §9)
 - `dataverse-mcp-usage` — §4.3a.5 fallback matrix
 - `worktree-net10-migrate`, `worktree-sync`, `worktree-setup` — Cross-project coordination
 - `merge-to-master`, `push-to-github`, `pull-from-github` — Standard git ops

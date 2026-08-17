@@ -15,7 +15,7 @@
 - L1 = 19 idempotent `IJobHandler` handlers (H0/H0.5/H1/H2a/b/H3–H11/H12a/b/c/H13/H14) per ADR-004
 - L2 = new .NET 10 App Service control plane with Cosmos DB serverless state, REST + AAD, fire-and-forget handler execution + state-reconciler
 - L3 = `/provision-environment` Claude Code operator skill (Phase D)
-- Data model = 11 new columns on `sprk_dataverseenvironment` + Cosmos DB `spaarke-provisioning` database
+- Data model = 12 new columns on `sprk_dataverseenvironment` + Cosmos DB `spaarke-provisioning` database
 - Infrastructure = 25 Bicep modules (+ new `uami.bicep`) + `platform.bicep` rebuild + `customer.bicep` extension + `model1-shared.bicep` first-class + `platform-controlplane.bicep` new
 - Governance = Phase G canonical naming + Phase H canonical secret-catalog manifest + Phase C UAMI structural migration
 - Enforcement = 5 new ArchTests (§4D I1–I5 tenant isolation) + 6 handler post-condition trap-verifications (T1–T6)
@@ -79,7 +79,7 @@ Per [spec.md § Owner Clarifications](./spec.md#owner-clarifications) audit trai
 - `.claude/skills/bff-deploy/SKILL.md` — H9 BFF deploy handler consumes patterns
 - `.claude/skills/azure-deploy/SKILL.md` — H2a Bicep deploy patterns
 - `.claude/skills/dataverse-deploy/SKILL.md` — H6 solution import patterns
-- `.claude/skills/dataverse-create-schema/SKILL.md` — Registry extension (11 new columns)
+- `.claude/skills/dataverse-create-schema/SKILL.md` — Registry extension (12 new columns)
 - `.claude/skills/dataverse-mcp-usage/SKILL.md` — Registry read/write during L3 skill
 
 **Knowledge Articles / Constraints** (per `.claude/constraints/`):
@@ -179,7 +179,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 5. Complete 11 of 14 null `AppRoleId` GUIDs in `Infrastructure/Auth/GraphAppRoles.cs` via `az` enumeration
 6. Publish initial version-compatibility matrix + 6 U-CB customer-comms templates
 7. Audit ~28 non-deployer-listed items in `src/solutions/` (per §11.1a) → publish `notes/solutions-reconciliation-2026-08.md`
-8. Cross-reference `sprk_dataverseenvironment` existing 16 columns against 11 new columns to add (Phase C prep)
+8. Cross-reference `sprk_dataverseenvironment` existing 16 columns against 12 new columns to add (Phase C prep)
 
 **Deliverables**:
 - [ ] `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` (one authoritative)
@@ -189,7 +189,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 - [ ] `notes/pcf-33-vs-7-mapping-2026-08.md`
 - [ ] `notes/ai-seed-drift-resolution-2026-08.md`
 - [ ] `Infrastructure/Auth/GraphAppRoles.cs` — all 14 `AppRoleId` GUIDs populated
-- [ ] `notes/registry-column-audit-2026-08.md` (11 new columns confirmed non-existent)
+- [ ] `notes/registry-column-audit-2026-08.md` (12 new columns confirmed non-existent)
 
 **Inputs**: [design.md](./design.md), [notes/r3-handoff.md](./notes/r3-handoff.md), `docs/architecture/AI-SEARCH-INDEX-CATALOG.md`, `scripts/ai-search/Deploy-AllIndexes.ps1`, existing 4+ deploy guides
 
@@ -251,7 +251,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 ### Phase C — Registry + Cosmos + Bicep + UAMI + L2 Control Plane
 
 **Objectives** (BIG phase — split into sub-waves):
-1. Extend `sprk_dataverseenvironment` with 11 new columns (per FR-26)
+1. Extend `sprk_dataverseenvironment` with 12 new columns (per FR-26)
 2. Model Cosmos DB `spaarke-provisioning` database + `runs` container schema (per FR-27)
 3. Extend `customer.bicep` — add Cosmos DB + optional SignalR; remove Redis
 4. NEW `uami.bicep` module — per-customer User-Assigned Managed Identity
@@ -269,7 +269,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 **Deliverables** (organized as sub-waves):
 
 **Wave C1 (schema + Cosmos)**:
-- [ ] Registry: 11 new columns on `sprk_dataverseenvironment` (`sprk_currentrunid`, `sprk_tenancymodel`, `sprk_tenantid`, `sprk_bffversion`, `sprk_solutionversion`, `sprk_ClientCacheBustToken` + 5 v2 additions)
+- [ ] Registry: 12 new columns on `sprk_dataverseenvironment` (`sprk_currentrunid`, `sprk_tenancymodel`, `sprk_tenantid`, `sprk_bffversion`, `sprk_solutionversion`, `sprk_ClientCacheBustToken` + 6 v2 additions incl. `sprk_provisionedon`)
 - [ ] Cosmos schema: `spaarke-provisioning/runs` container definition (partition `/customerId`, TTL 365d, KV URI ref pattern)
 
 **Wave C2 (Bicep)**:
@@ -559,7 +559,7 @@ Full list at [spec.md § Success Criteria (22 items)](./spec.md#success-criteria
 - [ ] `spaarke-spekvcert` DO-NOT-RENAME dev exception codified in Bicep + config
 
 **Phase C** (biggest — sub-wave acceptance):
-- C1: 11 new columns on `sprk_dataverseenvironment`; Cosmos schema defined
+- C1: 12 new columns on `sprk_dataverseenvironment`; Cosmos schema defined
 - C2: `uami.bicep` module exists; `app-service.bicep` binds UAMI both slots; T5 slot-swap smoke test produces no 503s
 - C3: L2 project scaffolds + builds + all `IJobHandler` handlers register in DI
 - C4: All 19 handlers idempotent (integration test: second run = no-op)
