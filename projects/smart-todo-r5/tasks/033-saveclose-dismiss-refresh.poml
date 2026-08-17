@@ -4,7 +4,7 @@
     <title>Save &amp; Close dismisses inner modal and refreshes the kanban (FR-14)</title>
     <phase>4: Main-form modal</phase>
     <gate>032 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Coordinates dialog-close detection across two host surfaces (Code Page + LegalWorkspace widget) for a production save flow; correctness failure silently hides saved data from the user (kanban goes stale). CLAUDE.md §8 FULL trigger; explicitly named as an opus/xhigh task in projects/smart-todo-r5/CLAUDE.md §"Execution Model &amp; Tiering".</rigor-reason>
     <model-tier>opus</model-tier>

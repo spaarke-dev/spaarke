@@ -157,7 +157,33 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
           entityName: "sprk_todo",
           entityId: todoId,
         }).then((outcome) => {
-          if (outcome.launched) return;
+          if (outcome.launched) {
+            // task 033 (FR-14) — the OOB form dialog closed. An existing-record
+            // OPEN never resolves with `savedEntityReference` (CREATE-only, per
+            // MS Learn — see wizardLaunchers.ts outcome-shape note), so there is
+            // no reliable save-vs-cancel signal; refetch UNCONDITIONALLY so a
+            // Save & Close reflects in the widget's list without a manual
+            // reload. A redundant refetch on cancel is tolerable; a missing one
+            // on save is not. The promise resolves AFTER Save & Close commits,
+            // so the refetch reads committed data.
+            //
+            //  - `refetchRef.current` is the AUTHORITATIVE refresh for THIS
+            //    widget (re-queries the list; reflects edits AND completions).
+            //  - `feedSync.notifyChange(todoId, true)` fans the change out to
+            //    sibling blocks (ActivityFeed / other SmartTodo instances) that
+            //    subscribe to FeedTodoSyncContext. `isActive: true` is the
+            //    CONSERVATIVE choice: a subscriber treats `true` as
+            //    "reconcile-by-refetch, no-op if already listed" but treats
+            //    `false` as "REMOVE this todo now" (see useTodoItems.ts). Since
+            //    we cannot know from the resolve value whether the user
+            //    completed the todo, `false` could wrongly drop a still-active
+            //    row cross-block, whereas `true` at worst leaves a
+            //    just-completed row until the sibling's own next refresh
+            //    (tolerable staleness, never data loss).
+            refetchRef.current?.();
+            feedSync.notifyChange(todoId, true);
+            return;
+          }
 
           // Loose typing — the shared lib doesn't pull in @types/xrm.
           const xrm = (globalThis as unknown as {
@@ -194,7 +220,9 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
         height: { value: 85, unit: "%" },
       });
     },
-    [ctx],
+    // `feedSync` added (task 033) — the todoId branch now fans the post-close
+    // change out via `feedSync.notifyChange`. `refetchRef` is a ref (no dep).
+    [ctx, feedSync],
   );
 
   const handleAddTodo = React.useCallback(() => {

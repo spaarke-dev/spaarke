@@ -24,7 +24,9 @@
  *     └── SmartToDo (Kanban, with `hideHeader` so inner KanbanHeader is
  *           suppressed — chrome lives in the consolidated Header above)
  *
- * Open triggers (all route to `openSprkTodoAsLayout1` below):
+ * Open triggers (all route to `launchOpenTodoForm` in services/openTodoLauncher.ts;
+ * task 033 threads a post-close `handleRefresh` so a Save & Close refreshes the
+ * Kanban — see that module for the save-vs-cancel-signal rationale):
  *   • `OPEN_TODOS_EVENT` window event — toolbar Open + card double-click + card Open icon
  *   • `useLaunchContext` → `openTodo` action — URL-param launch (parent-form ribbon path)
  *
@@ -33,7 +35,7 @@
 
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
-import { CreateTodoWizard, navigateToEntityRecordSurfaceAsync } from "@spaarke/ui-components";
+import { CreateTodoWizard } from "@spaarke/ui-components";
 import type { Orientation, ToolbarAction } from "@spaarke/ui-components";
 import {
   createXrmDataService,
@@ -61,6 +63,7 @@ import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./servi
 import { useLaunchContext } from "./hooks/useLaunchContext";
 import { useUserPreferences } from "./hooks/useUserPreferences";
 import { launchNewTaskCreateForm } from "./services/newTaskLauncher";
+import { launchOpenTodoForm } from "./services/openTodoLauncher";
 // SmartTodoViewMode type import removed 2026-06-19 — see viewMode removal above.
 
 // ---------------------------------------------------------------------------
@@ -68,39 +71,21 @@ import { launchNewTaskCreateForm } from "./services/newTaskLauncher";
 // `navigateToEntityRecordSurfaceAsync` launcher instead of an inline
 // `Xrm.Navigation.navigateTo` call — see wizardLaunchers.ts)
 //
-// Opens the OOB `sprk_todo` main form at Layout 1 (85% × 85% centered modal via
-// `Xrm.Navigation.navigateTo`). Replaces the R4 iframe-hosted `<SmartTodoModal>`
-// per ai-spaarke-ai-workspace-UI-r2 FR-13 (iframe-hosting `main.aspx` is a
-// contractually unsupported anti-pattern per Microsoft Learn 2025-05-07).
+// Opens the OOB `sprk_todo` main form at the full-cover OOB size (task 032 /
+// FR-13) via `Xrm.Navigation.navigateTo`. Replaces the R4 iframe-hosted
+// `<SmartTodoModal>` per ai-spaarke-ai-workspace-UI-r2 FR-13 (iframe-hosting
+// `main.aspx` is a contractually unsupported anti-pattern per MS Learn).
 //
-// Called from two open triggers below: the `OPEN_TODOS_EVENT` listener and the
-// `useLaunchContext` openTodo effect. Both funnel through this helper so the
-// Layout 1 geometry (FR-20 binding: 85% × 85%, position 1, target 2) stays in
-// one place.
-//
-// Kept as a thin sync/void wrapper (task 031 step 3 decision — see
-// notes/task-031-launcher-consolidation.md): both callers below are
-// fire-and-forget event handlers with no interest in the async outcome, so
-// wrapping here is the smaller diff vs. threading `Promise<NavigateToOutcome>`
-// through two call sites for no behavioral gain. The shared launcher now owns
-// BOTH the frame-walking Xrm resolution (`resolveXrmNavigation` — strictly
-// more robust than this file's prior inline `window.parent ?? window` guess)
-// and the `record` OOB sizing; this wrapper only preserves the "unavailable"
-// console diagnostic the pre-031 inline call used to emit.
-// ---------------------------------------------------------------------------
-
-function openSprkTodoAsLayout1(todoId: string): void {
-  void navigateToEntityRecordSurfaceAsync({
-    entityName: "sprk_todo",
-    entityId: todoId,
-  }).then((outcome) => {
-    if (!outcome.launched) {
-      // eslint-disable-next-line no-console
-      console.warn("[SmartTodoApp] Xrm.Navigation.navigateTo unavailable; open aborted.");
-    }
-  });
-}
-
+// task 033 (FR-14) — the open wrapper is now `launchOpenTodoForm` in
+// `services/openTodoLauncher.ts` (extracted from the pre-033 module-scope
+// `openSprkTodoAsLayout1` for unit-testability, mirroring the CREATE path's
+// `newTaskLauncher.ts`). It threads an `onClose` refetch callback so a Save &
+// Close reflects in the Kanban without a manual reload. Called from two open
+// triggers below — the `OPEN_TODOS_EVENT` listener and the `useLaunchContext`
+// openTodo effect — both passing `handleRefresh` so the refetch fires once the
+// dialog closes. See openTodoLauncher.ts for the save-vs-cancel-signal
+// rationale (OPEN mode refetches UNCONDITIONALLY on close; CREATE gates on
+// `savedEntityReference`).
 // ---------------------------------------------------------------------------
 // Styles
 // ---------------------------------------------------------------------------
@@ -293,7 +278,11 @@ function SmartTodoLayout(): React.ReactElement {
   // `openSprkTodoAsLayout1` directly (was setModalTodoId under R4-100/W-2).
   React.useEffect(() => {
     if (launchContext?.action === 'openTodo') {
-      openSprkTodoAsLayout1(launchContext.todoId);
+      // task 033 (FR-14) — refetch the Kanban once the OOB form dialog closes
+      // so a Save & Close reflects without a manual reload. `handleRefresh` is
+      // stable (wraps innerRefetchRef; refetch is context-stable), so the
+      // mount-once capture below reads a current refetch.
+      void launchOpenTodoForm(launchContext.todoId, handleRefresh);
     }
     // Run once on mount — `launchContext` is memoised by the hook for the
     // component's lifetime and won't change.
@@ -311,14 +300,18 @@ function SmartTodoLayout(): React.ReactElement {
     const handler = (ev: Event): void => {
       const detail = (ev as CustomEvent<OpenTodosEventDetail>).detail;
       if (detail?.firstId) {
-        openSprkTodoAsLayout1(detail.firstId);
+        // task 033 (FR-14) — refetch the Kanban once the OOB form dialog closes
+        // (unconditional; OPEN mode has no save-vs-cancel resolve signal).
+        void launchOpenTodoForm(detail.firstId, handleRefresh);
       }
     };
     window.addEventListener(OPEN_TODOS_EVENT, handler);
     return () => {
       window.removeEventListener(OPEN_TODOS_EVENT, handler);
     };
-  }, []);
+    // `handleRefresh` is stable; listing it keeps the subscription in lockstep
+    // without churn (re-subscribe is a harmless remove+add).
+  }, [handleRefresh]);
 
   // ── R4 task 060 — Per-card open callback (Open icon + double-click) ──────
   //
