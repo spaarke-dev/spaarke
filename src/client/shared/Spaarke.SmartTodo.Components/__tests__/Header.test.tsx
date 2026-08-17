@@ -61,11 +61,7 @@ jest.mock('@spaarke/ui-components', () => {
   return {
     MicrosoftToDoIcon: () => ReactActual.createElement('span', { 'data-testid': 'todo-icon' }),
     SelectionAwareToolbar: (props: { selectedCount: number }) =>
-      ReactActual.createElement(
-        'div',
-        { 'data-testid': 'selection-toolbar' },
-        `${props.selectedCount} selected`,
-      ),
+      ReactActual.createElement('div', { 'data-testid': 'selection-toolbar' }, `${props.selectedCount} selected`),
   };
 });
 
@@ -74,7 +70,7 @@ import * as React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { Header, type HeaderProps } from '../Header';
+import { Header, type HeaderProps } from '../src/components/Header';
 
 // React 19 requires this flag for `act()` to recognize the jsdom environment
 // as a test environment (jest.setup.cjs — outside this task's scope — does
@@ -94,15 +90,13 @@ function fireClick(el: Element): void {
 
 function fireKeyDown(el: Element, key: string): void {
   act(() => {
-    el.dispatchEvent(
-      new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }),
-    );
+    el.dispatchEvent(new KeyboardEvent('keydown', { key, code: key, bubbles: true, cancelable: true }));
   });
 }
 
 function findButtonByText(root: ParentNode, text: RegExp): HTMLButtonElement {
   const buttons = Array.from(root.querySelectorAll('button'));
-  const match = buttons.find((b) => text.test(b.textContent ?? ''));
+  const match = buttons.find(b => text.test(b.textContent ?? ''));
   if (!match) {
     throw new Error(`No <button> found matching ${text} among ${buttons.length} buttons`);
   }
@@ -111,12 +105,12 @@ function findButtonByText(root: ParentNode, text: RegExp): HTMLButtonElement {
 
 function queryButtonByText(root: ParentNode, text: RegExp): HTMLButtonElement | null {
   const buttons = Array.from(root.querySelectorAll('button'));
-  return buttons.find((b) => text.test(b.textContent ?? '')) ?? null;
+  return buttons.find(b => text.test(b.textContent ?? '')) ?? null;
 }
 
 function findButtonByAriaLabel(root: ParentNode, label: RegExp): HTMLButtonElement {
   const buttons = Array.from(root.querySelectorAll('button'));
-  const match = buttons.find((b) => label.test(b.getAttribute('aria-label') ?? ''));
+  const match = buttons.find(b => label.test(b.getAttribute('aria-label') ?? ''));
   if (!match) {
     throw new Error(`No <button aria-label> found matching ${label}`);
   }
@@ -125,7 +119,7 @@ function findButtonByAriaLabel(root: ParentNode, label: RegExp): HTMLButtonEleme
 
 function queryButtonByAriaLabel(root: ParentNode, label: RegExp): HTMLButtonElement | null {
   const buttons = Array.from(root.querySelectorAll('button'));
-  return buttons.find((b) => label.test(b.getAttribute('aria-label') ?? '')) ?? null;
+  return buttons.find(b => label.test(b.getAttribute('aria-label') ?? '')) ?? null;
 }
 
 interface Harness {
@@ -169,7 +163,7 @@ function renderHeader(overrides: Partial<HeaderProps> = {}): Harness {
     root.render(
       <FluentProvider theme={webLightTheme}>
         <Header {...props} />
-      </FluentProvider>,
+      </FluentProvider>
     );
   });
 
@@ -226,10 +220,7 @@ describe('Header — mockup layout parity (FR-05)', () => {
     // `<SearchFilter>` (UAT pass 2, 2026-08-17) DOES mount a real input —
     // collapsed via aria-hidden/display:none when isFilterPaneOpen is false
     // (the default here) — asserted separately below.
-    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute(
-      'aria-hidden',
-      'true',
-    );
+    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute('aria-hidden', 'true');
 
     // DOM order matches mockup order: Filter → + New Task → ⋮.
     const allButtons = Array.from(h.container.querySelectorAll('button'));
@@ -274,25 +265,17 @@ describe('Header — inline SearchFilter (smart-todo-r5 UAT pass 2, 2026-08-17)'
     expect(searchFilter).not.toBeNull();
     // DOM position comparison: searchFilter precedes filterButton.
     // eslint-disable-next-line no-bitwise
-    expect(
-      searchFilter!.compareDocumentPosition(filterButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(searchFilter!.compareDocumentPosition(filterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('render_IsFilterPaneOpenTrue_SearchFilterIsNotAriaHidden', () => {
     const h = (activeHarness = renderHeader({ isFilterPaneOpen: true }));
-    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute(
-      'aria-hidden',
-      'false',
-    );
+    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute('aria-hidden', 'false');
   });
 
   it('render_IsFilterPaneOpenFalse_SearchFilterIsAriaHidden', () => {
     const h = (activeHarness = renderHeader({ isFilterPaneOpen: false }));
-    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute(
-      'aria-hidden',
-      'true',
-    );
+    expect(h.container.querySelector('[data-testid="search-filter"]')).toHaveAttribute('aria-hidden', 'true');
   });
 
   it('render_SearchQuery_ReflectsThroughToTheInlineInputValue', () => {
@@ -300,34 +283,23 @@ describe('Header — inline SearchFilter (smart-todo-r5 UAT pass 2, 2026-08-17)'
       isFilterPaneOpen: true,
       searchQuery: 'Smith v Jones',
     }));
-    const input = h.container.querySelector(
-      '[data-testid="search-filter-input"]',
-    ) as HTMLInputElement | null;
+    const input = h.container.querySelector('[data-testid="search-filter-input"]') as HTMLInputElement | null;
     expect(input).not.toBeNull();
     expect(input!.value).toBe('Smith v Jones');
   });
 
   it('render_InputPlaceholder_MatchesExactUatWordingAndHasNoSearchLabel', () => {
     const h = (activeHarness = renderHeader({ isFilterPaneOpen: true }));
-    const input = h.container.querySelector(
-      '[data-testid="search-filter-input"]',
-    ) as HTMLInputElement | null;
+    const input = h.container.querySelector('[data-testid="search-filter-input"]') as HTMLInputElement | null;
     expect(input!.placeholder).toBe('Filter by name, description, assigned to...');
-    expect(
-      Array.from(h.container.querySelectorAll('*')).some((el) => el.textContent === 'Search'),
-    ).toBe(false);
+    expect(Array.from(h.container.querySelectorAll('*')).some(el => el.textContent === 'Search')).toBe(false);
   });
 
   it('type_IntoTheInlineSearchInput_InvokesOnSearchQueryChange', () => {
     const h = (activeHarness = renderHeader({ isFilterPaneOpen: true }));
-    const input = h.container.querySelector(
-      '[data-testid="search-filter-input"]',
-    ) as HTMLInputElement;
+    const input = h.container.querySelector('[data-testid="search-filter-input"]') as HTMLInputElement;
 
-    const nativeSetter = Object.getOwnPropertyDescriptor(
-      window.HTMLInputElement.prototype,
-      'value',
-    )?.set;
+    const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
     act(() => {
       nativeSetter?.call(input, 'jordan');
       input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -343,9 +315,7 @@ describe('Header — inline SearchFilter (smart-todo-r5 UAT pass 2, 2026-08-17)'
 
     expect(searchFilter).not.toBeNull();
     // eslint-disable-next-line no-bitwise
-    expect(
-      searchFilter!.compareDocumentPosition(filterButton) & Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    expect(searchFilter!.compareDocumentPosition(filterButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -365,8 +335,8 @@ describe('Header — overflow menu (Settings, Layout, Refresh) — FR-05 / U-3',
   it('click_SettingsMenuItem_InvokesOnOpenSettingsUnchanged', () => {
     const h = (activeHarness = renderHeader());
     const menu = openOverflowMenu(h);
-    const settingsItem = Array.from(menu.querySelectorAll('[role="menuitem"]')).find((el) =>
-      /settings/i.test(el.textContent ?? ''),
+    const settingsItem = Array.from(menu.querySelectorAll('[role="menuitem"]')).find(el =>
+      /settings/i.test(el.textContent ?? '')
     )!;
 
     fireClick(settingsItem);
@@ -377,8 +347,8 @@ describe('Header — overflow menu (Settings, Layout, Refresh) — FR-05 / U-3',
   it('click_LayoutMenuItem_FlipsOrientationHorizontalToVertical', () => {
     const h = (activeHarness = renderHeader({ orientation: 'horizontal' }));
     const menu = openOverflowMenu(h);
-    const layoutItem = Array.from(menu.querySelectorAll('[role="menuitem"]')).find((el) =>
-      /layout/i.test(el.textContent ?? ''),
+    const layoutItem = Array.from(menu.querySelectorAll('[role="menuitem"]')).find(el =>
+      /layout/i.test(el.textContent ?? '')
     )!;
 
     fireClick(layoutItem);
@@ -389,8 +359,8 @@ describe('Header — overflow menu (Settings, Layout, Refresh) — FR-05 / U-3',
   it('click_LayoutMenuItem_FlipsOrientationVerticalToHorizontal', () => {
     const h = (activeHarness = renderHeader({ orientation: 'vertical' }));
     const menu = openOverflowMenu(h);
-    const layoutItem = Array.from(menu.querySelectorAll('[role="menuitem"]')).find((el) =>
-      /layout/i.test(el.textContent ?? ''),
+    const layoutItem = Array.from(menu.querySelectorAll('[role="menuitem"]')).find(el =>
+      /layout/i.test(el.textContent ?? '')
     )!;
 
     fireClick(layoutItem);
@@ -401,8 +371,8 @@ describe('Header — overflow menu (Settings, Layout, Refresh) — FR-05 / U-3',
   it('click_RefreshMenuItem_InvokesOnRefreshUnchanged', () => {
     const h = (activeHarness = renderHeader());
     const menu = openOverflowMenu(h);
-    const refreshItem = Array.from(menu.querySelectorAll('[role="menuitem"]')).find((el) =>
-      /refresh/i.test(el.textContent ?? ''),
+    const refreshItem = Array.from(menu.querySelectorAll('[role="menuitem"]')).find(el =>
+      /refresh/i.test(el.textContent ?? '')
     )!;
 
     fireClick(refreshItem);
@@ -415,7 +385,7 @@ describe('Header — overflow menu (Settings, Layout, Refresh) — FR-05 / U-3',
     const menu = openOverflowMenu(h);
     const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
 
-    expect(items.some((el) => /layout/i.test(el.textContent ?? ''))).toBe(false);
+    expect(items.some(el => /layout/i.test(el.textContent ?? ''))).toBe(false);
     expect(items).toHaveLength(2); // Settings + Refresh remain.
   });
 

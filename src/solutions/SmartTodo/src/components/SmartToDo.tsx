@@ -68,8 +68,8 @@ import { KanbanHeader } from "./KanbanHeader";
 // owns the QuickAdd input. It dispatches `QUICK_ADD_TODO_EVENT` window events
 // which this component subscribes to and routes through its existing
 // `handleAdd` (single-source optimistic add + Dataverse create logic).
-import { QUICK_ADD_TODO_EVENT } from "./Header";
-import type { QuickAddTodoEventDetail } from "./Header";
+import { QUICK_ADD_TODO_EVENT } from "@spaarke/smart-todo-components";
+import type { QuickAddTodoEventDetail } from "@spaarke/smart-todo-components";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
 import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../hooks/useTodoItems";

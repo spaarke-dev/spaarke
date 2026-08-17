@@ -35,7 +35,7 @@ import * as React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import { SearchFilter, type SearchFilterProps } from '../SearchFilter';
+import { SearchFilter, type SearchFilterProps } from '../src/components/SearchFilter';
 
 // React 19 requires this flag for `act()` to recognize the jsdom environment
 // as a test environment — see Header.test.tsx for the same note.
@@ -62,10 +62,7 @@ function findInputByTestId(root: ParentNode, testid: string): HTMLInputElement {
 }
 
 function setInputValue(input: HTMLInputElement, value: string): void {
-  const nativeSetter = Object.getOwnPropertyDescriptor(
-    window.HTMLInputElement.prototype,
-    'value',
-  )?.set;
+  const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
   act(() => {
     nativeSetter?.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
@@ -96,7 +93,7 @@ function renderSearchFilter(overrides: Partial<SearchFilterProps> = {}): Harness
     root.render(
       <FluentProvider theme={webLightTheme}>
         <SearchFilter {...props} />
-      </FluentProvider>,
+      </FluentProvider>
     );
   });
 
@@ -135,13 +132,13 @@ describe('SearchFilter — UAT pass 2 layout (2026-08-17): no label, revised pla
   it('render_NeverShowsASearchCaptionLabel', () => {
     const h = (activeHarness = renderSearchFilter());
     expect(h.container.textContent).not.toMatch(/^Search$/);
-    expect(Array.from(h.container.querySelectorAll('*')).some((el) => el.textContent === 'Search')).toBe(false);
+    expect(Array.from(h.container.querySelectorAll('*')).some(el => el.textContent === 'Search')).toBe(false);
   });
 
   it('render_InputPlaceholder_MatchesExactUatWording', () => {
     const h = (activeHarness = renderSearchFilter());
     expect(findInputByTestId(h.container, 'search-filter-input').placeholder).toBe(
-      'Filter by name, description, assigned to...',
+      'Filter by name, description, assigned to...'
     );
   });
 });
@@ -176,7 +173,7 @@ describe('SearchFilter — NFR-03 proxy (search text survives unrelated re-rende
       root.render(
         <FluentProvider theme={webLightTheme}>
           <SearchFilter isOpen={true} value="Smith v Jones" onChange={onChange} />
-        </FluentProvider>,
+        </FluentProvider>
       );
     });
 
@@ -187,14 +184,14 @@ describe('SearchFilter — NFR-03 proxy (search text survives unrelated re-rende
       root.render(
         <FluentProvider theme={webLightTheme}>
           <SearchFilter isOpen={false} value="Smith v Jones" onChange={onChange} />
-        </FluentProvider>,
+        </FluentProvider>
       );
     });
     act(() => {
       root.render(
         <FluentProvider theme={webLightTheme}>
           <SearchFilter isOpen={true} value="Smith v Jones" onChange={onChange} />
-        </FluentProvider>,
+        </FluentProvider>
       );
     });
 
