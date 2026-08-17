@@ -23,7 +23,11 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
-### Changed (2026-08-16 — RED-4 B dead-code deletion · code-quality-and-assurance-r3 followups)
+### Changed (2026-08-17 — push-to-github Step 1.7 real-DV smoke gate · smart-todo-r5 task 060)
+
+- **Changed — [`.claude/skills/push-to-github/SKILL.md`](skills/push-to-github/SKILL.md)**: added **Step 1.7 — Real-Dataverse Smoke Check (Widget/Dataverse Changes)** (spec FR-20 / PROC-1). For any push that changes Dataverse-querying widget/component/service code, the pre-flight flow now WARNs + asks whether ≥1 real create+read against **real** Dataverse was exercised — a mock/prototype harness passing is not sufficient. Advisory (ask-user-first), same non-blocking shape as Steps 1.5/1.6 — **not** a CI script or hard block (§11 — extended the existing skill rather than authoring a new `/real-dv-smoke` command). Rationale cited in-step: R4 UAT-5/6 burned deploy cycles because the `spaarke-prototype` harness mocked a `sprk_contact` entity that doesn't exist in real Dataverse (real is OOB `contact`); the mock hid the entity-name bug. Also added a "Tips for AI" pointer.
+
+
 
 - **Changed — [`.claude/patterns/testing/god-class-ratchet.md`](patterns/testing/god-class-ratchet.md)** + root `CLAUDE.md` §17 pointer: frozen-file count **14 → 13**. `DataverseWebApiService.cs` graduated off the ratchet — RED-4 "B" hardening deleted ~1,414 LOC of runtime-dead document/analysis/KPI/generic/processing-job/communication/health code (unreachable — those interfaces route to the SDK impl per `GraphModule.cs`), shrinking it **2,822 → 1,409** (below the 2,000 ceiling) and narrowing the class declaration to `: IEventDataverseService, IFieldMappingDataverseService`. Waiver removed from `GodClassGuardTests`. Verified: BFF 10,402 tests pass, ArchTests 38/38. Also surfaced **DEF-2** (WebApi field-mapping throws via the unimplemented `GetEntitySetNameAsync` stub — split-brain trap #2 is a *throwing* stub, not a duplicate) → routed in `projects/code-quality-and-assurance-r3/notes/defer-issues.md`.
 

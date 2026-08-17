@@ -30,9 +30,9 @@
 | 041 | Playwright NFR suite (perf/a11y/orientation) | 5 | FR-17 | sonnet/high | R | 024,025 | ✅ authored+valid+wired (⚠️ real-env green run escalated — no live Power Apps env in sandbox; see notes/task-041-playwright-nfr.md) |
 | 042 | R-10 handleEmail seam + un-skip; RegardingResolver S1/N1 | 5 | FR-18 | sonnet/high | R | — | ✅ |
 | 050 | Refresh Matter ribbon icon + RibbonDiff | 6 | FR-19 | sonnet/high | S | — | ✅ |
-| 051 | 5 per-entity ribbon solutions (Create To Do) | 6 | FR-19 | sonnet/high | none | 050 | 🔲 |
-| 052 | Deploy + smoke each parent button | 6 | deploy | sonnet/high | none | 051 | 🔲 |
-| 060 | PROC-1 real-DV smoke gate (skill checklist) | 7 | FR-20 | sonnet/high | none | — | 🔲 |
+| 051 | 5 per-entity ribbon solutions (Create To Do) | 6 | FR-19 | sonnet/high | none | 050 | ⛔ deferred (operator 2026-08-17 — 5 live ribbon deploys; do when operator can eyeball) |
+| 052 | Deploy + smoke each parent button | 6 | deploy | sonnet/high | none | 051 | ⛔ deferred (with 051) |
+| 060 | PROC-1 real-DV smoke gate (skill checklist) | 7 | FR-20 | sonnet/high | none | — | ✅ |
 | 090 | Project wrap-up (test-diet, close #508, archive) | 7 | wrap-up | sonnet/high | none | all | 🔲 |
 
 ## Parallel Execution Groups
