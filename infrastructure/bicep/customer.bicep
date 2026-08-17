@@ -106,6 +106,11 @@ var serviceBusName = 'spaarke-${customerId}-${environmentName}-sbus'
 // ACS resource: sprk-{customer}-{env}-acs (per boundary; data location immutable — D-01)
 var acsResourceName = 'sprk-${customerId}-${environmentName}-acs'
 
+// Cosmos DB account: spaarke-{customer}-{env}-cosmos (per-customer; max 44 chars per naming convention)
+// Serverless SQL API; hosts the `spaarke-ai` database (sessions/prompts/audit/memory/feedback) per
+// docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md. BFF is per-customer's dedicated data plane.
+var cosmosAccountName = take('spaarke-${customerId}-${environmentName}-cosmos', 44)
+
 // Dead-letter blob container for the ACS Event Grid subscription (task 012 / §8.3).
 var acsDeadLetterContainerName = 'acs-eventgrid-deadletter'
 
@@ -167,6 +172,28 @@ module serviceBus 'modules/service-bus.bicep' = {
     location: location
     sku: serviceBusSku
     queueNames: serviceBusQueues
+    tags: tags
+  }
+}
+
+// ============================================================================
+// COSMOS DB (Per-customer AI platform state — Wave C2 prep, task 014)
+// Per spec §5.3 + FR-04 + R11 + § MUST rules: Cosmos MUST be per-customer (BFF prereq —
+// BFF will not start without it, R11). Unconditional invocation (no feature gate).
+// Wave C2 (task 032) will refactor into the multi-stack composition (model1-shared /
+// model2-full); this scaffold ensures the module is wired so C2 lands cleanly.
+// Redis is intentionally NOT provisioned per-customer (Q-E FR-12) — see header note.
+// Database + containers + RBAC (Data Contributor for BFF MI) are owned by the module.
+// ============================================================================
+
+module cosmosDb 'modules/cosmos-db.bicep' = {
+  scope: rg
+  name: 'cosmos-${baseName}'
+  params: {
+    accountName: cosmosAccountName
+    location: location
+    databaseName: 'spaarke-ai'
+    appServicePrincipalId: bffPrincipalId
     tags: tags
   }
 }
@@ -237,6 +264,12 @@ output serviceBusName string = serviceBus.outputs.serviceBusName
 output serviceBusEndpoint string = serviceBus.outputs.serviceBusEndpoint
 #disable-next-line outputs-should-not-contain-secrets
 output serviceBusConnectionString string = serviceBus.outputs.serviceBusConnectionString
+
+// --- Cosmos DB (task 014 Wave C2 prep — per-customer AI platform state) ---
+output cosmosAccountName string = cosmosDb.outputs.accountName
+output cosmosAccountId string = cosmosDb.outputs.accountId
+output cosmosAccountEndpoint string = cosmosDb.outputs.accountEndpoint
+output cosmosDatabaseName string = cosmosDb.outputs.databaseName
 
 // --- Membership topic (R3 Phase 2) ---
 output membershipTopicName string = membershipTopic.outputs.topicName
