@@ -334,6 +334,12 @@ export const todoRegistration: SectionRegistration = {
       id: "todo",
       type: "content",
       title: "Smart To Do",
+      // `hideTitle` suppresses the SectionPanel header bar while keeping `title`
+      // for aria-labels. SmartTodoWidget renders its OWN `<PaneHeader
+      // title="Smart To Do" />`, so without this the workspace stacked two
+      // identical "Smart To Do" titles (UAT #4, 2026-08-17 — operator: "remove
+      // the top 'Smart To Do', only use the title in the code page itself").
+      hideTitle: true,
       style: { overflow: "hidden" },
       renderContent: () => React.createElement(FeedSyncBridgeHost, { ctx }),
     };
