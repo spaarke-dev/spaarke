@@ -96,6 +96,7 @@ public static class GraphAppRoles
     private const string IdFilesReadAll = "01d4889c-1287-42c6-ac1f-5d1e02578ef6";
     private const string IdFilesReadWriteAll = "75359482-378d-4052-8f01-80520e7db3cd";
     private const string IdSitesReadAll = "332a536c-c7ef-4017-ab91-336970924f0d";
+    private const string IdSitesReadWriteAll = "9492366f-7969-46a4-8d15-ed1a20078fff";
 
     // Self-Service Registration subsystem — sourced pre-r1 from
     // scripts/Setup-EntraInfrastructure.ps1:78-80.
@@ -140,7 +141,7 @@ public static class GraphAppRoles
             "SPE / Documents", "App-only file read/write for document automation + SPE operations.", false),
         new GraphAppRole(SitesReadAll, "Read items in all site collections", IdSitesReadAll,
             "SPE / Documents", "App-only site/drive metadata resolution for SPE containers.", false),
-        new GraphAppRole(SitesReadWriteAll, "Read and write items in all site collections", null,
+        new GraphAppRole(SitesReadWriteAll, "Read and write items in all site collections", IdSitesReadWriteAll,
             "SPE / Documents", "App-only site/list write for SPE container provisioning.", false),
 
         // Core directory / user resolution — always required
