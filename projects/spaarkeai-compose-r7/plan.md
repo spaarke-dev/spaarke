@@ -1,7 +1,7 @@
 # Project Plan: Spaarke Compose R7 — Editor UX
 
 > **Last Updated**: 2026-08-13
-> **Status**: Ready for Tasks
+> **Status**: ✅ Complete (deployed to dev 2026-08-17)
 > **Spec**: [spec.md](spec.md)
 
 ---
@@ -180,12 +180,12 @@ Phase 8: Wrap-up (anti-clobber deploy, test-diet, docs)
 
 ### Phase 8: Wrap-up
 
-**Deliverables:**
-- [ ] Anti-clobber deploy (BFF + `sprk_spaarkeai` together)
-- [ ] `/test-diet` reconciliation (`notes/test-diet-report.md`)
-- [ ] Docs (Compose editor UX + PDF import + autosave/draft model)
-- [ ] **Name a home for the deferred fidelity wideners** (GitHub Idea or fast-follow project) — carry R6 defer-register §C evidence
-- [ ] README status → Complete; lessons-learned; archive
+**Deliverables:** — ✅ COMPLETE 2026-08-17
+- [x] Anti-clobber deploy (BFF 44.95 MB net10 + `sprk_spaarkeai` together to dev; hash-verified, healthy, Compose routes 401)
+- [x] `/test-diet` reconciliation (`notes/test-diet-report.md` — CLEAN, 0 scaffolding)
+- [x] Docs (`docs/architecture/COMPOSE-EDITOR-UX.md` — editor UX + PDF import + autosave/draft model)
+- [x] **Fidelity-wideners home named** — fast-follow `spaarkeai-compose-fidelity-wideners-r1` (DEF-002 / GitHub #777), carrying R6 defer-register §C evidence
+- [x] README status → Complete; lessons-learned captured; TASK-INDEX 090 → ✅
 
 ---
 
@@ -252,7 +252,7 @@ Phase 8: Wrap-up (anti-clobber deploy, test-diet, docs)
 
 ---
 
-**Status**: Ready for Tasks
+**Status**: ✅ Complete (deployed to dev 2026-08-17)
 **Next Action**: task-create decomposition (pipeline Step 3)
 
 ---

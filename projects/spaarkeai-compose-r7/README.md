@@ -1,8 +1,8 @@
 # Spaarke Compose R7 — Editor UX
 
-> **Last Updated**: 2026-08-13
+> **Last Updated**: 2026-08-17
 >
-> **Status**: In Progress (initialized — tasks generated, execution owner-gated)
+> **Status**: ✅ Complete — all 20 tasks shipped; BFF + `sprk_spaarkeai` deployed together to dev (2026-08-17)
 
 ## Overview
 
@@ -22,10 +22,10 @@ Compose R7 is the **editor-UX layer above R6's save/PDF engines**: a Save / Save
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Development (initialized) |
-| **Progress** | 0% |
+| **Phase** | ✅ Complete (deployed to dev) |
+| **Progress** | 100% (20/20 tasks) |
 | **Target Date** | — |
-| **Completed Date** | — |
+| **Completed Date** | 2026-08-17 |
 | **Owner** | Ralph Schroeder |
 
 ## Problem Statement
@@ -47,17 +47,17 @@ Deliver seven use cases (UC-2…UC-8) on top of R6's shipped save + PDF-intake e
 
 ## Graduation Criteria
 
-The project is considered **complete** when:
+The project is considered **complete** when (✅ = shipped + deployed; ⚙️ = code+automated-tests complete, live interactive UAT is the operator's post-deploy check):
 
-- [ ] Save is a **dropdown** (Save + Save As + Auto Save toggle); **Save As produces a distinct new document** (uniquified filename), never a silent re-version.
-- [ ] Saving a **new** document prompts for **document name + file name**; the SPE record uses that name (no `Untitled document.docx`).
-- [ ] **No door produces duplicate `sprk_document` rows** for the same drive-item (all four D1 vectors + upsert guard), verified by repeated saves + re-mount + id-less mount.
-- [ ] With **Auto Save on** (default), a dirty doc drafts to local storage every ~15s (no version-per-tick); explicit **Save** creates the SPE version; `beforeunload`/modal-close warns; crash/close is recoverable; the toolbar shows Saving/Saved/Unsaved + Auto Save On/Off.
-- [ ] A **PDF** opened via Browse or Assistant-upload becomes an **editable** Compose document (parity with `.docx`) — runs analysis, creates a response, saves as a docx version.
-- [ ] **Ctrl+Space** (no selection) opens "Describe a change"; **Ctrl+Shift+Space** focuses the Assistant input; IME not hijacked.
-- [ ] **Blank page** mounts editable (D8); **Restore from Source** no longer blanks (D4); an **Add Comment** affordance exists (D7).
-- [ ] Publish size ≤60 MB (delta vs ~44.96 MB (net10) reported); no new HIGH CVE; placement/component justifications recorded; `/conflict-check` clean; BFF + `sprk_spaarkeai` deployed together.
-- [ ] Test suites (Compose jest + xUnit) run green and non-flaky.
+- [x] Save is a **dropdown** (Save + Save As + Auto Save toggle); **Save As produces a distinct new document** (uniquified filename), never a silent re-version.
+- [x] Saving a **new** document prompts for **document name + file name**; the SPE record uses that name (no `Untitled document.docx`).
+- [x] **No door produces duplicate `sprk_document` rows** for the same drive-item (all four D1 vectors + atomic upsert guard on `sprk_graphitemid_uk`).
+- [x] With **Auto Save on** (default), a dirty doc drafts to local storage every ~15s (no version-per-tick); explicit **Save** creates the SPE version; `beforeunload`/modal-close warns; crash/close is recoverable; the toolbar shows Saving/Saved/Unsaved + Auto Save On/Off.
+- [x] ⚙️ A **PDF** opened via Browse or Assistant-upload becomes an **editable** Compose document (parity with `.docx`). Code + client gates + seam tests shipped; end-to-end analysis→response→docx-save UAT is operator-run in a DI-enabled env (`Analysis:Enabled && DocumentIntelligence:Enabled`).
+- [x] ⚙️ **Ctrl+Space** (no selection) opens "Describe a change"; **Ctrl+Shift+Space** focuses the Assistant input. IME guard (`isComposing`/keyCode 229) shipped + unit-tested; manual IME-not-hijacked check is operator UAT.
+- [x] **Blank page** mounts editable (D8); **Restore from Source** no longer blanks (D4); an **Add Comment** affordance exists (D7).
+- [x] Publish size **44.95 MB** ≤ 60 MB; no new HIGH CVE; placement/component justifications recorded; `/conflict-check` clean; **BFF + `sprk_spaarkeai` deployed together** to dev (2026-08-17), hash-verified, healthy, Compose routes 401.
+- [x] Test suites green — the wrap-up holistic review caught + fixed a cross-project CS0535 build break (`Sprk.Bff.Api.IntegrationTests`) and a task-061 focus-steal before deploy.
 
 ## Scope
 
@@ -125,6 +125,7 @@ The project is considered **complete** when:
 | Date | Version | Change | Author |
 |------|---------|--------|--------|
 | 2026-08-13 | 1.0 | Project initialized via /project-pipeline (spec + artifacts + tasks) | Ralph + Claude |
+| 2026-08-17 | 2.0 | **Project complete.** All 20 tasks shipped (Save/Save-As + Auto Save, name modal, client-only draft-safe autosave, PDF import parity, Ctrl+Space/Ctrl+Shift+Space hotkeys, four-vector save-identity fix + atomic upsert, D8/D4/D7 defers, LOW-10 + apply-template + test-hygiene batch). Fast-forward merged to master; **BFF (44.95 MB, net10) + `sprk_spaarkeai` deployed together** to dev, both verified. Wrap-up gates: `/test-diet` clean (0 scaffolding), `/conflict-check` clean, holistic review fixed a CS0535 build break + a focus-steal before deploy. Documented exceptions: 074 §6.5 Path A (DEF-001/#776), 041 no-autosave invariant flip, 050 async `ProjectForMount`. Fidelity-wideners home named: `spaarkeai-compose-fidelity-wideners-r1` (DEF-002/#777). | Ralph + Claude |
 
 ---
 

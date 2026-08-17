@@ -3,8 +3,15 @@
   <metadata>
     <title>Project wrap-up — anti-clobber deploy, test-diet, docs, fidelity-widener home, archive</title>
     <phase>8 Wrap-up</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
+    <!-- 090 COMPLETE 2026-08-17: quality gates (holistic code-review+adr-check fixed 1 CRITICAL CS0535 build
+         break + 1 focus-steal Warning) · /test-diet CLEAN (0 scaffolding) · docs (COMPOSE-EDITOR-UX.md) ·
+         fidelity-wideners home DEF-002/#777 · /conflict-check CLEAN · BFF (44.95 MB net10, hash-verified,
+         healthy, Compose routes 401) + sprk_spaarkeai (published, R7 markers verified) DEPLOYED TOGETHER to
+         dev · README->Complete · TASK-INDEX 090->✅. Documented exceptions cited: 074 §6.5, 041 invariant
+         flip, 050 async, DEF-002. See notes/lessons-learned.md + notes/test-diet-report.md. -->
+
     <rigor>FULL</rigor>
     <rigor-reason>Final quality gates (code-review + adr-check), an irreversible anti-clobber deploy, /test-diet reconciliation, and project closure.</rigor-reason>
     <model-tier>sonnet</model-tier>
