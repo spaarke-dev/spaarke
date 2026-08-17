@@ -63,6 +63,53 @@ the save path's own live-eTag staleness-assert + AnnotationReanchor model.
 
 ---
 
+### DEF-002 — Compose fidelity-wideners home (indentation/paragraph-style/section-break survival — fast-follow)
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | next-round |
+| **Filed** | 2026-08-17 |
+| **Source** | task 090 wrap-up (spec Owner Clarifications — "fidelity-wideners home decided at wrap-up"); R6 defer-register §C |
+| **GitHub Issue** | [#777](https://github.com/spaarke-dev/spaarke/issues/777) |
+
+**Description**
+
+R7 is deliberately editor-UX-only and does not touch the render-on-save fidelity engine (ADR-049). The Compose
+**fidelity wideners** — making Word formatting features SURVIVE the save round-trip instead of degrading loudly —
+need a concrete named home so they don't rot as ledger entries. This DEF names that home: a fast-follow project
+**`spaarkeai-compose-fidelity-wideners-r1`** (sequence AFTER `spaarkeai-compose-templates-r8`), carrying the R6
+defer-register §C evidence.
+
+**Concrete failure mode (§11)**: opening a routine, real NDA and saving it through Compose silently flattens
+~84 indentations (`indentation-dropped ×84`) and ~85 paragraph styles (`paragraph-style-flattened ×85`) — measured
+on the Corteva NDA UAT (2026-08-06). The output document loses its visual structure. On a legal-drafting surface
+this is a named, measured regression on a shipped document class, not "future flexibility".
+
+Front-of-queue wideners (by UAT warning volume): indentation survival (×84), paragraph-style survival (×85),
+section-break survival (×6, == R6 **D5** page borders / page-break flow). Lower tier: tab-flattened ×5,
+line-break ×5, heading-direct-numbering ×4, drawing/embedded ×5, custom-style-linked numbering, localized heading
+ids, `hMerge`/`tblLayout` typed carry, bookmarks+internal links, typed move-revisions + table-revision carry,
+`pageBreakBefore` tri-state, field-result box text + SmartArt.
+
+**Entry-points**
+
+- `projects/spaarkeai-compose-r7/notes/r6-defer-register-consolidated.md` §C — widener table + UAT volumes (the evidence carried forward)
+- `.claude/adr/ADR-049-compose-shadow-document.md` — render-on-save canonical model; `src/server/api/Sprk.Bff.Api/Services/Compose/**` (SaveAsync render path)
+- `docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md` — fidelity architecture
+
+**Suggested approach**
+
+Stand up `spaarkeai-compose-fidelity-wideners-r1` via `/design-to-spec` → `/project-pipeline`; prioritize
+indentation + paragraph-style (the ×84/×85 volumes) first (section-break folds in R6 D5). Each widener is a
+typed-carry addition to the render-on-save model with a seam test proving survival on the Corteva-NDA corpus.
+
+**Estimated effort**: multi-widener project; indentation + paragraph-style survival ≈ the first milestone (~13 wideners total, decreasing frequency).
+**Blockers**: none technical; needs portfolio scheduling. Owner worst-offender corpus rows 4–8 + Corteva-NDA-as-corpus-row-4 (needs confidentiality sign-off) strengthen the FR-08 fidelity gate.
+**Related**: R6 D5 (page borders) subsumed by section-break survival; ADR-049; sequence after templates-r8.
+
+---
+
 ## Issues (ISS)
 
 _None filed._

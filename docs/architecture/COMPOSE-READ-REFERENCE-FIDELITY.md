@@ -1,6 +1,6 @@
 # Compose Read & Reference Fidelity
 
-> **Purpose**: End-to-end reference for how Compose *reads* a `.docx` into the editor with legal-grade fidelity and makes every clause *referenceable*. Covers the single server projection (one reader), verbatim text + warn-don't-drop, the deterministic numbering engine, the `paraId → legal-number` reference layer + `CitationResolver`, and the honest page/line position. This is the **read/reference** companion to the **write/save** side ([ADR-049](../../.claude/adr/ADR-049-compose-shadow-document.md)).
+> **Purpose**: End-to-end reference for how Compose *reads* a `.docx` into the editor with legal-grade fidelity and makes every clause *referenceable*. Covers the single server projection (one reader), verbatim text + warn-don't-drop, the deterministic numbering engine, the `paraId → legal-number` reference layer + `CitationResolver`, and the honest page/line position. This is the **read/reference** companion to the **write/save** side ([ADR-049](../../.claude/adr/ADR-049-compose-shadow-document.md)); the editor-UX layer above both (save/save-as, draft-safe autosave, hotkeys, PDF import, save-identity) is [COMPOSE-EDITOR-UX.md](COMPOSE-EDITOR-UX.md).
 >
 > **Last reviewed**: 2026-07-28 (project `spaarkeai-compose-fidelity-r4.5`, merged to master; deployed to dev `spaarke-bff-dev` + `sprk_spaarkeai`). Establishes read-side invariants F-1…F-5 alongside R4's write invariants I-1…I-7.
 >
