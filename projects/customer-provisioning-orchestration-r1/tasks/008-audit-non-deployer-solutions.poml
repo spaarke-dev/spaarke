@@ -4,7 +4,7 @@
     <title>Audit ~28 non-deployer-listed items in src/solutions/ per §11.1a; publish reconciliation note</title>
     <phase>A Doc Consolidation + Audits</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Read-only inventory + classification audit. No code changes. Per root CLAUDE.md §8 rigor table, inventory creation = MINIMAL.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -97,7 +97,7 @@ Per spec.md § 11.1a solutions reconciliation + FR-09 + design.md Q2 owner clari
     <criterion testable="true">Negative: git diff shows only the new notes file — no code/script/solution folder touched.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec §11.1a + FR-09 + Q2 owner clarification. Feeds Wave C4 H6 handler (Package Deployer).</notes>
+  <notes>Spec §11.1a + FR-09 + Q2 owner clarification. Feeds Wave C4 H6 handler (Package Deployer). Completed 2026-08-17: 36 folders enumerated, 8 authoritative (per $SolutionImportOrder), 28 non-listed classified as 14 (a) code pages / 0 (b) feature-scoped / 3 (c) dev-only-retired / 11 (d) unknown-needs-review. Reconciliation math matches spec exactly. Output: notes/solutions-reconciliation-2026-08.md. 5 advisory recommendations (R1–R5), only R5 is r1-binding (H6 MUST source from $SolutionImportOrder).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
