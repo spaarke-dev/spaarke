@@ -67,11 +67,39 @@ jest.mock('@spaarke/ui-components', () => ({
   TODO_REGARDING_CATALOG: MOCK_TODO_REGARDING_CATALOG,
 }));
 
-import { buildNewTaskDefaultValues, launchNewTaskCreateForm } from '../services/newTaskLauncher';
+import {
+  buildNewTaskDefaultValues,
+  launchNewTaskCreateForm,
+  resolveHostRegardingRecord,
+} from '../services/newTaskLauncher';
 import type { ILaunchContext } from '../hooks/useLaunchContext';
+
+/**
+ * Stub the shell form context that `getXrm().Page.data.entity.getEntityReference()`
+ * reads. `getXrm` resolves the bare global `Xrm` first, so we set it on
+ * `window` (=== globalThis under jsdom). Cleared in `afterEach`.
+ */
+function stubHostRecord(ref: { id: string; entityType: string; name?: string } | null): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).Xrm = {
+    WebApi: {},
+    Page: {
+      data: {
+        entity: {
+          getEntityReference: () => ref,
+        },
+      },
+    },
+  };
+}
 
 beforeEach(() => {
   mockNavigateToEntityRecordSurfaceAsync.mockReset();
+});
+
+afterEach(() => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete (window as any).Xrm;
 });
 
 // ---------------------------------------------------------------------------
@@ -101,9 +129,11 @@ describe('buildNewTaskDefaultValues', () => {
     const result = buildNewTaskDefaultValues(launchContext);
 
     expect(result).toBeDefined();
-    expect(result!['sprk_regardingmatter']).toBe(
-      JSON.stringify([{ id: 'guid-1', entityType: 'sprk_matter', name: 'Matter A' }]),
-    );
+    // D-8 (2026-08-17): three-key `data` lookup convention (MS Learn) —
+    // id / name / type — replaces the pre-D-8 (unsupported) JSON.stringify shape.
+    expect(result!['sprk_regardingmatter']).toBe('guid-1');
+    expect(result!['sprk_regardingmattername']).toBe('Matter A');
+    expect(result!['sprk_regardingmattertype']).toBe('sprk_matter');
     expect(result!['sprk_regardingrecordid']).toBe('guid-1');
     expect(result!['sprk_regardingrecordname']).toBe('Matter A');
     // Documented gap (task 030 escalation trigger) — the type-lookup resolver
@@ -124,9 +154,9 @@ describe('buildNewTaskDefaultValues', () => {
     const result = buildNewTaskDefaultValues(launchContext);
 
     expect(result).toBeDefined();
-    expect(result!['sprk_regardingproject']).toBe(
-      JSON.stringify([{ id: 'guid-2', entityType: 'sprk_project', name: 'Project B' }]),
-    );
+    expect(result!['sprk_regardingproject']).toBe('guid-2');
+    expect(result!['sprk_regardingprojectname']).toBe('Project B');
+    expect(result!['sprk_regardingprojecttype']).toBe('sprk_project');
     expect(result!['sprk_regardingrecordid']).toBe('guid-2');
     expect(result!['sprk_regardingrecordname']).toBe('Project B');
   });
@@ -140,7 +170,7 @@ describe('buildNewTaskDefaultValues', () => {
       regardingFilter: { entityType: 'sprk_matter', recordId: 'guid-3', recordName: 'Matter C' },
     };
     const result = buildNewTaskDefaultValues(launchContext);
-    expect(result!['sprk_regardingmatter']).toContain('guid-3');
+    expect(result!['sprk_regardingmatter']).toBe('guid-3');
   });
 
   it('returns undefined (plain create) when the regarding entityType is not one of the 12 canonical sprk_todo targets', () => {
@@ -157,7 +187,11 @@ describe('buildNewTaskDefaultValues', () => {
       regardingFilter: { entityType: 'sprk_matter', recordId: 'guid-5' },
     };
     const result = buildNewTaskDefaultValues(launchContext);
+    expect(result!['sprk_regardingmatter']).toBe('guid-5');
+    expect(result!['sprk_regardingmattertype']).toBe('sprk_matter');
     expect(result!['sprk_regardingrecordid']).toBe('guid-5');
+    // No name available → neither the lookup `name` key nor the text name field.
+    expect('sprk_regardingmattername' in result!).toBe(false);
     expect('sprk_regardingrecordname' in result!).toBe(false);
   });
 });
@@ -221,5 +255,86 @@ describe('launchNewTaskCreateForm (handleNewTask delegate)', () => {
 
     const callArgs = mockNavigateToEntityRecordSurfaceAsync.mock.calls[0][0];
     expect(callArgs.defaultValues['sprk_regardingrecordid']).toBe('guid-6');
+  });
+
+  it('passes createFromEntity (regarding pre-associate) alongside defaultValues when regarding context is present', async () => {
+    mockNavigateToEntityRecordSurfaceAsync.mockResolvedValue({ launched: true, cancelled: true });
+    const launchContext: ILaunchContext = {
+      action: 'openTodos',
+      regardingFilter: { entityType: 'sprk_matter', recordId: 'guid-7', recordName: 'Matter G' },
+    };
+
+    await launchNewTaskCreateForm(launchContext, jest.fn());
+
+    const callArgs = mockNavigateToEntityRecordSurfaceAsync.mock.calls[0][0];
+    expect(callArgs.createFromEntity).toEqual({
+      entityType: 'sprk_matter',
+      id: 'guid-7',
+      name: 'Matter G',
+    });
+  });
+
+  it('does not pass createFromEntity when there is no regarding source (plain create)', async () => {
+    mockNavigateToEntityRecordSurfaceAsync.mockResolvedValue({ launched: true, cancelled: true });
+
+    await launchNewTaskCreateForm(undefined, jest.fn());
+
+    const callArgs = mockNavigateToEntityRecordSurfaceAsync.mock.calls[0][0];
+    expect(callArgs.createFromEntity).toBeUndefined();
+    expect(callArgs.defaultValues).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveHostRegardingRecord + host-preferred precedence (D-8, 2026-08-17)
+// ---------------------------------------------------------------------------
+
+describe('resolveHostRegardingRecord (D-8 host-record read)', () => {
+  it('returns undefined when there is no reachable form context (standalone / jsdom)', () => {
+    expect(resolveHostRegardingRecord()).toBeUndefined();
+  });
+
+  it('reads the host record from Xrm.Page.data.entity.getEntityReference()', () => {
+    stubHostRecord({ id: '{guid-host}', entityType: 'sprk_matter', name: 'Host Matter' });
+    expect(resolveHostRegardingRecord()).toEqual({
+      entityType: 'sprk_matter',
+      recordId: 'guid-host', // braces stripped
+      recordName: 'Host Matter',
+    });
+  });
+
+  it('returns undefined when the host record has no id yet (unsaved host form)', () => {
+    stubHostRecord({ id: '', entityType: 'sprk_matter', name: 'Unsaved' });
+    expect(resolveHostRegardingRecord()).toBeUndefined();
+  });
+});
+
+describe('host record is preferred over launch context (D-8)', () => {
+  it('buildNewTaskDefaultValues uses the host record when present, over launch context', () => {
+    stubHostRecord({ id: 'host-matter-guid', entityType: 'sprk_matter', name: 'Host Matter' });
+    const launchContext: ILaunchContext = {
+      action: 'openTodos',
+      regardingFilter: { entityType: 'sprk_project', recordId: 'lc-project-guid', recordName: 'LC Project' },
+    };
+
+    const result = buildNewTaskDefaultValues(launchContext);
+
+    // Host (matter) wins — project lookup keys must be absent.
+    expect(result!['sprk_regardingmatter']).toBe('host-matter-guid');
+    expect(result!['sprk_regardingrecordid']).toBe('host-matter-guid');
+    expect('sprk_regardingproject' in result!).toBe(false);
+  });
+
+  it('falls back to launch context when the host record is not a supported regarding target', () => {
+    stubHostRecord({ id: 'acct-guid', entityType: 'account', name: 'Some Account' });
+    const launchContext: ILaunchContext = {
+      action: 'openTodos',
+      regardingFilter: { entityType: 'sprk_matter', recordId: 'lc-matter-guid', recordName: 'LC Matter' },
+    };
+
+    const result = buildNewTaskDefaultValues(launchContext);
+
+    // Host entity (account) isn't a catalog target → launch-context matter used.
+    expect(result!['sprk_regardingmatter']).toBe('lc-matter-guid');
   });
 });

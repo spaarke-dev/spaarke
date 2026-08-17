@@ -405,6 +405,25 @@ export interface EntityRecordSurfaceParams {
    */
   defaultValues?: Record<string, unknown>;
   /**
+   * Optional parent EntityReference to pre-associate the newly-created record
+   * to via Dataverse relationship attribute-mapping — the documented
+   * `navigateTo`/`openForm` "create from parent" seam (MS Learn: "Designates a
+   * record that provides default values based on mapped column values"). This
+   * is the same mechanism a subgrid "+ New" uses to auto-set the relationship
+   * lookup on the child. Set on the `pageInput` for the CREATE branch only
+   * (ignored when `entityId` is present). Braces are stripped from `id`.
+   *
+   * NOTE (per the 2026-08-17 researcher finding): `createFromEntity` is
+   * INDIRECT — it copies whatever attribute mappings exist on the parent→child
+   * relationship and cannot target a named field directly, so it silently
+   * pre-fills nothing when no mapping is configured. Callers that need a
+   * SPECIFIC named lookup pre-populated deterministically should ALSO pass that
+   * lookup via `defaultValues` using the flat three-key convention
+   * (`{field}` = id, `{field}name` = name, `{field}type` = target logical
+   * name). Passing both is safe and maximizes pre-fill reliability.
+   */
+  createFromEntity?: { entityType: string; id: string; name?: string };
+  /**
    * Optional `navigateTo` `pageInput.formId` override — selects a specific
    * System Form instance instead of the entity's default-ordered main form.
    * Added by task 032 (FR-12, header-hide investigation) as the wiring seam
@@ -491,10 +510,31 @@ export async function navigateToEntityRecordSurfaceAsync(
     // format `{...}` GUIDs are accepted by callers, `entityId` wants bare.
     pageInput.entityId = (params.entityId as string).replace(/[{}]/g, '');
   }
-  // OOB pre-seed: `data` on an entityrecord pageInput pre-populates form
-  // fields with default values (the documented createFromEntity/default-value seam).
+  // OOB pre-seed: `data` on an entityrecord pageInput is a FLAT
+  // attribute-name → default-value dictionary (same rules as `openForm`'s
+  // `formParameters` — MS Learn "Set column values using parameters passed to
+  // a form"). Lookups use the three-key convention `{field}` / `{field}name` /
+  // `{field}type`; the CALLER builds that shape (see SmartTodo newTaskLauncher).
   if (params.defaultValues && Object.keys(params.defaultValues).length > 0) {
     pageInput.data = params.defaultValues;
+  }
+  // OOB pre-associate: `createFromEntity` is the relationship-attribute-mapping
+  // "create from parent" seam (sibling of `data` on the pageInput). CREATE
+  // branch only — pre-populating a parent lookup on an existing record is
+  // meaningless. See `EntityRecordSurfaceParams.createFromEntity` doc comment.
+  if (
+    !isOpenExisting &&
+    params.createFromEntity &&
+    typeof params.createFromEntity.id === 'string' &&
+    params.createFromEntity.id.length > 0 &&
+    typeof params.createFromEntity.entityType === 'string' &&
+    params.createFromEntity.entityType.length > 0
+  ) {
+    pageInput.createFromEntity = {
+      entityType: params.createFromEntity.entityType,
+      id: params.createFromEntity.id.replace(/[{}]/g, ''),
+      name: params.createFromEntity.name ?? '',
+    };
   }
   // Task 032 (FR-12) header-hide seam — see `EntityRecordSurfaceParams.formId`
   // doc comment. No-op today (no caller passes it; no clone form exists yet).

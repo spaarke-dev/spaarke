@@ -209,6 +209,52 @@ describe('navigateToEntityRecordSurfaceAsync', () => {
 
       expect(outcome).toEqual({ launched: true, cancelled: true });
     });
+
+    it('passes defaultValues through as pageInput.data (flat pre-seed dictionary)', async () => {
+      const navigateTo = installXrmStub({});
+
+      await navigateToEntityRecordSurfaceAsync({
+        entityName: 'sprk_todo',
+        title: 'New To Do',
+        defaultValues: { sprk_regardingmatter: 'm-guid', sprk_regardingmattertype: 'sprk_matter' },
+      });
+
+      const [pageInput] = navigateTo.mock.calls[0];
+      expect(pageInput.data).toEqual({
+        sprk_regardingmatter: 'm-guid',
+        sprk_regardingmattertype: 'sprk_matter',
+      });
+    });
+
+    it('sets pageInput.createFromEntity (braces stripped) on the CREATE branch (D-8 regarding pre-associate)', async () => {
+      const navigateTo = installXrmStub({});
+
+      await navigateToEntityRecordSurfaceAsync({
+        entityName: 'sprk_todo',
+        title: 'New To Do',
+        createFromEntity: { entityType: 'sprk_matter', id: '{88888888-8888-8888-8888-888888888888}', name: 'Matter H' },
+      });
+
+      const [pageInput] = navigateTo.mock.calls[0];
+      expect(pageInput.createFromEntity).toEqual({
+        entityType: 'sprk_matter',
+        id: '88888888-8888-8888-8888-888888888888',
+        name: 'Matter H',
+      });
+    });
+
+    it('does NOT set createFromEntity on the OPEN branch (entityId present)', async () => {
+      const navigateTo = installXrmStub(undefined);
+
+      await navigateToEntityRecordSurfaceAsync({
+        entityName: 'sprk_todo',
+        entityId: '99999999-9999-9999-9999-999999999999',
+        createFromEntity: { entityType: 'sprk_matter', id: 'm-guid', name: 'Matter' },
+      });
+
+      const [pageInput] = navigateTo.mock.calls[0];
+      expect(pageInput).not.toHaveProperty('createFromEntity');
+    });
   });
 
   describe('no reachable Xrm host', () => {
