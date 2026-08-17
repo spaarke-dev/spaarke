@@ -26,21 +26,11 @@
  *   - Dark mode + high-contrast supported automatically via token system
  */
 
-import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Badge,
-  Button,
-  Spinner,
-} from "@fluentui/react-components";
-import {
-  ArrowClockwiseRegular,
-  SettingsRegular,
-} from "@fluentui/react-icons";
-import { MicrosoftToDoIcon } from "@spaarke/ui-components";
-import { AddTodoBar } from "./AddTodoBar";
+import * as React from 'react';
+import { makeStyles, tokens, Text, Badge, Button, Spinner } from '@fluentui/react-components';
+import { ArrowClockwiseRegular, SettingsRegular } from '@fluentui/react-icons';
+import { MicrosoftToDoIcon } from '@spaarke/ui-components';
+import { AddTodoBar } from './AddTodoBar';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -48,40 +38,40 @@ import { AddTodoBar } from "./AddTodoBar";
 
 const useStyles = makeStyles({
   header: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalS,
     paddingBottom: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    borderBottomWidth: "1px",
-    borderBottomStyle: "solid",
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
     borderBottomColor: tokens.colorNeutralStroke2,
     backgroundColor: tokens.colorNeutralBackground2,
     flexShrink: 0,
-    flexWrap: "wrap",
-    minHeight: "36px",
+    flexWrap: 'wrap',
+    minHeight: '36px',
   },
 
   leftGroup: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalS,
     flexShrink: 0,
   },
 
   centerGroup: {
-    flex: "1 1 0",
+    flex: '1 1 0',
     minWidth: 0,
   },
 
   rightGroup: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
     flexShrink: 0,
   },
@@ -113,32 +103,18 @@ export interface IKanbanHeaderProps {
 // ---------------------------------------------------------------------------
 
 export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
-  ({
-    totalCount,
-    onRecalculate,
-    isRecalculating,
-    onAdd,
-    isAdding,
-    onSettingsOpen,
-    embedded = false,
-  }) => {
+  ({ totalCount, onRecalculate, isRecalculating, onAdd, isAdding, onSettingsOpen, embedded = false }) => {
     const styles = useStyles();
 
     // In embedded mode, show only compact action buttons (no title/add bar)
     if (embedded) {
       return (
-        <div className={styles.header} role="banner" style={{ justifyContent: "flex-end" }}>
+        <div className={styles.header} role="banner" style={{ justifyContent: 'flex-end' }}>
           <div className={styles.rightGroup}>
             <Button
               appearance="subtle"
               size="small"
-              icon={
-                isRecalculating ? (
-                  <Spinner size="tiny" />
-                ) : (
-                  <ArrowClockwiseRegular />
-                )
-              }
+              icon={isRecalculating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
               disabled={isRecalculating}
               onClick={onRecalculate}
               aria-label="Recalculate column assignments"
@@ -180,13 +156,7 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
           <Button
             appearance="subtle"
             size="small"
-            icon={
-              isRecalculating ? (
-                <Spinner size="tiny" />
-              ) : (
-                <ArrowClockwiseRegular />
-              )
-            }
+            icon={isRecalculating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
             disabled={isRecalculating}
             onClick={onRecalculate}
             aria-label="Recalculate column assignments"
@@ -206,4 +176,4 @@ export const KanbanHeader: React.FC<IKanbanHeaderProps> = React.memo(
   }
 );
 
-KanbanHeader.displayName = "KanbanHeader";
+KanbanHeader.displayName = 'KanbanHeader';

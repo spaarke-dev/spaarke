@@ -226,7 +226,11 @@ function formatEntityFallbackLabel(entityLogicalName: string): string {
  * target, bump `sprk_lastvisited`/`sprk_visitcount` on an existing row,
  * resolve + store `sprk_displayname` on first sighting.
  */
-async function upsertHistoryItem(xrm: XrmContext | undefined, ownerId: string, page: DerivedCurrentPage): Promise<void> {
+async function upsertHistoryItem(
+  xrm: XrmContext | undefined,
+  ownerId: string,
+  page: DerivedCurrentPage
+): Promise<void> {
   const existing = await findHistoryItem(ownerId, page.entityLogicalName, page.entityId);
   if (existing) {
     await bumpHistoryItem(existing.sprk_navitemid, (existing.sprk_visitcount ?? 0) + 1);
