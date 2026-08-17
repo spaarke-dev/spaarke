@@ -4,7 +4,7 @@
     <title>Integration test — end-to-end Bicep deploy dry-run of customer + platform + model1-shared + platform-controlplane stacks against dev subscription</title>
     <phase>C Wave C2 — Bicep + UAMI</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying task per root CLAUDE.md §8 override — any task tagged integration-test triggers unconditional FULL rigor (code-review + adr-check at Step 9.5). Also deploy tag + azure-deployment scope. This is the E2E gate verifying Wave C2 produces a coherent deployable stamp.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -99,7 +99,9 @@
     <criterion testable="true">Negative: no .github/workflows/** file is touched.</criterion>
   </acceptance-criteria>
 
-  <notes>Maps spec.md FR-04 acceptance + Wave C2 completion gate. This test becomes a recurring pre-Phase F gate — re-run it whenever any Wave C2 bicep is modified. Coordinate with Phase H for eventual CI wiring per root CLAUDE.md §10 ci-workflows=Y coordinated-PR rule.</notes>
+  <notes>Maps spec.md FR-04 acceptance + Wave C2 completion gate. This test becomes a recurring pre-Phase F gate — re-run it whenever any Wave C2 bicep is modified. Coordinate with Phase H for eventual CI wiring per root CLAUDE.md §10 ci-workflows=Y coordinated-PR rule.
+
+**Completion notes (2026-08-17)**: Delivered `scripts/tests/bicep-e2e-dry-run.ps1` (three-tier test: static build / live what-if / structural assertions) + notes artifact at `notes/bicep-e2e-dry-run-20260817.md`. All 3 non-deferred stacks (customer, platform, platform-controlplane) build clean AND what-if succeeds against dev subscription. All 8 structural assertions PASS (UAMI both-slot binding, module count 29 vs baseline 25 acknowledged as Wave 2 drift, no CI workflow edits, etc.). scripts/README.md updated (Testing & Validation section). Step 9.5 quality gates: code-review PASS with 2 minor comment-additions applied; adr-check PASS (no violations, no warnings — ADR-038 §7 KEEP paths are C#-scoped and don't cover shell integration tests). Deviation documented: stacks/model1-shared.bicep is an unmigrated caller of task-029 UAMI-only app-service.bicep (build failure is EXPECTED per task 029 D1); follow-on task recommended to migrate the sharedBffApi module invocation.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
