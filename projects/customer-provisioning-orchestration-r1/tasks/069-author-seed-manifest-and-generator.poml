@@ -4,7 +4,7 @@
     <title>Author declarative seed manifest at scripts/seed-data/manifest.yaml + generator that fans out to seeder scripts</title>
     <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','dataverse'; introduces authoritative source for AI seed chain resolving R14 two-source drift; blast-radius = every future customer environment's seed correctness.</rigor-reason>
     <model-tier>opus</model-tier>
