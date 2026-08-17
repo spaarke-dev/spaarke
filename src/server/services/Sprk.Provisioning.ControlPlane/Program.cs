@@ -52,6 +52,7 @@
 
 using Sprk.Provisioning.ControlPlane.Endpoints;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
+using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
 using Sprk.Provisioning.ControlPlane.Registry;
@@ -103,6 +104,19 @@ builder.Services.AddProvisioningHandlers(builder.Configuration);
 // IOpenAiClient, IPlaybookService injection).
 builder.Services.AddSingleton<IDataverseEnvironmentRegistryClient, NullDataverseEnvironmentRegistryClient>();
 builder.Services.AddScoped<H05ConsentCaptureHandler>();
+
+// Task 043: H1 subscription-readiness handler + ARM readiness probe
+// placeholder. Wave C5 replaces NullSubscriptionReadinessProbe with a real
+// ARM-backed impl (Azure.ResourceManager SDK OR `az` shell-out) once the L2
+// App Service UAMI has Reader RBAC granted on each customer subscription.
+// Both registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+// Placement Justification (CLAUDE.md §10): H1 lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types (ADR-013).
+// H1 uses IProvisioningRunRepository (task 037) + IHandlerEnqueuer (task
+// 038); no BFF-facade dependencies. Downstream H2a is owned by sibling
+// task 044.
+builder.Services.AddSingleton<ISubscriptionReadinessProbe, NullSubscriptionReadinessProbe>();
+builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 
 var app = builder.Build();
 
