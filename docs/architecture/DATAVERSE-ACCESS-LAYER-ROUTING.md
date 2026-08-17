@@ -58,8 +58,16 @@ are **stubs**: some throw `NotImplementedException`, and seven return **silent-e
    event + field-mapping + impersonation/POA surface, the shared `GetEntitySetNameAsync`/`ConvertJsonElementToObject`
    helpers, and both `UpdateRecordFieldsAsync` impls. Waiver removed from `GodClassGuardTests` (now under the
    2,000 ceiling). Verified: BFF 10,402 tests pass, ArchTests 38/38.
-4. **Seven silent-empty SDK stubs** — convert to throw ONLY after trap #1 is rerouted (else it crashes the
-   TodoGenerationmigration path loudly).
+4. **✅ DONE (RED-4 B, 2026-08-17) — silent-empty SDK stubs → throw.** The 8 event/field-mapping query stubs on
+   `DataverseServiceClientImpl` (`QueryEventsAsync`, `GetEventAsync`, `QueryEventLogsAsync`, `GetEventTypesAsync`,
+   `GetEventTypeAsync`, `QueryFieldMappingProfilesAsync`, `GetFieldMappingProfileAsync`, `GetFieldMappingRulesAsync`)
+   returned empty + `LogWarning` — masking a mis-route as "no data" (the DEF-1 bug class). Now they `throw
+   NotImplementedException`, consistent with the sibling event/field-mapping methods, so a mis-route (injecting
+   the composite `IDataverseService` instead of the narrow interface) fails LOUD. Gated behind DEF-1: done only
+   after `smart-todo-r5` rerouted `TodoGenerationService` Rules 1 & 3 to `IEventDataverseService` (commit
+   `8e0aa4e6e`), so no live path hits the throw. Verified: no legitimate caller routes these via the composite
+   (all event callers inject `IEventDataverseService`, all field-mapping callers inject
+   `IFieldMappingDataverseService`); full BFF suite 10,427 pass.
 
 ## Auth (#3b)
 
