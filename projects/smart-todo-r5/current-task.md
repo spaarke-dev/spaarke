@@ -9,22 +9,24 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **19 of 28 DONE/code-done**: 001 002 003 010 · 020 021 022 023 024 · 011 012 013 034 040 042 · **030 031** ✅ · **032** code-done · **050** edit-done. **033** 🔄 running (opus). |
-| **Step** | Modal spine nearly complete: 030 ✅ (New Task→OOB create modal), 031 ✅ (unified create+open launcher `navigateToEntityRecordSurfaceAsync`), 032 code ✅ (fullCover 100×100 + formId seam; header-hide = form-clone deploy documented), **033 running** (Save&Close→refetch; create gates on savedEntityReference [done by 030], open refetches unconditionally on close per 031 finding). All code committed+pushed through `c95b1179d`. |
-| **Status** | in-progress — 033 (opus capstone) running in background; then a single DEPLOY PHASE. |
-| **Next Action** | Verify+commit 033 when it returns → then run the **DEPLOY BATCH** (below) as one pass. **KEY DEPLOY FACT**: direct Web API PATCH of `systemform` is a silent no-op in spaarkedev1 — form edits require the `pac` solution export→edit→import roundtrip (proven in 014; scripts in scratchpad). |
+| **Task** | **20 of 28 DONE/code-done**: 001 002 003 010 · 020 021 022 023 024 · 011 012 013 034 040 042 · **030 031 033** ✅ · **032** code-done. Modal spine code COMPLETE. Branch synced to master (`561f5869f`, 0 behind, conflict-checked). |
+| **Step** | Modal spine done: 030 create modal, 031 unified launcher, 032 fullCover sizing (header-hide DEFERRED — see below), 033 Save&Close→refetch. **DEPLOY PHASE: just deploy A (Code Page) — 32B header-hide + 050/051 ribbon deferred per operator 2026-08-17.** |
+| **Status** | in-progress — **SmartTodo Code Page (`sprk_smarttodo`) DEPLOYED + verified 2026-08-17** (full 2,089,534 bytes, well-formed, published via pac solution-roundtrip; raw PATCH truncated at ~2.0MB → roundtrip is the reliable path for large webresources). Widget surface (SpaarkeAi/LegalWorkspace) pending decision. |
+| **Next Action** | Operator UAT on the standalone Code Page (below). Decide whether to also deploy the WIDGET surface (SpaarkeAi/LegalWorkspace code page — bigger hot-path) for the widget's 033 open-refresh path. |
 
-### 🚚 DEFERRED DEPLOY BATCH (run as one pass after 033, then ONE operator UAT)
-| Item | Deploy action (mine, via pac) | Operator UAT |
+### 🚚 DEPLOY status
+| Item | State | Operator UAT |
 |---|---|---|
-| **014** | (form handlers already live) | create-path resolver smoke: subgrid-create from Matter + manual-pick Project; verify 5 regarding fields + scores |
-| **032 header-hide** | clone "To Do main form"→"…- Modal" + add OnLoad `sprk_todo_modal_header_hide` webresource (`headerSection.set*Visible(false)`) + solution import; wire clone GUID into `wizardLaunchers.ts` formId seam (recipe in `notes/task-032-fullcover-header.md`) | header hidden, Save&Close reachable, full-cover |
-| **025** | build+deploy SmartTodo Code Page + widget (020-024 + 030-033 client work) | Code Page visual QA (top bar, filter pane, completed toggle, coloring, orientation) |
-| **035** | (modal spine deploys with 025's Code Page) | create/open modal + Save&Close refresh (033 UAT script) |
-| **050** | export `spaarke_insights` → apply RibbonDiff edit → import (`notes/task-050`) | Matter "Create To Do" shows checkmark icon |
+| **Code Page** (`sprk_smarttodo`, 025) | ✅ DEPLOYED + published (build: `dist/smarttodo.html`, Vite source-bundles UI.Components; cache cleared; solution-roundtrip upload) | Code Page visual QA (top bar/filter/completed/coloring/orientation) + modal create/open/**Save&Close refresh**/full-cover (header VISIBLE = fine) |
+| **Widget** (SpaarkeAi/LW workspace, 025) | ⏸️ PENDING — modal spine touched `todo.registration.ts` (widget open handler) + shared launcher, which live in the workspace code page, not `sprk_smarttodo`. Needs a separate SpaarkeAi/LW build+deploy (hot-path). | widget Open→modal→refresh (once deployed) |
+| **014 resolver smoke** | (form handlers already live from 014) | subgrid-create from Matter + manual-pick Project → 5 regarding fields + scores |
 
-### 🔜 Remaining after deploy batch
-**041** (Playwright NFR — needs 025 deployed), **051→052** (5-entity ribbon clone + deploy), **060** (real-DV smoke gate — edits `.claude/skills/push-to-github`, MAIN-SESSION-ONLY §3), **090** (wrap-up: test-diet, close #508, defer-issues GH URLs, archive).
+### ⏸️ DEFERRED (operator decision 2026-08-17)
+- **032 header-hide form clone (FR-12)** → DEFERRED to UI-polish. **Reason:** the clone's `setCommandBarVisible(false)` would hide the form command bar = **removes Save**; unverified whether the navigateTo dialog supplies its own Save. Ship the OOB modal WITH its header (Save works), evaluate the real modal live, THEN decide if header-hide is worth a carefully-designed clone. 032 fullCover sizing SHIPS with A. FR-12 partial (full-cover yes, header-hide deferred).
+- **050 + 051 ribbon icons (FR-19)** → DEFERRED to a single ribbon-icon cleanup pass (import shared `spaarke_insights` ONCE for all 6 Create-To-Do buttons). Cosmetic only; 050 RibbonDiff edit already committed + ready. Nothing depends on it.
+
+### 🔜 Remaining after deploy A
+**041** (Playwright NFR — authorable now, live run needs 025+auth), **050→051→052** (ribbon cleanup pass), **060** (real-DV smoke gate — edits `.claude/skills/push-to-github`, MAIN-SESSION-ONLY §3), **090** (wrap-up: test-diet, close #508, defer-issues GH URLs incl. header-hide + ribbon deferrals, archive).
 
 ### Disjoint-partition ledger (subagents share ONE worktree — never co-edit a file)
 - **useKanbanColumns.ts** touched by 022 AND 023 → never same wave.
