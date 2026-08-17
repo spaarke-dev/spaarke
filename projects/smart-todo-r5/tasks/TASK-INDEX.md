@@ -33,7 +33,7 @@
 | 051 | 5 per-entity ribbon solutions (Create To Do) | 6 | FR-19 | sonnet/high | none | 050 | ⛔ deferred (operator 2026-08-17 — 5 live ribbon deploys; do when operator can eyeball) |
 | 052 | Deploy + smoke each parent button | 6 | deploy | sonnet/high | none | 051 | ⛔ deferred (with 051) |
 | 060 | PROC-1 real-DV smoke gate (skill checklist) | 7 | FR-20 | sonnet/high | none | — | ✅ |
-| 090 | Project wrap-up (test-diet, close #508, archive) | 7 | wrap-up | sonnet/high | none | all | 🔄 partial (2026-08-17 — #508 CLOSED, lessons-learned, defer-tracker + README/INDEX honest state; NOT marked Complete: 051/052/032/041/D-13 deferred; `/test-diet` + GH-issue filing + README→Complete held for true close) |
+| 090 | Project wrap-up (test-diet, close #508, archive) | 7 | wrap-up | sonnet/high | none | all | ✅ (2026-08-17 — #508 CLOSED; lessons-learned; `/code-review` clean; `/test-diet` reconciled 0-scaffolding; BFF INBOUND deployed; README→Complete w/ operator-accepted deferrals 051/052/041 + won't-do 032. Remaining tracked D-10..D-13.) |
 
 ## Parallel Execution Groups
 
