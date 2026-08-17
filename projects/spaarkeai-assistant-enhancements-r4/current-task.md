@@ -10,9 +10,9 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | ✅ **001, 022, 010, 020, 030, 011, 012, 013 COMPLETE**. 🎉 **E1 SPINE (010→011→012→013) DONE** — the P1 grounded-recommend core + its FR-10 eval guardrail. Next 🔲 = E2 (021→023→024) or E3 (031/032→033). |
-| **Status** | 013: R4 eval harness (`AssistantEnhancementsR4EvalTests.cs`) + 3 golden utterances (AR4-001/002/003); 6 structural DoD assertions grounding the advisory list-tasks tier; GoldenUtteranceEval gate 154/154; negative check confirmed. All committed locally (NOT pushed; **PR still HELD** per owner). |
-| **Next Action** | Pick next safe wave: **E2** 021 (gate free-string SprkChatSuggestions, dep 012✅+022✅) → 023 (follow-on cards) → 024 (eval); **E3** 031 (feedback→memory, dep 030✅) + 032 (preference-producer, xhigh) → 033 (eval). **040** (D9) needs `--chrome` live-DOM → NOT autonomous. **080** deploy (create `sprk_groundedtoolallowlist` column + re-seed), then **090** wrap-up (/test-diet). |
+| **Task** | ✅ **031 COMPLETE** (feedback→memory pipeline, FR-08). ✅ **001, 022, 010, 020, 030, 011, 012, 013, 031 COMPLETE**. |
+| **Status** | 031: NEW `IPreferenceMemoryCapture` facade (mirrors `IComposeMemoryCapture`) wires `FeedbackService.SubmitAsync` → governed User-scope `Preference` memory. Per-user ONLY (keyed by resolved systemuserid, never oid/global); `trustLevel` inert; best-effort non-blocking. 20/20 tests · build 0 err · publish 43.67 MB · CVE clean · Step 9.5 CLEAN. NOT committed/pushed (owner reviews). |
+| **Next Action** | **E3**: 032 (preference-producer, opus/xhigh — the injection-defense boundary; consumes 031's persisted preference) → 033 (eval + bounds tests). Or **E2** 021→023→024. **040** (D9) needs `--chrome`. **080** deploy, **090** wrap-up. |
 
 ### 012 working state (2026-08-16, opus/high FULL) — analysis complete, machinery pending
 **Conflict-check**: PASS (silent) — no master commits since divergence touch the Chat/catalog files; no open PR overlaps `SessionDispatchOrchestrator.cs`/`list-tasks.action.json`/`sprk_playbookconsumer-rows.json`. (PR #508 = Events/SmartTodo shared components, not my files.)

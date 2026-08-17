@@ -4,7 +4,7 @@
     <title>Feedback→memory pipeline — thumbs-down/comment / "do this every time" → governed preference item (FR-08)</title>
     <phase>3 — E3 feedback→memory loop</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>NEW wiring connecting the one-way feedback sink to the governed memory write path — governance-sensitive persistence.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -79,7 +79,15 @@
     <criterion testable="true">Unit tests added/updated in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
     <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
   </acceptance-criteria>
-  <notes>Code-trace anchors: FeedbackService.SubmitAsync ~:57 (one-way sink); Preference fact type from task 030; IComposeMemoryCapture is the write-facade pattern to mirror. Depends on 030 (needs the `Preference` fact type). Task 032 consumes the persisted preference into a pre-turn tool hint. Run /conflict-check before the BFF PR.</notes>
+  <notes>Code-trace anchors: FeedbackService.SubmitAsync ~:57 (one-way sink); Preference fact type from task 030; IComposeMemoryCapture is the write-facade pattern to mirror. Depends on 030 (needs the `Preference` fact type). Task 032 consumes the persisted preference into a pre-turn tool hint. Run /conflict-check before the BFF PR.
+
+COMPLETED 2026-08-17 (opus/high FULL). NOT committed/pushed (owner reviews governance-sensitive memory code). Files:
+- NEW `Services/Ai/PublicContracts/IPreferenceMemoryCapture.cs` — CRUD-safe capture facade (mirrors IComposeMemoryCapture): PreferenceCaptureInput + PreferenceMemoryCaptureOutcome/Status DTOs.
+- NEW `Services/Ai/PublicContracts/PreferenceMemoryCapture.cs` — resolves AAD oid → canonical Dataverse systemuserid (ISystemUserIdentityResolver), builds a User-scope MemoryItem (Fact.Type=Preference), persists via SHARED IMemoryItemStore.UpsertAsync. TrustLevel=null inert; Tier-3 envelope; best-effort (never throws except honored cancel; unresolvable user → Skipped, NO write).
+- EDIT `Services/Ai/Feedback/FeedbackService.cs` — injects the facade (optional, mirrors optional IAuditLogService precedent); after the feedback write, fires the trigger: standing-directive marker in comment (any rating) → origin=user + ConfirmedByUser=true; thumbs-down+comment w/o directive → origin=ai-derived + ConfirmedByUser=false; else no capture. Non-blocking (feedback id always returned even if capture throws).
+- EDIT `Infrastructure/DI/AiPersistenceModule.cs` — registered IPreferenceMemoryCapture (Scoped).
+- TESTS: NEW PreferenceMemoryCaptureTests (8) + extended FeedbackServiceTests (5 trigger cases). 20/20 targeted pass.
+Governance: per-user ONLY (User scope, keyed by systemuserid — never oid, never Record/global); NO capability-catalog mutation (ADR-039 HITL preserved); trustLevel inert (ADR-042 #616 deferred). BFF build 0 errors; publish 43.67 MB compressed (≤60; no packages added); CVE clean. Step 9.5: code-review PASS (0 critical/0 blocking) + adr-check CLEAN (ADR-013/042/039/010, §10). Escalation trigger did NOT fire (loop closes wholly within per-user memory).</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
