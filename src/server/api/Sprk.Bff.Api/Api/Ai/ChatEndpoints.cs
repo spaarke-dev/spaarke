@@ -980,18 +980,18 @@ public static class ChatEndpoints
             // skip. Best-effort (ADR-019): a proposer failure/timeout silently yields no followups and
             // never breaks the turn.
             var effectiveDocumentId = request.DocumentId ?? session.DocumentId;
-            var followups = new List<ChatSseFollowupItem>();
 
             // (1) Deterministic missing-context action chips (AIPU-058) — fire only when no document is
             //     loaded AND the AI asked for one. Folding these into the grounded menu is a deferred
             //     phase-2; for now they stay deterministic, re-typed as 'action'.
-            followups.AddRange(BuildMissingContextActionChips(effectiveDocumentId, fullResponse.ToString()));
+            var missingContextActionChips = BuildMissingContextActionChips(effectiveDocumentId, fullResponse.ToString());
 
             // (2) The grounded proposer over the conversation tail + the context-scoped candidate menu +
             //     the active tab's server-derived content. Runs on EVERY turn (no length gate) — cadence
             //     is structural. Bounded by a timeout; a failure/timeout silently yields none.
             //     FR-07 (task 050) note preserved: pass request.Message (NOT the augmented attachment
             //     blob) — the followups reason about the user's conceptual question.
+            IReadOnlyList<SuggestedFollowup> grounded = Array.Empty<SuggestedFollowup>();
             try
             {
                 using var followupsTimeoutCts = new CancellationTokenSource(FollowupsTimeoutMs);
@@ -1002,7 +1002,7 @@ public static class ChatEndpoints
                     ? (IReadOnlyCollection<string>)Array.Empty<string>()
                     : WidgetContextTypeResolver.ResolveOpenTabContextTypes(liveTabs);
 
-                var grounded = await suggestionService.SuggestForConversationAsync(
+                grounded = await suggestionService.SuggestForConversationAsync(
                     sessionId,
                     tenantId,
                     request.Message,
@@ -1011,15 +1011,6 @@ public static class ChatEndpoints
                     request.ActiveContext?.TabId,
                     openTabContextTypes,
                     followupsLinkedCts.Token);
-
-                // Capabilities first (what you can DO), then questions (what you can ASK) — the design's
-                // deterministic order (§5a); the client renders the single arrow/affordance distinction.
-                followups.AddRange(grounded
-                    .Where(f => f.Kind == SuggestedFollowupKind.Capability && f.TargetBindingId is not null)
-                    .Select(f => new ChatSseFollowupItem("capability", f.Label, TargetBindingId: f.TargetBindingId)));
-                followups.AddRange(grounded
-                    .Where(f => f.Kind == SuggestedFollowupKind.Question)
-                    .Select(f => new ChatSseFollowupItem("question", f.Label)));
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
@@ -1031,6 +1022,12 @@ public static class ChatEndpoints
             {
                 logger.LogWarning(ex, "Grounded followups failed for session={SessionId}; skipping", sessionId);
             }
+
+            // Merge the two typed sources into ONE ordered list (action → capability → question; a
+            // capability with no binding is dropped) — the §9a wire contract. Extracted to the testable
+            // BuildTypedFollowups (task 024 / FR-10, exercised via InternalsVisibleTo) so the "the wire is
+            // the typed two-kind shape, never an untyped free string" guarantee has a direct regression guard.
+            var followups = BuildTypedFollowups(missingContextActionChips, grounded);
 
             if (followups.Count > 0)
             {
@@ -3298,6 +3295,36 @@ public static class ChatEndpoints
     /// <param name="effectiveDocumentId">The active document ID (null or empty when no document is loaded).</param>
     /// <param name="responseText">The full AI response text to inspect for missing-context keywords.</param>
     /// <returns>The three typed action chips when missing-context is detected; otherwise an empty list.</returns>
+    /// <summary>
+    /// task 024 (FR-04 / FR-10): assemble the ONE typed "suggestions" wire payload from the two typed
+    /// sources — the deterministic missing-context ACTION chips and the grounded proposer's two-kind
+    /// output — in the §9a wire order (ACTION first, then CAPABILITY = what you can DO, then QUESTION =
+    /// what you can ASK). A CAPABILITY whose <c>TargetBindingId</c> is null is DROPPED (a capability with
+    /// no binding is a dead-end and must never reach the wire — the structural death of the P2 free-string
+    /// dead-end); a QUESTION carries only its label. Extracted from the <c>/messages</c> emit path so the
+    /// "the wire shape is the typed two-kind <see cref="ChatSseFollowupItem"/>[], never an untyped string"
+    /// guarantee has a direct regression guard, exercised via <c>InternalsVisibleTo</c> (the same testing
+    /// precedent as this file's other internals). Behavior-preserving refactor of the prior inline block.
+    /// </summary>
+    /// <param name="missingContextActionChips">The deterministic, already-typed <c>action</c> chips (may be empty).</param>
+    /// <param name="grounded">The grounded proposer's typed two-kind followups (empty on a proposer failure/timeout).</param>
+    /// <returns>The ordered, typed followups list; a capability with a null binding id is excluded.</returns>
+    internal static List<ChatSseFollowupItem> BuildTypedFollowups(
+        IReadOnlyList<ChatSseFollowupItem> missingContextActionChips,
+        IReadOnlyList<SuggestedFollowup> grounded)
+    {
+        var followups = new List<ChatSseFollowupItem>(missingContextActionChips);
+        // Capabilities first (what you can DO), then questions (what you can ASK) — the design's
+        // deterministic §5a order; the client renders the single arrow/affordance distinction.
+        followups.AddRange(grounded
+            .Where(f => f.Kind == SuggestedFollowupKind.Capability && f.TargetBindingId is not null)
+            .Select(f => new ChatSseFollowupItem("capability", f.Label, TargetBindingId: f.TargetBindingId)));
+        followups.AddRange(grounded
+            .Where(f => f.Kind == SuggestedFollowupKind.Question)
+            .Select(f => new ChatSseFollowupItem("question", f.Label)));
+        return followups;
+    }
+
     private static IReadOnlyList<ChatSseFollowupItem> BuildMissingContextActionChips(
         string? effectiveDocumentId,
         string responseText)

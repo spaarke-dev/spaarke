@@ -121,7 +121,7 @@ The E2 behaviors' regression guards were authored WITH their features (the ADR-0
 
 **FR-06 is a pure client UX behavior with no BFF dispatch surface** — it correctly has NO golden-utterance-gate home; forcing a BFF fact for it would be mis-shaped. It is guarded entirely by the client suite (023).
 
-**Tracked residual** (behavior-gap register / `notes/defer-issues.md`): there is no end-to-end contract test asserting the `ChatEndpoints` SSE `suggestions` event is emitted in the TYPED shape (vs the retired free-string) — that path requires the live-agent streaming harness the deterministic eval suite deliberately avoids; the typed shape is guarded structurally at the Action-contract (this family) + service (021a) + client-parse (021b) layers instead.
+**Endpoint-wiring guard** (task 024): the `ChatEndpoints` `/messages` path emits the typed `suggestions` payload via the extracted, testable `ChatEndpoints.BuildTypedFollowups` — guarded by `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpointsTypedFollowupsTests.cs` (order action → capability → question, typed-kind mapping, null-binding-capability dropped, empty ⇒ no event). Together with the Action-contract fact (this family) + service (021a) + client-parse (021b), the "the wire is the typed two-kind shape, never an untyped free string" guarantee is covered end to end.
 
 ## Deletion-safety
 
