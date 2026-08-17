@@ -51,10 +51,12 @@
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Endpoints;
+using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
+using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -154,6 +156,40 @@ builder.Services.AddSingleton<IArmKeyVaultRefProbe, AzCliArmKeyVaultRefProbe>();
 builder.Services.AddSingleton<IUpgradeDriftDetector, AzCliUpgradeDriftDetector>();
 builder.Services.AddSingleton<IBicepTemplateInspector, FileBicepTemplateInspector>();
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
+
+// Task 046: H3 Entra app-registration handler + two collaborator seams
+// (IEntraAppRegProvisioner shells out to hardened
+// scripts/Register-EntraAppRegistrations.ps1 per r1 task 010 commit fea66c023;
+// IAdminConsentVerifier queries Graph oauth2PermissionGrants — Wave C4 uses
+// NullAdminConsentVerifier (always Verified) as scaffold, Wave C5 swaps for
+// Microsoft.Graph SDK v6 impl with DefaultAzureCredential per ADR-028). All
+// registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+//
+// Placement Justification (CLAUDE.md §10): H3 lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013). H3
+// uses IProvisioningRunRepository (task 037) + two dedicated seams; no BFF-
+// facade dependencies. Downstream H4 (task 047, Batch 3D) reads bffAppRegId
+// from interStepState; H3 does NOT enqueue H4 directly — Wave C5 reconciler
+// owns fan-out (parity with H2a's post-deploy branching model).
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-028 UAMI-outbound + KV-secret-ref: script uses az operator auth;
+//     client secret stored in KV as BFF-API-ClientSecret and referenced
+//     downstream as @Microsoft.KeyVault(SecretUri=...) — cleartext NEVER
+//     traverses Cosmos parameters/interStepState (handler leak-guard enforces).
+//   - spec.md MUST rule (Dataverse S2S drop per r3 task 060): NO S2sAppRegId
+//     field on EntraAppRegOutputs (compile-time guard); NO code path to
+//     invoke a script that would create one.
+//   - §4C rollback: provisioner failures + missing precondition are Resumable;
+//     cleartext-secret-leak + S2S-forbidden are QuarantineRequired.
+//   - Admin-consent WaitingOnGate is NOT a failure per design.md §4.1 H3 row —
+//     envelope is processed correctly; the gate is external.
+builder.Services.Configure<EntraAppRegOptions>(
+    builder.Configuration.GetSection(nameof(EntraAppRegOptions)));
+builder.Services.AddSingleton<IEntraAppRegProvisioner, RegisterEntraAppRegScriptProvisioner>();
+builder.Services.AddSingleton<IAdminConsentVerifier, NullAdminConsentVerifier>();
+builder.Services.AddScoped<H3EntraAppRegHandler>();
+
 
 // Task 070: H12a AI seed chain handler + two collaborator seams
 // (ISeedManifestReader = on-disk read + SHA-256 hash + defense-in-depth
