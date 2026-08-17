@@ -124,7 +124,7 @@
         <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
       </DisplayRules>
       <Actions>
-        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateEventWizard" Library="$webresource:sprk_wizard_commands.js">
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateEventWizard" Library="$webresource:sprk_wizard_commands">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>
       </Actions>
@@ -137,7 +137,7 @@
         <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
       </DisplayRules>
       <Actions>
-        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateProjectWizard" Library="$webresource:sprk_wizard_commands.js">
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateProjectWizard" Library="$webresource:sprk_wizard_commands">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>
       </Actions>
@@ -150,7 +150,7 @@
         <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
       </DisplayRules>
       <Actions>
-        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateTodoWizard" Library="$webresource:sprk_wizard_commands.js">
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateTodoWizard" Library="$webresource:sprk_wizard_commands">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>
       </Actions>
@@ -163,7 +163,7 @@
         <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
       </DisplayRules>
       <Actions>
-        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openFindSimilarDialog" Library="$webresource:sprk_wizard_commands.js">
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openFindSimilarDialog" Library="$webresource:sprk_wizard_commands">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>
       </Actions>
@@ -176,7 +176,7 @@
         <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
       </DisplayRules>
       <Actions>
-        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openPlaybookLibrary" Library="$webresource:sprk_wizard_commands.js">
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openPlaybookLibrary" Library="$webresource:sprk_wizard_commands">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>
       </Actions>
@@ -189,7 +189,7 @@
         <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
       </DisplayRules>
       <Actions>
-        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openSummarizeFilesWizard" Library="$webresource:sprk_wizard_commands.js">
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openSummarizeFilesWizard" Library="$webresource:sprk_wizard_commands">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>
       </Actions>
@@ -202,7 +202,7 @@
         <DisplayRule Id="sprk.Wizard.Matter.Form.DisplayRule" />
       </DisplayRules>
       <Actions>
-        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openDocumentUploadWizard" Library="$webresource:sprk_wizard_commands.js">
+        <JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openDocumentUploadWizard" Library="$webresource:sprk_wizard_commands">
           <CrmParameter Value="PrimaryControl" />
         </JavaScriptFunction>
       </Actions>
