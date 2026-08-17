@@ -25,7 +25,7 @@
 //                             (fleet-scoped queue; DefaultAzureCredential;
 //                             deterministic MessageId for FR-22 level-1
 //                             idempotency; SessionId = CustomerId).
-//   - Task 039 (this task):   OpenTelemetry -> Azure Monitor exporter behind
+//   - Task 039:               OpenTelemetry -> Azure Monitor exporter behind
 //                             AzureMonitorGuard + AuditLogMiddleware
 //                             (NFR-11 auditable operator action; every
 //                             mutating endpoint audit-logs actor tid/oid/roles
@@ -35,6 +35,12 @@
 //                             claims are populated) and BEFORE UseAuthorization
 //                             (so 401/403 short-circuits are captured per POML
 //                             acceptance #4).
+//   - Task 041 (this task):   H0 preflight handler + four preflight quota
+//                             probes (Azure OpenAI TPM, Dataverse env-rate,
+//                             subscription vCPU, SPE cert-bootstrap) wired
+//                             behind IProvisioningHandler in DI via
+//                             AddProvisioningHandlers. First handler in the
+//                             wave C4 catalog (spec.md FR-01 + NFR-12).
 //   - Wave C5:                Real POST /api/runs handler (replaces the 501
 //                             placeholder) + reconciler background service
 //                             (consumes IHandlerEnqueuer).
@@ -45,8 +51,10 @@
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Endpoints;
+using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
+using Sprk.Provisioning.ControlPlane.Registry;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -74,6 +82,27 @@ builder.Services.AddServiceBusModule(builder.Configuration);
 // records land in Azure Monitor `traces` with structured properties in
 // customDimensions (Kusto: `traces | where message startswith "AuditableAction"`).
 builder.Services.AddTelemetryModule(builder.Configuration, builder.Environment.EnvironmentName);
+// Task 041: Provisioning handler surface — H0 preflight handler + the four
+// IPreflightQuotaProbe registrations (one per script under
+// scripts/preflight/*.ps1). H0 blocks the pipeline BEFORE H1 starts on any
+// insufficient headroom (spec.md FR-01 + NFR-12; design.md § 15 north-star:
+// surface lead-time items UP-FRONT, not after the 30-min Bicep step). Wave
+// C5 adds the reconciler background service that dispatches these handlers
+// off the Service Bus queue; today they resolve via IProvisioningHandler
+// for unit tests + the temporary H0-enqueues-H0.5 bridge documented in
+// H0PreflightHandler.
+builder.Services.AddProvisioningHandlers(builder.Configuration);
+
+// Task 042: H0.5 consent-capture handler + registry lookup placeholder.
+// Wave C5 replaces NullDataverseEnvironmentRegistryClient with a real
+// Dataverse-backed impl once the L2 Dataverse client wiring lands.
+// Both registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+// Placement Justification (CLAUDE.md §10): the handler lives in L2 (not
+// BFF) per spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types
+// (ADR-013 forcing-function rule — no IActionResolver, IActionRunner,
+// IOpenAiClient, IPlaybookService injection).
+builder.Services.AddSingleton<IDataverseEnvironmentRegistryClient, NullDataverseEnvironmentRegistryClient>();
+builder.Services.AddScoped<H05ConsentCaptureHandler>();
 
 var app = builder.Build();
 
