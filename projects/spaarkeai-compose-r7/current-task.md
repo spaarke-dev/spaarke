@@ -1,9 +1,9 @@
 # Current Task State — spaarkeai-compose-r7
 
-> **Last Updated**: 2026-08-17 (task 090 IN PROGRESS — pre-deploy steps 0–5 DONE + committed; STOPPED at the irreversible deploy/merge boundary awaiting owner go/no-go)
+> **Last Updated**: 2026-08-17 (task 090 IN PROGRESS — code MERGED TO MASTER; only the operator dev-deploy + final closure remain)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git**: 0 behind master; 42+ ahead; **13 commits unpushed** (branch never pushed this session). Working tree clean.
+> **Git**: `/worktree-sync` Full Sync DONE — pushed + **fast-forward merged to master** (`origin/master` @ `b8befe571`, main repo synced, 0 conflicts). `/conflict-check` CLEAN (no PR file-overlap; no sibling in-flight dev deploy; dev on net10 baseline). Branch == master + these closure-doc commits.
 
 ---
 
@@ -11,9 +11,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **090 wrap-up — IN PROGRESS.** Pre-deploy steps 0–5 complete. Steps 6 (deploy+merge) and 7–9 (README/plan/lessons/TASK-INDEX→✅) NOT done — they follow the deploy. |
-| **Step** | ⛔ STOPPED before step 6 (anti-clobber deploy + merge-to-master) — irreversible; owner authorization + live env required. |
-| **Next Action** | Owner decides go/no-go on: (1) `/conflict-check` + **deploy BFF + `sprk_spaarkeai` together** (NFR-05, never from net8, publish ≤60 MB); (2) `/worktree-sync` push the 13 commits + **merge-to-master** (deferred here by project decision). THEN steps 7–9: README→Complete, plan ✅, lessons-learned, TASK-INDEX 090→✅. |
+| **Task** | **090 wrap-up — IN PROGRESS.** Steps 0–5 done; **step 6 code-merge DONE** (merged to master `b8befe571`). REMAINING: the dev **deploy** (operator) + final closure steps 7–9. |
+| **Step** | ⛔ Holding at the **dev deploy** — operator-run in a coordinated NFR-05 window (BFF + `sprk_spaarkeai` TOGETHER, from THIS net10 tree, never net8). Code is safely on master regardless. |
+| **Next Action** | (1) **Operator**: deploy BFF + `sprk_spaarkeai` together to `spaarke-bff-dev` in a coordinated window (publish ≤60 MB vs ~44.96; verify no clobber). (2) THEN final closure: README→Complete + changelog, plan milestones ✅, TASK-INDEX 090→✅, then a final `/worktree-sync` to push the closure commits. Cite the 4 documented exceptions in the wrap-up record. |
+
+### ✅ Done this session (all on master @ b8befe571)
+- **Merge-to-master**: `/worktree-sync` Full Sync — 46 commits fast-forwarded to master, 0 conflicts, main repo synced.
+- **`/conflict-check`** (anti-clobber, per owner request): CLEAN. No open PR overlaps our 24 src files (checked #690/#508 + 6 BFF dependabot); 0 behind master; no active BFF/SpaarkeAi sibling has an in-flight dev deploy (55-row registry sweep — all are complete+merged, or initialize-only/owner-gated). dev runs the net10 master our branch targets. Residual risk = real-time deploy timing → operator window.
+- **lessons-learned.md** written (CS0535 cross-project build gap; nonce-baseline focus-steal; authenticatedFetch-throws; client-only-autosave; §6.5 Path A; deploy-coordination).
 
 ### ✅ Task 090 pre-deploy work DONE this session (all committed, unpushed)
 - **Step 1 (code-review + adr-check)**: ran holistic review via 2 background agents (server C# / client TS). Fixed 1 CRITICAL + 1 WARNING:
