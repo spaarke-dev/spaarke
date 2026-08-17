@@ -105,7 +105,7 @@ import {
   type InputOnChangeData,
 } from '@fluentui/react-components';
 import { ArrowClockwiseRegular, Add20Regular, Open20Regular, Search20Regular } from '@fluentui/react-icons';
-import { OrientationToggle, type Orientation, MicrosoftToDoIcon } from '@spaarke/ui-components';
+import { OrientationToggle, type Orientation, type ToolbarAction, MicrosoftToDoIcon } from '@spaarke/ui-components';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
@@ -921,6 +921,13 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // Render
   // -------------------------------------------------------------------------
 
+  // Selection-aware actions (§11 parity with the Code Page) — the shared
+  // <Header> renders these via <SelectionAwareToolbar> when ≥1 card is selected.
+  const widgetToolbarActions = React.useMemo<ToolbarAction[]>(
+    () => [{ id: 'open', label: 'Open', icon: <Open20Regular />, onClick: handleOpenSelected }],
+    [handleOpenSelected]
+  );
+
   return (
     <div
       className={styles.root}
@@ -950,7 +957,7 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         title={title}
         onRefresh={refetch}
         selectedCount={selectedIds.size}
-        toolbarActions={[]}
+        toolbarActions={widgetToolbarActions}
         orientation={orientation}
         onOrientationChange={setOrientation}
         isFilterPaneOpen={isSearchExpanded}
