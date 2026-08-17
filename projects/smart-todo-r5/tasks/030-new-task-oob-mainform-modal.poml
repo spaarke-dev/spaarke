@@ -4,7 +4,7 @@
     <title>+ New Task opens sprk_todo OOB main form (create) as a modal (FR-10)</title>
     <phase>4: Main-form modal</phase>
     <gate>013 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx across two surfaces (SmartTodo Code Page + potentially the shared OOB-launch module); changes a production create flow from a proprietary wizard to an OOB Dataverse form modal; tags include dataverse/modal. CLAUDE.md §8 FULL trigger.</rigor-reason>
     <model-tier>sonnet</model-tier>

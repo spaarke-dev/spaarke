@@ -47,7 +47,7 @@
     </CustomAction>
     <CustomAction Id="sprk.Wizard.Matter.CreateTodo.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">
       <CommandUIDefinition>
-        <Button Alt="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.Alt" Command="sprk.Wizard.Matter.CreateTodo.Command" Id="sprk.Wizard.Matter.CreateTodo.Button" Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png" LabelText="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.ToolTipDescription" />
+        <Button Alt="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.Alt" Command="sprk.Wizard.Matter.CreateTodo.Command" Id="sprk.Wizard.Matter.CreateTodo.Button" Image32by32="$webresource:sprk_ToDoCheckmark32.svg" Image16by16="$webresource:sprk_ToDoCheckmark16.svg" ModernImage="$webresource:sprk_ToDoCheckmark32.svg" LabelText="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.LabelText" Sequence="0" TemplateAlias="o1" ToolTipTitle="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.ToolTipTitle" ToolTipDescription="$LocLabels:sprk.Wizard.Matter.CreateTodo.Button.ToolTipDescription" />
       </CommandUIDefinition>
     </CustomAction>
     <CustomAction Id="sprk.Wizard.Matter.FindSimilar.Button.CustomAction" Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children" Sequence="0">

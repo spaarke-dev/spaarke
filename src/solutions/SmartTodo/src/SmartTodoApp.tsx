@@ -60,6 +60,7 @@ import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolb
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
 import { useLaunchContext } from "./hooks/useLaunchContext";
 import { useUserPreferences } from "./hooks/useUserPreferences";
+import { launchNewTaskCreateForm } from "./services/newTaskLauncher";
 // SmartTodoViewMode type import removed 2026-06-19 — see viewMode removal above.
 
 // ---------------------------------------------------------------------------
@@ -195,6 +196,20 @@ function SmartTodoLayout(): React.ReactElement {
     innerRefetchRef.current = fn;
   }, []);
 
+  // Refresh — UAT 2026-06-21 round 8: route to the inner SmartToDo's real
+  // refetch (captured via onRefetchReady). Fall back to the TodoContext
+  // refetch only if the inner one hasn't reported in yet (defensive — would
+  // never happen in normal mount order). Declared here (moved up by task 030,
+  // FR-10) so `handleNewTask` below can call it on save — was previously
+  // defined further down, used only by the Header's Refresh menu item.
+  const handleRefresh = React.useCallback(() => {
+    if (innerRefetchRef.current) {
+      innerRefetchRef.current();
+    } else {
+      refetch();
+    }
+  }, [refetch]);
+
   // ── R4 task 030 — Header state (App-level, per task brief) ───────────────
   //
   // `searchQuery` is owned here and still forwarded to `<SmartToDo>` for its
@@ -243,15 +258,29 @@ function SmartTodoLayout(): React.ReactElement {
     DEFAULT_TODO_FILTER,
   );
 
-  // ── task 020 (FR-05 / U-3, 2026-08-16) — "+ New Task" stub ───────────────
+  // ── Launch context — read once on mount (task 100 / W-2, extended R4-034,
+  //     hoisted here by task 030 so both the "+ New Task" handler below AND
+  //     the openTodo effect further down can read it). ───────────────────────
+  const launchContext = useLaunchContext();
+
+  // ── task 030 (FR-10, 2026-08-16) — "+ New Task" opens the sprk_todo OOB
+  //     main form in CREATE mode as a modal ────────────────────────────────
   //
-  // TODO(030): wire to OOB main-form create modal per FR-10. Task 030 has
-  // not landed yet, so this is a documented no-op — the button must stay
-  // visible and clickable (never hidden, never throws) per this task's
-  // acceptance criteria.
+  // Replaces task 020's documented no-op stub. Reuses
+  // `navigateToEntityRecordSurfaceAsync` (via `launchNewTaskCreateForm` in
+  // `services/newTaskLauncher.ts`) — the SAME launcher already wired into the
+  // Assistant surface-launch registry — per CLAUDE.md §11 (no second,
+  // parallel `Xrm.Navigation.navigateTo` call site). ADR-050 Path A exception
+  // (spec.md ADR Tensions / CLAUDE.md §6.5): this deliberately stays on the
+  // OOB main form, NOT a proprietary `SprkModal`/`FormModal`. On save
+  // (`outcome.savedEntityReference` present), `handleRefresh` re-fetches the
+  // Kanban so the new To Do appears without a manual reload; on cancel,
+  // nothing happens (negative acceptance criterion). Does NOT touch
+  // `LaunchCreateTodoWizardHost` / `CreateTodoWizard` below — that stays the
+  // Outlook/parent-ribbon entry point (FR-19, out of this task's scope).
   const handleNewTask = React.useCallback(() => {
-    // Intentional no-op until task 030 (FR-10) lands.
-  }, []);
+    void launchNewTaskCreateForm(launchContext, handleRefresh);
+  }, [launchContext, handleRefresh]);
 
   // R2 FR-13 (2026-07-01) — The hybrid `<SmartTodoModal>` (R4 task 040) that
   // used to overlay this component has been retired. The `OPEN_TODOS_EVENT`
@@ -265,7 +294,6 @@ function SmartTodoLayout(): React.ReactElement {
   // Page with `?action=openTodo&todoId=<guid>`, `useLaunchContext` returns the
   // `openTodo` discriminator. R2 FR-13 (2026-07-01) — this path now calls
   // `openSprkTodoAsLayout1` directly (was setModalTodoId under R4-100/W-2).
-  const launchContext = useLaunchContext();
   React.useEffect(() => {
     if (launchContext?.action === 'openTodo') {
       openSprkTodoAsLayout1(launchContext.todoId);
@@ -429,26 +457,15 @@ function SmartTodoLayout(): React.ReactElement {
     [actionHandlers],
   );
 
-  // Refresh — UAT 2026-06-21 round 8: route to the inner SmartToDo's real
-  // refetch (captured via onRefetchReady). Fall back to the TodoContext
-  // refetch only if the inner one hasn't reported in yet (defensive — would
-  // never happen in normal mount order).
-  const handleRefresh = React.useCallback(() => {
-    if (innerRefetchRef.current) {
-      innerRefetchRef.current();
-    } else {
-      refetch();
-    }
-  }, [refetch]);
-
   // task 020 (FR-05 / U-3, 2026-08-16) — The QuickAdd inline input (title →
   // QUICK_ADD_TODO_EVENT → SmartToDo's handleAdd) and its Header-side
   // "+ New" wizard button (`onOpenWizard`) were removed along with the rest
   // of the QuickAdd group. The Header's new primary add path is the
-  // "+ New Task" button (`handleNewTask`, stubbed below — TODO(030)). The
-  // richer `CreateTodoWizard` path remains reachable via Outlook ribbon +
-  // parent-form ribbon launches (`LaunchCreateTodoWizardHost`, below) — those
-  // launch triggers are unrelated to the Header and were not touched here.
+  // "+ New Task" button (`handleNewTask`, wired to the OOB create form by
+  // task 030 / FR-10 — see declaration above). The richer `CreateTodoWizard`
+  // path remains reachable via Outlook ribbon + parent-form ribbon launches
+  // (`LaunchCreateTodoWizardHost`, below) — those launch triggers are
+  // unrelated to the Header and were not touched here.
 
   // ── R4 task 042 (FR-18) — TodoDetailPanel side-pane retired ──────────────
   // The R3 two-pane layout (kanban + collapsible TodoDetailPanel separated by

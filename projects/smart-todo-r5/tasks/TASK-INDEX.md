@@ -20,7 +20,7 @@
 | 023 | Subtle channel coloring + yellow-contrast audit | 3 | FR-08 | sonnet/high | Q | 003 | ✅ |
 | 024 | Widget default = side-by-side columns | 3 | FR-09 | sonnet/high | none | 003 | ✅ |
 | 025 | Deploy code page + widget; visual QA | 3 | deploy | sonnet/high | none | 020-024 | 🔲 |
-| 030 | + New Task opens OOB main form (create) modal | 4 | FR-10 | sonnet/high | none | 013 | 🔲 |
+| 030 | + New Task opens OOB main form (create) modal | 4 | FR-10 | sonnet/high | none | 013 | ✅ |
 | 031 | Open shares same launch mechanism | 4 | FR-11 | sonnet/high | none | 030 | 🔲 |
 | 032 | Full-cover sizing + hide main-form header | 4 | FR-12/13 | sonnet/high | none | 031 | 🔲 |
 | 033 | Save & Close dismiss + kanban refresh (interceptor) | 4 | FR-14 | opus/xhigh | none | 032 | 🔲 |
@@ -29,7 +29,7 @@
 | 040 | vitest expansion + new coverage | 5 | FR-16 | sonnet/high | R | 011,021,022 | ✅ |
 | 041 | Playwright NFR suite (perf/a11y/orientation) | 5 | FR-17 | sonnet/high | R | 024,025 | 🔲 |
 | 042 | R-10 handleEmail seam + un-skip; RegardingResolver S1/N1 | 5 | FR-18 | sonnet/high | R | — | ✅ |
-| 050 | Refresh Matter ribbon icon + RibbonDiff | 6 | FR-19 | sonnet/high | S | — | 🔲 |
+| 050 | Refresh Matter ribbon icon + RibbonDiff | 6 | FR-19 | sonnet/high | S | — | 🔄 |
 | 051 | 5 per-entity ribbon solutions (Create To Do) | 6 | FR-19 | sonnet/high | none | 050 | 🔲 |
 | 052 | Deploy + smoke each parent button | 6 | deploy | sonnet/high | none | 051 | 🔲 |
 | 060 | PROC-1 real-DV smoke gate (skill checklist) | 7 | FR-20 | sonnet/high | none | — | 🔲 |
