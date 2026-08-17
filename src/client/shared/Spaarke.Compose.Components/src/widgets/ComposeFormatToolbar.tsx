@@ -126,6 +126,7 @@ import {
   ArrowRedo24Regular,
   Info24Regular,
   CommentMultiple24Regular,
+  CommentAdd24Regular,
   ChevronDown16Regular,
   DocumentEdit24Regular,
   OpenRegular,
@@ -245,6 +246,15 @@ export interface ComposeFormatToolbarProps {
   trackChangesEnabled?: boolean;
   /** Toggle the live Track Changes overlay. Rendered only when supplied. */
   onToggleTrackChanges?: () => void;
+
+  // ---- Add Comment (FR-10 / R6 D7, task 072) — the UI entry point onto the SHIPPED comment
+  //      round-trip machinery (useComposeCommentThreads / ComposeCommentThread, R6 tasks 024/026).
+  //      The prior "Comments" FAB was removed (UAT round-6 #3b), leaving the panel reachable-less;
+  //      this re-exposes it as a toolbar toggle. Rendered only when the handler is supplied. ----
+  /** True when the Comments composer/panel is open (drives the toggle's pressed state). */
+  commentsOpen?: boolean;
+  /** Open the Comments composer for the current selection (host captures the range). Rendered only when supplied. */
+  onToggleComments?: () => void;
 
   // ---- Deferred edit-path gate (task 038, supersedes task 037 — R4 zero-error guardrails) ----
   /**
@@ -469,6 +479,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     applyTemplateDisabledReason,
     trackChangesEnabled,
     onToggleTrackChanges,
+    commentsOpen,
+    onToggleComments,
     hasReview,
     reviewSummaryOpen,
     onToggleReviewSummary,
@@ -1106,7 +1118,26 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
 
       <ToolbarDivider data-testid="compose-format-divider-2" />
 
-      {/* ==== Group 3 (UAT round-4 #12): Show/Hide Review Notes · Track Changes ==== */}
+      {/* ==== Group 3 (UAT round-4 #12): Add Comment · Show/Hide Review Notes · Track Changes ==== */}
+      {/* ---- Add Comment (FR-10 / R6 D7, task 072) — the re-exposed UI entry point onto the SHIPPED
+             comment machinery (host `onToggleComments` = handleToggleComments, which captures the live
+             selection into a pendingRange and opens the ComposeCommentThread composer). ICON-ONLY toggle
+             mirroring Track Changes: primary/subtle appearance carries the on/off state (ADR-021 —
+             semantic tokens only, dark-mode-correct), accessible name + pressed state + tooltip retained. ---- */}
+      {onToggleComments ? (
+        <Tooltip content="Add a comment on the selected text" relationship="label" withArrow>
+          <ToolbarButton
+            appearance={commentsOpen ? 'primary' : 'subtle'}
+            icon={<CommentAdd24Regular />}
+            aria-label="Add comment"
+            aria-pressed={commentsOpen === true}
+            disabled={controlDisabled}
+            onClick={onToggleComments}
+            data-testid="compose-format-add-comment"
+          />
+        </Tooltip>
+      ) : null}
+
       {hasReview && onToggleReviewNotes ? (
         <Tooltip content={reviewNotesOpen ? 'Hide Review Notes' : 'Show Review Notes'} relationship="label" withArrow>
           <ToolbarButton

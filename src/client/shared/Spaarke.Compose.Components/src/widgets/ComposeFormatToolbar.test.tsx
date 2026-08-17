@@ -660,6 +660,43 @@ describe('ComposeFormatToolbar — Track Changes toggle (item 4)', () => {
   });
 });
 
+describe('ComposeFormatToolbar — Add Comment affordance (FR-10 / R6 D7, task 072)', () => {
+  it('is not rendered when no onToggleComments handler is wired', () => {
+    renderFormatToolbar();
+    expect(screen.queryByTestId('compose-format-add-comment')).not.toBeInTheDocument();
+  });
+
+  it('renders and fires onToggleComments when clicked (drives the shipped comment machinery via the host)', async () => {
+    const user = userEvent.setup();
+    const onToggleComments = jest.fn();
+    renderFormatToolbar({}, { props: { onToggleComments, commentsOpen: false } });
+
+    const btn = screen.getByTestId('compose-format-add-comment');
+    expect(btn).toHaveAttribute('aria-label', 'Add comment');
+    expect(btn).toHaveAttribute('aria-pressed', 'false');
+    await user.click(btn);
+    expect(onToggleComments).toHaveBeenCalledTimes(1);
+  });
+
+  it('reflects the open state via aria-pressed', () => {
+    renderFormatToolbar({}, { props: { onToggleComments: jest.fn(), commentsOpen: true } });
+    expect(screen.getByTestId('compose-format-add-comment')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('is disabled when the toolbar is globally disabled', () => {
+    renderFormatToolbar({}, { props: { onToggleComments: jest.fn(), disabled: true } });
+    expect(screen.getByTestId('compose-format-add-comment')).toBeDisabled();
+  });
+
+  it('ADR-021: renders under a dark theme with no hardcoded hex color', () => {
+    const { container } = renderFormatToolbar({}, { theme: webDarkTheme, props: { onToggleComments: jest.fn() } });
+    const btn = screen.getByTestId('compose-format-add-comment');
+    expect(btn).toBeInTheDocument();
+    // The button subtree carries only Fluent v9 semantic tokens — no literal hex colors (ADR-021).
+    expect(btn.outerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 7. Sticky pin + disabled-all + dark mode
 // ---------------------------------------------------------------------------

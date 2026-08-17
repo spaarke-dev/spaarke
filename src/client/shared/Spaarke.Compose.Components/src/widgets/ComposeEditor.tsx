@@ -3241,6 +3241,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           applyTemplateDisabledReason={applyTemplateDisabledReason}
           trackChangesEnabled={trackChangesEnabled}
           onToggleTrackChanges={toggleTrackChanges}
+          // FR-10 / R6 D7 (task 072) — re-expose the SHIPPED comment machinery: the toolbar "Add
+          // Comment" toggle drives handleToggleComments, which captures the live selection into
+          // pendingCommentRange and opens the ComposeCommentThread composer (below). No new pipeline.
+          commentsOpen={commentsOpen}
+          onToggleComments={handleToggleComments}
           // UAT round-2 items #1/#2 — the "Review" dropdown. Shown only when an NDA advisory review is
           // present (in-document advisory threads OR summary findings the host reports). "Review Summary"
           // toggles the host's docked panel; "Review Notes" toggles the right-gutter cards (local state).

@@ -3,8 +3,8 @@
   <metadata>
     <title>Add Comment toolbar affordance wired to shipped machinery (R6 D7 / FR-10)</title>
     <phase>7 Accepted Defers + Hardening</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx toolbar UI + wires to existing comment machinery; frontend with dark-mode requirements.</rigor-reason>
     <model-tier>sonnet</model-tier>

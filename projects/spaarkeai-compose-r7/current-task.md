@@ -11,9 +11,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **071 ✅ COMPLETE** (Reload-from-source no-blank, FR-09 — root-caused + fixed). Next: **072** (add-comment toolbar affordance, FR-10) |
-| **Step** | 071 root-caused (loadSucceeded didn't stamp driveId → reload lost the drive → !loadDriveId reset → blank); fixed + gated (code-review + adr-check PASS); 645 standalone jest green (+3 reducer tests); committed. |
-| **Next Action** | Execute **072** (add-comment toolbar affordance, FR-10) → 074 (apply-template ETag/404, FR-12) → 090 wrap-up. |
+| **Task** | **072 ✅ COMPLETE** (Add Comment toolbar affordance, FR-10). Next: **074** (apply-template ETag/If-Match + typed-404, FR-12) |
+| **Step** | 072 wired the toolbar entry point onto the shipped comment machinery + gated (code-review + adr-check PASS, ADR-021 dark-mode); 650 standalone jest green (+5 toolbar tests); committed. |
+| **Next Action** | Execute **074** (apply-template ETag/If-Match + ApiError-typed 404, FR-12) → 090 wrap-up. |
+
+### Task 072 — what shipped (see notes/task-072-notes.md)
+**Re-exposed the shipped comment machinery (§11 — no rebuild).** The comment round-trip (`useComposeCommentThreads.createThread` + `ComposeCommentThread` composer + `handleToggleComments`) shipped in R6 (024/026); only the UI trigger was missing (the "Comments" FAB was removed UAT round-6 #3b, leaving the panel unreachable). Fix: added an "Add Comment" icon-toggle to `ComposeFormatToolbar` (Group 3, next to Review Notes/Track Changes; mirrors the Track Changes toggle — ADR-021 primary/subtle tokens, dark-mode-correct; new optional `commentsOpen`/`onToggleComments` props) + threaded `onToggleComments={handleToggleComments}` from ComposeEditor. The button drives the EXISTING seam (selection → pendingCommentRange → composer → createThread). ComposeAiToolbar.tsx intentionally NOT modified (single entry point, directional deviation recorded). +5 standalone toolbar tests (fire, aria-pressed, disabled, dark-mode no-hex). No BFF bytes.
 
 ### Task 071 — what shipped (see notes/task-071-notes.md)
 **Root cause of R6 D4 "Reload from source blanks + asks for re-upload":** the BFF Load response carries an authoritative `payload.driveId`, but `loadSucceeded` never stamped it onto `documentRef` (unlike `saveSucceeded`, which does — line 753). So a BU-container/PDF-sourced/promoted doc had `documentRef.driveId=undefined` after load; on Reload-from-source (`requestLoad`), `loadDriveId = documentRef.driveId ?? effectiveDriveId` went falsy → the `!loadDriveId → dispatch({kind:'reset'})` branch → INITIAL_STATE → "re-upload" empty state. **Fix (pure client mount-state):** stamp `driveId: payload.driveId` in `loadSucceeded` (action field + reducer documentRef spread, mirroring the shipped saveSucceeded stamp). Reload now retains the drive → fetches → repopulates. Escalation trigger did NOT fire (no server round-trip added; the reload's round-trip is the feature). +3 standalone reducer tests. No BFF bytes. Reuses the existing requestLoad path (§11).
