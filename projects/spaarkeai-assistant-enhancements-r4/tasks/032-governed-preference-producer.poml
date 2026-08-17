@@ -4,7 +4,30 @@
     <title>Governed narrow-allow-list preference-producer → pre-turn tool hint (FR-09)</title>
     <phase>3 — E3 feedback→memory loop</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-17 (opus/xhigh, FULL — the injection-defense boundary). Design: the ONE sanctioned seam where a
+         LEARNED preference biases behavior, bounded to be injection-safe. NEW static PreferenceDirectiveProducer
+         (Services/Ai/Context/, pure function mirroring StatedProfileRenderer): a CLOSED allow-list of named directives
+         (task-agenda-default, daily-briefing-default) is matched by DETERMINISTIC ordinal marker-containment (no LLM, no
+         classifier) against the caller's CONFIRMED Preference facts; a match emits a FIXED SERVER-AUTHORED hint that biases
+         the DEFAULT of an ALREADY-AVAILABLE capability. Wired as a 4th sibling userFragment producer on ContextBinder
+         (ResolvePreferenceDirectiveFragmentAsync, reads IMemoryItemStore.GetForUserAsync, soft-fails to null). THE BOUNDS:
+         (1) PROMPT-ONLY — the hint folds into the userFragment; it NEVER touches AgentToolFilterContext (the mount set stays
+         preference-blind; proven — the two structural-invariant tests stay at 7 members, NO 032 member added → a preference
+         reaches the grounding filter through NO member at all). Never grants a capability. (2) Never alters a fact (adds no
+         grounded data; the hint re-states "every fact must come from a tool result"). (3) INJECTION-SAFE — the user's RAW
+         preference text is NEVER emitted as an instruction; only the closed-set match fires the fixed hint (poisoned-text test
+         proves an injection payload in the preference emits only the server hint). (4) CONFIRMED-ONLY — an unconfirmed
+         ai-derived inference (task-031 dormant candidate) never steers (ADR-042 coherence). (5) Off-allow-list directive =
+         inert. (6) guillemet DATA-guard discipline preserved (DirectiveGuard line states the hard bound). trustLevel inert
+         (#616). Also FIXED a pre-existing task-011 regression: 2 invariant tests (ContextBinderOrgContextTests +
+         StatedProfileSecurityTests) hardcoded AgentToolFilterContext=6 props; 011 added AdvisoryToolAllowList (→7) without
+         updating them — reconciled + repurposed as live 032 guards. 8 producer bounds tests + 2 fixed = 85/85 ContextBinder
+         suite green; build 0 err; publish 43.68 MB compressed (≤60, Δ≈0); CVE clean. Step 9.5 CLEAN (adr-check ADR-039
+         preference-only / ADR-042 / ADR-013 / §10 / §11, 0 violations; code-review 0 blocking — 1 note: independent
+         GetForUserAsync read, acceptable). Escalation trigger did NOT fire. 033 adds the eval + wider bounds coverage. -->
+    <!-- ORIGINAL: <status>pending</status> -->
+
     <rigor>FULL</rigor>
     <rigor-reason>Crosses the advisory→bounded-directive line at the injection-defense boundary; a preference-producer seam on ContextBinder that must never become a capability grant.</rigor-reason>
     <model-tier>opus</model-tier>

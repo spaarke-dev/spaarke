@@ -561,11 +561,14 @@ public sealed class ContextBinder : IContextBinder
         var statedProfileFragment = await ResolveStatedProfileFragmentAsync(systemUserId, ct).ConfigureAwait(false);
         var orgContextFragment = await ResolveOrgContextFragmentAsync(systemUserId, ct).ConfigureAwait(false);
         var memoryRecallFragment = await ResolveUserMemoryFragmentAsync(systemUserId, ct).ConfigureAwait(false);
+        // task 032 (FR-09): the fourth sibling — the governed narrow-allow-list preference-directive HINT.
+        var preferenceDirectiveFragment = await ResolvePreferenceDirectiveFragmentAsync(systemUserId, ct).ConfigureAwait(false);
 
-        // Deterministic order: stated profile FIRST, then org (BU/team) context, then memory recall. Present
-        // blocks are joined by a blank line. This preserves the prior behavior exactly when the org block is
-        // absent (stated-only → stated; memory-only → memory; stated+memory → stated\n\nmemory). All absent → null.
-        var blocks = new List<string>(3);
+        // Deterministic order: stated profile FIRST, then org (BU/team) context, then memory recall, then the
+        // preference-directive hint LAST (task 032). Present blocks are joined by a blank line. This preserves
+        // the prior behavior exactly when the new blocks are absent (stated-only → stated; memory-only →
+        // memory; stated+memory → stated\n\nmemory). All absent → null.
+        var blocks = new List<string>(4);
         if (statedProfileFragment is not null)
         {
             blocks.Add(statedProfileFragment);
@@ -577,6 +580,10 @@ public sealed class ContextBinder : IContextBinder
         if (memoryRecallFragment is not null)
         {
             blocks.Add(memoryRecallFragment);
+        }
+        if (preferenceDirectiveFragment is not null)
+        {
+            blocks.Add(preferenceDirectiveFragment);
         }
 
         return blocks.Count == 0 ? null : string.Join("\n\n", blocks);
@@ -664,6 +671,43 @@ public sealed class ContextBinder : IContextBinder
             _logger.LogWarning(ex,
                 "ContextBinder: user-memory store read failed for the resolved caller — User recall " +
                 "fragment degrades to absent (soft-fail; a bind is never taken down by memory). NFR-07.");
+            return null;
+        }
+    }
+
+    // ── User-scope GOVERNED preference-directive hint (task 032, FR-09): the ONE sanctioned seam where a
+    //    LEARNED preference biases behavior. Reads the caller's CONFIRMED Preference facts and runs the
+    //    CLOSED-allow-list PreferenceDirectiveProducer, which emits a SERVER-AUTHORED pre-turn hint that
+    //    biases the DEFAULT of an already-available capability. Soft-fail to null (store outage / no confirmed
+    //    directive → absent). ADR-039 preference-only: this is PROMPT text folded into the User slice — it
+    //    NEVER reaches AgentToolFilterContext / grounding / dispatch (the mount set stays preference-blind,
+    //    the task-011 ProfileInjection invariant). Confirmed-only (task-031 dormant candidates never steer);
+    //    the user's raw preference text is never emitted as an instruction (only the fixed hint is). ────────
+
+    private async Task<string?> ResolvePreferenceDirectiveFragmentAsync(string systemUserId, CancellationToken ct)
+    {
+        if (_memoryItemStore is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var items = await _memoryItemStore.GetForUserAsync(systemUserId, ct).ConfigureAwait(false);
+            var facts = items.Select(i => i.Fact).ToList();
+            return PreferenceDirectiveProducer.Produce(facts);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Defense-in-depth: a store outage degrades the preference-directive hint to absent — a bind is
+            // never taken down by a preference, and the ABSENCE of a hint is always the safe default (NFR-07).
+            _logger.LogWarning(ex,
+                "ContextBinder: preference-directive read failed for the resolved caller — the governed " +
+                "preference hint degrades to absent (soft-fail; the safe default is no steering).");
             return null;
         }
     }

@@ -10,9 +10,9 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | ✅ **031 COMPLETE** (feedback→memory pipeline, FR-08). ✅ **001, 022, 010, 020, 030, 011, 012, 013, 031 COMPLETE**. |
-| **Status** | 031: NEW `IPreferenceMemoryCapture` facade (mirrors `IComposeMemoryCapture`) wires `FeedbackService.SubmitAsync` → governed User-scope `Preference` memory. Per-user ONLY (keyed by resolved systemuserid, never oid/global); `trustLevel` inert; best-effort non-blocking. 20/20 tests · build 0 err · publish 43.67 MB · CVE clean · Step 9.5 CLEAN. NOT committed/pushed (owner reviews). |
-| **Next Action** | **E3**: 032 (preference-producer, opus/xhigh — the injection-defense boundary; consumes 031's persisted preference) → 033 (eval + bounds tests). Or **E2** 021→023→024. **040** (D9) needs `--chrome`. **080** deploy, **090** wrap-up. |
+| **Task** | ✅ **032 COMPLETE** (governed preference-producer, FR-09 — the injection-defense boundary). ✅ **001, 010, 011, 012, 013, 020, 022, 030, 031, 032 COMPLETE** (10 of 17). |
+| **Status** | 032: `PreferenceDirectiveProducer` (static, closed allow-list → SERVER-AUTHORED prompt hint; CONFIRMED-only; deterministic marker match, no LLM) wired as ContextBinder's 4th sibling userFragment producer. PROMPT-ONLY — never touches `AgentToolFilterContext` (proven: the 2 structural-invariant tests stay at 7 members). Injection-safe (raw text never emitted). Also fixed a pre-existing 011 regression (2 invariant tests hardcoded 6 props; 011 added AdvisoryToolAllowList→7). 8 bounds tests + 2 fixed = 85/85 · build 0 err · publish 43.68 MB · CVE clean · Step 9.5 CLEAN. All committed locally (NOT pushed). |
+| **Next Action** | **E3**: **033** (eval + preference-producer bounds tests, dep 031✅+032✅ — the last E3 task). **E2**: 021a→021b→023→024 (021 suggestion consolidation — design delta done). **040** (D9) needs `--chrome`. **080** deploy (create `sprk_groundedtoolallowlist` column + re-seed) → **090** wrap-up. |
 
 ### 012 working state (2026-08-16, opus/high FULL) — analysis complete, machinery pending
 **Conflict-check**: PASS (silent) — no master commits since divergence touch the Chat/catalog files; no open PR overlaps `SessionDispatchOrchestrator.cs`/`list-tasks.action.json`/`sprk_playbookconsumer-rows.json`. (PR #508 = Events/SmartTodo shared components, not my files.)

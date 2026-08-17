@@ -24,7 +24,7 @@
 | 024 | E2 eval cases (dead-end + card gating) | 2 E2 | FR-10 | sonnet / high | FULL | ✅ | 021b, 023 | 🔲 |
 | 030 | `Preference` MemoryFactType + wire map | 3 E3 loop | FR-07 | opus / high | FULL | ❌ | — | ✅ |
 | 031 | Feedback→memory pipeline | 3 E3 loop | FR-08 | opus / high | FULL | ❌ | 030 | ✅ |
-| 032 | Governed narrow-allow-list preference-producer | 3 E3 loop | FR-09 | opus / xhigh | FULL | ❌ | 030 | 🔲 |
+| 032 | Governed narrow-allow-list preference-producer | 3 E3 loop | FR-09 | opus / xhigh | FULL | ❌ | 030 | ✅ (PreferenceDirectiveProducer closed-allow-list → server-authored prompt hint; confirmed-only; never touches AgentToolFilterContext; 8 bounds tests + 2 invariant guards fixed, 85/85; publish 43.68 MB; CVE clean) |
 | 033 | E3 eval + preference-producer bounds tests | 3 E3 loop | FR-09, FR-10 | sonnet / high | FULL | ✅ | 031, 032 | 🔲 |
 | 040 | D9 host-proof flex-chain fix (Open-in-Compose) | 4 D9 | FR-11 | sonnet / high | FULL | ❌ | — | 🔲 |
 | 080 | Deploy + verify (BFF + sprk_spaarkeai; owner-gated) | Deploy | — | sonnet / high | STANDARD | ❌ | 013, 024, 033, 040 | 🔲 |

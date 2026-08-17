@@ -137,7 +137,13 @@ public sealed class StatedProfileSecurityTests
                 // OpenTabContextTypes added by task 030 (FR-12 tool economy) — a STRUCTURAL open-tab fact
                 // (the context-types of the workspace tabs currently open, mapped from live session.Tabs),
                 // NOT a profile/User-fragment signal; grounding stays profile-independent.
-                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord", "OpenTabContextTypes" },
+                // AdvisoryToolAllowList added by R4 task 011 (FR-02) — the resolved Action's grounded-tool
+                // allow-list on an advisory capability's nested turn (deterministic context scoping AFTER
+                // binding-id selection); a STRUCTURAL tool-projection fact, NOT a profile/User-fragment signal.
+                // R4 task 032 (FR-09) adds a governed preference-directive USER-FRAGMENT producer but NO member
+                // here — its hint is prompt-only, so this set stays unchanged: the proof that a stated profile
+                // OR a learned preference feeds AgentToolFilterContext through NO member at all.
+                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord", "OpenTabContextTypes", "AdvisoryToolAllowList" },
                 "the grounding filter context is structural-facts-only — no profile/User-fragment-derived member exists");
 
         factsOnly.Surface.Should().Be("assistant");
