@@ -100,6 +100,7 @@ public static class GraphAppRoles
 
     // Core / Directory
     private const string IdUserReadAll = "df021288-bdef-4463-88db-98f22de89214";
+    private const string IdGroupReadAll = "5b567255-7703-4780-807c-7be8301ae99b";
 
     // Self-Service Registration subsystem — sourced pre-r1 from
     // scripts/Setup-EntraInfrastructure.ps1:78-80.
@@ -150,7 +151,7 @@ public static class GraphAppRoles
         // Core directory / user resolution — always required
         new GraphAppRole(UserReadAll, "Read all users' full profiles", IdUserReadAll,
             "Core / Directory", "Resolve user identities for authorization + notification addressing.", false),
-        new GraphAppRole(GroupReadAll, "Read all groups", null,
+        new GraphAppRole(GroupReadAll, "Read all groups", IdGroupReadAll,
             "Core / Authorization", "Resolve group membership for access decisions + membership junction sync.", false),
 
         // Email / Communication — module-conditional (also requires Exchange ApplicationAccessPolicy)
