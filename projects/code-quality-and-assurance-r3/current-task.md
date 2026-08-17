@@ -12,7 +12,7 @@
 |-------|-------|
 | **Project** | code-quality-and-assurance-r3 — **COMPLETE (35/35)** + extensive post-program follow-on. **All merged to master `3146837a7`.** Nothing uncommitted. |
 | **State** | ✅ Program closed (aggregate un-gated **F→D**, maintainability mean **C+**; A+ = multi-cycle). ✅ Merged to master + **BFF deployed to dev** (Finance recalc 401 verified live). ✅ Post-program review (4 evidence agents). ✅ Follow-on fixes merged. ✅ RED follow-on projects defined/set up. **No active in-flight task** — this is a coordination/handoff state. |
-| **Next Action** | **RED-4 "B" COMPLETE.** ✅ dead-code deletion (`e94987071`) ✅ DEF-2 fix (`749dd273e`) ✅ **silent-empty SDK stubs→throw** (DEF-1 unblocked by smart-todo-r5 reroute `8e0aa4e6e`; all 8 event/field-mapping stubs now throw; verified no live composite caller; BFF 10,427 pass) — commit pending push/merge. **Only follow-ups left**: DEF-2 **live-dev smoke** (field-mapping write vs spaarke-dev), and the operator-gated big projects (RED-1, RED-2, C). |
+| **Next Action** | **RED-4 "B" COMPLETE + DEPLOYED.** ✅ dead-code deletion (`e94987071`) ✅ DEF-2 fix (`749dd273e`) ✅ silent-empty SDK stubs→throw (`50f6dc37d`) — all merged to master. ✅ **Deployed to `spaarke-bff-dev` 2026-08-17** (44.95 MB, `/healthz` green, DI valid); DEF-2 **live-verified** (EntityDefinitions metadata query resolves for field-mapping entities against spaarkedev1). **Nothing left in RED-4 B.** Remaining r3 threads are all operator-gated: #3b MI (task 011/NG1, live-env prereqs), RED-1/RED-2/C (new projects), backlog carryovers. |
 
 ### ✅ Completed this session (all on master `3146837a7`)
 1. **r3 closeout**: 061 (`5a6ad556e`), 041 (`e1f06c5a9`), 042+063 (`cec19d374`), 090 (`704b6a213`). Merged to master; BFF deployed to dev.

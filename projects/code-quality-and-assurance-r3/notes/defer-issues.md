@@ -5,7 +5,7 @@
 | ID | Title | GitHub Issue | Status |
 |----|-------|--------------|--------|
 | DEF-1 | `TodoGenerationService` — 2 of 5 rules (Overdue events, Deadline) silently generate zero To Dos (event query → SDK silent-empty stub) | {URL — to file} | ROUTED → smart-todo-r5 |
-| DEF-2 | `DataverseWebApiService.GetEntitySetNameAsync` threw `NotImplementedException`, breaking field-mapping read/write via the WebApi path — **FIXED** (implemented; pending live-dev smoke) | {URL — to file} | ✅ FIXED (RED-4 B) — live-verify pending |
+| DEF-2 | `DataverseWebApiService.GetEntitySetNameAsync` threw `NotImplementedException`, breaking field-mapping read/write via the WebApi path — **FIXED + live-verified** | {URL — to file} | ✅ CLOSED (RED-4 B) — deployed + smoke-verified 2026-08-17 |
 
 ## DEF-2 — WebApi field-mapping threw via unimplemented `GetEntitySetNameAsync` (FIXED 2026-08-16)
 
@@ -14,9 +14,11 @@
 > mirroring the proven `GetEntityObjectTypeCodeAsync` pattern; fails LOUD (throws `InvalidOperationException`)
 > on metadata error/missing set-name. Regression: `tests/integration/Spe.Integration.Tests/DataverseWebApiFieldMappingRegressionTests.cs`
 > (LIVE-gated per ADR-038 — runs against spaarke-dev, skips in CI). Structural verification done (full BFF
-> suite green); **behavioral verification is a live-dev smoke** (exercise a field-mapping write against
-> spaarke-dev, or run the gated regression with real Dataverse config). The `#3b` MI migration must preserve
-> the metadata-read permission (`prvReadEntity` / EntityDefinitions read) for the app-user.
+> suite green). **Behavioral verification DONE 2026-08-17**: deployed to `spaarke-bff-dev` (app boots → DI
+> valid, `/healthz` green) and confirmed the exact metadata query the fix makes resolves against dev Dataverse
+> (`spaarkedev1`): `sprk_fieldmappingprofile → sprk_fieldmappingprofiles`, `sprk_fieldmappingrule →
+> sprk_fieldmappingrules`, `sprk_event → sprk_events`, `account → accounts`. The `#3b` MI migration must
+> preserve the metadata-read permission (`prvReadEntity` / EntityDefinitions read) for the app-user.
 
 **Discovered**: 2026-08-16 during the RED-4 "B" hardening (verified against code at HEAD).
 **Severity**: latent correctness — threw (not silent) when the WebApi field-mapping read/write path executed.
