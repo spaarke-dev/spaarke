@@ -10,11 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **Wave 0 COMPLETE (18/18) — ready for Wave 1** |
-| **Task** | none (Wave 1 dispatch pending owner go/no-go) |
+| **Project phase** | **Wave 0 + Wave 1 COMPLETE (27/27 dispatched tasks) — ready for Wave 2** |
+| **Task** | none (Wave 2 dispatch pending owner go/no-go) |
 | **Status** | wave-boundary |
-| **Next Action** | Present Wave 0 wrap-up report + Wave 1 plan → owner selects dispatch mode → `task-execute` fanout for Wave 1 (8 tasks eligible: 015, 021, 023, 024, 027, 028, 032, 033; +036 after 024) |
-| **Blocker** | None external. **Wave 0 wrap-up notes for reviewer**: (a) task 001 Path A exception on 5 retained release guides — awaits reviewer accept/contest; (b) task 012 `pac solution import --stage-and-upgrade` deviation documented; (c) task 020/018 co-commit `3758c33b6` from shared-worktree git-index race (attribution muddled, content correct); (d) `customer.json` inadvertently deleted by Batch 3 Bicep agent, restored from HEAD. **Metrics**: 31 Wave-0 commits · 38 ahead of origin · net −2,110 LOC · BFF publish 43.65 MB (Δ−1.31 vs 44.96 baseline; −1.29 from task 005 alone) · CVE clean · GodClassGuard pass · Steps 9.5 quality gates PASS on tasks 080 + 005. |
+| **Next Action** | Present Wave 1 wrap-up + Wave 2 plan → owner selects dispatch mode → `task-execute` fanout for Wave 2 (7 tasks: 025 + 029/030/031 dep-chain + 037/038/039 shared-Program.cs chain) |
+| **Blocker** | None external. **Wave 1 wrap-up notes for reviewer**: (a) task 033 Path A D1 — created dedicated `modules/controlplane-app-service.bicep` UAMI-only from birth because task 029 (app-service.bicep UAMI refactor) has not shipped yet; retire when 029 lands (topology equivalent); (b) task 023 directional deviation — authored PowerShell Web API script instead of Entity.xml unpack (repo only has `.gitkeep`); mirrors v2 baseline pattern; (c) task 024 field-name reconciliation — Cosmos requires JSON `id` (non-negotiable) while POML wanted `runId`; C# property `RunId` semantic + JSON `id`/`createdOn`/`completedOn` compromise; (d) 5 pre-existing unmerged files from unrelated projects RESOLVED via `git checkout HEAD --`; (e) task 032 refactored 309-LOC scaffold to 640-LOC first-class §3A A1 composition; (f) task 033 `az deployment sub what-if` succeeded against Spaarke Dev subscription; (g) task 036 L2 project builds 0/0 with analyzers-as-errors; picks up task 024's Models POCOs. **Metrics**: 49 ahead of origin · BFF publish 43.65 MB unchanged (L2 baseline 3.28 MB compressed) · CVE clean · Steps 9.5 quality gates PASS on all FULL-rigor tasks (023, 024, 027, 028, 032, 033, 036). |
 
 ### Files Modified This Session (through pipeline init)
 

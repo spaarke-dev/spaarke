@@ -48,7 +48,7 @@ Two additional corrections independently caught by task-gen subagents:
 | 012 | ✅ | Extend `Deploy-DataverseSolutions.ps1` to Package Deployer (8 solutions) | STANDARD | sonnet / high | groupB-parallel | none |
 | 013 | ✅ | Harden `Deploy-Release.ps1` Phase 4 (`customerId`-driven; remove `spaarkedev1`) | STANDARD | sonnet / high | groupB-parallel | none |
 | 014 | ✅ | Add Cosmos DB provisioning module invocation to `customer.bicep` prep | STANDARD | sonnet / high | groupB-parallel | none |
-| 015 | ⏸ | Author `Grant-GraphAppRoles.ps1` reading `GraphAppRoles.cs` constant | STANDARD | sonnet / high | none (dep 005) | 005 |
+| 015 | ✅ | Author `Grant-GraphAppRoles.ps1` reading `GraphAppRoles.cs` constant | STANDARD | sonnet / high | none (dep 005) | 005 |
 | 016 | ✅ | Add H0 preflight quota-check PS modules | STANDARD | sonnet / high | groupB-parallel | none |
 
 ### Phase G — Canonical Naming Compliance at Provisioning (4 tasks)
@@ -58,34 +58,34 @@ Two additional corrections independently caught by task-gen subagents:
 | 018 | ✅ | Parameterize Bicep vault name in `customer.bicep` + `platform.bicep` + `key-vault.bicep` | STANDARD | sonnet / high | groupG-parallel | none |
 | 019 | ✅ | Update seeder scripts to canonical KV secret names | STANDARD | sonnet / high | groupG-parallel | none |
 | 020 | ✅ | Codify `spaarke-spekvcert` DO-NOT-RENAME dev exception | STANDARD | sonnet / medium | groupG-parallel | none |
-| 021 | ⏸ | Wire `naming-conformance-check.ps1` into `Validate-DeployedEnvironment.ps1` design | STANDARD | sonnet / medium | none (dep 018-020) | 018, 019, 020 |
+| 021 | ✅ | Wire `naming-conformance-check.ps1` into `Validate-DeployedEnvironment.ps1` design | STANDARD | sonnet / medium | none (dep 018-020) | 018, 019, 020 |
 
 ### Phase C Wave C1 — Registry + Cosmos Model (3 tasks)
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 023 | 🔲 | **Extend `sprk_dataverseenvironment` with 12 new columns** — CORRECTED from "11" per discovery §9 | FULL | sonnet / high | waveC1-parallel | none |
-| 024 | 🔲 | Author Cosmos DB `spaarke-provisioning`/`runs` schema + BFF-side POCO models | FULL | sonnet / high | waveC1-parallel | none |
+| 023 | ✅ | **Extend `sprk_dataverseenvironment` with 12 new columns** — CORRECTED from "11" per discovery §9 | FULL | sonnet / high | waveC1-parallel | none |
+| 024 | ✅ | Author Cosmos DB `spaarke-provisioning`/`runs` schema + BFF-side POCO models | FULL | sonnet / high | waveC1-parallel | none |
 | 025 | ⏸ | ArchTest guarding no cleartext secret in Cosmos `parameters` | FULL | sonnet / high | none (dep 024) | 024 |
 
 ### Phase C Wave C2 — Bicep + UAMI (8 tasks)
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 027 | 🔲 | Extend `customer.bicep` — add Cosmos + optional SignalR; remove Redis; UAMI param | FULL | sonnet / high | waveC2-parallel | none |
-| 028 | 🔲 | Author NEW `infrastructure/bicep/modules/uami.bicep` (Phase C UAMI migration) | FULL | opus / high | waveC2-parallel | none |
+| 027 | ✅ | Extend `customer.bicep` — add Cosmos + optional SignalR; remove Redis; UAMI param | FULL | sonnet / high | waveC2-parallel | none |
+| 028 | ✅ | Author NEW `infrastructure/bicep/modules/uami.bicep` (Phase C UAMI migration) | FULL | opus / high | waveC2-parallel | none |
 | 029 | ⏸ | Refactor `app-service.bicep` to consume UAMI (bind both slots — structural T5 fix) | FULL | opus / high | none (dep 028) | 028 |
 | 030 | ⏸ | Migrate RBAC (KV Secrets User, Storage, Cognitive Services, Cosmos DB) to UAMI principal | FULL | opus / high | none (dep 028, 029) | 028, 029 |
 | 031 | ⏸ | Rebuild `platform.bicep` to control-plane-only (D12) | FULL | opus / high | none (dep 027) | 027 |
-| 032 | 🔲 | Review/verify `infrastructure/bicep/stacks/model1-shared.bicep` (EXISTS already per discovery §6 — task reframed from NEW to review) | FULL | opus / high | waveC2-parallel | none |
-| 033 | 🔲 | Author NEW `infrastructure/bicep/platform-controlplane.bicep` — L2 orchestrator infra | FULL | opus / high | waveC2-parallel | none |
+| 032 | ✅ | Review/verify `infrastructure/bicep/stacks/model1-shared.bicep` (EXISTS already per discovery §6 — task reframed from NEW to review) | FULL | opus / high | waveC2-parallel | none |
+| 033 | ✅ | Author NEW `infrastructure/bicep/platform-controlplane.bicep` — L2 orchestrator infra | FULL | opus / high | waveC2-parallel | none |
 | 034 | ⏸ | Integration test: end-to-end Bicep deploy dry-run (dev subscription) | FULL | sonnet / high | none (dep 027-033; test-modifying → unconditional FULL) | 027, 028, 029, 030, 031, 032, 033 |
 
 ### Phase C Wave C3 — L2 Control-Plane Scaffold (4 tasks)
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 036 | 🔲 | Scaffold NEW .NET 10 project `src/server/services/Sprk.Provisioning.ControlPlane/**` | FULL | opus / high | waveC3-scaffold | none |
+| 036 | ✅ | Scaffold NEW .NET 10 project `src/server/services/Sprk.Provisioning.ControlPlane/**` | FULL | opus / high | waveC3-scaffold | none |
 | 037 | ⏸ | Wire Cosmos client for L2 (partition `/customerId`; §4D I3 partition-key ArchTest coverage) | FULL | opus / high | none (dep 024, 036 — shared Program.cs) | 024, 036 |
 | 038 | ⏸ | Wire Service Bus client for L2 (handler enqueue path per §4.2) | FULL | opus / high | none (dep 036 — shared Program.cs) | 036 |
 | 039 | ⏸ | Wire App Insights + Log Analytics for L2 (audit-log with actor `tid`) | FULL | sonnet / high | none (dep 036 — shared Program.cs) | 036 |
@@ -319,10 +319,10 @@ Per `notes/resource-discovery-2026-08-16.md`:
 | Metric | Value |
 |---|---|
 | **Total tasks** | 78 |
-| **not-started** 🔲 | 60 |
+| **not-started** 🔲 | 51 |
 | **in-progress** 🟡 | 0 |
-| **completed** ✅ | 18 (Wave 0 complete: 001-004, 005, 006-008, 010-014, 016, 018-020, 080) |
-| **Wave 0 total** | 18 tasks · 31 commits · 38 ahead of origin · net −2,110 LOC · BFF publish 43.65 MB (Δ−1.31 vs 44.96 baseline) · CVE clean |
+| **completed** ✅ | 27 (Wave 0: 18; Wave 1: 015, 021, 023, 024, 027, 028, 032, 033, 036) |
+| **Wave 0 + Wave 1 total** | 27 tasks · 43 code commits · 49 ahead of origin · BFF publish 43.65 MB (unchanged since task 005; L2 baseline 3.28 MB compressed) · CVE clean · L2 project builds 0/0 |
 | **blocked** ⏸ | (per dep chains — resolvable) |
 | **Ready to start (no deps)** | 21 tasks: 001, 002, 003, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 018, 019, 020, 032, 033, 080 (Phase E), plus 023, 024 (Wave C1 pending 004) |
 
