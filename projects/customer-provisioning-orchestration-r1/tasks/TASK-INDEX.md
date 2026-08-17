@@ -66,7 +66,7 @@ Two additional corrections independently caught by task-gen subagents:
 |---|---|---|---|---|---|---|
 | 023 | ✅ | **Extend `sprk_dataverseenvironment` with 12 new columns** — CORRECTED from "11" per discovery §9 | FULL | sonnet / high | waveC1-parallel | none |
 | 024 | ✅ | Author Cosmos DB `spaarke-provisioning`/`runs` schema + BFF-side POCO models | FULL | sonnet / high | waveC1-parallel | none |
-| 025 | ⏸ | ArchTest guarding no cleartext secret in Cosmos `parameters` | FULL | sonnet / high | none (dep 024) | 024 |
+| 025 | ✅ | ArchTest guarding no cleartext secret in Cosmos `parameters` | FULL | sonnet / high | none (dep 024) | 024 |
 
 ### Phase C Wave C2 — Bicep + UAMI (8 tasks)
 
@@ -74,9 +74,9 @@ Two additional corrections independently caught by task-gen subagents:
 |---|---|---|---|---|---|---|
 | 027 | ✅ | Extend `customer.bicep` — add Cosmos + optional SignalR; remove Redis; UAMI param | FULL | sonnet / high | waveC2-parallel | none |
 | 028 | ✅ | Author NEW `infrastructure/bicep/modules/uami.bicep` (Phase C UAMI migration) | FULL | opus / high | waveC2-parallel | none |
-| 029 | ⏸ | Refactor `app-service.bicep` to consume UAMI (bind both slots — structural T5 fix) | FULL | opus / high | none (dep 028) | 028 |
-| 030 | ⏸ | Migrate RBAC (KV Secrets User, Storage, Cognitive Services, Cosmos DB) to UAMI principal | FULL | opus / high | none (dep 028, 029) | 028, 029 |
-| 031 | ⏸ | Rebuild `platform.bicep` to control-plane-only (D12) | FULL | opus / high | none (dep 027) | 027 |
+| 029 | ✅ | Refactor `app-service.bicep` to consume UAMI (bind both slots — structural T5 fix) | FULL | opus / high | none (dep 028) | 028 |
+| 030 | ✅ | Migrate RBAC (KV Secrets User, Storage, Cognitive Services, Cosmos DB) to UAMI principal | FULL | opus / high | none (dep 028, 029) | 028, 029 |
+| 031 | ✅ | Rebuild `platform.bicep` to control-plane-only (D12) | FULL | opus / high | none (dep 027) | 027 |
 | 032 | ✅ | Review/verify `infrastructure/bicep/stacks/model1-shared.bicep` (EXISTS already per discovery §6 — task reframed from NEW to review) | FULL | opus / high | waveC2-parallel | none |
 | 033 | ✅ | Author NEW `infrastructure/bicep/platform-controlplane.bicep` — L2 orchestrator infra | FULL | opus / high | waveC2-parallel | none |
 | 034 | ⏸ | Integration test: end-to-end Bicep deploy dry-run (dev subscription) | FULL | sonnet / high | none (dep 027-033; test-modifying → unconditional FULL) | 027, 028, 029, 030, 031, 032, 033 |
@@ -86,9 +86,9 @@ Two additional corrections independently caught by task-gen subagents:
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
 | 036 | ✅ | Scaffold NEW .NET 10 project `src/server/services/Sprk.Provisioning.ControlPlane/**` | FULL | opus / high | waveC3-scaffold | none |
-| 037 | ⏸ | Wire Cosmos client for L2 (partition `/customerId`; §4D I3 partition-key ArchTest coverage) | FULL | opus / high | none (dep 024, 036 — shared Program.cs) | 024, 036 |
-| 038 | ⏸ | Wire Service Bus client for L2 (handler enqueue path per §4.2) | FULL | opus / high | none (dep 036 — shared Program.cs) | 036 |
-| 039 | ⏸ | Wire App Insights + Log Analytics for L2 (audit-log with actor `tid`) | FULL | sonnet / high | none (dep 036 — shared Program.cs) | 036 |
+| 037 | ✅ | Wire Cosmos client for L2 (partition `/customerId`; §4D I3 partition-key ArchTest coverage) | FULL | opus / high | none (dep 024, 036 — shared Program.cs) | 024, 036 |
+| 038 | ✅ | Wire Service Bus client for L2 (handler enqueue path per §4.2) | FULL | opus / high | none (dep 036 — shared Program.cs) | 036 |
+| 039 | ✅ | Wire App Insights + Log Analytics for L2 (audit-log with actor `tid`) | FULL | sonnet / high | none (dep 036 — shared Program.cs) | 036 |
 
 ### Phase C Wave C4 — Handler Implementations (15 tasks — H0 through H13, excluding H12a/b/c/H14)
 
@@ -319,10 +319,10 @@ Per `notes/resource-discovery-2026-08-16.md`:
 | Metric | Value |
 |---|---|
 | **Total tasks** | 78 |
-| **not-started** 🔲 | 51 |
+| **not-started** 🔲 | 46 |
 | **in-progress** 🟡 | 0 |
-| **completed** ✅ | 27 (Wave 0: 18; Wave 1: 015, 021, 023, 024, 027, 028, 032, 033, 036) |
-| **Wave 0 + Wave 1 total** | 27 tasks · 43 code commits · 49 ahead of origin · BFF publish 43.65 MB (unchanged since task 005; L2 baseline 3.28 MB compressed) · CVE clean · L2 project builds 0/0 |
+| **completed** ✅ | 34 (Wave 0: 18; Wave 1: 9; Wave 2: 7) |
+| **Wave 0+1+2 total** | 34 tasks · 50 code commits · 57 ahead of origin · BFF+L2 builds 0/0 clean · CVE clean · quality gates PASS on all FULL-rigor tasks |
 | **blocked** ⏸ | (per dep chains — resolvable) |
 | **Ready to start (no deps)** | 21 tasks: 001, 002, 003, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 018, 019, 020, 032, 033, 080 (Phase E), plus 023, 024 (Wave C1 pending 004) |
 
