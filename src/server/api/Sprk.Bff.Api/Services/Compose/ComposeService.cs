@@ -872,17 +872,26 @@ public class ComposeService : IComposeService
                 unavailable: true);
         }
 
-        var layout = await _pdfIntakeSource.ParseAsync(pdfBytes.ToArray(), fileName, cancellationToken)
+        // Task 050 / FR-11 (spaarkeai-compose-r7): consume the CAUSE-DISCRIMINATED intake result (task 073's
+        // ParseWithDiagnosticsAsync, now on the IComposePdfIntakeSource facade) so the user sees the SPECIFIC
+        // reason — circuit-breaker-open / timeout / corrupt-file / disabled — instead of one collapsed
+        // "corrupt or unavailable". This became a clean, downcast-free facade consumption (no ADR-013 breach)
+        // once the facade's prior sole owner (spaarke-ai-architecture-redesign-r2) closed and R7 took ownership.
+        var intake = await _pdfIntakeSource.ParseWithDiagnosticsAsync(pdfBytes.ToArray(), fileName, cancellationToken)
             .ConfigureAwait(false);
-        if (layout is null)
+        if (!intake.Succeeded)
         {
-            // Cause is collapsed at the facade's null boundary (corrupt file vs service failure —
-            // the facade logged the specific reason); surface the retryable framing (503).
+            // 503 (retryable) for service-side / transient causes — circuit-open, timeout, unknown, and the
+            // ADR-032 gate-off "disabled" (which rides Unknown); 422 (not retryable — the document itself is
+            // the problem) ONLY for Corrupt. Mirrors the load endpoint's own 503-vs-422 split. The message is
+            // the facade's cause-specific text (honest-lossiness: the real reason crosses the wire).
+            var unavailable = intake.FailureCause != PdfIntakeFailureCause.Corrupt;
             throw new ComposePdfIntakeException(
-                $"PDF intake failed: the document layout could not be extracted from '{fileName}'. " +
-                "The file may be corrupt or the document-parsing service is unavailable.",
-                unavailable: true);
+                intake.FailureMessage
+                    ?? $"PDF intake failed: the document layout could not be extracted from '{fileName}'.",
+                unavailable);
         }
+        var layout = intake.Layout!;
 
         var projection = _pdfModelProjector.Project(layout);
         if (projection.Status == ComposeProjectionStatus.Failed)

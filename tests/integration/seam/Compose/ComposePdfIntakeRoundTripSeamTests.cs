@@ -125,10 +125,12 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
                 It.IsAny<HttpContext>(), PdfDriveId, PdfItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(PdfBytes, writable: false));
 
-        // ── Boundary: the intake seam yields the NDA-shaped layout (the Azure DI double) ─────────
+        // ── Boundary: the intake seam yields the NDA-shaped layout (the Azure DI double). Task 050
+        //    (FR-11): ComposeService now consumes ParseWithDiagnosticsAsync (cause-discriminated),
+        //    so the double is set up on it — a success result carrying the layout. ─────────────────
         _fixture.PdfIntakeSourceMock
-            .Setup(p => p.ParseAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(NdaLayout());
+            .Setup(p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PdfIntakeParseResult.Success(NdaLayout()));
 
         using var client = _fixture.CreateAuthenticatedClient();
 
@@ -283,10 +285,14 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
             .Setup(s => s.DownloadFileAsUserAsync(
                 It.IsAny<HttpContext>(), PdfDriveId, PdfItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(PdfBytes, writable: false));
-        // The intake seam resolves null — compound-OFF / parse-service failure (the Null peer's contract).
+        // The intake seam fails — a service-side / transient cause (circuit-open / timeout / unknown), which
+        // maps to the retryable 503. Task 050 (FR-11): ComposeService consumes the discriminated result, so
+        // the double returns a Failure with a non-Corrupt cause carrying the honest "PDF intake failed" text.
         _fixture.PdfIntakeSourceMock
-            .Setup(p => p.ParseAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DocumentLayout?)null);
+            .Setup(p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PdfIntakeParseResult.Failure(
+                PdfIntakeFailureCause.Unknown,
+                "PDF intake failed: the document layout could not be extracted. The service is unavailable."));
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.GetAsync(
@@ -315,14 +321,15 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
             .Setup(s => s.DownloadFileAsUserAsync(
                 It.IsAny<HttpContext>(), PdfDriveId, PdfItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(PdfBytes, writable: false));
-        // Only page chrome — nothing projectable (the projector's ONLY Failed outcome).
+        // Only page chrome — a SUCCESSFUL parse whose layout the PROJECTOR then rejects as nothing
+        // projectable (the projector's ONLY Failed outcome). Task 050 (FR-11): a success result.
         _fixture.PdfIntakeSourceMock
-            .Setup(p => p.ParseAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new DocumentLayout
+            .Setup(p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PdfIntakeParseResult.Success(new DocumentLayout
             {
                 PageCount = 1,
                 Blocks = new[] { Para("Page 1 of 1", DocumentLayoutParagraphRole.PageNumber) },
-            });
+            }));
 
         using var client = _fixture.CreateAuthenticatedClient();
         var response = await client.GetAsync(

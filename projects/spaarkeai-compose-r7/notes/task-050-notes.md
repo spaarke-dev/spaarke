@@ -28,22 +28,39 @@ zero added I/O and never touches the intake source.
   - **Correctness fix** — `Project` door's `Content` echo now fires on `mount.Minted || mount.SourceFormat is not null`. A PDF's synthesized docx is pre-minted by the renderer, so `MintAndPersist` is a no-op → `Minted=false`; without the `SourceFormat` clause a PDF browse would return a docx projection but NO docx bytes, breaking the client's save-as-docx flow (051). `Upload` already echoes `Content` unconditionally.
 - **`tests/integration/seam/Compose/ComposeMountPdfProjectionSeamTests.cs`** (NEW, seam KEEP path): 3 through-the-wire tests over the real `/project` door + real projector/renderer, `IComposePdfIntakeSource` mocked at the PublicContracts boundary only.
 
-## FR-11 rider (deferred from task 073) — ADR §6.5 **Path C (comply)**, NOT wired server-side
+## FR-11 rider (deferred from task 073) — SOLVED via ADR §6.5 **Path A** (owner directive: r2 is closed)
 
 Task 073 shipped facade-level cause discrimination (`ParseWithDiagnosticsAsync` on the concrete
 `ComposePdfIntakeSource`, returning `PdfIntakeParseResult{FailureCause, FailureMessage}`) and deferred the
-**end-to-end surfacing** to 050/051. On implementing 050 the surfacing hit a **hard boundary**:
+**end-to-end surfacing** to 050/051. On implementing 050 the surfacing appeared boundary-blocked
+(consuming the cause server-side needed either widening the **then-r2-sole-owned** `IComposePdfIntakeSource`
+interface OR a concrete downcast = ADR-013 breach). I surfaced this per §6.5.
 
-- `ComposeService._pdfIntakeSource` is typed `PublicContracts.IComposePdfIntakeSource?` — the **r2-sole-owned** facade. `ParseWithDiagnosticsAsync` exists ONLY on the concrete class, NOT on that interface.
-- Consuming the discriminated cause server-side therefore requires EITHER **(a)** widening the r2-owned `IComposePdfIntakeSource` (coordination-gated — 073's constraint was "consume, don't modify r2's surface") OR **(b)** a concrete downcast in `ComposeService` (an **ADR-013 facade-discipline breach** — and code-quality-r3 just consolidated such downcasts away).
+**Owner directive**: `spaarke-ai-architecture-redesign-r2` **is closed** → the sole-owner coordination gate
+is gone and **R7 now owns the facade**. That makes **Path A (widen the facade cleanly)** correct — no
+breach, no downcast. Implemented end-to-end:
 
-**Decision — Path C**: neither boundary is breached. The current collapsed message (`ProjectPdfToDocxAsync`
-throws `"PDF intake failed: … The file may be corrupt or the document-parsing service is unavailable."`)
-is **already honest and safe** — it is byte-identical to the `PdfIntakeFailureCause.Unknown` wording. The
-FR-11 improvement is a *cause-specific UX message refinement* (circuit-open vs timeout vs corrupt), **not a
-correctness gap**. It is not worth an ADR-013 breach or an unilateral edit to r2's surface. FR-11's
-facade-level discrimination is DONE (073, directly unit-tested); end-to-end surfacing is consciously left
-UN-wired pending a cross-worktree decision (see "Open decision for the owner" below). **Not a silent drop.**
+- **Moved `PdfIntakeFailureCause` + `PdfIntakeParseResult`** from `Services/Ai/ComposePdfIntakeSource.cs`
+  into a new `Services/Ai/PublicContracts/PdfIntakeParseResult.cs` — the facade contract is now
+  self-contained; `Services/Compose` consumes the cause through the **facade namespace only** (ADR-013 clean).
+- **Added `ParseWithDiagnosticsAsync` to `IComposePdfIntakeSource`** (the facade interface). Concrete already
+  had it (073) → now an interface member. `NullComposePdfIntakeSource` implements it too: gate-off returns
+  `Failure(Unknown, "<AI document parsing is disabled …>")` — the ADR-032 gate-off universe stays distinct
+  via the MESSAGE, keeping the enum narrow per 073's design.
+- **Wired `ComposeService.ProjectPdfToDocxAsync`** to call `ParseWithDiagnosticsAsync` (via the facade — no
+  downcast) and throw the **cause-specific** `FailureMessage`. Status mapping: `unavailable = FailureCause
+  != Corrupt` → **Corrupt → 422** (not retryable — the document is the problem), everything else
+  (circuit-open / timeout / unknown / disabled) → **503** (retryable / service-side). Mirrors the load
+  endpoint's own 503-vs-422 split; applies to BOTH the Load and the new mount doors.
+- **Test ripple (task-013 pattern)**: seam mocks migrated `ParseAsync` → `ParseWithDiagnosticsAsync`
+  (`ComposePdfIntakeRoundTripSeamTests` ×3, `ComposeMountPdfProjectionSeamTests` ×2 + Verify). Added one
+  FR-11 end-to-end seam test: a Corrupt cause → 422 with the cause-specific message (not the collapsed text).
+  073's 17 direct unit tests on the concrete stay green (types resolve from PublicContracts via the
+  existing `using`).
+
+**Result**: FR-11 is DONE end-to-end — a PDF that fails intake now shows the user the SPECIFIC reason
+(circuit-breaker-open / timeout / corrupt / disabled) with the correct retryable-vs-not status, on every
+Compose PDF door. No ADR-013 breach; the facade is cleanly R7-owned post-r2-close.
 
 ## Placement Justification (BFF §10)
 
@@ -66,13 +83,15 @@ new component → no §11 justification required (modify-only).
 - **code-review: PASS** — 0 Critical / 0 Warnings. Async fork mirrors `LoadAsync`; new mount-door catches replicate the Load door's mapping; the `Content`-echo fix is a real correctness improvement. No AI smells; seam test is ADR-038 KEEP-path, no banned patterns.
 - **adr-check: PASS** — 0 violations. ADR-007/013 sync→async = pre-approved spec Path-A exception (documented in code); ADR-013 facade discipline HONORED (FR-11 downcast NOT taken — Path C); ADR-032 gate unchanged; §10 clean (publish/CVE/placement); §11 modify-only.
 
-## Deviations / open decision for the owner
+## Deviations / notes
 
 - **NFR-04 contract change**: `ProjectForMount` is now async. Documented in code (`IComposeService` `<remarks>`, `ComposeService` inline, both endpoint comments) and here. Pre-approved by spec ADR Tensions row 2 (path A).
-- 🔔 **FR-11 end-to-end surfacing** needs an owner decision: (A) file a small r2-coordinated addition to `IComposePdfIntakeSource` (widen the facade to carry the cause), or (C — current) accept the already-honest collapsed message and formally close FR-11 as "facade discrimination shipped in 073; end-to-end surfacing not worth an ADR-013/r2 breach". Recommend **C**. To be filed via `/defer` (notes/defer-issues.md + GitHub Issue atomically) once the owner confirms the path.
+- **FR-11 solved (Path A)** per owner directive (r2 closed) — see the FR-11 section above. Facade widened cleanly; no ADR-013 breach. Committed separately from the async fork.
+- **Project scope note**: FR-11 was authored as a 073 rider originally homed at 050/051; it is now fully landed in the 050 work (server end-to-end). 051 (client) can render the cause-specific message the server already sends, but does not need to — the server surface is complete.
 
 ## Task 051 (next) — client half
 
 051 (client PDF intake-door gates + env verify + parity) consumes `sourceFormat` (now on the mount
 responses), admits `.pdf` in the Browse `accept` filter + the intake-door gate, and runs the parity UAT.
-The FR-11 surfacing does NOT block 051 (server can't discriminate without the boundary change above).
+FR-11 is already surfaced server-side; 051 may optionally render the cause-specific message in the PDF
+error banner (the server sends it), but the end-to-end contract is complete without further server work.

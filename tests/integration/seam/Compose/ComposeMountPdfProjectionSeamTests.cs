@@ -14,11 +14,14 @@
 //      SYNTHESIZED docx bytes echoed back (a PK zip — NOT the PDF the caller sent), so the client can
 //      save the PDF-sourced doc as a docx (the 051 flow). Parity with the Load door's PDF round-trip.
 //   2. The DOCX path is UNCHANGED / synchronous-fast: a native .docx browse returns sourceFormat:null,
-//      an editable projection, and NEVER touches the PDF intake source (ParseAsync invoked zero times) —
-//      the async contract change added no I/O to the docx mount.
+//      an editable projection, and NEVER touches the PDF intake source (zero intake calls) — the async
+//      contract change added no I/O to the docx mount.
 //   3. Intake unavailability (the compound-gate-OFF / parse-service-failure boundary) fails the mount
 //      door LOUDLY with the honest 503 ProblemDetails — the SAME typed mapping the Load door has, never a
 //      silent empty mount and never a generic 500 (the new ComposePdfIntakeException catch in Project).
+//   4. FR-11 end-to-end: a cause-discriminated intake FAILURE (Corrupt) surfaces the CAUSE-SPECIFIC
+//      message + the correct 422 (not-retryable) status through the mount door — not one collapsed
+//      "corrupt or unavailable" (task 073 shipped the discrimination; task 050 wires it to the user).
 //
 // REUSES (root CLAUDE.md §11 — extend, don't duplicate): ComposeFidelitySeamFixture (real
 // ComposeService/ComposeEndpoints + real ComposePdfModelProjector/renderer; module-boundary mocks only —
@@ -80,10 +83,11 @@ public sealed class ComposeMountPdfProjectionSeamTests : IClassFixture<ComposeFi
     {
         _fixture.ResetBoundaries();
 
-        // ── Boundary: the intake seam yields the NDA-shaped layout (the Azure DI double) ─────────
+        // ── Boundary: the intake seam yields the NDA-shaped layout (the Azure DI double). Task 050
+        //    (FR-11): ComposeService consumes ParseWithDiagnosticsAsync (cause-discriminated). ─────
         _fixture.PdfIntakeSourceMock
-            .Setup(p => p.ParseAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(NdaLayout());
+            .Setup(p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PdfIntakeParseResult.Success(NdaLayout()));
 
         using var client = _fixture.CreateAuthenticatedClient();
 
@@ -146,7 +150,7 @@ public sealed class ComposeMountPdfProjectionSeamTests : IClassFixture<ComposeFi
         // The docx path added NO I/O: the intake source was NEVER consulted (the fork's await is reached
         // only on the PDF branch — this is the "docx path stays synchronous-fast" acceptance criterion).
         _fixture.PdfIntakeSourceMock.Verify(
-            p => p.ParseAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
             "the docx mount path must never touch the PDF intake source — the async change is PDF-branch-only");
     }
@@ -160,10 +164,13 @@ public sealed class ComposeMountPdfProjectionSeamTests : IClassFixture<ComposeFi
     {
         _fixture.ResetBoundaries();
 
-        // The intake seam resolves null — compound-gate-OFF / parse-service failure (the Null peer's contract).
+        // The intake seam fails with a service-side / transient cause → the retryable 503. Task 050 (FR-11):
+        // ComposeService consumes the discriminated result (a non-Corrupt cause maps to unavailable/503).
         _fixture.PdfIntakeSourceMock
-            .Setup(p => p.ParseAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((DocumentLayout?)null);
+            .Setup(p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PdfIntakeParseResult.Failure(
+                PdfIntakeFailureCause.Unknown,
+                "PDF intake failed: the document layout could not be extracted. The service is unavailable."));
 
         using var client = _fixture.CreateAuthenticatedClient();
 
@@ -174,6 +181,38 @@ public sealed class ComposeMountPdfProjectionSeamTests : IClassFixture<ComposeFi
             "intake unavailability maps to an honest 503 ProblemDetails via the mount door too, never a generic 500 or a silent empty mount");
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("PDF intake failed", "the real, user-presentable reason crosses the wire (parity with the Load door)");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // (4) FR-11 end-to-end — a cause-discriminated failure surfaces the SPECIFIC message + status.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Project_PdfSource_WhenCorrupt_Returns422WithCauseSpecificMessage_NotTheCollapsedText()
+    {
+        _fixture.ResetBoundaries();
+
+        // Task 073's classifier resolved a CORRUPT cause (the document itself is the problem). FR-11: the
+        // cause-specific message + the NOT-retryable 422 must reach the user — not the generic 503/"corrupt
+        // or unavailable" the pre-FR-11 collapsed null boundary produced for every failure alike.
+        const string corruptMessage =
+            "PDF intake for 'damaged.pdf' failed: the file appears to be corrupt or in an unsupported format.";
+        _fixture.PdfIntakeSourceMock
+            .Setup(p => p.ParseWithDiagnosticsAsync(It.IsAny<byte[]>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PdfIntakeParseResult.Failure(PdfIntakeFailureCause.Corrupt, corruptMessage));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync("/api/compose/project",
+            new { content = PdfBytes, fileName = "damaged.pdf" });
+
+        // Corrupt = the document is the problem → 422 (retrying won't help), NOT the 503 an unavailable
+        // service gets — the cause drives the status, proving discrimination reaches the endpoint.
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
+            "a Corrupt cause is not retryable — it maps to 422, distinct from the 503 a transient/unavailable cause gets");
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("appears to be corrupt or in an unsupported format",
+            "the CAUSE-SPECIFIC message crosses the wire (FR-11) — not the collapsed 'corrupt or unavailable' catch-all");
     }
 
     /// <summary>Minimal in-memory .docx — a single body paragraph. Mirrors the sibling seam files' local

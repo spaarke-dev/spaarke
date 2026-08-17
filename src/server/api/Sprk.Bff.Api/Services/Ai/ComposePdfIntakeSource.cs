@@ -2,60 +2,10 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
-/// <summary>
-/// Task 073 (spaarkeai-compose-r7, FR-11 / LOW-10) — the runtime-failure causes an intake attempt can
-/// hit, distinguished so a caller can surface a cause-specific message instead of one collapsed
-/// "unavailable" outcome. Deliberately narrow: these are the causes observable from the EXISTING parse
-/// stack's error text (Azure Document Intelligence circuit breaker / timeout / bad-format responses —
-/// see <c>TextExtractorService.ExtractLayoutAsync</c>) without forking <c>Services/Ai</c> internals to
-/// expose a typed cause. This is NOT the ADR-032 gate-off case — that stays on
-/// <see cref="NullComposePdfIntakeSource"/>, a separate class with its own distinct "AI document parsing
-/// is disabled" log line, untouched by this task.
-/// </summary>
-public enum PdfIntakeFailureCause
-{
-    /// <summary>The Document Intelligence circuit breaker is open after repeated recent failures;
-    /// the caller should retry later rather than immediately.</summary>
-    CircuitOpen,
-
-    /// <summary>The parse call exceeded the configured Document Intelligence timeout.</summary>
-    Timeout,
-
-    /// <summary>The document itself could not be parsed — invalid, unsupported, or corrupt format.</summary>
-    Corrupt,
-
-    /// <summary>An intake failure whose cause did not match a known pattern. Carries the same
-    /// collapsed wording the facade produced before task 073 — the safe default for any failure this
-    /// classifier cannot yet distinguish (never silently mis-attributed to one of the three named
-    /// causes above).</summary>
-    Unknown,
-}
-
-/// <summary>
-/// Task 073 — the discriminated result <see cref="ComposePdfIntakeSource.ParseWithDiagnosticsAsync"/>
-/// returns: either a successfully-parsed <see cref="Layout"/>, or a <see cref="FailureCause"/> +
-/// cause-specific <see cref="FailureMessage"/>. Exactly one of (<see cref="Layout"/>) / (<see
-/// cref="FailureCause"/>, <see cref="FailureMessage"/>) is populated.
-/// </summary>
-public sealed record PdfIntakeParseResult
-{
-    /// <summary>The parsed layout on success; null on any failure.</summary>
-    public DocumentLayout? Layout { get; init; }
-
-    /// <summary>The classified failure cause; null on success.</summary>
-    public PdfIntakeFailureCause? FailureCause { get; init; }
-
-    /// <summary>The cause-specific, user-presentable failure message; null on success.</summary>
-    public string? FailureMessage { get; init; }
-
-    /// <summary>True when <see cref="Layout"/> was extracted.</summary>
-    public bool Succeeded => Layout is not null;
-
-    public static PdfIntakeParseResult Success(DocumentLayout layout) => new() { Layout = layout };
-
-    public static PdfIntakeParseResult Failure(PdfIntakeFailureCause cause, string message) =>
-        new() { FailureCause = cause, FailureMessage = message };
-}
+// Task 050 (spaarkeai-compose-r7, FR-11 end-to-end): PdfIntakeFailureCause + PdfIntakeParseResult moved
+// to Services/Ai/PublicContracts/PdfIntakeParseResult.cs so the facade contract is self-contained and
+// ComposeService (Services/Compose) consumes the cause through the facade namespace only (ADR-013). They
+// are reachable here via the `using ...PublicContracts` above.
 
 /// <summary>
 /// Task 040 (spaarkeai-compose-r6, FR-06) — <see cref="IComposePdfIntakeSource"/> implementation:
