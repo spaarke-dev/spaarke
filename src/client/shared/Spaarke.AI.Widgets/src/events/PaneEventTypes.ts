@@ -1587,7 +1587,16 @@ export interface ConversationPaneEvent {
     // asks ConversationPane — which owns the single `QuickStartModal` — to open
     // that modal on a specified tab (`create` | `analysis`). Additive
     // discriminant per ADR-030; existing subscribers ignore it.
-    | 'open_quick_start';
+    | 'open_quick_start'
+    // ── Focus chat input (spaarkeai-compose-r7 task 061, FR-05 / UC-6) ──
+    // A DIFFERENT pane (the Compose editor, via its Ctrl+Shift+Space hotkey) asks
+    // ConversationPane to move keyboard focus into the Assistant chat composer.
+    // ConversationPane relays it to SprkChat's `focusInputSignal` host→focus seam,
+    // which calls the SprkChatInput `focusInput()` handle. A pure UI-focus signal —
+    // carries NO content (only the reused `sessionId`/`timestamp` identifier fields
+    // below, both Tier-1 safe per ADR-015). Additive discriminant per ADR-030;
+    // existing subscribers ignore it.
+    | 'focus_chat_input';
 
   /** Human-readable suggestion text when `type === 'suggestion'`. */
   suggestionText?: string;

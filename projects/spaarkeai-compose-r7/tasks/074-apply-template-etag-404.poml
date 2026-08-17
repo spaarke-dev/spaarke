@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>apply-template If-Match/ETag + ApiError-typed 404 branch (FR-12)</title>
+    <phase>7 Accepted Defers + Hardening</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <!-- task 074 (2026-08-17): Item 1 (ApiError-typed 404, dead response.ok idiom removed) DONE + committed
+         (3faba8c1b). Item 2 (If-Match/ETag) resolved via CLAUDE.md §6.5 PATH A — OWNER APPROVED (Ralph,
+         2026-08-17): documented exception (apply-template rides the same server-side model as save, no client
+         If-Match per the deliberate ComposeService design 1177-1184/1482-1485; residual TOCTOU is rare +
+         recoverable via SPE version history), server-side If-Match hardening DEFERRED to a scoped BFF
+         follow-up (/defer). See notes/task-074-notes.md for the full §6.5 record. -->
+
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx (and possibly BFF) apply-template path; concurrency + error-handling hardening.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded hardening (ETag guard + typed 404) with explicit anchor; low ambiguity — but gated by an escalation to confirm the file is still touched post-r8.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx apply-template handler (shared Compose spine).</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, react, typescript, bff-api</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Harden the apply-template replace: add If-Match/ETag to guard against a TOCTOU with a concurrent sibling-tab save, and replace
+    the dead response.ok idiom in the apply handler with an ApiError-typed 404 branch. FIRST confirm R7 still touches this
+    apply-template path after the r8 template split; if it does NOT, treat this as standalone drive-by hardening on the same file.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in optimistic-concurrency (ETag/If-Match), the ApiError contract, and the Compose apply-template path. Follow ADRs strictly.</role>
+
+  <goal>
+    The apply-template replace is ETag/If-Match guarded against concurrent sibling-tab saves, and a 404 is handled as a typed
+    ApiError (replacing the dead response.ok idiom).
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-12 + Assumptions (apply-template file touch). Templates move to r8; this task confirms R7 still touches the apply
+      path, else proceeds as standalone hardening on the same file.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">Apply-template handler in ComposeWorkspace.tsx (ETag/If-Match on replace + ApiError-typed 404 replacing response.ok)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-019">The 404 branch MUST be handled as a typed ApiError (ADR-019 ProblemDetails/ApiError), replacing the dead response.ok idiom — not an untyped throw.</constraint>
+    <constraint source="project">Add If-Match/ETag to the apply-template replace to guard the TOCTOU vs a concurrent sibling-tab save. If any server-side change is required, state a Placement Justification (cite .claude/constraints/bff-extensions.md), verify publish ≤60 MB (delta vs 001 baseline), no new HIGH CVE, and /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts. MUST NOT expand scope into template storage/picker (that is r8).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>etag concurrency, apierror, apply-template</topic>
+    <files>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; confirm R7 still touches the apply-template path post-r8 split (else standalone hardening).</step>
+    <step order="1">Add If-Match/ETag to the apply-template replace.</step>
+    <step order="2">Replace the response.ok idiom with an ApiError-typed 404 branch.</step>
+    <step order="3">Add unit tests: concurrent apply/save is ETag-guarded; a 404 surfaces as a typed ApiError.</step>
+    <step order="4">If server touched: publish-size + CVE checks; record delta vs 001 baseline in notes/.</step>
+    <step order="5">Run jest (+ xUnit if server touched); verify green.</step>
+    <step order="6">Update TASK-INDEX.md: set 074 status to ✅.</step>
+    <step order="7">Document the file-touch confirmation + any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>At Step 0, if task-create's assumption is wrong and R7 no longer touches the apply-template path after the r8 template split, record that and proceed as standalone drive-by hardening on the same file; if the path has been MOVED to r8 entirely, STOP and escalate (root §6) — the work may belong in r8.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Concurrent apply/save is ETag-guarded">
+      <steps>
+        <step>Open the same doc in two sibling tabs; save in tab A.</step>
+        <step>In tab B, apply a template over the now-stale ETag.</step>
+        <step>Verify the apply is rejected/handled by the If-Match/ETag guard (no lost-update), not silently overwriting tab A's save.</step>
+      </steps>
+      <expected>The stale apply is ETag-guarded; the concurrent save is not clobbered.</expected>
+    </test>
+    <test name="404 surfaces as a typed ApiError">
+      <steps>
+        <step>Trigger apply-template against a missing target (forces a 404).</step>
+        <step>Verify the handler surfaces a typed ApiError (not the dead response.ok idiom / unhandled error).</step>
+      </steps>
+      <expected>A 404 is handled as a typed ApiError.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+    <tool name="dotnet">Build/test the BFF (only if server touched)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">Unit tests for ETag-guarded apply + typed-404</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a concurrent sibling-tab save, when apply-template replaces, then the If-Match/ETag guard prevents a lost-update (TOCTOU).</criterion>
+    <criterion testable="true">Given a 404 on apply, when the handler runs, then it is handled as a typed ApiError (not the dead response.ok idiom).</criterion>
+    <criterion testable="true">If the server was touched: publish ≤60 MB (delta vs 001 baseline); no new HIGH CVE.</criterion>
+    <criterion testable="true">jest green; scope did not expand into r8 template storage.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-12 + Assumptions. Confirm the file touch at Step 0 per the escalation trigger.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

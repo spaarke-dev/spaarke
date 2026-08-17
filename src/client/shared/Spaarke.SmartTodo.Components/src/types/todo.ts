@@ -77,6 +77,15 @@ export interface ITodoRecord {
   sprk_duedate?: string;
   sprk_priorityscore?: number;
   sprk_effortscore?: number;
+  /** sprk_priority Choice — drives the card's priority FLAG (derivePriorityGlyph): Urgent=100000000, High=100000001, Medium=100000002, Low=100000003. */
+  sprk_priority?: number | null;
+  /** Assigned-to contact display name (mapped from the lookup's formatted value) — drives the card's "Assigned:" line. */
+  assignedToName?: string;
+  /** Regarding-record resolver text (search + card display) — ADR-024. */
+  sprk_regardingrecordname?: string;
+  sprk_regardingrecordnumber?: string;
+  /** Locale-formatted due date (for date-search parity with the Code Page). */
+  dueDateFormatted?: string;
   sprk_todocolumn?: string | null;
   sprk_todopinned?: boolean;
   statecode: number;

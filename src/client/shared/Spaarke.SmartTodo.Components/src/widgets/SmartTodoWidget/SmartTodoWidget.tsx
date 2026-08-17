@@ -105,16 +105,21 @@ import {
   type InputOnChangeData,
 } from '@fluentui/react-components';
 import { ArrowClockwiseRegular, Add20Regular, Open20Regular, Search20Regular } from '@fluentui/react-icons';
-import {
-  OrientationToggle,
-  type Orientation,
-} from '../../../../Spaarke.UI.Components/src/components/OrientationToggle';
-import { MicrosoftToDoIcon } from '../../../../Spaarke.UI.Components/src/icons/MicrosoftToDoIcon';
+import { OrientationToggle, type Orientation, MicrosoftToDoIcon } from '@spaarke/ui-components';
 
 import { useSmartTodoWidgetStyles } from './SmartTodoWidget.styles';
 import type { IFeedSyncBridge, IRegardingContext, ITodoRecord, IWebApi } from '../../types/todo';
 import type { IKanbanDataverseService } from '../../types/kanban';
 import { SmartTodoKanban } from '../../components/SmartTodoKanban';
+// SHARED Header — the SAME top-bar the Code Page renders (Filter · + New Task ·
+// overflow + inline SearchFilter), hoisted into this package so both surfaces
+// compose one component (smart-todo-r5 follow-up 2026-08-17). Relative import
+// (not the package root) to avoid a self-referential barrel cycle.
+import { Header } from '../../components/Header';
+// Shared search predicate (§11 — same one the Code Page uses; matches name /
+// description / regarding / assigned-to / DATE). Relative import (not the package
+// root) to avoid a self-referential barrel cycle.
+import { matchesTodoSearchQuery } from '../../utils/todoSearchUtils';
 import { useCurrentContactId } from '../../hooks/useCurrentContactId';
 
 // ---------------------------------------------------------------------------
@@ -125,6 +130,17 @@ export const TODO_STATUSCODE_OPEN = 1 as const;
 export const TODO_STATUSCODE_IN_PROGRESS = 659490001 as const;
 export const TODO_STATUSCODE_COMPLETED = 2 as const;
 export const TODO_STATUSCODE_DISMISSED = 659490002 as const;
+
+// ---------------------------------------------------------------------------
+// U-2 / smart-todo-r5 task 024 (2026-08-15) — exported so the smoke-test file
+// can assert the widget's initial orientation without a React renderer (this
+// peer package has no Jest config yet — see __tests__/SmartTodoWidget.test.tsx
+// header comment). `'horizontal'` maps to `KanbanBoard`'s base `board` style
+// (`flexDirection: 'row'`) — side-by-side columns; kept as the single source
+// of truth for the `useState` initial value below.
+// ---------------------------------------------------------------------------
+
+export const SMART_TODO_WIDGET_DEFAULT_ORIENTATION: Orientation = 'horizontal';
 
 // ---------------------------------------------------------------------------
 // Search debounce — local SearchBox text is held by `searchQuery` state and
@@ -176,6 +192,7 @@ export function buildSmartTodoQuery(opts: {
     'sprk_name',
     'sprk_description',
     'sprk_duedate',
+    'sprk_priority',
     'sprk_priorityscore',
     'sprk_effortscore',
     'sprk_todocolumn',
@@ -183,6 +200,8 @@ export function buildSmartTodoQuery(opts: {
     'statecode',
     'statuscode',
     '_sprk_assignedto_value',
+    'sprk_regardingrecordname',
+    'sprk_regardingrecordnumber',
     'createdon',
     'modifiedon',
   ].join(',');
@@ -372,11 +391,18 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   // To Do home") persists orientation via `useUserPreferences` (R4-071) —
   // that's the canonical persistence point.
   //
-  // UAT 2026-06-20: WIDGET default is 'vertical' (Today on top, Tomorrow in
-  // middle, Future on bottom — stacked rows). This matches the widget's
-  // typical narrow workspace pane. The Code Page default remains
-  // 'horizontal' (columns side-by-side) because it gets full viewport width.
-  const [orientation, setOrientation] = React.useState<Orientation>('vertical');
+  // U-2 / smart-todo-r5 task 024 (2026-08-15): WIDGET default changed to
+  // 'horizontal' (Today/Tomorrow/Future side-by-side columns — left, center,
+  // right), matching the mockup intent (FR-09) and the Code Page's existing
+  // default. Superseded the prior UAT 2026-06-20 'vertical' (stacked-rows)
+  // default. `orientation='horizontal'` maps to `KanbanBoard`'s base `board`
+  // style (`flexDirection: 'row'`, side-by-side); `'vertical'` applies
+  // `boardVertical` (`flexDirection: 'column'`, stacked) — confirmed against
+  // `Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx`. The
+  // orientation toggle remains available for users on narrow panes who want
+  // the stacked layout; the CSS-only flip (NFR-08) preserves drag-drop +
+  // selection state either way.
+  const [orientation, setOrientation] = React.useState<Orientation>(SMART_TODO_WIDGET_DEFAULT_ORIENTATION);
 
   // SearchBox — local controlled value debounced into `appliedQuery` which
   // drives the in-memory filter.
@@ -478,7 +504,20 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
       .retrieveMultipleRecords('sprk_todo', query)
       .then(result => {
         if (cancelled) return;
-        const entities = (result.entities ?? []) as ITodoRecord[];
+        // Map Dataverse formatted-value annotations onto named fields so the
+        // SHARED KanbanCard renders identically to the Code Page: the "Assigned:"
+        // line (from the assignee lookup's formatted value) and the locale date.
+        // (`retrieveMultipleRecords` returns these `@…FormattedValue` annotations
+        // by default; `sprk_priority` — which drives the priority flag — and the
+        // regarding text come back directly via the widened $select.)
+        const FV = '@OData.Community.Display.V1.FormattedValue';
+        const entities = (result.entities ?? []).map((e: Record<string, unknown>) => ({
+          ...e,
+          assignedToName:
+            (e[`_sprk_assignedto_value${FV}`] as string | undefined) ?? (e['assignedToName'] as string | undefined),
+          dueDateFormatted:
+            (e[`sprk_duedate${FV}`] as string | undefined) ?? (e['dueDateFormatted'] as string | undefined),
+        })) as ITodoRecord[];
         setItems(entities);
         setIsLoading(false);
         setError(null);
@@ -544,19 +583,17 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
   }, [items.length, onBadgeCountChange]);
 
   // -------------------------------------------------------------------------
-  // In-memory search filter — case-insensitive substring match across
-  // `sprk_name` (subject) and `sprk_description`. Cheap to include both
-  // since `description` is already in the $select.
+  // In-memory search filter — uses the SHARED `matchesTodoSearchQuery` predicate
+  // (§11), so the widget matches the SAME fields as the Code Page: name,
+  // description, regarding-record name/number, assigned-to, and the blended DATE
+  // search (e.g. "august 18", "aug", "8/18"). Previously the widget had its own
+  // inline predicate that matched only name + description (smart-todo-r5
+  // follow-up 2026-08-17).
   // -------------------------------------------------------------------------
 
   const filteredItems = React.useMemo(() => {
-    const q = appliedQuery.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(item => {
-      const name = (item.sprk_name ?? '').toLowerCase();
-      const desc = (item.sprk_description ?? '').toLowerCase();
-      return name.includes(q) || desc.includes(q);
-    });
+    if (!appliedQuery.trim()) return items;
+    return items.filter(item => matchesTodoSearchQuery(item, appliedQuery));
   }, [items, appliedQuery]);
 
   // Prune stale selections when the visible list changes (search filter,
@@ -900,174 +937,185 @@ export const SmartTodoWidget: React.FC<SmartTodoWidgetProps> = ({
         `aria-label` AND a `<Tooltip relationship="label">` per Fluent v9
         accessibility conventions.
       */}
-      {/* ── Title row (UAT 2026-06-19): brand icon + "Smart To Do" text in
-            its own row above the toolbar. Mirrors the Code Page Header's
-            title row for chrome uniformity. Suppressed via `showTitle={false}`
-            when host (e.g., LegalWorkspace SectionPanel) already renders a
-            section title. */}
-      {showTitle && (
-        <div className={styles.titleRow}>
-          <MicrosoftToDoIcon size={20} active />
-          <Text size={400} weight="semibold" as="h1" className={styles.titleText}>
-            {title}
-          </Text>
-        </div>
-      )}
+      {/* ── SHARED Header (smart-todo-r5 follow-up 2026-08-17) ───────────────
+            The widget's bespoke toolbar (quick-add + action-icon cluster) was
+            REPLACED by the SAME `<Header>` the Code Page renders — hoisted into
+            `@spaarke/smart-todo-components`. A code page and its widget must
+            compose the same shared-lib components (§11), so the widget's
+            toolbar now IS the Code Page's: Filter · + New Task · overflow
+            (Layout/Refresh) + the inline `<SearchFilter>`. Wired to the widget's
+            own state/callbacks. Header owns the title row (the LegalWorkspace
+            section sets `hideTitle`, so it isn't duplicated). ── */}
+      <Header
+        title={title}
+        onRefresh={refetch}
+        selectedCount={selectedIds.size}
+        toolbarActions={[]}
+        orientation={orientation}
+        onOrientationChange={setOrientation}
+        isFilterPaneOpen={isSearchExpanded}
+        onToggleFilterPane={handleToggleSearch}
+        searchQuery={searchQuery}
+        onSearchQueryChange={setSearchQuery}
+        onNewTask={onAddTodo}
+      />
 
-      <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
-        {/* ── LEFT: QuickAdd only (UAT 2026-06-19: '+ wizard' button removed
+      {false && (
+        <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
+          {/* ── LEFT: QuickAdd only (UAT 2026-06-19: '+ wizard' button removed
              per user feedback — quick-add is the sole create affordance in
              the widget toolbar. The full-form wizard remains reachable from
              the quick-add error MessageBar's 'Open full wizard' link, AND
              from the parent-form ribbon / Outlook ribbon entry points.) ──── */}
-        <div className={styles.toolbarLeft}>
-          {quickAddAvailable && (
-            <>
-              {/* UAT 2026-06-19: three-field quick-add — Title + Due Date + Assigned To + Add. */}
-              <Input
-                size="small"
-                value={quickAddTitle}
-                placeholder={quickAddPlaceholder}
-                onChange={handleQuickAddTitleChange}
-                onKeyDown={handleQuickAddKeyDown}
-                aria-label="To-do name"
-                disabled={isQuickAdding}
-                className={styles.quickAddInput}
-              />
-              <input
-                type="date"
-                value={quickAddDueDate}
-                onChange={handleQuickAddDueDateChange}
-                disabled={isQuickAdding}
-                aria-label="Due date"
-                className={styles.quickAddDateInput}
-              />
-              <div className={styles.assignedToWrap}>
+          <div className={styles.toolbarLeft}>
+            {quickAddAvailable && (
+              <>
+                {/* UAT 2026-06-19: three-field quick-add — Title + Due Date + Assigned To + Add. */}
                 <Input
                   size="small"
-                  value={quickAddAssignedTo}
-                  onChange={handleQuickAddAssignedToChange}
-                  onFocus={handleAssignedToFocus}
-                  onBlur={handleAssignedToBlur}
-                  placeholder="Assigned to"
+                  value={quickAddTitle}
+                  placeholder={quickAddPlaceholder}
+                  onChange={handleQuickAddTitleChange}
+                  onKeyDown={handleQuickAddKeyDown}
+                  aria-label="To-do name"
                   disabled={isQuickAdding}
-                  aria-label="Assigned to"
-                  aria-autocomplete="list"
-                  aria-expanded={showAssignedToResults}
-                  aria-controls="smart-todo-widget-assignedto-results"
-                  role="combobox"
+                  className={styles.quickAddInput}
                 />
-                {showAssignedToResults && (
-                  <div id="smart-todo-widget-assignedto-results" role="listbox" className={styles.assignedToResults}>
-                    {isSearchingContacts && <div className={styles.assignedToResultsHint}>Searching…</div>}
-                    {!isSearchingContacts && assignedToResults.length === 0 && (
-                      <div className={styles.assignedToResultsHint}>No contacts found</div>
-                    )}
-                    {!isSearchingContacts &&
-                      assignedToResults.map(c => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          role="option"
-                          aria-selected={c.id === quickAddAssignedToContactId}
-                          className={styles.assignedToResultItem}
-                          // onMouseDown beats onBlur so the click registers
-                          // before the dropdown closes.
-                          onMouseDown={e => {
-                            e.preventDefault();
-                            handleSelectAssignedTo(c.id, c.name);
-                          }}
-                        >
-                          {c.name}
-                        </button>
-                      ))}
-                  </div>
-                )}
-              </div>
-              <Tooltip content="Add to-do (Enter)" relationship="label">
-                <Button
-                  appearance="primary"
-                  size="small"
-                  icon={<Add20Regular />}
-                  onClick={handleQuickAddClick}
-                  disabled={quickAddDisabled}
-                  aria-label="Add to-do"
+                <input
+                  type="date"
+                  value={quickAddDueDate}
+                  onChange={handleQuickAddDueDateChange}
+                  disabled={isQuickAdding}
+                  aria-label="Due date"
+                  className={styles.quickAddDateInput}
                 />
-              </Tooltip>
-            </>
-          )}
-        </div>
+                <div className={styles.assignedToWrap}>
+                  <Input
+                    size="small"
+                    value={quickAddAssignedTo}
+                    onChange={handleQuickAddAssignedToChange}
+                    onFocus={handleAssignedToFocus}
+                    onBlur={handleAssignedToBlur}
+                    placeholder="Assigned to"
+                    disabled={isQuickAdding}
+                    aria-label="Assigned to"
+                    aria-autocomplete="list"
+                    aria-expanded={showAssignedToResults}
+                    aria-controls="smart-todo-widget-assignedto-results"
+                    role="combobox"
+                  />
+                  {showAssignedToResults && (
+                    <div id="smart-todo-widget-assignedto-results" role="listbox" className={styles.assignedToResults}>
+                      {isSearchingContacts && <div className={styles.assignedToResultsHint}>Searching…</div>}
+                      {!isSearchingContacts && assignedToResults.length === 0 && (
+                        <div className={styles.assignedToResultsHint}>No contacts found</div>
+                      )}
+                      {!isSearchingContacts &&
+                        assignedToResults.map(c => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            role="option"
+                            aria-selected={c.id === quickAddAssignedToContactId}
+                            className={styles.assignedToResultItem}
+                            // onMouseDown beats onBlur so the click registers
+                            // before the dropdown closes.
+                            onMouseDown={e => {
+                              e.preventDefault();
+                              handleSelectAssignedTo(c.id, c.name);
+                            }}
+                          >
+                            {c.name}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+                </div>
+                <Tooltip content="Add to-do (Enter)" relationship="label">
+                  <Button
+                    appearance="primary"
+                    size="small"
+                    icon={<Add20Regular />}
+                    onClick={handleQuickAddClick}
+                    disabled={quickAddDisabled}
+                    aria-label="Add to-do"
+                  />
+                </Tooltip>
+              </>
+            )}
+          </div>
 
-        {/* ── SPACER ──────────────────────────────────────────────────── */}
-        <div className={styles.toolbarSpacer} />
+          {/* ── SPACER ──────────────────────────────────────────────────── */}
+          <div className={styles.toolbarSpacer} />
 
-        {/* ── RIGHT: actions OR inline filter input (UAT 2026-06-19) ────
+          {/* ── RIGHT: actions OR inline filter input (UAT 2026-06-19) ────
               When Filter is toggled OFF, show the action cluster (Open /
               Refresh / Orient / Filter icon).
               When Filter is toggled ON, the action cluster slides out (hidden)
               and a SearchBox slides in to its place — filter field is INLINE
               in the toolbar, not in a separate row below. Click the Filter
               icon again to slide back to actions. */}
-        <div className={styles.toolbarActions}>
-          {isSearchExpanded ? (
-            <>
-              <SearchBox
-                value={searchQuery}
-                placeholder="Filter to-dos…"
-                onChange={handleSearchChange}
-                aria-label="Filter to-dos"
-                size="small"
-                className={styles.inlineFilterBox}
-                autoFocus
-              />
-              <Tooltip content="Close filter" relationship="label">
-                <ToggleButton
-                  appearance="subtle"
+          <div className={styles.toolbarActions}>
+            {isSearchExpanded ? (
+              <>
+                <SearchBox
+                  value={searchQuery}
+                  placeholder="Filter to-dos…"
+                  onChange={handleSearchChange}
+                  aria-label="Filter to-dos"
                   size="small"
-                  icon={<Search20Regular />}
-                  checked
-                  onClick={handleToggleSearch}
-                  aria-label="Close filter"
-                  aria-expanded
+                  className={styles.inlineFilterBox}
+                  autoFocus
                 />
-              </Tooltip>
-            </>
-          ) : (
-            <>
-              <Tooltip content={openTooltip} relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<Open20Regular />}
-                  onClick={handleOpenSelected}
-                  aria-label={openTooltip}
-                />
-              </Tooltip>
-              <Tooltip content="Refresh to-do list" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<ArrowClockwiseRegular />}
-                  onClick={refetch}
-                  aria-label="Refresh to-do list"
-                />
-              </Tooltip>
-              <OrientationToggle orientation={orientation} onChange={setOrientation} />
-              <Tooltip content="Filter to-dos" relationship="label">
-                <ToggleButton
-                  appearance="subtle"
-                  size="small"
-                  icon={<Search20Regular />}
-                  checked={false}
-                  onClick={handleToggleSearch}
-                  aria-label="Open filter"
-                  aria-expanded={false}
-                />
-              </Tooltip>
-            </>
-          )}
-        </div>
-      </Toolbar>
+                <Tooltip content="Close filter" relationship="label">
+                  <ToggleButton
+                    appearance="subtle"
+                    size="small"
+                    icon={<Search20Regular />}
+                    checked
+                    onClick={handleToggleSearch}
+                    aria-label="Close filter"
+                    aria-expanded
+                  />
+                </Tooltip>
+              </>
+            ) : (
+              <>
+                <Tooltip content={openTooltip} relationship="label">
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<Open20Regular />}
+                    onClick={handleOpenSelected}
+                    aria-label={openTooltip}
+                  />
+                </Tooltip>
+                <Tooltip content="Refresh to-do list" relationship="label">
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    icon={<ArrowClockwiseRegular />}
+                    onClick={refetch}
+                    aria-label="Refresh to-do list"
+                  />
+                </Tooltip>
+                <OrientationToggle orientation={orientation} onChange={setOrientation} />
+                <Tooltip content="Filter to-dos" relationship="label">
+                  <ToggleButton
+                    appearance="subtle"
+                    size="small"
+                    icon={<Search20Regular />}
+                    checked={false}
+                    onClick={handleToggleSearch}
+                    aria-label="Open filter"
+                    aria-expanded={false}
+                  />
+                </Tooltip>
+              </>
+            )}
+          </div>
+        </Toolbar>
+      )}
 
       {/* UAT 2026-06-19: the prior expanded-search row BELOW the toolbar
           is removed. Filter input lives INLINE in the toolbar (above).

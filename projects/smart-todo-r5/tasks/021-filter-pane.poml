@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="smart-todo-r5">
+  <metadata>
+    <title>Filter pane — Priority / Status / Due date / Assigned-To (FR-06 / F-3)</title>
+    <phase>3: Top bar + filter + visuals</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New .tsx component + modifies query-building .ts across the Code Page data layer (queryHelpers.ts, DataverseService.ts, useTodoItems.ts) — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger); tags include dataverse (Xrm.WebApi typeahead).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard Fluent v9 + Xrm.WebApi frontend feature, not architectural/high-blast-radius — sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares filter-predicate state and query-building surface (queryHelpers.ts buildTodoItemsQuery, DataverseService.getActiveTodos, useTodoItems) with task 022 (Completed status toggle) — both tasks add clauses to the SAME OData predicate and the SAME Status filter category. Coordinate manually even though the two tasks are not chained by formal deps.</parallel-reason>
+    <deps>020</deps>
+    <tags>react, typescript, fluent-ui, frontend, dataverse</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Build the filter pane opened by task 020's Filter pill (controlled by the `isFilterPaneOpen` / `onToggleFilterPane` state already wired in Header.tsx/SmartTodoApp.tsx). Add expandable categories — Priority (multi-select of sprk_priority choice values), Status (Open / In Progress / Completed, multi-select), Due date (Today / Tomorrow / This week / Overdue), Assigned To (typeahead against `contact` via Xrm.WebApi, single-select) — plus a "Clear all" affordance. Default filter state on load = Status {Open, In Progress}, everything else unfiltered. Wire the resulting predicate through useTodoItems → DataverseService.getActiveTodos → queryHelpers.buildTodoItemsQuery, which today hardcodes `statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)` and must become parameterized by the pane's selections.</prompt>
+
+  <role>Spaarke platform developer. Expert in Fluent UI v9 composite filter UI, OData $filter construction, and host-context Xrm.WebApi queries. Follow ADRs strictly.</role>
+
+  <goal>A new FilterPane component (rendered inside SmartTodoApp.tsx, anchored to the Filter pill via the isFilterPaneOpen state from task 020) exposes 4 expandable categories + Clear-all; SmartTodoApp.tsx owns the filter-predicate state (priority selections, status selections, due-date category, assignedToContactId, showCompleted) and threads it through useTodoItems/DataverseService/queryHelpers so the kanban's fetched data reflects the active filter; defaults apply on first load; Clear-all resets to the Status {Open, In Progress} default; the filter state persists across an orientation flip (NFR-03 — it lives in React state above the kanban, unaffected by the CSS-only orientation swap).</goal>
+
+  <context>
+    <background>Spec FR-06 (F-3, refined by U-3 on 2026-08-14): the Filter pill (task 020) is the entry point; this task builds the pane contents/logic. The current query layer (src/solutions/SmartTodo/src/services/queryHelpers.ts `buildTodoItemsQuery`) hardcodes the active-status clause to Open+In Progress and the ownership clause to the current contact — there is no existing parameterization for Priority, Due-date category, or a caller-chosen Assigned-To. Task 020 deleted the Code Page's only existing Xrm.WebApi contact-typeahead implementation (Header.tsx's Assigned-To quick-add field, ~250ms debounce, `contains(fullname,'…')` filter against `contact`, statecode eq 0, $top=8, $orderby fullname asc) — replicate that exact pattern here rather than re-deriving it, per docs/standards/DATA-ACCESS-DECISION-CRITERIA.md (host-context Xrm.WebApi, no BFF). `TagFilter` (src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx) is an existing generic Fluent v9 multi-select chip filter — reuse it for the Priority category instead of building a new multi-select control from scratch.</background>
+    <relevant-files>
+      <file role="new">src/solutions/SmartTodo/src/components/FilterPane/FilterPane.tsx</file>
+      <file role="new">src/solutions/SmartTodo/src/components/FilterPane/FilterPane.styles.ts</file>
+      <file role="new">src/solutions/SmartTodo/src/components/FilterPane/index.ts</file>
+      <file role="modify">src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+      <file role="modify">src/solutions/SmartTodo/src/services/queryHelpers.ts</file>
+      <file role="modify">src/solutions/SmartTodo/src/services/DataverseService.ts</file>
+      <file role="modify">src/solutions/SmartTodo/src/hooks/useTodoItems.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/TagFilter.tsx</file>
+      <file role="canonical-reference">docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Filter pill trigger + isFilterPaneOpen/onToggleFilterPane state must exist in Header.tsx/SmartTodoApp.tsx before this pane can be anchored to it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens exclusively — zero hex/rgb literals (NFR-04).</constraint>
+    <constraint source="ADR-028">Assigned-To typeahead MUST use host-context Xrm.WebApi (no BFF) — per spec MUST rule; BFF=N for this project.</constraint>
+    <constraint source="spec">FR-06: default filter state = Status {Open, In Progress}; all other categories unfiltered on first load.</constraint>
+    <constraint source="spec">FR-06: Status category MUST include Completed as a selectable value (unchecked by default) — coordinate with task 022, which is responsible for the kanban RENDER-side support once Completed items are included; this task owns the CHECKBOX/UI and the query-layer plumbing that lets a caller opt Completed in.</constraint>
+    <constraint source="project">Do not change the composite To Do Score formula or column-bucketing logic (todoScoring.ts, useKanbanColumns.ts) — filtering narrows the fetched SET, it does not change scoring/bucketing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>filter-ui-and-odata-predicates</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">makeStyles module-scope conventions, semantic-token usage.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Read Header.tsx/SmartTodoApp.tsx post-020, queryHelpers.ts (buildTodoItemsQuery, TODO_SELECT_FIELDS, statuscode constants at ~line 474-475: 1=Open, 659490001=In Progress, 2=Completed, 659490002=Dismissed), DataverseService.getActiveTodos, useTodoItems.ts, TagFilter.tsx, and DATA-ACCESS-DECISION-CRITERIA.md.</step>
+    <step order="1">Define an `ITodoFilterState` type (priorityValues: sprk_priority[], statusValues: ('Open'|'InProgress'|'Completed')[], dueDateCategory: 'Today'|'Tomorrow'|'ThisWeek'|'Overdue'|undefined, assignedToContactId?: string) with a DEFAULT_TODO_FILTER constant (statusValues: ['Open','InProgress']).</step>
+    <step order="2">Build FilterPane.tsx as an expandable-category panel (Accordion or a stack of collapsible sections) rendered from/anchored to Header's Filter pill via the `isFilterPaneOpen` prop passed down from SmartTodoApp.tsx. Priority category: wrap `TagFilter` bound to the 4 sprk_priority display values (Urgent/High/Medium/Low). Status category: 3 checkboxes/Tag options (Open/In Progress/Completed). Due date category: single-select of the 4 named buckets. Assigned To category: replicate the Xrm.WebApi contact-typeahead pattern removed from Header.tsx in task 020 (same debounce/filter/limit). Add a "Clear all" button that resets to DEFAULT_TODO_FILTER.</step>
+    <step order="3">Lift `filterState` (useState, default DEFAULT_TODO_FILTER) into SmartTodoApp.tsx; pass it + a setter into FilterPane and into whatever hook drives the fetch.</step>
+    <step order="4">Extend `buildTodoItemsQuery` in queryHelpers.ts to accept an optional filter-predicate parameter and build the $filter clause dynamically: statuscode inclusion set derived from statusValues (map Open→1, InProgress→659490001, Completed→2), sprk_priority `in` clause when priorityValues is non-empty, due-date range clause per dueDateCategory (reuse the existing Overdue-category pattern at line ~219-224 as a model), and assignee override when assignedToContactId is set (replacing the default current-user ownership clause). Preserve backward compatibility: calling with no filter argument must reproduce today's exact query (regression safety for any other caller of buildTodoItemsQuery).</step>
+    <step order="5">Thread the filter predicate through DataverseService.getActiveTodos and useTodoItems (IUseTodoItemsOptions gains a `filter?: ITodoFilterState` field) so SmartTodoApp.tsx's filterState reaches the actual Dataverse query.</step>
+    <step order="6">Verify NFR-03: confirm filterState lives in SmartTodoApp (above the kanban), independent of the orientation CSS-only swap — no additional wiring should be needed, but add a regression test asserting filter selections survive an orientation toggle.</step>
+    <step order="7">Write unit tests: default state on load, each category narrows the query correctly (assert the generated OData string or the DataverseService call args), Clear-all resets to default, Assigned-To typeahead uses Xrm.WebApi (not fetch/BFF).</step>
+    <step order="8">Grep changed files for hex/rgb literals — zero matches.</step>
+    <step order="9">Update tasks/TASK-INDEX.md: mark 021 ✅ completed.</step>
+    <step order="10">Document the final `ITodoFilterState` shape + any coordination outcome with task 022 in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 022's Completed-status kanban-render work is not yet settled (statuscode=2 rendering/bucketing shape undecided) when this task executes, coordinate directly rather than guessing — the Status category's Completed checkbox and the query-layer statuscode-inclusion plumbing built here MUST match whatever bucketing task 022 lands. If the two cannot be reconciled without a shared design decision, STOP and escalate per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Open the filter pane with webLightTheme, then switch to webDarkTheme</step>
+        <step>Inspect each category (Priority chips, Status checkboxes, Due-date options, Assigned-To results dropdown)</step>
+      </steps>
+      <expected>All colors adapt via semantic tokens; zero hex/rgb literals</expected>
+    </test>
+    <test name="Keyboard navigation">
+      <steps>
+        <step>Open the pane via the Filter pill using only the keyboard</step>
+        <step>Tab through each category, expand/collapse via Enter/Space, select options via arrow keys/Space</step>
+        <step>Activate Clear-all via keyboard</step>
+      </steps>
+      <expected>Every control is reachable and operable without a mouse; focus order matches visual order</expected>
+    </test>
+    <test name="Default + Clear-all behavior">
+      <steps>
+        <step>Load the Code Page fresh (no prior filter interaction)</step>
+        <step>Change several filter selections, then click Clear all</step>
+      </steps>
+      <expected>Initial load shows Status={Open,In Progress} only; Clear-all restores exactly that default (not an all-clear/empty state)</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest in src/solutions/SmartTodo</tool>
+    <tool name="terminal">grep for hex/rgb literals</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/components/FilterPane/FilterPane.tsx</output>
+    <output type="code">src/solutions/SmartTodo/src/components/FilterPane/FilterPane.styles.ts</output>
+    <output type="code">src/solutions/SmartTodo/src/components/FilterPane/index.ts</output>
+    <output type="code">src/solutions/SmartTodo/src/services/queryHelpers.ts</output>
+    <output type="code">src/solutions/SmartTodo/src/services/DataverseService.ts</output>
+    <output type="code">src/solutions/SmartTodo/src/hooks/useTodoItems.ts</output>
+    <output type="test">src/solutions/SmartTodo/src/components/FilterPane/__tests__/FilterPane.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Code Page loads fresh, when no filter interaction has occurred, then the effective query includes statuscode in (Open, In Progress) only — matching today's default behavior.</criterion>
+    <criterion testable="true">Given the user selects one or more Priority values, when the kanban re-fetches, then only matching sprk_priority items are returned.</criterion>
+    <criterion testable="true">Given the user checks Completed in the Status category, when the kanban re-fetches, then Completed items (statuscode=2) are included; unchecking removes them again.</criterion>
+    <criterion testable="true">Given the user selects a Due-date category (Today/Tomorrow/This week/Overdue), then the query is scoped to that date range.</criterion>
+    <criterion testable="true">Given the user types 2+ characters into Assigned To, then a debounced Xrm.WebApi `contact` query (not a BFF call) returns matching contacts; selecting one scopes the query to that assignee.</criterion>
+    <criterion testable="true">Given active non-default filter selections, when the user clicks Clear all, then the filter resets exactly to Status={Open, In Progress} with all other categories unfiltered.</criterion>
+    <criterion testable="true">Given a non-default filter state, when the user toggles Kanban orientation, then the filter selections are unchanged (NFR-03).</criterion>
+    <criterion testable="true">Negative: calling buildTodoItemsQuery with no filter argument reproduces the exact pre-existing query string (no regression for other callers).</criterion>
+    <criterion testable="true">All unit tests pass; zero hex/rgb literals via grep; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-06 (F-3). statuscode constants: 1=Open, 659490001=In Progress, 2=Completed, 659490002=Dismissed (queryHelpers.ts ~line 474-475). Coordinate the Status/Completed shape directly with whoever executes task 022 — the two tasks touch the same predicate-building surface.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

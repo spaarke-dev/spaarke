@@ -541,9 +541,16 @@ public sealed class ComposeTemplateChromeProvenanceSeamTests : IClassFixture<Com
 
         AssertTemplateChromeAdopted(doc);
         AssertNoDanglingMainPartReferences(main);
-        // The NDA corpus fixture itself is NOT validator-clean (8 spec-invalid w14:paraId values,
-        // pre-existing on the RAW bytes) — see the helper's doc comment. Assert no NEW errors.
-        AssertMergeIntroducesNoNewValidationErrors(carrierBytes, doc);
+        // Task 075 (FR-13): the NDA corpus fixture's 8 spec-invalid w14:paraId values (>= the
+        // OOXML MaxExclusive bound 0x80000000) were regenerated to spec-valid ids — the fixture
+        // (and therefore the merged output) is now validator-clean, so this asserts the STRICT
+        // "no repair prompt" bar directly. The lenient "no NEW errors beyond the source's own
+        // baseline" helper (AssertMergeIntroducesNoNewValidationErrors) no longer applies — the
+        // source has no baseline errors left to carry through, and its own self-check
+        // (`sourceBaseline.Should().NotBeEmpty(...)`) would now fail by design, per its doc
+        // comment: "if the fixture has been cleaned up, switch this slice back to the strict
+        // AssertPackageValidates."
+        AssertPackageValidates(doc);
     }
 
     /// <summary>Deserialization target for the 200 response (the fields this seam asserts).</summary>

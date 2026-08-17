@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="smart-todo-r5">
+  <metadata>
+    <title>Deploy SmartTodo Code Page + widget; Phase 3 visual QA</title>
+    <phase>3: Top bar + filter + visuals</phase>
+    <gate>020-024 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Real-environment deploy of 5 preceding tasks' changes (deps on 5 tasks — "deps on 3+ tasks" trigger per CLAUDE.md §8); irreversible-adjacent (Dataverse web-resource upload) with a mandatory visual-QA verification obligation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical build+deploy+QA sequence following an established skill (code-page-deploy) — not architectural — sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>020,021,022,023,024</deps>
+    <tags>deploy, code-page, frontend</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build and deploy the SmartTodo Code Page (Vite, src/solutions/SmartTodo) via scripts/Deploy-SmartTodo.ps1, and redeploy every consumer surface that mounts the SpaarkeAi SmartTodoWidget (grep src/solutions/LegalWorkspace/src/sections/todo.registration.ts's importers and the code-page-deploy skill's Dual-Deploy Warning recipe to identify which — likely LegalWorkspace and/or SpaarkeAi) so tasks 020-024's changes (top-bar redesign, filter pane, Completed toggle, subtle coloring, side-by-side default) reach the target Dataverse environment. Follow the `code-page-deploy` skill's mandatory cache-clearing + shared-lib-rebuild-first sequence exactly — do not skip it. Perform a manual visual QA pass against every Phase 3 acceptance criterion before marking this task complete.</prompt>
+
+  <role>Spaarke platform developer. Expert in the Vite Code Page build pipeline, Dataverse web-resource deployment, and shared-library cache-invalidation hazards. Follow ADRs strictly.</role>
+
+  <goal>The SmartTodo Code Page and every SmartTodoWidget-hosting surface are rebuilt and redeployed to the target Dataverse environment with tasks 020-024's changes live; a documented visual QA pass confirms each Phase 3 surface (top bar, filter pane, Completed toggle, subtle coloring, widget side-by-side default) matches its task's acceptance criteria in the real environment, not just in local dev/test.</goal>
+
+  <context>
+    <background>Per CLAUDE.md §12 build commands and the `code-page-deploy` skill: shared libraries (Spaarke.UI.Components, Spaarke.SmartTodo.Components, Spaarke.Auth) must be rebuilt via `npm run build` BEFORE any consumer Code Page is built, or the consumer's Vite bundle will silently contain stale shared-lib code — this has caused prior production incidents per the skill's "🚨 Critical" section. Tasks 020-021 changed the SmartTodo Code Page directly (src/solutions/SmartTodo); tasks 022-023 changed the shared Spaarke.SmartTodo.Components package (consumed by BOTH the Code Page and the SpaarkeAi/LegalWorkspace widget); task 024 changed the widget only. The skill's "Dual-Deploy Warning — Aliased-Source Pairs" section is the authoritative recipe for discovering which additional code pages must be rebuilt when a shared-lib change needs to reach widget consumers.</background>
+    <relevant-files>
+      <file role="reference">scripts/Deploy-SmartTodo.ps1</file>
+      <file role="reference">src/solutions/SmartTodo/vite.config.ts</file>
+      <file role="reference">src/solutions/LegalWorkspace/src/sections/todo.registration.ts</file>
+      <file role="reference">.claude/skills/code-page-deploy/SKILL.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">Top-bar redesign must be complete before deploy.</dependency>
+      <dependency task="021" status="pending">Filter pane must be complete before deploy.</dependency>
+      <dependency task="022" status="pending">Completed status toggle must be complete before deploy.</dependency>
+      <dependency task="023" status="pending">Subtle channel coloring must be complete before deploy.</dependency>
+      <dependency task="024" status="pending">Widget side-by-side default must be complete before deploy.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Follow the `code-page-deploy` skill's cache-clearing sequence exactly (rm -rf dist/ node_modules/.vite/ .vite/ before every build) — no exceptions, per the skill's documented production-incident history.</constraint>
+    <constraint source="project">Rebuild Spaarke.UI.Components and Spaarke.SmartTodo.Components (and Spaarke.Auth if touched) BEFORE building any consumer Code Page — verify each rebuild actually picked up the source changes (grep a known changed string in the rebuilt dist/ output per the skill's Verification section) before proceeding.</constraint>
+    <constraint source="project">Do NOT deploy partial work — all 5 preceding tasks (020-024) must be complete first (enforced by gate).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page-and-widget-deployment</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>projects/smart-todo-r5/to-do-header-revision.jpg</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Confirm tasks 020-024 are all marked ✅ in tasks/TASK-INDEX.md before proceeding — do not deploy partial Phase 3 work.</step>
+    <step order="1">Rebuild shared libraries in dependency order: `cd src/client/shared/Spaarke.UI.Components &amp;&amp; npm run build`, then `cd src/client/shared/Spaarke.SmartTodo.Components &amp;&amp; npm run build`, then `cd src/client/shared/Spaarke.Auth &amp;&amp; npm run build` if it was touched by any of 020-024 (it was not, per those tasks' scopes — skip unless verification shows otherwise).</step>
+    <step order="2">Verify each rebuild picked up source changes: grep a known changed string (e.g., a new class name introduced in task 023, or the 'horizontal' default from task 024) inside the rebuilt shared-lib dist/ output. If not found, the cache was stale — clear and rebuild again before proceeding.</step>
+    <step order="3">Clear the SmartTodo Code Page's build cache: `cd src/solutions/SmartTodo &amp;&amp; rm -rf dist/ node_modules/.vite/ .vite/`.</step>
+    <step order="4">Build the SmartTodo Code Page: `npm run build` (Vite, NOT any *:prod alias — this project has no build:prod script for Vite solutions; confirm by checking package.json before running).</step>
+    <step order="5">Run `scripts/Deploy-SmartTodo.ps1` to deploy the built Code Page to the target Dataverse environment.</step>
+    <step order="6">Run the Dual-Deploy Warning recipe: `grep -rn 'resolve.alias\|__dirname' src/solutions/*/vite.config.ts` (or the PowerShell equivalent) to identify every code page whose Vite config aliases into a source tree touched by tasks 022-024. Additionally check src/solutions/LegalWorkspace/src/sections/todo.registration.ts's consumers (LegalWorkspace itself, and SpaarkeAi if it mounts LegalWorkspace-hosted widgets) to determine which additional code page(s) must be rebuilt + redeployed to carry the shared-lib changes (022-024) to the widget-hosting surface.</step>
+    <step order="7">For each additional code page identified in step 6: clear its build cache, rebuild it, and deploy it via its established deploy script (e.g., Deploy-LegalWorkspaceCustomPage.ps1 and/or Deploy-SpaarkeAi.ps1 — confirm the correct script by reading its header comment before running).</step>
+    <step order="8">Perform manual visual QA against the target environment, checking off each Phase 3 acceptance criterion: top bar matches the mockup and overflow wiring works (020); filter pane categories + defaults + Clear-all work, Assigned-To typeahead returns real contacts (021); Completed toggle reveals/hides Completed items without layout breakage (022); channel coloring is subtly differentiated with no white-on-yellow (023); the SpaarkeAi widget defaults to side-by-side columns and survives an orientation flip (024).</step>
+    <step order="9">Document the QA pass (pass/fail per criterion, screenshots if available, any deviation) in projects/smart-todo-r5/notes/.</step>
+    <step order="10">Update tasks/TASK-INDEX.md: mark 025 ✅ completed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any Phase 3 acceptance criterion fails in the real deployed environment despite passing locally (a real-DV smoke gap per spec FR-20/PROC-1), STOP — do not mark this task complete. Log the failure, identify which of tasks 020-024 needs a follow-up fix, and escalate per CLAUDE.md §6 rather than silently accepting a partial deploy.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Full Phase 3 visual QA sweep (real environment)">
+      <steps>
+        <step>Open the deployed SmartTodo Code Page in the target Dataverse environment</step>
+        <step>Walk through top bar, filter pane, Completed toggle, coloring, and (in a workspace hosting the widget) orientation default</step>
+      </steps>
+      <expected>Every Phase 3 acceptance criterion (020-024) holds in the real deployed environment</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build shared libs + SmartTodo Code Page</tool>
+    <tool name="powershell">Run Deploy-SmartTodo.ps1 and any additional identified deploy scripts</tool>
+    <tool name="terminal">grep for cache-staleness verification and alias-consumer discovery</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">SmartTodo Code Page (dist/index.html deployed as a Dataverse web resource)</output>
+    <output type="deploy">SpaarkeAi/LegalWorkspace widget-hosting surface(s) identified in step 6-7</output>
+    <output type="docs">projects/smart-todo-r5/notes/ (QA pass documentation)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deploy sequence completes, then the SmartTodo Code Page in the target environment shows the redesigned top bar (020), a working filter pane (021), the Completed toggle (022), subtle coloring (023) — all matching their tasks' acceptance criteria.</criterion>
+    <criterion testable="true">Given the SpaarkeAi/LegalWorkspace widget-hosting surface is redeployed, then the SmartTodoWidget defaults to side-by-side columns (024) in the real environment.</criterion>
+    <criterion testable="true">Given the shared-lib rebuild-verification step, then a grep of the rebuilt dist/ output confirms no stale cache was deployed.</criterion>
+    <criterion testable="true">Negative: if any criterion fails in the real environment, the task is NOT marked complete — a failure is documented and escalated, not silently accepted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Phase 3 deploy/QA gate. Deploy-SmartTodo.ps1 is the confirmed existing script for the Code Page; the exact additional widget-consumer deploy script(s) must be confirmed at execution time per step 6-7 (do not guess — read each candidate script's header comment).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

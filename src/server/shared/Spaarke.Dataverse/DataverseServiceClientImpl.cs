@@ -1726,7 +1726,12 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     // ========================================
     // Event Management Operations (Events and Workflow Automation R1)
-    // Note: These use ServiceClient SDK. For Web API implementation, see DataverseWebApiService.
+    // NOTE: Events route to DataverseWebApiService (GraphModule DI); this SDK impl is NEVER a legitimate
+    // binding for them. Every method here THROWS NotImplementedException so a mis-route (a consumer injecting
+    // the composite IDataverseService instead of IEventDataverseService) fails LOUD. Previously the query
+    // methods returned silent-empty (LogWarning + empty) — that masked exactly such a mis-route as "no data"
+    // and shipped the DEF-1 latent bug (TodoGenerationService silently generated zero To Dos). RED-4 B
+    // (2026-08-16) converted the silent-empty stubs to throw, after DEF-1 was rerouted in smart-todo-r5.
     // ========================================
 
     public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
@@ -1742,16 +1747,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         Guid? ownerUserId = null,
         CancellationToken ct = default)
     {
-        // Stub: Return empty results until sprk_event entity is deployed
-        _logger.LogWarning("QueryEventsAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
-        return Task.FromResult((Array.Empty<EventEntity>(), 0));
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        throw new NotImplementedException("QueryEventsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
     {
-        // Stub: Return null until sprk_event entity is deployed
-        _logger.LogWarning("GetEventAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
-        return Task.FromResult<EventEntity?>(null);
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        throw new NotImplementedException("GetEventAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<(Guid Id, DateTime CreatedOn)> CreateEventAsync(CreateEventRequest request, CancellationToken ct = default)
@@ -1774,9 +1777,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
     {
-        // Stub: Return empty results until sprk_eventlog entity is deployed
-        _logger.LogWarning("QueryEventLogsAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
-        return Task.FromResult(Array.Empty<EventLogEntity>());
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        throw new NotImplementedException("QueryEventLogsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
@@ -1787,27 +1789,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public Task<EventTypeEntity[]> GetEventTypesAsync(bool activeOnly = true, CancellationToken ct = default)
     {
-        // Stub: Return empty results until sprk_eventtype entity is deployed
-        _logger.LogWarning("GetEventTypesAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
-        return Task.FromResult(Array.Empty<EventTypeEntity>());
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        throw new NotImplementedException("GetEventTypesAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<EventTypeEntity?> GetEventTypeAsync(Guid id, CancellationToken ct = default)
     {
-        // Stub: Return null until sprk_eventtype entity is deployed
-        _logger.LogWarning("GetEventTypeAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
-        return Task.FromResult<EventTypeEntity?>(null);
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        throw new NotImplementedException("GetEventTypeAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     // ========================================
     // Field Mapping Operations (Events and Workflow Automation R1)
+    // NOTE: Field-mapping routes to DataverseWebApiService (GraphModule DI); like the event methods above,
+    // every method here THROWS on a mis-route (inject IFieldMappingDataverseService, not the composite).
+    // RED-4 B (2026-08-16) converted the former silent-empty query stubs to throw.
     // ========================================
 
     public Task<FieldMappingProfileEntity[]> QueryFieldMappingProfilesAsync(CancellationToken ct = default)
     {
-        // Stub: Return empty results until sprk_fieldmappingprofile entity is deployed
-        _logger.LogWarning("QueryFieldMappingProfilesAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
-        return Task.FromResult(Array.Empty<FieldMappingProfileEntity>());
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("QueryFieldMappingProfilesAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
     public Task<FieldMappingProfileEntity?> GetFieldMappingProfileAsync(
@@ -1815,9 +1817,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         string targetEntity,
         CancellationToken ct = default)
     {
-        // Stub: Return null until sprk_fieldmappingprofile entity is deployed
-        _logger.LogWarning("GetFieldMappingProfileAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
-        return Task.FromResult<FieldMappingProfileEntity?>(null);
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("GetFieldMappingProfileAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
     public Task<FieldMappingRuleEntity[]> GetFieldMappingRulesAsync(
@@ -1825,9 +1826,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         bool activeOnly = true,
         CancellationToken ct = default)
     {
-        // Stub: Return empty results until sprk_fieldmappingrule entity is deployed
-        _logger.LogWarning("GetFieldMappingRulesAsync called on ServiceClient implementation - use DataverseWebApiService for full implementation");
-        return Task.FromResult(Array.Empty<FieldMappingRuleEntity>());
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("GetFieldMappingRulesAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
     public Task<Dictionary<string, object?>> RetrieveRecordFieldsAsync(
@@ -1947,6 +1947,49 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             throw new InvalidOperationException(
                 $"Failed to create {entity.LogicalName} record: {ex.Message}", ex);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default)
+    {
+        if (entity == null)
+            throw new ArgumentNullException(nameof(entity));
+
+        if (string.IsNullOrEmpty(entity.LogicalName))
+            throw new ArgumentException("Entity logical name must be set", nameof(entity));
+
+        // The upsert MUST be resolvable by a key — either an alternate key (KeyAttributes) or the
+        // primary id. Without one, Dataverse cannot match a target and the request is meaningless.
+        if (entity.KeyAttributes.Count == 0 && entity.Id == Guid.Empty)
+            throw new ArgumentException(
+                "Upsert requires KeyAttributes (an alternate key) or a primary Id on the entity.", nameof(entity));
+
+        try
+        {
+            var request = new Microsoft.Xrm.Sdk.Messages.UpsertRequest { Target = entity };
+            var response = (Microsoft.Xrm.Sdk.Messages.UpsertResponse)await _serviceClient.ExecuteAsync(request, ct);
+
+            var id = response.Target.Id;
+            _logger.LogInformation(
+                "[DATAVERSE] Upserted {EntityLogicalName} record {EntityId} (created={RecordCreated})",
+                entity.LogicalName,
+                id,
+                response.RecordCreated);
+
+            return (id, response.RecordCreated);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "[DATAVERSE] Error upserting {EntityLogicalName} record. KeyAttributes: {KeyCount}, Attributes: {AttributeCount}",
+                entity.LogicalName,
+                entity.KeyAttributes.Count,
+                entity.Attributes.Count);
+
+            throw new InvalidOperationException(
+                $"Failed to upsert {entity.LogicalName} record: {ex.Message}", ex);
         }
     }
 

@@ -148,6 +148,9 @@ public sealed class OutboxServiceSeamTests
     {
         private readonly Dictionary<Guid, Entity> _rows = new();
 
+        public async Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default)
+            => (await CreateAsync(entity, ct), true); // compose-r7 task 013: interface member; fake delegates to create
+
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default)
         {
             var id = Guid.NewGuid();

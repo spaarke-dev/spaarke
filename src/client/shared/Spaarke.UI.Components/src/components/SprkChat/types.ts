@@ -1318,6 +1318,17 @@ export interface ISprkChatProps {
   onOutboundConsumed?: () => void;
 
   /**
+   * FR-05 (spaarkeai-compose-r7 task 061, UC-6) — one-shot host→focus seam. When the host bumps this
+   * number to a NEW value, SprkChat focuses its chat input once (via the SprkChatInput `focusInput()`
+   * imperative handle). Mirrors the `pendingOutboundMessage` host→send seam: a monotonically increasing
+   * nonce the host increments in response to a cross-pane `conversation.focus_chat_input` PaneEventBus
+   * event (dispatched by the Compose editor's Ctrl+Shift+Space hotkey). SprkChat records the last value
+   * it acted on and skips re-render re-fires. Undefined ⇒ ZERO behavior change (existing consumers are
+   * byte-identical). A number (not a boolean) so repeated focus requests are each distinct.
+   */
+  focusInputSignal?: number;
+
+  /**
    * Hook fired BEFORE SprkChat starts an outbound message stream — R5 task
    * 020 / D2-11.
    *
@@ -1516,6 +1527,13 @@ export interface ISprkChatInputHandle {
    * the slash hook, and focusing the input.
    */
   triggerSlashMode: () => void;
+
+  /**
+   * FR-05 (spaarkeai-compose-r7 task 061, UC-6) — move keyboard focus into the chat textarea
+   * WITHOUT altering its content (unlike `triggerSlashMode`, which writes `/`). Consumed by SprkChat's
+   * `focusInputSignal` host→focus seam so a cross-pane Ctrl+Shift+Space can land the caret in the composer.
+   */
+  focusInput: () => void;
 }
 
 /** Props for SprkChatContextSelector sub-component. */

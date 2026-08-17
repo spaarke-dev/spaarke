@@ -72,6 +72,19 @@ export const useKanbanCardStyles = makeStyles({
     gap: tokens.spacingVerticalXXS,
   },
 
+  /**
+   * Title row — wraps the title text + the FR-02 priority glyph so the
+   * glyph sits inline with the title without breaking the title's
+   * ellipsis-on-overflow behaviour (task 012).
+   */
+  titleRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+    minWidth: 0,
+  },
+
   title: {
     display: 'block',
     overflow: 'hidden',
@@ -79,6 +92,8 @@ export const useKanbanCardStyles = makeStyles({
     whiteSpace: 'nowrap',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
+    flex: '1 1 auto',
+    minWidth: 0,
   },
 
   titleCompleted: {

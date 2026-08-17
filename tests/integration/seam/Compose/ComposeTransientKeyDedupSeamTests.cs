@@ -105,7 +105,7 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
         });
         (await ReadOkBody(second)).Should().NotBeNull();
 
-        _fixture.DataverseMock.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+        _fixture.DataverseMock.Verify(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
             Times.Once, "the same transient key must resolve to ONE record — the second Save-Version replaces in place");
         _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
                 It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
@@ -155,8 +155,8 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
                 It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity)null!);
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid.NewGuid(), true));
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
@@ -189,7 +189,7 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
         _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
             Times.Never, "the fork never replaces an existing item — it forks a brand-new one");
-        _fixture.DataverseMock.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+        _fixture.DataverseMock.Verify(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
             Times.Once, "the fork creates a brand-new sprk_document record");
     }
 
@@ -231,7 +231,7 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
             (await ReadOkBody(response)).Should().NotBeNull($"save #{i + 1} must succeed");
         }
 
-        _fixture.DataverseMock.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+        _fixture.DataverseMock.Verify(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
             Times.Once, "eight repeated create-on-save calls with the SAME transient key must produce exactly ONE record — the 8-duplicate defect is fixed");
         _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
                 It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
@@ -290,7 +290,7 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
             .ReturnsAsync(() => createdRow!);
 
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) =>
             {
                 var row = new Entity("sprk_document", Guid.NewGuid())
@@ -304,7 +304,7 @@ public sealed class ComposeTransientKeyDedupSeamTests : IClassFixture<ComposeFid
                 }
                 createdRow = row;
             })
-            .ReturnsAsync(() => createdRow?.Id ?? Guid.NewGuid());
+            .ReturnsAsync(() => (createdRow?.Id ?? Guid.NewGuid(), true)); // task 013 (FR-07d): upsert returns (id, created)
 
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(

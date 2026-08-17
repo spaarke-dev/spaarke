@@ -258,6 +258,9 @@ export const SprkChatInput = React.forwardRef<ISprkChatInputHandle, ISprkChatInp
       ref,
       () => ({
         triggerSlashMode: () => handleSlashButtonClick(),
+        // FR-05 (task 061, UC-6): focus the textarea without mutating its content (Ctrl+Shift+Space
+        // cross-pane focus). `inputRef` is a stable ref, so no dependency change is needed.
+        focusInput: () => inputRef.current?.focus(),
       }),
       [handleSlashButtonClick]
     );

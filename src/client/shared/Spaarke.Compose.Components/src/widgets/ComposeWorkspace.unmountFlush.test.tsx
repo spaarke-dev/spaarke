@@ -3,10 +3,18 @@
  *
  * DI-02 (notes/defer-issues.md): every path that closes/removes a compose tab
  * (`WorkspaceTabManager.closeTab`, `clearAllTabs` on a History switch or an
- * exclusive-playbook reset) unmounts `ComposeWorkspace` with NO dirty-check — there
- * is no autosave/debounce anywhere in this workspace, only an EXPLICIT Ctrl+S /
- * toolbar-Save / cross-pane bridge save. Un-flushed keystrokes since the last
- * explicit save were silently dropped when the tab unmounted.
+ * exclusive-playbook reset) unmounts `ComposeWorkspace` with NO dirty-check.
+ * Un-flushed keystrokes since the last SERVER save were silently dropped when the tab
+ * unmounted.
+ *
+ * NOTE (spaarkeai-compose-r7 FR-03, tasks 040/041): the workspace now ALSO has a
+ * CLIENT-ONLY draft autosave (a ~15s dirty-only localStorage snapshot) — the prior
+ * "no autosave anywhere" invariant was deliberately reversed (spec ADR-Tensions path
+ * A). That does NOT change this test: the client draft path never calls `triggerSave`
+ * and never POSTs, so the SERVER-save flush-on-unmount is STILL the only path that
+ * POSTs without an explicit Ctrl+S / toolbar-Save / bridge save. These assertions
+ * (dirty unmount → exactly one `/save` POST; clean unmount → zero) remain the DI-02
+ * contract, unchanged.
  *
  * The fix (see `hasUnsavedWorkRef` + the unmount effect in `ComposeWorkspace.tsx`,
  * just after `handleDirtyChange`) best-effort flushes through the SAME

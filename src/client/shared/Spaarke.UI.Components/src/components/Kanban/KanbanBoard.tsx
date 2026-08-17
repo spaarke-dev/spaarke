@@ -239,27 +239,35 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
         {columns.map(column => {
           const isCollapsed = collapsedColumns?.has(column.id) ?? false;
 
-          // R4 task 103 (E-2, 2026-06-18) — column tint + top-border accent
-          // are composed into a single inline style. `tintColor` (UAT 5) sits
-          // behind cards as a gentle wash; `accentColor` remains the sharper
-          // top-border accent rail. Both default to `undefined` for backwards
-          // compatibility with existing consumers (Calendar, future Kanban
-          // surfaces) that don't set either.
-          const columnInlineStyle: React.CSSProperties | undefined = (() => {
-            const hasAccent = !!column.accentColor;
-            const hasTint = !!column.tintColor;
-            if (!hasAccent && !hasTint) return undefined;
-            return {
-              ...(hasAccent
-                ? {
-                    borderTopWidth: '3px',
-                    borderTopStyle: 'solid',
-                    borderTopColor: column.accentColor,
-                  }
-                : {}),
-              ...(hasTint ? { backgroundColor: column.tintColor } : {}),
-            };
-          })();
+          // R4 task 103 (E-2, 2026-06-18) — column tint + top-border accent.
+          //
+          // smart-todo-r5 task 023 (FR-08 / U-1 + F-1, 2026-08-16) — UAT
+          // feedback: applying `tintColor` as the FULL column body background
+          // (the original R4-103 behaviour, applied via this same inline
+          // style object) read as a heavy, full-saturation wash. Per spec
+          // FR-08's named "subtle" options ("thin accent bar OR lightly
+          // tinted header"), `tintColor` now scopes to the column HEADER
+          // strip only (see `columnHeaderTintStyle` below, applied to the
+          // `columnHeader` div) — NOT the column container / card-list body.
+          // `accentColor` remains the sharper, primary top-border accent
+          // rail on the column container (unchanged — still a thin 3px
+          // border, already subtle). Both default to `undefined` for
+          // backwards compatibility with existing consumers (Calendar,
+          // future Kanban surfaces) that don't set either.
+          const columnInlineStyle: React.CSSProperties | undefined = column.accentColor
+            ? {
+                borderTopWidth: '3px',
+                borderTopStyle: 'solid',
+                borderTopColor: column.accentColor,
+              }
+            : undefined;
+
+          // Header-only tint (FR-08) — a light background wash confined to
+          // the column header strip (title/subtitle/count row), composed
+          // with the header's existing `cursor: pointer` inline style below.
+          const columnHeaderTintStyle: React.CSSProperties | undefined = column.tintColor
+            ? { backgroundColor: column.tintColor }
+            : undefined;
 
           // UAT 2026-06-20 — Single container for both expanded AND collapsed.
           // Same column classname/layout in both states; only the droppable
@@ -288,10 +296,15 @@ function KanbanBoardInner<T>(props: IKanbanBoardProps<T>, _ref: React.Ref<HTMLDi
               aria-label={isCollapsed ? `${column.title} (collapsed)` : column.title}
               style={{ ...columnInlineStyle, ...collapsedHorizontalInline }}
             >
-              {/* Column header — always rendered; click toggles collapse. */}
+              {/* Column header — always rendered; click toggles collapse.
+                  FR-08: carries the subtle `tintColor` header wash (if set)
+                  alongside the pre-existing pointer-cursor affordance. */}
               <div
                 className={styles.columnHeader}
-                style={onToggleCollapse ? { cursor: 'pointer' } : undefined}
+                style={{
+                  ...(onToggleCollapse ? { cursor: 'pointer' as const } : {}),
+                  ...columnHeaderTintStyle,
+                }}
                 onClick={onToggleCollapse ? () => onToggleCollapse(column.id) : undefined}
               >
                 <div>

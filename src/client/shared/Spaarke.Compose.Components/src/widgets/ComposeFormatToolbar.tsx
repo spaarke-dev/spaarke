@@ -98,6 +98,8 @@ import {
   MenuPopover,
   MenuList,
   MenuItem,
+  MenuItemCheckbox,
+  MenuDivider,
   Popover,
   PopoverTrigger,
   PopoverSurface,
@@ -124,6 +126,7 @@ import {
   ArrowRedo24Regular,
   Info24Regular,
   CommentMultiple24Regular,
+  CommentAdd24Regular,
   ChevronDown16Regular,
   DocumentEdit24Regular,
   OpenRegular,
@@ -174,6 +177,20 @@ const useStyles = makeStyles({
   },
   menuButton: {
     minWidth: '96px',
+  },
+  // FR-03 (task 041): the save-state indicator (Saving… / Unsaved / Saved + Auto Save On/Off).
+  // Subtle, single-line, Fluent v9 semantic tokens only (ADR-021 dark-mode-correct).
+  saveStateIndicator: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXXS,
+    marginInlineStart: tokens.spacingHorizontalXS,
+    marginInlineEnd: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase200,
+    whiteSpace: 'nowrap',
+    userSelect: 'none',
   },
   // FIX #5: the icon-only tool palette rendered INSIDE a Paragraph/Font/Word
   // dropdown popover — a comfortable, even horizontal gap (not cramped, not
@@ -230,6 +247,15 @@ export interface ComposeFormatToolbarProps {
   /** Toggle the live Track Changes overlay. Rendered only when supplied. */
   onToggleTrackChanges?: () => void;
 
+  // ---- Add Comment (FR-10 / R6 D7, task 072) — the UI entry point onto the SHIPPED comment
+  //      round-trip machinery (useComposeCommentThreads / ComposeCommentThread, R6 tasks 024/026).
+  //      The prior "Comments" FAB was removed (UAT round-6 #3b), leaving the panel reachable-less;
+  //      this re-exposes it as a toolbar toggle. Rendered only when the handler is supplied. ----
+  /** True when the Comments composer/panel is open (drives the toggle's pressed state). */
+  commentsOpen?: boolean;
+  /** Open the Comments composer for the current selection (host captures the range). Rendered only when supplied. */
+  onToggleComments?: () => void;
+
   // ---- Deferred edit-path gate (task 038, supersedes task 037 — R4 zero-error guardrails) ----
   /**
    * True when the editor is over a LOADED/imported baseline (an uploaded `.docx`, a stored
@@ -264,6 +290,18 @@ export interface ComposeFormatToolbarProps {
   canSave?: boolean;
   /** True while a save is in flight. */
   isSaving?: boolean;
+  /** FR-01/FR-03 (task 020/040): current Auto Save state, surfaced as a checkable menu item in the Save
+   *  dropdown. The actual draft-safe autosave behavior is implemented in Phase 4 (040/041); this toolbar
+   *  only renders the control + reports toggles. Undefined → the Auto Save item is not rendered (a host
+   *  that has not wired autosave yet keeps the plain Save / Save As menu). */
+  autoSaveEnabled?: boolean;
+  /** FR-01/FR-03 (task 020/040): invoked with the NEXT Auto Save state when the user toggles the menu
+   *  item. Rendered only when both this and {@link autoSaveEnabled} are set. */
+  onAutoSaveToggle?: (enabled: boolean) => void;
+  /** FR-03 (task 041): true when the document has unsaved edits (dirty OR an unpersisted transient
+   *  draft). Drives the save-state indicator (Saving… while {@link isSaving}, Unsaved when true, Saved
+   *  otherwise). Undefined → the indicator is not rendered (a host that does not track dirty state). */
+  hasUnsavedEdits?: boolean;
   /** G10 (FR-09, task 040): manual "Refresh Profile" handler. Renders the button when set (the host
    *  wires it only for a promoted doc — one with a sprk_document record to re-profile). */
   onRefreshProfile?: () => void;
@@ -430,6 +468,9 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onSave,
     canSave,
     isSaving,
+    autoSaveEnabled,
+    onAutoSaveToggle,
+    hasUnsavedEdits,
     onRefreshProfile,
     onReloadFromSource,
     onOpenDocument,
@@ -438,6 +479,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     applyTemplateDisabledReason,
     trackChangesEnabled,
     onToggleTrackChanges,
+    commentsOpen,
+    onToggleComments,
     hasReview,
     reviewSummaryOpen,
     onToggleReviewSummary,
@@ -984,10 +1027,23 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
              primaryActionButton's `aria-label`; a Tooltip carries the full label on hover (icon-only
              buttons need both — ADR-021/a11y). ---- */}
       {onSave ? (
-        <Menu positioning="below-end">
+        <Menu
+          positioning="below-end"
+          // FR-01 (task 020): the Auto Save toggle is a checkable menu item. Its checked state is
+          // controlled by the host (autoSaveEnabled); rendered only when the host wired autosave
+          // (both autoSaveEnabled + onAutoSaveToggle set — the FR-03 Phase-4 behavior lives there).
+          checkedValues={
+            autoSaveEnabled !== undefined && onAutoSaveToggle
+              ? { autosave: autoSaveEnabled ? ['on'] : [] }
+              : undefined
+          }
+          onCheckedValueChange={(_e, data) => {
+            if (data.name === 'autosave') onAutoSaveToggle?.(data.checkedItems.includes('on'));
+          }}
+        >
           <MenuTrigger disableButtonEnhancement>
             {(triggerProps: MenuButtonProps) => (
-              <Tooltip content={isSaving ? 'Saving…' : 'Save Version'} relationship="label" withArrow>
+              <Tooltip content={isSaving ? 'Saving…' : 'Save'} relationship="label" withArrow>
                 <SplitButton
                   appearance="subtle"
                   data-testid="compose-format-save"
@@ -996,7 +1052,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                     onClick: () => onSave('version'),
                     disabled: saveDisabled,
                     icon: <SaveRegular />,
-                    'aria-label': isSaving ? 'Saving' : 'Save version',
+                    'aria-label': isSaving ? 'Saving' : 'Save',
                   }}
                 />
               </Tooltip>
@@ -1004,22 +1060,84 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
+              {/* FR-01 (task 020): Save = append an SPE version to the SAME document (ADR-049).
+                  Explicit item so the split-button's primary action is discoverable in the menu too. */}
+              <MenuItem
+                icon={<SaveRegular />}
+                disabled={saveDisabled}
+                onClick={() => onSave('version')}
+                data-testid="compose-format-save-version"
+              >
+                Save
+              </MenuItem>
+              {/* FR-01/FR-07a (task 020/012): Save As = a REAL fork — a distinct new sprk_document with a
+                  uniquified filename (never a silent re-version of the original). Replaces R6's
+                  "Save New Document". */}
               <MenuItem
                 icon={<SaveRegular />}
                 disabled={saveDisabled}
                 onClick={() => onSave('new')}
                 data-testid="compose-format-save-new"
               >
-                Save New Document
+                Save As
               </MenuItem>
+              {autoSaveEnabled !== undefined && onAutoSaveToggle ? (
+                <>
+                  <MenuDivider />
+                  <MenuItemCheckbox
+                    name="autosave"
+                    value="on"
+                    data-testid="compose-format-autosave-toggle"
+                  >
+                    Auto Save
+                  </MenuItemCheckbox>
+                </>
+              ) : null}
             </MenuList>
           </MenuPopover>
         </Menu>
       ) : null}
 
+      {/* FR-03 (task 041): save-state indicator (absorbs R6 D6). Reflects task-040 draft/dirty state:
+          Saving… while a save is in flight, Unsaved when there are dirty edits, Saved otherwise — plus
+          the Auto Save On/Off state. Rendered only when the host tracks save state (Save wired +
+          hasUnsavedEdits provided). Fluent v9 semantic tokens only (ADR-021 dark-mode); `aria-live` so
+          the state change is announced to assistive tech. */}
+      {onSave && hasUnsavedEdits !== undefined ? (
+        <Text
+          className={styles.saveStateIndicator}
+          data-testid="compose-save-state-indicator"
+          data-save-state={isSaving ? 'saving' : hasUnsavedEdits ? 'unsaved' : 'saved'}
+          aria-live="polite"
+        >
+          {isSaving ? <Spinner size="extra-tiny" aria-hidden /> : null}
+          {isSaving ? 'Saving…' : hasUnsavedEdits ? 'Unsaved' : 'Saved'}
+          {autoSaveEnabled !== undefined ? ` · Auto Save ${autoSaveEnabled ? 'On' : 'Off'}` : ''}
+        </Text>
+      ) : null}
+
       <ToolbarDivider data-testid="compose-format-divider-2" />
 
-      {/* ==== Group 3 (UAT round-4 #12): Show/Hide Review Notes · Track Changes ==== */}
+      {/* ==== Group 3 (UAT round-4 #12): Add Comment · Show/Hide Review Notes · Track Changes ==== */}
+      {/* ---- Add Comment (FR-10 / R6 D7, task 072) — the re-exposed UI entry point onto the SHIPPED
+             comment machinery (host `onToggleComments` = handleToggleComments, which captures the live
+             selection into a pendingRange and opens the ComposeCommentThread composer). ICON-ONLY toggle
+             mirroring Track Changes: primary/subtle appearance carries the on/off state (ADR-021 —
+             semantic tokens only, dark-mode-correct), accessible name + pressed state + tooltip retained. ---- */}
+      {onToggleComments ? (
+        <Tooltip content="Add a comment on the selected text" relationship="label" withArrow>
+          <ToolbarButton
+            appearance={commentsOpen ? 'primary' : 'subtle'}
+            icon={<CommentAdd24Regular />}
+            aria-label="Add comment"
+            aria-pressed={commentsOpen === true}
+            disabled={controlDisabled}
+            onClick={onToggleComments}
+            data-testid="compose-format-add-comment"
+          />
+        </Tooltip>
+      ) : null}
+
       {hasReview && onToggleReviewNotes ? (
         <Tooltip content={reviewNotesOpen ? 'Hide Review Notes' : 'Show Review Notes'} relationship="label" withArrow>
           <ToolbarButton

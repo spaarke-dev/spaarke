@@ -91,6 +91,7 @@ import {
   type SearchIndexEntry,
 } from '../services/navigatorSearchIndex';
 import { liveSearch } from '../services/liveSearchService';
+import { openEntityRecord } from '../services/recordNavigation';
 import { openView } from '../services/viewNavigation';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -171,11 +172,9 @@ async function navigateToTarget(xrm: XrmContext, target: SearchEntryTarget | nul
   if (!navigation) return;
 
   if (target.type === 'entityrecord') {
-    await navigation.navigateTo({
-      pageType: 'entityrecord',
-      entityName: target.entityLogicalName,
-      entityId: target.entityId,
-    });
+    // sprk_communication (Email) routes to the Email code page; all other
+    // records open the OOB form (shared rule — see recordNavigation.ts).
+    openEntityRecord(xrm, target.entityLogicalName, target.entityId);
     return;
   }
 

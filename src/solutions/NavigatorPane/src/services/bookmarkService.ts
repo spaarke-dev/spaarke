@@ -300,11 +300,23 @@ export async function pinCurrentPage(ownerId: string): Promise<PinResult> {
   const xrm = getXrm();
   const target = deriveCapturedTarget(xrm);
   if (target) {
+    // When the host didn't preload `entityRecordName`, `deriveCapturedTarget`
+    // falls back to the generic entity label ("Document"/"Communication").
+    // Resolve the real primary name in that case so the pin isn't labeled just
+    // by its type (UAT feedback) — best-effort; resolveRecordDisplayName falls
+    // back to the same generic label on any failure.
+    let displayName = target.displayName;
+    if (
+      target.pageType === NavItemPageType.EntityRecord &&
+      displayName === formatEntityFallbackLabel(target.targetLogicalName)
+    ) {
+      displayName = await resolveRecordDisplayName(xrm, target.targetLogicalName, target.targetId);
+    }
     return pin(ownerId, {
       targetLogicalName: target.targetLogicalName,
       targetId: target.targetId,
       pageType: target.pageType,
-      displayName: target.displayName,
+      displayName,
       source: NavItemSource.Captured,
     });
   }
