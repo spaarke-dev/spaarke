@@ -70,13 +70,7 @@ describe('SprkChatSuggestions', () => {
   });
 
   it('Render_MaxThreeSuggestions_TruncatesExtra', () => {
-    const suggestions = [
-      cap('First'),
-      question('Second?'),
-      cap('Third'),
-      question('Fourth?'),
-      cap('Fifth'),
-    ];
+    const suggestions = [cap('First'), question('Second?'), cap('Third'), question('Fourth?'), cap('Fifth')];
 
     renderWithProviders(<SprkChatSuggestions suggestions={suggestions} onSelect={mockOnSelect} visible={true} />);
 

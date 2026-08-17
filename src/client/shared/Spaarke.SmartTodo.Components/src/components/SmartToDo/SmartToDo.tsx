@@ -30,7 +30,7 @@
  *   - Support light, dark, and high-contrast modes (automatic via token system)
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   shorthands,
@@ -40,22 +40,18 @@ import {
   Spinner,
   MessageBar,
   MessageBarBody,
-} from "@fluentui/react-components";
-import { KanbanBoard } from "@spaarke/ui-components";
-import type { DropResult } from "@hello-pangea/dnd";
-import { KanbanCard } from "./KanbanCard";
-import { KanbanHeader } from "./KanbanHeader";
-import { ThresholdSettingsPopover } from "./ThresholdSettings";
-import { DismissedSection } from "./DismissedSection";
-import { useKanbanColumns } from "../../hooks/useKanbanColumns";
-import { computeTodoScore } from "../../utils/todoScoring";
-import type {
-  ITodo,
-  ITodoKanbanPreferences,
-  ITodoMutationResult,
-} from "../../types/entities";
-import type { TodoColumn, IKanbanDataverseService } from "../../types/kanban";
-import type { IFeedSyncBridge } from "../../types/todo";
+} from '@fluentui/react-components';
+import { KanbanBoard } from '@spaarke/ui-components';
+import type { DropResult } from '@hello-pangea/dnd';
+import { KanbanCard } from './KanbanCard';
+import { KanbanHeader } from './KanbanHeader';
+import { ThresholdSettingsPopover } from './ThresholdSettings';
+import { DismissedSection } from './DismissedSection';
+import { useKanbanColumns } from '../../hooks/useKanbanColumns';
+import { computeTodoScore } from '../../utils/todoScoring';
+import type { ITodo, ITodoKanbanPreferences, ITodoMutationResult } from '../../types/entities';
+import type { TodoColumn, IKanbanDataverseService } from '../../types/kanban';
+import type { IFeedSyncBridge } from '../../types/todo';
 
 // ---------------------------------------------------------------------------
 // Lazy-loaded AI Summary dialog (bundle-size optimization)
@@ -65,19 +61,17 @@ import type { IFeedSyncBridge } from "../../types/todo";
 // this complex sub-tree from the initial bundle until first user click.
 // ---------------------------------------------------------------------------
 
-const LazyTodoAISummaryDialog = React.lazy(
-  () => import("./TodoAISummaryDialog")
-);
+const LazyTodoAISummaryDialog = React.lazy(() => import('./TodoAISummaryDialog'));
 
 /** Suspense fallback shown while the TodoAISummaryDialog chunk loads. */
 const TodoAISummaryFallback: React.FC = () => (
   <div
     style={{
-      position: "fixed",
+      position: 'fixed',
       inset: 0,
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
       backgroundColor: tokens.colorNeutralStroke1,
       zIndex: 1000,
     }}
@@ -116,32 +110,32 @@ function sortTodoItems(items: ITodo[]): ITodo[] {
 
 const useStyles = makeStyles({
   card: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     backgroundColor: tokens.colorNeutralBackground1,
-    ...shorthands.borderWidth("1px"),
-    ...shorthands.borderStyle("solid"),
+    ...shorthands.borderWidth('1px'),
+    ...shorthands.borderStyle('solid'),
     ...shorthands.borderColor(tokens.colorNeutralStroke2),
     borderRadius: tokens.borderRadiusMedium,
-    overflow: "hidden",
-    flex: "1 1 0",
-    minHeight: "400px",
+    overflow: 'hidden',
+    flex: '1 1 0',
+    minHeight: '400px',
   },
   /** Borderless, height-flexible root for use inside a tabbed container. */
   embeddedRoot: {
-    display: "flex",
-    flexDirection: "column",
-    flex: "1 1 0",
-    overflow: "hidden",
+    display: 'flex',
+    flexDirection: 'column',
+    flex: '1 1 0',
+    overflow: 'hidden',
     backgroundColor: tokens.colorNeutralBackground1,
   },
 
   // ── Loading state ─────────────────────────────────────────────────────────
   loadingContainer: {
-    flex: "1 1 0",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    flex: '1 1 0',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // ── Error state ───────────────────────────────────────────────────────────
@@ -167,31 +161,30 @@ const useStyles = makeStyles({
 
   // ── Empty state ───────────────────────────────────────────────────────────
   emptyContainer: {
-    flex: "1 1 0",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
+    flex: '1 1 0',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
     gap: tokens.spacingVerticalS,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
     color: tokens.colorNeutralForeground3,
-    textAlign: "center",
+    textAlign: 'center',
   },
 
   // ── Kanban board area ─────────────────────────────────────────────────────
   boardContainer: {
-    flex: "1 1 0",
-    display: "flex",
-    flexDirection: "column",
+    flex: '1 1 0',
+    display: 'flex',
+    flexDirection: 'column',
     minHeight: 0,
-    overflow: "hidden",
+    overflow: 'hidden',
     paddingTop: tokens.spacingVerticalXS,
     paddingBottom: tokens.spacingVerticalXS,
     paddingLeft: tokens.spacingHorizontalS,
     paddingRight: tokens.spacingHorizontalS,
   },
-
 });
 
 // ---------------------------------------------------------------------------
@@ -206,8 +199,7 @@ const TodoEmptyState: React.FC = () => {
         All caught up
       </Text>
       <Text size={200}>
-        No to-do items at the moment. Items flagged from the Updates Feed or
-        system-generated tasks will appear here.
+        No to-do items at the moment. Items flagged from the Updates Feed or system-generated tasks will appear here.
       </Text>
     </div>
   );
@@ -218,9 +210,9 @@ const TodoEmptyState: React.FC = () => {
 // ---------------------------------------------------------------------------
 
 const COLUMN_ID_MAP: Record<string, TodoColumn> = {
-  Today: "Today",
-  Tomorrow: "Tomorrow",
-  Future: "Future",
+  Today: 'Today',
+  Tomorrow: 'Tomorrow',
+  Future: 'Future',
 };
 
 // ---------------------------------------------------------------------------
@@ -335,9 +327,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
    * Status overrides keyed by sprk_todoid. Stored as a Dataverse statuscode
    * (1=Open, 659490001=In Progress, 2=Completed, 659490002=Dismissed).
    */
-  const [statusOverrides, setStatusOverrides] = React.useState<Map<string, number>>(
-    new Map()
-  );
+  const [statusOverrides, setStatusOverrides] = React.useState<Map<string, number>>(new Map());
 
   /** Set of todoIds that are currently being dismissed (disable dismiss button) */
   const [dismissingIds, setDismissingIds] = React.useState<Set<string>>(new Set());
@@ -361,12 +351,10 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const [settingsOpen, setSettingsOpen] = React.useState(false);
 
   /** Collapsed Kanban columns — Future is collapsed by default */
-  const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(
-    new Set(["Future"])
-  );
+  const [collapsedColumns, setCollapsedColumns] = React.useState<ReadonlySet<string>>(new Set(['Future']));
 
   const handleToggleCollapse = React.useCallback((columnId: string) => {
-    setCollapsedColumns((prev) => {
+    setCollapsedColumns(prev => {
       const next = new Set(prev);
       if (next.has(columnId)) {
         next.delete(columnId);
@@ -382,10 +370,10 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // -------------------------------------------------------------------------
 
   const activeItems = React.useMemo(() => {
-    const dismissedSet = new Set(dismissedItems.map((d) => d.sprk_todoid));
+    const dismissedSet = new Set(dismissedItems.map(d => d.sprk_todoid));
     return items
-      .filter((item) => !dismissedSet.has(item.sprk_todoid))
-      .map((item) => {
+      .filter(item => !dismissedSet.has(item.sprk_todoid))
+      .map(item => {
         const overrideStatuscode = statusOverrides.get(item.sprk_todoid);
         if (overrideStatuscode === undefined) return item;
         // statecode follows statuscode (per task 009): Open/InProgress => Active, else Inactive.
@@ -401,8 +389,8 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Merge addedItems into the display list
   const displayItems = React.useMemo(() => {
     if (addedItems.length === 0) return activeItems;
-    const addedIds = new Set(addedItems.map((a) => a.sprk_todoid));
-    const dedupedActive = activeItems.filter((i) => !addedIds.has(i.sprk_todoid));
+    const addedIds = new Set(addedItems.map(a => a.sprk_todoid));
+    const dedupedActive = activeItems.filter(i => !addedIds.has(i.sprk_todoid));
     return sortTodoItems([...dedupedActive, ...addedItems]);
   }, [activeItems, addedItems]);
 
@@ -414,14 +402,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // flows through the optional injected `dataverseService`)
   // -------------------------------------------------------------------------
 
-  const {
-    columns,
-    moveItem,
-    reorderInColumn,
-    togglePin,
-    recalculate,
-    isRecalculating,
-  } = useKanbanColumns<ITodo>({
+  const { columns, moveItem, reorderInColumn, togglePin, recalculate, isRecalculating } = useKanbanColumns<ITodo>({
     items: displayItems,
     todayThreshold: preferences.todayThreshold,
     tomorrowThreshold: preferences.tomorrowThreshold,
@@ -441,34 +422,32 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       const optimisticItem: ITodo = {
         sprk_todoid: tempId,
         sprk_name: title,
-        statecode: 0,        // Active
-        statuscode: 1,       // Open (per task 009)
+        statecode: 0, // Active
+        statuscode: 1, // Open (per task 009)
         sprk_priorityscore: 50,
         sprk_effortscore: 10,
         createdon: new Date().toISOString(),
         modifiedon: new Date().toISOString(),
       };
 
-      setAddedItems((prev) => sortTodoItems([...prev, optimisticItem]));
+      setAddedItems(prev => sortTodoItems([...prev, optimisticItem]));
 
       try {
         const result = await onCreateTodo(title);
 
         if (!result.success) {
-          setAddedItems((prev) => prev.filter((i) => i.sprk_todoid !== tempId));
-          setAddError(
-            result.error?.message ?? "Failed to create to-do item. Please try again."
-          );
+          setAddedItems(prev => prev.filter(i => i.sprk_todoid !== tempId));
+          setAddError(result.error?.message ?? 'Failed to create to-do item. Please try again.');
         } else {
-          setAddedItems((prev) => prev.filter((i) => i.sprk_todoid !== tempId));
+          setAddedItems(prev => prev.filter(i => i.sprk_todoid !== tempId));
           onRefetch();
           // FR-14: cross-block notification — the new todo is active.
           const newId = result.id ?? tempId;
           feedSync?.notifyChange(newId, true);
         }
       } catch {
-        setAddedItems((prev) => prev.filter((i) => i.sprk_todoid !== tempId));
-        setAddError("Failed to create to-do item. Please try again.");
+        setAddedItems(prev => prev.filter(i => i.sprk_todoid !== tempId));
+        setAddError('Failed to create to-do item. Please try again.');
       } finally {
         setIsAdding(false);
       }
@@ -482,24 +461,24 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
   const handleDismiss = React.useCallback(
     async (todoId: string) => {
-      const item = displayItems.find((i) => i.sprk_todoid === todoId);
+      const item = displayItems.find(i => i.sprk_todoid === todoId);
       if (!item) return;
 
-      setDismissingIds((prev) => new Set(prev).add(todoId));
-      setDismissedItems((prev) => [item, ...prev]);
+      setDismissingIds(prev => new Set(prev).add(todoId));
+      setDismissedItems(prev => [item, ...prev]);
 
       try {
         const result = await onDismissTodo(todoId);
         if (!result.success) {
-          setDismissedItems((prev) => prev.filter((i) => i.sprk_todoid !== todoId));
+          setDismissedItems(prev => prev.filter(i => i.sprk_todoid !== todoId));
         } else {
           // FR-14: cross-block notification — todo became inactive.
           feedSync?.notifyChange(todoId, false);
         }
       } catch {
-        setDismissedItems((prev) => prev.filter((i) => i.sprk_todoid !== todoId));
+        setDismissedItems(prev => prev.filter(i => i.sprk_todoid !== todoId));
       } finally {
-        setDismissingIds((prev) => {
+        setDismissingIds(prev => {
           const next = new Set(prev);
           next.delete(todoId);
           return next;
@@ -515,19 +494,19 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
   const handleRestore = React.useCallback(
     async (todoId: string) => {
-      const item = dismissedItems.find((i) => i.sprk_todoid === todoId);
+      const item = dismissedItems.find(i => i.sprk_todoid === todoId);
       if (!item) return;
 
-      setRestoringIds((prev) => new Set(prev).add(todoId));
-      setDismissedItems((prev) => prev.filter((i) => i.sprk_todoid !== todoId));
+      setRestoringIds(prev => new Set(prev).add(todoId));
+      setDismissedItems(prev => prev.filter(i => i.sprk_todoid !== todoId));
       // Override to statuscode=1 (Open) optimistically.
-      setStatusOverrides((prev) => new Map(prev).set(todoId, 1));
+      setStatusOverrides(prev => new Map(prev).set(todoId, 1));
 
       try {
         const result = await onRestoreTodo(todoId);
         if (!result.success) {
-          setDismissedItems((prev) => [item, ...prev]);
-          setStatusOverrides((prev) => {
+          setDismissedItems(prev => [item, ...prev]);
+          setStatusOverrides(prev => {
             const next = new Map(prev);
             next.delete(todoId);
             return next;
@@ -538,14 +517,14 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           feedSync?.notifyChange(todoId, true);
         }
       } catch {
-        setDismissedItems((prev) => [item, ...prev]);
-        setStatusOverrides((prev) => {
+        setDismissedItems(prev => [item, ...prev]);
+        setStatusOverrides(prev => {
           const next = new Map(prev);
           next.delete(todoId);
           return next;
         });
       } finally {
-        setRestoringIds((prev) => {
+        setRestoringIds(prev => {
           const next = new Set(prev);
           next.delete(todoId);
           return next;
@@ -565,10 +544,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
       // Dropped outside any column or back to the same position
       if (!destination) return;
-      if (
-        destination.droppableId === source.droppableId &&
-        destination.index === source.index
-      ) {
+      if (destination.droppableId === source.droppableId && destination.index === source.index) {
         return;
       }
 
@@ -639,7 +615,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   const renderCard = React.useCallback(
     (item: ITodo, _index: number, columnId: string) => {
       // Get column accent colour from the columns array
-      const col = columns.find((c) => c.id === columnId);
+      const col = columns.find(c => c.id === columnId);
       return (
         <KanbanCard
           todo={item}
@@ -670,7 +646,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     <div
       className={embedded ? styles.embeddedRoot : styles.card}
       role="region"
-      aria-label={`Smart To Do Kanban, ${totalCount} item${totalCount === 1 ? "" : "s"}`}
+      aria-label={`Smart To Do Kanban, ${totalCount} item${totalCount === 1 ? '' : 's'}`}
     >
       {/* ── KanbanHeader — hidden in workspace preview (disableSidePane) ── */}
       {!disableSidePane && (
@@ -692,7 +668,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         preferences={preferences}
         onSave={handleSettingsSave}
       >
-        <span style={{ display: "none" }} />
+        <span style={{ display: 'none' }} />
       </ThresholdSettingsPopover>
 
       {/* ── Add-error banner ──────────────────────────────────────────── */}
@@ -717,11 +693,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
       {/* ── Loading state ─────────────────────────────────────────────── */}
       {(isLoading || prefsLoading) && (
         <div className={styles.loadingContainer}>
-          <Spinner
-            size="medium"
-            label="Loading to-do items..."
-            labelPosition="below"
-          />
+          <Spinner size="medium" label="Loading to-do items..." labelPosition="below" />
         </div>
       )}
 
@@ -731,12 +703,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
           <MessageBar intent="error" layout="multiline">
             <MessageBarBody>
               {error}
-              <Button
-                appearance="transparent"
-                size="small"
-                onClick={onRefetch}
-                className={styles.retryButton}
-              >
+              <Button appearance="transparent" size="small" onClick={onRefetch} className={styles.retryButton}>
                 Try again
               </Button>
             </MessageBarBody>
@@ -767,22 +734,17 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
 
           {/* Show more / Open full view button for workspace preview mode */}
           {(onShowMore || disableSidePane) && (
-            <div style={{ display: "flex", justifyContent: "center", padding: "8px" }}>
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '8px' }}>
               <Button appearance="subtle" size="small" onClick={handleShowMore}>
-                {disableSidePane ? "Open full view" : "Show more"}
+                {disableSidePane ? 'Open full view' : 'Show more'}
               </Button>
             </div>
           )}
 
           {/* Dismissed section — collapsible, at bottom of card */}
-          <DismissedSection
-            items={dismissedItems}
-            onRestore={handleRestore}
-            restoringIds={restoringIds}
-          />
+          <DismissedSection items={dismissedItems} onRestore={handleRestore} restoringIds={restoringIds} />
         </>
       )}
-
     </div>
   );
 };

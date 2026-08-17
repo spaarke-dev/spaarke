@@ -202,7 +202,11 @@ describe('useSseStream - Typed Suggestions Handling', () => {
     const valid = cap('Prioritize my tasks', 'binding-1');
     const result = await runStream([
       { type: 'token', content: 'Hello' },
-      { type: 'suggestions', content: null, data: { suggestions: [valid, 'a bare legacy string', { label: 'no kind' }] } },
+      {
+        type: 'suggestions',
+        content: null,
+        data: { suggestions: [valid, 'a bare legacy string', { label: 'no kind' }] },
+      },
       { type: 'done', content: null },
     ]);
 
@@ -211,7 +215,11 @@ describe('useSseStream - Typed Suggestions Handling', () => {
 
   it('startStream_CapabilityWithoutBindingId_IsDropped', async () => {
     const result = await runStream([
-      { type: 'suggestions', content: null, data: { suggestions: [{ kind: 'capability', label: 'X', targetBindingId: null, actionId: null }] } },
+      {
+        type: 'suggestions',
+        content: null,
+        data: { suggestions: [{ kind: 'capability', label: 'X', targetBindingId: null, actionId: null }] },
+      },
       { type: 'done', content: null },
     ]);
     expect(result.current.suggestions).toEqual([]);
@@ -219,7 +227,11 @@ describe('useSseStream - Typed Suggestions Handling', () => {
 
   it('startStream_ActionWithoutActionId_IsDropped', async () => {
     const result = await runStream([
-      { type: 'suggestions', content: null, data: { suggestions: [{ kind: 'action', label: 'X', targetBindingId: null, actionId: null }] } },
+      {
+        type: 'suggestions',
+        content: null,
+        data: { suggestions: [{ kind: 'action', label: 'X', targetBindingId: null, actionId: null }] },
+      },
       { type: 'done', content: null },
     ]);
     expect(result.current.suggestions).toEqual([]);
@@ -237,7 +249,11 @@ describe('useSseStream - Typed Suggestions Handling', () => {
     // An action id the client cannot route ({upload,search,select} only) is a
     // soft dead-end — dropped symmetrically with a capability lacking a binding.
     const result = await runStream([
-      { type: 'suggestions', content: null, data: { suggestions: [{ kind: 'action', label: 'Do the thing', targetBindingId: null, actionId: 'teleport' }] } },
+      {
+        type: 'suggestions',
+        content: null,
+        data: { suggestions: [{ kind: 'action', label: 'Do the thing', targetBindingId: null, actionId: 'teleport' }] },
+      },
       { type: 'done', content: null },
     ]);
     expect(result.current.suggestions).toEqual([]);

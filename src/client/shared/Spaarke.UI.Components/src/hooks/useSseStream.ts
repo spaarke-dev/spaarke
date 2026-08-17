@@ -129,11 +129,7 @@ export function parsePaneEvent(line: string): IAiPaneEvent | null {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** The three structural kinds a valid follow-up item may declare (021a wire contract). */
-const VALID_FOLLOWUP_KINDS: ReadonlySet<string> = new Set<SprkChatFollowupKind>([
-  'capability',
-  'question',
-  'action',
-]);
+const VALID_FOLLOWUP_KINDS: ReadonlySet<string> = new Set<SprkChatFollowupKind>(['capability', 'question', 'action']);
 
 /**
  * The only `actionId`s the client can route (the deterministic missing-context
@@ -183,9 +179,7 @@ function parseSuggestions(event: IChatSseEvent): ISprkChatFollowup[] {
         ? candidate.targetBindingId
         : null;
     const actionId =
-      typeof candidate.actionId === 'string' && candidate.actionId.length > 0
-        ? candidate.actionId
-        : null;
+      typeof candidate.actionId === 'string' && candidate.actionId.length > 0 ? candidate.actionId : null;
     // A capability with no Binding id, or an action with no (or an unroutable)
     // action id, is a dead-end promise — drop it (the guarantee the design
     // delta §5 requires: a chip that "acts" must have a real route).

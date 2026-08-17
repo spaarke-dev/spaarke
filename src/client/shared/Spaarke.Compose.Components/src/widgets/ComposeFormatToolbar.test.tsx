@@ -490,10 +490,7 @@ describe('ComposeFormatToolbar — Save / Save As dropdown + Auto Save (FR-01 ta
   it('renders the Auto Save toggle (checked) when the host wired autosave, and fires onAutoSaveToggle', async () => {
     const user = userEvent.setup();
     const onAutoSaveToggle = jest.fn();
-    renderFormatToolbar(
-      {},
-      { props: { onSave: jest.fn(), canSave: true, autoSaveEnabled: true, onAutoSaveToggle } }
-    );
+    renderFormatToolbar({}, { props: { onSave: jest.fn(), canSave: true, autoSaveEnabled: true, onAutoSaveToggle } });
 
     await user.click(screen.getByRole('button', { name: /save options/i }));
     const toggle = await screen.findByTestId('compose-format-autosave-toggle');

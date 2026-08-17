@@ -131,9 +131,7 @@ interface IKanbanCardPriorityEffortFields {
 }
 
 /** Priority glyph tone (icon colour + accessible label) per `sprk_priority` option. */
-export function derivePriorityGlyph(
-  value: number | null | undefined
-): { label: string; color: string } | undefined {
+export function derivePriorityGlyph(value: number | null | undefined): { label: string; color: string } | undefined {
   switch (value) {
     case 100000000:
       return { label: 'Urgent', color: tokens.colorStatusDangerForeground1 };
@@ -155,15 +153,33 @@ export function deriveEffortBadge(
 ): { label: string; style: React.CSSProperties } | undefined {
   switch (value) {
     case 100000000:
-      return { label: 'None', style: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 } };
+      return {
+        label: 'None',
+        style: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 },
+      };
     case 100000001:
-      return { label: 'Very High', style: { backgroundColor: tokens.colorStatusDangerBackground1, color: tokens.colorStatusDangerForeground1 } };
+      return {
+        label: 'Very High',
+        style: { backgroundColor: tokens.colorStatusDangerBackground1, color: tokens.colorStatusDangerForeground1 },
+      };
     case 100000002:
-      return { label: 'High', style: { backgroundColor: tokens.colorPaletteDarkOrangeBackground1, color: tokens.colorPaletteDarkOrangeForeground1 } };
+      return {
+        label: 'High',
+        style: {
+          backgroundColor: tokens.colorPaletteDarkOrangeBackground1,
+          color: tokens.colorPaletteDarkOrangeForeground1,
+        },
+      };
     case 100000003:
-      return { label: 'Medium', style: { backgroundColor: tokens.colorStatusWarningBackground1, color: tokens.colorStatusWarningForeground1 } };
+      return {
+        label: 'Medium',
+        style: { backgroundColor: tokens.colorStatusWarningBackground1, color: tokens.colorStatusWarningForeground1 },
+      };
     case 100000004:
-      return { label: 'Low', style: { backgroundColor: tokens.colorStatusSuccessBackground1, color: tokens.colorStatusSuccessForeground1 } };
+      return {
+        label: 'Low',
+        style: { backgroundColor: tokens.colorStatusSuccessBackground1, color: tokens.colorStatusSuccessForeground1 },
+      };
     default:
       // Unset or an unrecognised value — neutral no-op (no badge rendered).
       return undefined;
@@ -254,7 +270,8 @@ function KanbanCardInner<T extends IKanbanCardTodo>({
 
   // FR-02/FR-03 (task 012): priority glyph + effort badge, read from the raw
   // Choice fields (see the local structural type + helpers above `KanbanCardInner`).
-  const { sprk_priority: priorityChoice, sprk_effort: effortChoice } = todo as unknown as IKanbanCardPriorityEffortFields;
+  const { sprk_priority: priorityChoice, sprk_effort: effortChoice } =
+    todo as unknown as IKanbanCardPriorityEffortFields;
   const priorityGlyph = derivePriorityGlyph(priorityChoice);
   const effortBadge = deriveEffortBadge(effortChoice);
 

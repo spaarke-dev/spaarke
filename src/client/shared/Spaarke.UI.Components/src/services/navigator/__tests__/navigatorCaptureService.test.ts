@@ -137,13 +137,28 @@ function installFakeXrm() {
   return { xrm, pageContextRef };
 }
 
-function setPage(pageContextRef: { current: FakePageContextInput | undefined }, input: FakePageContextInput | undefined): void {
+function setPage(
+  pageContextRef: { current: FakePageContextInput | undefined },
+  input: FakePageContextInput | undefined
+): void {
   pageContextRef.current = input;
 }
 
-const MATTER = { entityName: 'sprk_matter', entityId: '11111111-1111-1111-1111-111111111111', pageType: 'entityrecord' as const };
-const PROJECT = { entityName: 'sprk_project', entityId: '22222222-2222-2222-2222-222222222222', pageType: 'entityrecord' as const };
-const DOCUMENT = { entityName: 'sprk_document', entityId: '33333333-3333-3333-3333-333333333333', pageType: 'entityrecord' as const };
+const MATTER = {
+  entityName: 'sprk_matter',
+  entityId: '11111111-1111-1111-1111-111111111111',
+  pageType: 'entityrecord' as const,
+};
+const PROJECT = {
+  entityName: 'sprk_project',
+  entityId: '22222222-2222-2222-2222-222222222222',
+  pageType: 'entityrecord' as const,
+};
+const DOCUMENT = {
+  entityName: 'sprk_document',
+  entityId: '33333333-3333-3333-3333-333333333333',
+  pageType: 'entityrecord' as const,
+};
 
 async function advance(ms: number = DEFAULT_CAPTURE_POLL_INTERVAL_MS): Promise<void> {
   await jest.advanceTimersByTimeAsync(ms);
@@ -180,9 +195,21 @@ describe('navigatorCaptureService — startNavigatorCapture', () => {
     expect(xrm.WebApi.updateRecord).not.toHaveBeenCalled();
 
     const created = xrm.WebApi.createRecord.mock.calls.map(call => call[1] as Record<string, unknown>);
-    expect(created[0]).toMatchObject({ sprk_targetlogicalname: 'sprk_matter', sprk_targetid: MATTER.entityId, sprk_visitcount: 1 });
-    expect(created[1]).toMatchObject({ sprk_targetlogicalname: 'sprk_project', sprk_targetid: PROJECT.entityId, sprk_visitcount: 1 });
-    expect(created[2]).toMatchObject({ sprk_targetlogicalname: 'sprk_document', sprk_targetid: DOCUMENT.entityId, sprk_visitcount: 1 });
+    expect(created[0]).toMatchObject({
+      sprk_targetlogicalname: 'sprk_matter',
+      sprk_targetid: MATTER.entityId,
+      sprk_visitcount: 1,
+    });
+    expect(created[1]).toMatchObject({
+      sprk_targetlogicalname: 'sprk_project',
+      sprk_targetid: PROJECT.entityId,
+      sprk_visitcount: 1,
+    });
+    expect(created[2]).toMatchObject({
+      sprk_targetlogicalname: 'sprk_document',
+      sprk_targetid: DOCUMENT.entityId,
+      sprk_visitcount: 1,
+    });
 
     // Every row was written as History/Captured — never a pin (task 031/050 concerns, not this task).
     for (const row of created) {
@@ -296,7 +323,9 @@ describe('navigatorCaptureService — startNavigatorCapture', () => {
 const OTHER_USER_ID = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
 
 /** Build a fake stored `sprk_navitem` row for direct seeding into `xrm.store`. */
-function buildSeedRow(overrides: Partial<FakeStoredNavItem> & Pick<FakeStoredNavItem, 'sprk_navitemid'>): FakeStoredNavItem {
+function buildSeedRow(
+  overrides: Partial<FakeStoredNavItem> & Pick<FakeStoredNavItem, 'sprk_navitemid'>
+): FakeStoredNavItem {
   return {
     sprk_type: NavItemType.History,
     sprk_source: 100000000,

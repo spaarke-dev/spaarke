@@ -461,9 +461,7 @@ describe('SprkChat - Suggestions Integration', () => {
     const user = userEvent.setup();
 
     await act(async () => {
-      renderWithProviders(
-        <SprkChat {...defaultProps} onSuggestionCapabilitySelect={onSuggestionCapabilitySelect} />
-      );
+      renderWithProviders(<SprkChat {...defaultProps} onSuggestionCapabilitySelect={onSuggestionCapabilitySelect} />);
     });
 
     await waitFor(() => {
@@ -477,7 +475,11 @@ describe('SprkChat - Suggestions Integration', () => {
       {
         type: 'suggestions',
         content: null,
-        data: { suggestions: [{ kind: 'capability', label: 'Prioritize my tasks', targetBindingId: 'binding-42', actionId: null }] },
+        data: {
+          suggestions: [
+            { kind: 'capability', label: 'Prioritize my tasks', targetBindingId: 'binding-42', actionId: null },
+          ],
+        },
       },
       { type: 'done', content: null },
     ]);
@@ -520,7 +522,9 @@ describe('SprkChat - Suggestions Integration', () => {
       {
         type: 'suggestions',
         content: null,
-        data: { suggestions: [{ kind: 'action', label: 'Search documents', targetBindingId: null, actionId: 'search' }] },
+        data: {
+          suggestions: [{ kind: 'action', label: 'Search documents', targetBindingId: null, actionId: 'search' }],
+        },
       },
       { type: 'done', content: null },
     ]);
