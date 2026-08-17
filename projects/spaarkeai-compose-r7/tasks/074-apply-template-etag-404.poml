@@ -4,7 +4,13 @@
     <title>apply-template If-Match/ETag + ApiError-typed 404 branch (FR-12)</title>
     <phase>7 Accepted Defers + Hardening</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>in-progress</status>
+    <!-- task 074 progress (2026-08-17): Item 1 (ApiError-typed 404, dead response.ok idiom removed) DONE +
+         committed. Item 2 (If-Match/ETag) ESCALATED per CLAUDE.md §6.5 — the real fix conflicts with the
+         deliberate ComposeService client-If-Match rejection (1177-1184) + deferred Graph-If-Match candidate
+         (1482-1485) and requires a shared SpeFileStore (ADR-007) facade change beyond this bounded task.
+         See notes/task-074-notes.md for the §6.5 resolution paths (Path A recommended for R7). Awaiting owner. -->
+
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx (and possibly BFF) apply-template path; concurrency + error-handling hardening.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -2076,6 +2076,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       setIsApplyingTemplate(true);
       setApplyTemplateError(null);
       try {
+        // FR-12 (task 074): `authenticatedFetch` THROWS a typed `ApiError` (status + ProblemDetails) on
+        // any non-2xx — it never RETURNS a non-ok Response (see authenticatedFetch.ts + the same note at
+        // the memo/draft handlers below). So the old `if (!response.ok)` branch here was DEAD code; the
+        // 404 (and every other) failure is now handled as a typed ApiError in the catch below (ADR-019).
         const response = await authenticatedFetch(
           `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(speId)}/apply-template`,
           {
@@ -2084,24 +2088,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             body: JSON.stringify({ driveId: applyDriveId, templateIdOrName }),
           }
         );
-
-        if (!response.ok) {
-          // Extract ProblemDetails.detail so the dialog shows the actual server-side reason
-          // (mirrors the save-path error extraction).
-          let detail = '';
-          try {
-            const problem = (await response.clone().json()) as { detail?: string; title?: string };
-            detail = problem.detail ?? problem.title ?? '';
-          } catch {
-            detail = '';
-          }
-          setApplyTemplateError(
-            response.status === 404
-              ? detail || `Template "${templateIdOrName}" was not found. Check the template name or ID.`
-              : detail || `Failed to apply the template (HTTP ${response.status}).`
-          );
-          return;
-        }
 
         const payload = (await response.json()) as {
           templateName?: string;
@@ -2130,8 +2116,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           });
         }
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setApplyTemplateError(`Failed to apply the template: ${message}`);
+        // FR-12 (task 074): the failure path is a TYPED ApiError (ADR-019 ProblemDetails), thrown by
+        // authenticatedFetch — branch on `err.status` (404 = template not found) and surface the
+        // server-side `detail`/`title`, replacing the dead response.ok idiom removed above. A non-ApiError
+        // (e.g. a genuine network/parse throw) keeps the generic fallback.
+        if (err instanceof ApiError) {
+          const detail = err.problemDetails?.detail ?? err.problemDetails?.title ?? '';
+          setApplyTemplateError(
+            err.status === 404
+              ? detail || `Template "${templateIdOrName}" was not found. Check the template name or ID.`
+              : detail || `Failed to apply the template (HTTP ${err.status}).`
+          );
+        } else {
+          const message = err instanceof Error ? err.message : String(err);
+          setApplyTemplateError(`Failed to apply the template: ${message}`);
+        }
       } finally {
         setIsApplyingTemplate(false);
       }
