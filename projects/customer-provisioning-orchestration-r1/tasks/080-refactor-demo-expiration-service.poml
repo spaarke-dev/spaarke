@@ -4,7 +4,7 @@
     <title>Refactor DemoExpirationService.cs off [Obsolete] DemoProvisioningOptions.Environments/DefaultEnvironment → DataverseEnvironmentService</title>
     <phase>E DemoExpirationService Migration</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api'; modifies BFF service .cs file; existing frozen-file per NFR-07 god-class ratchet (+100 LOC grace). R5 carry-over acceptance scope.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -96,7 +96,17 @@
     <criterion testable="true">Negative: refactor does NOT remove the [Obsolete] options themselves (task 082 owns removal); this task only stops consuming them.</criterion>
   </acceptance-criteria>
 
-  <notes>Reference: spec.md R5 + NFR-07 + task 081 (parallel consumer) + task 082 (config cleanup).</notes>
+  <notes>Reference: spec.md R5 + NFR-07 + task 081 (parallel consumer) + task 082 (config cleanup).
+
+Completion (2026-08-17):
+  - DemoExpirationService.cs baseline 364 LOC → 379 LOC (+15; not on god-class frozen list, well under 2,000 ceiling and +100 grace).
+  - Zero code references to `_options.Environments` / `_options.DefaultEnvironment` remain (only 1 doc-comment mentioning the migration). `dotnet build` emits 0 CS-warnings on modified files; 4 residual CS0618 warnings are in RegistrationEndpoints.cs (task 081 scope) + 1 pragma-disabled block in RegistrationDataverseService.cs (also task 081).
+  - Extracted default-selection rule as `DataverseEnvironmentRecord.SelectDefault(IReadOnlyList<>)` static helper (preserves the historical `First()` fallback semantics). Reusable by task 081 when it migrates RegistrationEndpoints/RegistrationDataverseService.
+  - Added 5 pure-domain tests at `tests/unit/domain/Registration/DataverseEnvironmentRecordSelectDefaultTests.cs` (ADR-038 §2 path #6, no mocks/DI/I/O). All 54 Registration-namespace tests pass.
+  - BFF publish size 44.94 MB compressed (Δ −0.02 MB vs 44.96 baseline) — well under 60 MB ceiling and +5 MB per-task threshold.
+  - CVE scan clean.
+  - GodClassGuardTests passes.
+  - Step 9.5 quality gates: code-review + adr-check both clean, no ADR conflicts, no escalations (all Path C — comply).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
