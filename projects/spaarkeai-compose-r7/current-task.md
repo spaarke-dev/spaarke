@@ -11,9 +11,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **090 wrap-up — IN PROGRESS.** Steps 0–5 done; **step 6 code-merge DONE** (merged to master `b8befe571`). REMAINING: the dev **deploy** (operator) + final closure steps 7–9. |
-| **Step** | ⛔ Holding at the **dev deploy** — operator-run in a coordinated NFR-05 window (BFF + `sprk_spaarkeai` TOGETHER, from THIS net10 tree, never net8). Code is safely on master regardless. |
-| **Next Action** | (1) **Operator**: deploy BFF + `sprk_spaarkeai` together to `spaarke-bff-dev` in a coordinated window (publish ≤60 MB vs ~44.96; verify no clobber). (2) THEN final closure: README→Complete + changelog, plan milestones ✅, TASK-INDEX 090→✅, then a final `/worktree-sync` to push the closure commits. Cite the 4 documented exceptions in the wrap-up record. |
+| **Task** | ✅ **PROJECT COMPLETE — 20/20 tasks.** 090 wrap-up done + deployed to dev 2026-08-17. |
+| **Step** | Done. BFF (44.95 MB net10, hash-verified, `/healthz` 200, Compose routes 401) + `sprk_spaarkeai` (published, R7 markers verified) deployed TOGETHER to dev (NFR-05). README→Complete, plan ✅, TASK-INDEX 090→✅, 090 POML completed. |
+| **Next Action** | Optional: `/devops-project-register` (board), archive the worktree. Operator interactive UAT: PDF end-to-end in a DI-enabled env + manual IME check (the two ⚙️ graduation criteria). Fidelity-wideners fast-follow = DEF-002/#777. |
 
 ### ✅ Done this session (all on master @ b8befe571)
 - **Merge-to-master**: `/worktree-sync` Full Sync — 46 commits fast-forwarded to master, 0 conflicts, main repo synced.
