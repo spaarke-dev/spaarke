@@ -4,7 +4,33 @@
     <title>Author the advisory task-agenda capability — upgrade list-tasks to advisory + bounded tools (FR-01)</title>
     <phase>1 — E1 grounded-recommend tier</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-16 (opus/high, FULL). Two halves shipped:
+         CATALOG (WIP part 1/2, committed earlier): list-tasks.action.json upgraded ack-only → advisory (modelTier Reasoning,
+         outputDeterminism advisory, temperature 0.3, groundedToolAllowList=[grid_overview, daily_briefing_overview], rewritten
+         advisory systemPrompt with ADVISORY GROUNDING RULES, acknowledgement maxLength 200→4000); outputschemas mirror synced.
+         Binding row UNCHANGED (routing keys off the Action's non-empty allow-list; disposition already SurfaceLaunch). chipTransitions
+         DEFERRED to task 023 (Briefing/SmartToDo launch bindings don't exist yet — dead target_binding_id = the P2 anti-pattern).
+         MACHINERY (part 2/2, this session): (A) AdvisoryCapabilityRunner (new, Services/Ai/Chat/) — builds the NESTED bounded turn via
+         the factory's advisory overload, drains ChatResponseUpdate.Text, assembles {acknowledgement:<narration>} JsonElement (ADR-040
+         store-before-render; the shipped list-tasks wire contract the client already renders — no client change). (B) SprkChatAgentFactory
+         .CreateAgentAsync advisory overload — 2 optional params (advisoryToolAllowList threaded into filterContext@915 → fires 011 PreFilter;
+         advisorySystemPrompt replaces the prompt at the single agent-construction point); BOTH null on every existing call = byte-identical.
+         NullSprkChatAgentFactory override updated to match. (C) SessionDispatchOrchestrator routing — routes on
+         effectiveAction.GroundedToolAllowList.Count>0 to the advisory runner (optional ctor dep, null→linear ActionRunner fallback, ADR-032);
+         all other dispatches unchanged; DI registered unconditionally in the compound-ON block. NO fallback A′ needed — Option A's nested turn
+         mounts ZERO capability/refusal tools (011 PreFilter) so it structurally cannot dispatch a 2nd capability → adr-check ADR-039 CLEAN
+         (the 011 escalation trigger did NOT fire). ROUTING DECISION: keys off the materialized GroundedToolAllowList (010), NOT OutputDeterminism
+         (unmaterialized column; adding it = a 2nd task-080-deferred column with no independent effect) — directional-mode adaptation of AC-100.
+         OBO verified: the grounded handlers resolve OBO ambiently from IHttpContextAccessor; the nested turn runs inline in the top-level chat
+         request's async context → OBO flows without token threading. TESTS: 9 new seam tests (tests/integration/seam/Ai/) — routing (advisory→runner,
+         empty-allow-list→linear, null-runner→linear fallback, advisory output stored-and-rendered-from-ledger) + runner behavior (threads
+         allow-list/prompt/Reasoning-tier into the factory = 011 primitive made live; drains+assembles narration; forwards operand text; empty-narration
+         honest fallback; empty-allow-list guard throws). 9/9 pass; 145/145 factory+dispatch+PreFilter regression pass; BFF build 0 errors; publish
+         43.67 MB compressed (≤60 MB, Δ≈0 vs 44.96 baseline — one small file, no packages); CVE clean. Step 9.5 gates CLEAN (code-review 0 blocking,
+         adr-check 0 violations: ADR-039/013/040/032/016 + §10/§11). chipTransitions (task 023) + E1 eval cases (task 013) remain. -->
+    <!-- ORIGINAL: <status>pending</status> -->
+
     <!-- SCOPE ADDENDUM 2026-08-16 (task 011 seam refinement; owner-approved Option A, see notes/011-012-advisory-nested-turn-design.md §3a):
          011 delivered ONLY the deterministic projection primitive (AgentToolFilterContext.AdvisoryToolAllowList + AgentToolProjection.PreFilter
          narrowing + unit tests). The NESTED-TURN MACHINERY that Option A introduced now lands HERE in 012 alongside the catalog authoring, because

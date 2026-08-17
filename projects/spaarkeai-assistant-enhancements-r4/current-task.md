@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-assistant-enhancements-r4
 
-> **Last Updated**: 2026-08-16 (by task-execute — 011 complete)
+> **Last Updated**: 2026-08-16 (by task-execute — 012 COMPLETE, machinery half shipped)
 > **Recovery**: Read "Quick Recovery" first. Tracks the **active task only**; history lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | ✅ **001, 022, 010, 020, 030, 011 COMPLETE**. 🔄 **012 IN PROGRESS** (opus/high, FULL) — advisory `list-tasks` + nested-turn machinery. |
-| **Status** | Wave 1 E1 spine: 010→011 ✅; 012 in progress. `/conflict-check` PASS (no master/PR overlap on Services/Ai/Chat, list-tasks, playbookconsumer). All prior work committed locally (not pushed). |
-| **Next Action** | **Finish 012** — see "012 working state" below. Then 013 (E1 eval). 031/032 unblocked (dep 030). 021/023/024 (E2) need 012. 040 needs `--chrome`. |
+| **Task** | ✅ **001, 022, 010, 020, 030, 011, 012 COMPLETE**. Next 🔲 = **013** (E1 eval — task-agenda golden utterances). |
+| **Status** | Wave 1 E1 spine 010→011→012 ✅ (the P1 grounded-recommend value-proving core is DONE). 012 machinery: AdvisoryCapabilityRunner + factory advisory overload + DispatchAsync routing + DI + 9 seam tests. BFF build 0 err; 145/145 regression; publish 43.67 MB compressed (≤60); CVE clean; Step 9.5 CLEAN. Machinery committed locally (NOT pushed; PR still HELD per owner). |
+| **Next Action** | **013** (E1 eval cases, dep 012 ✅ — add task-agenda golden utterances to `assistant-r4-eval-cases.json` + the R4 harness). Then 021/023/024 (E2, need 012 ✅ + 022 ✅). 031/032 unblocked (dep 030 ✅). 040 needs `--chrome`. 080 deploy (create `sprk_groundedtoolallowlist` column + re-seed). |
 
 ### 012 working state (2026-08-16, opus/high FULL) — analysis complete, machinery pending
 **Conflict-check**: PASS (silent) — no master commits since divergence touch the Chat/catalog files; no open PR overlaps `SessionDispatchOrchestrator.cs`/`list-tasks.action.json`/`sprk_playbookconsumer-rows.json`. (PR #508 = Events/SmartTodo shared components, not my files.)
