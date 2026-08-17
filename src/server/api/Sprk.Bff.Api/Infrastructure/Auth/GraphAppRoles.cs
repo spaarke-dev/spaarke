@@ -84,10 +84,18 @@ public static class GraphAppRoles
     /// <summary>Read and write directory data (app-only) — Self-Service Registration subsystem.</summary>
     public const string DirectoryReadWriteAll = "Directory.ReadWrite.All";
 
-    // ── Well-known Microsoft Graph well-known application-permission (app role) IDs ────────────
-    // Confirmed in-repo (scripts/Setup-EntraInfrastructure.ps1:78-80 — self-service-registration
-    // subsystem). These are the Microsoft Graph well-known role GUIDs; do NOT change without a
-    // live §5a re-enumeration.
+    // ── Well-known Microsoft Graph application-permission (app role) IDs ─────────────────────
+    // Enumerated 2026-08-17 via `az ad sp show --id 00000003-0000-0000-c000-000000000000
+    //   --query "appRoles[?value=='<name>'].id"` (r1 task 005 — H10 escalation gate; discovery
+    //   report §12). These are the app-role definition IDs on the Microsoft Graph resource
+    //   service principal (constant across every tenant); do NOT change without a live
+    //   re-enumeration.
+
+    // SPE / Documents
+    private const string IdFileStorageContainerSelected = "40dc41bc-0f7e-42ff-89bd-d9516947e474";
+
+    // Self-Service Registration subsystem — sourced pre-r1 from
+    // scripts/Setup-EntraInfrastructure.ps1:78-80.
     private const string IdUserReadWriteAll = "741f803b-c850-494e-b5df-cde7c675a1ca";
     private const string IdGroupMemberReadWriteAll = "dbaae8cf-10b5-4b86-a4a1-f871c94c6571";
     private const string IdDirectoryReadWriteAll = "19dbc75e-c2e2-444c-a770-ec69d8559fc7";
@@ -121,7 +129,7 @@ public static class GraphAppRoles
     public static readonly IReadOnlyList<GraphAppRole> All = new[]
     {
         // SPE / Documents — always required (SharePoint Embedded container + file access)
-        new GraphAppRole(FileStorageContainerSelected, "Access selected file storage containers", null,
+        new GraphAppRole(FileStorageContainerSelected, "Access selected file storage containers", IdFileStorageContainerSelected,
             "SPE / Documents", "SharePoint Embedded container access for app-only container/drive operations.", false),
         new GraphAppRole(FilesReadAll, "Read files in all site collections", null,
             "SPE / Documents", "App-only read of SPE/SharePoint file content (agent grounding, indexing).", false),
