@@ -4,7 +4,7 @@
     <title>Project wrap-up — README Complete, lessons-learned, /test-diet, success-criteria verification, archive</title>
     <phase>Wrap-up</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation + reconciliation wrap-up; no production code authored.</rigor-reason>
     <model-tier>sonnet</model-tier>
