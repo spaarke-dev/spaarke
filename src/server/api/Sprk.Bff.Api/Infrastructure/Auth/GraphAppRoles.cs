@@ -94,6 +94,7 @@ public static class GraphAppRoles
     // SPE / Documents
     private const string IdFileStorageContainerSelected = "40dc41bc-0f7e-42ff-89bd-d9516947e474";
     private const string IdFilesReadAll = "01d4889c-1287-42c6-ac1f-5d1e02578ef6";
+    private const string IdFilesReadWriteAll = "75359482-378d-4052-8f01-80520e7db3cd";
 
     // Self-Service Registration subsystem — sourced pre-r1 from
     // scripts/Setup-EntraInfrastructure.ps1:78-80.
@@ -134,7 +135,7 @@ public static class GraphAppRoles
             "SPE / Documents", "SharePoint Embedded container access for app-only container/drive operations.", false),
         new GraphAppRole(FilesReadAll, "Read files in all site collections", IdFilesReadAll,
             "SPE / Documents", "App-only read of SPE/SharePoint file content (agent grounding, indexing).", false),
-        new GraphAppRole(FilesReadWriteAll, "Read and write files in all site collections", null,
+        new GraphAppRole(FilesReadWriteAll, "Read and write files in all site collections", IdFilesReadWriteAll,
             "SPE / Documents", "App-only file read/write for document automation + SPE operations.", false),
         new GraphAppRole(SitesReadAll, "Read items in all site collections", null,
             "SPE / Documents", "App-only site/drive metadata resolution for SPE containers.", false),
