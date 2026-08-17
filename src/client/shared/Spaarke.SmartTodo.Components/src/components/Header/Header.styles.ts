@@ -31,11 +31,7 @@ export const useHeaderStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     backgroundColor: tokens.colorNeutralBackground2,
-    ...shorthands.borderBottom(
-      tokens.strokeWidthThin,
-      'solid',
-      tokens.colorNeutralStroke1,
-    ),
+    ...shorthands.borderBottom(tokens.strokeWidthThin, 'solid', tokens.colorNeutralStroke1),
   },
 
   /**
@@ -51,7 +47,7 @@ export const useHeaderStyles = makeStyles({
       tokens.spacingVerticalS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalXS,
-      tokens.spacingHorizontalM,
+      tokens.spacingHorizontalM
     ),
   },
 
@@ -71,7 +67,7 @@ export const useHeaderStyles = makeStyles({
       tokens.spacingVerticalXS,
       tokens.spacingHorizontalM,
       tokens.spacingVerticalS,
-      tokens.spacingHorizontalM,
+      tokens.spacingHorizontalM
     ),
     minHeight: '44px',
     boxSizing: 'border-box',

@@ -76,15 +76,11 @@ export const SearchFilter: React.FC<SearchFilterProps> = ({ isOpen, value, onCha
     (_ev: SearchBoxChangeEvent, data: InputOnChangeData) => {
       onChange(data.value);
     },
-    [onChange],
+    [onChange]
   );
 
   return (
-    <div
-      className={isOpen ? styles.rootOpen : styles.rootClosed}
-      data-testid="search-filter"
-      aria-hidden={!isOpen}
-    >
+    <div className={isOpen ? styles.rootOpen : styles.rootClosed} data-testid="search-filter" aria-hidden={!isOpen}>
       <SearchBox
         ref={inputRef}
         className={styles.searchBox}

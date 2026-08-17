@@ -4,7 +4,7 @@
     <title>Playwright NFR suite — perf &lt;3s, WCAG 2.1 AA + keyboard, orientation flip (FR-17)</title>
     <phase>5: Tests + hygiene</phase>
     <gate>024,025 complete</gate>
-    <status>not-started</status>
+    <status>authored-valid-wired; real-env green run escalated (no live Power Apps env in sandbox) — see notes/task-041-playwright-nfr.md</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying override (root CLAUDE.md §8, TEST-MODIFYING row): this task adds files under `tests/e2e/**` and carries the `testing`/`e2e-test` tags, so FULL rigor + code-review/adr-check at Step 9.5 apply UNCONDITIONALLY.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -52,7 +52,7 @@ import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/aut
 import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 // ListView import removed 2026-06-19 per UAT: list view discontinued — kanban only.
-import { Header } from "./components/Header";
+import { Header } from "@spaarke/smart-todo-components";
 // smart-todo-r5 UAT 2026-08-17 — the structured Filter pane (task 021,
 // FR-06 / F-3: Priority / Status / Due-date / Assigned-To) is REPLACED by a
 // single expanding text search, mounted against task 020's
