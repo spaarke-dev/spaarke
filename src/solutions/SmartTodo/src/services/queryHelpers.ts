@@ -537,119 +537,19 @@ const TODO_REGARDING_LOOKUP_BY_ENTITY: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Filter pane types + helpers (task 021, FR-06 / F-3)
+// Filter pane types + helpers (task 021, FR-06 / F-3) — REMOVED
+// smart-todo-r5 UAT 2026-08-17: the structured Filter pane (Priority /
+// Status / Due-date / Assigned-To categories: `TodoStatusFilterValue`,
+// `TODO_STATUS_FILTER_STATUSCODE`, `TodoDueDateCategory`,
+// `TODO_PRIORITY_CHOICE_VALUES`, `ITodoFilterState`, `DEFAULT_TODO_FILTER`,
+// `buildDueDateRangeClause`) is replaced by a single client-side text search
+// (`components/SearchFilter`) applied in `SmartToDo.tsx`'s `displayItems`
+// memo. `buildTodoItemsQuery` below reverted to its pre-task-021 signature —
+// see its doc comment. This intentionally also removes the FR-07 "Show
+// Completed" toggle (task 022) that lived in the Status category — see
+// `projects/smart-todo-r5/notes/uat-filter-text-search.md` for the operator
+// sign-off.
 // ---------------------------------------------------------------------------
-
-/**
- * Status values selectable in the Filter pane's Status category (multi-select).
- * Maps 1:1 onto `sprk_todo.statuscode` (Open=1, InProgress=659490001,
- * Completed=2 — see the statuscode legend above `TODO_SELECT_FIELDS`).
- * Dismissed (659490002) is intentionally NOT selectable here — that lane is
- * exclusively `buildDismissedTodoQuery`'s collapsible section, untouched by
- * this filter category.
- */
-export type TodoStatusFilterValue = 'Open' | 'InProgress' | 'Completed';
-
-/** Maps a `TodoStatusFilterValue` to its raw `sprk_todo.statuscode` integer. */
-export const TODO_STATUS_FILTER_STATUSCODE: Record<TodoStatusFilterValue, number> = {
-  Open: 1,
-  InProgress: 659490001,
-  Completed: 2,
-};
-
-/**
- * Named due-date range buckets for the Filter pane's Due-date category
- * (single-select). Ranges are computed relative to "today" (UTC midnight) at
- * query-build time — see `buildDueDateRangeClause`.
- */
-export type TodoDueDateCategory = 'Today' | 'Tomorrow' | 'ThisWeek' | 'Overdue';
-
-/**
- * `sprk_todo.sprk_priority` Choice values (task 010 / FR-02): Urgent=100000000,
- * High=100000001, Medium=100000002, Low=100000003. Exported so `FilterPane.tsx`
- * can build its `TagFilter` option list without duplicating the raw integers.
- */
-export const TODO_PRIORITY_CHOICE_VALUES: ReadonlyArray<{ value: number; label: string }> = [
-  { value: 100000000, label: 'Urgent' },
-  { value: 100000001, label: 'High' },
-  { value: 100000002, label: 'Medium' },
-  { value: 100000003, label: 'Low' },
-];
-
-/**
- * Filter-pane predicate (task 021, FR-06 / F-3). Fully controlled, owned by
- * `SmartTodoApp.tsx`, threaded through `useTodoItems` → `DataverseService
- * .getActiveTodos` → `buildTodoItemsQuery` (below).
- *
- * `assignedToContactId`, when set, OVERRIDES the default "assigned to me"
- * ownership clause (`_sprk_assignedto_value eq <contactId>`) with the chosen
- * contact instead — the Assigned-To category RE-SCOPES ownership rather than
- * adding an extra AND clause on top of it.
- */
-export interface ITodoFilterState {
-  /** `sprk_priority` choice values to include. Empty array = unfiltered (all priorities). */
-  priorityValues: number[];
-  /** Status values to include (multi-select). Empty array matches nothing — the UI (Clear-all) never leaves this empty for more than a keystroke. */
-  statusValues: TodoStatusFilterValue[];
-  /** Single-select due-date bucket. `undefined` = unfiltered (all due dates, including none set). */
-  dueDateCategory?: TodoDueDateCategory;
-  /** Contact GUID to scope results to. `undefined` = default "assigned to me" scope. */
-  assignedToContactId?: string;
-}
-
-/**
- * Default filter state on first load (FR-06 acceptance): Status =
- * {Open, In Progress}; everything else unfiltered. "Clear all" resets to
- * exactly this value (not an all-clear/empty state).
- */
-export const DEFAULT_TODO_FILTER: ITodoFilterState = {
-  priorityValues: [],
-  statusValues: ['Open', 'InProgress'],
-  dueDateCategory: undefined,
-  assignedToContactId: undefined,
-};
-
-/**
- * Build the OData $filter clause for a single Due-date category bucket.
- * Mirrors the UTC-midnight-truncation pattern already used by
- * `buildEventCategoryFilter`'s Overdue case (above) — reused as the model
- * per task 021 step 4.
- *
- *   Today    — [todayStart, todayStart + 1d)
- *   Tomorrow — [todayStart + 1d, todayStart + 2d)
- *   ThisWeek — [todayStart, todayStart + 7d)  (rolling 7-day window from today)
- *   Overdue  — sprk_duedate < todayStart
- */
-function buildDueDateRangeClause(category: TodoDueDateCategory): string {
-  const ONE_DAY_MS = 86400000;
-  const today = new Date();
-  today.setUTCHours(0, 0, 0, 0);
-  const todayStart = today.getTime();
-
-  switch (category) {
-    case 'Today': {
-      const start = new Date(todayStart).toISOString();
-      const end = new Date(todayStart + ONE_DAY_MS).toISOString();
-      return `(sprk_duedate ge ${start} and sprk_duedate lt ${end})`;
-    }
-    case 'Tomorrow': {
-      const start = new Date(todayStart + ONE_DAY_MS).toISOString();
-      const end = new Date(todayStart + 2 * ONE_DAY_MS).toISOString();
-      return `(sprk_duedate ge ${start} and sprk_duedate lt ${end})`;
-    }
-    case 'ThisWeek': {
-      const start = new Date(todayStart).toISOString();
-      const end = new Date(todayStart + 7 * ONE_DAY_MS).toISOString();
-      return `(sprk_duedate ge ${start} and sprk_duedate lt ${end})`;
-    }
-    case 'Overdue': {
-      const start = new Date(todayStart).toISOString();
-      return `sprk_duedate lt ${start}`;
-    }
-    default:
-      return '';
-  }
-}
 
 /**
  * Build the OData query for active to-do items (Kanban-visible).
@@ -670,14 +570,12 @@ function buildDueDateRangeClause(category: TodoDueDateCategory): string {
  *     through UX intent. If entityType isn't in the supported map, the filter is
  *     silently ignored (safe fallback — matches unsupported handling in the
  *     memo repository).
- *   - IF `filterState` is provided (task 021, FR-06 / F-3 filter pane): it
- *     TAKES OVER statuscode inclusion (superseding `includeCompleted`
- *     entirely — `statusValues` is the fuller multi-select generalization of
- *     that boolean), AND adds `sprk_priority` inclusion, a due-date range
- *     clause, and an Assigned-To ownership override. When `filterState` is
- *     omitted, behavior is 100% unchanged from before this task (verified by
- *     `queryHelpers.test.ts`'s backward-compat case) — every pre-existing
- *     caller (and `includeCompleted`) keeps working exactly as before.
+ *
+ * smart-todo-r5 UAT 2026-08-17: task 021's `filterState` (Priority /
+ * Status / Due-date / Assigned-To structured predicate) parameter is
+ * REMOVED — this function reverted to its pre-task-021 shape. The
+ * replacement (a single free-text search) is applied client-side in
+ * `SmartToDo.tsx`'s `displayItems` memo, not threaded into this query.
  *
  * Sort: priorityscore desc, then duedate asc (most urgent first). This is
  * unchanged when Completed items are included — they sort into the same
@@ -695,68 +593,24 @@ function buildDueDateRangeClause(category: TodoDueDateCategory): string {
  *
  * @param contactId - GUID of the current user's sprk_contact record
  * @param regardingFilter - Optional parent-record filter (openTodos launch)
- * @param includeCompleted - FR-07 Show-Completed toggle state (legacy path
- *   only — ignored when `filterState` is provided). Defaults to `false`.
- * @param filterState - Full Filter-pane predicate (task 021). When provided,
- *   it is authoritative for status/priority/due-date/assignee — see above.
+ * @param includeCompleted - FR-07 Show-Completed toggle state. No live caller
+ *   passes `true` today (the UI toggle that drove it was removed by task
+ *   021/the smart-todo-r5 UAT change) — kept for signature back-compat.
+ *   Defaults to `false`.
  */
 export function buildTodoItemsQuery(
   contactId: string,
   regardingFilter?: ITodoRegardingFilter,
   includeCompleted: boolean = false,
-  filterState?: ITodoFilterState,
 ): string {
   const openInProgressClause = `statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)`;
 
-  let ownershipClause: string;
-  let activeClause: string;
-  let priorityClause: string | null = null;
-  let dueDateClause: string | null = null;
-
-  if (filterState) {
-    // task 021 (FR-06) — the Filter pane's Status multi-select fully
-    // determines statuscode inclusion. Empty selection defensively matches
-    // nothing (statuscode eq -1 never matches a real record) rather than
-    // silently falling back to "all statuses" — the UI (Clear-all) always
-    // restores a non-empty default, so this is a belt-and-braces guard, not
-    // a reachable steady state.
-    const selectedCodes = filterState.statusValues
-      .map((v) => TODO_STATUS_FILTER_STATUSCODE[v])
-      .filter((code): code is number => code !== undefined);
-    activeClause =
-      selectedCodes.length === 0
-        ? 'statuscode eq -1'
-        : selectedCodes.length === 1
-          ? `statuscode eq ${selectedCodes[0]}`
-          : `(${selectedCodes.map((c) => `statuscode eq ${c}`).join(' or ')})`;
-
-    if (filterState.priorityValues.length > 0) {
-      priorityClause =
-        filterState.priorityValues.length === 1
-          ? `sprk_priority eq ${filterState.priorityValues[0]}`
-          : `(${filterState.priorityValues.map((v) => `sprk_priority eq ${v}`).join(' or ')})`;
-    }
-
-    if (filterState.dueDateCategory) {
-      dueDateClause = buildDueDateRangeClause(filterState.dueDateCategory);
-    }
-
-    // Assigned-To override — RE-SCOPES ownership rather than AND-ing on top
-    // of the default "assigned to me" clause.
-    ownershipClause = `_sprk_assignedto_value eq ${filterState.assignedToContactId ?? contactId}`;
-  } else {
-    // Legacy path — byte-identical to pre-task-021 behavior (task 022's
-    // includeCompleted boolean still works for any caller that doesn't pass
-    // filterState).
-    ownershipClause = `_sprk_assignedto_value eq ${contactId}`;
-    activeClause = includeCompleted
-      ? `(${openInProgressClause} or statuscode eq 2)`
-      : openInProgressClause;
-  }
+  const ownershipClause = `_sprk_assignedto_value eq ${contactId}`;
+  const activeClause = includeCompleted
+    ? `(${openInProgressClause} or statuscode eq 2)`
+    : openInProgressClause;
 
   const clauses: string[] = [ownershipClause, activeClause];
-  if (priorityClause) clauses.push(priorityClause);
-  if (dueDateClause) clauses.push(dueDateClause);
 
   if (regardingFilter) {
     const lookup = TODO_REGARDING_LOOKUP_BY_ENTITY[regardingFilter.entityType];

@@ -6,7 +6,7 @@
  * `SmartTodoApp.tsx`'s module-scope `openSprkTodoAsLayout1` wrapper for the same
  * reason `launchNewTaskCreateForm` was extracted: so the post-close refetch
  * decision is unit-testable WITHOUT pulling `SmartTodoApp.tsx`'s full import
- * graph (Header, SmartToDo, FilterPane, Toolbar, TodoContext, `@spaarke/auth`,
+ * graph (Header, SmartToDo, SearchFilter, Toolbar, TodoContext, `@spaarke/auth`,
  * ...) into the test module graph. Task 033 gave this wrapper real branching
  * worth testing in isolation (the launched-vs-not gate + the unconditional
  * on-close refetch), which is what justifies the separate file per CLAUDE.md

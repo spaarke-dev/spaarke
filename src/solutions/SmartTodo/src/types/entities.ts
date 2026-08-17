@@ -74,6 +74,15 @@ export interface ITodo {
   _ownerid_value?: string;
   createdon: string;
   modifiedon: string;
+  // DEF-11 Part 3 (2026-07-04, record-header-and-notepad-r1) — regarding-record
+  // resolver text fields (ADR-024), always selected via
+  // `queryHelpers.ts TODO_SELECT_FIELDS` and consumed by
+  // `SmartToDo.tsx`/`utils/todoSearchUtils.ts`'s search predicate. Type gap
+  // closed here (smart-todo-r5 UAT 2026-08-17) — the fields were already
+  // read off `ITodo` items at runtime without being declared on this
+  // interface (a pre-existing `tsc` error this fix removes).
+  sprk_regardingrecordname?: string;
+  sprk_regardingrecordnumber?: string;
 }
 
 /**

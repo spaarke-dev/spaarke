@@ -84,7 +84,7 @@ import {
   useLaunchContext,
   LAUNCH_ACTION_OPEN_TODOS,
 } from "../hooks/useLaunchContext";
-import type { ITodoRegardingFilter, ITodoFilterState } from "../services/queryHelpers";
+import type { ITodoRegardingFilter } from "../services/queryHelpers";
 // R4 task 101 (W-3, 2026-06-18) — `useKanbanColumns` was hoisted into the
 // `@spaarke/smart-todo-components` peer package so the workspace widget can
 // reuse the same Today/Tomorrow/Future bucketing. The Code Page now imports
@@ -97,6 +97,7 @@ import { useUserPreferences } from "../hooks/useUserPreferences";
 import { DataverseService } from "../services/DataverseService";
 import { ITodo } from "../types/entities";
 import { computeTodoScore } from "../utils/todoScoreUtils";
+import { matchesTodoSearchQuery } from "../utils/todoSearchUtils";
 import { useOptionalTodoContext } from "../context/TodoContext";
 import type { TodoColumn } from "../types/enums";
 import type { DropResult } from "@hello-pangea/dnd";
@@ -356,18 +357,12 @@ export interface ISmartToDoProps {
    * Back-compat: when omitted or empty string, no filter is applied.
    */
   searchQuery?: string;
-  /**
-   * task 021 (FR-06 / F-3) — Filter pane predicate (Priority / Status /
-   * Due-date / Assigned-To), lifted to `SmartTodoApp.tsx` (same lifting
-   * pattern as `orientation` and `searchQuery` above) and threaded straight
-   * through to the internal `useTodoItems` call so the Dataverse query
-   * itself is scoped — not a client-side post-filter like `searchQuery`.
-   *
-   * Back-compat: when omitted, `useTodoItems` receives `filter: undefined`
-   * and falls back to the pre-task-021 default query (today's behavior —
-   * Status {Open, In Progress}, everything else unfiltered).
-   */
-  filter?: ITodoFilterState;
+  // task 021's `filter` prop (structured Filter-pane predicate, threaded
+  // into the Dataverse query) — REMOVED smart-todo-r5 UAT 2026-08-17. The
+  // replacement free-text search is `searchQuery` above (client-side only —
+  // see `displayItems` below); the Dataverse query reverted to its
+  // pre-task-021 default (Status {Open, In Progress}, everything else
+  // unfiltered).
 }
 
 // ---------------------------------------------------------------------------
@@ -389,7 +384,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   onSettingsOpenerReady,
   orientation: orientationProp,
   searchQuery,
-  filter,
 }) => {
   const styles = useStyles();
 
@@ -447,7 +441,6 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     userId: contactId ?? '00000000-0000-0000-0000-000000000000',
     mockItems,
     regardingFilter,
-    filter,
   });
 
   // R4 task 031 / FR-07 / OD-2 — "Assigned to Me" is the sole filter mode for
@@ -596,21 +589,24 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // Users can now type e.g. "Smith v Jones" or "MAT-2026-01234" and see just
   // the todos related to that matter — without needing to drill from the
   // Matter form's checkmark.
+  //
+  // smart-todo-r5 UAT 2026-08-17 — extended again to match the Assigned-To
+  // contact's display name (`assignedToName`). This closes the gap left by
+  // task 021's structured Filter pane removal (its Assigned-To typeahead
+  // category is gone; a free-text match against the same display name is the
+  // replacement). `assignedToName` is ALREADY populated on every fetched
+  // `ITodo` — `DataverseService.mapTodoFormattedValues` maps the
+  // `_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue`
+  // annotation onto it for every `getActiveTodos` call (see
+  // `services/DataverseService.ts`) — so no query/select change was needed
+  // here. The match predicate itself is extracted to
+  // `utils/todoSearchUtils.ts::matchesTodoSearchQuery` (unit-tested there
+  // directly) rather than inlined, since this component has no existing test
+  // harness to exercise it through.
   const displayItems = React.useMemo(() => {
-    const q = (searchQuery ?? "").trim().toLowerCase();
-    if (!q) return mergedItems;
-    return mergedItems.filter((item) => {
-      const name = (item.sprk_name ?? "").toLowerCase();
-      const desc = (item.sprk_description ?? "").toLowerCase();
-      const regardingName = (item.sprk_regardingrecordname ?? "").toLowerCase();
-      const regardingNumber = (item.sprk_regardingrecordnumber ?? "").toLowerCase();
-      return (
-        name.includes(q) ||
-        desc.includes(q) ||
-        regardingName.includes(q) ||
-        regardingNumber.includes(q)
-      );
-    });
+    const q = searchQuery ?? "";
+    if (!q.trim()) return mergedItems;
+    return mergedItems.filter((item) => matchesTodoSearchQuery(item, q));
   }, [mergedItems, searchQuery]);
 
   const totalCount = displayItems.length;

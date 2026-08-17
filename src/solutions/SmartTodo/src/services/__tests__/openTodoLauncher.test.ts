@@ -18,7 +18,7 @@
  *
  * Test harness note: mirrors `SmartTodoApp.test.tsx` — `@spaarke/ui-components`
  * is mocked so the test imports only the small service module rather than
- * `SmartTodoApp.tsx`'s full import graph (Header, SmartToDo, FilterPane,
+ * `SmartTodoApp.tsx`'s full import graph (Header, SmartToDo, SearchFilter,
  * Toolbar, TodoContext, `@spaarke/auth`, ...). This is exactly why the OPEN
  * wrapper was extracted from `SmartTodoApp.tsx` into `openTodoLauncher.ts`
  * (task 033), matching the CREATE path's `newTaskLauncher.ts` precedent.

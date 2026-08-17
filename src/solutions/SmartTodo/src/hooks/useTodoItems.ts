@@ -27,13 +27,8 @@ import type { IWebApi } from '../types/xrm';
 // DEF-11 Part 2 (2026-07-04, record-header-and-notepad-r1): openTodos launch
 // filter (R4 FR-34 consumer wiring).
 import type { ITodoRegardingFilter } from '../services/queryHelpers';
-// task 021 (FR-06 / F-3) — Filter pane predicate (Priority/Status/Due-date/
-// Assigned-To), owned by SmartTodoApp and threaded through this hook.
-import type {
-  ITodoFilterState,
-  TodoDueDateCategory,
-  TodoStatusFilterValue,
-} from '../services/queryHelpers';
+// task 021's Filter-pane predicate (`ITodoFilterState` + friends) import —
+// REMOVED smart-todo-r5 UAT 2026-08-17. See queryHelpers.ts module doc.
 
 // ---------------------------------------------------------------------------
 // Sort helper
@@ -90,15 +85,6 @@ export interface IUseTodoItemsOptions {
    * Added 2026-07-04 (record-header-and-notepad-r1 DEF-11 Part 2).
    */
   regardingFilter?: ITodoRegardingFilter;
-  /**
-   * Optional Filter-pane predicate (task 021, FR-06 / F-3). Owned by
-   * `SmartTodoApp.tsx`, threaded straight through to
-   * `DataverseService.getActiveTodos`. When set, it is authoritative for
-   * status/priority/due-date/assignee — see `buildTodoItemsQuery`. When
-   * omitted, back-compat: today's default query (Status {Open, In Progress},
-   * everything else unfiltered) is used unchanged.
-   */
-  filter?: ITodoFilterState;
 }
 
 export interface IUseTodoItemsResult {
@@ -117,41 +103,17 @@ export interface IUseTodoItemsResult {
 // ---------------------------------------------------------------------------
 
 export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult {
-  const { webApi, userId, mockItems, regardingFilter, filter } = options;
+  const { webApi, userId, mockItems, regardingFilter } = options;
 
   // Destructure regardingFilter to primitive deps so useEffect stability isn't
   // broken by parent components passing a new object identity per render.
   const regardingFilterEntity = regardingFilter?.entityType ?? null;
   const regardingFilterRecordId = regardingFilter?.recordId ?? null;
 
-  // task 021 (FR-06) — same rationale as regardingFilter above: destructure
-  // `filter` to primitive/stable keys so a new object identity from the
-  // parent's `filterState` re-render doesn't destabilise this effect (which
-  // would otherwise re-fetch on every unrelated SmartTodoApp re-render).
-  const filterPriorityKey = filter ? filter.priorityValues.join(',') : null;
-  const filterStatusKey = filter ? filter.statusValues.join(',') : null;
-  const filterDueDateCategory = filter?.dueDateCategory ?? null;
-  const filterAssignedToContactId = filter?.assignedToContactId ?? null;
-
-  const todoFilterForFetch = useMemo<ITodoFilterState | undefined>(() => {
-    if (filterPriorityKey === null || filterStatusKey === null) return undefined;
-    return {
-      priorityValues: filterPriorityKey ? filterPriorityKey.split(',').map(Number) : [],
-      statusValues: (filterStatusKey
-        ? filterStatusKey.split(',')
-        : []) as TodoStatusFilterValue[],
-      dueDateCategory: (filterDueDateCategory ?? undefined) as TodoDueDateCategory | undefined,
-      assignedToContactId: filterAssignedToContactId ?? undefined,
-    };
-  }, [filterPriorityKey, filterStatusKey, filterDueDateCategory, filterAssignedToContactId]);
-
-  // Latest filter snapshot for the FeedTodoSyncContext subscribe callback
-  // below (a stable-identity effect that must still read the CURRENT filter
-  // at call time — same ref-mirroring pattern as itemsRef/selectedIdsRef).
-  const filterRef = useRef<ITodoFilterState | undefined>(todoFilterForFetch);
-  useEffect(() => {
-    filterRef.current = todoFilterForFetch;
-  }, [todoFilterForFetch]);
+  // task 021's Filter-pane predicate destructuring (`filter` →
+  // `todoFilterForFetch` / `filterRef`) — REMOVED smart-todo-r5 UAT
+  // 2026-08-17. The replacement free-text search is applied client-side in
+  // `SmartToDo.tsx`'s `displayItems` memo, not threaded into the fetch.
 
   const [items, setItems] = useState<ITodo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -209,7 +171,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
         : undefined;
 
     serviceRef.current
-      .getActiveTodos(userId, filterForFetch, todoFilterForFetch)
+      .getActiveTodos(userId, filterForFetch)
       .then((result) => {
         if (cancelled) return;
 
@@ -242,7 +204,6 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     fetchKey,
     regardingFilterEntity,
     regardingFilterRecordId,
-    todoFilterForFetch,
   ]);
 
   // -------------------------------------------------------------------------
@@ -271,16 +232,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
         if (!userId) return;
 
         try {
-          // task 021 — apply the CURRENT filter (via ref, since this effect's
-          // own deps are intentionally just [subscribe, userId]) so an
-          // externally-activated item that doesn't match the active filter
-          // correctly stays out of the list (falls through the `!newItem`
-          // guard below), rather than always using the unfiltered default.
-          const result = await serviceRef.current.getActiveTodos(
-            userId,
-            undefined,
-            filterRef.current,
-          );
+          const result = await serviceRef.current.getActiveTodos(userId, undefined);
           if (!result.success) return;
 
           // Find the newly active todo in the refreshed list

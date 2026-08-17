@@ -16,7 +16,9 @@
  * 3-field QuickAdd group (F-3) plus a broken/mislabeled toggle-into-inline-
  * SearchBox "Filter" affordance (F-6 — it filtered client-side substrings,
  * not real search). FR-05 replaces both with: a Filter pill (ENTRY POINT
- * only — opens the filter pane task 021 builds; no filter logic lives here),
+ * only — opens the expanding text search `components/SearchFilter` mounts
+ * (task 021's structured Filter pane was REPLACED by this search per the
+ * smart-todo-r5 UAT 2026-08-17 decision); no filter logic lives here),
  * a primary "+ New Task" button (stubbed until task 030 wires the OOB
  * main-form create modal per FR-10), and a "⋮" overflow menu holding exactly
  * Settings / Layout / Refresh (owner-decided mapping, U-3, 2026-08-15).
@@ -170,9 +172,10 @@ export interface HeaderProps {
   onOrientationChange?: (orientation: Orientation) => void;
 
   /**
-   * Controlled open state for the filter pane (task 021 owns the pane
-   * content — this Header only renders the trigger). Required: the sole
-   * consumer, `SmartTodoApp`, always lifts this state.
+   * Controlled open state for the search bar underneath (`components/SearchFilter`,
+   * smart-todo-r5 UAT 2026-08-17 — replaced task 021's structured Filter pane;
+   * this Header only renders the trigger, not the pane content). Required: the
+   * sole consumer, `SmartTodoApp`, always lifts this state.
    */
   isFilterPaneOpen: boolean;
 

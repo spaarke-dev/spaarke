@@ -52,11 +52,13 @@ import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 // ListView import removed 2026-06-19 per UAT: list view discontinued — kanban only.
 import { Header } from "./components/Header";
-// task 021 (FR-06 / F-3) — Filter pane, mounted against task 020's
-// isFilterPaneOpen/onToggleFilterPane state (below).
-import { FilterPane } from "./components/FilterPane";
-import { DEFAULT_TODO_FILTER } from "./services/queryHelpers";
-import type { ITodoFilterState } from "./services/queryHelpers";
+// smart-todo-r5 UAT 2026-08-17 — the structured Filter pane (task 021,
+// FR-06 / F-3: Priority / Status / Due-date / Assigned-To) is REPLACED by a
+// single expanding text search, mounted against task 020's
+// isFilterPaneOpen/onToggleFilterPane state (below). See
+// projects/smart-todo-r5/notes/uat-filter-text-search.md for the decision +
+// the FR-07 "Show Completed" regression this intentionally accepts.
+import { SearchFilter } from "./components/SearchFilter";
 import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
@@ -194,26 +196,22 @@ function SmartTodoLayout(): React.ReactElement {
 
   // ── R4 task 030 — Header state (App-level, per task brief) ───────────────
   //
-  // `searchQuery` is owned here and still forwarded to `<SmartToDo>` for its
+  // `searchQuery` is owned here and forwarded to `<SmartToDo>` for its
   // card-level substring filter (title / description / regarding-record name
-  // / number). task 020 (FR-05 / U-3, 2026-08-16) removed Header's inline
-  // SearchBox — the only prior producer of `setSearchQuery` — per FR-05
-  // acceptance ("the broken/mislabeled inline-SearchBox 'Filter' toggle...
-  // is removed, not relabeled"). The state is DELIBERATELY retained (not
-  // deleted) because `<SmartToDo>` still reads it; it now stays at its
-  // initial "" value until task 021's filter pane (FR-06) wires a new
-  // producer. `selectedIds` is the **multi-select** set driving Row 4 of
-  // the header (card affordances — task 060). It is INDEPENDENT of
-  // `selectedEventId` from TodoContext (which, post-R4 task 042, drives only
-  // the ListView highlight — the side-pane is retired per FR-18).
+  // / number / assigned-to — extended by the smart-todo-r5 UAT 2026-08-17
+  // change, see `SmartToDo.tsx`'s `displayItems` memo). Its producer is now
+  // the `<SearchFilter>` bar below (mounted against `isFilterPaneOpen`,
+  // REPLACING task 021's structured Filter pane per the operator's UAT
+  // decision — see `projects/smart-todo-r5/notes/uat-filter-text-search.md`).
+  // `selectedIds` is the **multi-select** set driving Row 4 of the header
+  // (card affordances — task 060). It is INDEPENDENT of `selectedEventId`
+  // from TodoContext (which, post-R4 task 042, drives only the ListView
+  // highlight — the side-pane is retired per FR-18).
   //
   // For task 030 `selectedIds` is initialized empty; the toolbar renders
   // `null` (zero selection). Task 060 will populate the Set as the user
   // multi-selects cards in the kanban + list views.
-  // Not React state — nothing currently produces a new value (see comment
-  // above); a plain constant avoids an unused-setter lint warning while
-  // `<SmartToDo searchQuery={searchQuery} />` keeps compiling unchanged.
-  const searchQuery = "";
+  const [searchQuery, setSearchQuery] = React.useState<string>("");
   // `setSelectedIds` is consumed by task 032 Delete's `onClearSelection`
   // callback. Task 060 will additionally populate the Set as the user
   // multi-selects cards in the kanban + list views.
@@ -229,16 +227,12 @@ function SmartTodoLayout(): React.ReactElement {
     setIsFilterPaneOpen((v) => !v);
   }, []);
 
-  // ── task 021 (FR-06 / F-3) — Filter pane predicate ───────────────────────
-  //
-  // Owned here (ABOVE the Kanban, per NFR-03 — independent of the CSS-only
-  // orientation swap below) and threaded through to `<SmartToDo>` →
-  // `useTodoItems` → `DataverseService.getActiveTodos` →
-  // `buildTodoItemsQuery`. Default matches FR-06: Status {Open, In
-  // Progress}, everything else unfiltered.
-  const [filterState, setFilterState] = React.useState<ITodoFilterState>(
-    DEFAULT_TODO_FILTER,
-  );
+  // task 021's structured Filter pane predicate (`filterState` /
+  // `ITodoFilterState` / `DEFAULT_TODO_FILTER`) was REMOVED here per the
+  // smart-todo-r5 UAT 2026-08-17 decision — `searchQuery` (above) is now the
+  // sole filter predicate, applied client-side in `<SmartToDo>`. The
+  // Dataverse query (`buildTodoItemsQuery`) reverted to its pre-task-021
+  // default (no structured filter params) — see queryHelpers.ts.
 
   // ── Launch context — read once on mount (task 100 / W-2, extended R4-034,
   //     hoisted here by task 030 so both the "+ New Task" handler below AND
@@ -494,14 +488,15 @@ function SmartTodoLayout(): React.ReactElement {
         onNewTask={handleNewTask}
       />
 
-      {/* ── task 021 (FR-06 / F-3) — Filter pane, anchored to task 020's
-            Filter pill via isFilterPaneOpen. Stays mounted across open/close
-            (visibility toggled via CSS) — see FilterPane.tsx module doc. ── */}
-      <FilterPane
+      {/* ── smart-todo-r5 UAT 2026-08-17 — expanding text search, anchored
+            to task 020's Filter pill via isFilterPaneOpen. Stays mounted
+            across open/close (visibility toggled via CSS) — see
+            SearchFilter.tsx module doc. REPLACES task 021's structured
+            Filter pane. ── */}
+      <SearchFilter
         isOpen={isFilterPaneOpen}
-        filterState={filterState}
-        onChange={setFilterState}
-        webApi={getWebApi()}
+        value={searchQuery}
+        onChange={setSearchQuery}
       />
 
       {/* ── Primary surface — Kanban Board (UAT 2026-06-19: list view removed
@@ -510,14 +505,10 @@ function SmartTodoLayout(): React.ReactElement {
         <SmartToDo
           webApi={getWebApi()}
           userId={getUserId()}
-          // task 020 (2026-08-16) — Header's inline SearchBox (the sole prior
-          // producer of this value) was removed per FR-05; `searchQuery` is
-          // now a frozen "" constant (see comment near its declaration
-          // above) until task 021's filter pane wires a new producer.
+          // smart-todo-r5 UAT 2026-08-17 — `searchQuery` is now produced by
+          // the `<SearchFilter>` expanding text search above (task 021's
+          // structured Filter pane + its `filter` prop below are removed).
           searchQuery={searchQuery}
-          // task 021 (FR-06 / F-3) — Filter pane predicate, threaded to the
-          // Dataverse query (not a client-side post-filter like searchQuery).
-          filter={filterState}
           // R4 task 060 — Card affordances plumbing (FR-25/26/27)
           selectedIds={selectedIds}
           onToggleSelect={handleToggleSelect}

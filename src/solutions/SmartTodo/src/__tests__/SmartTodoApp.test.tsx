@@ -23,8 +23,8 @@
  * `services/newTaskLauncher.ts` (`buildNewTaskDefaultValues` +
  * `launchNewTaskCreateForm`) specifically so it's unit-testable WITHOUT
  * pulling `SmartTodoApp.tsx`'s full import graph (Header, SmartToDo,
- * FilterPane, Toolbar, TodoContext, `@spaarke/auth`, ...) into the test
- * module graph — mirrors `Header.test.tsx` / `FilterPane.test.tsx`'s
+ * SearchFilter, Toolbar, TodoContext, `@spaarke/auth`, ...) into the test
+ * module graph — mirrors `Header.test.tsx` / `SearchFilter.test.tsx`'s
  * component-isolation precedent, applied one layer down (service isolation)
  * because `SmartTodoLayout` isn't itself exported for direct rendering.
  * These tests exercise `launchNewTaskCreateForm`/`buildNewTaskDefaultValues`

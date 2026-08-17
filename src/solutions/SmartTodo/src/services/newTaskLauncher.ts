@@ -4,7 +4,7 @@
  * Extracted from `SmartTodoApp.tsx` into its own service module (mirrors the
  * existing `queryHelpers.ts` / `TodoRegardingUpdateBuilder.ts` service-layer
  * convention) so it can be unit-tested WITHOUT pulling `SmartTodoApp.tsx`'s
- * full import graph (Header, SmartToDo, FilterPane, Toolbar, TodoContext,
+ * full import graph (Header, SmartToDo, SearchFilter, Toolbar, TodoContext,
  * `@spaarke/auth`, ...) into the test module graph. `openSprkTodoAsLayout1`
  * (the sibling "open" launcher) stays inline in `SmartTodoApp.tsx` because it
  * has no non-trivial branching to unit-test in isolation; this launcher DOES
