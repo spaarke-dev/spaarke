@@ -102,6 +102,9 @@ public static class GraphAppRoles
     private const string IdUserReadAll = "df021288-bdef-4463-88db-98f22de89214";
     private const string IdGroupReadAll = "5b567255-7703-4780-807c-7be8301ae99b";
 
+    // Email / Communication
+    private const string IdMailRead = "810c84a8-4a9e-49e6-bf7d-12d183f40d01";
+
     // Self-Service Registration subsystem — sourced pre-r1 from
     // scripts/Setup-EntraInfrastructure.ps1:78-80.
     private const string IdUserReadWriteAll = "741f803b-c850-494e-b5df-cde7c675a1ca";
@@ -155,7 +158,7 @@ public static class GraphAppRoles
             "Core / Authorization", "Resolve group membership for access decisions + membership junction sync.", false),
 
         // Email / Communication — module-conditional (also requires Exchange ApplicationAccessPolicy)
-        new GraphAppRole(MailRead, "Read mail in all mailboxes", null,
+        new GraphAppRole(MailRead, "Read mail in all mailboxes", IdMailRead,
             "Email / Communication", "App-only inbound mail read for email-to-document automation.", true),
         new GraphAppRole(MailReadWrite, "Read and write mail in all mailboxes", null,
             "Email / Communication", "App-only mail read/write for processing + categorization.", true),
