@@ -302,8 +302,35 @@ public class ComposeService : IComposeService
     // (keyed by paraId) cannot pair them. MintAndPersist is the ingest-time stamp (fill-gaps-only,
     // idempotent, fail-open — NOT the save-path count-gate this project retires), the same pass
     // LoadAsync applies before its own projection build.
-    public ComposeMountProjection ProjectForMount(ReadOnlyMemory<byte> content, CancellationToken cancellationToken = default)
+    public async Task<ComposeMountProjection> ProjectForMount(
+        ReadOnlyMemory<byte> content,
+        string? fileName = null,
+        CancellationToken cancellationToken = default)
     {
+        // Task 050 (spaarkeai-compose-r7, FR-06 — PDF import parity, NFR-04 / ADR Tensions path A): give
+        // the mount doors (Browse-project + Assistant-upload) the SAME PDF fork LoadAsync has (@502) so a
+        // PDF opened via those doors becomes an editable Compose document, not a fail-closed read-only
+        // mount. Detection is bytes-first (IsPdfSource: %PDF- magic OR .pdf extension — a mis-named PDF
+        // still lands here), and on a PDF the source projects through the ONE ProjectPdfToDocxAsync intake
+        // leg (Azure DI prebuilt-layout → ComposePdfModelProjector → SynthesizeDocument), after which the
+        // synthesized .docx replaces `content` and the ENTIRE mint/HTML/canonical pipeline below runs
+        // UNCHANGED — "PDF projects into the same model docx projects into" holds by construction.
+        //
+        // This is why ProjectForMount is now async — a documented, project-scoped ADR-007/ADR-013 contract
+        // change: it was deliberately synchronous / no-I/O, and the DOCX path STAYS synchronous-fast (the
+        // await below is reached ONLY on the PDF branch; a native .docx mount does zero added I/O and never
+        // touches the intake source). Unavailability / parse failure throws a CLEAR ComposePdfIntakeException
+        // (the endpoints map it to 503/422), never a silent empty mount over a non-empty PDF.
+        IReadOnlyList<ComposeProjectionWarning>? pdfIntakeWarnings = null;
+        string? sourceFormat = null;
+        if (IsPdfSource(fileName, content.Span))
+        {
+            sourceFormat = "pdf";
+            (content, pdfIntakeWarnings) = await ProjectPdfToDocxAsync(
+                    content, fileName ?? "(compose-mount)", driveId: "(mount)", documentSpeId: "(mount)", cancellationToken)
+                .ConfigureAwait(false);
+        }
+
         var stamp = _baselineParaIdStamper.MintAndPersist(content);
         var bytes = stamp.Mutated ? stamp.Bytes : content;
 
@@ -311,14 +338,26 @@ public class ComposeService : IComposeService
         var canonical = _projectionBuilder.BuildContentModel(bytes, cancellationToken);
 
         var mountModel = canonical.Status == ComposeProjectionStatus.Failed ? null : canonical.Model;
+        // Task 013 (012-review F7): flatten warnings ride to the client with the model.
+        var contentModelWarnings = mountModel is not null && canonical.Warnings.Count > 0 ? canonical.Warnings : null;
+        // Task 050 (FR-06): the PDF intake's counted degradations ride WITH the model warnings — intake
+        // facts FIRST (source-level: fixed-layout reflow, page chrome, list/table approximation), mirroring
+        // LoadAsync@563. Merged UNCONDITIONALLY so the intake facts reach the client even when the
+        // synthesized-docx re-projection itself failed (mountModel null / op-log fallback).
+        if (pdfIntakeWarnings is { Count: > 0 })
+        {
+            contentModelWarnings = contentModelWarnings is null
+                ? pdfIntakeWarnings
+                : pdfIntakeWarnings.Concat(contentModelWarnings).ToList();
+        }
         return new ComposeMountProjection
         {
             Content = bytes,
             Minted = stamp.Mutated,
             Projection = projection,
             ContentModel = mountModel,
-            // Task 013 (012-review F7): flatten warnings ride to the client with the model.
-            ContentModelWarnings = mountModel is not null && canonical.Warnings.Count > 0 ? canonical.Warnings : null,
+            ContentModelWarnings = contentModelWarnings,
+            SourceFormat = sourceFormat,
         };
     }
 
@@ -833,17 +872,26 @@ public class ComposeService : IComposeService
                 unavailable: true);
         }
 
-        var layout = await _pdfIntakeSource.ParseAsync(pdfBytes.ToArray(), fileName, cancellationToken)
+        // Task 050 / FR-11 (spaarkeai-compose-r7): consume the CAUSE-DISCRIMINATED intake result (task 073's
+        // ParseWithDiagnosticsAsync, now on the IComposePdfIntakeSource facade) so the user sees the SPECIFIC
+        // reason — circuit-breaker-open / timeout / corrupt-file / disabled — instead of one collapsed
+        // "corrupt or unavailable". This became a clean, downcast-free facade consumption (no ADR-013 breach)
+        // once the facade's prior sole owner (spaarke-ai-architecture-redesign-r2) closed and R7 took ownership.
+        var intake = await _pdfIntakeSource.ParseWithDiagnosticsAsync(pdfBytes.ToArray(), fileName, cancellationToken)
             .ConfigureAwait(false);
-        if (layout is null)
+        if (!intake.Succeeded)
         {
-            // Cause is collapsed at the facade's null boundary (corrupt file vs service failure —
-            // the facade logged the specific reason); surface the retryable framing (503).
+            // 503 (retryable) for service-side / transient causes — circuit-open, timeout, unknown, and the
+            // ADR-032 gate-off "disabled" (which rides Unknown); 422 (not retryable — the document itself is
+            // the problem) ONLY for Corrupt. Mirrors the load endpoint's own 503-vs-422 split. The message is
+            // the facade's cause-specific text (honest-lossiness: the real reason crosses the wire).
+            var unavailable = intake.FailureCause != PdfIntakeFailureCause.Corrupt;
             throw new ComposePdfIntakeException(
-                $"PDF intake failed: the document layout could not be extracted from '{fileName}'. " +
-                "The file may be corrupt or the document-parsing service is unavailable.",
-                unavailable: true);
+                intake.FailureMessage
+                    ?? $"PDF intake failed: the document layout could not be extracted from '{fileName}'.",
+                unavailable);
         }
+        var layout = intake.Layout!;
 
         var projection = _pdfModelProjector.Project(layout);
         if (projection.Status == ComposeProjectionStatus.Failed)
@@ -2711,26 +2759,36 @@ public class ComposeService : IComposeService
             }
         }
 
+        // FR-07(d) (task 013): atomic UPSERT on the sprk_graphitemid_uk alternate key — replaces the
+        // read-then-CreateAsync sequence so two concurrent first-saves of the SAME minted SPE item can
+        // never each insert a row (Dataverse resolves the target server-side; the second UPDATES the
+        // first's row → exactly one sprk_document, no TOCTOU window). The key uses the RAW DocumentSpeId
+        // string, identical to the read above (TryFindDocumentByGraphItemIdAsync): sprk_graphitemid is an
+        // opaque SPE drive-item id (a STRING, not a GUID), so the match is exact-string and ADR-044 GUID
+        // canonicalization does NOT apply (verified — the alt-key lookup keys on the raw string).
+        entity.KeyAttributes[GraphItemIdAttribute] = request.DocumentSpeId;
+
         Guid newId;
+        bool rowCreatedThisCall;
         try
         {
-            newId = await _dataverse.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
+            (newId, rowCreatedThisCall) = await _dataverse.UpsertAsync(entity, cancellationToken).ConfigureAwait(false);
 
             _logger.LogInformation(
-                "Compose promote: created sprk_document {DocumentRecordId} for driveItem={DocumentSpeId}",
-                newId, request.DocumentSpeId);
+                "Compose promote: upserted sprk_document {DocumentRecordId} for driveItem={DocumentSpeId} (created={Created})",
+                newId, request.DocumentSpeId, rowCreatedThisCall);
         }
         catch (InvalidOperationException ex)
         {
-            // Narrow race — a concurrent Save promoted first. Re-resolve by BOTH keys:
-            //   • sprk_graphitemid_uk — the classic case (two saves of the SAME minted SPE item), OR
-            //   • G7 (task 022) sprk_composetransientkey_uk — two truly-concurrent FIRST saves of the same
-            //     transient draft each minted their OWN SPE item (different graphitemid) but carry the SAME
-            //     transient key, so the loser's create fails the transient-key unique constraint. Re-resolving
-            //     by the transient key lands the loser on the winner's record → ONE record, no duplicate
-            //     (the loser's minted item is orphaned, an acceptable rare edge — never a duplicate ROW).
+            // The graphItemId upsert is atomic, so the classic same-SPE-item race is already closed. This
+            // catch now handles the SECONDARY race the upsert CANNOT: two truly-concurrent FIRST saves of
+            // the same transient draft each mint their OWN SPE item (DIFFERENT graphitemid) but carry the
+            // SAME transient key — the loser's upsert-create then fails the sprk_composetransientkey_uk
+            // unique constraint. Re-resolve by graphItemId (defensive) then transientKey to land the loser
+            // on the winner's record → ONE record (the loser's minted item is orphaned, an acceptable rare
+            // edge — never a duplicate ROW).
             _logger.LogWarning(ex,
-                "Compose promote: create failed for driveItem={DocumentSpeId} — likely concurrent promotion. Re-resolving via alternate key (graphItemId, then transientKey).",
+                "Compose promote: upsert failed for driveItem={DocumentSpeId} — likely a concurrent same-transientKey first-save. Re-resolving via alternate key (graphItemId, then transientKey).",
                 request.DocumentSpeId);
 
             Guid? raceWinnerId = (await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
@@ -2749,6 +2807,7 @@ public class ComposeService : IComposeService
             }
 
             newId = raceWinnerId.Value;
+            rowCreatedThisCall = false; // the winner created the row; this call resolved onto it
         }
 
         // 3) Rebind the ChatSession DocumentId from SPE id → new sprk_documentid (FR-07).
@@ -2770,7 +2829,9 @@ public class ComposeService : IComposeService
             DocumentSpeId = request.DocumentSpeId,
             SessionId = request.SessionId,
             DocumentRecordId = newId,
-            WasCreated = true,
+            // FR-07(d) (task 013): honest create-vs-update signal from the atomic upsert (false when a
+            // concurrent winner created the row and this call updated/resolved onto it).
+            WasCreated = rowCreatedThisCall,
         };
     }
 

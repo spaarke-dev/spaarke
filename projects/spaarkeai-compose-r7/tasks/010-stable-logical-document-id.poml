@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Introduce a stable, non-rotating logical document id persisted across re-mounts (FR-07b)</title>
+    <phase>1 Save-Identity Fix (UC-8)</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts client code and a contract type; architectural foundation that blocks Phase 4 (draft key) and the client dedup key.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural change — introduces a new cross-cutting identity concept persisted through 4 mount/persist-back paths; blocks Phase 4 and the FR-07 dedup key. Blast radius across ComposeWorkspace lifecycle.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx / ComposeWorkspace.types.ts + compose-contracts.ts (shared Compose spine + cross-worktree contention per INDEX.md).</parallel-reason>
+    <deps>001</deps>
+    <tags>frontend, react, typescript, refactoring</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Introduce a stable, non-rotating logical document id that survives widget re-mount and reload for an unsaved Compose
+    document. Today no such id exists: transientKey is minted fresh at every transient/draft mount door and never persisted,
+    speDriveItemId is reset to '' on transient mounts, and sprkDocumentId exists only after first-save promotion. Persist and
+    rehydrate a single logical id so the same document keeps one identity across re-mount/reload. This id is the SHARED key
+    for both the FR-03 draft-recovery store and the FR-07 client dedup path.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in React lifecycle, the Compose workspace mount/persist-back state machine, and TypeScript contract types. Follow ADRs strictly.</role>
+
+  <goal>
+    ComposeDocumentRef carries a non-rotating logical id (either a persisted transientKey or a new composeLogicalId field) that:
+    is minted once per logical document, persisted to local/session storage, and rehydrated on re-mount/reload; is written back
+    through saveSucceeded / mountTransient / mountDraftHtml / loadSucceeded; and is exposed as the derivation
+    `sprkDocumentId ?? speDriveItemId ?? persistedLogicalId` for downstream consumers (FR-03 draft store, FR-07 dedup).
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-07(b) + §11 New-Components table. Owner clarification: unify FR-03 draft-recovery + FR-07 client dedup on ONE
+      stable id. Confirmed against code: none of speDriveItemId / sprkDocumentId / transientKey is non-rotating pre-save.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.types.ts</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx mint sites @2962/3011/3289/3347/3420/1113 via mintTransientKey@240 — the fresh-mint doors to unify onto one persisted id</file>
+      <file role="canonical-reference">ComposeWorkspace.types.ts mountTransient@559, mountDraftHtml@613 (speDriveItemId reset), saveSucceeded / loadSucceeded persist-back</file>
+      <file role="canonical-reference">compose-contracts.ts ComposeDocumentRef@642–668 (speDriveItemId / sprkDocumentId@646 / transientKey)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Coordination gate + conflict-check clean on the Compose spine.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">The logical id is a CLIENT identity concept only; it MUST NOT change the server save/version contract (ADR-049 append-only SPE versioning is unchanged by this task).</constraint>
+    <constraint source="project">The persisted id MUST be non-rotating for a given logical document across ALL transient/draft mount doors — do not mint a fresh key on re-mount when a persisted one exists.</constraint>
+    <constraint source="project">Expose the exact derivation `sprkDocumentId ?? speDriveItemId ?? persistedLogicalId` as the single identity accessor consumed by FR-03 (040) and FR-07 client dedup (011). Do NOT create two divergent keys.</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts. MUST NOT add a server-side draft/identity store — this id lives client-side (local/session storage).</constraint>
+    <constraint source="project">Prefer extending ComposeDocumentRef / the existing transientKey plumbing over adding a parallel identity mechanism (root §11).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose mount identity, client persistence</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+      <file>projects/spaarkeai-compose-r7/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, model-tier opus; load ADR-049 + spec.md FR-07.</step>
+    <step order="1">Trace the six mint sites (@2962/3011/3289/3347/3420/1113) and the mintTransientKey@240 helper; confirm none persists.</step>
+    <step order="2">Decide the implementation: persist the transientKey vs add a dedicated composeLogicalId field on ComposeDocumentRef. Document the bounded choice in notes/.</step>
+    <step order="3">Add persistence (local/session storage) + rehydration keyed so a re-mount/reload for the same logical document resolves the SAME id.</step>
+    <step order="4">Wire the persist-back through saveSucceeded / mountTransient / mountDraftHtml / loadSucceeded so the id survives each transition.</step>
+    <step order="5">Expose the `sprkDocumentId ?? speDriveItemId ?? persistedLogicalId` derivation as the identity accessor for FR-03/FR-07.</step>
+    <step order="6">Add/adjust unit tests for id stability across a simulated re-mount and across each persist-back transition.</step>
+    <step order="7">Run jest for the Compose widget suite; verify green.</step>
+    <step order="8">Update TASK-INDEX.md: set 010 status to ✅.</step>
+    <step order="9">Record the implementation choice + any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If persisting transientKey turns out to require touching the server save/promote contract (i.e., the id cannot stay client-only), STOP and escalate (root §6.5 — this would breach the client-only decision and NFR-03) rather than adding a server field.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>ComposeDocumentRef (compose-contracts.ts:642–668) has speDriveItemId / sprkDocumentId@646 / transientKey — but none is non-rotating pre-save (confirmed in spec §11).</existing>
+    <extension>Extend the existing ComposeDocumentRef + transientKey plumbing (persist it) rather than a parallel identity object; a dedicated composeLogicalId field is acceptable only if persisting transientKey proves infeasible — it is still an extension of the same ref, not a new subsystem.</extension>
+    <cost-of-doing-nothing>Without a non-rotating id, FR-03 draft recovery orphans drafts on re-mount and FR-07 client dedup has no stable key — duplicate sprk_document rows recur and unsaved drafts are lost. This blocks Phase 4 entirely.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Draft identity survives re-mount">
+      <steps>
+        <step>Open a new (unsaved) Compose document; note its logical id via the identity accessor.</step>
+        <step>Unmount and re-mount the Compose widget (simulate tab switch / reload).</step>
+        <step>Verify the identity accessor returns the SAME id, and no fresh transientKey was minted.</step>
+      </steps>
+      <expected>The logical id is identical before and after re-mount; storage holds one entry per logical document.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test the Spaarke.Compose.Components package (build:prod semantics for shared lib)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.types.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/types/compose-contracts.ts</output>
+    <output type="test">Compose widget unit tests for id stability</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a new unsaved doc, when the widget re-mounts or the page reloads, then the identity accessor returns the same logical id (no fresh mint).</criterion>
+    <criterion testable="true">The id is written back through saveSucceeded, mountTransient, mountDraftHtml, and loadSucceeded (each transition preserves it).</criterion>
+    <criterion testable="true">The identity accessor implements exactly `sprkDocumentId ?? speDriveItemId ?? persistedLogicalId`.</criterion>
+    <criterion testable="true">The id lives entirely client-side (local/session storage); no server contract or BFF endpoint was changed.</criterion>
+    <criterion testable="true">docxBridge.ts is not deleted; no parallel identity mechanism was added.</criterion>
+    <criterion testable="true">Compose widget jest suite passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-07(b), §11 table row "Stable logical document id", Owner Clarifications "Draft-identity key". Implementation choice (persist transientKey vs new composeLogicalId) is a bounded design detail left to this task.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

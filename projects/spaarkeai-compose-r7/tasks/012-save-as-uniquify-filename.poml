@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-compose-r7">
+  <metadata>
+    <title>Save As is a real fork — uniquify the filename so Graph PUT-by-path cannot coalesce (FR-07a)</title>
+    <phase>1 Save-Identity Fix (UC-8)</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.cs save-fork code in the transient-create/fork brownfield path; feeds the Phase 2 dropdown.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded change across the client forkNew path and server ResolveFileName; explicit reference impl exists (SaveAsync/transient-key dedup).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx forkNew/isTransientCreate path + ComposeService.cs create-on-save naming (shared Compose spine / BFF).</parallel-reason>
+    <deps>010</deps>
+    <tags>frontend, react, typescript, bff-api</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make Save As ('new') produce a genuine fork: uniquify the filename so a Graph PUT-by-path cannot coalesce the copy onto the
+    original file. Today the fork can silently re-version the original. The Save As fork MUST create a distinct new
+    sprk_document with a distinct file, never a silent re-version.
+  </prompt>
+
+  <role>SPAARKE platform developer. Expert in the Compose save-fork path (client forkNew + server ResolveFileName) and Graph PUT-by-path semantics. Follow ADRs strictly.</role>
+
+  <goal>
+    Save As uniquifies the target filename (e.g., "Name (2).docx") in the create-on-save fork path so the SPE PUT-by-path lands
+    a new drive item, yielding a distinct sprk_document row + file. The 'version'|'new' enum is unchanged.
+  </goal>
+
+  <context>
+    <background>
+      spec.md FR-07(a) + FR-01. Save As is the first of the four D1 duplicate-record vectors: without filename uniquification a
+      Graph PUT-by-path can coalesce the fork onto the existing file, so the "fork" silently re-versions the original. This feeds
+      Phase 2 (020 Save dropdown), which surfaces Save As.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="canonical-reference">ComposeWorkspace.tsx triggerSave@1346 (forkNew@1355 / isTransientCreate@1367 / effectiveTransientKey@1370)</file>
+      <file role="canonical-reference">ComposeService.cs create-on-save name @1346 (ResolveFileName), SaveAsync@1009, transient-key dedup @3381–3413</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Stable logical id — a Save As fork mints a NEW logical document (distinct id), not the original's id.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049">Save As rides ADR-049 append-only versioning by creating a NEW document; it MUST NOT be implemented as a new-version append on the original.</constraint>
+    <constraint source="project">The Save As ('new') path in ComposeWorkspace.tsx triggerSave@1346 / forkNew@1355 MUST uniquify the filename so the SPE PUT-by-path creates a distinct drive item; a fork MUST yield a new logical id (from task 010), not reuse the original's.</constraint>
+    <constraint source="project">Keep ComposeSaveMode = 'version' | 'new' unchanged — this task changes fork behavior, not the enum.</constraint>
+    <constraint source="project">BFF change: if ResolveFileName@1346 is touched server-side, state a Placement Justification in the PR (cite .claude/constraints/bff-extensions.md), verify compressed publish size ≤60 MB and report delta vs the 001 baseline (~44.96 MB net10), confirm no new HIGH CVE, and run /conflict-check before the BFF PR.</constraint>
+    <constraint source="project">MUST NOT delete docxBridge.ts. MUST NOT add a parallel save/fork mechanism.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose save fork, filename uniquify</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL, effort xhigh; load spec FR-01/FR-07a + SaveAsync reference.</step>
+    <step order="1">Trace triggerSave@1346 → forkNew@1355 → server create-on-save ResolveFileName@1346; identify where PUT-by-path could coalesce.</step>
+    <step order="2">Implement filename uniquification for the 'new' fork (client-supplied name threaded, server-side collision-safe suffixing).</step>
+    <step order="3">Ensure the fork mints a NEW task-010 logical id, not the original's.</step>
+    <step order="4">Add unit tests: Save As on a doc with an existing filename produces a distinct filename + distinct identity.</step>
+    <step order="5">If server touched: run publish-size + CVE checks; record delta vs 001 baseline in notes/.</step>
+    <step order="6">Run jest + xUnit Compose suites; verify green.</step>
+    <step order="7">Update TASK-INDEX.md: set 012 status to ✅.</step>
+    <step order="8">Document any deviation in projects/spaarkeai-compose-r7/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the server ResolveFileName/create-on-save contract cannot uniquify without an additional Graph round-trip that risks a new duplicate window, STOP and escalate (root §6.5) — do not ship a fork that can still coalesce.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Save As produces a distinct document">
+      <steps>
+        <step>Open a saved Compose doc; note its filename + sprk_document.</step>
+        <step>Choose Save As.</step>
+        <step>Verify a distinct new sprk_document with a uniquified filename (e.g. "Name (2).docx") + a distinct file is created.</step>
+        <step>Verify the original is unchanged (no silent re-version).</step>
+      </steps>
+      <expected>Save As forks to a distinct document + file; the original is untouched.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build/test Spaarke.Compose.Components</tool>
+    <tool name="dotnet">Build/test + publish-size measure for the BFF (if server touched)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="test">Unit tests for Save As filename uniquify + distinct identity</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a saved doc, when the user chooses Save As, then a distinct sprk_document with a uniquified filename + distinct file is produced — never a silent re-version of the original.</criterion>
+    <criterion testable="true">The Save As fork carries a NEW task-010 logical id, not the original's.</criterion>
+    <criterion testable="true">ComposeSaveMode remains 'version' | 'new' (enum unchanged).</criterion>
+    <criterion testable="true">If the BFF was touched: compressed publish size ≤60 MB with delta reported vs the 001 baseline; no new HIGH CVE.</criterion>
+    <criterion testable="true">Compose jest + xUnit suites pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-07(a) + FR-01. Save As label replaces R6's "Save New Document" (onSave('new')); enum value stays 'new'. Feeds 020.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

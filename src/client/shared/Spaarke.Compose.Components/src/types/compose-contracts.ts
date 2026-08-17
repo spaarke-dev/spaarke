@@ -665,6 +665,36 @@ export interface ComposeDocumentRef {
    * mounts that predate G7 (server then skips dedup — unchanged behavior).
    */
   transientKey?: string;
+  /**
+   * FR-07(b) (spaarkeai-compose-r7, task 010): the **non-rotating logical document id** for an
+   * unsaved Compose document. Distinct from {@link transientKey} (a per-mount server-dedup key that
+   * is minted fresh at every door and is `undefined` for loaded/promoted docs): `composeLogicalId`
+   * is minted ONCE per logical document, persisted to client storage (single active-draft slot,
+   * `composeIdentity.ts`), and **rehydrated on re-mount/reload** so the same document keeps one
+   * identity. It is the SHARED key for the FR-03 draft-recovery store (task 040) and the FR-07
+   * client dedup path (task 011).
+   *
+   * Consume it via {@link getComposeLogicalIdentity} — NEVER read this field directly for identity
+   * (the accessor implements the `sprkDocumentId ?? speDriveItemId ?? composeLogicalId` derivation
+   * and guards the `speDriveItemId: ''` transient sentinel). Undefined for a document that already
+   * has a real `speDriveItemId`/`sprkDocumentId` (identity comes from those). Client-only — this id
+   * NEVER reaches the server save/version contract (ADR-049 unchanged; NFR-03).
+   */
+  composeLogicalId?: string;
+}
+
+/**
+ * FR-07(b) (task 010): the single identity accessor for a Compose document. Returns the first
+ * non-empty of `sprkDocumentId`, `speDriveItemId`, `composeLogicalId` — guarding the `''`
+ * transient sentinel that {@link ComposeDocumentRef.speDriveItemId} carries on transient/draft
+ * mounts (a bare `??` would wrongly yield `''`). This is the canonical dedup + draft-store key
+ * consumed by FR-03 (task 040) and FR-07 client dedup (task 011); do NOT derive identity any
+ * other way.
+ */
+export function getComposeLogicalIdentity(ref: Pick<ComposeDocumentRef, 'sprkDocumentId' | 'speDriveItemId' | 'composeLogicalId'> | null | undefined): string | undefined {
+  if (!ref) return undefined;
+  const nonEmpty = (v: string | undefined): string | undefined => (v && v.length > 0 ? v : undefined);
+  return nonEmpty(ref.sprkDocumentId) ?? nonEmpty(ref.speDriveItemId) ?? nonEmpty(ref.composeLogicalId);
 }
 
 /**

@@ -1950,6 +1950,49 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
     }
 
+    /// <inheritdoc />
+    public async Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default)
+    {
+        if (entity == null)
+            throw new ArgumentNullException(nameof(entity));
+
+        if (string.IsNullOrEmpty(entity.LogicalName))
+            throw new ArgumentException("Entity logical name must be set", nameof(entity));
+
+        // The upsert MUST be resolvable by a key — either an alternate key (KeyAttributes) or the
+        // primary id. Without one, Dataverse cannot match a target and the request is meaningless.
+        if (entity.KeyAttributes.Count == 0 && entity.Id == Guid.Empty)
+            throw new ArgumentException(
+                "Upsert requires KeyAttributes (an alternate key) or a primary Id on the entity.", nameof(entity));
+
+        try
+        {
+            var request = new Microsoft.Xrm.Sdk.Messages.UpsertRequest { Target = entity };
+            var response = (Microsoft.Xrm.Sdk.Messages.UpsertResponse)await _serviceClient.ExecuteAsync(request, ct);
+
+            var id = response.Target.Id;
+            _logger.LogInformation(
+                "[DATAVERSE] Upserted {EntityLogicalName} record {EntityId} (created={RecordCreated})",
+                entity.LogicalName,
+                id,
+                response.RecordCreated);
+
+            return (id, response.RecordCreated);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "[DATAVERSE] Error upserting {EntityLogicalName} record. KeyAttributes: {KeyCount}, Attributes: {AttributeCount}",
+                entity.LogicalName,
+                entity.KeyAttributes.Count,
+                entity.Attributes.Count);
+
+            throw new InvalidOperationException(
+                $"Failed to upsert {entity.LogicalName} record: {ex.Message}", ex);
+        }
+    }
+
     public async Task UpdateAsync(string entityLogicalName, Guid id, Dictionary<string, object> fields, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(entityLogicalName))
