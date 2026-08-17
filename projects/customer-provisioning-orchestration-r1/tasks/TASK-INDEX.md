@@ -30,34 +30,34 @@ Two additional corrections independently caught by task-gen subagents:
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 001 | 🔲 | Consolidate 4+ deploy guides into one authoritative `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` | MINIMAL | sonnet / medium | groupA-parallel | none |
-| 002 | 🔲 | Audit AI Search index catalog vs `Deploy-AllIndexes.ps1` | MINIMAL | sonnet / medium | groupA-parallel | none |
-| 003 | 🔲 | Reconcile 33 PCF folders → 7 in-use mapping | MINIMAL | sonnet / medium | groupA-parallel | none |
-| 004 | 🔲 | Resolve two-source AI seed drift | STANDARD | sonnet / medium | groupA-parallel | none |
-| 005 | 🔲 | **Complete 11 of 14 null `AppRoleId` GUIDs** in `GraphAppRoles.cs` via `az` enum (H10 escalation gate) — CORRECTED from "10 of 14" per discovery §12 | FULL | sonnet / xhigh | none (serial per-GUID commit) | none |
-| 006 | 🔲 | Publish `docs/deployment/version-compatibility-matrix.md` (initial) | MINIMAL | sonnet / medium | groupA-parallel | none |
-| 007 | 🔲 | Author 6 U-CB customer-comms templates in `docs/deployment/customer-comms/` | MINIMAL | sonnet / medium | groupA-parallel | none |
-| 008 | 🔲 | Audit ~28 non-deployer-listed items in `src/solutions/` (§11.1a reconciliation) | MINIMAL | sonnet / medium | groupA-parallel | none |
+| 001 | ✅ | Consolidate 4+ deploy guides into one authoritative `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` | MINIMAL | sonnet / medium | groupA-parallel | none |
+| 002 | ✅ | Audit AI Search index catalog vs `Deploy-AllIndexes.ps1` | MINIMAL | sonnet / medium | groupA-parallel | none |
+| 003 | ✅ | Reconcile 33 PCF folders → 7 in-use mapping | MINIMAL | sonnet / medium | groupA-parallel | none |
+| 004 | ✅ | Resolve two-source AI seed drift | STANDARD | sonnet / medium | groupA-parallel | none |
+| 005 | ✅ | **Complete 11 of 14 null `AppRoleId` GUIDs** in `GraphAppRoles.cs` via `az` enum (H10 escalation gate) — CORRECTED from "10 of 14" per discovery §12 | FULL | sonnet / xhigh | none (serial per-GUID commit) | none |
+| 006 | ✅ | Publish `docs/deployment/version-compatibility-matrix.md` (initial) | MINIMAL | sonnet / medium | groupA-parallel | none |
+| 007 | ✅ | Author 6 U-CB customer-comms templates in `docs/deployment/customer-comms/` | MINIMAL | sonnet / medium | groupA-parallel | none |
+| 008 | ✅ | Audit ~28 non-deployer-listed items in `src/solutions/` (§11.1a reconciliation) | MINIMAL | sonnet / medium | groupA-parallel | none |
 
 ### Phase B — Gap Automation Script Hardening (7 tasks)
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 010 | 🔲 | Harden `Register-EntraAppRegistrations.ps1` for 14-grant idempotency | STANDARD | sonnet / high | groupB-parallel | none |
-| 011 | 🔲 | Refactor SPE scripts to confidential-client (T6 fix) | STANDARD | sonnet / high | groupB-parallel | none |
-| 012 | 🔲 | Extend `Deploy-DataverseSolutions.ps1` to Package Deployer (8 solutions) | STANDARD | sonnet / high | groupB-parallel | none |
-| 013 | 🔲 | Harden `Deploy-Release.ps1` Phase 4 (`customerId`-driven; remove `spaarkedev1`) | STANDARD | sonnet / high | groupB-parallel | none |
-| 014 | 🔲 | Add Cosmos DB provisioning module invocation to `customer.bicep` prep | STANDARD | sonnet / high | groupB-parallel | none |
+| 010 | ✅ | Harden `Register-EntraAppRegistrations.ps1` for 14-grant idempotency | STANDARD | sonnet / high | groupB-parallel | none |
+| 011 | ✅ | Refactor SPE scripts to confidential-client (T6 fix) | STANDARD | sonnet / high | groupB-parallel | none |
+| 012 | ✅ | Extend `Deploy-DataverseSolutions.ps1` to Package Deployer (8 solutions) | STANDARD | sonnet / high | groupB-parallel | none |
+| 013 | ✅ | Harden `Deploy-Release.ps1` Phase 4 (`customerId`-driven; remove `spaarkedev1`) | STANDARD | sonnet / high | groupB-parallel | none |
+| 014 | ✅ | Add Cosmos DB provisioning module invocation to `customer.bicep` prep | STANDARD | sonnet / high | groupB-parallel | none |
 | 015 | ⏸ | Author `Grant-GraphAppRoles.ps1` reading `GraphAppRoles.cs` constant | STANDARD | sonnet / high | none (dep 005) | 005 |
-| 016 | 🔲 | Add H0 preflight quota-check PS modules | STANDARD | sonnet / high | groupB-parallel | none |
+| 016 | ✅ | Add H0 preflight quota-check PS modules | STANDARD | sonnet / high | groupB-parallel | none |
 
 ### Phase G — Canonical Naming Compliance at Provisioning (4 tasks)
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 018 | 🔲 | Parameterize Bicep vault name in `customer.bicep` + `platform.bicep` + `key-vault.bicep` | STANDARD | sonnet / high | groupG-parallel | none |
-| 019 | 🔲 | Update seeder scripts to canonical KV secret names | STANDARD | sonnet / high | groupG-parallel | none |
-| 020 | 🔲 | Codify `spaarke-spekvcert` DO-NOT-RENAME dev exception | STANDARD | sonnet / medium | groupG-parallel | none |
+| 018 | ✅ | Parameterize Bicep vault name in `customer.bicep` + `platform.bicep` + `key-vault.bicep` | STANDARD | sonnet / high | groupG-parallel | none |
+| 019 | ✅ | Update seeder scripts to canonical KV secret names | STANDARD | sonnet / high | groupG-parallel | none |
+| 020 | ✅ | Codify `spaarke-spekvcert` DO-NOT-RENAME dev exception | STANDARD | sonnet / medium | groupG-parallel | none |
 | 021 | ⏸ | Wire `naming-conformance-check.ps1` into `Validate-DeployedEnvironment.ps1` design | STANDARD | sonnet / medium | none (dep 018-020) | 018, 019, 020 |
 
 ### Phase C Wave C1 — Registry + Cosmos Model (3 tasks)
@@ -153,7 +153,7 @@ Two additional corrections independently caught by task-gen subagents:
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 080 | 🔲 | Refactor `DemoExpirationService.cs` off `[Obsolete]` `DemoProvisioningOptions.Environments`/`DefaultEnvironment` → `DataverseEnvironmentService` | FULL | sonnet / xhigh | none (serial BFF touch; frozen file mod) | none |
+| 080 | ✅ | Refactor `DemoExpirationService.cs` off `[Obsolete]` `DemoProvisioningOptions.Environments`/`DefaultEnvironment` → `DataverseEnvironmentService` | FULL | sonnet / xhigh | none (serial BFF touch; frozen file mod) | none |
 | 081 | ⏸ | Refactor `RegistrationEndpoints.cs` lines 466/468/469 (remove 4 `[Obsolete]` warnings) | FULL | sonnet / high | none (dep 080) | 080 |
 | 082 | ⏸ | Delete `DemoProvisioning__Environments__*` + `__DefaultEnvironment` from Azure config; verify BFF `/health` + publish size delta | FULL | sonnet / high | none (dep 080, 081 + deploy) | 080, 081 |
 
@@ -319,9 +319,10 @@ Per `notes/resource-discovery-2026-08-16.md`:
 | Metric | Value |
 |---|---|
 | **Total tasks** | 78 |
-| **not-started** 🔲 | 78 |
+| **not-started** 🔲 | 60 |
 | **in-progress** 🟡 | 0 |
-| **completed** ✅ | 0 |
+| **completed** ✅ | 18 (Wave 0 complete: 001-004, 005, 006-008, 010-014, 016, 018-020, 080) |
+| **Wave 0 total** | 18 tasks · 31 commits · 38 ahead of origin · net −2,110 LOC · BFF publish 43.65 MB (Δ−1.31 vs 44.96 baseline) · CVE clean |
 | **blocked** ⏸ | (per dep chains — resolvable) |
 | **Ready to start (no deps)** | 21 tasks: 001, 002, 003, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 018, 019, 020, 032, 033, 080 (Phase E), plus 023, 024 (Wave C1 pending 004) |
 

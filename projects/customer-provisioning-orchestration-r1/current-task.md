@@ -1,8 +1,8 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-16 (by `/project-pipeline` Step 2 — reset from design-shipped state to ready-for-task-001)
+> **Last Updated**: 2026-08-17 (Wave 0 Batch 1 complete; Batch 2 in flight)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` @ `be3f12bb6` (post-master-merge; local only)
+> **Branch**: `work/customer-provisioning-orchestration-r1` @ `b6022edd7` (14 commits ahead of origin; local only)
 
 ---
 
@@ -10,11 +10,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **Pipeline initialization complete — ready for task-execute** |
-| **Task** | none (task 001 will be first `task-execute` invocation) |
-| **Status** | not-started |
-| **Next Action** | Owner reviews spec.md + plan.md + task POMLs at [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md) → run `task-execute 001` (or `/project-continue`) to begin Phase A |
-| **Blocker** | None external |
+| **Project phase** | **Wave 0 COMPLETE (18/18) — ready for Wave 1** |
+| **Task** | none (Wave 1 dispatch pending owner go/no-go) |
+| **Status** | wave-boundary |
+| **Next Action** | Present Wave 0 wrap-up report + Wave 1 plan → owner selects dispatch mode → `task-execute` fanout for Wave 1 (8 tasks eligible: 015, 021, 023, 024, 027, 028, 032, 033; +036 after 024) |
+| **Blocker** | None external. **Wave 0 wrap-up notes for reviewer**: (a) task 001 Path A exception on 5 retained release guides — awaits reviewer accept/contest; (b) task 012 `pac solution import --stage-and-upgrade` deviation documented; (c) task 020/018 co-commit `3758c33b6` from shared-worktree git-index race (attribution muddled, content correct); (d) `customer.json` inadvertently deleted by Batch 3 Bicep agent, restored from HEAD. **Metrics**: 31 Wave-0 commits · 38 ahead of origin · net −2,110 LOC · BFF publish 43.65 MB (Δ−1.31 vs 44.96 baseline; −1.29 from task 005 alone) · CVE clean · GodClassGuard pass · Steps 9.5 quality gates PASS on tasks 080 + 005. |
 
 ### Files Modified This Session (through pipeline init)
 
