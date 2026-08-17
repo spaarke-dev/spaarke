@@ -4,7 +4,6 @@
     <title>Parameterize vault name in customer.bicep + platform.bicep + modules/key-vault.bicep (sprk-{env}-kv canonical)</title>
     <phase>G Canonical Naming Compliance</phase>
     <gate>startable</gate>
-    <status>not-started</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies Bicep files (existing infra); azure-deployment scope; no BFF code. Per root CLAUDE.md §8, Bicep + explicit naming constraints = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>
