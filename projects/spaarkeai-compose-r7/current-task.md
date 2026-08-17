@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-compose-r7
 
-> **Last Updated**: 2026-08-17 (context-handoff — Phase 5 complete: 050 + FR-11 + 051 all committed; next 060)
+> **Last Updated**: 2026-08-17 (context-handoff — Phases 6+7 COMPLETE: 060/061/070/071/072/074 all committed; 19/20 done; ONLY 090 wrap-up remains)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 > **Git**: master MERGED (HEAD `9aaf695c8` merge; resolved DataverseWebApiService.cs conflict — RED-4 dead-code deletion took master side, my UpsertAsync lives in DataverseServiceClientImpl/interface; 1124 Compose tests green post-merge). Branch current with master.
@@ -11,9 +11,29 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **072 ✅ COMPLETE** (Add Comment toolbar affordance, FR-10). Next: **074** (apply-template ETag/If-Match + typed-404, FR-12) |
-| **Step** | 072 wired the toolbar entry point onto the shipped comment machinery + gated (code-review + adr-check PASS, ADR-021 dark-mode); 650 standalone jest green (+5 toolbar tests); committed. |
-| **Next Action** | Execute **074** (apply-template ETag/If-Match + ApiError-typed 404, FR-12) → 090 wrap-up. |
+| **Task** | **074 ✅ COMPLETE** (FR-12). **ALL FEATURE TASKS DONE — 19/20.** Only **090 wrap-up** remains. |
+| **Step** | 074 Item 1 (ApiError-typed 404) shipped; Item 2 (If-Match) resolved §6.5 Path A (owner-approved) + DEF-001/#776 filed. Checkpoint for /compact. |
+| **Next Action** | Execute **090 wrap-up** (final task): deploy BFF + `sprk_spaarkeai` together (NFR-05, never from a net8 tree), `/test-diet`, docs/README refresh, `/worktree-sync` push + **merge-to-master (deferred here by project decision)**, archive. Cite the documented exceptions in the wrap-up PR (see below). |
+
+### 🟢 THIS SESSION (Phase 6 + Phase 7 — all feature tasks completed). Recent commits (newest first):
+- **074** finalize `bfff3cc35` (§6.5 Path A + DEF-001/#776) · 074 Item 1 `3faba8c1b` (ApiError-typed 404, dead response.ok removed)
+- **072** `0ecea8d0d` (Add Comment toolbar → shipped machinery)
+- **071** `906462d66` (Reload-from-source no-blank — loadSucceeded now stamps driveId)
+- **070** `de2e1e902` (Blank-page-editable regression guard — D8 already satisfied, no src change)
+- **061** `d3d05b7fc` (Ctrl+Shift+Space focus chat — focusInput() + PaneEventBus focus_chat_input)
+- **060** `202870ff3` (Ctrl+Space "Describe a change" at caret + composeHotkeys.ts)
+
+### ⚠️ Documented exceptions to CITE in the 090 wrap-up PR description
+1. **074 §6.5 Path A** (apply-template no client If-Match; residual TOCTOU recoverable via SPE version history) — `notes/task-074-notes.md`; follow-up **DEF-001 / GitHub #776**.
+2. **041 "no autosave" invariant flip** (client-only autosave; NO automatic SERVER save — NFR-03) — ADR-Tensions Path A.
+3. **050 ProjectForMount async** (ADR-007/013 sync→async for the PDF fork — NFR-04) — ADR-Tensions Path A.
+
+### 090 wrap-up checklist (from CLAUDE.md + TASK-INDEX)
+- **Deploy**: BFF + `sprk_spaarkeai` TOGETHER (anti-clobber, NFR-05). **NEVER deploy BFF from a net8 tree** (→503). Publish ≤60 MB (net10 baseline ~44.96 MB incl PDBs).
+- **`/test-diet`** (BINDING project-close gate — reconcile added/modified tests vs the 17-ban classifier; emits `notes/test-diet-report.md`; the wrap-up PR MUST cite it).
+- **Docs**: README graduation criteria, fidelity-wideners deferral (file via `/defer` — the "Known R7 deferral" per project CLAUDE.md).
+- **`/worktree-sync`** Full Sync — push (branch is AHEAD of origin `a070620e8` by ~7 unpushed commits) + **merge-to-master** (deferred to here by standing project decision).
+- Portfolio: project not registered on the board (optional `/devops-project-register`).
 
 ### Task 072 — what shipped (see notes/task-072-notes.md)
 **Re-exposed the shipped comment machinery (§11 — no rebuild).** The comment round-trip (`useComposeCommentThreads.createThread` + `ComposeCommentThread` composer + `handleToggleComments`) shipped in R6 (024/026); only the UI trigger was missing (the "Comments" FAB was removed UAT round-6 #3b, leaving the panel unreachable). Fix: added an "Add Comment" icon-toggle to `ComposeFormatToolbar` (Group 3, next to Review Notes/Track Changes; mirrors the Track Changes toggle — ADR-021 primary/subtle tokens, dark-mode-correct; new optional `commentsOpen`/`onToggleComments` props) + threaded `onToggleComments={handleToggleComments}` from ComposeEditor. The button drives the EXISTING seam (selection → pendingCommentRange → composer → createThread). ComposeAiToolbar.tsx intentionally NOT modified (single entry point, directional deviation recorded). +5 standalone toolbar tests (fire, aria-pressed, disabled, dark-mode no-hex). No BFF bytes.
