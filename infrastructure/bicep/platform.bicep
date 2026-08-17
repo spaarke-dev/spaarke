@@ -81,6 +81,9 @@ param tags object = {
   managedBy: 'bicep'
 }
 
+@description('Platform Key Vault name. Canonical: sprk-{env}-kv per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret & Resource Naming Standard" R3 + spec.md §7.9 / FR-35. Parameterized (was hardcoded `sprk-platform-{env}-kv` per task 018) so H4 handler + Phase H seeder can address correctly-named per-env vaults deterministically and codified exceptions (e.g., spaarke-spekvcert dev carve-out per task 020) can override the default.')
+param keyVaultName string = 'sprk-${environmentName}-kv'
+
 // ============================================================================
 // VARIABLES — Naming Convention (sprk_/spaarke- standard)
 // ============================================================================
@@ -95,9 +98,6 @@ var aiSearchName = 'spaarke-search-${environmentName}'
 var docIntelligenceName = 'spaarke-docintel-${environmentName}'
 var appInsightsName = 'sprk-platform-${environmentName}-insights'
 var logAnalyticsName = 'sprk-platform-${environmentName}-logs'
-
-// Short-form names (sprk- prefix) for length-constrained resources (Key Vault: 24 chars)
-var keyVaultName = 'sprk-platform-${environmentName}-kv'
 
 // Cosmos DB account name (spaarke- prefix, max 44 chars)
 var cosmosAccountName = 'spaarke-cosmos-${environmentName}'

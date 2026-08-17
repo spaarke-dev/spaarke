@@ -2,7 +2,12 @@
 // Azure Key Vault module for Spaarke infrastructure
 // Hardened: network restrictions, secret rotation, least-privilege RBAC, audit logging
 
-@description('Name of the Key Vault')
+// Vault name. Default (caller-supplied) follows canonical `sprk-{env}-kv` per
+// AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret & Resource Naming Standard" (R3).
+// Dev exception: `spaarke-spekvcert` is a DO-NOT-RENAME live dev-artifact per
+// projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md
+// (owner directive #3, 2026-08-15 · FR-35 · §7.9 R3). Do not rename the dev vault.
+@description('Name of the Key Vault. Canonical: sprk-{env}-kv. Dev exception spaarke-spekvcert per naming-exception-registry.md.')
 param keyVaultName string
 
 @description('Location for the Key Vault')

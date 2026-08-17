@@ -15,6 +15,7 @@
     <deps>none</deps>
     <tags>bicep, azure-deployment, deploy</tags>
     <estimated-effort>3-4 hours</estimated-effort>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -97,7 +98,16 @@ Per spec.md FR-35 + §7.9 R3 + design.md § handlers H4 + r3 task 063 handoff §
     <criterion testable="true">Negative: no live-dev deployment triggered by this task (per owner directive #3).</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-35 + §7.9 R3 + owner directive #3. Feeds Phase H canonical secret-catalog manifest (Phase H can target correct vault) + task 020 dev-exception codification.</notes>
+  <notes>Spec FR-35 + §7.9 R3 + owner directive #3. Feeds Phase H canonical secret-catalog manifest (Phase H can target correct vault) + task 020 dev-exception codification.
+
+Completion (2026-08-17, Wave 0 Batch 3 parallel dispatch):
+- `infrastructure/bicep/customer.bicep`: (a) `param platformKeyVaultName` default changed from hardcoded `'sprk-platform-prod-kv'` to canonical `'sprk-${environmentName}-kv'` per §7.9 R3; (b) `var keyVaultName` converted to `param keyVaultName string = take('sprk-${customerId}-${environmentName}-kv', 24)` (per-customer canonical incorporates customerId; 24-char cap preserved). Task 020's DO-NOT-RENAME registry comment block kept intact.
+- `infrastructure/bicep/platform.bicep`: `var keyVaultName = 'sprk-platform-${environmentName}-kv'` converted to `param keyVaultName string = 'sprk-${environmentName}-kv'` — drops legacy `-platform-` qualifier from default per §7.9 R3 canonical.
+- `infrastructure/bicep/modules/key-vault.bicep`: NO CHANGE required — `keyVaultName` was already a required `param` (correct SRP for leaf module which has no env context). Task 020 has already added the canonical + dev-exception `@description` annotation.
+- Verification: `az bicep build` on both customer.bicep + platform.bicep exit 0 with no new warnings (pre-existing warnings on unrelated concerns: ACS null-safety BCP318, ai-search listQueryKeys, ACS webhook URL). Grep verification: zero hardcoded vault-name string literals remain in the 3 scoped files.
+- Deferred (documented deviation): `az deployment group what-if` NOT run — requires interactive Azure auth + target RG unavailable in Wave 0 sub-agent context; owner directive #3 also forbids re-running live-dev deployments. IaC-only verification (bicep build + grep + git diff scope) satisfied; what-if defers to next operator-driven deploy.
+- Sibling coordination: task 020 (`spaarke-spekvcert` DO-NOT-RENAME codification) landed comment blocks + `@description` annotations concurrently on customer.bicep + modules/key-vault.bicep; my param conversion was applied in-place preserving 020's comments (minimal diff scope, no conflict).
+  </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

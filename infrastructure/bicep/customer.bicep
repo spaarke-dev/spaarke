@@ -32,8 +32,8 @@ param environmentName string = 'prod'
 @description('Primary Azure region for all customer resources')
 param location string = 'westus2'
 
-@description('Name of the platform Key Vault (from platform.bicep deployment) for cross-references')
-param platformKeyVaultName string = 'sprk-platform-prod-kv'
+@description('Name of the platform Key Vault (from platform.bicep deployment) for cross-references. Canonical: sprk-{env}-kv per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret & Resource Naming Standard" R3 + spec.md §7.9 / FR-35 (task 018 drops legacy `-platform-` qualifier from default; matches platform.bicep keyVaultName default). Override supported for codified exceptions per task 020.')
+param platformKeyVaultName string = 'sprk-${environmentName}-kv'
 
 // --- Storage Account options ---
 
@@ -97,8 +97,14 @@ var baseName = 'sprk${customerId}${environmentName}'
 // Storage account: sprk{customer}{env}sa (lowercase, no hyphens, max 24 chars)
 var storageAccountName = take(toLower(replace('${baseName}sa', '-', '')), 24)
 
-// Key Vault: sprk-{customer}-{env}-kv (max 24 chars)
-var keyVaultName = take('sprk-${customerId}-${environmentName}-kv', 24)
+// Key Vault: sprk-{customer}-{env}-kv (max 24 chars).
+// Canonical per AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret & Resource Naming
+// Standard" (R3). Dev exception: `spaarke-spekvcert` is a DO-NOT-RENAME live
+// dev-artifact per projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md
+// (owner directive #3 · FR-35 · §7.9 R3). Task 018 parameterizes vault-name to
+// allow the dev exception to be honored via caller override at deployment time.
+@description('Customer Key Vault name. Canonical per-customer form incorporates customerId per AZURE-RESOURCE-NAMING-CONVENTION.md § "Multi-Customer Prod Environment" (customer + env combo isolates per-customer vaults; capped at 24 chars per Key Vault limit). Parameterized by task 018 (was hardcoded `var keyVaultName`) so H4 handler + Phase H seeder address vaults deterministically. Override supported for codified exceptions per task 020 (see naming-exception-registry.md).')
+param keyVaultName string = take('sprk-${customerId}-${environmentName}-kv', 24)
 
 // Service Bus: spaarke-{customer}-{env}-sbus (Note: '-sb' suffix is reserved by Azure)
 var serviceBusName = 'spaarke-${customerId}-${environmentName}-sbus'
