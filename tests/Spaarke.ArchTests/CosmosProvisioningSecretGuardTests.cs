@@ -77,6 +77,54 @@ public class CosmosProvisioningSecretGuardTests
     private const string L2SecretsPropertyName = "Secrets";
 
     /// <summary>
+    /// Explicit exclusions from the L2 secret-shape scan. Types listed here are
+    /// documented CLAUDE.md §6.5 Path A exceptions — runtime-transient shapes
+    /// that carry plaintext secrets in local scope only, NEVER on Cosmos-
+    /// persisted POCOs. Additions require:
+    ///   1. A single-line comment naming the task ID and rationale.
+    ///   2. Reviewer sign-off in the PR that adds the exclusion.
+    ///   3. A follow-on note in the project's design.md ADR Tensions section.
+    /// If the shape is a candidate for Path C (comply) — e.g. by refactoring to
+    /// <see cref="Models.KeyVaultSecretRef"/> — prefer that over path A.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>KeyVaultSecretRef</b> — the compliant reference type itself; its
+    /// <c>SecretName</c> property matches the secret-shape regex but holds a
+    /// KV secret NAME, not a value. Excluded from day 1 of task 025.
+    /// </para>
+    /// <para>
+    /// <b>SolutionImportOptions</b> (task 049, wave C4 Batch 3D) — IConfiguration
+    /// binding POCO for the H6 handler. The <c>ClientSecret</c> property is
+    /// bound by App Service at app-setting-binding time from an
+    /// <c>@Microsoft.KeyVault(SecretUri=…)</c> reference (Wave C5 wiring per
+    /// design.md §7.1). The plaintext value lives ONLY on this IOptions bag
+    /// after bind time — it is never persisted to Cosmos (H6 passes it to a
+    /// child pwsh process via env-var; no ProvisioningRun / InterStepState
+    /// slot receives it). Path A exception with wave-C5 follow-on to consider
+    /// upgrading to <see cref="Models.KeyVaultSecretRef"/> + a runtime
+    /// secret-resolver seam (Path C) once the KV SDK dependency budget is
+    /// evaluated for L2.
+    /// </para>
+    /// <para>
+    /// <b>SolutionImportRequest</b> (task 049) — transient <see langword="record"/>
+    /// carrying the plaintext client secret from the H6 handler to the
+    /// <c>DeployDataverseSolutionsScriptImporter</c> shell-out. Instantiated
+    /// per-invocation in method scope; never persisted to Cosmos. Plaintext IS
+    /// unavoidable because <c>pac auth create --clientSecret</c> requires the
+    /// value. Path A exception; Path C alternative (record carries a
+    /// <see cref="Models.KeyVaultSecretRef"/> instead + runner resolves
+    /// internally) is deferred to Wave C5 alongside the Options refactor.
+    /// </para>
+    /// </remarks>
+    private static readonly HashSet<string> ExcludedTypeFullNames = new(StringComparer.Ordinal)
+    {
+        CompliantSecretRefFullName,
+        "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.SolutionImportOptions",
+        "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.SolutionImportRequest",
+    };
+
+    /// <summary>
     /// Lazy-loaded L2 assembly. Preference: already-loaded in <see cref="AppDomain"/>;
     /// fallback: <see cref="Assembly.LoadFrom(string)"/> on the newest matching DLL under
     /// <c>src/server/services/Sprk.Provisioning.ControlPlane/bin/**</c>. If the DLL is
@@ -181,12 +229,12 @@ public class CosmosProvisioningSecretGuardTests
         var assembly = L2Assembly.Value;
 
         // Scan every type declared in Sprk.Provisioning.ControlPlane*.
-        // Excluded: the compliant KeyVaultSecretRef type itself — its VaultName /
-        // SecretName / VersionId are KV reference metadata, not cleartext values.
+        // Excluded: types in <see cref="ExcludedTypeFullNames"/> — the
+        // KeyVaultSecretRef compliant type + documented Path A exceptions.
         var typesToScan = assembly.GetTypes()
             .Where(t => t.Namespace is not null
                         && t.Namespace.StartsWith(L2NamespacePrefix, StringComparison.Ordinal))
-            .Where(t => !string.Equals(t.FullName, CompliantSecretRefFullName, StringComparison.Ordinal));
+            .Where(t => t.FullName is null || !ExcludedTypeFullNames.Contains(t.FullName));
 
         var offenders = new List<string>();
         foreach (var type in typesToScan)

@@ -15,6 +15,7 @@
 // -----------------------------------------------------------------------------
 
 using System.Text.Json.Serialization;
+using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 namespace Sprk.Provisioning.ControlPlane.Models;
 
@@ -84,4 +85,28 @@ public sealed class InterStepState
     [JsonPropertyName("speConsentCorrelationId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? SpeConsentCorrelationId { get; set; }
+
+    /// <summary>
+    /// H6-authored manifest of the 8 authoritative Spaarke managed solutions
+    /// imported by Package Deployer (spec.md §11.1a + FR-09). Populated once
+    /// H6 completes successfully; each record carries the solution unique
+    /// name + installed version + Dataverse-assigned solutionId + dependency
+    /// tier. Consumed by H7 (env-var values — task 050) for option-set / config
+    /// lookups keyed by solutionId, and by operator UI for solution-level
+    /// status views. Null / empty until H6 succeeds.
+    /// </summary>
+    /// <remarks>
+    /// CONTROLLED SCHEMA EXTENSION (task 049 / wave C4 Batch 3D):
+    /// design.md §6.2 field <c>interStepState</c> was originally enumerated
+    /// with 11 keys; this field is a POML-driven addition per task 049
+    /// step 5 + acceptance criterion 6 ("Cosmos interStepState contains
+    /// manifest of 8 imported solutions with name + version + solutionId").
+    /// Follows the enumerated-keys discipline: adding this required a
+    /// deliberate type extension (not an ad-hoc dictionary insert). The
+    /// key <c>importedSolutions</c> is now part of the interStepState
+    /// contract that downstream handlers rely on.
+    /// </remarks>
+    [JsonPropertyName("importedSolutions")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IList<ImportedSolutionRecord>? ImportedSolutions { get; set; }
 }
