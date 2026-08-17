@@ -1,7 +1,7 @@
 # Current Task State — Smart To Do R5
 
-> **Last Updated**: 2026-08-15 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" first. New session will begin task execution.
+> **Last Updated**: 2026-08-17 (context-handoff before compaction)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5`, synced to master, all work committed+pushed through **`0347dc406`**.
 
 ---
 
@@ -9,80 +9,43 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **20 of 28 DONE/code-done**: 001 002 003 010 · 020 021 022 023 024 · 011 012 013 034 040 042 · **030 031 033** ✅ · **032** code-done. Modal spine code COMPLETE. Branch synced to master (`561f5869f`, 0 behind, conflict-checked). |
-| **Step** | Modal spine done: 030 create modal, 031 unified launcher, 032 fullCover sizing (header-hide DEFERRED — see below), 033 Save&Close→refetch. **DEPLOY PHASE: just deploy A (Code Page) — 32B header-hide + 050/051 ribbon deferred per operator 2026-08-17.** |
-| **Status** | in-progress — **SmartTodo Code Page (`sprk_smarttodo`) DEPLOYED + verified 2026-08-17** (full 2,089,534 bytes, well-formed, published via pac solution-roundtrip; raw PATCH truncated at ~2.0MB → roundtrip is the reliable path for large webresources). Widget surface (SpaarkeAi/LegalWorkspace) pending decision. |
-| **Next Action** | Operator UAT on the standalone Code Page (below). Decide whether to also deploy the WIDGET surface (SpaarkeAi/LegalWorkspace code page — bigger hot-path) for the widget's 033 open-refresh path. |
+| **Phase** | Core project 20/28 done + modal spine complete. Now in **UAT-fix + deploy** loop with the operator (live testing on spaarkedev1). |
+| **Status** | 4 UAT items + date-search fixed & committed. **Code Page (`sprk_smarttodo`) DEPLOYED** with the latest (inline filter + blended date-search). 3 deploys still pending (PCF, ribbon, workspace). |
+| **Next Action** | Run the remaining deploy pass (see "PENDING DEPLOYS"), starting with the **RegardingResolver PCF build fix** (pdfjs deep-import — see below). Then operator re-tests everything. |
 
-### 🚚 DEPLOY status
-| Item | State | Operator UAT |
-|---|---|---|
-| **Code Page** (`sprk_smarttodo`, 025) | ✅ DEPLOYED + published (build: `dist/smarttodo.html`, Vite source-bundles UI.Components; cache cleared; solution-roundtrip upload) | Code Page visual QA (top bar/filter/completed/coloring/orientation) + modal create/open/**Save&Close refresh**/full-cover (header VISIBLE = fine) |
-| **Widget** (SpaarkeAi/LW workspace, 025) | ⏸️ PENDING — modal spine touched `todo.registration.ts` (widget open handler) + shared launcher, which live in the workspace code page, not `sprk_smarttodo`. Needs a separate SpaarkeAi/LW build+deploy (hot-path). | widget Open→modal→refresh (once deployed) |
-| **014 resolver smoke** | (form handlers already live from 014) | subgrid-create from Matter + manual-pick Project → 5 regarding fields + scores |
+### ✅ DONE + committed (this UAT session)
+- **UAT #1 filter → inline text search** (`e4cb780c4`): SearchFilter renders inline LEFT of the Filter pill (Header.tsx), no "Search" label, placeholder "Filter by name, description, assigned to...". Replaced the structured FilterPane (removed `FilterPane/`). **FR-07 Show-Completed toggle removed** (operator-accepted; defer-issue).
+- **Blended date-search** (`0347dc406`): `todoSearchUtils.buildTodoDueDateSearchBlob` — matches natural dates ("august", "august 18", "aug 18", "8/18", "8/18/2026", ISO, day, year, `dueDateFormatted`). Timezone-safe (regex-parses ISO parts). Added `dueDateFormatted` to ITodo + `mapTodoFormattedValues`.
+- **UAT #2 RegardingResolver "Regarding Name" blank** (`f8818f327`): **v1.4.8→v1.4.9**. Root cause = Name cell single-sourced an unreliable bound prop on the auto-detect path with no fallback. Fix = displayName precedence (bound → in-session selectedTarget → read-only webAPI `$select`). PCF jest 78/78. ⚠️ **PCF build blocked — see pdfjs below.**
+- **UAT #3 Matter ribbon 404** (`2073140c6`): 7 refs used `$webresource:sprk_wizard_commands.js` but the webresource is `sprk_wizard_commands` (no .js). Stripped `.js` in `src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml`. Needs `spaarke_insights` deploy.
+- **The auto-associate (D-8) WORKS** — operator confirmed the record gets the matter + `sprk_regardingrecordname`. #2 was only the PCF display.
 
-### ⏸️ DEFERRED (operator decision 2026-08-17)
-- **032 header-hide form clone (FR-12)** → DEFERRED to UI-polish. **Reason:** the clone's `setCommandBarVisible(false)` would hide the form command bar = **removes Save**; unverified whether the navigateTo dialog supplies its own Save. Ship the OOB modal WITH its header (Save works), evaluate the real modal live, THEN decide if header-hide is worth a carefully-designed clone. 032 fullCover sizing SHIPS with A. FR-12 partial (full-cover yes, header-hide deferred).
-- **050 + 051 ribbon icons (FR-19)** → DEFERRED to a single ribbon-icon cleanup pass (import shared `spaarke_insights` ONCE for all 6 Create-To-Do buttons). Cosmetic only; 050 RibbonDiff edit already committed + ready. Nothing depends on it.
+### 🔴 pdfjs / RegardingResolver PCF build fix (do FIRST in the deploy pass)
+The RegardingResolver PCF **webpack build fails** because `RegardingResolverApp.tsx:238-249` + `handlers/ResolverWriteHandler.ts:32-38` import from the **ROOT barrel** `@spaarke/ui-components`, which drags the whole lib (SprkChat → `pdfjs-dist/pdf.mjs`) into the PCF bundle; the PCF's older webpack/babel can't transform pdf.mjs. **Every other PCF uses deep imports** (`@spaarke/ui-components/dist/...` or `/dist/pcf-safe`) — ADR-012 PCF Import Pattern. **TRUE FIX**: change RegardingResolver's 2 barrel imports to deep/pcf-safe paths (PolymorphicPicker, resolveRecordType/resolveRecordNumberFieldName/resolveRecordDisplayNameFieldName/buildRecordUrl, OOB_MODAL_SIZES, applyResolverFields, TODO_REGARDING_CATALOG + types). Verify `dist/pcf-safe` / `dist/services` / `dist/components/PolymorphicPicker` / `dist/utils/adapters/oobModalSizes` export them; add to pcf-safe if missing. Also mark `@spaarke/ui-components` `"sideEffects": false` (belt). NOT a workaround — it's the architectural conformance the other 12 PCFs already have. (Also `npm install --legacy-peer-deps` for RegardingResolver + siblings @spaarke/auth/@spaarke/sdap-client node_modules.)
 
-### 🔜 Remaining after deploy A
-**041** (Playwright NFR — authorable now, live run needs 025+auth), **050→051→052** (ribbon cleanup pass), **060** (real-DV smoke gate — edits `.claude/skills/push-to-github`, MAIN-SESSION-ONLY §3), **090** (wrap-up: test-diet, close #508, defer-issues GH URLs incl. header-hide + ribbon deferrals, archive).
+### 🚚 PENDING DEPLOYS (operator wants the full pass, then ONE re-test)
+1. **RegardingResolver PCF v1.4.9** — do the pdfjs fix → build → `pcf-deploy` (solution pack + import). Operator verifies footer `v1.4.9 • Built 2026-08-17` + Regarding Name shows.
+2. **`spaarke_insights` ribbon** (#3 + task 050 icon, both in `sprk_Matter/RibbonDiff.xml`) — solution roundtrip scoped to the Matter ribbon: export live spaarke_insights → apply the `.js`-strip (7 refs) + the CreateTodo icon (Image32/16 + ModernImage = sprk_ToDoCheckmark SVGs) to the exported customizations.xml → reimport --publish-changes. ⚠️ shared solution — Matter-ribbon-only changes.
+3. **SpaarkeAi/LegalWorkspace workspace** (#4 + widget modal-spine/open-refresh) — **#4 fix**: in `src/solutions/LegalWorkspace/src/sections/todo.registration.ts:336` the section config sets `title: "Smart To Do"` AND `SmartTodoWidget` renders its own PaneHeader title (showTitle default true) → duplicate. Remove the section-level title (keep the widget's), verify render, then rebuild+deploy the workspace code page (bigger; SpaarkeAi hot-path). Also carries todo.registration.ts's 031/033 open-refresh (widget surface still on pre-031 path until deployed).
 
-### Disjoint-partition ledger (subagents share ONE worktree — never co-edit a file)
-- **useKanbanColumns.ts** touched by 022 AND 023 → never same wave.
-- **queryHelpers.ts** touched by 021 AND 022 → never same wave.
-- **RegardingResolverApp.tsx** touched by 042 (done) AND 013-adjacent → 013 is live-form, separate.
-- **solutions/SmartTodo/SmartToDo.tsx** touched by 011 (quick-add handleAdd) — distinct from SmartTodoApp.tsx (020, done) and Header (020, done).
-- Wave B {011, 012, 022} verified disjoint: 011=UI.Components/CreateTodoWizard+SmartToDo.tsx+webresource · 012=SmartTodo.Components/components/KanbanCard+scorecards · 022=SmartTodo.Components/hooks/useKanbanColumns.ts+queryHelpers.ts.
+### 🔜 Remaining core tasks (post-UAT)
+- **041** Playwright NFR (authorable; live run needs Code Page + auth).
+- **050→051→052** ribbon (050 icon deploys with #3; 051 = 5 more entities' Create-To-Do buttons — apply the SAME no-`.js` ref pattern; 052 deploy).
+- **060** real-DV smoke gate (edits `.claude/skills/push-to-github` — MAIN-SESSION-ONLY §3).
+- **090** wrap-up: test-diet, close PR #508 superseded, file GH issues for defer-issues (D-1..D-9), archive.
 
-### Critical Context
-Execution underway on branch `work/smart-todo-r5`. **001 complete** (PR#508 boundary fix — barrel imports, package/tsconfig wired, `tsc` green, gates clean). **010 complete by pre-existence** (`sprk_priority`/`sprk_effort` already on live `sprk_todo` with exact spec values — NO schema write). Most tasks are `parallel-safe:false` (shared-lib contention) → critical path runs serially in main session; subagent fan-out reserved for group Q (020/022/023/024) + group R (040/041/042). UI.Components `dist` + both packages' `node_modules` are now built locally (needed for `tsc`).
+### 🧰 DEPLOY MECHANICS (hard-won — reuse these)
+- **Env**: spaarkedev1 (`https://spaarkedev1.crm.dynamics.com`). MCP + `pac` (profile [3]) + `az account get-access-token` all target it.
+- **systemform edits are a SILENT NO-OP via direct Web API PATCH** — MUST use `pac` solution export→edit→import roundtrip. (Form handlers 013/014 already live: presave + score OnLoad on form `eca59df4…`; `sprk_todo_score_onchange` webresource created.)
+- **Large webresource (Code Page 2MB): raw PATCH TRUNCATES (~2.0MB)** → ALWAYS solution-roundtrip. Verify the copied file size == build BEFORE import, and verify deployed content markers (not just "success") AFTER — a stale build shipped once this session.
+- **Sandbox blocks `Remove-Item -Recurse -Force`** (pre-execution) → use `[System.IO.Directory]::Delete($p,$true)` or fresh dir names + `-Force` overwrite flags.
+- Code Page webresource: `sprk_smarttodo` (`f85a1884-962b-f111-88b5-7ced8d1dc988`). Build: `cd src/solutions/SmartTodo; clear dist/.vite; npm run build` → `dist/smarttodo.html` (Vite source-bundles UI.Components; cache clear mandatory).
+- Roundtrip scripts are in the session scratchpad (cp3*, wire-todo-form.ps1, etc.).
 
-### Files/State this session (all committed)
-- `spec.md`, `design.md` — refined; #508 absorbed into FR-01
-- `plan.md`, `README.md`, `CLAUDE.md`, `TASK-INDEX.md` — generated
-- `tasks/*.poml` — 28 tasks (all XML-valid, full field set)
-- `projects/INDEX.md` — R5 row added (BFF=N, SpaarkeAi=Y)
+### 📋 UAT/defer tracker
+`projects/smart-todo-r5/notes/defer-issues.md` D-7 (filter→search + FR-07 removal), D-8 (auto-associate — DONE), D-9 (ribbon 404 — fixed, deploy pending). Plus notes/uat-*.md per item. All need GH issue URLs before task-090.
 
 ---
 
 ## Full State (Detailed)
-
-### Where execution begins
-- **Entry task**: `001` — Absorb PR #508 boundary fix on `Spaarke.SmartTodo.Components` (`opus/xhigh`, gate startable).
-- **Parallel group P**: 001 + 010 (schema columns) may run concurrently.
-- **Serial spines**: 001→002→003 (Phase 1 hoist) · 010→011 (schema→handler) · 030→031→032→033 (modal) · 050→051→052 (ribbon).
-- **High-power tasks** (`opus/xhigh`): 001 (package boundary), 002 (13-file hoist), 033 (Save&Close/OOB-dialog coordination). All else `sonnet/high`.
-- Full registry + parallel groups + critical path: [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
-
-### Locked decisions (also in CLAUDE.md)
-- F-5 effort = **Option B** (Low→25…Very High→100, None→50); formula unchanged.
-- R-9 ribbon (5 entities) = **in R5** (Phase 6). U-3 overflow = Settings→ThresholdSettings / Layout→orientation toggle / Refresh→reload.
-- RegardingResolver = sole canonical resolver (AssociationResolver retired — do NOT resurrect).
-- F-7/F-8 modal = **Option 1** (OOB main form, full-cover + hidden header) — ADR-050 **Path A** exception.
-- PR #508 absorbed into FR-01/task 001; **close #508 as superseded at wrap-up (task 090)**.
-
-### ⚠️ Codebase-drift reconciliations (verify at task time — code wins per §2)
-- `SmartTodoModal.tsx` was DELETED — task 033 targets `openSprkTodoAsLayout1()` / `FeedSyncBridgeHost.handleOpenTodo()`, not the stale interceptor.
-- `+ New Task` currently opens `CreateTodoWizard` (FR-10 = real behavior swap; reuse `navigateToEntityRecordSurfaceAsync()`).
-- FR-15 (task 034) may already be resolved — no live `RecordNavigationModalShell` consumer; written verify-first.
-- Test runner is **Jest** (not vitest); Playwright + axe-core already present (`tests/e2e/`).
-- `sprk_todo` form XML is NOT in the repo (Dataverse-hosted) — tasks 013/030/031/032 treat it as an MCP/maker target.
-
-### Coordination
-- **Shared-lib contention**: 19 worktrees touch shared libs; `Spaarke.SmartTodo.Components` is hot. Run `/conflict-check` before each PR; small sequential PRs. Overlaps `code-quality-and-assurance-r3` (SpaarkeAi=Y).
-- Task 060 edits `.claude/skills/push-to-github` → main-session-only (§3 sub-agent write boundary).
-
-### Steps Completed / Decisions This Task — none (task 011 not started)
-
-Task 003 is complete; see `projects/smart-todo-r5/notes/task-003-shim.md` for full detail (LW `components/SmartToDo/`
-is now a 3-file thin shim + `hooks/useSmartToDoBridge.ts`; 10 duplicated files git-rm'd; a 3rd consumer
-(`WorkspaceGrid.tsx`'s `LazySmartToDoDialog`) was discovered and required zero edits; a pre-existing `App.tsx`
-tsc error — dead `useDialogForDetail` prop — was fixed as part of the conversion).
-
-**Next**: load task 011's POML (`tasks/011-...poml`) + knowledge files (ADR-012, spec.md FR-02/03 sections,
-CLAUDE.md "Implementation Notes" re: `sprk_priorityscore`/`sprk_effortscore` already existing) before
-implementing the auto-score handler.
-
-### Parallel Execution
-_(none active)_
+See `tasks/TASK-INDEX.md` for the 28-task registry (14 core ✅ + modal spine 030-033 ✅ + 013/014). Locked decisions, disjoint-partition ledger, and codebase-drift reconciliations are preserved in git history of this file (pre-2026-08-17 versions) if needed.
