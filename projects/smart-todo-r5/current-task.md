@@ -9,9 +9,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | UAT deploy pass ✅ + INBOUND BFF fix ✅ + **merged to master** (`c3b80eece`). Now executing remaining core tasks via task-execute. **Task 041 (Playwright NFR suite) IN PROGRESS.** |
-| **Status** | Branch merged to master (all work visible to other projects). Index reconciled (014/025/035/050 ✅ done-via-UAT; 032 ⛔ deferred). **Task 041**: 4 files authored (SmartTodoPage page object + performance/accessibility/orientation specs) + `.env.example` SMART_TODO_URL. Verifying typecheck (root `npm install` running). |
-| **Next Action** | After install: `npx playwright test smart-todo --list` to confirm specs compile + are discovered. Expect the **escalation trigger to fire** (no live Power Apps env in sandbox → cannot run green) → mark 041 authored+valid+wired, escalate for a real-env run before merge (per POML `<escalation>` + negative acceptance criterion). Then 051/052 (ribbon), 060, 090. |
+| **Phase** | **Partial wrap-up done (2026-08-17).** Core merged to master (`c3b80eece`) + deployed. 041 authored (real-env pending). 060 done. **090 partial** — project NOT marked Complete (deferrals). |
+| **Status** | ✅ done this session: UAT deploy pass, INBOUND BFF fix, master merge, 041 (Playwright authored+wired), 060 (push-to-github Step 1.7 real-DV gate), 090-partial (#508 CLOSED, lessons-learned.md, defer-tracker D-7/8/9 resolved + D-10..D-13 added, README/INDEX honest "substantially complete"). |
+| **Next Action (remaining — true close)** | Deferred/pending, tracked as D-10..D-13: **(1)** 051/052 — Create-To-Do ribbon on 5 more entities (dedicated `*Ribbons` solutions, live deploys); **(2)** 041 — Playwright real-env run (`SMART_TODO_URL` + confirm 2 selector assumptions); **(3)** D-13 — deploy BFF INBOUND fix → review dry-run counts → flip `EnableEventSourcedGeneration` → ping r3 hardening owner (Epic #427); **(4)** true 090 close: `/test-diet`, file GH issues for D-1..D-4/D-6 + D-10..D-13, README→Complete, reset current-task. 032 (header-hide) closed as won't-do (design constraint). |
 
 ### 📄 Task 041 (Playwright NFR suite) — files authored (this session)
 - `tests/e2e/pages/smart-todo/SmartTodoPage.ts` — Code Page page object (does NOT extend BasePCFPage per POML); locators from source (filter `data-testid=search-filter`, "Add to-do item", "More options", toolbar "Smart To Do toolbar", columns `role=list`, cards `role=listitem`); `waitForReady`, `flipOrientationViaLayout`, `selectCard`, `setColorScheme`, `assertNoLayoutGlitch`.
