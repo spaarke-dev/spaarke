@@ -471,6 +471,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // optional; existing consumers ignore.
   pendingOutboundMessage,
   onOutboundConsumed,
+  // FR-05 (spaarkeai-compose-r7 task 061) — one-shot host→focus seam (mirrors pendingOutboundMessage).
+  focusInputSignal,
   onBeforeSendMessage,
   // R6 Pillar 8 task 097b / TIER-C surface completion — fires whenever the
   // internal messages array changes. Optional; ADR-012 context-agnostic.
@@ -2536,6 +2538,23 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       }
     }
   }, [pendingOutboundMessage, session, isStreaming, handleSend, onOutboundConsumed]);
+
+  // ── FR-05 (spaarkeai-compose-r7 task 061, UC-6): one-shot host→focus seam ─────────────────────────
+  //
+  // When the host bumps `focusInputSignal` to a NEW value (in response to a cross-pane
+  // `conversation.focus_chat_input` PaneEventBus event — dispatched by the Compose editor's
+  // Ctrl+Shift+Space hotkey), move keyboard focus into the chat composer via the SprkChatInput
+  // `focusInput()` imperative handle. Mirrors the `pendingOutboundMessage` one-shot guard idiom
+  // (`lastFocusSignalRef` records the value acted on so re-renders with the same nonce never re-fire).
+  // Undefined ⇒ no-op (existing consumers unchanged). No session/stream gate — focusing the input is
+  // always safe and is exactly what the user asked for (unlike a send).
+  const lastFocusSignalRef = React.useRef<number | undefined>(undefined);
+  React.useEffect(() => {
+    if (focusInputSignal === undefined) return;
+    if (lastFocusSignalRef.current === focusInputSignal) return;
+    lastFocusSignalRef.current = focusInputSignal;
+    inputHandleRef.current?.focusInput();
+  }, [focusInputSignal]);
 
   // Handle playbook chip selection — switches context to the selected playbook
   const handlePlaybookChipClick = React.useCallback(

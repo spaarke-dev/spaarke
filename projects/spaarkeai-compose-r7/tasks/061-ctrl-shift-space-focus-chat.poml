@@ -3,8 +3,8 @@
   <metadata>
     <title>Ctrl+Shift+Space focuses the Assistant chat input — focusInput() + PaneEventBus (FR-05)</title>
     <phase>6 Hotkeys (UC-6)</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx/.ts across editor + chat panes; extends a handle interface + adds a cross-pane event; hot-path coordination.</rigor-reason>
     <model-tier>sonnet</model-tier>

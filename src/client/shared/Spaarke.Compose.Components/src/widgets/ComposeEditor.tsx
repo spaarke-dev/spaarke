@@ -116,7 +116,7 @@ import {
   subscribeComposeAiToolbarActions,
 } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
-import { matchesDescribeChangeHotkey } from './composeHotkeys';
+import { matchesDescribeChangeHotkey, matchesFocusChatHotkey } from './composeHotkeys';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
   AgreementReviewSummaryPanel,
@@ -2178,6 +2178,9 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     // (same convention as commentThreadsRef / selectedThreadIdRef). `caretRunSeqRef` dedupes request ids.
     const caretRunSeqRef = React.useRef(0);
     const describeChangeAtCaretRef = React.useRef<(() => void) | null>(null);
+    // FR-05 (task 061, UC-6) — Ctrl+Shift+Space emits a cross-pane `conversation.focus_chat_input`
+    // event (reached from the stale-closed editorProps.handleKeyDown via this fresh ref, like above).
+    const focusChatRef = React.useRef<(() => void) | null>(null);
 
     // ----- TipTap editor instance -----------------------------------------
     const editor = useEditor({
@@ -2209,6 +2212,12 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // contract parity).
           role: 'textbox',
           'aria-multiline': 'true',
+          // FR-04/FR-05 (tasks 060/061) — advertise the editor's keyboard shortcuts via the ARIA
+          // standard `aria-keyshortcuts` (space-separated list, tokens joined by `+`): Ctrl+Space
+          // opens "Describe a change" at the caret; Ctrl+Shift+Space focuses the Assistant chat input.
+          // This is the discoverability "shortcut hint" (screen-reader-advertised, non-intrusive — no
+          // whole-editor hover tooltip, no app-specific shortcut leaked into the shared SprkChat).
+          'aria-keyshortcuts': 'Control+Space Control+Shift+Space',
         },
         // Task 111 requirement 2 — suppress the browser's native context menu
         // inside the Compose editor region and open the AI toolbar at the
@@ -2274,12 +2283,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             setFindReplaceOpen(false);
             return true;
           }
+          // FR-05 (task 061, UC-6) — Ctrl+Shift+Space moves focus into the Assistant chat input across
+          // panes. Checked BEFORE the FR-04 branch (both guard Shift, so order is not load-bearing, but
+          // the more specific match reads first). IME-guarded inside `matchesFocusChatHotkey`. Emits a
+          // `conversation.focus_chat_input` PaneEventBus event (via the fresh ref → `emitFocusChat`).
+          if (matchesFocusChatHotkey(event)) {
+            event.preventDefault();
+            focusChatRef.current?.();
+            return true;
+          }
           // FR-04 (task 060, UC-5) — Ctrl+Space (primary) / Ctrl+/ (fallback) opens the shipped
           // "Describe a change" instruction dialog for the CURRENT CARET/PARAGRAPH (no selection
           // required). `matchesDescribeChangeHotkey` owns the IME guard (never fires mid-composition)
-          // + both bindings; the runner (`runDescribeChangeAtCaret`, reached via the fresh ref) reuses
-          // promptForInstruction + dispatches the same compose-rewrite-instruction Action — no parallel
-          // dialog (root §11). We `preventDefault` + return true so the space/slash never also types.
+          // + both bindings + the Shift disambiguation; the runner (`runDescribeChangeAtCaret`, reached
+          // via the fresh ref) reuses promptForInstruction + dispatches the same compose-rewrite-instruction
+          // Action — no parallel dialog (root §11). `preventDefault` + return true so Space/`/` never types.
           if (matchesDescribeChangeHotkey(event)) {
             event.preventDefault();
             describeChangeAtCaretRef.current?.();
@@ -2689,6 +2707,21 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useEffect(() => {
       describeChangeAtCaretRef.current = runDescribeChangeAtCaret;
     }, [runDescribeChangeAtCaret]);
+
+    // FR-05 (task 061, UC-6) — emit the cross-pane focus signal. The editor and the Assistant chat live
+    // in different panes, so the Ctrl+Shift+Space intent crosses via the existing PaneEventBus (ADR-030):
+    // ONE additive `conversation.focus_chat_input` event, no new transport. ConversationPane relays it to
+    // SprkChat's `focusInputSignal` seam → SprkChatInput.focusInput(). Carries NO content — only the
+    // reused `sessionId` identifier (Tier-1 safe, ADR-015). Reached via `focusChatRef` for closure freshness.
+    const emitFocusChat = React.useCallback((): void => {
+      dispatch('conversation', {
+        type: 'focus_chat_input',
+        ...(sessionId ? { sessionId } : {}),
+      });
+    }, [dispatch, sessionId]);
+    React.useEffect(() => {
+      focusChatRef.current = emitFocusChat;
+    }, [emitFocusChat]);
 
     // Task 041 (FR-11 batch reuse) — build + dispatch ONE note-tool request against `threadId`'s
     // LIVE clause span. This IS `runNoteTool`'s prior request-building body (round-8 #3/#4),

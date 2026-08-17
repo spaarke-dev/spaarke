@@ -4,7 +4,11 @@
  * lane and directly proves the KNOWN failure mode: an IME composition must NOT trigger the hotkey.
  */
 
-import { matchesDescribeChangeHotkey, type DescribeChangeHotkeyEvent } from './composeHotkeys';
+import {
+  matchesDescribeChangeHotkey,
+  matchesFocusChatHotkey,
+  type DescribeChangeHotkeyEvent,
+} from './composeHotkeys';
 
 /** Minimal event factory — only the fields the predicate reads. */
 function ev(overrides: Partial<DescribeChangeHotkeyEvent>): DescribeChangeHotkeyEvent {
@@ -76,5 +80,45 @@ describe('matchesDescribeChangeHotkey — negative cases', () => {
 
   it('does NOT fire for a bare modifier press (Ctrl alone)', () => {
     expect(matchesDescribeChangeHotkey(ev({ ctrlKey: true, code: 'ControlLeft', key: 'Control' }))).toBe(false);
+  });
+
+  it('does NOT fire for Ctrl+SHIFT+Space (that is the focus-chat hotkey — disambiguation)', () => {
+    expect(
+      matchesDescribeChangeHotkey(ev({ ctrlKey: true, shiftKey: true, code: 'Space', key: ' ' }))
+    ).toBe(false);
+  });
+});
+
+describe('matchesFocusChatHotkey — FR-05 (Ctrl/Cmd+Shift+Space)', () => {
+  it('matches Ctrl+Shift+Space', () => {
+    expect(matchesFocusChatHotkey(ev({ ctrlKey: true, shiftKey: true, code: 'Space', key: ' ' }))).toBe(true);
+  });
+
+  it('matches Cmd+Shift+Space', () => {
+    expect(matchesFocusChatHotkey(ev({ metaKey: true, shiftKey: true, code: 'Space', key: ' ' }))).toBe(true);
+  });
+
+  it('does NOT match Ctrl+Space without Shift (that is the describe-change hotkey)', () => {
+    expect(matchesFocusChatHotkey(ev({ ctrlKey: true, code: 'Space', key: ' ' }))).toBe(false);
+  });
+
+  it('does NOT fire during an IME composition even with Ctrl+Shift+Space', () => {
+    expect(
+      matchesFocusChatHotkey(ev({ ctrlKey: true, shiftKey: true, code: 'Space', key: ' ', isComposing: true }))
+    ).toBe(false);
+  });
+
+  it('does NOT fire for the legacy keyCode=229 composition signal', () => {
+    expect(
+      matchesFocusChatHotkey(ev({ ctrlKey: true, shiftKey: true, code: 'Space', key: ' ', keyCode: 229 }))
+    ).toBe(false);
+  });
+
+  it('does NOT fire for Shift+Space with no Ctrl/Cmd modifier', () => {
+    expect(matchesFocusChatHotkey(ev({ shiftKey: true, code: 'Space', key: ' ' }))).toBe(false);
+  });
+
+  it('does NOT fire for Ctrl+Shift+/ (only Space is the focus-chat key)', () => {
+    expect(matchesFocusChatHotkey(ev({ ctrlKey: true, shiftKey: true, key: '/', code: 'Slash' }))).toBe(false);
   });
 });
