@@ -1,5 +1,5 @@
 {
-  "$comment": "spaarkeai-assistant-enhancements-r4 task 001 (FR-10 infra / P5) — SCAFFOLD ONLY. This file seeds ONE template/example eval case (AR4-001) shaped to the assistant-r1-eval-cases.json convention (the nearest precedent per task 001's knowledge files) so FR-01/04/06/09 implementation tasks copy a known-good shape instead of inventing one. It deliberately does NOT introduce a harness .cs file yet (no [Trait(\"Category\",\"GoldenUtteranceEval\")] class reads this file today) — task 001 is STANDARD rigor, docs+scaffolding only, no .cs/.ts/.tsx edits. The FR-01 implementation task (grounded task-agenda advisory capability) is the one that (a) upgrades the existing list-tasks Action/Binding to output_determinism:advisory + the per-Action bounded-tool allow-list, and (b) authors AssistantEnhancementsR4EvalTests.cs (mirroring AssistantEnhancementsR1EvalTests.cs) that loads THIS file, joins the Category=GoldenUtteranceEval merge gate, and extends it with the case(s) FR-04/06/09 add. See tests/integration/contract/Eval/README.md 'Adding a case' + the Assistant-Enhancements-R1 eval family section, and projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md 'Eval-case harness convention' section for the full convention writeup.",
+  "$comment": "spaarkeai-assistant-enhancements-r4 — the R4 golden-utterance eval family (FR-10). Seeded by task 001 (AR4-001 template, scaffold-only); task 013 (FR-10 E1) authored AssistantEnhancementsR4EvalTests.cs (mirroring AssistantEnhancementsR1EvalTests.cs) which loads THIS file, joins the Category=GoldenUtteranceEval merge gate, and structurally grounds the P1 task-agenda DoD against the REAL catalog (the advisory list-tasks Action mirror + the two grounded-tool rows + the list-tasks Binding), so a regression to the ack-only tier (empty groundedToolAllowList / non-advisory / thin-ack maxLength / dropped grounding rules) fails the suite. Cases are DATA; the harness is the mechanical assertion layer (no live LLM — the underlying dispatch selection is deterministic per ADR-039). E2 (task 024) + E3 (task 033) extend THIS family with their FR-04/06/09 cases. See tests/integration/contract/Eval/README.md + projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md 'Eval-case harness convention'.",
   "schemaVersion": "assistant-r4-eval@v1",
   "cases": [
     {
@@ -12,9 +12,37 @@
         "outcomeClass": "dispatch",
         "consumerType": "list-tasks",
         "catalogStatus": "mirrored",
-        "seededBy": "task 050 (R1) — list-tasks Binding mirrored in infra/dataverse/sprk_playbookconsumer-rows.json; R4 FR-01/FR-02/FR-03 upgrade this Binding's Action to output_determinism:advisory + a per-Action bounded grounded-tool allow-list (spaarkeai-assistant-enhancements-r4, task TBD — the FR-01 implementation task) — the consumerType itself is unchanged, only the Action's determinism mode + tool grounding"
+        "seededBy": "task 050 (R1) — list-tasks Binding mirrored in infra/dataverse/sprk_playbookconsumer-rows.json; R4 FR-01/FR-02/FR-03 (task 012) upgraded this Binding's Action to output_determinism:advisory + a per-Action bounded grounded-tool allow-list (spaarke.grid_overview + spaarke.daily_briefing_overview). The consumerType is unchanged — only the Action's determinism mode + tool grounding."
       },
-      "notes": "P1 / FR-01 template case (root behavior-gap register row P1 — 'thin ack, no summary'). Acceptance this case anchors once its harness lands: a grounded summary (real counts/top items from spaarke.grid_overview My-Tasks + spaarke.daily_briefing_overview, EACH cited to a tool result) + a recommendation (e.g. 'I'd start with the 2 due today'), then the Tasks tab opens; NO fabricated data, NO thin ack-only reply, NO duplicate tab. This schema (mirrored from assistant-r1-eval-cases.json) does not yet model citation-integrity assertions the way golden-utterances.json's assertions.citationIntegrity flag does — the FR-01 harness should either add an equivalent assertions block to this family's schema (extend-the-DATA-not-the-shared-schema, per README NFR-06 precedent) or assert grounding operationally against AgentToolProjection.PreFilter / the advisory Action's cited-claim contract, mirroring AssistantEnhancementsR1EvalTests.ProfileInjection_DoesNotFlipTheGroundedR1CapabilitySet_OperationalEvalInMergeGate's pattern of asserting against real production types rather than an LLM judge where the underlying selection is deterministic."
+      "notes": "P1 / FR-01 root case (behavior-gap register row P1 — 'thin ack, no summary'). DoD the harness anchors structurally: the advisory list-tasks Action declares output_determinism:advisory + a non-empty groundedToolAllowList (grid_overview My-Tasks + daily_briefing_overview) + the Reasoning tier + the ADVISORY GROUNDING RULES prompt (cite every count/name/date to a tool result, never fabricate, never ask the user's identity) + a rich acknowledgement outputSchema (maxLength widened from the ack-only 200), and the Binding still declares surface_launch (Tasks tab opens). A revert to the ack-only tier fails ListTasksAction_DeclaresAdvisoryGroundedRecommendTier_NotAckOnly."
+    },
+    {
+      "caseId": "AR4-002",
+      "family": "task-agenda-advisory",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "what's on my plate today",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 (R1) list-tasks Binding; R4 task 012 advisory upgrade — same Action as AR4-001, alternate task-agenda phrasing."
+      },
+      "notes": "FR-01 phrasing variant — a task-agenda ask that is NOT the literal 'today' utterance still routes to the advisory list-tasks capability (ADR-039: selection is by the one Text-path decider over the authored tool description, not a keyword classifier). Anchors the same grounded-summary + recommendation + Tasks-opened DoD as AR4-001."
+    },
+    {
+      "caseId": "AR4-003",
+      "family": "task-agenda-advisory",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "help me prioritize my tasks",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 (R1) list-tasks Binding; R4 task 012 advisory upgrade — the prioritization phrasing (root register row P2, the 'Help me prioritize my tasks' follow-on that previously dead-ended asking for the user's id)."
+      },
+      "notes": "FR-01 prioritization case (behavior-gap register row P2). The advisory tier's RECOMMENDATION half is the point: the capability must prioritize over the grounded task/briefing data. The no-identity-ask half of the P2 defect is grounded structurally by the two tools' OBO-identity assertion (asserted in AdvisoryGroundedTools_ExistInCatalog_AndAssertGroundingAndObo) — the tools scope to the calling user automatically, so no flow needs to ask 'who are you'."
     }
   ]
 }

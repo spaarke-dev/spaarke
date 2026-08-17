@@ -4,7 +4,26 @@
     <title>E1 eval cases — golden utterances for the task-agenda capability (FR-10)</title>
     <phase>1 — E1 grounded-recommend tier</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-16 (sonnet-tier work executed on Opus 4.8 session, FULL/TEST-MODIFYING). The task-001 R4 eval
+         family (assistant-r4-eval-cases.json, schema assistant-r4-eval@v1) had the AR4-001 template but NO harness .cs;
+         013 authored AssistantEnhancementsR4EvalTests.cs mirroring AssistantEnhancementsR1EvalTests (NOT a parallel harness —
+         escalation trigger did NOT fire). Mechanism = DETERMINISTIC structural grounding against the REAL catalog (the R1
+         precedent's approach — no live LLM; ADR-039 selection is deterministic). Cases: AR4-001 "what do I need to do today",
+         AR4-002 "what's on my plate today", AR4-003 "help me prioritize my tasks" (family task-agenda-advisory, floor 3 met).
+         6 harness assertions: (1) suite inventory + closed vocabularies; (2) family coverage floor; (3) consumerType grounded
+         per catalogStatus (mirrored → sprk_playbookconsumer row); (4) THE P1 DoD proof — list-tasks.action.json declares the
+         advisory grounded-recommend tier (outputDeterminism advisory, groundedToolAllowList=[grid_overview,daily_briefing_overview],
+         modelTier Reasoning, ADVISORY GROUNDING RULES prompt with cite/no-fabricate/no-identity-ask, acknowledgement maxLength>1000
+         — reverting to ack-only FAILS this); (5) list-tasks Binding declares surface_launch + risk None (Tasks-opened, read-only);
+         (6) the two grounded tool rows exist, Chat-context, descriptions mandate citing + forbid inventing + forbid identity-ask
+         (grounded+cited+no-fabrication+OBO). Joined to the Category=GoldenUtteranceEval merge gate via the trait (zero CI-YAML
+         change). NEGATIVE CHECK confirmed: temp-reverting outputDeterminism advisory→fact fails assertion (4). 6/6 R4 pass;
+         full GoldenUtteranceEval gate 154/154; build 0 err. TEST-ONLY (no BFF production change → no publish/CVE gate). Step 9.5
+         CLEAN (adr-check ADR-038 established-family + ADR-039 deterministic-grounding + §11 no-parallel-harness; code-review
+         KEEP-path contract test, maintain-class, deterministic, no banned antipattern). E2 (024) + E3 (033) extend this family. -->
+    <!-- ORIGINAL: <status>pending</status> -->
+
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING — adds eval/test coverage; CLAUDE.md §8 TEST-MODIFYING override forces code-review + adr-check unconditionally.</rigor-reason>
     <model-tier>sonnet</model-tier>

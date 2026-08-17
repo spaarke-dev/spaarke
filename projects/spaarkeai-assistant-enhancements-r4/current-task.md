@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-assistant-enhancements-r4
 
-> **Last Updated**: 2026-08-16 (by task-execute — 012 COMPLETE, machinery half shipped)
+> **Last Updated**: 2026-08-16 (by task-execute — 012 + 013 COMPLETE; **E1 spine DONE**)
 > **Recovery**: Read "Quick Recovery" first. Tracks the **active task only**; history lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 ---
@@ -10,9 +10,9 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | ✅ **001, 022, 010, 020, 030, 011, 012 COMPLETE**. Next 🔲 = **013** (E1 eval — task-agenda golden utterances). |
-| **Status** | Wave 1 E1 spine 010→011→012 ✅ (the P1 grounded-recommend value-proving core is DONE). 012 machinery: AdvisoryCapabilityRunner + factory advisory overload + DispatchAsync routing + DI + 9 seam tests. BFF build 0 err; 145/145 regression; publish 43.67 MB compressed (≤60); CVE clean; Step 9.5 CLEAN. Machinery committed locally (NOT pushed; PR still HELD per owner). |
-| **Next Action** | **013** (E1 eval cases, dep 012 ✅ — add task-agenda golden utterances to `assistant-r4-eval-cases.json` + the R4 harness). Then 021/023/024 (E2, need 012 ✅ + 022 ✅). 031/032 unblocked (dep 030 ✅). 040 needs `--chrome`. 080 deploy (create `sprk_groundedtoolallowlist` column + re-seed). |
+| **Task** | ✅ **001, 022, 010, 020, 030, 011, 012, 013 COMPLETE**. 🎉 **E1 SPINE (010→011→012→013) DONE** — the P1 grounded-recommend core + its FR-10 eval guardrail. Next 🔲 = E2 (021→023→024) or E3 (031/032→033). |
+| **Status** | 013: R4 eval harness (`AssistantEnhancementsR4EvalTests.cs`) + 3 golden utterances (AR4-001/002/003); 6 structural DoD assertions grounding the advisory list-tasks tier; GoldenUtteranceEval gate 154/154; negative check confirmed. All committed locally (NOT pushed; **PR still HELD** per owner). |
+| **Next Action** | Pick next safe wave: **E2** 021 (gate free-string SprkChatSuggestions, dep 012✅+022✅) → 023 (follow-on cards) → 024 (eval); **E3** 031 (feedback→memory, dep 030✅) + 032 (preference-producer, xhigh) → 033 (eval). **040** (D9) needs `--chrome` live-DOM → NOT autonomous. **080** deploy (create `sprk_groundedtoolallowlist` column + re-seed), then **090** wrap-up (/test-diet). |
 
 ### 012 working state (2026-08-16, opus/high FULL) — analysis complete, machinery pending
 **Conflict-check**: PASS (silent) — no master commits since divergence touch the Chat/catalog files; no open PR overlaps `SessionDispatchOrchestrator.cs`/`list-tasks.action.json`/`sprk_playbookconsumer-rows.json`. (PR #508 = Events/SmartTodo shared components, not my files.)
