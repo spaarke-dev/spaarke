@@ -4,7 +4,9 @@
     <title>Consolidate 4+ deploy guides into one authoritative SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</title>
     <phase>A Doc Consolidation + Audits</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-on>2026-08-17</completed-on>
+    <completion-notes>Consolidated 6 customer-provisioning guides into new authoritative docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (851 lines). Retired guides converted to stubs (git history preserved). Root CLAUDE.md §17 pointer row added. Path A exception documented for retained component-scoped release guides (PCF/AI/COMMUNICATION/M365-COPILOT/DECLARATIVE/DEPLOYMENT-VERIFICATION); see projects/customer-provisioning-orchestration-r1/notes/task-001-consolidation-deviations.md.</completion-notes>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation-only consolidation; no code changes; no ADR touch; no tests. Per root CLAUDE.md §8 rigor table, docs-only work is MINIMAL.</rigor-reason>
     <model-tier>sonnet</model-tier>
