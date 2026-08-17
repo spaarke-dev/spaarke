@@ -43,6 +43,20 @@
         "seededBy": "task 050 (R1) list-tasks Binding; R4 task 012 advisory upgrade — the prioritization phrasing (root register row P2, the 'Help me prioritize my tasks' follow-on that previously dead-ended asking for the user's id)."
       },
       "notes": "FR-01 prioritization case (behavior-gap register row P2). The advisory tier's RECOMMENDATION half is the point: the capability must prioritize over the grounded task/briefing data. The no-identity-ask half of the P2 defect is grounded structurally by the two tools' OBO-identity assertion (asserted in AdvisoryGroundedTools_ExistInCatalog_AndAssertGroundingAndObo) — the tools scope to the calling user automatically, so no flow needs to ask 'who are you'."
+    },
+    {
+      "caseId": "AR4-020",
+      "family": "preference-loop",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "always summarize my tasks",
+      "expected": {
+        "outcomeClass": "preference-bias",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "R4 E3 loop (task 030 Preference fact type / task 031 feedback→memory capture / task 032 governed producer) — a confirmed standing directive persists as a User-scope Preference and biases the FR-01 list-tasks capability's DEFAULT on the next turn."
+      },
+      "notes": "P3-loop case (FR-08/09, behavior-gap register row P3 — the learning loop that never closed). The E3 loop: a confirmed 'always summarize my tasks' directive → PreferenceMemoryCapture writes a governed User-scope Preference, ConfirmedByUser=true (task 031) → PreferenceDirectiveProducer's CLOSED allow-list emits a server-authored pre-turn HINT biasing the list-tasks (FR-01) capability's default (task 032). Grounded structurally by PreferenceLoop_BiasesARealCataloguedCapability_ConfirmedOnly_OffAllowListInert: the bias targets a REAL mirror binding (list-tasks, never a phantom); confirmed-only (an unconfirmed inference is a task-031 dormant candidate that never steers); off-allow-list directives are inert; the hint never grants a capability or alters a fact (prompt-only — it never reaches AgentToolFilterContext, proven by the two structural-invariant tests) with the DATA-guard present. A boundary breach fails the suite."
     }
   ]
 }

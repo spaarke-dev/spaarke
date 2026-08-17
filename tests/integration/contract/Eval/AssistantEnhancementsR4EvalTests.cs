@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
+using Sprk.Bff.Api.Services.Ai.Context;
+using Sprk.Bff.Api.Services.Ai.Memory;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 using Xunit.Abstractions;
@@ -49,15 +51,18 @@ public class AssistantEnhancementsR4EvalTests
 
     private static readonly IReadOnlySet<string> Families = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
-        // E1 (task 013). E2 (task 024) + E3 (task 033) add their families here when they extend the suite.
+        // E1 (task 013). E3 (task 033) adds "preference-loop". E2 (task 024) adds its families when it extends the suite.
         "task-agenda-advisory",
+        "preference-loop",
     };
 
     private static readonly IReadOnlySet<string> Channels =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "text", "click" };
 
     private static readonly IReadOnlySet<string> OutcomeClasses =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dispatch" };
+        // "dispatch" = a capability runs (E1). "preference-bias" = a confirmed standing directive biases an
+        // already-available capability's DEFAULT (E3, task 032) — it does NOT dispatch by itself.
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "dispatch", "preference-bias" };
 
     private static readonly IReadOnlySet<string> CatalogStatuses =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "existing", "mirrored", "live-catalog" };
@@ -66,10 +71,11 @@ public class AssistantEnhancementsR4EvalTests
     private static readonly IReadOnlySet<string> R4UcIds =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "UC-H-1" };
 
-    // Per-family coverage floor (FR-10: the P1 task-agenda behavior owes its golden utterances).
+    // Per-family coverage floor (FR-10: each behavior owes its golden utterances).
     private static readonly IReadOnlyDictionary<string, int> FamilyFloors = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
     {
-        ["task-agenda-advisory"] = 3,
+        ["task-agenda-advisory"] = 3, // E1: the 'today' ask, a phrasing variant, a prioritization ask.
+        ["preference-loop"] = 1,      // E3: the P3 feedback→memory→bias loop.
     };
 
     // -------------------------------------------------------------------------
@@ -108,8 +114,7 @@ public class AssistantEnhancementsR4EvalTests
         {
             suite.Cases.Count(c => string.Equals(c.Family, family, StringComparison.OrdinalIgnoreCase))
                 .Should().BeGreaterOrEqualTo(floor,
-                    $"FR-10: the '{family}' E1 behavior owes at least {floor} golden-utterance case(s) " +
-                    "(the 'today' ask, a phrasing variant, and a prioritization ask)");
+                    $"FR-10: the '{family}' behavior owes at least {floor} golden-utterance case(s)");
         }
     }
 
@@ -247,6 +252,57 @@ public class AssistantEnhancementsR4EvalTests
                 $"{name}'s description forbids fabrication AND the identity-ask (OBO auto-scopes to the caller) — the P1/P2 grounding contract");
         }
     }
+
+    // -------------------------------------------------------------------------
+    // E3 — the P3 feedback→memory→bias loop grounding (FR-08/09, task 033)
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// The E3 (preference-loop) golden case, grounded in the merge gate: a CONFIRMED standing directive biases
+    /// an already-cataloged capability's DEFAULT (task 032), ONLY when confirmed (task 031's dormant-candidate
+    /// rule), never off-allow-list, via a prompt hint that never grants a capability — and the biased
+    /// capability is a REAL mirror binding, never a phantom. A regression that opened the preference-steering
+    /// boundary (off-allow-list steering, unconfirmed steering, or a phantom target) fails this.
+    /// </summary>
+    [Fact]
+    public void PreferenceLoop_BiasesARealCataloguedCapability_ConfirmedOnly_OffAllowListInert()
+    {
+        // The E3 bias points at a REAL cataloged capability (the same list-tasks the E1 family grounds) — the
+        // producer's closed allow-list can never bias a capability that does not exist as a Binding.
+        PreferenceDirectiveProducer.AllowList.Should().Contain(
+            d => d.TargetCapability.Contains("list-tasks", StringComparison.OrdinalIgnoreCase),
+            "the task-agenda directive biases the FR-01 list-tasks capability");
+        LoadMirrorConsumerTypes().Should().Contain("list-tasks",
+            "the biased capability is a real sprk_playbookconsumer binding, not an invented one");
+
+        // A CONFIRMED allow-listed directive produces the server-authored bias hint for that capability.
+        var hint = PreferenceDirectiveProducer.Produce(new[] { Preference("always summarize my tasks", confirmed: true) });
+        hint.Should().NotBeNull();
+        hint!.Should().Contain("task-agenda capability");
+
+        // CONFIRMED-ONLY: the same directive UNCONFIRMED (a task-031 dormant candidate) does not steer.
+        PreferenceDirectiveProducer.Produce(new[] { Preference("always summarize my tasks", confirmed: false) })
+            .Should().BeNull("an unconfirmed inference must not bias tool selection until acknowledged (ADR-042 / task 031)");
+
+        // OFF-ALLOW-LIST: a confirmed directive outside the closed set is inert (owner Q2: no free-text steering).
+        PreferenceDirectiveProducer.Produce(new[] { Preference("always use a very formal tone", confirmed: true) })
+            .Should().BeNull("off-allow-list directives have no tool-selection effect");
+
+        // NEVER grants a capability / alters a fact — the DATA-guard states the hard bound (defense-in-depth
+        // atop the structural guarantee that the hint is prompt-only and never reaches AgentToolFilterContext).
+        hint.Should().Contain("NEVER grant a capability, change a grounded fact");
+    }
+
+    private static MemoryFact Preference(string directive, bool confirmed) =>
+        new()
+        {
+            Type = MemoryFactType.Preference,
+            Key = directive,
+            Value = directive,
+            Source = confirmed ? MemoryOrigin.User : MemoryOrigin.AiDerived,
+            ConfirmedByUser = confirmed,
+            Confidence = confirmed ? 1.0 : 0.5,
+        };
 
     // -------------------------------------------------------------------------
     // Helpers (mirror AssistantEnhancementsR1EvalTests)

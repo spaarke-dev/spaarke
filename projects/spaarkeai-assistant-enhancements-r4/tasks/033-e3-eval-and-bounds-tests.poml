@@ -4,7 +4,22 @@
     <title>E3 eval cases + preference-producer bounds unit tests (FR-09/10)</title>
     <phase>3 — E3 feedback→memory loop</phase>
     <gate>startable</gate>
-    <status>pending</status>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-17 (sonnet work on Opus session, FULL/TEST-MODIFYING). Closes E3. Extended the R4 golden-utterance
+         family (013): added the "preference-loop" family + "preference-bias" outcomeClass to AssistantEnhancementsR4EvalTests,
+         the AR4-020 P3-loop golden case (utterance "always summarize my tasks" → preference-bias → list-tasks), and a
+         PreferenceLoop_BiasesARealCataloguedCapability_ConfirmedOnly_OffAllowListInert grounding test in the
+         Category=GoldenUtteranceEval merge gate. DISTINCT from 032's isolated unit tests: it grounds the P3 loop against the
+         REAL catalog — asserts the producer's allow-list biases a capability (list-tasks) that is a REAL sprk_playbookconsumer
+         mirror binding (never a phantom), confirmed-only (unconfirmed inference dormant), off-allow-list inert, DATA-guard
+         present. NEGATIVE CHECK empirically confirmed: temp-removing the producer's confirmed-only guard fails BOTH the E3
+         grounding test AND 032's unconfirmed test (breach caught), then reverted. TEST-ONLY (producer breach reverted; only the
+         eval JSON + harness changed) → no publish/CVE gate. R4 eval 7/7; full GoldenUtteranceEval gate 155/155; build 0 err.
+         Step 9.5 CLEAN (adr-check ADR-038 KEEP-path/gate + ADR-039 boundary assertions + §11 extended-family; code-review
+         real-catalog grounding, negative-check confirmed, maintain-class, no banned shapes). Did NOT modify the 030/031/032
+         seams to pass. E3 loop (030→031→032→033) COMPLETE. -->
+    <!-- ORIGINAL: <status>pending</status> -->
+
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING — adds eval + unit coverage; CLAUDE.md §8 override makes any tests/** task FULL rigor with unconditional code-review + adr-check.</rigor-reason>
     <model-tier>sonnet</model-tier>

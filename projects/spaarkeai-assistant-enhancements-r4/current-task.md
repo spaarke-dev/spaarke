@@ -1,7 +1,7 @@
 # Current Task State — spaarkeai-assistant-enhancements-r4
 
-> **Last Updated**: 2026-08-16 (by task-execute — 012 + 013 COMPLETE; **E1 spine DONE**)
-> **Recovery**: Read "Quick Recovery" first. Tracks the **active task only**; history lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
+> **Last Updated**: 2026-08-17 (by task-execute — 033 COMPLETE; **E1 + E3 DONE**; CHECKPOINT for fresh session)
+> **Recovery**: Read "Quick Recovery" + "FRESH SESSION START HERE" first. Tracks the **active task only**; history lives in `tasks/TASK-INDEX.md` + per-task `.poml`.
 
 ---
 
@@ -10,9 +10,27 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | ✅ **032 COMPLETE** (governed preference-producer, FR-09 — the injection-defense boundary). ✅ **001, 010, 011, 012, 013, 020, 022, 030, 031, 032 COMPLETE** (10 of 17). |
-| **Status** | 032: `PreferenceDirectiveProducer` (static, closed allow-list → SERVER-AUTHORED prompt hint; CONFIRMED-only; deterministic marker match, no LLM) wired as ContextBinder's 4th sibling userFragment producer. PROMPT-ONLY — never touches `AgentToolFilterContext` (proven: the 2 structural-invariant tests stay at 7 members). Injection-safe (raw text never emitted). Also fixed a pre-existing 011 regression (2 invariant tests hardcoded 6 props; 011 added AdvisoryToolAllowList→7). 8 bounds tests + 2 fixed = 85/85 · build 0 err · publish 43.68 MB · CVE clean · Step 9.5 CLEAN. All committed locally (NOT pushed). |
-| **Next Action** | **E3**: **033** (eval + preference-producer bounds tests, dep 031✅+032✅ — the last E3 task). **E2**: 021a→021b→023→024 (021 suggestion consolidation — design delta done). **040** (D9) needs `--chrome`. **080** deploy (create `sprk_groundedtoolallowlist` column + re-seed) → **090** wrap-up. |
+| **Task** | ✅ **033 COMPLETE** (E3 eval + bounds, FR-09/10). ✅ **11 of 17 done**: 001, 010, 011, 012, 013, 020, 022, 030, 031, 032, 033. **E1 spine ✅ · E3 loop ✅**. 021 SUPERSEDED → 021a/021b. |
+| **Status** | 033: extended the R4 golden-utterance family (013) with the `preference-loop` family + AR4-020 P3-loop case + a `PreferenceLoop_...` grounding test in the GoldenUtteranceEval merge gate (grounds the loop vs the REAL catalog; confirmed-only; off-list inert; DATA-guard). Negative check confirmed. TEST-ONLY. Full gate **155/155**; build 0 err. Step 9.5 CLEAN. All work committed locally (**NOT pushed; PR HELD** per owner). |
+| **Next Action** | See **FRESH SESSION START HERE** below. Remaining: **E2** 021a→021b→023→024 · **040** (D9, needs `--chrome`) · **080** deploy · **090** wrap-up. |
+
+---
+
+## 🟢 FRESH SESSION START HERE (2026-08-17 checkpoint)
+
+**Git**: branch `work/spaarkeai-assistant-enhancements-r4`, HEAD **`9aabf8933`** (+ a 033 commit landing now). **All committed locally, 0 pushed** (owner holds the push + PR). Working tree clean. Runtime **.NET 10** (SDK ≥10.0.100; never deploy BFF from a net8 tree).
+
+**Done (11/17)**: E1 spine **010→011→012→013 ✅** (the P1 grounded-recommend core: advisory `list-tasks` + `AdvisoryCapabilityRunner` nested turn + dispatch routing + eval). E3 loop **030→031→032→033 ✅** (Preference type + feedback→memory capture + governed injection-safe preference-producer + eval). Plus 001, 020, 022.
+
+**Remaining (6 tasks), in recommended order:**
+1. **021a** (BFF, opus/high) → **021b** (client, sonnet/high) — the **suggestion consolidation** (FR-04). Design is LOCKED in [`notes/021-grounded-suggestions-design-delta.md`](notes/021-grounded-suggestions-design-delta.md) (owner-approved): retire the ungrounded free-string generator; run ONE grounded proposer pass per turn emitting a TYPED two-kind structure — **capability** chips (real `targetBindingId`, arrow) + **question** chips (text, no arrow); reuse `AssistantSuggestionService`. 021a POML has the full blueprint. `/conflict-check` (SprkChat hot-path, compose-r5/r6).
+2. **023** (client, FR-06) — follow-on cards (Briefing/SmartToDo), open-tab-gated. Dep 022✅+012✅. NOTE: 012 deferred `chipTransitions` to here.
+3. **024** (eval, FR-10) — E2 eval cases. Dep 021b+023.
+4. **040** (D9, FR-11) — **needs a live-DOM `--chrome` session → NOT autonomous** (owner involvement). Confirm D9 still repros after the merged partial fix first.
+5. **080** (deploy, owner-gated) — **MUST create the `sprk_groundedtoolallowlist` column on `sprk_analysisaction` + re-seed** before the BFF spine is deployable (010/012 depend on it). Deploy BFF + `sprk_spaarkeai` together. Also: 022 hardcoded live spaarkedev1 layout GUIDs (multi-env needs per-env update).
+6. **090** — wrap-up + `/test-diet` gate.
+
+**Standing context**: publish stable ~43.67 MB compressed (≤60); CVE clean; commit msgs end `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`; ADR-042 hard-governance DEFERRED to #616 (trustLevel inert). Two review catches this session worth remembering: (a) 031's inferred preference was mistakenly Confidence 1.0 → fixed to 0.5 (dormant below the 0.7 recall gate); (b) 011 left 2 invariant tests red (AgentToolFilterContext 6→7) → fixed in 032.
 
 ### 012 working state (2026-08-16, opus/high FULL) — analysis complete, machinery pending
 **Conflict-check**: PASS (silent) — no master commits since divergence touch the Chat/catalog files; no open PR overlaps `SessionDispatchOrchestrator.cs`/`list-tasks.action.json`/`sprk_playbookconsumer-rows.json`. (PR #508 = Events/SmartTodo shared components, not my files.)
