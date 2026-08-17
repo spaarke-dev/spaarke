@@ -108,6 +108,8 @@ function mapTodoFormattedValues(entities: WebApiRecord[]): WebApiRecord[] {
     ...e,
     assignedToName: (e[`_sprk_assignedto_value${FV}`] as string) ?? '',
     statuscodeName: (e[`statuscode${FV}`] as string) ?? '',
+    // Formatted due date (locale short date) for the blended date text-search (UAT 2026-08-17).
+    dueDateFormatted: (e[`sprk_duedate${FV}`] as string) ?? '',
   }));
 }
 

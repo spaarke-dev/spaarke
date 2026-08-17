@@ -76,3 +76,38 @@ describe('matchesTodoSearchQuery — no match', () => {
     expect(matchesTodoSearchQuery(makeTodo(), 'nonexistent-term-xyz')).toBe(false);
   });
 });
+
+describe('matchesTodoSearchQuery — blended due-date search (UAT 2026-08-17)', () => {
+  const dueAug18 = makeTodo({ sprk_duedate: '2026-08-18', dueDateFormatted: '8/18/2026' });
+
+  it('call_MonthNameLong_Matches', () => {
+    expect(matchesTodoSearchQuery(dueAug18, 'august')).toBe(true);
+    expect(matchesTodoSearchQuery(dueAug18, 'August 18')).toBe(true);
+  });
+
+  it('call_MonthNameShort_Matches', () => {
+    expect(matchesTodoSearchQuery(dueAug18, 'aug 18')).toBe(true);
+  });
+
+  it('call_Numeric_And_Iso_And_Formatted_Match', () => {
+    expect(matchesTodoSearchQuery(dueAug18, '8/18')).toBe(true);
+    expect(matchesTodoSearchQuery(dueAug18, '8/18/2026')).toBe(true);
+    expect(matchesTodoSearchQuery(dueAug18, '2026-08-18')).toBe(true);
+  });
+
+  it('call_DifferentMonth_DoesNotMatch', () => {
+    expect(matchesTodoSearchQuery(dueAug18, 'september')).toBe(false);
+    expect(matchesTodoSearchQuery(dueAug18, 'july')).toBe(false);
+  });
+
+  it('call_TimezoneSafe_DayNotShifted', () => {
+    // A DATE-ONLY 2026-08-18 must match "18", never "17" (no local-tz Date() shift).
+    expect(matchesTodoSearchQuery(dueAug18, 'august 18')).toBe(true);
+    expect(matchesTodoSearchQuery(dueAug18, 'august 17')).toBe(false);
+  });
+
+  it('call_NoDueDate_NoThrow_NoFalseMatch', () => {
+    const noDate = makeTodo({ sprk_duedate: undefined, dueDateFormatted: undefined });
+    expect(matchesTodoSearchQuery(noDate, 'august')).toBe(false);
+  });
+});

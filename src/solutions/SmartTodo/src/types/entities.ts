@@ -57,6 +57,8 @@ export interface ITodo {
   /** 0-100 native effort score on sprk_todo. */
   sprk_effortscore?: number;
   sprk_duedate?: string;
+  /** Dataverse formatted value of sprk_duedate (locale short date, e.g. "8/18/2026") — mapped for date text-search (UAT 2026-08-17). */
+  dueDateFormatted?: string;
   sprk_completedon?: string;
   /** Choice: 100000000=Today, 100000001=Tomorrow, 100000002=Future. */
   sprk_todocolumn?: number;
