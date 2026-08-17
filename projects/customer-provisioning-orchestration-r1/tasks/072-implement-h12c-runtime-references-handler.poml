@@ -3,8 +3,8 @@
   <metadata>
     <title>Implement H12c runtime references handler — sprk_aimodeldeployment rows point at customer or shared OpenAI</title>
     <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','ai','dataverse'; handler in the DAG whose failure blocks Setup Status = Ready. FR-17 acceptance scope; tier-branch (Model 1 vs Model 2) is critical for cost + isolation semantics.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -100,7 +100,9 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
   </acceptance-criteria>
 
-  <notes>Reference: spec.md FR-17 + §4.1a + ADR-020 + design.md §4.1 H12c row. Interlocks with task 077 (per-tenant metering) for Model 1 attribution.</notes>
+  <notes>Reference: spec.md FR-17 + §4.1a + ADR-020 + design.md §4.1 H12c row. Interlocks with task 077 (per-tenant metering) for Model 1 attribution.
+
+COMPLETION SUMMARY (2026-08-17): Implemented H12cRuntimeReferencesHandler + IModelDeploymentReferenceWriter seam (DataverseWebApiModelDeploymentReferenceWriter production impl) + PinnedModelCatalog (3 ADR-020 models) under Handlers/RuntimeReferences/. Tier-branch: Model2Dedicated reads InterStepState.OpenAiEndpoint (H2a output); Model1Shared reads RuntimeReferencesOptions:SharedPlatformOpenAiEndpoint (operator config) + writes tenantId metering-attribution note into sprk_description (live schema verified via mcp__dataverse__describe has no tenantId column — see notes/task-072-h12c-deviations.md D-072-1). DAG-join guard requires BOTH H12a + H12b in CompletedPhases before proceeding. Idempotency key h12c-{customerId}-{tenancyModel}-{endpointHash} per POML literal (endpointHash = SHA-256 hex of resolved endpoint). Enqueues H14 on success (temporary wave-Cp bridge, parity with H12b→H12c). Every failure mode classifies Resumable (upsert is retry-safe in full, parity with H7). 20 unit tests added, all green. Registered via AddH12cRuntimeReferencesHandler() extension (RuntimeReferencesModule.cs) in Program.cs. Step 9.5 gates: code-review 0 Critical / 2 informational Warnings (both precedent-consistent); adr-check 0 Violations. Full suite: 389/389 passing (with sibling in-flight files present); L2 build 0/0 (sibling folder isolated during verification — see report). 3 deviations documented in notes/task-072-h12c-deviations.md (D-072-1 metering field Path C, D-072-2 H14 bridge, D-072-3 idempotency-key-format POML-literal precedent).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

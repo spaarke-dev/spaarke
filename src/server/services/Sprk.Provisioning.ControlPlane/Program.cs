@@ -61,9 +61,11 @@ using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 using Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
+using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
 using Sprk.Provisioning.ControlPlane.Registry;
@@ -599,6 +601,107 @@ builder.Services.AddHttpClient<IDataverseAppUserVerifier, DataverseWebApiAppUser
 builder.Services.AddHttpClient<IGraphAppRoleGranter, GraphRestAppRoleGranter>();
 builder.Services.AddHttpClient<IGraphAppRoleParityVerifier, GraphRestAppRoleParityVerifier>();
 builder.Services.AddScoped<H10DataverseAppUserGraphParityHandler>();
+
+// Task 054 (Batch 3F): H11 user-provisioning handler (D6 identity-preset
+// branch) + THREE collaborator seams (IGraphUserProvisioner =
+// GraphRestUserProvisioner issues real Graph REST /users + assignLicense
+// calls — NativeAccount branch; IB2BInvitationClient =
+// GraphRestB2BInvitationClient issues real Graph REST /invitations calls —
+// B2BGuest branch; IB2BConsentVerifier = GraphRestB2BConsentVerifier is the
+// consent-verification gate — independent GET /users/{id}?$select=
+// externalUserState re-query per invited guest, parity with H3's
+// IAdminConsentVerifier gate shape). All registrations UNCONDITIONAL per
+// ADR-032 — no feature-gate branches.
+//
+// Placement Justification (CLAUDE.md §10): H11 lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013
+// forcing-function rule — no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H11 uses IProvisioningRunRepository (task
+// 037) + the three dedicated seams; no BFF-facade dependencies. Idempotency
+// key users-{customerId} is deliberately customerId-ONLY per POML constraint
+// — user provisioning is per-customer; per-user idempotency is delegated to
+// the Graph UPN alt-key check inside GraphRestUserProvisioner.CreateUserAsync.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - NFR-09 (Path C — pivot to comply in spirit, NOT a literal SDK
+//     dependency): parity with H10's file-header "NFR-09 IMPLEMENTATION
+//     NOTE" — raw HttpClient + DefaultAzureCredential surfaces the same
+//     HTTP-status + response-body diagnostic NFR-09 asks the BFF's
+//     Microsoft.Graph SDK ODataError catch to carry, without adding a new
+//     SDK dependency to L2.
+//   - ADR-028 UAMI-outbound + §4D I5 explicit-tenant: every Graph token
+//     acquisition uses DefaultAzureCredential with TenantId = the run's
+//     explicit tenantId parameter — never an ambient default-tenant credential.
+//   - §4C rollback: user-creation + B2B-invitation failures are Resumable
+//     (POST /users + POST /invitations are each individually idempotent per
+//     their own existing-record short-circuit); a license-assignment
+//     failure is RetryableWithCleanup (user account already exists;
+//     assignLicense is itself idempotent) — DELIBERATELY distinct from the
+//     user-creation failure class, parity with H10's T3-vs-grant-failure
+//     distinction.
+//   - B2B consent-pending is NOT a failure per design.md §4.1 H11 row (same
+//     WaitingOnGate shape as H3's admin-consent gate) — envelope is
+//     processed correctly; the gate is external (the customer-tenant guest
+//     accepting the invitation).
+//
+// Branch-scope resolution note (per root CLAUDE.md §8.5 directional-steps
+// guidance): see H11UserProvisioningHandler.cs file header "BRANCH
+// SEMANTICS" for how the POML's <goal> vs <steps>/<acceptance-criteria>
+// ambiguity (whether B2BGuest ALSO runs CreateUser+AssignLicense) was
+// resolved — full note also in
+// projects/customer-provisioning-orchestration-r1/notes/task-054-deviations.md.
+builder.Services.Configure<H11UserProvisioningOptions>(
+    builder.Configuration.GetSection(nameof(H11UserProvisioningOptions)));
+builder.Services.AddHttpClient<IGraphUserProvisioner, GraphRestUserProvisioner>();
+builder.Services.AddHttpClient<IB2BInvitationClient, GraphRestB2BInvitationClient>();
+builder.Services.AddHttpClient<IB2BConsentVerifier, GraphRestB2BConsentVerifier>();
+builder.Services.AddScoped<H11UserProvisioningHandler>();
+
+// Task 072 (Batch 3F): H12c runtime references handler + ONE collaborator
+// seam (IModelDeploymentReferenceWriter = DataverseWebApiModelDeployment
+// ReferenceWriter issues real Dataverse Web API upserts against
+// sprk_aimodeldeployment — find-by-sprk_name, PATCH if found, POST if not).
+// H12c is the DAG-join point requiring BOTH H12a (task 070) + H12b (task
+// 071) complete before it dispatches (design.md §4.1 DAG: "H12c — needs both
+// H12a + H12b + H2a OpenAI"). Registered via a single AddH12cRuntimeReferences
+// Handler() extension method (RuntimeReferencesModule.cs) — parity with
+// H12b's AddH12bAppConfigSeedHandler() god-class-ratchet pattern. All
+// registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+//
+// Placement Justification (CLAUDE.md §10): H12c lives in L2 (not BFF) per
+// spec §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-
+// function rule — no IActionResolver, IActionRunner, IOpenAiClient,
+// IPlaybookService injection). H12c uses IProvisioningRunRepository (task
+// 037) + IHandlerEnqueuer (task 038) + the local IModelDeploymentReference
+// Writer seam; no BFF-facade dependencies. Idempotency key
+// h12c-{customerId}-{tenancyModel}-{endpointHash} follows the POML-literal
+// format (endpointHash = SHA-256 of the RESOLVED Azure OpenAI endpoint URI)
+// so a tenancy migration or endpoint rotation forces a re-write.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - Path C (pivot to comply): the live sprk_aimodeldeployment Dataverse
+//     schema (verified via mcp__dataverse__describe) carries NO tenantId
+//     column, though the POML's literal step 4 asks for a "metering-
+//     attribution tenantId field" on Model 1 rows. H12c does NOT add a new
+//     column to a live table from inside a handler task (CLAUDE.md §11 —
+//     schema changes are their own task); instead the tenantId attribution
+//     is written as a human-readable note in sprk_description, and the
+//     QUERYABLE metering mechanism is left to task 077's scope. Full
+//     rationale in H12cRuntimeReferencesHandler.cs file header +
+//     projects/customer-provisioning-orchestration-r1/notes/task-072-h12c-deviations.md.
+//   - ADR-020: written rows are exactly the 3 pinned models (gpt-4o
+//     2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large 1) per
+//     PinnedModelCatalog.cs — no ad-hoc or unpinned entries.
+//   - ADR-028 UAMI outbound + §4D I5 explicit-tenant: the writer's Dataverse
+//     token acquisition uses DefaultAzureCredential with TenantId = the
+//     run's explicit tenantId parameter — never an ambient default-tenant
+//     credential.
+//   - §4C rollback: EVERY H12c failure mode classifies Resumable — the
+//     find-by-sprk_name/PATCH-or-POST upsert is retry-safe in full on any
+//     partial-batch failure. No QuarantineRequired path exists for H12c
+//     (parity with H7's reasoning). Full mapping table inline in
+//     H12cRuntimeReferencesHandler.cs file header.
+builder.Services.AddH12cRuntimeReferencesHandler(builder.Configuration);
 
 var app = builder.Build();
 
