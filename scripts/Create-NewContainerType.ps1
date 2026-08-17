@@ -214,7 +214,10 @@ try {
     Write-Host "NEXT STEPS:" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "1. Store container type ID in Key Vault:" -ForegroundColor White
-    Write-Host "   az keyvault secret set --vault-name <name> --name 'Spe--ContainerTypeId' --value '$newContainerTypeId'" -ForegroundColor Gray
+    # NAMING (task 019 / Phase G / spec §7.9 R2,R4): canonical name is `SPE-ContainerTypeId`
+    # (Seed-ProductionKeyVault.ps1 + Configure-ProductionAppSettings.ps1 + config/spaarke-resources.yaml).
+    # The prior `Spe--ContainerTypeId` spelling was an R2 casing-drift alias; Phase H owns live-env collapse.
+    Write-Host "   az keyvault secret set --vault-name <name> --name 'SPE-ContainerTypeId' --value '$newContainerTypeId'" -ForegroundColor Gray
     Write-Host ""
     Write-Host "2. Create a container for the root business unit:" -ForegroundColor White
     Write-Host "   .\New-BusinessUnitContainer.ps1 -ContainerTypeId '$newContainerTypeId' ..." -ForegroundColor Gray
