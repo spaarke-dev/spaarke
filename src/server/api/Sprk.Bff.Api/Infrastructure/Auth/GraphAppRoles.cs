@@ -98,6 +98,9 @@ public static class GraphAppRoles
     private const string IdSitesReadAll = "332a536c-c7ef-4017-ab91-336970924f0d";
     private const string IdSitesReadWriteAll = "9492366f-7969-46a4-8d15-ed1a20078fff";
 
+    // Core / Directory
+    private const string IdUserReadAll = "df021288-bdef-4463-88db-98f22de89214";
+
     // Self-Service Registration subsystem — sourced pre-r1 from
     // scripts/Setup-EntraInfrastructure.ps1:78-80.
     private const string IdUserReadWriteAll = "741f803b-c850-494e-b5df-cde7c675a1ca";
@@ -145,7 +148,7 @@ public static class GraphAppRoles
             "SPE / Documents", "App-only site/list write for SPE container provisioning.", false),
 
         // Core directory / user resolution — always required
-        new GraphAppRole(UserReadAll, "Read all users' full profiles", null,
+        new GraphAppRole(UserReadAll, "Read all users' full profiles", IdUserReadAll,
             "Core / Directory", "Resolve user identities for authorization + notification addressing.", false),
         new GraphAppRole(GroupReadAll, "Read all groups", null,
             "Core / Authorization", "Resolve group membership for access decisions + membership junction sync.", false),
