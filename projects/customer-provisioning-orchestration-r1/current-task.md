@@ -1,8 +1,9 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-17 (Wave 3 COMPLETE — all 19 handler tasks landed)
+> **Last Updated**: 2026-08-17 (Wave 3 WRAP-UP FULLY COMPLETE — master merged, branch pushed, draft PR opened)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` (unpushed; owner directive "no push, no PR yet" active)
+> **Branch**: `work/customer-provisioning-orchestration-r1` @ `9ec26ffe0` (pushed to origin; **draft PR #779 open**)
+> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DO NOT MERGE — Wave 4 pending)
 
 ---
 
@@ -12,10 +13,11 @@
 |-------|-------|
 | **Project phase** | **Wave 3 COMPLETE (53/78 tasks = 68%)** — Wave 4 dispatch pending owner go-ahead |
 | **Task** | none (wave boundary) |
-| **Status** | wave-boundary |
-| **Next Action** | Present Wave 4 dispatch plan to owner. Wave 4 = Phase D + Wave C5 + Wave C6 + Phase H + Phase E cleanup + Phase F acceptance + wrap-up (25 tasks). |
-| **Blocker** | None external. **Pre-Wave-4 backlog** (see below): (a) ArchTest debt from tasks 046/047 — Path A extension of `CosmosProvisioningSecretGuardTests.ExcludedTypeFullNames` OR refactor `KeyVaultName`/`KvSecretsPopulation.*` to `KeyVaultSecretRef` type; (b) master divergence at ~103 commits behind; (c) owner decision on push/PR — 60+ local commits accumulated |
-| **L2 project state** | 428/428 tests pass · `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` 0/0 · TreatWarningsAsErrors=true · CVE clean · Program.cs at ADR-010 target |
+| **Status** | wave-boundary — READY for Wave 4 |
+| **Next Action** | On owner go-ahead: dispatch **Wave 4 Batch 4A** (3 parallel: ArchTest debt refactor to `KeyVaultSecretRef` · task 081 remove [Obsolete] from RegistrationEndpoints · task 084 Phase H canonical secret-catalog manifest generator) |
+| **Blocker** | None. All 3 pre-Wave-4 owner decisions closed: (a) ArchTest debt → refactor to `KeyVaultSecretRef` (Wave 4 4A opener); (b) master merge → **DONE (9ec26ffe0)**; (c) push/PR → **DONE (#779 draft)** |
+| **L2 project state** | 428/428 tests pass · `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` 0/0 · TreatWarningsAsErrors=true · CVE clean · Program.cs at ADR-010 target · **post-merge verified 2026-08-17** |
+| **Master sync** | Merged origin/master `9ec26ffe0` — 112 upstream commits absorbed, 1 conflict resolved (researcher MEMORY.md, append-only union merge), zero L2 breakage |
 
 ---
 
@@ -124,12 +126,12 @@ Estimated: ~40-50 more agent hours across 5 sessions with proactive checkpointin
 
 ## Blockers
 
-**Status**: None external
+**Status**: None. All Wave 3 wrap-up decisions closed.
 
-**Pre-Wave-4 owner decisions**:
-1. **ArchTest debt** — extend exclusions (path A) or refactor (path B)? Recommend refactor to `KeyVaultSecretRef`.
-2. **Master divergence** — ~103 commits behind origin/master. Merge planning: (a) merge master into feature branch now (safe — overlapping files: GraphAppRoles.cs, customer.bicep, 3 Bicep modules); (b) defer to end-of-Wave-4; (c) push feature branch as-is + rebase later.
-3. **Push / PR** — 60+ local commits since Wave 0 start. Owner directive still "no push, no PR yet"; owner may want to reconsider now that Wave 3 is a clean milestone.
+**Pre-Wave-4 owner decisions (all resolved 2026-08-17)**:
+1. ✅ **ArchTest debt** — owner chose: refactor to structured `KeyVaultSecretRef` type (small task, executed as Wave 4 Batch 4A opener).
+2. ✅ **Master divergence** — owner chose: merge master NOW. Executed via `9ec26ffe0` (112 commits absorbed; conflict on researcher `MEMORY.md` resolved as append-only union merge; L2 build 0/0 + 428/428 tests still pass post-merge).
+3. ✅ **Push / PR** — owner chose: push branch + open draft PR at Wave 3 milestone. Executed: branch pushed to `origin/work/customer-provisioning-orchestration-r1`; draft PR https://github.com/spaarke-dev/spaarke/pull/779 opened with comprehensive body (3-layer architecture summary, L2 verification, `§4D` invariants status, deviations registry, Wave 4 plan).
 
 ---
 
