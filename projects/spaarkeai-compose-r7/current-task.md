@@ -11,9 +11,14 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **050 ✅ COMPLETE** — async `ProjectForMount` PDF fork (server, FR-06). Next: **051** (client PDF intake-door gates + env verify + parity) |
-| **Step** | 050 implemented + gated (code-review + adr-check PASS); publish −0.0148 MB; 1127 Compose tests green; commit pending this turn |
-| **Next Action** | Execute **051** (client PDF gates + parity, sonnet@high) → 060 → 061 → 070 → 071 → 072 → 074 → 090. |
+| **Task** | **050 ✅ + FR-11 ✅ + 051 ✅ COMPLETE** — Phase 5 (PDF Import Parity / UC-7) code-complete. Next: **060** (Ctrl+Space "Describe a change") |
+| **Step** | 051 implemented + gated (code-review + adr-check PASS); 622 standalone jest green (+3 CI-only gate tests); commit pending this turn |
+| **Next Action** | Execute **060** (Ctrl+Space describe-change, sonnet@high) → 061 → 070 → 071 → 072 → 074 → 090. |
+
+### Task 051 — what shipped (see notes/task-051-notes.md)
+Client PDF intake-door parity. **Root cause was bigger than "add .pdf to accept"**: r6 wired the sourceFormat reducer/save-routing/banner, but `ComposeEditor.isEditableDocx` still rejected any `.pdf` fileName → even the r6 Load PDF path routed to reference-only. Fix: made `isEditableDocx(bytes, fileName, sourceFormat?)` **sourceFormat-aware** (trust bytes when `sourceFormat==='pdf'`) + threaded a `sourceFormat` prop to ComposeEditor — fixes Load + Browse + Upload **uniformly**. Browse/Upload handlers parse `sourceFormat` → `mountTransient` (reducer no longer hardcodes null); Browse `accept` admits `.pdf`. 622 standalone jest + 3 CI-only gate tests + 1 reducer test. **HONEST env note**: the live PDF→editable→analysis→response→save UAT needs a DI-enabled env (task 001: live gate value unverifiable from this session) → operator-run; code + automated tests complete; escalation trigger did NOT fire (gate state unknown, not confirmed-off; degrades gracefully).
+
+### Phase 5 COMPLETE (code). 15/20 tasks done: 001, 010, 011, 012, 013, 020, 030, 040, 041, 050, 051, 073, 075 (+FR-11 wired). Remaining: 060, 061, 070, 071, 072, 074, 090.
 
 ### Task 050 — what shipped (see notes/task-050-notes.md)
 `ProjectForMount` is now **async** with the same `IsPdfSource → ProjectPdfToDocxAsync` fork LoadAsync has (ADR-007/013 sync→async = spec ADR-Tensions path A / NFR-04). Mount doors (`/api/compose/project` Browse + `/api/compose/upload`) now open a PDF as an editable synthesized docx with `sourceFormat:"pdf"` + `pdf-intake-*` warnings; docx path stays synchronous-fast (intake `await` is PDF-branch-only). Added `SourceFormat` to `ComposeMountProjection` + both mount response records; added the honest 503/422 `ComposePdfIntakeException` mapping to BOTH mount handlers (they lacked it); **correctness fix**: `/project` echoes `Content` on `Minted || SourceFormat != null` (a PDF's synthesized docx is pre-minted → `Minted=false`, so without this the client got a docx projection but no docx bytes). New seam test `ComposeMountPdfProjectionSeamTests.cs` (3 tests). Publish **44.9452 MB incl PDBs** (−0.0148 vs 44.96); CVE clean; conflict-clean.

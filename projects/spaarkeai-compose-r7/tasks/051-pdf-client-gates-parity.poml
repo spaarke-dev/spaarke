@@ -3,8 +3,8 @@
   <metadata>
     <title>Client PDF intake-door gates + env verify + PDF parity acceptance (FR-06)</title>
     <phase>5 PDF Import Parity (UC-7)</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx client gates; end-to-end parity verification across two intake doors.</rigor-reason>
     <model-tier>sonnet</model-tier>

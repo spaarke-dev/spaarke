@@ -363,6 +363,11 @@ export type ComposeWorkspaceAction =
       // recovered). Carried onto documentRef.composeLogicalId — the SHARED key for FR-03 draft
       // recovery (040) + FR-07 client dedup (011). Persisted client-side; survives re-mount/reload.
       composeLogicalId?: string;
+      // Task 051 (spaarkeai-compose-r7, FR-06 — PDF import parity): 'pdf' when the Browse-project /
+      // Assistant-upload door forked a PDF into a server-SYNTHESIZED docx (task 050). Drives the editor's
+      // editable admission (despite a .pdf display name) + the PDF create-on-save routing, exactly as
+      // loadSucceeded.sourceFormat does for the Load door. Omitted for a native docx mount → null.
+      sourceFormat?: string | null;
     }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
   // Item 6 (UAT round-4): `sessionId` carries a MINTED document session id for born-in-editor mounts
@@ -604,8 +609,11 @@ export function composeWorkspaceReducer(
         loadedContentModel: action.contentModel ?? null,
         // task 013 (r6, F7): same lifecycle as the model — set from this mount's response or cleared.
         loadedContentModelWarnings: action.contentModelWarnings ?? null,
-        // Task 041 (FR-06): a transient mount is not a PDF-sourced load — clear rather than inherit.
-        sourceFormat: null,
+        // Task 051 (FR-06 — PDF import parity): a Browse-project / Assistant-upload mount CAN now be
+        // PDF-sourced (task 050 gave ProjectForMount the intake fork), so carry the marker when the door
+        // supplies it; a native docx mount omits it → null (clear-rather-than-inherit still holds — a fresh
+        // mount over a prior PDF session must not keep the prior 'pdf').
+        sourceFormat: action.sourceFormat ?? null,
         // 026-F5 (task 012, r6): a fresh mount has no save history — clear any stale save-warning
         // banner from a prior document mounted in this same tab.
         saveDegradationWarnings: null,

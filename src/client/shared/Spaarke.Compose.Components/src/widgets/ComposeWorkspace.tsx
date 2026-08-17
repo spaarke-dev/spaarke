@@ -3148,6 +3148,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           let projection: ComposeServerProjection | null = null;
           let projectContentModel: ComposeContentModel | null = null;
           let projectContentModelWarnings: Array<{ code: string; count: number }> | null = null;
+          // Task 051 (FR-06): the PDF-source marker from the /project response (task 050). 'pdf' → the
+          // retainedBytes below are a server-synthesized docx the editor must admit as editable.
+          let projectSourceFormat: 'pdf' | null = null;
           // task 012 (r6): the retained mount bytes. Default = the local file bytes; REPLACED by the
           // server's `content` byte echo when present — `/project` returns it ONLY when server-side
           // paraId minting mutated the caller's bytes, and adopting the echo keeps editor/model/
@@ -3168,12 +3171,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                   content?: string | null;
                   // task 013 (r6, F7): the projection's flatten warnings.
                   contentModelWarnings?: Array<{ code: string; count: number }> | null;
+                  // Task 051 (FR-06 — PDF import parity): 'pdf' when the browsed file was a PDF and
+                  // `content` is the docx SYNTHESIZED by the task-050 mount fork. Parsed defensively.
+                  sourceFormat?: string | null;
                 };
                 projection = normalizeProjection(payload.projection);
                 projectContentModel = payload.contentModel ?? null;
                 projectContentModelWarnings = Array.isArray(payload.contentModelWarnings)
                   ? payload.contentModelWarnings
                   : null;
+                projectSourceFormat = payload.sourceFormat === 'pdf' ? 'pdf' : null;
                 if (typeof payload.content === 'string' && payload.content.length > 0) {
                   retainedBytes = base64ToArrayBuffer(payload.content);
                 }
@@ -3185,6 +3192,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               projection = null;
               projectContentModel = null;
               projectContentModelWarnings = null;
+              projectSourceFormat = null;
               retainedBytes = result;
             }
           }
@@ -3202,6 +3210,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             contentModel: projectContentModel,
             // task 013 (r6, F7): the projection's flatten warnings — same lifecycle as the model.
             contentModelWarnings: projectContentModelWarnings,
+            // Task 051 (FR-06 — PDF import parity): carry the PDF-source marker so the editor admits the
+            // synthesized docx as editable (despite the .pdf display name) and Save routes create-on-save.
+            sourceFormat: projectSourceFormat,
             // G7 (task 022): mint the transient dedup key once for this Browse mount → every create-on-save
             // sends it so repeated saves target ONE record (no duplicate mint).
             transientKey: mintTransientKey(),
@@ -3504,6 +3515,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           contentModel?: ComposeContentModel | null;
           // task 013 (r6, F7): the projection's flatten warnings.
           contentModelWarnings?: Array<{ code: string; count: number }> | null;
+          // Task 051 (FR-06 — PDF import parity): 'pdf' when the uploaded file was a PDF and `content` is
+          // the docx SYNTHESIZED by the task-050 mount fork. Parsed defensively (older BFF omits it).
+          sourceFormat?: string | null;
         };
 
         // ASP.NET Core serializes byte[] as a base64 string (NOT a JSON number
@@ -3534,6 +3548,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           contentModel: payload.contentModel ?? null,
           // task 013 (r6, F7): the projection's flatten warnings — same lifecycle as the model.
           contentModelWarnings: Array.isArray(payload.contentModelWarnings) ? payload.contentModelWarnings : null,
+          // Task 051 (FR-06 — PDF import parity): carry the PDF-source marker so the editor admits the
+          // synthesized docx as editable (despite the .pdf display name) and Save routes create-on-save.
+          sourceFormat: payload.sourceFormat === 'pdf' ? 'pdf' : null,
           // G7 (task 022): transient dedup key for this assistant-upload mount.
           transientKey: mintTransientKey(),
           // FR-07(b) (task 010): mint+persist the non-rotating logical id for this uploaded document.
@@ -3886,7 +3903,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       <input
         ref={browseFileInputRef}
         type="file"
-        accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        // Task 051 (spaarkeai-compose-r7, FR-06 — PDF import parity): admit .pdf at the Browse intake door.
+        // A picked PDF round-trips through POST /api/compose/project (the task-050 mount fork) → a
+        // synthesized docx the editor mounts editable. An un-intakeable PDF (DI gate off / parse failure)
+        // still degrades gracefully (projection null / reference-only) — admission ≠ guaranteed editable.
+        accept=".docx,.pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/pdf"
         className={styles.hiddenBrowseInput}
         onChange={handleBrowseFileSelected}
         data-testid="compose-workspace-browse-file-input"
@@ -4071,6 +4092,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // 013, F-2 "one reader") the editor renders an explicit error/unavailable state.
               projection={state.projection}
               documentRef={editorDocRef}
+              // Task 051 (FR-06 — PDF import parity): 'pdf' when the mounted docx was synthesized from a
+              // PDF (any intake door). The editor admits it as editable despite the .pdf display name.
+              sourceFormat={state.sourceFormat}
               bffBaseUrl={bffBaseUrl}
               sessionId={state.sessionId}
               // task 041 (FR-13): pass-through to getToolsForSurface via ComposeEditor's own

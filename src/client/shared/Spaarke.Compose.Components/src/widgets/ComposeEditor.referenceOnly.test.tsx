@@ -71,7 +71,8 @@ const DOCX_SIGNATURE = [0x50, 0x4b, 0x03, 0x04];
 function renderEditor(
   docxBytes: ArrayBuffer,
   documentRef: ComposeEditorDocumentRef | undefined,
-  projection: ComposeServerProjection | null = null
+  projection: ComposeServerProjection | null = null,
+  sourceFormat: string | null = null
 ) {
   return render(
     <FluentProvider theme={webLightTheme}>
@@ -80,12 +81,21 @@ function renderEditor(
           docxBytes={docxBytes}
           projection={projection}
           documentRef={documentRef}
+          sourceFormat={sourceFormat}
           sessionId="session-defg"
         />
       </PaneEventBusProvider>
     </FluentProvider>
   );
 }
+
+const EDITABLE_PROJECTION: ComposeServerProjection = {
+  status: 'success',
+  canEdit: true,
+  html: '<p data-paraid="AB12CD34">Synthesized from a PDF</p>',
+  warnings: [],
+  schemaVersion: 'compose-html-v1',
+};
 
 describe('ComposeEditor — Wave 6 (DEF-G) non-docx reference-only guard', () => {
   beforeEach(() => {
@@ -128,5 +138,58 @@ describe('ComposeEditor — Wave 6 (DEF-G) non-docx reference-only guard', () =>
 
     // F-2 "one reader" (task 013): no client-side reader is ever invoked, on either path.
     expect(docxToTipTapHtml).not.toHaveBeenCalled();
+  });
+});
+
+describe('ComposeEditor — FR-06 PDF import parity (task 051): sourceFormat admits the synthesized docx', () => {
+  beforeEach(() => {
+    docxToTipTapHtml.mockClear();
+  });
+
+  it('PDF-sourced mount (synthesized DOCX bytes + .pdf display name + sourceFormat="pdf"): renders EDITABLE, not reference-only', async () => {
+    // The server intake fork (task 050) returns a SYNTHESIZED docx (PK zip) whose display name still ends
+    // in .pdf. The editable gate must trust the bytes + the sourceFormat marker and admit it — the whole
+    // point of FR-06 parity. Without task 051 the .pdf extension routed this to reference-only.
+    renderEditor(
+      bufferFrom(DOCX_SIGNATURE),
+      { speDriveItemId: '', fileName: 'Corteva NDA (signed).pdf' },
+      EDITABLE_PROJECTION,
+      'pdf'
+    );
+
+    await screen.findByRole('textbox');
+    await waitFor(() => expect(screen.queryByTestId('compose-reference-only')).not.toBeInTheDocument());
+    expect(docxToTipTapHtml).not.toHaveBeenCalled();
+  });
+
+  it('sourceFormat="pdf" still trusts the BYTES: a non-docx buffer under a PDF marker stays reference-only (never editable over non-docx)', async () => {
+    // Defensive: sourceFormat==='pdf' skips the .pdf EXTENSION rejection but still requires real docx
+    // magic bytes (isDocxBytes) — a raw PDF buffer (server contract violation) must NOT mount editable.
+    renderEditor(
+      bufferFrom(PDF_SIGNATURE),
+      { speDriveItemId: '', fileName: 'raw.pdf' },
+      EDITABLE_PROJECTION,
+      'pdf'
+    );
+
+    const panel = await screen.findByTestId('compose-reference-only');
+    expect(panel).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(docxToTipTapHtml).not.toHaveBeenCalled();
+  });
+
+  it('a .pdf name WITHOUT a sourceFormat marker stays reference-only (un-intakeable PDF regression guard)', async () => {
+    // A PDF that the server could NOT intake (DI gate off / parse failure) never earns sourceFormat='pdf';
+    // even a coincidental PK-zip under a .pdf name is reference-only — admission is intake-door-gated.
+    renderEditor(
+      bufferFrom(DOCX_SIGNATURE),
+      { speDriveItemId: '', fileName: 'unintakeable.pdf' },
+      EDITABLE_PROJECTION,
+      null
+    );
+
+    const panel = await screen.findByTestId('compose-reference-only');
+    expect(panel).toBeInTheDocument();
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   });
 });

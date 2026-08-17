@@ -275,7 +275,15 @@ const NON_DOCX_EXTENSION = /\.(pdf|txt|rtf|doc|xlsx?|pptx?|csv|zip|md|html?|json
  *     bytes look like a ZIP (xlsx/pptx are ZIPs too).
  *  2. Otherwise, a real .docx must carry the OOXML ZIP local-file-header magic.
  */
-function isEditableDocx(bytes: ArrayBuffer, fileName: string | undefined): boolean {
+function isEditableDocx(bytes: ArrayBuffer, fileName: string | undefined, sourceFormat?: string | null): boolean {
+  // Task 051 (spaarkeai-compose-r7, FR-06 — PDF import parity): a PDF-sourced mount (sourceFormat==='pdf')
+  // is a server-SYNTHESIZED docx whose display fileName still ends in ".pdf" (e.g. "NDA.pdf"). The bytes ARE
+  // a real .docx (the server intake fork projected the PDF → canonical model → SynthesizeDocument), so trust
+  // the byte signature and do NOT let the .pdf extension route it to reference-only. sourceFormat is set ONLY
+  // when a server intake door (Load / Browse-project / Assistant-upload) successfully forked a PDF, so this
+  // admission is inherently limited to the intake doors — every OTHER non-docx (xlsx/pptx ZIP siblings, txt,
+  // and a raw un-intakeable .pdf that never earned a sourceFormat marker) still routes to reference-only.
+  if (sourceFormat === 'pdf') return isDocxBytes(bytes);
   if (fileName && NON_DOCX_EXTENSION.test(fileName.trim())) return false;
   return isDocxBytes(bytes);
 }
@@ -602,6 +610,14 @@ export interface ComposeEditorProps {
    * when the editor is mounted with no document.
    */
   documentRef?: ComposeEditorDocumentRef;
+
+  /**
+   * Task 051 (spaarkeai-compose-r7, FR-06 — PDF import parity): `'pdf'` when the mounted `docxBytes` were
+   * SYNTHESIZED server-side from a PDF (the intake fork on Load / Browse-project / Assistant-upload). The
+   * editor uses this to admit the mount as editable even though `documentRef.fileName` still ends in
+   * `.pdf` — the bytes are a real `.docx`. Null/undefined for a native docx mount (the common case).
+   */
+  sourceFormat?: string | null;
 
   /**
    * BFF base URL (host only, e.g. `https://host.azurewebsites.net`). Supplied
@@ -1856,6 +1872,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       importedComments,
       projection,
       documentRef,
+      sourceFormat,
       bffBaseUrl,
       sessionId = '',
       onDirtyChange,
@@ -2295,7 +2312,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // reference-only state. The editable DOCX path below is unchanged. Nothing
       // is editable here, so report dirty=false (no create-on-save for a
       // reference-only file).
-      if (!isEditableDocx(docxBytes, documentRef?.fileName)) {
+      if (!isEditableDocx(docxBytes, documentRef?.fileName, sourceFormat)) {
         editor.commands.setContent('<p></p>');
         dirtyRef.current = false;
         setReferenceOnly({ fileName: documentRef?.fileName });
