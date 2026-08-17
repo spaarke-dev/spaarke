@@ -4,7 +4,7 @@
     <title>Wire App Insights + Log Analytics for L2 — mutating endpoints audit-log actor tid (NFR-11)</title>
     <phase>C Wave C3 — L2 Control-Plane Scaffold</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>l2-controlplane tag + auth-adjacent (audit log carries actor tid claim from JWT) + NFR-11 auditable-operator-action compliance. task-create Step 3.5.5 FULL (l2-controlplane; NEW surface; downstream endpoints depend on structured logging + trace correlation).</rigor-reason>
     <model-tier>sonnet</model-tier>
