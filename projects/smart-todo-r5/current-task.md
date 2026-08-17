@@ -1,7 +1,7 @@
 # Current Task State — Smart To Do R5
 
-> **Last Updated**: 2026-08-17 (context-handoff before compaction)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5`, synced to master, all work committed+pushed through **`0347dc406`**.
+> **Last Updated**: 2026-08-17 (deploy pass complete; INBOUND fix in progress)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5`, all deploy-pass work committed+pushed through **`226ee6154`** (46 behind origin/master — not yet synced).
 
 ---
 
@@ -9,9 +9,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Core project 20/28 done + modal spine complete. Now in **UAT-fix + deploy** loop with the operator (live testing on spaarkedev1). |
-| **Status** | 4 UAT items + date-search fixed & committed. **Code Page (`sprk_smarttodo`) DEPLOYED** with the latest (inline filter + blended date-search). 3 deploys still pending (PCF, ribbon, workspace). |
-| **Next Action** | Run the remaining deploy pass (see "PENDING DEPLOYS"), starting with the **RegardingResolver PCF build fix** (pdfjs deep-import — see below). Then operator re-tests everything. |
+| **Phase** | Core project 20/28 + modal spine done. UAT-fix + deploy loop with operator. **All 3 pending deploys are now DONE.** Then a NEW blocker surfaced: the **INBOUND** event-sourced-todo bug (operator wants it resolved before wrap-up). |
+| **Status** | ✅ **Deploy pass COMPLETE** (2026-08-17): all 4 UAT items + date-search LIVE on spaarkedev1. Operator re-testing. Now implementing the **INBOUND** fix (BFF). |
+| **Next Action** | Implement the **INBOUND fix — Option A gated** (see "INBOUND" below). It's a BFF change (Path-A exception to BFF=N, operator-authorized). Branch is **46 behind origin/master** — consider Update-Only sync before/with the BFF work (TodoGenerationService.cs identical to master; DataverseServiceClientImpl.cs +43 on master, stub NOT yet throwing). |
+
+### ✅ DEPLOY PASS COMPLETE (2026-08-17) — all live on spaarkedev1
+1. **RegardingResolver PCF v1.4.9** (`bdc1b6c2e`) — **pdfjs TRUE FIX shipped**: switched `RegardingResolverApp.tsx` + `handlers/ResolverWriteHandler.ts` from the root `@spaarke/ui-components` barrel to per-module deep dist imports (PolymorphicPicker, PolymorphicResolverService, TodoRegardingUpdateBuilder, oobModalSizes). Bundle 2.2MB→60KB, builds clean, no pdfjs. Also ships UAT #2 Regarding Name display fix. Imported+published; footer `v1.4.9 • Built 2026-08-17`.
+2. **Matter ribbon** (temp-only, no repo change) — **live carrier is `MatterRibbons` v1.0.0.1, NOT `spaarke_insights`** (⚠️ repo's `spaarke_insights/.../sprk_Matter/RibbonDiff.xml` fix was against the wrong solution copy; both carry same button IDs, last-import-wins → MatterRibbons wins). Applied to live-exported MatterRibbons: 7 `.js` refs stripped (`sprk_wizard_commands.js`→`sprk_wizard_commands`, fixes #3 404), CreateTodo button icon → `sprk_ToDoCheckmark32/16.svg` + ModernImage (task 050). Verified both webresources exist. Backup: `c:\tmp\ribbon-matter\MatterRibbons.zip`. **Tasks 051/052 must target dedicated `*Ribbons` solutions, not spaarke_insights.**
+3. **SpaarkeAi code page `sprk_spaarkeai`** (`226ee6154`) — UAT #4: `todo.registration.ts` added `hideTitle:true` (framework flag, types.ts:89) to suppress the duplicate section-level "Smart To Do" title; widget's own PaneHeader is now the single title. Rebuilt (5.79MB single-file), deployed via temp-solution roundtrip (`sprksaicp1`, deleted after), deployed content verified (`hideTitle:!0` present, tail `</html>` intact, no truncation). Also ships todo.registration's 031/033 widget open-refresh.
+
+### 🔴 INBOUND — event-sourced To Do generation (from r3 RED-4 / DEF-1) — IN PROGRESS
+`notes/INBOUND-event-sourced-todo-generation-broken.md`. **Bug CONFIRMED current in code**: `TodoGenerationService.cs:334,478` (Rules 1 Overdue-events + 3 Deadline-proximity) call `_dataverse!.QueryEventsAsync` where `_dataverse` is the `IDataverseService` composite → `DataverseServiceClientImpl.QueryEventsAsync:1746-1747` is a **silent-empty stub** (LogWarning + `Array.Empty`). So those 2 rules produce ZERO To Dos. Real impl is on `IEventDataverseService`.
+**DECISION (2026-08-17): Option A — reroute, GATED** (operator: "which is the best more robust solution" → I chose; A fixes the root-cause mis-route vs B amputating the feature, and unblocks the r3 stub→throw).
+**Plan**: inject `IEventDataverseService` into `TodoGenerationService`; reroute Rules 1 & 3 to it; land behind a **default-OFF feature flag** (ADR-032 kill-switch) that logs a dry-run would-create count, so first-run volume/dedupe/notifications are validated before enabling. FULL rigor: BFF test obligation (`tests/unit/Sprk.Bff.Api.Tests/`), publish-size verify (≤60MB), CVE check, code-review + adr-check. **Path-A ADR/scope exception to BFF=N — document in PR** (operator authorized "resolve before completing"). Ping r3 hardening owner when done so stub→throw can proceed; file GH issue on Epic #427 (DEF-1).
 
 ### ✅ DONE + committed (this UAT session)
 - **UAT #1 filter → inline text search** (`e4cb780c4`): SearchFilter renders inline LEFT of the Filter pill (Header.tsx), no "Search" label, placeholder "Filter by name, description, assigned to...". Replaced the structured FilterPane (removed `FilterPane/`). **FR-07 Show-Completed toggle removed** (operator-accepted; defer-issue).
