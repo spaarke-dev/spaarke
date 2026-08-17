@@ -116,6 +116,7 @@ import {
   subscribeComposeAiToolbarActions,
 } from './ComposeAiToolbar';
 import { ComposeFindReplace } from './ComposeFindReplace';
+import { matchesDescribeChangeHotkey } from './composeHotkeys';
 import { ComposeCommentThread, type ComposeCommentPendingRange } from './ComposeCommentThread';
 import {
   AgreementReviewSummaryPanel,
@@ -2170,6 +2171,14 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       };
     }, [redlineClickAnchor]);
 
+    // FR-04 (task 060, UC-5) — the Ctrl+Space / Ctrl+/ "Describe a change" hotkey (registered in the
+    // editor's `editorProps.handleKeyDown` below) reaches its caret-scoped runner through this ref.
+    // The runner is a useCallback defined AFTER useEditor (it needs `promptForInstruction`), while
+    // editorProps closes over the initial render; a ref keeps the handler pointed at the CURRENT runner
+    // (same convention as commentThreadsRef / selectedThreadIdRef). `caretRunSeqRef` dedupes request ids.
+    const caretRunSeqRef = React.useRef(0);
+    const describeChangeAtCaretRef = React.useRef<(() => void) | null>(null);
+
     // ----- TipTap editor instance -----------------------------------------
     const editor = useEditor({
       // LOCKED Spike #1 set + the ADDITIVE R2 custom marks (task 031) + the R3 paraId identity
@@ -2263,6 +2272,17 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           }
           if (event.key === 'Escape' && findReplaceOpen) {
             setFindReplaceOpen(false);
+            return true;
+          }
+          // FR-04 (task 060, UC-5) — Ctrl+Space (primary) / Ctrl+/ (fallback) opens the shipped
+          // "Describe a change" instruction dialog for the CURRENT CARET/PARAGRAPH (no selection
+          // required). `matchesDescribeChangeHotkey` owns the IME guard (never fires mid-composition)
+          // + both bindings; the runner (`runDescribeChangeAtCaret`, reached via the fresh ref) reuses
+          // promptForInstruction + dispatches the same compose-rewrite-instruction Action — no parallel
+          // dialog (root §11). We `preventDefault` + return true so the space/slash never also types.
+          if (matchesDescribeChangeHotkey(event)) {
+            event.preventDefault();
+            describeChangeAtCaretRef.current?.();
             return true;
           }
           return false;
@@ -2618,6 +2638,57 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       instructionResolveRef.current = null;
       resolve?.(result);
     }, []);
+
+    // FR-04 (task 060, UC-5) — open "Describe a change" for the CURRENT CARET/PARAGRAPH (no selection),
+    // reached by the Ctrl+Space / Ctrl+/ hotkey registered in `editorProps.handleKeyDown` above. This is
+    // the keyboard-first sibling of `ComposeAiToolbar.handleActionClick` (selection-driven) and of
+    // `dispatchNoteToolRequest` (note-clause-driven): it resolves the enclosing textblock of the collapsed
+    // caret as the edit target, REUSES the shipped `promptForInstruction` dialog to collect the free-text
+    // instruction (no parallel dialog — root §11), and dispatches the SAME `compose-rewrite-instruction`
+    // Action routed to the DOCUMENT session so the result lands as an inline redline (DEF-09). The
+    // bindingId is read from the runtime-merged registry (`getComposeAiToolbarActions()`), so it no-ops
+    // cleanly while the Phase-4 catalog binding is unwired — mirroring the toolbar's own stub gate (it
+    // checks bindingId FIRST so an unwired tool never prompts the user for an instruction it can't run).
+    const runDescribeChangeAtCaret = React.useCallback(async (): Promise<void> => {
+      if (!editor || !enqueueComposeAction || !sessionId) return;
+      const action = getComposeAiToolbarActions().find(a => a.id === 'compose-rewrite-instruction');
+      if (!action?.bindingId) return; // not wired yet (Phase-4 catalog pending) — no-op (mirrors toolbar)
+      // Resolve the enclosing textblock (paragraph) of the collapsed caret as the edit target.
+      const $from = editor.state.selection.$from;
+      const blockStart = $from.start();
+      const blockEnd = $from.end();
+      const rawText = editor.state.doc.textBetween(blockStart, blockEnd, ' ');
+      const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
+      // Reuse the SHIPPED instruction dialog. Cancel/empty ⇒ abort (mirrors toolbar + note-tool paths).
+      const entered = await promptForInstruction(action);
+      if (!entered || !entered.trim()) return;
+      const instruction = entered.trim();
+      void enqueueComposeAction({
+        id: `${action.id}#caret-${(caretRunSeqRef.current += 1)}`,
+        bindingId: action.bindingId,
+        args: {
+          slots: {
+            selectionText,
+            selectionAnchorStart: blockStart,
+            selectionAnchorEnd: blockEnd,
+            documentSpeId: documentRef?.speDriveItemId,
+            documentRecordId: documentRef?.sprkDocumentId,
+            sessionId,
+            instruction,
+          },
+        },
+        // DEF-09: an in-editor EDIT action — route to the document session so the result materializes as
+        // an inline redline (independent of the registry's `materializesInEditor` flag, which the catalog
+        // seed may not preserve — same rationale as `dispatchNoteToolRequest`).
+        documentSessionId: sessionId,
+      }).catch(() => undefined);
+    }, [editor, enqueueComposeAction, sessionId, documentRef, promptForInstruction]);
+
+    // Keep the fresh runner reachable from the (initial-render-closed) editorProps.handleKeyDown, per the
+    // ref convention above (mirrors commentThreadsRef / selectedThreadIdRef assignment effects).
+    React.useEffect(() => {
+      describeChangeAtCaretRef.current = runDescribeChangeAtCaret;
+    }, [runDescribeChangeAtCaret]);
 
     // Task 041 (FR-11 batch reuse) — build + dispatch ONE note-tool request against `threadId`'s
     // LIVE clause span. This IS `runNoteTool`'s prior request-building body (round-8 #3/#4),

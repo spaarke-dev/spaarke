@@ -22,7 +22,7 @@
 | 041 | Save-state indicator + beforeunload + invariant/test update | 4 | ✅ | FULL | sonnet | high | ❌ spine | 040 | FR-03 |
 | 050 | Async `ProjectForMount` PDF fork (server) | 5 | ✅ | FULL | **opus** | high | ❌ spine/BFF | 001 | FR-06 |
 | 051 | Client PDF intake-door gates + env verify + parity | 5 | ✅ | FULL | sonnet | high | ❌ spine | 050 | FR-06 |
-| 060 | Ctrl+Space "Describe a change" at caret (IME-guarded) | 6 | 🔲 | FULL | sonnet | high | ❌ spine | 001 | FR-04 |
+| 060 | Ctrl+Space "Describe a change" at caret (IME-guarded) | 6 | ✅ | FULL | sonnet | high | ❌ spine | 001 | FR-04 |
 | 061 | Ctrl+Shift+Space focus chat — focusInput() + PaneEventBus | 6 | 🔲 | FULL | sonnet | high | ❌ spine/coord | 001 | FR-05 |
 | 070 | Blank page mounts editable | 7 | 🔲 | FULL | sonnet | high | ❌ spine | 001 | FR-08 |
 | 071 | Restore from Source no longer blanks | 7 | 🔲 | FULL | sonnet | **xhigh** | ❌ spine | 011 | FR-09 |

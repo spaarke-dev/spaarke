@@ -3,8 +3,8 @@
   <metadata>
     <title>Ctrl+Space opens "Describe a change" at the caret, IME-guarded (FR-04)</title>
     <phase>6 Hotkeys (UC-5)</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>passed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .tsx keydown handling with an IME edge case; frontend behavior with a known failure mode.</rigor-reason>
     <model-tier>sonnet</model-tier>

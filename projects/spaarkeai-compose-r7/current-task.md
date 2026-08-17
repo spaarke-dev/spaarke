@@ -11,9 +11,12 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **050 ✅ + FR-11 ✅ + 051 ✅ COMPLETE** — Phase 5 (PDF Import Parity / UC-7) code-complete. Next: **060** (Ctrl+Space "Describe a change") |
-| **Step** | 051 implemented + gated (code-review + adr-check PASS); 622 standalone jest green (+3 CI-only gate tests); commit pending this turn |
-| **Next Action** | Execute **060** (Ctrl+Space describe-change, sonnet@high) → 061 → 070 → 071 → 072 → 074 → 090. |
+| **Task** | **060 ✅ COMPLETE** (Ctrl+Space "Describe a change" at caret, FR-04). Phase 6 hotkeys in progress. Next: **061** (Ctrl+Shift+Space focus chat) |
+| **Step** | 060 implemented + gated (code-review + adr-check PASS); 634 standalone jest green (+12 predicate tests); +3 CI-only editor tests; committed. |
+| **Next Action** | Execute **061** (Ctrl+Shift+Space focus chat — add focusInput() to ISprkChatInputHandle + PaneEventBus; **/conflict-check ConversationPane/SprkChatInput vs assistant-r3** before PR) → 070 → 071 → 072 → 074 → 090. |
+
+### Task 060 — what shipped (see notes/task-060-notes.md)
+Ctrl+Space (primary) / Ctrl+/ (fallback) opens the shipped "Describe a change" dialog at the CURRENT CARET/PARAGRAPH (no selection). NEW pure `composeHotkeys.ts` (`matchesDescribeChangeHotkey`, IME-guarded via `isComposing` + legacy `keyCode 229`) — extracted so the IME guard is standalone-testable. `ComposeEditor.tsx`: hotkey branch in the existing `editorProps.handleKeyDown` (the Ctrl+F seam) → `runDescribeChangeAtCaret` resolves the caret's enclosing textblock (`$from.start()..end()`), reuses `promptForInstruction` (no parallel dialog — §11), dispatches the same `compose-rewrite-instruction` Action to the document session (inline redline, DEF-09); bindingId-first gate mirrors the toolbar; stale-closure handled via `describeChangeAtCaretRef`. **Both bindings wired** (macOS Cmd+Space = Spotlight → effective binding is Cmd+/). ComposeAiToolbar.tsx intentionally NOT modified (directional deviation recorded). No BFF bytes. 634 standalone jest / 0 fail.
 
 ### Task 051 — what shipped (see notes/task-051-notes.md)
 Client PDF intake-door parity. **Root cause was bigger than "add .pdf to accept"**: r6 wired the sourceFormat reducer/save-routing/banner, but `ComposeEditor.isEditableDocx` still rejected any `.pdf` fileName → even the r6 Load PDF path routed to reference-only. Fix: made `isEditableDocx(bytes, fileName, sourceFormat?)` **sourceFormat-aware** (trust bytes when `sourceFormat==='pdf'`) + threaded a `sourceFormat` prop to ComposeEditor — fixes Load + Browse + Upload **uniformly**. Browse/Upload handlers parse `sourceFormat` → `mountTransient` (reducer no longer hardcodes null); Browse `accept` admits `.pdf`. 622 standalone jest + 3 CI-only gate tests + 1 reducer test. **HONEST env note**: the live PDF→editable→analysis→response→save UAT needs a DI-enabled env (task 001: live gate value unverifiable from this session) → operator-run; code + automated tests complete; escalation trigger did NOT fire (gate state unknown, not confirmed-off; degrades gracefully).
