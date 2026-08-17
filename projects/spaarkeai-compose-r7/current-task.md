@@ -1,9 +1,9 @@
 # Current Task State — spaarkeai-compose-r7
 
-> **Last Updated**: 2026-08-17 (context-handoff — Phases 6+7 COMPLETE: 060/061/070/071/072/074 all committed; 19/20 done; ONLY 090 wrap-up remains)
+> **Last Updated**: 2026-08-17 (task 090 IN PROGRESS — pre-deploy steps 0–5 DONE + committed; STOPPED at the irreversible deploy/merge boundary awaiting owner go/no-go)
 > **Recovery**: Read "Quick Recovery" first
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
-> **Git**: master MERGED (HEAD `9aaf695c8` merge; resolved DataverseWebApiService.cs conflict — RED-4 dead-code deletion took master side, my UpsertAsync lives in DataverseServiceClientImpl/interface; 1124 Compose tests green post-merge). Branch current with master.
+> **Git**: 0 behind master; 42+ ahead; **13 commits unpushed** (branch never pushed this session). Working tree clean.
 
 ---
 
@@ -11,9 +11,23 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **074 ✅ COMPLETE** (FR-12). **ALL FEATURE TASKS DONE — 19/20.** Only **090 wrap-up** remains. |
-| **Step** | 074 Item 1 (ApiError-typed 404) shipped; Item 2 (If-Match) resolved §6.5 Path A (owner-approved) + DEF-001/#776 filed. Checkpoint for /compact. |
-| **Next Action** | Execute **090 wrap-up** (final task): deploy BFF + `sprk_spaarkeai` together (NFR-05, never from a net8 tree), `/test-diet`, docs/README refresh, `/worktree-sync` push + **merge-to-master (deferred here by project decision)**, archive. Cite the documented exceptions in the wrap-up PR (see below). |
+| **Task** | **090 wrap-up — IN PROGRESS.** Pre-deploy steps 0–5 complete. Steps 6 (deploy+merge) and 7–9 (README/plan/lessons/TASK-INDEX→✅) NOT done — they follow the deploy. |
+| **Step** | ⛔ STOPPED before step 6 (anti-clobber deploy + merge-to-master) — irreversible; owner authorization + live env required. |
+| **Next Action** | Owner decides go/no-go on: (1) `/conflict-check` + **deploy BFF + `sprk_spaarkeai` together** (NFR-05, never from net8, publish ≤60 MB); (2) `/worktree-sync` push the 13 commits + **merge-to-master** (deferred here by project decision). THEN steps 7–9: README→Complete, plan ✅, lessons-learned, TASK-INDEX 090→✅. |
+
+### ✅ Task 090 pre-deploy work DONE this session (all committed, unpushed)
+- **Step 1 (code-review + adr-check)**: ran holistic review via 2 background agents (server C# / client TS). Fixed 1 CRITICAL + 1 WARNING:
+  - CRITICAL `fd8bc350b` — CS0535 build break: task-013 missed `UpsertAsync` on `FakeGenericEntityService` in the SEPARATE `Sprk.Bff.Api.IntegrationTests` project (hidden because the unit suite compiled green). Stub added (throws NotImplementedException per that fake's convention); integration project now builds **0 errors** (verified).
+  - WARNING `4691d992d` — task-061 focus-steal on mount: `SprkChat` consume-effect fired on first render (`focusInputSignal=0 !== undefined`). Fixed by baselining `lastFocusSignalRef` to the mount-time nonce; only a later bump fires.
+- **Steps 2/4/5 (docs commit)** `<see git log>` — test-diet report (CLEAN: 37 files all MAINTAIN, 0 scaffolding); `docs/architecture/COMPOSE-EDITOR-UX.md` (new durable UX-layer doc + cross-link); **DEF-002/#777** fidelity-wideners home = fast-follow `spaarkeai-compose-fidelity-wideners-r1`.
+- **Step 3 (repo-cleanup)**: scan clean — no stray artifacts.
+- **Non-blocking review notes for the wrap-up PR / owner disposition** (NOT fixed — all pre-existing-shape or documented): server WARNING #2 (promote catch treats all upsert failures as races — pre-existing shape, not R7 regression); suggestions: inaccurate XML remark `IGenericEntityService.cs:26`, PdfIntake marker-string coupling to Azure wording, client↔server `ResolveFileName` drift risk, localStorage quota gap for very large drafts, 6-char fork-token collision window. All graceful/documented.
+
+### ⚠️ Documented exceptions to CITE in the 090 wrap-up PR description
+1. **074 §6.5 Path A** (apply-template no client If-Match; residual TOCTOU recoverable via SPE version history) — `notes/task-074-notes.md`; follow-up **DEF-001 / GitHub #776**.
+2. **041 "no autosave" invariant flip** (client-only autosave; NO automatic SERVER save — NFR-03) — ADR-Tensions Path A.
+3. **050 ProjectForMount async** (ADR-007/013 sync→async for the PDF fork — NFR-04) — ADR-Tensions Path A.
+4. **DEF-002 / #777** — fidelity-wideners fast-follow home (spec Owner-Clarification resolved at wrap-up).
 
 ### 🟢 THIS SESSION (Phase 6 + Phase 7 — all feature tasks completed). Recent commits (newest first):
 - **074** finalize `bfff3cc35` (§6.5 Path A + DEF-001/#776) · 074 Item 1 `3faba8c1b` (ApiError-typed 404, dead response.ok removed)
