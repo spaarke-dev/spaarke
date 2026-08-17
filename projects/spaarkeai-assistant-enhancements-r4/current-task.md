@@ -10,9 +10,29 @@
 | Field | Value |
 |---|---|
 | **Project** | spaarkeai-assistant-enhancements-r4 — **EXECUTION STARTED 2026-08-15** (owner ran `/task-execute` + "parallel + autonomous where safe") |
-| **Task** | ✅ **021a COMPLETE** (BFF grounded proposer, FR-04). ✅ **12 of 17 done**. **NEXT: 021b** (client typed two-kind chip render, sonnet/high). |
-| **Status** | 021a done + committed locally: retired ungrounded generator; AssistantSuggestionService.SuggestForConversationAsync + typed SuggestedFollowup + ParseFollowups; FilterByContextTypes union pre-filter; two-kind action JSON; typed `suggestions` SSE event. 27/27 tests; publish 44.97 MB (Δ+0.01); CVE clean; Step 9.5 CLEAN (independent ADR-039 review, no Critical, W1 fixed). **NOT pushed; PR HELD.** |
-| **Next Action** | **021b** — render the typed two-kind chip family. **Wire contract LOCKED in [`notes/021-grounded-suggestions-design-delta.md` §9a](notes/021-grounded-suggestions-design-delta.md)** (capability→Click-path dispatch by targetBindingId; question→re-send label; action→special-route by actionId; one chip family, arrow=capability/action, no-arrow=question). Client files: SprkChatSuggestions.tsx + SprkChat.tsx handleSuggestionSelect. `/conflict-check` (SprkChat hot-path, compose-r5/r6). |
+| **Task** | 🔄 **021b RECON DONE, impl pending** (client typed two-kind chip render, sonnet/high FULL). ✅ **12 of 17 done** (021a committed `068a81f9e`). **Checkpointed for a fresh session — 021b plan LOCKED below.** |
+| **Status** | 021a ✅ committed local (`068a81f9e`; 7 unpushed, PR HELD). 021b: `/conflict-check` = **soft pass** (no open PR touches SprkChat/shared-UI/SpaarkeAi). Recon resolved the shared-lib↔host boundary + SSE-parse location (see **021b IMPLEMENTATION PLAN**). Stopping here to avoid mid-surgery context exhaustion (021b = 6-7 files incl. two 2000-3000-line files). |
+| **Next Action** | Execute **021b** per the **021b IMPLEMENTATION PLAN** block below. Start: evolve the typed suggestion shape in `SprkChat/types.ts` + `useSseStream.ts` extractSuggestions. |
+
+---
+
+## 021b IMPLEMENTATION PLAN (recon 2026-08-17 — LOCKED, ready to execute)
+
+**Wire contract from 021a** = design-delta **§9a**: SSE `type:"suggestions"`, `data.suggestions: FollowupItem[]` where `FollowupItem = { kind: "capability"|"question"|"action"; label; targetBindingId?; actionId? }` (nulls serialized; camelCase). Order server-authored: action→capability→question. Empty events not emitted.
+
+**KEY ARCHITECTURAL BOUNDARY (resolved):** `SprkChatSuggestions` + `SprkChat` + `useSseStream` are **host-agnostic shared lib** (`@spaarke/ui-components`, ADR-012) — they know only `string[]` + `onSelect(text)` today. The bindingId **Click-path dispatch lives in SpaarkeAi** (`ConsumerChips.tsx`/`dispatchConsumer`/`agreementReviewRouting.ts`), a SEPARATE surface (the design-delta §4 "two chip systems"). So the capability dispatch must cross the boundary via a **new callback prop** the host (SpaarkeAi ConversationPane) wires — the shared lib must NOT import dispatchConsumer.
+
+**Exact files + changes:**
+1. **`SprkChat/types.ts`** (2306 ln): add `SprkChatFollowup` type (`{ kind:'capability'|'question'|'action'; label:string; targetBindingId?:string; actionId?:string }`). Evolve `ISprkChatSuggestionsProps.suggestions` (:1628), the SprkChat prop `suggestions` (:1958), and the SSE event data type `suggestions` (:290/307) from `string[]` → `SprkChatFollowup[]`. Add a new callback prop on the SprkChat props: `onCapabilitySelect?: (bindingId: string) => void` (host wires to dispatchConsumer). Keep `onSuggestionSelect`/`onSend` for question.
+2. **`hooks/useSseStream.ts`** (:130-142 `extractSuggestions`, :425 the `suggestions` branch): parse `data.suggestions` as `SprkChatFollowup[]` (objects) instead of filtering strings. Drop any item without a `kind` (untyped = never rendered — AC). Keep best-effort.
+3. **`SprkChatSuggestions.tsx`** (184 ln): render ONE chip family, TWO variants by `kind` (structural): capability/action = bordered + trailing **→** (InteractionTag can hold a secondary/icon slot — use a trailing arrow glyph via tokens, NOT a hardcoded color); question = lighter pill, NO arrow. Imperative labels already server-authored. Remove the `[action:*]` string-strip (:155) — actionId is now typed. onSelect passes the typed item (change `onSelect: (text)` → `onSelect: (item: SprkChatFollowup)`), OR keep onSelect(label) + add the kind via a parallel arg. Cleanest: `onSelect(item: SprkChatFollowup)`.
+4. **`SprkChat.tsx`** `handleSuggestionSelect` (:1583-1600): branch on `item.kind` — `capability` → `onCapabilitySelect?.(item.targetBindingId!)`; `question` → send `item.label` as a message (existing onSend path); `action` → the existing upload/search/select routing keyed off `item.actionId` (replaces the `[action:upload]`.startsWith checks at :1585/1591/1595). Render call at :2792-2796 passes typed suggestions.
+5. **SpaarkeAi ConversationPane** (`src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`): wire `onCapabilitySelect={bindingId => dispatchConsumer(...)}` — reuse the SAME dispatch ConsumerChips use (find it in useConsumerChips.tsx/ConsumerChips.tsx — the bindingId Click-path). This is the ONLY host-side wiring; do NOT rebuild ConsumerChips.
+6. **`docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md`**: add the action-chip-vs-question-chip sub-distinction (arrow=acts, no-arrow=asks; structural kind; label grammar).
+7. **Tests**: `SprkChat/__tests__/SprkChatSuggestions.test.tsx` + `suggestionsIntegration.test.tsx` — capability renders arrow variant + fires onCapabilitySelect(bindingId); question renders no-arrow + sends text; action fires the actionId route; an item with no `kind` does NOT render (negative). Build: `npm run build` for the shared lib + SpaarkeAi (NOT build:prod — that's PCF-only, per project CLAUDE.md). Lint. No `--chrome` needed (unit/RTL).
+
+**Gotchas:** ADR-021 tokens-only (arrow via a Fluent glyph/token, no hardcoded color); ADR-022 React-16-safe APIs; host-agnostic — shared lib must not import SpaarkeAi/dispatchConsumer (callback seam only); NFR-09 don't regress other SprkChat consumers (the `suggestions` prop shape change is breaking → check ALL SprkChat consumers, e.g. full-page/widget hosts, for the `suggestions=`/`onSelect=` call sites and update them). **MERGE-ORDER GATE (021a review W2): 021b deploys WITH 021a at task 080 — the SSE wire changed string[]→typed.** `/conflict-check` again before the PR.
+
 
 ---
 
