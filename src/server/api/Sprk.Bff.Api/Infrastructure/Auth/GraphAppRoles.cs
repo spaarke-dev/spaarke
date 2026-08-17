@@ -105,6 +105,7 @@ public static class GraphAppRoles
     // Email / Communication
     private const string IdMailRead = "810c84a8-4a9e-49e6-bf7d-12d183f40d01";
     private const string IdMailReadWrite = "e2a3a72e-5f79-4c64-b1b1-878b674786c9";
+    private const string IdMailSend = "b633e1c5-b582-4048-a93e-9f11b44c7e96";
 
     // Self-Service Registration subsystem — sourced pre-r1 from
     // scripts/Setup-EntraInfrastructure.ps1:78-80.
@@ -163,7 +164,7 @@ public static class GraphAppRoles
             "Email / Communication", "App-only inbound mail read for email-to-document automation.", true),
         new GraphAppRole(MailReadWrite, "Read and write mail in all mailboxes", IdMailReadWrite,
             "Email / Communication", "App-only mail read/write for processing + categorization.", true),
-        new GraphAppRole(MailSend, "Send mail as any user", null,
+        new GraphAppRole(MailSend, "Send mail as any user", IdMailSend,
             "Email / Communication", "App-only outbound send for system notifications + communications.", true),
         new GraphAppRole(MailboxSettingsRead, "Read all users' mailbox settings", null,
             "Email / Communication", "App-only mailbox settings read (time zone / working hours) for scheduling.", true),
