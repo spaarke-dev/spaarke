@@ -1680,6 +1680,40 @@ public static class ComposeEndpoints
             logger.LogWarning(ex, "Compose save: patch-engine refusal ({Kind}). TraceId={TraceId}", ex.Kind, httpContext.TraceIdentifier);
             return MapPatchException(ex, httpContext);
         }
+        catch (InvalidOperationException ex) when (
+            ex.Message.Contains("Found multiple records", StringComparison.OrdinalIgnoreCase)
+            || ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
+            || (ex.Message.Contains("sprk_graphitemid", StringComparison.OrdinalIgnoreCase)
+                && ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase)))
+        {
+            // Prod-safety hardening (post-R7 #1): the FR-07(d) atomic upsert on the sprk_graphitemid_uk
+            // alternate key fails in two environment-integrity conditions the code cannot self-heal:
+            //   (a) the key index is not Active (build Failed) -> "not defined as keys" / "(Not Active)"
+            //   (b) the environment carries duplicate sprk_document rows for one graphitemid -> resolve
+            //       finds "Found multiple records".
+            // Both previously fell through to the opaque 500 below ("Save failed: InvalidOperationException:
+            // ..."). Map to an HONEST, actionable ProblemDetails instead. The SPE version already persisted
+            // (only the sprk_document row upsert failed) so edits are NOT lost -- the user can retry once an
+            // administrator reconciles the data / reactivates the key.
+            var keyInactive = ex.Message.Contains("not defined as keys", StringComparison.OrdinalIgnoreCase)
+                || ex.Message.Contains("Not Active", StringComparison.OrdinalIgnoreCase);
+            logger.LogError(ex,
+                "Compose save: sprk_document identity-key fault (keyInactive={KeyInactive}). TraceId={TraceId}",
+                keyInactive, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: keyInactive ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status409Conflict,
+                title: "Document identity unavailable",
+                detail: keyInactive
+                    ? "This document couldn't be saved because the document-identity index (sprk_graphitemid_uk) " +
+                      "is not active in this environment. An administrator needs to reactivate it. Your edits " +
+                      "were not lost — retry once it's resolved."
+                    : "This document couldn't be saved because it has duplicate identity records in this " +
+                      "environment. An administrator needs to reconcile the duplicate documents. Your edits " +
+                      "were not lost — retry once it's resolved.",
+                type: keyInactive
+                    ? "https://tools.ietf.org/html/rfc7231#section-6.6.4"
+                    : "https://tools.ietf.org/html/rfc7231#section-6.5.8");
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Compose save: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
