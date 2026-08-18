@@ -162,8 +162,14 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
     let cancelled = false;
     void (async () => {
       try {
+        // The SpaarkeAi/LegalWorkspace code page runs in an iframe where Xrm lives on the PARENT/TOP
+        // window, not the iframe's own globalThis — use the SAME fallback every other SpaarkeAi Xrm
+        // consumer uses (WorkspacePane, ManageWorkspacesPane, usePlaybookOptions, main.tsx). Reading only
+        // globalThis.Xrm returned undefined here → the BU container never resolved → a false "no storage
+        // container configured" save error even when the BU has one (UAT 2026-08-18).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (globalThis as any).Xrm;
+        const w = window as any;
+        const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm;
         const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
         const webApi = xrm?.WebApi;
         if (!rawUserId || !webApi) return; // no Dataverse host — create-on-save container unavailable
