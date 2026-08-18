@@ -105,7 +105,7 @@ Two additional corrections independently caught by task-gen subagents:
 | 049 | ✅ | Implement H6 solution import via Package Deployer (8 solutions) | H6 | FULL | sonnet / high | waveC4-parallel | 012 |
 | 050 | ✅ | Implement H7 Dataverse env-var values (5 hard-required per design.md §10.2 reconciliation; 7 total) | H7 | FULL | sonnet / high | Batch 3E parallel | 036 |
 | 051 | ✅ | Implement H8 SPE container-type + root container (confidential-client per T6; canonical `SPE-ContainerTypeId` KV name) | H8 | FULL | sonnet / xhigh | Batch 3E parallel | 011 |
-| 052 | ⏸ | Implement H9 BFF deploy (blue-green slot swap) | H9 | FULL | sonnet / xhigh | none (dep 047 — needs KV ready) | 013, 047 |
+| 052 | ✅ | Implement H9 BFF deploy (blue-green slot swap) | H9 | FULL | sonnet / xhigh | none (dep 047 — needs KV ready) | 013, 047 |
 | 053 | ✅ | Implement H10 Dataverse App User + Graph app-role parity (T2 + T3 owner; 2 App Users incl. BffAppReg system user) | H10 | FULL | sonnet / xhigh | Batch 3E parallel | 005, 015 |
 | 054 | ✅ | Implement H11 user provisioning (identity preset per D6; NativeAccount + B2BGuest as alternative branches per Path C) | H11 | FULL | sonnet / high | Batch 3F parallel | 036 |
 | 055 | ⏸ | Implement H13 E2E acceptance-gate (ALL 6 T1-T6 traps + ALL 5 I1-I5 invariants + naming-conformance + cost envelope) | H13 | FULL | sonnet / xhigh | none (dep 041-054 + 064-067 + 070-073) | ALL C4 + C6 + C' handlers |
@@ -146,7 +146,7 @@ Two additional corrections independently caught by task-gen subagents:
 |---|---|---|---|---|---|---|
 | 075 | 🔲 | Author `/provision-environment` skill at `.claude/skills/provision-environment/SKILL.md` (Sub-Agent Write Boundary — MAIN-SESSION-ONLY) | STANDARD | opus / high | none (parallel-safe:false) | 057 |
 | 076 | 🔲 | Author fallback matrix impl in `/provision-environment` skill (MCP disconnect handling) | MINIMAL | sonnet / medium | none (parallel-safe:false; touches `.claude/skills/**`) | 075 |
-| 077 | 🔲 | Implement per-tenant token-metering layer (D19 — APIM OR app-level custom App Insights metric) | FULL | opus / high | none (dep Phase A decision) | 001-008 (Phase A) |
+| 077 | ✅ | Implement per-tenant token-metering layer (D19 — APIM OR app-level custom App Insights metric) — chose **app-level** (extends existing observability shipped by ai-architecture-redesign-r1 task 054; adds `TenantBudgetPolicy` + `InMemoryTenantTokenLedger` enforcement seam on `OpenAiClient`); build 0/0, 20/20 metering tests pass, publish 44.96 MB (Δ 0.00), CVE clean | FULL | opus / high | none (dep Phase A decision) | 001-008 (Phase A) |
 | 078 | ⏸ | Verify `POST /api/onboarding/consent-callback` E2E with actual Model 2 admin-consent flow | FULL | sonnet / high | none (dep 042, 057) | 042, 057 |
 
 ### Phase E — DemoExpirationService Migration (3 tasks) — parallel with C/C'/D

@@ -9,6 +9,7 @@ using Polly;
 using Polly.CircuitBreaker;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Resilience;
+using Sprk.Bff.Api.Services.Ai.Metering;
 using ResilenceCircuitState = Sprk.Bff.Api.Infrastructure.Resilience.CircuitState;
 
 namespace Sprk.Bff.Api.Services.Ai;
@@ -47,6 +48,8 @@ public class OpenAiClient : IOpenAiClient
     private readonly ICircuitBreakerRegistry? _circuitRegistry;
     private readonly ResiliencePipeline _circuitBreaker;
     private readonly Sprk.Bff.Api.Telemetry.AiTelemetry? _aiTelemetry;
+    private readonly ITenantBudgetPolicy? _tenantBudgetPolicy;
+    private readonly ITenantTokenLedger? _tenantTokenLedger;
 
     // Circuit breaker configuration (Task 072)
     private const int FailureThreshold = 5;       // Open after 5 failures
@@ -54,16 +57,28 @@ public class OpenAiClient : IOpenAiClient
     private const double FailureRatio = 0.5;      // 50% failure ratio to trip
     private const int MinimumThroughput = 5;      // Minimum calls before tripping
 
+    // Per-tenant metering — cost estimation constants (customer-provisioning-orchestration-r1
+    // task 077 / spec.md FR-13 §M1). Conservative default (gpt-4o rates per notes/pricing-
+    // research-2026-08-12.md §2); over-estimates cost = under-estimates budget headroom = safer
+    // for gating (Model 1 tenants trip the gate slightly earlier than actual spend). Model-specific
+    // pricing tables are a future evolution (not required for SC #13 acceptance).
+    private const decimal DefaultInputCostPer1MTokensUsd = 2.50m;   // gpt-4o input list rate
+    private const decimal DefaultOutputCostPer1MTokensUsd = 10.00m; // gpt-4o output list rate
+
     public OpenAiClient(
         IOptions<DocumentIntelligenceOptions> options,
         ILogger<OpenAiClient> logger,
         ICircuitBreakerRegistry? circuitRegistry = null,
-        Sprk.Bff.Api.Telemetry.AiTelemetry? aiTelemetry = null)
+        Sprk.Bff.Api.Telemetry.AiTelemetry? aiTelemetry = null,
+        ITenantBudgetPolicy? tenantBudgetPolicy = null,
+        ITenantTokenLedger? tenantTokenLedger = null)
     {
         _options = options.Value;
         _logger = logger;
         _circuitRegistry = circuitRegistry;
         _aiTelemetry = aiTelemetry;
+        _tenantBudgetPolicy = tenantBudgetPolicy;
+        _tenantTokenLedger = tenantTokenLedger;
 
         var endpoint = new Uri(_options.OpenAiEndpoint);
         var credential = new AzureKeyCredential(_options.OpenAiKey);
@@ -139,6 +154,7 @@ public class OpenAiClient : IOpenAiClient
         int? maxOutputTokens = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
@@ -210,6 +226,7 @@ public class OpenAiClient : IOpenAiClient
         int? maxOutputTokens = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
@@ -274,6 +291,7 @@ public class OpenAiClient : IOpenAiClient
         string mediaType,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var deploymentName = _options.ImageSummarizeModel ?? _options.SummarizeModel;
         var chatClient = _client.GetChatClient(deploymentName);
 
@@ -349,6 +367,7 @@ public class OpenAiClient : IOpenAiClient
         string mediaType,
         CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var deploymentName = _options.ImageSummarizeModel ?? _options.SummarizeModel;
         var chatClient = _client.GetChatClient(deploymentName);
 
@@ -416,6 +435,7 @@ public class OpenAiClient : IOpenAiClient
         int? dimensions = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var deploymentName = model ?? _options.EmbeddingModel;
         var embeddingDimensions = dimensions ?? _options.EmbeddingDimensions;
         var embeddingClient = _client.GetEmbeddingClient(deploymentName);
@@ -469,6 +489,7 @@ public class OpenAiClient : IOpenAiClient
         int? dimensions = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var textList = texts.ToList();
         var deploymentName = model ?? _options.EmbeddingModel;
         var embeddingDimensions = dimensions ?? _options.EmbeddingDimensions;
@@ -529,6 +550,7 @@ public class OpenAiClient : IOpenAiClient
         int? maxOutputTokens = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
@@ -613,18 +635,99 @@ public class OpenAiClient : IOpenAiClient
     private void RecordExecutorTokenUsage(ChatCompletion completion, string deploymentName)
     {
         var usage = completion?.Usage;
-        if (usage is null || _aiTelemetry is null)
+        if (usage is null)
         {
             return;
         }
 
-        _aiTelemetry.RecordMeteredTokens(
+        // (1) existing observability path — post-call metering emission (task 054, unchanged)
+        _aiTelemetry?.RecordMeteredTokens(
             tenantId: null,   // resolved from AiMeteringContext.Current
             userId: null,
             inputTokens: usage.InputTokenCount,
             outputTokens: usage.OutputTokenCount,
             source: "executor",
             model: deploymentName);
+
+        // (2) NEW post-call ledger accrual — customer-provisioning-orchestration-r1 task 077 (D19).
+        // Feeds the pre-call gate in TenantBudgetPolicy without a separate MeterListener plumbing.
+        // No-ops when: (a) no ledger injected (tests); (b) no ambient tenant scope
+        // (defensive — cannot attribute what we can't identify).
+        AccrueSpendToLedger(usage.InputTokenCount, usage.OutputTokenCount);
+    }
+
+    /// <summary>
+    /// Convert observed token counts to a conservative USD estimate and add to the per-tenant
+    /// month-to-date ledger. Tenant identity comes from the ambient
+    /// <see cref="Sprk.Bff.Api.Telemetry.AiMeteringContext.Current"/> scope (same source the
+    /// observability path uses via <see cref="Sprk.Bff.Api.Telemetry.AiTelemetry.RecordMeteredTokens"/>).
+    /// Fail-open: any exception is caught + logged; execution proceeds unchanged.
+    /// </summary>
+    /// <remarks>
+    /// r1 MVP uses gpt-4o list pricing as a single conservative rate for all models — over-estimates
+    /// spend for gpt-4o-mini calls, which is intentional (safer gating). Per-model pricing tables
+    /// are a future evolution (task 077 deviation entry cites this).
+    /// </remarks>
+    private void AccrueSpendToLedger(long inputTokens, long outputTokens)
+    {
+        if (_tenantTokenLedger is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var tenantId = Sprk.Bff.Api.Telemetry.AiMeteringContext.Current?.TenantId;
+            if (string.IsNullOrWhiteSpace(tenantId))
+            {
+                return;
+            }
+
+            var inputUsd = inputTokens > 0 ? (decimal)inputTokens / 1_000_000m * DefaultInputCostPer1MTokensUsd : 0m;
+            var outputUsd = outputTokens > 0 ? (decimal)outputTokens / 1_000_000m * DefaultOutputCostPer1MTokensUsd : 0m;
+            var totalUsd = inputUsd + outputUsd;
+
+            if (totalUsd > 0m)
+            {
+                _tenantTokenLedger.AddSpend(tenantId, totalUsd);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Fail-open per §11 rationale: enforcement must not break observability. Log and move on.
+            _logger.LogWarning(ex, "Failed to accrue tenant token spend to ledger (fail-open — call proceeds).");
+        }
+    }
+
+    /// <summary>
+    /// Pre-call budget gate — invoked at the top of every completion / streaming / embedding
+    /// method. When the ambient tenant is Model 1 gated AND over their monthly USD cap, throws
+    /// <see cref="TenantBudgetExceededException"/> BEFORE consuming any OpenAI TPM headroom
+    /// (spec.md FR-13 §M1 + SC #13). Fail-open on internal errors — the gate is a safety net,
+    /// observability is authoritative (see rationale in
+    /// <c>projects/customer-provisioning-orchestration-r1/notes/per-tenant-metering-impl-2026-08-17.md</c>).
+    /// </summary>
+    private void EnsureTenantUnderBudget()
+    {
+        if (_tenantBudgetPolicy is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _tenantBudgetPolicy.EnsureUnderBudget();
+        }
+        catch (TenantBudgetExceededException)
+        {
+            // Intentional — this is the 429 signal to the endpoint layer. Re-throw unmodified.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Any other failure = fail-open. Log and let the call proceed.
+            _logger.LogWarning(ex, "Tenant budget policy check failed unexpectedly (fail-open — call proceeds).");
+        }
     }
 
     /// <summary>
@@ -655,6 +758,7 @@ public class OpenAiClient : IOpenAiClient
         string deploymentName,
         CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var chatClient = _client.GetChatClient(deploymentName);
 
         var chatOptions = new ChatCompletionOptions
@@ -792,6 +896,7 @@ public class OpenAiClient : IOpenAiClient
         float? temperature = null,
         CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var isReasoning = IsReasoningDeployment(deploymentName, _options.ReasoningModel);
@@ -905,6 +1010,7 @@ public class OpenAiClient : IOpenAiClient
         int? maxOutputTokens = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        EnsureTenantUnderBudget();
         var deploymentName = model ?? _options.SummarizeModel;
         var effectiveMaxTokens = maxOutputTokens ?? _options.MaxOutputTokens;
         var chatClient = _client.GetChatClient(deploymentName);
