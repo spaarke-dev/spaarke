@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Governed narrow-allow-list preference-producer → pre-turn tool hint (FR-09)</title>
+    <phase>3 — E3 feedback→memory loop</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-17 (opus/xhigh, FULL — the injection-defense boundary). Design: the ONE sanctioned seam where a
+         LEARNED preference biases behavior, bounded to be injection-safe. NEW static PreferenceDirectiveProducer
+         (Services/Ai/Context/, pure function mirroring StatedProfileRenderer): a CLOSED allow-list of named directives
+         (task-agenda-default, daily-briefing-default) is matched by DETERMINISTIC ordinal marker-containment (no LLM, no
+         classifier) against the caller's CONFIRMED Preference facts; a match emits a FIXED SERVER-AUTHORED hint that biases
+         the DEFAULT of an ALREADY-AVAILABLE capability. Wired as a 4th sibling userFragment producer on ContextBinder
+         (ResolvePreferenceDirectiveFragmentAsync, reads IMemoryItemStore.GetForUserAsync, soft-fails to null). THE BOUNDS:
+         (1) PROMPT-ONLY — the hint folds into the userFragment; it NEVER touches AgentToolFilterContext (the mount set stays
+         preference-blind; proven — the two structural-invariant tests stay at 7 members, NO 032 member added → a preference
+         reaches the grounding filter through NO member at all). Never grants a capability. (2) Never alters a fact (adds no
+         grounded data; the hint re-states "every fact must come from a tool result"). (3) INJECTION-SAFE — the user's RAW
+         preference text is NEVER emitted as an instruction; only the closed-set match fires the fixed hint (poisoned-text test
+         proves an injection payload in the preference emits only the server hint). (4) CONFIRMED-ONLY — an unconfirmed
+         ai-derived inference (task-031 dormant candidate) never steers (ADR-042 coherence). (5) Off-allow-list directive =
+         inert. (6) guillemet DATA-guard discipline preserved (DirectiveGuard line states the hard bound). trustLevel inert
+         (#616). Also FIXED a pre-existing task-011 regression: 2 invariant tests (ContextBinderOrgContextTests +
+         StatedProfileSecurityTests) hardcoded AgentToolFilterContext=6 props; 011 added AdvisoryToolAllowList (→7) without
+         updating them — reconciled + repurposed as live 032 guards. 8 producer bounds tests + 2 fixed = 85/85 ContextBinder
+         suite green; build 0 err; publish 43.68 MB compressed (≤60, Δ≈0); CVE clean. Step 9.5 CLEAN (adr-check ADR-039
+         preference-only / ADR-042 / ADR-013 / §10 / §11, 0 violations; code-review 0 blocking — 1 note: independent
+         GetForUserAsync read, acceptable). Escalation trigger did NOT fire. 033 adds the eval + wider bounds coverage. -->
+    <!-- ORIGINAL: <status>pending</status> -->
+
+    <rigor>FULL</rigor>
+    <rigor-reason>Crosses the advisory→bounded-directive line at the injection-defense boundary; a preference-producer seam on ContextBinder that must never become a capability grant.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>THE injection-defense boundary — a preference may hint/trigger an allow-listed grounded capability but must NEVER grant a capability or alter a fact; highest E3 sensitivity.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>Wave3-E3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ContextBinder / a new producer seam (BFF, ADR-039 preference-only boundary) — coordinate BFF PRs via /conflict-check; depends on 030 (the Preference fact type).</parallel-reason>
+    <deps>030</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Implement a governed preference-producer seam: a CLOSED allow-list of named standing directives (e.g. "always summarize my tasks", "always open my briefing") maps ONLY to pre-turn tool HINTS. A preference may bias/trigger an allow-listed grounded capability (e.g. bias the FR-01 task-agenda capability's default), but MUST NEVER grant a capability or alter a fact. Preserve the injection-defense discipline: the stated profile MUST NOT feed `AgentToolFilterContext` except through this ONE sanctioned bounded hint (ADR-039 preference-only), and the `StatedProfileRenderer` guillemet «...» DATA-guard is preserved. An off-allow-list directive has NO tool-selection effect. Keep `trustLevel` inert (ADR-042 #616).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI-governance expertise; deeply comfortable with ADR-039's grounded-execution / preference-only rule, prompt-injection defense (the guillemet DATA-guard), and the `AgentToolFilterContext` / pre-filter boundary.</role>
+  <goal>A CLOSED allow-list of named standing directives maps ONLY to pre-turn tool HINTS: "always summarize my tasks" biases the FR-01 capability's default behavior; a preference never grants a capability or alters a fact; the injection-defense guard (guillemet DATA-guard, ADR-039 preference-only) is preserved; off-allow-list directives are inert.</goal>
+  <context>
+    <background>FR-09 — the governed steering step, the highest-sensitivity E3 change. Today `StatedProfileReader.cs` is ADVISORY-ONLY (its header lines 22–23 + the `ContextBinder` ctor doc lines 116–117 state it MUST NOT touch `AgentToolFilterContext`) and `StatedProfileRenderer.cs`'s FreeTextGuard wraps stated text in guillemets «...» as a DATA-guard against injection. This task adds a NEW bounded seam that deliberately crosses the advisory line — but only within tight bounds: a CLOSED allow-list of named directives ("always summarize my tasks", "always open my briefing") produces a pre-turn tool HINT that biases the default behavior of an allow-listed grounded capability (the FR-01 task-agenda capability). Crossing the line is bounded by design: a preference may bias/trigger an allow-listed capability, but NEVER grant a capability nor alter a fact. The stated profile still MUST NOT feed `AgentToolFilterContext` EXCEPT through this one sanctioned bounded hint (ADR-039 preference-only). The guillemet DATA-guard is preserved; off-allow-list directives have no tool-selection effect. ADR-042's deferred hard-governance stays deferred to #616 (`trustLevel` inert). The producer consumes the `Preference` items from tasks 030/031; recall/userFragment assembly is in `ContextBinder.ResolveUserFragmentAsync` (~:553–583).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Context/ContextBinder.cs (userFragment assembly ~:553–583; ctor doc lines 116–117 — stated profile MUST NOT touch AgentToolFilterContext; the new producer seam attaches here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Context/StatedProfileReader.cs (advisory-only; header lines 22–23 — MUST NOT touch AgentToolFilterContext)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Context/StatedProfileRenderer.cs (FreeTextGuard — guillemet «...» DATA-guard, preserve)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFactType.cs (`Preference` — from task 030; the producer's input)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentToolCatalogProjector.cs + AgentToolProjection.cs PreFilter (the pre-turn hint targets an allow-listed grounded capability here)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (add/update unit tests for the bounds — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the producer">Allow-listed named directives ONLY → a pre-turn tool HINT; the stated profile MUST NOT feed `AgentToolFilterContext` EXCEPT through this ONE sanctioned bounded hint; the guillemet «...» DATA-guard (advisory injection-defense) is preserved.</constraint>
+    <constraint source="ADR-042" scope="preferences">`trustLevel` carried INERT (deferred hard-governance owned by #616) — do NOT implement untrusted-origin ban / trustLevel enforcement / memory-poisoning evals.</constraint>
+    <constraint source="project" scope="the allow-list">CLOSED set of named directives — an OFF-allow-list directive has NO tool-selection effect; MUST NOT accept free-text preference steering (owner Q2: narrow allow-list only).</constraint>
+    <constraint source="project" scope="the hint's power">A preference may bias/trigger an allow-listed grounded capability but MUST NEVER grant a capability nor alter a fact — the bound is the point of the task.</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report absolute + delta; no new HIGH CVE.</constraint>
+    <constraint source="NFR-08" scope="the producer">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/ that exercise the bounds.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-042-memory-architecture-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Define the closed allow-list shape: named directives (e.g. "always summarize my tasks", "always open my briefing") → a hint targeting an allow-listed grounded capability (the FR-01 task-agenda capability). No free text.</step>
+    <step order="2">Implement the producer as a PRE-TURN HINT that biases the allow-listed capability's DEFAULT behavior — attached at the sanctioned seam on `ContextBinder`; it does NOT grant a capability or alter any fact.</step>
+    <step order="3">Preserve the guillemet «...» DATA-guard in `StatedProfileRenderer`; keep `StatedProfileReader` advisory-only (it MUST NOT touch `AgentToolFilterContext` except via this one sanctioned hint).</step>
+    <step order="4">Ensure off-allow-list directives are INERT — no tool-selection effect.</step>
+    <step order="5">Keep `trustLevel` inert (ADR-042 #616).</step>
+    <step order="6">Add/extend unit tests in tests/unit/Sprk.Bff.Api.Tests/ for the bounds (biases default; off-allow-list inert; never grants a capability; never alters a fact; DATA-guard preserved).</step>
+    <step order="7">dotnet build + dotnet publish size check; record absolute size + delta; run the vulnerable-package scan.</step>
+    <step order="8">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If a requested directive cannot be expressed as an allow-listed pre-turn HINT without letting the preference grant a capability or change a fact, STOP and escalate (ADR-039 / ADR-042 boundary) rather than widening the allow-list to free text.</trigger>
+  </escalation>
+  <justification>
+    <existing>`StatedProfileReader` is advisory-only and never steers tool selection; no seam turns a standing directive into a bounded pre-turn hint.</existing>
+    <extension>NO — a NEW bounded seam (steering crosses the advisory line by design, but bounded to a closed allow-list → hints only). Existing readers stay advisory.</extension>
+    <cost-of-doing-nothing>"always summarize my tasks" can never act automatically — the P3 loop stays open even after the preference is persisted (tasks 030/031).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">the governed preference-producer seam (Services/Ai/Context — closed allow-list → pre-turn hint)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ preference-producer bounds unit tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">"always summarize my tasks" biases the FR-01 capability's default behavior (via a pre-turn tool hint).</criterion>
+    <criterion testable="true">An off-allow-list directive has NO tool-selection effect (negative case).</criterion>
+    <criterion testable="true">A preference NEVER grants a capability nor alters a fact (negative case).</criterion>
+    <criterion testable="true">The injection-defense guard is preserved — the guillemet «...» DATA-guard holds; the stated profile feeds `AgentToolFilterContext` ONLY through the sanctioned bounded hint.</criterion>
+    <criterion testable="true">The bounds are unit-tested in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>Code-trace anchors: StatedProfileReader header lines 22–23 + ContextBinder ctor doc 116–117 (advisory-only, MUST NOT touch AgentToolFilterContext); StatedProfileRenderer FreeTextGuard (guillemet DATA-guard); ContextBinder ResolveUserFragmentAsync ~:553–583. Depends on 030 (Preference fact type); consumes preferences persisted by 031. The bounds this task enforces are the exact target of task 033's bounds tests. Run /conflict-check before the BFF PR — the injection-defense boundary is the highest-sensitivity E3 change.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

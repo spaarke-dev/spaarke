@@ -19,18 +19,10 @@
  *   - ADR-021: Fluent v9 primitives only, semantic tokens only, no hex/rgb.
  */
 
-import * as React from "react";
-import {
-  Dialog,
-  DialogSurface,
-  DialogTitle,
-  DialogBody,
-  Button,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
-import { DismissRegular } from "@fluentui/react-icons";
-import { SmartToDo, type ISmartToDoProps } from "./SmartToDo";
+import * as React from 'react';
+import { Dialog, DialogSurface, DialogTitle, DialogBody, Button, makeStyles, tokens } from '@fluentui/react-components';
+import { DismissRegular } from '@fluentui/react-icons';
+import { SmartToDo, type ISmartToDoProps } from './SmartToDo';
 
 export interface ISmartToDoDialogProps {
   /** Controls dialog visibility. */
@@ -56,11 +48,11 @@ const useStyles = makeStyles({
    * because Fluent's default DialogSurface caps at ~600px.
    */
   surface: {
-    width: "90vw",
-    height: "90vh",
-    maxWidth: "90vw",
-    display: "flex",
-    flexDirection: "column",
+    width: '90vw',
+    height: '90vh',
+    maxWidth: '90vw',
+    display: 'flex',
+    flexDirection: 'column',
   },
   /**
    * DialogBody takes the remaining vertical space below the title bar.
@@ -68,10 +60,10 @@ const useStyles = makeStyles({
    * needs to expose a non-zero height so the board can fill it.
    */
   body: {
-    flex: "1 1 auto",
-    display: "flex",
-    flexDirection: "column",
-    overflow: "hidden",
+    flex: '1 1 auto',
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
     minHeight: 0,
   },
   /**
@@ -79,9 +71,9 @@ const useStyles = makeStyles({
    * we provide a tokenized neutral background that adapts to dark mode.
    */
   host: {
-    flex: "1 1 auto",
-    display: "flex",
-    flexDirection: "column",
+    flex: '1 1 auto',
+    display: 'flex',
+    flexDirection: 'column',
     minHeight: 0,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
@@ -92,11 +84,7 @@ const useStyles = makeStyles({
 // Component
 // ---------------------------------------------------------------------------
 
-export const SmartToDoDialog: React.FC<ISmartToDoDialogProps> = ({
-  open,
-  onClose,
-  smartTodoProps,
-}) => {
+export const SmartToDoDialog: React.FC<ISmartToDoDialogProps> = ({ open, onClose, smartTodoProps }) => {
   const styles = useStyles();
 
   return (
@@ -109,14 +97,7 @@ export const SmartToDoDialog: React.FC<ISmartToDoDialogProps> = ({
     >
       <DialogSurface className={styles.surface} aria-label="To Do">
         <DialogTitle
-          action={
-            <Button
-              appearance="subtle"
-              aria-label="Close"
-              icon={<DismissRegular />}
-              onClick={onClose}
-            />
-          }
+          action={<Button appearance="subtle" aria-label="Close" icon={<DismissRegular />} onClick={onClose} />}
         >
           To Do
         </DialogTitle>
@@ -131,6 +112,6 @@ export const SmartToDoDialog: React.FC<ISmartToDoDialogProps> = ({
   );
 };
 
-SmartToDoDialog.displayName = "SmartToDoDialog";
+SmartToDoDialog.displayName = 'SmartToDoDialog';
 
 export default SmartToDoDialog;

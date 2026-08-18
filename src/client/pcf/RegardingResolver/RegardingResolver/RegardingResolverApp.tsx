@@ -1274,11 +1274,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
     let cancelled = false;
     void (async (): Promise<void> => {
       try {
-        const result = await webApi.retrieveRecord(
-          hostEntity,
-          hostRecordId,
-          '?$select=sprk_regardingrecordname'
-        );
+        const result = await webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordname');
         const value = result?.sprk_regardingrecordname;
         if (!cancelled && typeof value === 'string' && value.trim().length > 0) {
           setResolvedName(value);

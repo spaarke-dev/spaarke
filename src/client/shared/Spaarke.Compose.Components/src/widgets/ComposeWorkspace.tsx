@@ -162,7 +162,12 @@ import {
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
 // FR-07(b) (task 010): the non-rotating logical document id — minted once per logical document,
 // persisted client-side, and rehydrated on recovery. Shared key for FR-03 (040) + FR-07 dedup (011).
-import { startNewComposeLogicalId, clearActiveComposeLogicalId, uniquifyForkFileName, recoverActiveComposeLogicalId } from './composeIdentity';
+import {
+  startNewComposeLogicalId,
+  clearActiveComposeLogicalId,
+  uniquifyForkFileName,
+  recoverActiveComposeLogicalId,
+} from './composeIdentity';
 // FR-03 (task 040): CLIENT-ONLY local draft store for draft-safe autosave (localStorage; no BFF).
 import { saveComposeDraft, getComposeDraft, clearComposeDraft } from './composeDraftStore';
 // FR-03/FR-07 (task 010): the canonical identity accessor = the draft-store key. Value import (the
@@ -1465,9 +1470,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // mangle the user's deliberate name. Fall back to the machine uniquify only when there is NO
       // override or the entered name equals the source (same-name Save As still must not re-version).
       const forkDisplayName = forkNew
-        ? (nameOverride && nameOverride !== state.documentRef.fileName
-            ? nameOverride
-            : uniquifyForkFileName(nameOverride ?? state.documentRef.fileName, effectiveTransientKey ?? mintTransientKey()))
+        ? nameOverride && nameOverride !== state.documentRef.fileName
+          ? nameOverride
+          : uniquifyForkFileName(
+              nameOverride ?? state.documentRef.fileName,
+              effectiveTransientKey ?? mintTransientKey()
+            )
         : null;
       const forkLogicalId = forkNew ? startNewComposeLogicalId() : undefined;
       const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
@@ -1653,13 +1661,14 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             //  4. the current file name IF it is a real user name (imported .docx keeps its name);
             //  5. an auto-name fallback — NEVER the literal 'Untitled document.docx' placeholder, so
             //     no path (incl. a modal-bypassing background flush) lands an "Untitled" record.
-            displayName: forkDisplayName
-              ?? nameOverride
-              ?? (pdfSourced
+            displayName:
+              forkDisplayName ??
+              nameOverride ??
+              (pdfSourced
                 ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
-                : (isUntitledDraftName(state.documentRef.fileName)
-                    ? autoNameForUnnamedDraft()
-                    : state.documentRef.fileName ?? null)),
+                : isUntitledDraftName(state.documentRef.fileName)
+                  ? autoNameForUnnamedDraft()
+                  : (state.documentRef.fileName ?? null)),
             transientKey: effectiveTransientKey,
             forkNew,
             // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): on a PDF-sourced create,
@@ -2165,9 +2174,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // The name-capture modal state. Null = closed. `requestSave` (below) opens it for an EXPLICIT save
   // that needs a name; its onSubmit re-enters triggerSave with the entered name (threaded into the
   // create-on-save displayName → server ResolveFileName + sprk_documentname).
-  const [saveNameModal, setSaveNameModal] = React.useState<
-    { mode: 'first-save' | 'save-as'; defaultName: string } | null
-  >(null);
+  const [saveNameModal, setSaveNameModal] = React.useState<{
+    mode: 'first-save' | 'save-as';
+    defaultName: string;
+  } | null>(null);
 
   // Does this save need a name first? Save As ALWAYS prompts (a deliberate fork the user names); a
   // normal Save prompts only on the FIRST create-on-save of a never-persisted, still-unnamed draft
@@ -2769,8 +2779,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       // after task 010's mint doors); when NOTHING is mounted, mint+persist a logical id so a
       // create-on-save from this staged insert still coalesces onto ONE identity instead of the
       // id-less `{ speDriveItemId: '' }` sentinel that historically skipped dedup.
-      const fallbackRef: ComposeDocumentRef =
-        state.documentRef ?? { speDriveItemId: '', composeLogicalId: startNewComposeLogicalId() };
+      const fallbackRef: ComposeDocumentRef = state.documentRef ?? {
+        speDriveItemId: '',
+        composeLogicalId: startNewComposeLogicalId(),
+      };
       dispatch({ kind: 'pendingAssistantInsert', payload: toAssistantInsertPayload(event, fallbackRef) });
     },
     // task 072 (FR-35 Doc Q&A stretch) — ephemeral highlight only; no document

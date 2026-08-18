@@ -82,12 +82,17 @@ export type {
  */
 function resolveActionIcon(iconKey: ITodoScoringAction['icon']): FluentIcon {
   switch (iconKey) {
-    case 'ArrowUpRegular':       return ArrowUpRegular;
-    case 'PersonSwapRegular':    return PersonSwapRegular;
-    case 'MoneyRegular':         return MoneyRegular;
-    case 'TaskListSquareRegular':return TaskListSquareLtrRegular;
+    case 'ArrowUpRegular':
+      return ArrowUpRegular;
+    case 'PersonSwapRegular':
+      return PersonSwapRegular;
+    case 'MoneyRegular':
+      return MoneyRegular;
+    case 'TaskListSquareRegular':
+      return TaskListSquareLtrRegular;
     case 'FolderOpenRegular':
-    default:                     return FolderOpenRegular;
+    default:
+      return FolderOpenRegular;
   }
 }
 
@@ -236,30 +241,28 @@ interface ISuggestedActionItemProps {
   onActionClick: (label: string) => void;
 }
 
-const SuggestedActionItem: React.FC<ISuggestedActionItemProps> = React.memo(
-  ({ action, onActionClick }) => {
-    const styles = useStyles();
-    const IconComponent = resolveActionIcon(action.icon);
+const SuggestedActionItem: React.FC<ISuggestedActionItemProps> = React.memo(({ action, onActionClick }) => {
+  const styles = useStyles();
+  const IconComponent = resolveActionIcon(action.icon);
 
-    const handleClick = React.useCallback(() => {
-      onActionClick(action.label);
-    }, [onActionClick, action.label]);
+  const handleClick = React.useCallback(() => {
+    onActionClick(action.label);
+  }, [onActionClick, action.label]);
 
-    return (
-      <li className={styles.actionItem}>
-        <Button
-          appearance="subtle"
-          size="small"
-          icon={<IconComponent aria-hidden="true" />}
-          className={styles.actionButton}
-          onClick={handleClick}
-        >
-          {action.label}
-        </Button>
-      </li>
-    );
-  }
-);
+  return (
+    <li className={styles.actionItem}>
+      <Button
+        appearance="subtle"
+        size="small"
+        icon={<IconComponent aria-hidden="true" />}
+        className={styles.actionButton}
+        onClick={handleClick}
+      >
+        {action.label}
+      </Button>
+    </li>
+  );
+});
 
 SuggestedActionItem.displayName = 'SuggestedActionItem';
 
@@ -276,14 +279,8 @@ const ResultBody: React.FC<IResultBodyProps> = ({ result, onActionClick }) => {
     <>
       {/* ── Scoring grid: Priority (left) + Effort (right) ── */}
       <div className={styles.scoringGrid}>
-        <PriorityScoreCard
-          priority={result.priority}
-          isMockData={result.isMockData}
-        />
-        <EffortScoreCard
-          effort={result.effort}
-          isMockData={result.isMockData}
-        />
+        <PriorityScoreCard priority={result.priority} isMockData={result.isMockData} />
+        <EffortScoreCard effort={result.effort} isMockData={result.isMockData} />
       </div>
 
       {/* ── Analysis card ── */}
@@ -312,17 +309,9 @@ const ResultBody: React.FC<IResultBodyProps> = ({ result, onActionClick }) => {
           <Text size={200} className={styles.suggestedActionsLabel}>
             Suggested actions
           </Text>
-          <ul
-            className={styles.actionsList}
-            role="list"
-            aria-label="Suggested actions"
-          >
-            {result.suggestedActions.map((action) => (
-              <SuggestedActionItem
-                key={action.label}
-                action={action}
-                onActionClick={onActionClick}
-              />
+          <ul className={styles.actionsList} role="list" aria-label="Suggested actions">
+            {result.suggestedActions.map(action => (
+              <SuggestedActionItem key={action.label} action={action} onActionClick={onActionClick} />
             ))}
           </ul>
         </div>
@@ -369,15 +358,12 @@ export const TodoAISummaryDialog: React.FC<ITodoAISummaryDialogProps> = ({
 
   // Handle suggested action clicks.
   // In R1 these are visual only — future tasks will wire real navigation.
-  const handleActionClick = React.useCallback(
-    (label: string) => {
-      if (process.env.NODE_ENV !== 'production') {
-        // eslint-disable-next-line no-console
-        console.info(`[TodoAISummaryDialog] Suggested action clicked: "${label}"`);
-      }
-    },
-    []
-  );
+  const handleActionClick = React.useCallback((label: string) => {
+    if (process.env.NODE_ENV !== 'production') {
+      // eslint-disable-next-line no-console
+      console.info(`[TodoAISummaryDialog] Suggested action clicked: "${label}"`);
+    }
+  }, []);
 
   return (
     <Dialog
@@ -403,19 +389,12 @@ export const TodoAISummaryDialog: React.FC<ITodoAISummaryDialogProps> = ({
             }
           >
             <div className={styles.titleRow}>
-              <SparkleRegular
-                className={styles.titleIcon}
-                aria-hidden="true"
-              />
+              <SparkleRegular className={styles.titleIcon} aria-hidden="true" />
               <Text size={400} className={styles.titleText}>
                 AI Summary
               </Text>
               {eventTitle && (
-                <Text
-                  size={200}
-                  className={styles.titleSubtitle}
-                  title={eventTitle}
-                >
+                <Text size={200} className={styles.titleSubtitle} title={eventTitle}>
                   {eventTitle}
                 </Text>
               )}
@@ -427,11 +406,7 @@ export const TodoAISummaryDialog: React.FC<ITodoAISummaryDialogProps> = ({
             <div className={styles.contentArea}>
               {/* Loading state */}
               {isLoading && (
-                <div
-                  className={styles.loadingContainer}
-                  aria-live="polite"
-                  aria-busy="true"
-                >
+                <div className={styles.loadingContainer} aria-live="polite" aria-busy="true">
                   <Spinner size="medium" />
                   <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
                     Analyzing…
@@ -447,11 +422,7 @@ export const TodoAISummaryDialog: React.FC<ITodoAISummaryDialogProps> = ({
                   </MessageBarBody>
                   <MessageBarActions
                     containerAction={
-                      <Button
-                        appearance="transparent"
-                        size="small"
-                        onClick={onRetry}
-                      >
+                      <Button appearance="transparent" size="small" onClick={onRetry}>
                         Retry
                       </Button>
                     }
@@ -460,24 +431,14 @@ export const TodoAISummaryDialog: React.FC<ITodoAISummaryDialogProps> = ({
               )}
 
               {/* Result state */}
-              {!isLoading && !error && result && (
-                <ResultBody
-                  result={result}
-                  onActionClick={handleActionClick}
-                />
-              )}
+              {!isLoading && !error && result && <ResultBody result={result} onActionClick={handleActionClick} />}
             </div>
           </DialogContent>
 
           {/* ── Actions ───────────────────────────────────────────────── */}
           <DialogActions>
             <div className={styles.footerDivider}>
-              <Button
-                appearance="secondary"
-                size="small"
-                onClick={onClose}
-                aria-label="Close AI Summary dialog"
-              >
+              <Button appearance="secondary" size="small" onClick={onClose} aria-label="Close AI Summary dialog">
                 Close
               </Button>
             </div>

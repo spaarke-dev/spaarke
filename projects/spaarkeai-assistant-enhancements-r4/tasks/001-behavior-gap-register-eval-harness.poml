@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Behavior-gap register + eval-case harness scaffolding (FR-12, FR-10 infra) — seed P1–P4</title>
+    <phase>0 — Foundation</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New-file infra + a P5 process artifact + eval-harness convention wiring; no code hot-path touched (no .cs/.ts change) — so STANDARD, not FULL</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical scaffolding + documentation: confirm the seeded register, locate the existing eval suite, commit a template eval case — no judgment-sensitive implementation</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Foundation</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New files only (behavior-gap register confirmation + eval-case template/example under the existing Eval suite dir); no shared code surface, no contended spine</parallel-reason>
+    <deps></deps>
+    <tags>docs, testing, eval</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Formalize the R4 behavior-gap process (FR-12) and the eval-case obligation (FR-10 infra). The behavior-gap register already exists at `projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md` seeded with P1–P4 — do NOT rebuild it; confirm it and reference it. Then establish the eval-case harness location + convention so every later AI-behavior change (FR-01/04/06/09) lands with a golden-utterance eval per ADR-039 + ADR-038: locate where the repo's existing ADR-039 golden-utterance eval cases live (grep for the existing suites), document the location + the add-a-case convention in the register/project notes, and commit ONE template/example eval case that later tasks copy.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Comfortable with the ADR-039 golden-utterance eval suite, the ADR-038 eval-case obligation, and lightweight project-artifact process docs. This is scaffolding + convention work, not implementation.</role>
+  <goal>The behavior-gap register exists (P1–P4 seeded, triage columns present) and the eval-case harness location/convention is established + documented so every later AI-behavior change (FR-01/04/06/09) can ship with a golden-utterance eval; a template/example eval case is committed for those tasks to copy.</goal>
+  <context>
+    <background>P5 (FR-12) is a lightweight STANDING project-artifact register (markdown), NOT a system surface — it mirrors R3's `defer-issues.md` discipline. The register is ALREADY seeded at `projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md` with P1–P4 (the four root gaps this project addresses) and triage columns (preference / systemic / defect). This task does NOT rebuild it — it confirms it, and wires the eval-case side of the loop. FR-10 requires every new/changed AI behavior (FR-01 advisory task-agenda, FR-04 no-dead-end suggestions, FR-06 follow-on cards, FR-09 preference-producer) to land with an eval case per the ADR-039 golden-utterance suite + the maker-guide obligation. The repo's existing eval suite lives under `tests/integration/contract/Eval/` — `golden-utterances.json`, per-consumer `*-eval-cases.json` (e.g. `assistant-r1-eval-cases.json`), and `GoldenUtteranceEvalSuiteTests.cs`. This task locates + documents that convention (grep to confirm current shape — do not assume) and commits ONE template/example R4 eval case so FR-01/04/06/09 tasks copy a known-good shape. No BFF code, no .tsx, no catalog change — pure infra + docs.</background>
+    <relevant-files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md (ALREADY seeded P1–P4 — confirm + reference, do NOT rebuild)</file>
+      <file>tests/integration/contract/Eval/ (the existing ADR-039 golden-utterance suite: golden-utterances.json, *-eval-cases.json, GoldenUtteranceEvalSuiteTests.cs — grep to confirm the current convention)</file>
+      <file>tests/integration/contract/Eval/assistant-r1-eval-cases.json (nearest-precedent per-consumer eval-case file to mirror)</file>
+      <file>projects/spaarkeai-assistant-enhancements-r1/notes/owed-eval-cases.md (precedent for tracking owed eval cases)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the eval-case convention">Eval cases are golden-utterance cases on the existing suite; the register + eval loop MUST NOT introduce a second dispatch/classifier surface or any system-facing feature — it is a project-artifact process only.</constraint>
+    <constraint source="ADR-038" scope="the template eval case">The eval obligation is per the ADR-038 golden-utterance suite; the committed template/example must fit the existing suite shape (locate + mirror it, do not invent a parallel harness).</constraint>
+    <constraint source="FR-12" scope="the register">The register is a lightweight STANDING markdown artifact (not a one-time audit, not a system surface); confirm P1–P4 + triage-destination columns are present; reference it from the project.</constraint>
+    <constraint source="project" scope="reuse-first (§11)">Do NOT rebuild the seeded register and do NOT build a new eval harness — reuse `tests/integration/contract/Eval/`; only add a template/example case + documentation.</constraint>
+    <constraint source="project" scope="hot-path">No code hot-path change — no edits to `.cs`/`.ts`/`.tsx`; infra + docs only.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="0">Declare rigor. Read the seeded register at notes/behavior-gap-register.md; confirm P1–P4 rows + triage columns (preference / systemic / defect) are present. Do NOT rebuild it.</step>
+    <step order="1">Grep/locate the existing ADR-039 golden-utterance eval suite (`tests/integration/contract/Eval/` — golden-utterances.json, *-eval-cases.json, GoldenUtteranceEvalSuiteTests.cs). Confirm the current file shape + how a per-consumer eval-case file is registered/run.</step>
+    <step order="2">Document the eval-case harness location + the "add an eval case for a behavior change" convention (where the file lives, the case shape, how the suite picks it up) in the register notes (or an adjacent project note) so FR-01/04/06/09 tasks reference it.</step>
+    <step order="3">Commit ONE template/example eval case (an R4 golden-utterance case, e.g. the FR-01 "what do I need to do today" grounded-summary expectation) shaped to the existing suite so later tasks copy a known-good example.</step>
+    <step order="4">Cross-reference the register ↔ eval convention from the project (CLAUDE.md deferral/eval obligation section) so the loop is discoverable.</step>
+    <step order="5">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If the existing eval suite shape cannot cleanly host an R4 advisory-capability golden-utterance case (e.g. the runner assumes a fact-mode-only contract), STOP and escalate the harness gap rather than forking a second parallel eval harness (§11 reuse-first).</trigger>
+  </escalation>
+  <justification>
+    <existing>The behavior-gap register already exists (seeded P1–P4); the golden-utterance eval suite already exists at tests/integration/contract/Eval/.</existing>
+    <extension>Yes — confirm/reference the seeded register and add ONE template eval case to the existing suite; no new register, no new harness.</extension>
+    <cost-of-doing-nothing>Without a documented eval convention + a copyable template, FR-01/04/06/09 each ship without an eval case, so the FR-10 guardrail is unmet and any of the four behaviors can silently regress with no failing test.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md (confirmed + eval convention referenced)</output>
+    <output type="test">tests/integration/contract/Eval/ template/example R4 eval case (mirrors the existing suite shape)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The behavior-gap register is present with P1–P4 rows AND triage-destination columns (preference / systemic / defect).</criterion>
+    <criterion testable="true">The eval-case harness location is identified (tests/integration/contract/Eval/) and the add-a-case convention is documented in the project notes.</criterion>
+    <criterion testable="true">One template/example R4 eval case is committed and fits the existing golden-utterance suite shape (not a new parallel harness).</criterion>
+    <criterion testable="true">The register is referenced from the project (discoverable from CLAUDE.md / notes).</criterion>
+    <criterion testable="true">Negative: no code hot-path touched — no `.cs`/`.ts`/`.tsx` edited; the seeded register is NOT rebuilt.</criterion>
+  </acceptance-criteria>
+  <notes>P5 process artifact. The register is seeded — this task formalizes the eval side of the loop (FR-10 infra) and makes the convention copyable for FR-01/04/06/09. Reuse the existing suite at tests/integration/contract/Eval/; do not invent a second harness.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

@@ -99,7 +99,7 @@ export function ensureNavigatorSidePane(): void {
           isSelected: false, // start collapsed; alwaysRender keeps capture alive
           alwaysRender: true, // load-bearing: pane JS runs while collapsed (NFR-05)
         })
-        .then((pane) => pane?.navigate?.({ pageType: 'webresource', webresourceName: WEBRESOURCE }))
+        .then(pane => pane?.navigate?.({ pageType: 'webresource', webresourceName: WEBRESOURCE }))
         .catch(() => {
           /* non-fatal — pane simply not registered this session */
         });

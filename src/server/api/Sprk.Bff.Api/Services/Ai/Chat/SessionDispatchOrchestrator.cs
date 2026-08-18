@@ -100,6 +100,13 @@ public class SessionDispatchOrchestrator
     // orchestrator omit it and get null → the subDomain->KnowledgeSourceIds resolution below is
     // skipped (byte-identical to pre-021 behavior: an unscoped review run). Never fails the dispatch.
     private readonly Sprk.Bff.Api.Services.Ai.Classification.IAgreementTypeRegistryReader? _agreementTypeRegistryReader;
+    // FR-01/FR-02 (task 012): OPTIONAL — the advisory grounded-recommend runner. Registered
+    // unconditionally in the compound-ON block (production always has it), but hand-built test
+    // constructions omit it → null → the dispatch falls back to the linear ActionRunner for EVERY Action
+    // (byte-identical to pre-012 behavior). Routing keys off the resolved Action's non-empty
+    // GroundedToolAllowList (task 010, the materialized advisory signal); a fact-tier Action (empty
+    // allow-list) always runs the ActionRunner. Never fails the dispatch (ADR-032).
+    private readonly IAdvisoryCapabilityRunner? _advisoryRunner;
 
     public SessionDispatchOrchestrator(
         ChatSessionManager sessionManager,
@@ -116,7 +123,8 @@ public class SessionDispatchOrchestrator
         ILogger<SessionDispatchOrchestrator> logger,
         TimeProvider? timeProvider = null,
         ISurfaceLaunchEnricher? surfaceLaunchEnricher = null,
-        Sprk.Bff.Api.Services.Ai.Classification.IAgreementTypeRegistryReader? agreementTypeRegistryReader = null)
+        Sprk.Bff.Api.Services.Ai.Classification.IAgreementTypeRegistryReader? agreementTypeRegistryReader = null,
+        IAdvisoryCapabilityRunner? advisoryRunner = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
@@ -144,6 +152,8 @@ public class SessionDispatchOrchestrator
         // Optional (may be null in hand-built test constructions or when the compound AI gate is
         // off); see field doc — task 021.
         _agreementTypeRegistryReader = agreementTypeRegistryReader;
+        // Optional (task 012); see field doc. Null in hand-built tests → linear ActionRunner fallback.
+        _advisoryRunner = advisoryRunner;
     }
 
     /// <summary>
@@ -170,6 +180,7 @@ public class SessionDispatchOrchestrator
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = null!;
         _agreementTypeRegistryReader = null;
+        _advisoryRunner = null;
     }
 
     /// <summary>
@@ -625,9 +636,26 @@ public class SessionDispatchOrchestrator
             string? llmError = null;
             try
             {
-                output = await _actionRunner
-                    .RunAsync(effectiveAction, boundInputs, runContext, cancellationToken)
-                    .ConfigureAwait(false);
+                if (_advisoryRunner is not null && effectiveAction.GroundedToolAllowList.Count > 0)
+                {
+                    // ── FR-01/FR-02 (task 012): ADVISORY grounded-recommend tier ─────────────────────
+                    // The resolved Action opts in via a non-empty groundedToolAllowList (task 010, the
+                    // materialized advisory routing signal) → run a NESTED bounded agent turn that mounts
+                    // ONLY those grounded READ tools (task-011 PreFilter) over the caller's OBO identity
+                    // and assembles the drained, cited narration into the stored payload (ADR-040
+                    // store-before-render). The Action was already selected by binding id — deterministic;
+                    // the ONE probabilistic decider stays the top-level Text-path turn (ADR-039). A null
+                    // runner (hand-built test orchestrator) falls through to the linear ActionRunner below.
+                    output = await _advisoryRunner
+                        .RunAsync(effectiveAction, session, request, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                else
+                {
+                    output = await _actionRunner
+                        .RunAsync(effectiveAction, boundInputs, runContext, cancellationToken)
+                        .ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {

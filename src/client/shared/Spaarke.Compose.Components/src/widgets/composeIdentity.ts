@@ -118,10 +118,12 @@ export function startNewComposeLogicalId(): string {
  * DISTINCT item (a real fork); the client shows the same name (no server round-trip to reconcile).
  */
 export function uniquifyForkFileName(fileName: string | undefined, forkKey: string): string {
-  const token = forkKey.replace(/[^a-z0-9]/gi, '').slice(0, 6).toLowerCase() || Date.now().toString(36).slice(-6);
+  const token =
+    forkKey
+      .replace(/[^a-z0-9]/gi, '')
+      .slice(0, 6)
+      .toLowerCase() || Date.now().toString(36).slice(-6);
   const base = fileName && fileName.trim().length > 0 ? fileName : 'Untitled document.docx';
   const dot = base.lastIndexOf('.');
-  return dot > 0
-    ? `${base.slice(0, dot)} (copy ${token})${base.slice(dot)}`
-    : `${base} (copy ${token})`;
+  return dot > 0 ? `${base.slice(0, dot)} (copy ${token})${base.slice(dot)}` : `${base} (copy ${token})`;
 }

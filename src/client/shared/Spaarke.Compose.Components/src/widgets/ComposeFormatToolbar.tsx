@@ -1033,9 +1033,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           // controlled by the host (autoSaveEnabled); rendered only when the host wired autosave
           // (both autoSaveEnabled + onAutoSaveToggle set — the FR-03 Phase-4 behavior lives there).
           checkedValues={
-            autoSaveEnabled !== undefined && onAutoSaveToggle
-              ? { autosave: autoSaveEnabled ? ['on'] : [] }
-              : undefined
+            autoSaveEnabled !== undefined && onAutoSaveToggle ? { autosave: autoSaveEnabled ? ['on'] : [] } : undefined
           }
           onCheckedValueChange={(_e, data) => {
             if (data.name === 'autosave') onAutoSaveToggle?.(data.checkedItems.includes('on'));
@@ -1084,11 +1082,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               {autoSaveEnabled !== undefined && onAutoSaveToggle ? (
                 <>
                   <MenuDivider />
-                  <MenuItemCheckbox
-                    name="autosave"
-                    value="on"
-                    data-testid="compose-format-autosave-toggle"
-                  >
+                  <MenuItemCheckbox name="autosave" value="on" data-testid="compose-format-autosave-toggle">
                     Auto Save
                   </MenuItemCheckbox>
                 </>

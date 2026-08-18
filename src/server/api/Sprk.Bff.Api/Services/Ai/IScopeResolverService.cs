@@ -682,6 +682,17 @@ public record AnalysisAction
     public bool AllowsKnowledge { get; init; }
 
     /// <summary>
+    /// Bounded grounded-tool allow-list (<c>sprk_groundedtoolallowlist</c>) declared by an
+    /// advisory-mode Action, mirroring the <see cref="AllowsKnowledge"/> per-Action opt-in but carried
+    /// as a bounded SET of grounded-tool identifiers (catalog data). EMPTY = opt-out: the Action mounts
+    /// zero grounded tools (stays ack-tier). Non-empty = the exact set of grounded tools this Action's
+    /// agent turn may mount; the deterministic agent-path pre-filter (R4 task 011) narrows the
+    /// handler-tool set to exactly these identifiers — a context-scoping predicate over catalog data,
+    /// NEVER a code-side tool-name list or a second decider (ADR-039). R4 task 010 / FR-03.
+    /// </summary>
+    public IReadOnlyList<string> GroundedToolAllowList { get; init; } = [];
+
+    /// <summary>
     /// Structured-Outputs JSON Schema for the action (sprk_outputschemajson, multiline text).
     /// Verbatim contents of the Dataverse field — supplied to
     /// <see cref="IOpenAiClient.GetStructuredCompletionRawAsync"/> as the
