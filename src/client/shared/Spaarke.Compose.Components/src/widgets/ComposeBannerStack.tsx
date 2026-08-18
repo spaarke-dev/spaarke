@@ -208,6 +208,32 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'pdf-intake-table-style-approximated': "A table's PDF styling was replaced with standard table formatting.",
   'pdf-intake-table-cell-consolidated': 'Overlapping table cells were combined into one cell.',
   'pdf-intake-table-cell-dropped': "A table cell's text could not be placed and was left out — please check the table.",
+  // UAT-07b (owner 2026-08-18): the render-on-save "flatten" widener family previously had NO friendly
+  // copy, so users saw raw codes like "paragraph-style-flattened ×62". These are FORMATTING-only
+  // simplifications (the text/content is intact) — folded into the concise summary below via
+  // SAVE_DEGRADATION_LABEL rather than one sentence each. Entries here keep the per-code fallback honest
+  // if the summary path is ever bypassed. See also DEF-002 (the actual widener engine work, UAT-07a).
+  'indentation-dropped': 'Some indentation was simplified.',
+  'paragraph-style-flattened': 'Some paragraph styles were simplified.',
+  'section-break-flattened': 'A section break was simplified.',
+  'tab-flattened': 'Some tab stops were simplified.',
+  'table-formatting-flattened': 'Some table formatting was simplified.',
+  'line-break-flattened': 'A line break was simplified.',
+  'internal-link-flattened': 'An internal link was simplified.',
+};
+
+// UAT-07b: short NOUN labels for the common formatting-simplification codes, used to build ONE concise,
+// plain-language summary ("indentation, paragraph styles, tables") instead of a wall of per-code sentences.
+// Codes not listed here fall back to their full SAVE_DEGRADATION_COPY sentence (they are usually
+// content-affecting, e.g. a dropped link target, and deserve their own line).
+const SAVE_DEGRADATION_LABEL: Record<string, string> = {
+  'indentation-dropped': 'indentation',
+  'paragraph-style-flattened': 'paragraph styles',
+  'section-break-flattened': 'section breaks',
+  'tab-flattened': 'tab stops',
+  'table-formatting-flattened': 'table formatting',
+  'line-break-flattened': 'line breaks',
+  'internal-link-flattened': 'internal links',
 };
 
 /** One human-readable line per warning; known codes get friendly copy (+ ×N when repeated). */
@@ -217,6 +243,38 @@ function saveDegradationSentence(warning: { code: string; count: number }): stri
     return warning.count > 1 ? `${known} (×${warning.count})` : known;
   }
   return `Some content was simplified when saving (${warning.code}${warning.count > 1 ? ` ×${warning.count}` : ''}).`;
+}
+
+/**
+ * UAT-07b — build ONE plain-language body for the save-degradation banner. Formatting-only
+ * simplifications (SAVE_DEGRADATION_LABEL) collapse into a single reassuring sentence naming the
+ * categories; any OTHER (content-affecting) codes keep their own full sentence. Deduplicates + orders
+ * so the user reads "your text is intact; these formatting kinds were simplified" instead of
+ * "paragraph-style-flattened ×62".
+ */
+function summarizeSaveDegradation(warnings: ReadonlyArray<{ code: string; count: number }>): string {
+  const formattingLabels: string[] = [];
+  const otherSentences: string[] = [];
+  for (const w of warnings) {
+    const label = SAVE_DEGRADATION_LABEL[w.code];
+    if (label) {
+      if (!formattingLabels.includes(label)) formattingLabels.push(label);
+    } else {
+      otherSentences.push(saveDegradationSentence(w));
+    }
+  }
+  const parts: string[] = [];
+  if (formattingLabels.length > 0) {
+    const list =
+      formattingLabels.length === 1
+        ? formattingLabels[0]
+        : `${formattingLabels.slice(0, -1).join(', ')} and ${formattingLabels[formattingLabels.length - 1]}`;
+    parts.push(
+      `Some formatting (${list}) was simplified to fit Compose's editor. Your text and content are intact.`
+    );
+  }
+  if (otherSentences.length > 0) parts.push(otherSentences.join(' '));
+  return parts.join(' ');
 }
 
 /** Stable content signature for a save-degradation set — the sessionStorage dismissal key suffix. */
@@ -341,11 +399,21 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   }, [reviewFindingsDegraded]);
   const showReviewFindingsDegradedBanner = showReviewFindingsDegraded && !reviewFindingsDegradedDismissed;
 
+  // UAT-05 (owner 2026-08-18): the generic Save-error banner previously had NO dismiss ✕ (unlike the
+  // warning/info banners), so a stale "Save error" could not be cleared. Add a local dismissal reset
+  // whenever the message changes (a NEW error re-shows). The parent still owns `errorMessage`; this only
+  // hides the CURRENT one on the client. The Word-lock variant keeps its Retry/Reload actions instead.
+  const [errorDismissed, setErrorDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setErrorDismissed(false);
+  }, [errorMessage]);
+  const showErrorBanner = !!errorMessage && !saveErrorIsLock && !errorDismissed;
+
   const showStack =
     showPdfSourceNotice ||
     showImportWarnings ||
     showSaveDegradation ||
-    !!errorMessage ||
+    (!!errorMessage && (saveErrorIsLock || !errorDismissed)) ||
     !!pendingAssistantInsert ||
     showSaveSuccessBanner ||
     showPartialApplyBanner ||
@@ -477,12 +545,24 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
             ) : null}
           </MessageBarActions>
         </MessageBar>
-      ) : errorMessage ? (
+      ) : showErrorBanner ? (
         <MessageBar intent="error" data-testid="compose-workspace-error-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Save error</MessageBarTitle>
             {errorMessage}
           </MessageBarBody>
+          {/* UAT-05: dismiss ✕ (the error banner previously had none). */}
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-error-dismiss"
+                onClick={() => setErrorDismissed(true)}
+              />
+            }
+          />
         </MessageBar>
       ) : null}
 
@@ -545,8 +625,8 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         // simplified while authoring it. Own dismissible banner; NOT gated by hideImportWarnings.
         <MessageBar intent="warning" data-testid="compose-workspace-save-degradation-banner" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Some content was simplified when saving</MessageBarTitle>
-            {saveWarnings.map(saveDegradationSentence).join(' ')}
+            <MessageBarTitle>Some formatting was simplified when saving</MessageBarTitle>
+            {`${summarizeSaveDegradation(saveWarnings)} The original file is unchanged until you save.`}
           </MessageBarBody>
           <MessageBarActions
             containerAction={

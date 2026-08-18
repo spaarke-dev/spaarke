@@ -2188,8 +2188,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       if (mode === 'new') return true;
       const ref = state.documentRef;
       if (!ref) return false;
-      const neverPersisted = !ref.speDriveItemId && !ref.sprkDocumentId;
-      return neverPersisted && isUntitledDraftName(ref.fileName);
+      // UAT-03 (owner 2026-08-18): prompt for a name on the FIRST save of ANY new-to-system document,
+      // not only born-in-editor "Untitled" drafts. A never-persisted doc (no speDriveItemId, no
+      // sprkDocumentId) has no sprk_document row yet — this save CREATES it, so the user names it.
+      // Previously an imported/uploaded file (which carries a real filename) skipped the prompt; FR-02's
+      // intent is to prompt on every create-on-save. The modal is seeded with the current filename (see
+      // requestSave) so the user confirms or renames rather than being blocked.
+      return !ref.speDriveItemId && !ref.sprkDocumentId;
     },
     [state.documentRef]
   );
@@ -2202,8 +2207,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     (mode: ComposeSaveMode = 'version'): void => {
       if (saveNeedsName(mode)) {
         const current = state.documentRef?.fileName;
-        // Save As seeds from the source name (the user edits it); a first save starts blank.
-        const defaultName = mode === 'new' && !isUntitledDraftName(current) ? (current ?? '') : '';
+        // Seed the modal with the current filename whenever it is a real name (Save As, OR a first save of
+        // an imported/uploaded file — UAT-03) so the user confirms/renames; a born-in-editor "Untitled"
+        // draft starts blank.
+        const defaultName = !isUntitledDraftName(current) ? (current ?? '') : '';
         setSaveNameModal({ mode: mode === 'new' ? 'save-as' : 'first-save', defaultName });
         return;
       }
