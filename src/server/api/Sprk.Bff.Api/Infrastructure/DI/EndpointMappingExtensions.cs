@@ -45,6 +45,11 @@ public static class EndpointMappingExtensions
         // Anonymous client config endpoint — MSAL bootstrap fallback for direct URL access (AIPU-091)
         app.MapMsalConfigEndpoints();
 
+        // Anonymous public runtime config endpoint (FR-36 — customer-provisioning-orchestration-r1
+        // task 087). Returns { bffUrl, msalClientId, tenantId, featureFlags } short-cached (60s + ETag)
+        // for external-spa + code-pages, closing the bake-at-build-time pattern.
+        app.MapPublicConfigEndpoint();
+
         // /healthz is the App Service LIVENESS probe — it must not fail on catalog
         // drift (an unseeded catalog would recycle instances forever). The FR-P0-04
         // reconciliation check (tag "catalog") is exposed on its own endpoint below;
