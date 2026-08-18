@@ -162,8 +162,11 @@ in **two models** — Model 1 (Spaarke-hosted tenant) and **Model 2 (the custome
    their federated credential) is materially more complex than in the Spaarke-hosted tenant. **This project's
    solution MUST be evaluated against BOTH models**, or provisioning inherits an unsolvable per-tenant step.
 4. **Sequencing:** provisioning should **not finalize its auth-provisioning design** until this project's model is
-   chosen (or should design that step to be pluggable). Recommend a lightweight inbound note into
-   `customer-provisioning-orchestration-r1` so it doesn't bake in the secret-based model prematurely.
+   chosen (or should design that step to be pluggable). **`customer-provisioning-orchestration-r1` is an ACTIVE
+   running project — no changes were made to it** (owner decision, 2026-08-17); this coupling is captured HERE for
+   **future coordination**. When auth-v4 is chartered (and provisioning is at a mergeable point), open the
+   coordination then: confirm provisioning keeps the "configure BFF confidential credential" step pluggable, and
+   pull provisioning's **Model-2** constraints into this project's research as a first-class input.
 
 ## 11. Evidence pointers
 
