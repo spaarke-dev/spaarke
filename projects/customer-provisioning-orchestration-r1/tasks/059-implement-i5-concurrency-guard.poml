@@ -3,8 +3,8 @@
   <metadata>
     <title>Implement I5 concurrency guard — same-customer serialization via sprk_currentrunid optimistic upsert</title>
     <phase>C Wave C5 — L2 REST + Reconciler</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>cleared</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse'; enforces §4D I5 tenant-isolation invariant + FR-23 concurrency guard; a bug here allows same-customer double-provision.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -111,10 +111,12 @@ using System.Diagnostics;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
 using Sprk.Provisioning.ControlPlane.Repositories;
+using Sprk.Provisioning.ControlPlane.Rollback;
 
 namespace Sprk.Provisioning.ControlPlane.Api;
 
@@ -257,21 +259,29 @@ public static class RunsEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         // (7) POST /api/runs/{id}/clear-quarantine — v3.2 §4C reversible clear.
+        // Task 061 wired the QuarantineClearService — endpoint returns 409 when
+        // the run is not in Quarantined state (wrong-state) OR when a
+        // concurrent writer advanced the Cosmos ETag.
         group.MapPost("/{id}/clear-quarantine", ClearQuarantine)
             .RequireAuthorization(AuthModule.Policies.Operator)
             .WithName("ClearQuarantine")
             .WithSummary("Clear a Quarantined run (v3.2 §4C) — REQUIRES ?reason= parameter")
             .WithDescription(
                 "Explicitly releases a Quarantined run so a new run can start " +
-                "against the same customerId. REQUIRES ?reason= parameter (400 " +
-                "otherwise) and audit-logs the action + actor tid + oid to App " +
-                "Insights `traces` with message prefix 'QuarantineCleared:' " +
-                "(spec FR-24 acceptance).")
+                "against the same customerId. Transitions Cosmos state " +
+                "Quarantined -> Failed + QuarantineInfo.State = Cleared + " +
+                "populates ClearedBy/ClearedAt. REQUIRES ?reason= parameter " +
+                "(400 otherwise), returns 404 if the run does not exist, 409 " +
+                "if the run is not in Quarantined state (wrong-state) OR on a " +
+                "concurrent-write ETag conflict, and audit-logs the action + " +
+                "actor tid + oid to App Insights `traces` with message prefix " +
+                "'QuarantineCleared:' (spec FR-24 acceptance).")
             .Produces(StatusCodes.Status202Accepted)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status404NotFound);
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status409Conflict);
 
         return app;
     }
@@ -281,19 +291,24 @@ public static class RunsEndpoints
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// POST /api/runs. Creates a new ProvisioningRun in Cosmos + enqueues H0
-    /// preflight via Service Bus. Returns 202 Accepted with Location header.
+    /// POST /api/runs. Acquires the per-customer I5 concurrency guard (task
+    /// 059), creates a new ProvisioningRun in Cosmos + enqueues H0 preflight
+    /// via Service Bus. Returns 202 Accepted with Location header on success,
+    /// 409 Conflict with the winning run id on same-customer contention, 502
+    /// on a transient guard failure.
     /// </summary>
     private static async Task<IResult> CreateRun(
         CreateRunRequest request,
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
+        ICustomerRunGuard runGuard,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(enqueuer);
+        ArgumentNullException.ThrowIfNull(runGuard);
 
         if (request is null)
         {
@@ -318,6 +333,51 @@ public static class RunsEndpoints
 
         var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
+
+        // Task 059 (I5 concurrency guard, spec.md FR-23): acquire BEFORE
+        // writing to Cosmos so a conflict does not litter the runs container
+        // with an orphaned NotStarted document. The guard is idempotent for
+        // the same runId; a Conflict means a DIFFERENT run holds the guard.
+        var acquire = await runGuard.TryAcquireAsync(
+            request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
+        switch (acquire)
+        {
+            case AcquireResult.Conflict conflict:
+                logger.LogInformation(
+                    "CreateRun: 409 — same-customer serialization (I5). " +
+                    "CustomerId={CustomerId} AttemptedRunId={RunId} " +
+                    "WinningRunId={WinningRunId} ReasonCode={ReasonCode}",
+                    request.CustomerId, runId, conflict.WinningRunId, conflict.ReasonCode);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status409Conflict,
+                    title: "Conflict",
+                    detail:
+                        $"A provisioning run for customer '{request.CustomerId}' is already " +
+                        $"in flight (winning runId '{conflict.WinningRunId}', reason '{conflict.ReasonCode}'). " +
+                        "Cross-customer runs are unaffected — this is per-customer serialization only (spec.md §4D I5 / FR-23).",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["winningRunId"] = conflict.WinningRunId,
+                        ["reasonCode"] = conflict.ReasonCode,
+                        ["correlationId"] = httpContext.TraceIdentifier,
+                    });
+
+            case AcquireResult.TransientFailure txf:
+                logger.LogWarning(
+                    "CreateRun: 502 — CustomerRunGuard transient failure. " +
+                    "CustomerId={CustomerId} AttemptedRunId={RunId} Diagnostic={Diagnostic}",
+                    request.CustomerId, runId, txf.Diagnostic);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status502BadGateway,
+                    title: "Bad Gateway",
+                    detail:
+                        $"Concurrency guard could not be evaluated for customer '{request.CustomerId}': " +
+                        $"{txf.Diagnostic}",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["correlationId"] = httpContext.TraceIdentifier,
+                    });
+        }
 
         var run = new ProvisioningRun
         {
@@ -354,10 +414,13 @@ public static class RunsEndpoints
         {
             // 409 Conflict — a run with this id already exists in the partition.
             // Extremely unlikely given the NewGuid — surfaces only on determined
-            // collision or replay attack.
+            // collision or replay attack. Best-effort release the guard we
+            // just acquired so the customer can start a new run without
+            // waiting for the reconciler / a terminal transition.
             logger.LogWarning(ex,
                 "CreateRun: id collision (customerId={CustomerId}, runId={RunId})",
                 run.CustomerId, run.RunId);
+            _ = await runGuard.ReleaseAsync(run.CustomerId, run.RunId, cancellationToken).ConfigureAwait(false);
             return Results.Problem(
                 statusCode: StatusCodes.Status409Conflict,
                 title: "Conflict",
@@ -555,9 +618,13 @@ public static class RunsEndpoints
         string? customerId,
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
+        ICustomerRunGuard runGuard,
         HttpContext httpContext,
+        ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(runGuard);
+
         if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
         {
             return validationResult;
@@ -585,18 +652,46 @@ public static class RunsEndpoints
             },
             cancellationToken).ConfigureAwait(false);
 
+        // Task 059 §4C: on operator-initiated cancel, best-effort release the
+        // I5 guard so a fresh run can start immediately. ReleaseAsync is a
+        // no-op if the guard's current value doesn't match (safe against
+        // races with an already-completed cancel handler). Task 061 explicitly
+        // owns the Quarantined path — see design.md §4C ("cross-customer
+        // serialization on quarantine" note): a Quarantined run's guard stays
+        // set until clear-quarantine, NOT released here. Our release is a
+        // mismatch no-op in that case because the run's Status is Quarantined,
+        // not the Cancel target.
+        var release = await runGuard.ReleaseAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (release is ReleaseResult.TransientFailure txf)
+        {
+            // Not fatal to the request — the cancel envelope is already
+            // enqueued. Log for observability; the operator sees 202 either
+            // way and the reconciler (task 058) or a task 061-owned handler
+            // will eventually converge.
+            logger.LogWarning(
+                "CancelRun: CustomerRunGuard release transient failure — " +
+                "CustomerId={CustomerId} RunId={RunId} Diagnostic={Diagnostic}",
+                customerId, id, txf.Diagnostic);
+        }
+
         return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
     }
 
     /// <summary>
     /// POST /api/runs/{id}/clear-quarantine. Reason parameter REQUIRED; the
     /// clearing action is audit-logged to App Insights with actor tid + oid.
+    /// Task 061: wired to <see cref="IQuarantineClearService"/> which
+    /// transitions Cosmos state Quarantined -> Failed +
+    /// QuarantineInfo.State = Cleared + populates ClearedBy/ClearedAt (ETag-
+    /// safe). The audit-log fires ONLY on a successful transition — 400 (no
+    /// reason), 404 (not found), 409 (wrong-state OR concurrent-write) paths
+    /// do NOT emit the QuarantineCleared record (spec FR-24 acceptance).
     /// </summary>
     private static async Task<IResult> ClearQuarantine(
         string id,
         string? customerId,
         string? reason,
-        IProvisioningRunRepository repository,
+        IQuarantineClearService clearService,
         IHandlerEnqueuer enqueuer,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
@@ -613,15 +708,48 @@ public static class RunsEndpoints
             return BadRequest(httpContext, "reason is required (spec FR-24).");
         }
 
-        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
-        if (read is null)
+        // Task 061: single source of truth for the Quarantined -> Failed
+        // transition. Service does the point-read + Quarantined guard + ETag-
+        // safe write; endpoint interprets the discriminated result into HTTP
+        // status per POML acceptance criterion "wrong-state, missing-reason,
+        // unauthorized". Missing-reason handled above; unauthorized handled by
+        // AuthModule.Policies.Operator (401/403).
+        var actorTid = ExtractTenantId(httpContext.User);
+        var actorOid = ExtractObjectId(httpContext.User);
+
+        var result = await clearService
+            .ClearAsync(customerId!, id, reason, actorOid, cancellationToken)
+            .ConfigureAwait(false);
+
+        switch (result)
         {
-            return NotFound(httpContext, id, customerId!);
+            case QuarantineClearResult.NotFound:
+                return NotFound(httpContext, id, customerId!);
+
+            case QuarantineClearResult.Conflict wrongState:
+                return Conflict(
+                    httpContext,
+                    $"Run '{id}' is not in Quarantined state (current status: {wrongState.CurrentStatus}). " +
+                    "clear-quarantine requires the run to be in Quarantined state (spec FR-24).");
+
+            case QuarantineClearResult.ConcurrencyConflict concurrent:
+                return Conflict(
+                    httpContext,
+                    $"Run '{id}' was modified by a concurrent writer (current status: {concurrent.Current.Status}). " +
+                    "Retry the clear-quarantine after re-reading the run state.");
+
+            case QuarantineClearResult.Success:
+                break; // Fall through to enqueue + audit-log below.
+
+            default:
+                throw new UnreachableException(
+                    $"QuarantineClearResult exhaustive union changed: {result.GetType().FullName}");
         }
 
-        // Enqueue the clear-quarantine dispatch — the reconciler (task 061)
-        // applies the QuarantineState=Cleared transition + updates
-        // Quarantine.ClearedBy/ClearedAt.
+        // Fire-and-forget dispatch envelope so downstream consumers (log
+        // subscribers, potential future audit-cleanup workers) see the action
+        // on the wire. The Cosmos state transition already landed via
+        // clearService.ClearAsync above; the envelope is observability-only.
         await enqueuer.EnqueueAsync(
             new HandlerEnvelope
             {
@@ -643,9 +771,7 @@ public static class RunsEndpoints
         // query can pivot on 'QuarantineCleared' independently of the general
         // AuditableAction stream. The general AuditLogMiddleware (task 039)
         // ALSO fires for this request; the two records complement (this one
-        // carries the reason + a distinct event name).
-        var actorTid = ExtractTenantId(httpContext.User);
-        var actorOid = ExtractObjectId(httpContext.User);
+        // carries the reason + a distinct event name). Only fired on success.
         logger.LogInformation(
             QuarantineClearedEventName + ": RunId={RunId} CustomerId={CustomerId} " +
             "Reason={Reason} ActorTid={ActorTid} ActorOid={ActorOid} RequestId={RequestId}",
@@ -703,6 +829,14 @@ public static class RunsEndpoints
             title: "Not Found",
             detail: $"ProvisioningRun '{runId}' not found in customer partition '{customerId}'.",
             type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+
+    private static IResult Conflict(HttpContext httpContext, string detail) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status409Conflict,
+            title: "Conflict",
+            detail: detail,
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.8",
             extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
 
     private static string SerializeEnqueueParameters(EnqueuePayload payload) =>
