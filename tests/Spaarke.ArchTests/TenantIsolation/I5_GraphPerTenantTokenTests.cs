@@ -17,9 +17,26 @@ namespace Spaarke.ArchTests.TenantIsolation;
 /// </para>
 ///
 /// <para>
-/// <b>Scan shape</b>: file-level scan of <c>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/**/*.cs</c>
-/// for every credential-construction site and MSAL authority binding. For
-/// each site the ArchTest asserts one of the following compliant shapes:
+/// <b>Scan shape</b>: file-level scan of every credential-construction site
+/// and MSAL authority binding under the BFF's credential-boundary directories:
+/// <list type="bullet">
+///   <item><c>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/**/*.cs</c> —
+///     the original scope (task 064). Every Graph-outbound credential lives
+///     here.</item>
+///   <item><c>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/**/*.cs</c> —
+///     added 2026-08-17 by customer-provisioning-orchestration-r1 Wave 4
+///     Batch 4D drift-1 in response to the task 065 audit report §7.2
+///     finding: <c>ManagedIdentityCredentialFactory.cs</c> constructed a
+///     <c>DefaultAzureCredential</c> without a <c>TenantId</c> assignment
+///     (parallel to the fixed <c>GraphClientFactory:132</c> gap) and was
+///     invisible to the original scan. The BFF's central credential factory
+///     is the highest-blast-radius credential surface — it feeds the
+///     DI-singleton <c>TokenCredential</c> used by every Dataverse / Cosmos
+///     / OpenAI / Content Safety consumer — so scanning it under the same
+///     I5 rules closes the visibility gap.</item>
+/// </list>
+/// For each construction site the ArchTest asserts one of the following
+/// compliant shapes:
 /// <list type="number">
 ///   <item><c>new ClientSecretCredential(tenantId, ...)</c> — first positional
 ///     argument is a non-empty tenant expression (NOT an empty string, NOT
@@ -54,7 +71,23 @@ namespace Spaarke.ArchTests.TenantIsolation;
 public class I5_GraphPerTenantTokenTests
 {
     private static readonly string RepoRoot = ResolveRepoRoot();
-    private const string ScanRelDir = "src/server/api/Sprk.Bff.Api/Infrastructure/Graph";
+
+    /// <summary>
+    /// Directories scanned for credential-construction sites. Each entry MUST be a
+    /// slash-normalized repo-relative path. Adding a directory here broadens the I5 invariant;
+    /// see the class-level XML doc for the rationale behind each entry.
+    /// </summary>
+    private static readonly string[] ScanRelDirs = new[]
+    {
+        "src/server/api/Sprk.Bff.Api/Infrastructure/Graph",
+        // Added 2026-08-17 (customer-provisioning-orchestration-r1 Wave 4 Batch 4D drift-1
+        // follow-up to task 065): the BFF's central Dataverse/Cosmos/OpenAI credential factory
+        // lives under Infrastructure/Auth and is the highest-blast-radius credential surface
+        // outside Infrastructure/Graph. Task 065 audit §7.2 found ManagedIdentityCredentialFactory
+        // had the same missing-TenantId gap as GraphClientFactory but was invisible to this
+        // ArchTest's original scope.
+        "src/server/api/Sprk.Bff.Api/Infrastructure/Auth",
+    };
 
     /// <summary>
     /// Recognizes <c>new ClientSecretCredential(</c> — captures the position
@@ -109,16 +142,26 @@ public class I5_GraphPerTenantTokenTests
         @"/(common|organizations|consumers)\b(?!/)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    [Fact(DisplayName = "FR-32/§4D I5: every Graph credential construction is per-tenant scoped (ClientSecretCredential, DefaultAzureCredential, WithAuthority)")]
+    [Fact(DisplayName = "FR-32/§4D I5: every BFF credential construction under Infrastructure/{Graph,Auth}/** is per-tenant scoped (ClientSecretCredential, DefaultAzureCredential, WithAuthority)")]
     public void GraphCredentials_ArePerTenantScoped()
     {
-        var scanRoot = Path.Combine(RepoRoot, ScanRelDir);
-        Assert.True(
-            Directory.Exists(scanRoot),
-            $"{ScanRelDir} directory not found at '{scanRoot}'. The I5 ArchTest cannot run without it.");
+        var scanRoots = ScanRelDirs
+            .Select(rel => (Rel: rel, Full: Path.Combine(RepoRoot, rel)))
+            .ToList();
+
+        foreach (var (rel, full) in scanRoots)
+        {
+            Assert.True(
+                Directory.Exists(full),
+                $"{rel} directory not found at '{full}'. The I5 ArchTest cannot run without it.");
+        }
 
         var offenders = new List<string>();
-        foreach (var file in EnumerateProductionCsFiles(scanRoot))
+        var scannedFiles = scanRoots
+            .SelectMany(root => EnumerateProductionCsFiles(root.Full))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var file in scannedFiles)
         {
             var rel = RelPath(file);
             var text = File.ReadAllText(file);
