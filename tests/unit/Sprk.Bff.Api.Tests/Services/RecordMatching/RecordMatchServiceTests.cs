@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
@@ -22,10 +23,11 @@ public class RecordMatchServiceTests
             AiSearchEndpoint = null,
             AiSearchKey = "test-key"
         });
+        var configuration = new ConfigurationBuilder().Build();
         var logger = Mock.Of<ILogger<RecordMatchService>>();
 
         // Act & Assert
-        var act = () => new RecordMatchService(options, logger);
+        var act = () => new RecordMatchService(options, configuration, logger);
         act.Should().Throw<InvalidOperationException>()
            .WithMessage("*AiSearchEndpoint*");
     }
@@ -39,10 +41,11 @@ public class RecordMatchServiceTests
             AiSearchEndpoint = "https://test.search.windows.net",
             AiSearchKey = null
         });
+        var configuration = new ConfigurationBuilder().Build();
         var logger = Mock.Of<ILogger<RecordMatchService>>();
 
         // Act & Assert
-        var act = () => new RecordMatchService(options, logger);
+        var act = () => new RecordMatchService(options, configuration, logger);
         act.Should().Throw<InvalidOperationException>()
            .WithMessage("*AiSearchKey*");
     }
