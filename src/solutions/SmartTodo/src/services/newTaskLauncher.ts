@@ -71,8 +71,8 @@
 import {
   navigateToEntityRecordSurfaceAsync,
   TODO_REGARDING_CATALOG,
+  getOobModalSize,
 } from '@spaarke/ui-components';
-import { getOobModalSize } from '@spaarke/ui-components/utils/adapters/oobModalSizes';
 import type { ILaunchContext } from '../hooks/useLaunchContext';
 import { getXrm } from './xrmProvider';
 

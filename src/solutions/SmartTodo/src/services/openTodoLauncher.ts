@@ -35,8 +35,7 @@
  * @see projects/smart-todo-r5/notes/task-033-saveclose-refresh.md
  */
 
-import { navigateToEntityRecordSurfaceAsync } from '@spaarke/ui-components';
-import { getOobModalSize } from '@spaarke/ui-components/utils/adapters/oobModalSizes';
+import { navigateToEntityRecordSurfaceAsync, getOobModalSize } from '@spaarke/ui-components';
 
 /** Entity logical name for the sprk_todo OOB main form (spec FR-11). */
 const TODO_ENTITY_NAME = 'sprk_todo';

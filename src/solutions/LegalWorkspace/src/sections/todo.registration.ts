@@ -61,8 +61,7 @@ import type {
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
-import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync } from "@spaarke/ui-components";
-import { getOobModalSize } from "@spaarke/ui-components/utils/adapters/oobModalSizes";
+import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync, getOobModalSize } from "@spaarke/ui-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
 import type { IFeedSyncBridge, SmartTodoWidgetProps } from "@spaarke/smart-todo-components";
