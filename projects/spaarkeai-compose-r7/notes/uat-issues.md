@@ -294,7 +294,13 @@ investigation/research pass to choose the correct write-model before building.
   (0 surface-owned errors). Real-env UAT: run an NDA review in Compose → confirm an Analysis record appears +
   reopens from history. (The old manual "Promote"/"Set related record" affordance stays as-is for explicit
   matter/project association — task 034.)
-- **BATCH COMPLETE** — every UAT row is now ✅ Fixed, ✅ Verified, or 📦 Deferred-to-r8 with an owner decision.
-  Remaining before R7 close: merge master → run BFF §10 publish-size gate → redeploy BFF + `sprk_spaarkeai`
-  together (NFR-05) → real-env UAT re-test.
+- **BATCH COMPLETE + DEPLOYED** (2026-08-18) — every UAT row is ✅ Fixed, ✅ Verified, or 📦 Deferred-to-r8 with an
+  owner decision. **Deployed to dev**: BFF (`spaarke-bff-dev`, 44.96 MB, all 4 SHA-256 hashes matched, health
+  200) + `sprk_spaarkeai` (updated + published, 5682 KB) TOGETHER (NFR-05). §10 gates: publish 43.64 MB
+  compressed ≤60 MB (flat vs baseline), CVE clean, conflict-check clean. Post-deploy: `/healthz` 200, compose
+  save route 401 (registered), `/api/ai/analysis/promote` 401 (UAT-08 live). Worktree synced to latest master
+  (0 behind), all commits pushed.
+  - **Remaining for R7 close**: (1) **real-env UAT re-test** of the fixed flows (container save, name-on-save,
+    redline placement, save banners, concurrency 412, auto-Analysis, progress indicator); (2) **UAT-10 ops
+    action** on the UAT Azure SignalR resource (connection-string key/endpoint/Serverless mode — NOT code).
 - **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".
