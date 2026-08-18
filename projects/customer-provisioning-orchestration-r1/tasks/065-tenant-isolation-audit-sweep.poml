@@ -3,8 +3,8 @@
   <metadata>
     <title>Phase A audit sweep of every BFF service touching AI Search / Cosmos / Graph / SPE (I2-I5 compliance)</title>
     <phase>C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>completed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api','testing','integration-test'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Sweeps entire BFF service surface for tenant-isolation invariant compliance.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -13,6 +13,7 @@ public class RecordMatchService : IRecordMatchService
 {
     private readonly SearchClient _searchClient;
     private readonly DocumentIntelligenceOptions _options;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<RecordMatchService> _logger;
 
     // Scoring weights per spec Section 4.2.3
@@ -31,9 +32,11 @@ public class RecordMatchService : IRecordMatchService
 
     public RecordMatchService(
         IOptions<DocumentIntelligenceOptions> options,
+        IConfiguration configuration,
         ILogger<RecordMatchService> logger)
     {
         _options = options.Value;
+        _configuration = configuration;
         _logger = logger;
 
         if (string.IsNullOrWhiteSpace(_options.AiSearchEndpoint))
@@ -73,10 +76,30 @@ public class RecordMatchService : IRecordMatchService
             SearchMode = SearchMode.Any
         };
 
+        // customer-provisioning-orchestration-r1 §4D tenant-isolation invariant I2 / FR-29
+        // (task 065): scope every records-index search to this BFF's tenant. The canonical
+        // tenant source is AzureAd:TenantId — the same source DataverseIndexSyncService uses
+        // when it stamps `tenantId` onto each indexed record (see TransformToDocument line
+        // 364 of that file). Filter shape is `tenantId eq '{tenantId}'`, AND-composed with
+        // the optional record-type filter below. Without this filter, once the records index
+        // moves to a shared-index-multi-tenant shape a record-match query would return
+        // matches from other tenants (CATASTROPHIC per §4D).
+        var tenantId = _configuration["AzureAd:TenantId"] ?? string.Empty;
+        var filterClauses = new List<string>();
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            filterClauses.Add($"tenantId eq '{tenantId.Replace("'", "''")}'");
+        }
+
         // Apply record type filter
         if (!string.Equals(request.RecordTypeFilter, "all", StringComparison.OrdinalIgnoreCase))
         {
-            searchOptions.Filter = $"recordType eq '{request.RecordTypeFilter}'";
+            filterClauses.Add($"recordType eq '{request.RecordTypeFilter}'");
+        }
+
+        if (filterClauses.Count > 0)
+        {
+            searchOptions.Filter = string.Join(" and ", filterClauses);
         }
 
         // Select only needed fields

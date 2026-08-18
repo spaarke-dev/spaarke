@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Spaarke.Core.Attributes;
 
 namespace Sprk.Bff.Api.Services.Ai.PromptLibrary;
 
@@ -309,6 +310,15 @@ public sealed class PromptLibraryService : IPromptLibraryService
     /// Cross-partition query to locate a template by id + tenantId.
     /// Used when the ownerId (partition key) is unknown.
     /// </summary>
+    /// <remarks>
+    /// customer-provisioning-orchestration-r1 §4D tenant-isolation invariant I3 / FR-30
+    /// (task 065): waived because the container partition key is `/ownerId` (see class
+    /// remarks) but this lookup path is entered with only the template id in hand — the
+    /// ownerId is unknown by construction. The SQL WHERE clause binds @tenantId so tenant
+    /// isolation is still enforced at the query level (defense in depth), and the query is
+    /// bounded to a single template id + tenant, so the fan-out remains minimal in practice.
+    /// </remarks>
+    [AllowCrossPartitionScan("PromptLibraryService.FindByIdAsync: PK=/ownerId is unknown at lookup; SQL WHERE binds @tenantId. Ref: customer-provisioning-orchestration-r1 §4D I3 / FR-30 / task 065.")]
     private async Task<PromptTemplate?> FindByIdAsync(
         string tenantId,
         string templateId,
