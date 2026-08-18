@@ -126,7 +126,7 @@ Declared in [spec.md § ADR Tensions](./spec.md#adr-tensions-per-claudemd-65--ma
 ## Sub-Agent Write Boundary (root CLAUDE.md §3)
 
 **Sub-agents CANNOT write to `.claude/` paths.** Applies to r1 tasks touching:
-- `.claude/skills/provision-environment/SKILL.md` (Phase D) — main-session-only
+- `.claude/skills/provision-environment/SKILL.md` (Phase D) — main-session-only **(LANDED 2026-08-18 tasks 075 + 076)**
 - `.claude/patterns/**` additions (if any) — main-session-only
 - `.claude/constraints/**` additions (if any) — main-session-only
 

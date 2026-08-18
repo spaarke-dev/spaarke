@@ -1,0 +1,102 @@
+[
+  {
+    "name": "DemoProvisioning__AccountDomain",
+    "slotSetting": false,
+    "value": "demo.spaarke.com"
+  },
+  {
+    "name": "DemoProvisioning__AdminNotificationEmails__0",
+    "slotSetting": false,
+    "value": "ralph.schroeder@spaarke.com"
+  },
+  {
+    "name": "DemoProvisioning__DefaultEnvironment",
+    "slotSetting": false,
+    "value": "Dev"
+  },
+  {
+    "name": "DemoProvisioning__DemoUsersGroupId",
+    "slotSetting": false,
+    "value": "745bfdf6-f899-4507-935d-c52de3621536"
+  },
+  {
+    "name": "DemoProvisioning__Environments__0__AppId",
+    "slotSetting": false,
+    "value": "729afe6d-ca73-f011-b4cb-6045bdd8b757"
+  },
+  {
+    "name": "DemoProvisioning__Environments__0__BusinessUnitName",
+    "slotSetting": false,
+    "value": "Spaarke Demo"
+  },
+  {
+    "name": "DemoProvisioning__Environments__0__DataverseUrl",
+    "slotSetting": false,
+    "value": "https://spaarkedev1.crm.dynamics.com"
+  },
+  {
+    "name": "DemoProvisioning__Environments__0__DefaultDemoDurationDays",
+    "slotSetting": false,
+    "value": "14"
+  },
+  {
+    "name": "DemoProvisioning__Environments__0__Name",
+    "slotSetting": false,
+    "value": "Dev"
+  },
+  {
+    "name": "DemoProvisioning__Environments__0__SpeContainerId",
+    "slotSetting": false,
+    "value": "b!yLRdWEOAdkaWXskuRfByIRiz1S9kb_xPveFbearu6y9k1_PqePezTIDObGJTYq50"
+  },
+  {
+    "name": "DemoProvisioning__Environments__0__TeamName",
+    "slotSetting": false,
+    "value": "Spaarke Demo"
+  },
+  {
+    "name": "DemoProvisioning__Environments__1__BusinessUnitName",
+    "slotSetting": false,
+    "value": "Spaarke Demo"
+  },
+  {
+    "name": "DemoProvisioning__Environments__1__DataverseUrl",
+    "slotSetting": false,
+    "value": "https://spaarke-demo.crm.dynamics.com"
+  },
+  {
+    "name": "DemoProvisioning__Environments__1__DefaultDemoDurationDays",
+    "slotSetting": false,
+    "value": "14"
+  },
+  {
+    "name": "DemoProvisioning__Environments__1__Name",
+    "slotSetting": false,
+    "value": "Demo 1"
+  },
+  {
+    "name": "DemoProvisioning__Environments__1__SpeContainerId",
+    "slotSetting": false,
+    "value": "b!FzmtPrWQEEi1yPtUOXM4_h7X4udVbCVJgu1ClOi23elAbPdL3-EGQK-D8YZ9tcZp"
+  },
+  {
+    "name": "DemoProvisioning__Environments__1__TeamName",
+    "slotSetting": false,
+    "value": "Spaarke Demo"
+  },
+  {
+    "name": "DemoProvisioning__Licenses__FabricFreeSkuId",
+    "slotSetting": false,
+    "value": "a403ebcc-fae0-4ca2-8c8c-7a907fd6c235"
+  },
+  {
+    "name": "DemoProvisioning__Licenses__PowerAppsPlan2TrialSkuId",
+    "slotSetting": false,
+    "value": "dcb1a3ae-b33f-4487-846a-a640262fadf4"
+  },
+  {
+    "name": "DemoProvisioning__Licenses__PowerAutomateFreeSkuId",
+    "slotSetting": false,
+    "value": "f30db892-07e9-47e9-837c-80727f46fd3d"
+  }
+]

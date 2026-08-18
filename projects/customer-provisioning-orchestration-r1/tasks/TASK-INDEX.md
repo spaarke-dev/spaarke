@@ -144,18 +144,19 @@ Two additional corrections independently caught by task-gen subagents:
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 075 | 🔲 | Author `/provision-environment` skill at `.claude/skills/provision-environment/SKILL.md` (Sub-Agent Write Boundary — MAIN-SESSION-ONLY) | STANDARD | opus / high | none (parallel-safe:false) | 057 |
-| 076 | 🔲 | Author fallback matrix impl in `/provision-environment` skill (MCP disconnect handling) | MINIMAL | sonnet / medium | none (parallel-safe:false; touches `.claude/skills/**`) | 075 |
+| 075 | ✅ | Author `/provision-environment` skill at `.claude/skills/provision-environment/SKILL.md` (Sub-Agent Write Boundary — MAIN-SESSION-ONLY) — LANDED 2026-08-18 main-session; ~470 LOC skill with Step 0 prereqs (6 checks) + Step 1-6 flow + Tool Matrix + Auth Flow + Dry-run + Troubleshooting + Failure Modes; skills registry auto-discovered | STANDARD | opus / high | none (parallel-safe:false) | 057 |
+| 076 | ✅ | Author fallback matrix impl in `/provision-environment` skill (MCP disconnect handling) — LANDED 2026-08-18 main-session; added ~155 LOC Fallback Matrix section (F1 MCP disconnect → pac data / raw Web API PS; F2 az token expiry → auto-refresh; F3 L2 unreachable → escalate + resume-from-Cosmos I6) + cross-references from Steps 4/5/6 | MINIMAL | sonnet / medium | none (parallel-safe:false; touches `.claude/skills/**`) | 075 |
 | 077 | ✅ | Implement per-tenant token-metering layer (D19 — APIM OR app-level custom App Insights metric) — chose **app-level** (extends existing observability shipped by ai-architecture-redesign-r1 task 054; adds `TenantBudgetPolicy` + `InMemoryTenantTokenLedger` enforcement seam on `OpenAiClient`); build 0/0, 20/20 metering tests pass, publish 44.96 MB (Δ 0.00), CVE clean | FULL | opus / high | none (dep Phase A decision) | 001-008 (Phase A) |
 | 078 | ✅ | Verify `POST /api/onboarding/consent-callback` E2E (signed-synthetic-payload path per POML alternative) — 7 E2E tests at `tests/integration/Sprk.Bff.Api.IntegrationTests/Onboarding/` cover 4 POML paths (happy · re-consent idempotency · restart · 401 HMAC) + §4D I1 · missing-sig-header · base64-signature; 7/7 PASS; BFF 10,484/0/97 preserved; publish 44.96 MB Δ +0.00; CVE clean; report `notes/consent-callback-e2e-2026-08-18.md`; 5 documented deviations (all Path C except D-078-4 Path A — L2 state-check scoping) | FULL | sonnet / high | none (dep 042, 057) | 042, 057 |
 
-### Phase E — DemoExpirationService Migration (3 tasks) — parallel with C/C'/D
+### Phase E — DemoExpirationService Migration (4 tasks — 081.5 added 2026-08-18 per task 082 escalation) — parallel with C/C'/D
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
 | 080 | ✅ | Refactor `DemoExpirationService.cs` off `[Obsolete]` `DemoProvisioningOptions.Environments`/`DefaultEnvironment` → `DataverseEnvironmentService` | FULL | sonnet / xhigh | none (serial BFF touch; frozen file mod) | none |
 | 081 | ✅ | Refactor `RegistrationEndpoints.cs` lines 466/468/469 (remove 4 `[Obsolete]` warnings) | FULL | sonnet / high | none (dep 080) | 080 |
-| 082 | ⏸ | Delete `DemoProvisioning__Environments__*` + `__DefaultEnvironment` from Azure config; verify BFF `/health` + publish size delta | FULL | sonnet / high | none (dep 080, 081 + deploy) | 080, 081 |
+| 081.5 | 🔲 | Refactor `RegistrationDataverseService` ctor off `[Obsolete]` `DemoProvisioningOptions` fallback (unblocks 082); pre-deploy Azure config gate (set `DATAVERSE_URL` on dev BEFORE code deploy); code deploy + `/healthz` verify | FULL | sonnet / high | none (serial BFF ctor + deploy) | 080, 081 |
+| 082 | ⏸ | Delete `DemoProvisioning__Environments__*` + `__DefaultEnvironment` from Azure config; verify BFF `/health` + publish size delta | FULL | sonnet / high | none (dep 080, 081, 081.5 + deploy) | 080, 081, 081.5 |
 
 ### Phase H — KV Federation Full Remediation (5 tasks)
 
@@ -193,7 +194,7 @@ Waves per plan.md § 3 Implementation Approach. Groups within a wave are paralle
 | **groupB-parallel** | 010, 011, 012, 013, 014, 016 (6 tasks) | none | Script hardening; different scripts each; STANDARD rigor |
 | **groupG-parallel** | 018, 019, 020 (3 tasks) | none | Naming compliance at provisioning; different targets |
 | **Serial (Phase A)** | 005 (11 GUID commits) | none | Serial per-GUID commit discipline |
-| **Serial (Phase E)** | 080 → 081 → 082 (3 tasks) | none | Existing frozen file modification; sequential dep chain |
+| **Serial (Phase E)** | 080 → 081 → 081.5 → 082 (4 tasks) | none | Existing frozen file modification; sequential dep chain; 081.5 added 2026-08-18 per task 082 pre-verification escalation (RegistrationDataverseService ctor fallback + Azure config pre-gate) |
 | **Serial (Phase D-skill)** | 075 → 076 (2 tasks) | none | `.claude/skills/**` — MAIN-SESSION-ONLY Sub-Agent Write Boundary |
 
 **Max concurrency**: 16 total (per Wave 0 groups combined = 7+6+3+1+1+1 = 19 tasks kickable; group tasks compose per wave). Recommend dispatch 6 at a time per `.claude/skills/project-pipeline/SKILL.md` Step 5 concurrency cap.
