@@ -71,6 +71,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
+using Sprk.Provisioning.ControlPlane.Reconciler;
 using Sprk.Provisioning.ControlPlane.Registry;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -859,6 +860,49 @@ builder.Services.AddSingleton<IAppServiceSlotSwapper, AzCliAppServiceSlotSwapper
 builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
 builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();
 builder.Services.AddScoped<H9BffDeployHandler>();
+
+// Task 058 (Wave C5): state-reconciler BackgroundService — polls Cosmos every
+// 5s (configurable via ReconcilerOptions.PollInterval) for runs with status ∈
+// {Running, WaitingOnGate}, computes DAG advancement per design.md §4.1
+// handler dependencies via IDagAdvancer, and enqueues each ready-to-dispatch
+// handler via IHandlerEnqueuer (task 038 Service Bus wire). Registers:
+//   - ReconcilerOptions (bound + validated; PollInterval >= 1s enforced)
+//   - TimeProvider.System (once, via TryAddSingleton — production clock)
+//   - IDagAdvancer -> DagAdvancer (Singleton, pure function)
+//   - IActiveRunScanner -> CosmosActiveRunScanner (Scoped; reuses the
+//     CosmosClient singleton from CosmosModule + the same database/container
+//     names — no duplicate client instantiation)
+//   - StateReconcilerService (HostedService)
+//
+// PLACEMENT (CLAUDE.md §10 / §11): L2-only; no BFF references; no AI-internal
+// injection (ADR-013 forcing-function rule). The reconciler is orchestration
+// infrastructure — the ADR-004 Path A exception at L2 scope applies (spec.md
+// ADR Tensions row 1 / CLAUDE.md §6.5).
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-004 (Path A at L2 scope): the state-reconciler is orchestration
+//     infrastructure, NOT itself an IJobHandler. Custom state machine +
+//     Cosmos-backed run doc + Service Bus enqueue is the documented L2
+//     execution model per design.md §4.2 (Fable M-9 resolution).
+//   - ADR-036 (Path C - comply): 3-level idempotency contract intact —
+//     Level 1 is Service Bus MessageId dedup (deterministic per (HandlerId,
+//     RunId, CustomerId, paramHash) via ServiceBusHandlerEnqueuer.ComputeMessageId);
+//     Level 2 is BFF-side Redis IdempotencyService; Level 3 is Dataverse
+//     alt-key upsert / Cosmos ETag on run doc. The reconciler does NOT
+//     write to Cosmos itself — handlers own state-transition writes —
+//     which keeps the reconciler ETag-race-free under N-instance concurrent
+//     execution.
+//   - ADR-032: all registrations UNCONDITIONAL - no feature-gate branches.
+//     Kill-switch is via Reconciler:Enabled config flag (test-only escape
+//     hatch; production leaves it true) which suppresses the ExecuteAsync
+//     loop cleanly rather than skipping DI registration.
+//   - §4D I3 waiver: CosmosActiveRunScanner.QueryActiveRunsAsync is
+//     annotated with [AllowCrossPartitionScan("design.md §4.2 ...")] — the
+//     ONE deliberate cross-partition read in L2, per design intent. The
+//     attribute is a same-named local declaration (not a Spaarke.Core ref)
+//     to avoid pulling Spaarke.Dataverse's Dataverse SDK transitively into
+//     the L2 publish (~several MB).
+builder.Services.AddReconcilerModule(builder.Configuration);
 
 var app = builder.Build();
 
