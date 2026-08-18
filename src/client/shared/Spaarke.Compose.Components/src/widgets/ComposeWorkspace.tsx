@@ -797,6 +797,18 @@ const useStyles = makeStyles({
     paddingBlock: tokens.spacingVerticalXS,
     flexShrink: 0,
   },
+  // UAT-04 (2026-08-18): compact top-area operation-in-flight indicator. Semantic tokens only
+  // (ADR-021 dark-mode-correct); an unobtrusive subtle-background strip above the banner stack.
+  operationIndicator: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalS,
+    paddingInline: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalXS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+  },
   editorSlot: {
     flex: 1,
     minHeight: 0,
@@ -3933,6 +3945,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // is available when there is unsaved work (an edit OR an unpersisted transient
   // draft) and not mid-save.
   const isSavingNow = state.status === 'saving';
+  // UAT-04 (2026-08-18, owner-requested): the user needs to know when Compose is performing an
+  // operation — surface a progress indicator in the workspace's top notification area (NOT the
+  // Assistant). Aggregate the existing per-action busy flags into ONE active-operation label; the
+  // indicator renders above the banner stack whenever any operation is in flight. Save takes priority
+  // (most frequent), then template apply, memo, Word-open, profile refresh.
+  const activeOperationLabel: string | null = isSavingNow
+    ? 'Saving…'
+    : isApplyingTemplate
+      ? 'Applying template…'
+      : memoActionInFlight
+        ? 'Creating summary memo…'
+        : isWordActing
+          ? 'Opening in Word…'
+          : isRefreshingProfile
+            ? 'Refreshing…'
+            : null;
   const hasWordDocument = toolbarDocumentId.length > 0 && bffBaseUrl.length > 0;
   // Task 041 review B-MEDIUM-1: a PDF-sourced mount must NOT open in Word — the persisted item is
   // the .pdf (Word can't edit it), and the C3 "id stable across the flush" invariant breaks: the
@@ -4097,6 +4125,22 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             }}
             onDismiss={() => dispatch({ kind: 'externalChangeDismissed' })}
           />
+
+          {/* UAT-04 (owner-requested): top-area progress indicator so the user knows Compose is
+              performing an operation (save / template / memo / Word-open / refresh). Lives in the
+              workspace's own notification area, NOT the Assistant. `aria-live="polite"` announces the
+              operation to assistive tech; `role="status"` marks it non-alarming. */}
+          {activeOperationLabel ? (
+            <div
+              className={styles.operationIndicator}
+              role="status"
+              aria-live="polite"
+              data-testid="compose-workspace-operation-indicator"
+            >
+              <Spinner size="extra-tiny" />
+              <Text size={200}>{activeOperationLabel}</Text>
+            </div>
+          ) : null}
 
           {/* Banner stack — errors / warnings / checkout status / assistant pending */}
           <ComposeBannerStack

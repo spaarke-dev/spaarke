@@ -245,9 +245,23 @@ investigation/research pass to choose the correct write-model before building.
   don't treat this as clean, open in Word to review" banner. BFF builds clean (0 errors); +3 banner tests
   (38/38). BFF §10 gates: additive bool field, zero new packages → publish-size delta ~0 / no new CVE (final
   publish measurement batched to pre-deploy).
-- 🔧 Do next (the batch): **UAT-24** (tolerant-but-SURFACED resolver — propose-don't-auto-place; UAT-21 already
-  applied the SURFACE half), plus the earlier-triaged **UAT-04** (progress indicator), **UAT-08** (promote +
-  auto-create Analysis — needs an owner design call on auto-create), **UAT-09** (comment anchoring signal —
-  overlaps UAT-22/12), **UAT-10** (notifications 401 — investigate, likely hub-auth/env), **UAT-25/26**
-  (concurrency-guard on the ContentModel save path — honest lost-update prevention/warning).
+- ✅ **UAT-04 Fixed** (2026-08-18, owner-requested): added a top-area operation-in-flight indicator in the
+  Compose workspace (NOT the Assistant, per owner). Aggregates the existing per-action busy flags
+  (`isSavingNow` / `isApplyingTemplate` / `memoActionInFlight` / `isWordActing` / `isRefreshingProfile`) into one
+  `activeOperationLabel` rendered as a compact `Spinner + label` strip above the banner stack
+  (`role=status`, `aria-live=polite`, ADR-021 semantic tokens). tsc-clean; the visual indicator is verified in
+  real-env UAT (driving the full workspace busy-state in jest is blocked by the FR-13 FormModal env gap).
+- ✅ **UAT-09 Verified-surfaced** (2026-08-18, no code change — premise stale, §6.5 honesty): the advisory-comment
+  placement failures are NOT silently lost — `AgreementReviewSummaryPanel` renders "N finding(s) could not be
+  anchored as an in-document comment — the citation below still shows what was flagged" (`placementFailureCount`,
+  with tests), fed from both the live and re-materialize placement paths. The comment SAVE-path drops are
+  additionally now honest via UAT-22. The op-log `commentAnchor` unrepresentable line is a diagnostic for a mark
+  outside the op-log's closed set; the comment itself rides the separate (now-honest) anchored-comments save path.
+  No silent loss to fix. (Optional future enhancement: a proactive banner so the count is visible without opening
+  the Review panel — not required for honesty.)
+- 🔧 Do next (the batch): **UAT-24** (tolerant/fuzzy resolver — the SURFACE half is done via UAT-21; the tolerant
+  half leans compose-r8), **UAT-08** (promote + auto-create Analysis — **needs an owner design call** on
+  auto-create; escalate before coding), **UAT-10** (notifications 401 — investigate; likely hub-auth/env, may not
+  be a pure code fix), **UAT-25/26** (concurrency-guard on the ContentModel save path — honest lost-update
+  prevention/warning; MAJOR, server-side).
 - **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".
