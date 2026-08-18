@@ -191,7 +191,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
         result.Should().BeOfType<HandlerResult.Success>();
         granter.CallCount.Should().Be(1);
         granter.LastInput.Should().NotBeNull();
-        granter.LastInput!.KeyVaultResourceId.Should().Contain(KeyVaultName);
+        granter.LastInput!.VaultResourceId.Should().Contain(KeyVaultName);
         granter.LastInput.RoleDefinitionId.Should().Be("4633458b-17de-408a-b874-0445c86b69e6",
             "public-cloud KV Secrets User role id");
     }

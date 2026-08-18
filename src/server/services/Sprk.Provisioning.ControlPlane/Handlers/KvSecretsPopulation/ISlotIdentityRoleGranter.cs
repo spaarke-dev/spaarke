@@ -60,14 +60,14 @@ public interface ISlotIdentityRoleGranter
 /// <param name="ResourceGroupName">Resource group containing the App Service + KV.</param>
 /// <param name="AppServiceName">App Service name (for slot MI resolution).</param>
 /// <param name="StagingSlotName">Staging slot name (typically <c>staging</c>).</param>
-/// <param name="KeyVaultResourceId">The full KV resource id (grant scope) — e.g. <c>/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vaults/{name}</c>.</param>
-/// <param name="RoleDefinitionId">The KV Secrets User role definition id (well-known GUID from <see cref="KvSecretsPopulationOptions.KeyVaultSecretsUserRoleId"/>).</param>
+/// <param name="VaultResourceId">The full KV resource id (grant scope) — e.g. <c>/subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.KeyVault/vaults/{name}</c>.</param>
+/// <param name="RoleDefinitionId">The KV Secrets User role definition id (well-known GUID from <see cref="KvSecretsPopulationOptions.KvSecretsUserRoleId"/>).</param>
 public sealed record SlotIdentityRoleGrantInput(
     string SubscriptionId,
     string ResourceGroupName,
     string AppServiceName,
     string StagingSlotName,
-    string KeyVaultResourceId,
+    string VaultResourceId,
     string RoleDefinitionId);
 
 /// <summary>

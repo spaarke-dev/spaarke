@@ -71,7 +71,7 @@ public interface ISpeContainerTypeProvisioner
 /// <param name="TenantId">Customer Entra tenant id (§4D I1/I5 — MUST be explicit, never default; passed as the script's mandatory <c>-TenantId</c>).</param>
 /// <param name="OwningAppId">BFF API app registration id (H3 output, <c>InterStepState.BffAppRegId</c>) — the confidential-client identity that owns the container type.</param>
 /// <param name="SharePointDomain">Customer SharePoint domain (e.g. <c>acme.sharepoint.com</c>) — passed as the script's <c>-SharePointDomain</c>.</param>
-/// <param name="KeyVaultName">Customer Key Vault name holding the SPE owner cert (§4D I4 tenant-scoped vault) — passed as the script's <c>-KeyVaultName</c>.</param>
+/// <param name="VaultName">Customer Key Vault name holding the SPE owner cert (§4D I4 tenant-scoped vault) — passed as the script's <c>-KeyVaultName</c>.</param>
 /// <param name="CertSecretName">KV secret name holding the base64 PFX SPE owner cert (T6 cert bootstrap) — passed as the script's <c>-CertSecretName</c>.</param>
 /// <param name="DisplayName">Container-type display name.</param>
 public sealed record SpeContainerTypeProvisionRequest(
@@ -79,7 +79,7 @@ public sealed record SpeContainerTypeProvisionRequest(
     string TenantId,
     string OwningAppId,
     string SharePointDomain,
-    string KeyVaultName,
+    string VaultName,
     string CertSecretName,
     string DisplayName);
 

@@ -101,7 +101,7 @@ public sealed class H14cDataverseWebhookSubHandler : IProvisioningHandler
 
         if (string.IsNullOrWhiteSpace(parameters.TenantId)
             || string.IsNullOrWhiteSpace(parameters.DataverseEnvUrl)
-            || string.IsNullOrWhiteSpace(parameters.KeyVaultName)
+            || string.IsNullOrWhiteSpace(parameters.VaultName)
             || string.IsNullOrWhiteSpace(parameters.SubscriptionId)
             || string.IsNullOrWhiteSpace(parameters.WebhookUrl))
         {
@@ -111,7 +111,7 @@ public sealed class H14cDataverseWebhookSubHandler : IProvisioningHandler
         }
 
         var signingKeyResult = await _secretReader.ReadSecretAsync(
-            parameters.KeyVaultName, parameters.SubscriptionId, SigningKeySecretName, cancellationToken)
+            parameters.VaultName, parameters.SubscriptionId, SigningKeySecretName, cancellationToken)
             .ConfigureAwait(false);
 
         string signingKey;
@@ -123,7 +123,7 @@ public sealed class H14cDataverseWebhookSubHandler : IProvisioningHandler
             case KvSecretReadResult.NotFound:
                 return new HandlerResult.Failure(
                     FailureClass.Resumable, H14cRejections.MissingSigningKey,
-                    $"KV secret '{SigningKeySecretName}' not found on vault '{parameters.KeyVaultName}' — " +
+                    $"KV secret '{SigningKeySecretName}' not found on vault '{parameters.VaultName}' — " +
                     "H4 (task 047) must populate it before H14c can register the Dataverse webhook.");
             case KvSecretReadResult.Failure kvFailure:
                 return new HandlerResult.Failure(
@@ -192,7 +192,7 @@ public sealed class H14cDataverseWebhookSubHandler : IProvisioningHandler
     public sealed record Parameters(
         [property: JsonPropertyName("tenantId")] string TenantId,
         [property: JsonPropertyName("dataverseEnvUrl")] string DataverseEnvUrl,
-        [property: JsonPropertyName("keyVaultName")] string KeyVaultName,
+        [property: JsonPropertyName("keyVaultName")] string VaultName,
         [property: JsonPropertyName("subscriptionId")] string SubscriptionId,
         [property: JsonPropertyName("webhookUrl")] string WebhookUrl);
 }

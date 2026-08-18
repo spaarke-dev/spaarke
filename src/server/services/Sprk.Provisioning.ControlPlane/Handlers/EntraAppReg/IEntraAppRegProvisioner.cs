@@ -65,11 +65,11 @@ public interface IEntraAppRegProvisioner
 /// </summary>
 /// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — MUST be explicit, never default; passed as script's mandatory <c>-TenantId</c>).</param>
-/// <param name="KeyVaultName">Target Key Vault name (e.g. <c>sprk-acme-prod-kv</c>) — passed as script's <c>-KeyVaultName</c>. Client secret is written here as <c>BFF-API-ClientSecret</c>.</param>
+/// <param name="VaultName">Target Key Vault name (e.g. <c>sprk-acme-prod-kv</c>) — passed as script's <c>-KeyVaultName</c>. Client secret is written here as <c>BFF-API-ClientSecret</c>.</param>
 public sealed record EntraAppRegRequest(
     string CustomerId,
     string TenantId,
-    string KeyVaultName);
+    string VaultName);
 
 /// <summary>
 /// Deploy outputs H3 needs to (a) populate <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.BffAppRegId"/>

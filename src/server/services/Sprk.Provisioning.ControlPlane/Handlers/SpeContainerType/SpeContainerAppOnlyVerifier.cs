@@ -51,7 +51,7 @@ public sealed class SpeContainerAppOnlyVerifier : ISpeContainerVerifier
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ContainerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.KeyVaultName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.VaultName);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CertSecretName);
 
         var scriptPath = _options.GetContainerMetadataAppOnlyScriptPath;
@@ -83,7 +83,7 @@ public sealed class SpeContainerAppOnlyVerifier : ISpeContainerVerifier
         psi.ArgumentList.Add("-TenantId");
         psi.ArgumentList.Add(request.TenantId);
         psi.ArgumentList.Add("-KeyVaultName");
-        psi.ArgumentList.Add(request.KeyVaultName);
+        psi.ArgumentList.Add(request.VaultName);
         psi.ArgumentList.Add("-CertSecretName");
         psi.ArgumentList.Add(request.CertSecretName);
 

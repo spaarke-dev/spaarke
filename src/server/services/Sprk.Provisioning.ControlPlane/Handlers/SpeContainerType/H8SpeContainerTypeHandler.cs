@@ -314,7 +314,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
                 TenantId: tenantId,
                 OwningAppId: owningAppId,
                 SharePointDomain: sharePointDomain,
-                KeyVaultName: keyVaultName,
+                VaultName: keyVaultName,
                 CertSecretName: certSecretName,
                 DisplayName: displayName);
             provisionOutcome = await _provisioner.ProvisionAsync(provisionRequest, cancellationToken)
@@ -366,7 +366,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
                 ContainerId: outputs.RootContainerId,
                 OwningAppId: owningAppId,
                 TenantId: tenantId,
-                KeyVaultName: keyVaultName,
+                VaultName: keyVaultName,
                 CertSecretName: certSecretName);
             verifyResult = await _verifier.VerifyAsync(verifyRequest, cancellationToken).ConfigureAwait(false);
         }

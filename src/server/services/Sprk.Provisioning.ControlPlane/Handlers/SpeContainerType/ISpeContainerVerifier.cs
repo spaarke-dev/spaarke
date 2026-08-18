@@ -47,13 +47,13 @@ public interface ISpeContainerVerifier
 /// <param name="ContainerId">SPE container id to verify (H8's just-created root container).</param>
 /// <param name="OwningAppId">BFF API app registration id — the confidential-client identity performing the GET.</param>
 /// <param name="TenantId">Customer Entra tenant id (§4D I1/I5 — explicit, no default).</param>
-/// <param name="KeyVaultName">Customer Key Vault name holding the SPE owner cert.</param>
+/// <param name="VaultName">Customer Key Vault name holding the SPE owner cert.</param>
 /// <param name="CertSecretName">KV secret name holding the base64 PFX SPE owner cert.</param>
 public sealed record SpeContainerVerificationRequest(
     string ContainerId,
     string OwningAppId,
     string TenantId,
-    string KeyVaultName,
+    string VaultName,
     string CertSecretName);
 
 /// <summary>Discriminated result of <see cref="ISpeContainerVerifier.VerifyAsync"/>.</summary>

@@ -116,12 +116,41 @@ public class CosmosProvisioningSecretGuardTests
     /// <see cref="Models.KeyVaultSecretRef"/> instead + runner resolves
     /// internally) is deferred to Wave C5 alongside the Options refactor.
     /// </para>
+    /// <para>
+    /// <b>EnvVarValuesOptions</b> (task 050, wave C4 Batch 3E) — direct parity
+    /// with <c>SolutionImportOptions</c> above. IConfiguration binding POCO for
+    /// the H7 handler. The <c>ClientSecret</c> property is bound by App Service
+    /// at app-setting-binding time from an
+    /// <c>@Microsoft.KeyVault(SecretUri=…)</c> reference (Wave C5 wiring per
+    /// design.md §7.1). The plaintext value lives ONLY on this IOptions bag
+    /// after bind time — it is never persisted to Cosmos (H7 hands it to
+    /// <c>DataverseWebApiEnvVarValuesWriter</c> for an OAuth2
+    /// client-credentials token acquisition, then discards). See the property's
+    /// own XML doc: "this options-bound field is NOT persisted to Cosmos."
+    /// Path A exception with Wave-C5 follow-on to consider upgrading to
+    /// <see cref="Models.KeyVaultSecretRef"/> + a runtime secret-resolver seam
+    /// (Path C) once task 084 (Phase H canonical secret-catalog manifest
+    /// generator) provides the L2 KV resolver. Added by Wave 4 Batch 4A
+    /// ArchTest debt remediation (2026-08-17).
+    /// </para>
+    /// <para>
+    /// <b>EnvVarValuesWriteRequest</b> (task 050) — transient <see langword="record"/>
+    /// carrying the plaintext client secret from the H7 handler to the
+    /// <c>DataverseWebApiEnvVarValuesWriter</c>. Direct parity with
+    /// <c>SolutionImportRequest</c> above. Instantiated per-invocation in method
+    /// scope; never persisted to Cosmos. Plaintext IS unavoidable because
+    /// the OAuth2 client-credentials token request requires the raw value.
+    /// Path A exception; Path C alternative deferred to task 084 as above.
+    /// Added by Wave 4 Batch 4A ArchTest debt remediation (2026-08-17).
+    /// </para>
     /// </remarks>
     private static readonly HashSet<string> ExcludedTypeFullNames = new(StringComparer.Ordinal)
     {
         CompliantSecretRefFullName,
         "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.SolutionImportOptions",
         "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.SolutionImportRequest",
+        "Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues.EnvVarValuesOptions",
+        "Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues.EnvVarValuesWriteRequest",
     };
 
     /// <summary>

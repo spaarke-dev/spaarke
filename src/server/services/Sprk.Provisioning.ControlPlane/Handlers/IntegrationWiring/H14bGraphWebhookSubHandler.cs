@@ -102,7 +102,7 @@ public sealed class H14bGraphWebhookSubHandler : IProvisioningHandler
         }
 
         if (string.IsNullOrWhiteSpace(parameters.TenantId)
-            || string.IsNullOrWhiteSpace(parameters.KeyVaultName)
+            || string.IsNullOrWhiteSpace(parameters.VaultName)
             || string.IsNullOrWhiteSpace(parameters.SubscriptionId)
             || string.IsNullOrWhiteSpace(parameters.NotificationBaseUrl))
         {
@@ -130,7 +130,7 @@ public sealed class H14bGraphWebhookSubHandler : IProvisioningHandler
         }
 
         var signingKeyResult = await _secretReader.ReadSecretAsync(
-            parameters.KeyVaultName, parameters.SubscriptionId, SigningKeySecretName, cancellationToken)
+            parameters.VaultName, parameters.SubscriptionId, SigningKeySecretName, cancellationToken)
             .ConfigureAwait(false);
 
         string signingKey;
@@ -142,7 +142,7 @@ public sealed class H14bGraphWebhookSubHandler : IProvisioningHandler
             case KvSecretReadResult.NotFound:
                 return new HandlerResult.Failure(
                     FailureClass.Resumable, H14bRejections.MissingSigningKey,
-                    $"KV secret '{SigningKeySecretName}' not found on vault '{parameters.KeyVaultName}' — " +
+                    $"KV secret '{SigningKeySecretName}' not found on vault '{parameters.VaultName}' — " +
                     "H4 (task 047) must populate it before H14b can wire Graph subscriptions.");
             case KvSecretReadResult.Failure kvFailure:
                 return new HandlerResult.Failure(
@@ -226,7 +226,7 @@ public sealed class H14bGraphWebhookSubHandler : IProvisioningHandler
     /// <summary>H14b's typed ParametersJson shape. Public for STJ reflection resolution parity with <see cref="H14aExchangePolicySubHandler.Parameters"/>.</summary>
     public sealed record Parameters(
         [property: JsonPropertyName("tenantId")] string TenantId,
-        [property: JsonPropertyName("keyVaultName")] string KeyVaultName,
+        [property: JsonPropertyName("keyVaultName")] string VaultName,
         [property: JsonPropertyName("subscriptionId")] string SubscriptionId,
         [property: JsonPropertyName("notificationBaseUrl")] string NotificationBaseUrl,
         [property: JsonPropertyName("communicationResource")] string? CommunicationResource,

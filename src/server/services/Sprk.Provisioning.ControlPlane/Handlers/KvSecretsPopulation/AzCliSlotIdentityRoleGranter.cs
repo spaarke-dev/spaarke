@@ -43,7 +43,7 @@ public sealed class AzCliSlotIdentityRoleGranter : ISlotIdentityRoleGranter
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentException.ThrowIfNullOrWhiteSpace(input.SubscriptionId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(input.KeyVaultResourceId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(input.VaultResourceId);
         ArgumentException.ThrowIfNullOrWhiteSpace(input.RoleDefinitionId);
 
         string? prodPrincipal;
@@ -148,7 +148,7 @@ public sealed class AzCliSlotIdentityRoleGranter : ISlotIdentityRoleGranter
         {
             _logger.LogInformation(
                 "H4 T5 interim: granting KV Secrets User on {KvResourceId} to slot={Slot} principalId={PrincipalId}",
-                input.KeyVaultResourceId, slotLabel, principalId);
+                input.VaultResourceId, slotLabel, principalId);
             var (exit, _, stderr) = await InvokeAzCapturingAsync(
                 _options.T5RoleGrantTimeout, cancellationToken,
                 "role", "assignment", "create",
@@ -156,7 +156,7 @@ public sealed class AzCliSlotIdentityRoleGranter : ISlotIdentityRoleGranter
                 "--assignee-object-id", principalId,
                 "--assignee-principal-type", "ServicePrincipal",
                 "--role", input.RoleDefinitionId,
-                "--scope", input.KeyVaultResourceId).ConfigureAwait(false);
+                "--scope", input.VaultResourceId).ConfigureAwait(false);
 
             if (exit != 0)
             {

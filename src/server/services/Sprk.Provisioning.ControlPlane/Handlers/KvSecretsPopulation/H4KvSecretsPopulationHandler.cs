@@ -558,8 +558,8 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                     ResourceGroupName: resourceGroupName,
                     AppServiceName: appServiceName,
                     StagingSlotName: stagingSlotName,
-                    KeyVaultResourceId: kvResourceId,
-                    RoleDefinitionId: _options.KeyVaultSecretsUserRoleId),
+                    VaultResourceId: kvResourceId,
+                    RoleDefinitionId: _options.KvSecretsUserRoleId),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

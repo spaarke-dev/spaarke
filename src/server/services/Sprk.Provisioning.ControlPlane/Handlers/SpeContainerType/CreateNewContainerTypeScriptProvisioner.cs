@@ -75,7 +75,7 @@ public sealed class CreateNewContainerTypeScriptProvisioner : ISpeContainerTypeP
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SharePointDomain);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.KeyVaultName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.VaultName);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CertSecretName);
 
         var scriptPath = _options.CreateNewContainerTypeScriptPath;
@@ -110,7 +110,7 @@ public sealed class CreateNewContainerTypeScriptProvisioner : ISpeContainerTypeP
         // T6 cert bootstrap — production path (KV). No CertThumbprint dev-fallback
         // branch is ever passed by the handler (that path is operator/local-only).
         psi.ArgumentList.Add("-KeyVaultName");
-        psi.ArgumentList.Add(request.KeyVaultName);
+        psi.ArgumentList.Add(request.VaultName);
         psi.ArgumentList.Add("-CertSecretName");
         psi.ArgumentList.Add(request.CertSecretName);
         psi.ArgumentList.Add("-DisplayName");

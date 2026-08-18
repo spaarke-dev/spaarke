@@ -284,7 +284,7 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
             var request = new EntraAppRegRequest(
                 CustomerId: envelope.CustomerId,
                 TenantId: tenantId,
-                KeyVaultName: keyVaultName);
+                VaultName: keyVaultName);
             outcome = await _provisioner.ProvisionAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

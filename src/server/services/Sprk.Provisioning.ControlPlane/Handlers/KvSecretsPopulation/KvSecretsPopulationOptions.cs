@@ -56,5 +56,5 @@ public sealed class KvSecretsPopulationOptions
     /// can override in a hypothetical sovereign cloud where the constant
     /// differs. Default: the public-cloud role id.
     /// </summary>
-    public string KeyVaultSecretsUserRoleId { get; set; } = "4633458b-17de-408a-b874-0445c86b69e6";
+    public string KvSecretsUserRoleId { get; set; } = "4633458b-17de-408a-b874-0445c86b69e6";
 }

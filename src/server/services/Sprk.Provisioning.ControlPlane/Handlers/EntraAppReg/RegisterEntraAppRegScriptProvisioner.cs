@@ -43,7 +43,7 @@
 //   with the naming convention <c>@Microsoft.KeyVault(SecretUri=https://
 //   {vaultName}.vault.azure.net/secrets/BFF-API-ClientSecret/)</c>. The
 //   provisioner ASSEMBLES this URI reference deterministically from the
-//   input <c>KeyVaultName</c> — the cleartext secret NEVER traverses the
+//   input <c>VaultName</c> — the cleartext secret NEVER traverses the
 //   runner boundary (parity with ADR-028 MUST rule; verified by the handler's
 //   downstream cleartext-secret-leak guard).
 //
@@ -95,7 +95,7 @@ public sealed class RegisterEntraAppRegScriptProvisioner : IEntraAppRegProvision
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.KeyVaultName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.VaultName);
 
         var scriptPath = _options.RegisterEntraAppRegistrationsScriptPath;
         if (!File.Exists(scriptPath))
@@ -123,7 +123,7 @@ public sealed class RegisterEntraAppRegScriptProvisioner : IEntraAppRegProvision
         psi.ArgumentList.Add("-TenantId");
         psi.ArgumentList.Add(request.TenantId);
         psi.ArgumentList.Add("-KeyVaultName");
-        psi.ArgumentList.Add(request.KeyVaultName);
+        psi.ArgumentList.Add(request.VaultName);
         // CustomerId is not a script parameter — it's a partition/correlation
         // scalar the handler uses. The single BFF app-reg is per-tenant, not
         // per-customer, so passing customerId here would be structurally wrong.
@@ -136,7 +136,7 @@ public sealed class RegisterEntraAppRegScriptProvisioner : IEntraAppRegProvision
 
         _logger.LogInformation(
             "H3 Entra app-reg provisioning starting: customerId={CustomerId} tenantId={TenantId} keyVault={KeyVault}",
-            request.CustomerId, request.TenantId, request.KeyVaultName);
+            request.CustomerId, request.TenantId, request.VaultName);
 
         try
         {
@@ -184,7 +184,7 @@ public sealed class RegisterEntraAppRegScriptProvisioner : IEntraAppRegProvision
 
         // KV URI reference is assembled deterministically — cleartext secret
         // NEVER traverses this method's boundary (ADR-028 MUST rule).
-        var kvUriRef = BuildKvUriReference(request.KeyVaultName);
+        var kvUriRef = BuildKvUriReference(request.VaultName);
 
         return new EntraAppRegOutcome.Success(new EntraAppRegOutputs
         {
