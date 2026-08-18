@@ -828,17 +828,20 @@ describe('usePendingRedline.materialize — formatted AI insertions render forma
 });
 
 // ---------------------------------------------------------------------------
-// usePendingRedline.materialize — selection fallback (round-3 UAT Test #4)
-// When the (normalize-tolerant) target still can't be located verbatim, anchor at the user's live
-// selection instead of dead-ending — but ONLY for not_found + a non-empty selection.
+// usePendingRedline.materialize — unresolved target ALWAYS surfaces (UAT-21, 2026-08-18)
+// The Round-3 UAT Test #4 fallback (anchor a not_found redline at the user's live selection) was a
+// SILENT mis-placement risk (stale caret / ledger replay → wrong text struck, reported as applied).
+// Per the owner ("highest trust priority") the R7 honest/safe charter reverses it: a not_found target
+// NEVER auto-places on the selection — it surfaces the banner and renders nothing (propose-don't-place).
 // ---------------------------------------------------------------------------
-describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test #4)', () => {
-  it('not_found + a live non-empty selection → anchors the redline at the selection', () => {
+describe('usePendingRedline.materialize (unresolved target surfaces — UAT-21, reverses round-3 fallback)', () => {
+  it('not_found + a live non-empty selection → honest banner, NOTHING placed (no silent mis-placement)', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
     const { result } = renderHook(() => usePendingRedline(editor));
 
-    // User still has a range selected (the clause they asked to revise); the model echoed a target
-    // that is NOT a verbatim substring of the doc.
+    // User has a range selected, but the model echoed a target that is NOT a verbatim substring of
+    // the doc. The old fallback struck+replaced the SELECTION (possibly the wrong text) and reported
+    // 'applied'; UAT-21 requires we surface the miss instead of guessing at the location.
     act(() => {
       editor.commands.setTextSelection({ from: 1, to: 10 });
     });
@@ -850,12 +853,13 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
       );
     });
 
-    expect(status).toBe('applied');
+    expect(status).toBe('not_found');
+    expect(result.current.error).toMatchObject({ kind: 'not_found' });
+    expect(result.current.pending).toHaveLength(0);
     const html = editor.getHTML();
-    expect(html).toContain('data-compose-mark="deletion"');
-    expect(html).toContain('nimble auburn');
-    expect(result.current.error).toBeNull();
-    expect(result.current.pending).toHaveLength(1);
+    // The selection is NOT struck and the alternative is NOT inserted — nothing was placed.
+    expect(html).not.toContain('data-compose-mark');
+    expect(html).not.toContain('nimble auburn');
     editor.destroy();
   });
 
@@ -900,11 +904,15 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
   });
 
   // UAT 2026-07-14 #3 (owner: ACCUMULATE): redline section A, then draft a DIFFERENT section B.
-  // (1) The new redline must land on B — NOT on A. (Previously the supersession strip relocated the
-  //     live selection onto A and the not-found fallback anchored B's redline there.)
+  // (1) The new redline must land on B — NOT on A. (The supersession strip must not relocate B's
+  //     placement onto A.)
   // (2) A's redline must be PRESERVED — drafting a different section accumulates (range-scoped
   //     supersession); only a re-draft of the same/overlapping section supersedes (next test).
-  it('draft on a DIFFERENT section anchors on the current selection AND keeps the prior redline (accumulate)', () => {
+  // NOTE (UAT-21, 2026-08-18): draft B now uses a RESOLVABLE target ("lazy") so it places via the
+  // normal resolver — the not_found→selection fallback this test formerly exercised was removed as a
+  // silent-mis-placement risk. The accumulation invariant (A preserved) is what this test guards, and
+  // it is independent of how B resolves.
+  it('draft on a DIFFERENT section places at that target AND keeps the prior redline (accumulate)', () => {
     const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
     const { result } = renderHook(() => usePendingRedline(editor));
 
@@ -925,12 +933,12 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
       editor.commands.setTextSelection({ from: bStart, to: bEnd });
     });
 
-    // Draft B: SAME binding, different ledgerRef, a target the model echoed non-verbatim → not_found
-    // → fallback must use selection B, and A (a different section) must NOT be superseded.
+    // Draft B: SAME binding, different ledgerRef, a RESOLVABLE target on the other section ("lazy")
+    // → places at B via the resolver, and A (a different section) must NOT be superseded.
     let status: string | undefined;
     act(() => {
       status = result.current.materialize(
-        { target_text: 'a paraphrase not present verbatim', new_text: 'INDOLENT', match_mode: 'strict' },
+        { target_text: 'lazy', new_text: 'INDOLENT', match_mode: 'strict' },
         { ledgerRef: 'b1@t2', bindingId: 'b1', turn: 2 }
       );
     });
@@ -965,14 +973,19 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
     // Re-select the SAME region (the "quick"→"nimble" redline) and re-draft it.
     const span = editor.getHTML();
     expect(span).toContain('nimble');
-    // Select across the struck "quick" + inserted "nimble" (the redline sits early in the doc).
+    // Select across the struck "quick" + inserted "nimble" (the redline sits early in the doc) so the
+    // range-scoped supersession sees the overlap with the prior redline.
     act(() => {
       editor.commands.setTextSelection({ from: 4, to: 16 });
     });
 
+    // UAT-21 (2026-08-18): draft B now uses a RESOLVABLE target ("quick") rather than a not_found
+    // target relying on the removed selection fallback. Supersession strips the prior redline first
+    // (reverting "nimble" back to "quick"), then the resolver places B on "quick". The range-overlap
+    // supersession invariant — the whole point of this test — is unchanged.
     act(() => {
       result.current.materialize(
-        { target_text: 'still not verbatim', new_text: 'swift', match_mode: 'strict' },
+        { target_text: 'quick', new_text: 'swift', match_mode: 'strict' },
         { ledgerRef: 'b1@t2', bindingId: 'b1', turn: 2 }
       );
     });

@@ -1544,6 +1544,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 .map(entry => entry.operation),
             }
           : undefined;
+        // UAT-23 (2026-08-18, honest/safe): the filter above excludes `deletedContentFlag` ops from
+        // what we apply. A GENUINE later-deletion is expected to drop silently; but the
+        // `anchorLostFlag` subset (an edit whose anchor drifted so it can't be re-anchored) is a
+        // still-valid edit being lost — count it so the save surfaces an honest degradation warning
+        // instead of dropping it in silence. Only meaningful on the op-log apply path; the model path
+        // (buildImportedContentModel) captures the current text whole, so a drifted op is moot there.
+        const anchorLostOpCount = opLogSnapshot
+          ? opLogSnapshot.orderedOps.filter(entry => entry.anchorLostFlag).length
+          : 0;
 
         // C2 fix (UAT 2026-07-20): the load-time paraId map — sent on every save so the server can stamp
         // MINTED ids physically onto the retained-original baseline's id-less paragraphs before the
@@ -1568,8 +1577,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // never deserialized an `annotations` property, so every comment previously sent that way was
         // silently dropped (session comments AND advisory comments alike). `?.()` guards an older
         // editor build without the handle.
+        // UAT-22 (2026-08-18, honest/safe): collect any session/advisory comment threads that resolve
+        // NO anchored comment (their live anchor is gone / non-paragraph / drifted across a paragraph)
+        // — a comment the user still sees in the gutter that would otherwise be silently dropped from
+        // the save. Counted below into an honest "N comment(s) couldn't be saved" degradation warning.
+        let droppedCommentCount = 0;
         const anchoredComments: ComposeAnchoredComment[] =
-          typeof editorRef.current.getAnchoredComments === 'function' ? editorRef.current.getAnchoredComments() : [];
+          typeof editorRef.current.getAnchoredComments === 'function'
+            ? editorRef.current.getAnchoredComments(() => {
+                droppedCommentCount += 1;
+              })
+            : [];
 
         // Base64-encode the RETAINED ORIGINAL bytes via the shared module-level encoder (see
         // `arrayBufferToBase64` above — also used by the FR-03/task 011 browse->project round-trip).
@@ -1916,12 +1934,28 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         // loadedContentModelWarnings) — deliberate: every persisted artifact embodies the intake
         // loss, and the banner is dismissible; a model-path save clears them via the reducer as before.
         const heldWarnings = state.loadedContentModelWarnings ?? [];
+        // UAT-22 / UAT-23 (2026-08-18, honest/safe): on the OP-LOG apply path, a dropped comment
+        // (its live anchor gone) and an anchor-lost edit (its anchor drifted so it can't be
+        // re-anchored) would otherwise vanish from the save with no signal. Surface them as their own
+        // degradation codes so the user is told "a comment / an edit couldn't be saved" instead of
+        // silently losing it. Gated to `!usedModelPath` — the model path captures the current text +
+        // comments whole (buildImportedContentModel), so neither loss occurs there.
+        const clientSurfacedLossWarnings: Array<{ code: string; count: number }> =
+          !usedModelPath
+            ? [
+                ...(droppedCommentCount > 0
+                  ? [{ code: 'comment-anchor-unresolved', count: droppedCommentCount }]
+                  : []),
+                ...(anchorLostOpCount > 0 ? [{ code: 'edit-anchor-lost', count: anchorLostOpCount }] : []),
+              ]
+            : [];
         const mergedSaveWarnings = mergeDegradationWarnings(
           payload.degradationWarnings ?? [],
           usedModelPath && importedBuilt ? importedBuilt.warnings : [],
           usedModelPath
             ? heldWarnings
-            : heldWarnings.filter(w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-'))
+            : heldWarnings.filter(w => typeof w?.code === 'string' && w.code.startsWith('pdf-intake-')),
+          clientSurfacedLossWarnings
         );
         dispatch({
           kind: 'saveDegradationWarnings',

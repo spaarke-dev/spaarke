@@ -972,7 +972,13 @@ export interface ComposeEditorHandle {
    * text-anchored via the stale `annotations` save field, which the server never deserialized — every
    * comment sent that way was silently dropped). Empty when no session/advisory comments exist.
    */
-  getAnchoredComments(): ComposeAnchoredComment[];
+  /**
+   * @param onDropped UAT-22 (2026-08-18) — optional sink called ONCE per session/advisory thread
+   * that resolves NO anchored comment because its live anchor is gone (a comment still shown in the
+   * gutter that would silently never reach Word). The host passes this to count drops and raise an
+   * honest "N comment(s) couldn't be saved" degradation warning. Omit to keep the plain mapping.
+   */
+  getAnchoredComments(onDropped?: (threadId: string, reason: string) => void): ComposeAnchoredComment[];
 
   /**
    * Live character + word counters from the TipTap CharacterCount extension.
@@ -3019,12 +3025,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // (paraId, run-local range) — no text-search (I-7). The imported id set is the load-time
         // `initialCommentThreads` (seeded from the doc's own comments); advisory threads have no
         // imported counterpart, so nothing is excluded for that instance.
-        getAnchoredComments: () => {
+        getAnchoredComments: onDropped => {
           if (!editor) return [];
           const importedIds = new Set(initialCommentThreads.map(t => t.id));
           return [
-            ...composeSessionCommentThreadsToAnchoredComments(editor.state.doc, commentThreadsRef.current, importedIds),
-            ...composeSessionCommentThreadsToAnchoredComments(editor.state.doc, advisoryComments.threads, new Set()),
+            ...composeSessionCommentThreadsToAnchoredComments(
+              editor.state.doc,
+              commentThreadsRef.current,
+              importedIds,
+              onDropped
+            ),
+            ...composeSessionCommentThreadsToAnchoredComments(
+              editor.state.doc,
+              advisoryComments.threads,
+              new Set(),
+              onDropped
+            ),
           ];
         },
         getCounts: () => {

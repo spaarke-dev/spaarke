@@ -181,6 +181,13 @@ function writeImportWarningsDismissed(signature: string): void {
 
 const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'comment-anchor-dropped': "A comment's anchor could not be placed; the comment text was kept.",
+  // UAT-22 (2026-08-18): a session/advisory comment whose anchored text changed so it could NOT be
+  // written into the saved document (distinct from -dropped above, where the text is retained).
+  'comment-anchor-unresolved':
+    "A comment couldn't be saved to the document because its anchored text changed — re-add it if it's still needed.",
+  // UAT-23 (2026-08-18): an edit whose anchor drifted during editing so it couldn't be re-anchored on
+  // save (a still-valid edit the op-log path had to drop) — surfaced instead of vanishing silently.
+  'edit-anchor-lost': "An edit couldn't be saved because its location changed while editing — please redo it.",
   'hyperlink-target-dropped': "A link's target could not be preserved.",
   'tracked-format-change-dropped': 'A tracked formatting change was simplified.',
   'tracked-format-change-flattened': 'A tracked formatting change was simplified.',

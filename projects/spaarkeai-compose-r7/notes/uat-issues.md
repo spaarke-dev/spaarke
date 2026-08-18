@@ -204,10 +204,22 @@ investigation/research pass to choose the correct write-model before building.
 
 **Stays in R7 (HONEST + SAFE batch — proceed now)**:
 - ✅ Done: UAT-01(base), 02, 03, 05, 07b.
+- ✅ **UAT-21 Fixed** (2026-08-18): removed the silent live-selection fallback in `usePendingRedline.ts`
+  (`resolveTargetSpans` not-found path). An unresolved AI-redline target now ALWAYS surfaces the banner and
+  places NOTHING — no more strike-and-replace onto stale/replayed selection reported as "applied". Reverses the
+  Round-3 UAT Test #4 fallback (an honest dead-end beats a silent wrong edit). 3 hook tests rewritten to the
+  new honest behavior; 80/80 usePendingRedline green.
+- ✅ **UAT-22 Fixed** (2026-08-18): `composeSessionCommentThreadsToAnchoredComments` now takes an optional
+  `onDropped` sink fired at its 3 silent-drop `continue`s (anchor gone / non-paragraph / cross-paragraph);
+  `getAnchoredComments(onDropped)` threads it; ComposeWorkspace counts drops and folds a
+  `comment-anchor-unresolved` degradation warning (op-log path). Friendly banner copy added. +3 sink tests.
+- ✅ **UAT-23 Fixed** (2026-08-18): the interceptor's `serialize` now splits the conflated `deletedContentFlag`
+  into a new `anchorLostFlag` = re-derivation FAILURE that is NOT a genuine deletion (a still-valid edit the
+  op-log filter drops). ComposeWorkspace counts these and folds an `edit-anchor-lost` degradation warning
+  (op-log path) — genuine deletions stay quiet (no false alarm). +2 interceptor tests; 64/64 green.
 - 🔧 Do next (the batch): **UAT-11** (container residual — honest signal + retry), **UAT-12** (surface dropped
-  tracked-changes/comments on read failure), **UAT-13** (surface association orphan), **UAT-21** (fix the
-  wrong-selection redline fallback — highest trust priority), **UAT-22/23** (surface silently-dropped
-  comments/edits), **UAT-24** (tolerant-but-SURFACED resolver — propose-don't-auto-place; neutralizes 06/09/21/22),
+  tracked-changes/comments on read failure), **UAT-13** (surface association orphan),
+  **UAT-24** (tolerant-but-SURFACED resolver — propose-don't-auto-place; UAT-21 already applied the SURFACE half),
   the warned-but-cryptic copy gap (friendly copy for footnote/field/content-control/numbering codes), plus the
   earlier-triaged **UAT-04** (progress indicator), **UAT-08** (promote + auto-create Analysis), **UAT-09**
   (comment anchoring signal), **UAT-10** (notifications 401), **UAT-25/26** (concurrency-guard on the
