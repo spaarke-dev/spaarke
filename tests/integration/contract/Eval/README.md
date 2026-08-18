@@ -101,6 +101,28 @@ A **net-new** family joined to the SAME merge gate (via the `Category=GoldenUtte
   - **AC3 incoherent practice-area × matter-type cannot commit** — CREATE-MATTER@v1 emits `practice_area_suggestion` + `matter_type_suggestion` as INDEPENDENT string LABELS (never enum/const/GUID), `additionalProperties:false`, allowstools=false, so no resolved closed-set value is ever model-emitted (each ref resolved deterministically per-field downstream — task 010 resolver).
 - **Not-vacuous**: the list-tasks + incoherent-combo facts carry discriminating assertions (disposition value, cue contents, independent-labels guard); the profile fact asserts an exact grounded set.
 
+## Assistant-Enhancements-R4 eval family (ACTIVE — task 013, gated)
+
+`spaarkeai-assistant-enhancements-r4` task 001 (FR-10 infra / P5) seeded [`assistant-r4-eval-cases.json`](assistant-r4-eval-cases.json) with a template case; task 013 (FR-10 E1) authored the harness [`AssistantEnhancementsR4EvalTests.cs`](AssistantEnhancementsR4EvalTests.cs) (same pattern as `AssistantEnhancementsR1EvalTests.cs`: `[Trait("Category", "GoldenUtteranceEval")]`, inventory integrity + honest catalog grounding + not-vacuous structural facts) and joined the merge gate with zero CI-YAML change. E2 (task 024) + E3 (task 033) extend the SAME file + harness. Convention + paper-trail-to-register detail: `projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md` ("Eval-case harness convention" section).
+
+**Cases** (`AR4-###`): AR4-001/002/003 (E1 task-agenda-advisory — the "today"/"plate"/"prioritize" phrasings, each grounded to the advisory `list-tasks` capability), AR4-020 (E3 preference-loop). **Structural facts**: E1 grounds the advisory tier (`ListTasksAction_DeclaresAdvisoryGroundedRecommendTier_NotAckOnly`, `ListTasksBinding_DeclaresSurfaceLaunch`, `AdvisoryGroundedTools_ExistInCatalog_AndAssertGroundingAndObo`); E3 grounds the bounded preference loop (`PreferenceLoop_BiasesARealCataloguedCapability_ConfirmedOnly_OffAllowListInert`).
+
+### E2 (task 024) FR-04 / FR-06 coverage map (FR-10)
+
+The E2 behaviors' regression guards were authored WITH their features (the ADR-038-preferred pattern — tests land in the feature PR, not a separate task), so task 024 does NOT duplicate them here (duplicate coverage is build-class, deleted at `/test-diet`). It adds the one guard the golden-utterance gate genuinely owed — the FR-04 no-dead-end *contract* anchor — and documents the full map:
+
+| Behavior | Acceptance | Guarded by | A regression that fails it |
+|---|---|---|---|
+| **FR-04** — "prioritize my tasks" maps to a real capability (no dead-end dispatch) | golden case | **AR4-003** (this family) | routing "prioritize" to a phantom / non-mirror consumerType |
+| **FR-04** — the follow-on suggester cannot form a dead-end (closed-candidate, typed two-kind, free-string generator retired) | in-gate structural fact | **`SuggestFollowupsAction_IsGroundedTypedTwoKindProposer_NoDeadEndFreeString`** (this family, task 024) | reverting to the ungrounded free-string generator / dropping the closed-candidate or typed-kind contract |
+| **FR-04** — the service drops an off-catalog capability suggestion; typed kinds parse | BFF unit | `AssistantSuggestionServiceTests.SuggestForConversationAsync_DropsCapabilityWhoseBindingIdIsOffCatalog_KeepsQuestion` (+ siblings) — task 021a | the closed-catalog guard stops dropping hallucinated ids |
+| **FR-04** — the client renders only typed/backed items; untyped/unbacked dropped | client unit | `useSseStream.suggestions.test.ts`, `SprkChatSuggestions.test.tsx`, `suggestionsIntegration.test.tsx` — task 021b | rendering a bare untyped string / a capability chip with no binding |
+| **FR-06** — Briefing / Smart To Do cards suppressed when the tab is open, shown + launch when closed | client unit | `agendaFollowOnCards.test.tsx` — task 023 | an ungated card (that would open a duplicate tab) |
+
+**FR-06 is a pure client UX behavior with no BFF dispatch surface** — it correctly has NO golden-utterance-gate home; forcing a BFF fact for it would be mis-shaped. It is guarded entirely by the client suite (023).
+
+**Endpoint-wiring guard** (task 024): the `ChatEndpoints` `/messages` path emits the typed `suggestions` payload via the extracted, testable `ChatEndpoints.BuildTypedFollowups` — guarded by `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/ChatEndpointsTypedFollowupsTests.cs` (order action → capability → question, typed-kind mapping, null-binding-capability dropped, empty ⇒ no event). Together with the Action-contract fact (this family) + service (021a) + client-parse (021b), the "the wire is the typed two-kind shape, never an untyped free string" guarantee is covered end to end.
+
 ## Deletion-safety
 
 KEEP-protected per ADR-038 (`tests/integration/contract/**`). Since P1 (task 026) the suite is an ACTIVE merge gate (NFR-02); every catalog/prompt change adds or updates cases (NFR-06).

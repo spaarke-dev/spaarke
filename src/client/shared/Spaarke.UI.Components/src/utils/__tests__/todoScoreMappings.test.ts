@@ -86,7 +86,7 @@ describe('EFFORT_TO_SCORE (FR-03, Option B quick-wins-first)', () => {
 // ---------------------------------------------------------------------------
 
 describe('null-defaults', () => {
-  it('DEFAULT_PRIORITY_CHOICE is Medium and resolves to 50 (today\'s default)', () => {
+  it("DEFAULT_PRIORITY_CHOICE is Medium and resolves to 50 (today's default)", () => {
     expect(DEFAULT_PRIORITY_CHOICE).toBe('Medium');
     expect(NULL_DEFAULT_PRIORITY_SCORE).toBe(50);
     expect(priorityChoiceToScore(undefined)).toBe(50);
@@ -139,10 +139,7 @@ describe('cross-surface parity (import graph)', () => {
   const repoRoot = path.resolve(__dirname, '../../../../../../..');
 
   const createTodoStepSrc = fs.readFileSync(
-    path.join(
-      repoRoot,
-      'src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/CreateTodoStep.tsx'
-    ),
+    path.join(repoRoot, 'src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/CreateTodoStep.tsx'),
     'utf8'
   );
 

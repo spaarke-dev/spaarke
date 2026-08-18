@@ -1,22 +1,41 @@
 /**
  * SprkChatSuggestions - Follow-up suggestion chips for SprkChat
  *
- * Renders 2-3 clickable follow-up suggestion chips below the latest
- * assistant message. Chips use Fluent UI v9 InteractionTag for a
- * pill/chip appearance with keyboard navigation (Arrow Left/Right,
- * Enter/Space to select).
+ * Renders up to 3 clickable follow-up suggestion chips below the latest
+ * assistant message as ONE chip family with two learnable variants, driven by
+ * the structural `kind` (NOT by phrasing — keyword heuristics on the label are
+ * banned by ASSISTANT-UI-ELEMENT-CRITERIA):
  *
- * Animation: fade-in + slide-up (200ms CSS transition) controlled
- * by the `visible` prop.
+ *   - CAPABILITY / ACTION — "does something" (dispatches a Binding, or opens the
+ *     upload/search/select shortcut). Rendered bordered + a trailing arrow (→)
+ *     so the user learns "arrow = acts".
+ *   - QUESTION — "asks the assistant something", answered right here by
+ *     re-entering the grounded loop. Rendered as a lighter pill with NO arrow so
+ *     the user learns "no arrow = asks".
  *
- * @see ADR-012 - Shared Component Library
+ * The label grammar (authored server-side by the SUGGEST-FOLLOWUPS Action) agrees
+ * with the affordance: imperative for capability/action, interrogative for
+ * question — so the look and the words always match.
+ *
+ * A bare/untyped item never reaches this component (the SSE parser drops anything
+ * without a valid `kind`), so a dead-end promise is structurally impossible.
+ *
+ * Chips use Fluent UI v9 InteractionTag for a pill/chip appearance with keyboard
+ * navigation (Arrow Left/Right between chips, Enter/Space to select).
+ *
+ * Animation: fade-in + slide-up (200ms CSS transition) controlled by `visible`.
+ *
+ * @see spaarkeai-assistant-enhancements-r4 task 021b — grounded, capability-backed
+ *      suggestions (design delta §5 / §5a / §9a)
+ * @see docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md — action-chip vs question-chip
+ * @see ADR-012 - Shared Component Library (context-agnostic)
  * @see ADR-021 - Fluent UI v9; makeStyles; design tokens; dark mode
  * @see ADR-022 - React 16 APIs only
  */
 
 import * as React from 'react';
 import { makeStyles, shorthands, tokens, InteractionTag, InteractionTagPrimary } from '@fluentui/react-components';
-import { ISprkChatSuggestionsProps } from './types';
+import { ISprkChatSuggestionsProps, ISprkChatFollowup } from './types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
@@ -57,11 +76,27 @@ const useStyles = makeStyles({
     cursor: 'pointer',
     maxWidth: '280px',
   },
+  chipLabel: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    ...shorthands.gap(tokens.spacingHorizontalXXS),
+    minWidth: 0,
+  },
   chipText: {
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     display: 'block',
+  },
+  /**
+   * The trailing "acts" arrow on capability / action chips. Colour is inherited
+   * from the InteractionTag (token-driven) — no hardcoded colour (ADR-021).
+   */
+  actsArrow: {
+    flexShrink: 0,
+    fontSize: tokens.fontSizeBase200,
+    lineHeight: tokens.lineHeightBase200,
+    opacity: 0.9,
   },
 });
 
@@ -76,7 +111,16 @@ function truncateText(text: string, maxLen: number): string {
   if (text.length <= maxLen) {
     return text;
   }
-  return text.slice(0, maxLen - 1).trimEnd() + '\u2026';
+  return text.slice(0, maxLen - 1).trimEnd() + '…';
+}
+
+/**
+ * A capability or action chip "does something" → it gets the bordered + arrow
+ * affordance. A question chip "asks" → lighter pill, no arrow. The distinction is
+ * STRUCTURAL (the item's `kind`), never a guess from the label text.
+ */
+function isActsChip(item: ISprkChatFollowup): boolean {
+  return item.kind === 'capability' || item.kind === 'action';
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,8 +133,11 @@ function truncateText(text: string, maxLen: number): string {
  * @example
  * ```tsx
  * <SprkChatSuggestions
- *   suggestions={["Summarize the key points", "What are the risks?"]}
- *   onSelect={(text) => sendMessage(text)}
+ *   suggestions={[
+ *     { kind: 'capability', label: 'Prioritize my tasks', targetBindingId: '<id>', actionId: null },
+ *     { kind: 'question', label: 'What are the risks in section 3?', targetBindingId: null, actionId: null },
+ *   ]}
+ *   onSelect={(item) => handleSuggestionSelect(item)}
  *   visible={!isStreaming}
  * />
  * ```
@@ -99,7 +146,8 @@ export const SprkChatSuggestions: React.FC<ISprkChatSuggestionsProps> = ({ sugge
   const styles = useStyles();
   const containerRef = React.useRef<HTMLDivElement>(null);
 
-  // Limit to MAX_SUGGESTIONS chips
+  // Limit to MAX_SUGGESTIONS chips. Server authors the order (actions, then
+  // capabilities, then questions) — render in received order.
   const displaySuggestions = React.useMemo(() => suggestions.slice(0, MAX_SUGGESTIONS), [suggestions]);
 
   // Keyboard navigation: Arrow Left/Right between chips, Enter/Space to select
@@ -146,21 +194,24 @@ export const SprkChatSuggestions: React.FC<ISprkChatSuggestionsProps> = ({ sugge
       onKeyDown={handleKeyDown}
       data-testid="sprkchat-suggestions"
     >
-      {displaySuggestions.map((suggestion, index) => {
-        // Action chips arrive as "[action:<id>] <label>" (AIPU-058). Strip the routing
-        // prefix for DISPLAY ONLY — the RAW string (prefix intact) is still passed to
-        // onSelect so the parent's handleSuggestionSelect can detect the action id and
-        // route the click. Without this the raw "[action:upload] Upload File" leaked to
-        // the chip label (UAT 2026-07-22).
-        const label = suggestion.replace(/^\[action:[^\]]+\]\s*/i, '');
+      {displaySuggestions.map((item, index) => {
+        // The label is authored server-side per kind (imperative for
+        // capability/action, interrogative for question) — no client-side
+        // stripping/parsing (the legacy "[action:*]" prefix is retired; the
+        // routing datum is the structural `actionId`/`targetBindingId`).
+        const label = item.label;
         const displayText = truncateText(label, MAX_TEXT_LENGTH);
         const isTruncated = label.length > MAX_TEXT_LENGTH;
+        const acts = isActsChip(item);
 
         return (
           <InteractionTag
             key={`suggestion-${index}`}
             className={styles.chip}
-            appearance="brand"
+            // Capability/action chips get the solid "brand" fill + arrow so they
+            // read as "does something"; question chips get the lighter "outline"
+            // pill so they read as "asks" (design delta §5a). Both are tokens-only.
+            appearance={acts ? 'brand' : 'outline'}
             shape="circular"
             size="small"
           >
@@ -168,11 +219,19 @@ export const SprkChatSuggestions: React.FC<ISprkChatSuggestionsProps> = ({ sugge
               role="button"
               aria-label={isTruncated ? label : undefined}
               title={isTruncated ? label : undefined}
-              onClick={() => onSelect(suggestion)}
+              onClick={() => onSelect(item)}
               data-suggestion-chip=""
+              data-suggestion-kind={item.kind}
               data-testid={`suggestion-chip-${index}`}
             >
-              <span className={styles.chipText}>{displayText}</span>
+              <span className={styles.chipLabel}>
+                <span className={styles.chipText}>{displayText}</span>
+                {acts && (
+                  <span className={styles.actsArrow} aria-hidden="true">
+                    {'→'}
+                  </span>
+                )}
+              </span>
             </InteractionTagPrimary>
           </InteractionTag>
         );

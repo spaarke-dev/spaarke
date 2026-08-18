@@ -4,11 +4,7 @@
  * lane and directly proves the KNOWN failure mode: an IME composition must NOT trigger the hotkey.
  */
 
-import {
-  matchesDescribeChangeHotkey,
-  matchesFocusChatHotkey,
-  type DescribeChangeHotkeyEvent,
-} from './composeHotkeys';
+import { matchesDescribeChangeHotkey, matchesFocusChatHotkey, type DescribeChangeHotkeyEvent } from './composeHotkeys';
 
 /** Minimal event factory — only the fields the predicate reads. */
 function ev(overrides: Partial<DescribeChangeHotkeyEvent>): DescribeChangeHotkeyEvent {
@@ -49,15 +45,11 @@ describe('matchesDescribeChangeHotkey — fallback binding (Ctrl/Cmd+/)', () => 
 
 describe('matchesDescribeChangeHotkey — IME guard (the known failure mode)', () => {
   it('does NOT fire during an IME composition (isComposing) even for Ctrl+Space', () => {
-    expect(
-      matchesDescribeChangeHotkey(ev({ ctrlKey: true, code: 'Space', key: ' ', isComposing: true }))
-    ).toBe(false);
+    expect(matchesDescribeChangeHotkey(ev({ ctrlKey: true, code: 'Space', key: ' ', isComposing: true }))).toBe(false);
   });
 
   it('does NOT fire for the legacy keyCode=229 composition signal', () => {
-    expect(
-      matchesDescribeChangeHotkey(ev({ ctrlKey: true, code: 'Space', key: ' ', keyCode: 229 }))
-    ).toBe(false);
+    expect(matchesDescribeChangeHotkey(ev({ ctrlKey: true, code: 'Space', key: ' ', keyCode: 229 }))).toBe(false);
   });
 
   it('does NOT fire during composition for the Ctrl+/ fallback either', () => {
@@ -83,9 +75,7 @@ describe('matchesDescribeChangeHotkey — negative cases', () => {
   });
 
   it('does NOT fire for Ctrl+SHIFT+Space (that is the focus-chat hotkey — disambiguation)', () => {
-    expect(
-      matchesDescribeChangeHotkey(ev({ ctrlKey: true, shiftKey: true, code: 'Space', key: ' ' }))
-    ).toBe(false);
+    expect(matchesDescribeChangeHotkey(ev({ ctrlKey: true, shiftKey: true, code: 'Space', key: ' ' }))).toBe(false);
   });
 });
 
@@ -109,9 +99,9 @@ describe('matchesFocusChatHotkey — FR-05 (Ctrl/Cmd+Shift+Space)', () => {
   });
 
   it('does NOT fire for the legacy keyCode=229 composition signal', () => {
-    expect(
-      matchesFocusChatHotkey(ev({ ctrlKey: true, shiftKey: true, code: 'Space', key: ' ', keyCode: 229 }))
-    ).toBe(false);
+    expect(matchesFocusChatHotkey(ev({ ctrlKey: true, shiftKey: true, code: 'Space', key: ' ', keyCode: 229 }))).toBe(
+      false
+    );
   });
 
   it('does NOT fire for Shift+Space with no Ctrl/Cmd modifier', () => {

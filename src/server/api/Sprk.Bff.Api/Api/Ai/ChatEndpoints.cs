@@ -451,6 +451,10 @@ public static class ChatEndpoints
         [FromServices] CrossMatterSafetyTelemetry crossMatterTelemetry,
         [FromServices] AiTelemetry aiTelemetry,
         [FromServices] ISessionPersistenceService? sessionPersistence,
+        // spaarkeai-assistant-enhancements-r4 task 021a (FR-04): the grounded follow-on proposer.
+        // Runs ONE pass after the response to emit typed capability + question followups (replacing the
+        // retired ungrounded free-string generator). Registered AddScoped in AnalysisServicesModule.
+        [FromServices] AssistantSuggestionService suggestionService,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
     {
@@ -960,65 +964,80 @@ public static class ChatEndpoints
                     citations.Length, sessionId);
             }
 
-            // AIPU-058: Detect missing document/entity context in the AI response.
-            // When the AI signals it needs a document but none is loaded, emit action chips
-            // (upload, browse, select) as the suggestions event so the user can take the
-            // next step directly from the chat without typing a follow-up message.
-            //
-            // Action chip format: "[action:<id>] <display label>"
-            // The frontend (SprkChat.tsx handleSuggestionSelect) routes these specially:
-            //   [action:upload]   → triggers the file input upload flow
-            //   [action:search]   → shows document search in the output pane
-            //   [action:select]   → lets the user search/select a matter
-            //
-            // When action chips are emitted, the standard LLM suggestion generation is
-            // skipped — the two events are mutually exclusive (action chips take priority).
+            // === FR-04 (spaarkeai-assistant-enhancements-r4 task 021a): ONE predictable grounded
+            // followups pass per turn =================================================================
+            // Retires the ungrounded free-string generator (it fed the model NO capability menu — only
+            // the last message + 500 chars — so it could not make a backed suggestion even in principle;
+            // that is the P2 dead-end) AND the three hidden skips that made cadence feel random
+            // (keyword-hijack mutual-exclusion, the <150-char skip, the separate proactive trigger).
+            // One pass now merges two typed sources into ONE typed "suggestions" event:
+            //   (1) the deterministic missing-context action chips (upload/browse/select) — kept as-is,
+            //       now a typed 'action' kind (the "[action:*]" string encoding is retired); and
+            //   (2) the grounded proposer's typed two-kind followups — 'capability' chips carrying a
+            //       real, model-SELECTED targetBindingId (dispatched via the Click path; a dead-end is
+            //       structurally impossible) + 'question' chips that re-enter the grounded loop.
+            // Emitted ONLY when non-empty, so absence is meaningful ("nothing relevant"), never a hidden
+            // skip. Best-effort (ADR-019): a proposer failure/timeout silently yields no followups and
+            // never breaks the turn.
             var effectiveDocumentId = request.DocumentId ?? session.DocumentId;
-            var actionChipsEmitted = await EmitMissingContextChipsIfNeededAsync(
-                response, effectiveDocumentId, fullResponse.ToString(), logger, sessionId, cancellationToken);
 
-            if (!actionChipsEmitted)
+            // (1) Deterministic missing-context action chips (AIPU-058) — fire only when no document is
+            //     loaded AND the AI asked for one. Folding these into the grounded menu is a deferred
+            //     phase-2; for now they stay deterministic, re-typed as 'action'.
+            var missingContextActionChips = BuildMissingContextActionChips(effectiveDocumentId, fullResponse.ToString());
+
+            // (2) The grounded proposer over the conversation tail + the context-scoped candidate menu +
+            //     the active tab's server-derived content. Runs on EVERY turn (no length gate) — cadence
+            //     is structural. Bounded by a timeout; a failure/timeout silently yields none.
+            //     FR-07 (task 050) note preserved: pass request.Message (NOT the augmented attachment
+            //     blob) — the followups reason about the user's conceptual question.
+            IReadOnlyList<SuggestedFollowup> grounded = Array.Empty<SuggestedFollowup>();
+            try
             {
-                // R6 Hotfix Wave B-G10d (2026-06-10) — Skip suggestion generation when the
-                // assistant response is very short (<150 chars). This happens when the FR-24
-                // dedup directive (R6 task 042 + B-G9b/B-G10a) constrains the chat-side LLM to a
-                // single-sentence acknowledgment because a playbook will render the primary result
-                // in the workspace tab. The suggestion-LLM call would have no substantive content
-                // to work with (just the ack phrase) — generated suggestions would be useless or
-                // empty. Better to show nothing than to show generic / meta suggestions.
-                //
-                // R7 ARCHITECTURAL HOME for proper followups (per user feedback 2026-06-10):
-                //   1. Add `sprk_followups` JSON column on `sprk_analysisaction` declaring the
-                //      action's natural followup affordances. Each entry: {label, playbookId,
-                //      parameterMapping}.
-                //   2. The DeliverOutput node executor emits a `followups` SSE event alongside
-                //      the widget. SprkChat already has the chip-rendering infrastructure.
-                //   3. Followup click → capability dispatch (binding id + args) via existing
-                //      Pillar 3 dispatch. Click becomes a proper orchestrated playbook execution,
-                //      not a generic LLM chat turn. Aligns with Pillar 8 "card-as-intent".
-                //
-                // Pre-existing chat turns (no playbook fired) still get the LLM-generated
-                // suggestions exactly as before — the threshold only suppresses the dedup-ack case.
-                if (fullResponse.Length >= 150)
-                {
-                    // Generate follow-up suggestions via a focused LLM call (~100 tokens).
-                    // Runs after the main response completes so it doesn't delay perceived response time.
-                    // Bounded by a 2-second timeout — if generation fails or exceeds the timeout,
-                    // suggestions are silently skipped (ADR-019: suggestions are optional, no error emitted).
-                    //
-                    // FR-07 (task 050): intentionally pass request.Message (NOT effectiveMessage)
-                    // here — suggestions are follow-up prompts generated against the user's
-                    // conceptual question, not the augmented attachment blob. Including 5 MB of
-                    // attachment text would balloon this ~100-token suggestion call.
-                    await GenerateAndEmitSuggestionsAsync(
-                        chatClient, response, request.Message, fullResponse.ToString(), logger, sessionId, cancellationToken);
-                }
-                else
-                {
-                    logger.LogDebug(
-                        "B-G10d: skipping suggestion generation — response length {Length} below dedup-ack threshold (likely playbook ack); R7 backlog: playbook-driven followups",
-                        fullResponse.Length);
-                }
+                using var followupsTimeoutCts = new CancellationTokenSource(FollowupsTimeoutMs);
+                using var followupsLinkedCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken, followupsTimeoutCts.Token);
+
+                var openTabContextTypes = liveTabs is null
+                    ? (IReadOnlyCollection<string>)Array.Empty<string>()
+                    : WidgetContextTypeResolver.ResolveOpenTabContextTypes(liveTabs);
+
+                grounded = await suggestionService.SuggestForConversationAsync(
+                    sessionId,
+                    tenantId,
+                    request.Message,
+                    fullResponse.ToString(),
+                    request.ActiveContext?.ContextType,
+                    request.ActiveContext?.TabId,
+                    openTabContextTypes,
+                    followupsLinkedCts.Token);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                logger.LogWarning(
+                    "Grounded followups timed out ({TimeoutMs}ms) for session={SessionId}; skipping",
+                    FollowupsTimeoutMs, sessionId);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Grounded followups failed for session={SessionId}; skipping", sessionId);
+            }
+
+            // Merge the two typed sources into ONE ordered list (action → capability → question; a
+            // capability with no binding is dropped) — the §9a wire contract. Extracted to the testable
+            // BuildTypedFollowups (task 024 / FR-10, exercised via InternalsVisibleTo) so the "the wire is
+            // the typed two-kind shape, never an untyped free string" guarantee has a direct regression guard.
+            var followups = BuildTypedFollowups(missingContextActionChips, grounded);
+
+            if (followups.Count > 0)
+            {
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("suggestions", null, new ChatSseSuggestionsData(followups)),
+                    cancellationToken);
+                logger.LogDebug(
+                    "Emitted {FollowupCount} typed followups for session={SessionId}",
+                    followups.Count, sessionId);
             }
 
             // Write done event
@@ -3196,99 +3215,13 @@ public static class ChatEndpoints
         new(m.Role.ToString(), m.Content, m.CreatedAt);
 
     /// <summary>
-    /// Maximum time allowed for suggestion generation before it is silently skipped.
+    /// spaarkeai-assistant-enhancements-r4 task 021a (FR-04) — maximum time the grounded follow-on
+    /// proposer may run after a chat response before it is silently skipped (ADR-019 — followups are
+    /// optional and must never delay or break the turn). A little more headroom than the retired
+    /// ~100-token free-string generator's 2s, because the grounded pass resolves the Action + the
+    /// candidate menu (both cached) then runs ONE Fast-tier selection turn.
     /// </summary>
-    private const int SuggestionsTimeoutMs = 2000;
-
-    /// <summary>
-    /// Generates 2-3 contextual follow-up suggestions using a focused LLM call (~100 tokens)
-    /// and emits them as a "suggestions" SSE event.
-    ///
-    /// This is intentionally cheap and runs after the main response completes, so it does not
-    /// add latency to the perceived response time. If the call fails or exceeds the 2-second
-    /// timeout, suggestions are silently skipped (ADR-019: suggestions are optional).
-    /// </summary>
-    private static async Task GenerateAndEmitSuggestionsAsync(
-        IChatClient chatClient,
-        HttpResponse response,
-        string userMessage,
-        string assistantResponse,
-        ILogger logger,
-        string sessionId,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            using var timeoutCts = new CancellationTokenSource(SuggestionsTimeoutMs);
-            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(
-                cancellationToken, timeoutCts.Token);
-
-            var suggestionsPrompt = new List<AiChatMessage>
-            {
-                new(ChatRole.System,
-                    "You generate follow-up suggestions for a chat conversation. " +
-                    "Based on the user's last message and the assistant's response, suggest 2-3 brief follow-up " +
-                    "questions or actions the user might want to take next. " +
-                    "Return ONLY a JSON array of strings. Each suggestion must be under 80 characters. " +
-                    "Be specific and actionable. Do not include numbering or bullet points. " +
-                    "Example: [\"Summarize the key risks\",\"Compare with the previous version\",\"What are the next steps?\"]"),
-                new(ChatRole.User, $"User message: {userMessage}\n\nAssistant response (truncated): {Truncate(assistantResponse, 500)}")
-            };
-
-            var options = new ChatOptions { MaxOutputTokens = 100 };
-            var result = await chatClient.GetResponseAsync(suggestionsPrompt, options, linkedCts.Token);
-            var text = result.Text?.Trim();
-
-            if (string.IsNullOrEmpty(text))
-            {
-                logger.LogDebug("Suggestion generation returned empty response for session={SessionId}", sessionId);
-                return;
-            }
-
-            // Parse the JSON array of suggestions
-            var suggestions = JsonSerializer.Deserialize<string[]>(text, JsonOptions);
-            if (suggestions is null || suggestions.Length == 0)
-            {
-                logger.LogDebug("Suggestion generation returned no valid suggestions for session={SessionId}", sessionId);
-                return;
-            }
-
-            // Validate: 1-3 suggestions, each under 80 characters
-            var validSuggestions = suggestions
-                .Where(s => !string.IsNullOrWhiteSpace(s) && s.Length <= 80)
-                .Take(3)
-                .ToArray();
-
-            if (validSuggestions.Length == 0)
-            {
-                logger.LogDebug("No valid suggestions after filtering for session={SessionId}", sessionId);
-                return;
-            }
-
-            // Emit the suggestions SSE event
-            await WriteChatSSEAsync(
-                response,
-                new ChatSseEvent("suggestions", null, new ChatSseSuggestionsData(validSuggestions)),
-                cancellationToken);
-
-            logger.LogDebug(
-                "Emitted {SuggestionCount} suggestions for session={SessionId}",
-                validSuggestions.Length, sessionId);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            // Suggestion generation timed out — skip silently (ADR-019)
-            logger.LogWarning(
-                "Suggestion generation timed out ({TimeoutMs}ms) for session={SessionId}; skipping",
-                SuggestionsTimeoutMs, sessionId);
-        }
-        catch (Exception ex)
-        {
-            // Suggestion generation failed — log warning but do not emit error event (ADR-019)
-            logger.LogWarning(ex,
-                "Suggestion generation failed for session={SessionId}; skipping", sessionId);
-        }
-    }
+    private const int FollowupsTimeoutMs = 4000;
 
     /// <summary>
     /// Keyword phrases that indicate the AI is asking the user to provide a document.
@@ -3343,48 +3276,69 @@ public static class ChatEndpoints
     ];
 
     /// <summary>
-    /// Detects whether the AI response indicates that a document or entity context is missing,
-    /// and emits a "suggestions" SSE event with action chips if so.
+    /// AIPU-058 — builds the deterministic "missing document context" action chips as TYPED followup
+    /// items, or an empty list when no missing-context signal is present. Returns the chips rather than
+    /// emitting them (task 021a: the caller merges them with the grounded proposer's followups into ONE
+    /// typed "suggestions" event, so the two are no longer mutually exclusive — the former keyword
+    /// "hijack" that suppressed suggestions is gone).
     ///
-    /// AIPU-058: Action chip format: "[action:&lt;id&gt;] &lt;display label&gt;"
-    /// The frontend (SprkChat.tsx handleSuggestionSelect) detects the "[action:" prefix and
-    /// routes the click to the appropriate handler instead of sending the text as a message:
-    ///   [action:upload]   → triggers the hidden file input upload flow
-    ///   [action:search]   → shows document search in the output pane
-    ///   [action:select]   → lets the user search and select a matter
+    /// The three chips carry a typed <c>action</c> kind with an <c>actionId</c> the frontend
+    /// (SprkChat.tsx) special-routes — <c>upload</c> → the file-input flow, <c>search</c> → the document
+    /// search pane, <c>select</c> → the matter picker. This replaces the legacy <c>"[action:&lt;id&gt;]
+    /// &lt;label&gt;"</c> string-prefix encoding; the behavior is unchanged (folding these into the
+    /// grounded candidate menu is a deferred phase-2).
     ///
-    /// Returns true when action chips were emitted (caller should skip LLM suggestion generation).
-    /// Returns false when no missing context is detected (caller proceeds with normal suggestions).
-    ///
-    /// Preconditions for emitting action chips:
-    ///   1. The effective document ID is null or empty (no document loaded in this session)
-    ///   2. The AI response text contains at least one keyword from MissingContextKeywords
+    /// Preconditions (both required):
+    ///   1. The effective document ID is null or empty (no document loaded in this session).
+    ///   2. The AI response text contains at least one keyword from <see cref="MissingContextKeywords"/>.
     /// </summary>
-    /// <param name="response">The HTTP response to write SSE frames to.</param>
     /// <param name="effectiveDocumentId">The active document ID (null or empty when no document is loaded).</param>
     /// <param name="responseText">The full AI response text to inspect for missing-context keywords.</param>
-    /// <param name="logger">Logger for diagnostic output.</param>
-    /// <param name="sessionId">Session ID for log correlation.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>True if action chips were emitted; false otherwise.</returns>
-    private static async Task<bool> EmitMissingContextChipsIfNeededAsync(
-        HttpResponse response,
-        string? effectiveDocumentId,
-        string responseText,
-        ILogger logger,
-        string sessionId,
-        CancellationToken cancellationToken)
+    /// <returns>The three typed action chips when missing-context is detected; otherwise an empty list.</returns>
+    /// <summary>
+    /// task 024 (FR-04 / FR-10): assemble the ONE typed "suggestions" wire payload from the two typed
+    /// sources — the deterministic missing-context ACTION chips and the grounded proposer's two-kind
+    /// output — in the §9a wire order (ACTION first, then CAPABILITY = what you can DO, then QUESTION =
+    /// what you can ASK). A CAPABILITY whose <c>TargetBindingId</c> is null is DROPPED (a capability with
+    /// no binding is a dead-end and must never reach the wire — the structural death of the P2 free-string
+    /// dead-end); a QUESTION carries only its label. Extracted from the <c>/messages</c> emit path so the
+    /// "the wire shape is the typed two-kind <see cref="ChatSseFollowupItem"/>[], never an untyped string"
+    /// guarantee has a direct regression guard, exercised via <c>InternalsVisibleTo</c> (the same testing
+    /// precedent as this file's other internals). Behavior-preserving refactor of the prior inline block.
+    /// </summary>
+    /// <param name="missingContextActionChips">The deterministic, already-typed <c>action</c> chips (may be empty).</param>
+    /// <param name="grounded">The grounded proposer's typed two-kind followups (empty on a proposer failure/timeout).</param>
+    /// <returns>The ordered, typed followups list; a capability with a null binding id is excluded.</returns>
+    internal static List<ChatSseFollowupItem> BuildTypedFollowups(
+        IReadOnlyList<ChatSseFollowupItem> missingContextActionChips,
+        IReadOnlyList<SuggestedFollowup> grounded)
     {
-        // Precondition 1: No document loaded
+        var followups = new List<ChatSseFollowupItem>(missingContextActionChips);
+        // Capabilities first (what you can DO), then questions (what you can ASK) — the design's
+        // deterministic §5a order; the client renders the single arrow/affordance distinction.
+        followups.AddRange(grounded
+            .Where(f => f.Kind == SuggestedFollowupKind.Capability && f.TargetBindingId is not null)
+            .Select(f => new ChatSseFollowupItem("capability", f.Label, TargetBindingId: f.TargetBindingId)));
+        followups.AddRange(grounded
+            .Where(f => f.Kind == SuggestedFollowupKind.Question)
+            .Select(f => new ChatSseFollowupItem("question", f.Label)));
+        return followups;
+    }
+
+    private static IReadOnlyList<ChatSseFollowupItem> BuildMissingContextActionChips(
+        string? effectiveDocumentId,
+        string responseText)
+    {
+        // Precondition 1: No document loaded.
         if (!string.IsNullOrWhiteSpace(effectiveDocumentId))
         {
-            return false;
+            return Array.Empty<ChatSseFollowupItem>();
         }
 
-        // Precondition 2: Response contains missing-context keywords
+        // Precondition 2: Response contains missing-context keywords.
         if (string.IsNullOrWhiteSpace(responseText))
         {
-            return false;
+            return Array.Empty<ChatSseFollowupItem>();
         }
 
         var lowerResponse = responseText.ToLowerInvariant();
@@ -3400,39 +3354,15 @@ public static class ChatEndpoints
 
         if (!keywordFound)
         {
-            return false;
+            return Array.Empty<ChatSseFollowupItem>();
         }
 
-        // Emit action chips as a suggestions SSE event.
-        // Format: "[action:<id>] <display label>" — parsed by SprkChat.handleSuggestionSelect.
-        var actionChips = new[]
+        return new[]
         {
-            "[action:upload] Upload File",
-            "[action:search] Browse Matter Documents",
-            "[action:select] Select a Matter",
+            new ChatSseFollowupItem("action", "Upload File", ActionId: "upload"),
+            new ChatSseFollowupItem("action", "Browse Matter Documents", ActionId: "search"),
+            new ChatSseFollowupItem("action", "Select a Matter", ActionId: "select"),
         };
-
-        await WriteChatSSEAsync(
-            response,
-            new ChatSseEvent("suggestions", null, new ChatSseSuggestionsData(actionChips)),
-            cancellationToken);
-
-        logger.LogInformation(
-            "Missing document context detected — emitted action chips for session={SessionId} (documentId was empty)",
-            sessionId);
-
-        return true;
-    }
-
-    /// <summary>
-    /// Truncates a string to the specified maximum length, appending "..." if truncated.
-    /// Used to limit the assistant response text sent to the suggestion generation prompt.
-    /// </summary>
-    private static string Truncate(string text, int maxLength)
-    {
-        if (string.IsNullOrEmpty(text) || text.Length <= maxLength)
-            return text;
-        return text[..maxLength] + "...";
     }
 
     /// <summary>
@@ -3887,12 +3817,38 @@ public record ChatSseCitationItem(
 public record ChatSseCitationsData(ChatSseCitationItem[] Citations);
 
 /// <summary>
-/// Data payload for "suggestions" SSE events emitted after the main response completes.
-/// Contains 1-3 contextual follow-up questions or actions generated by a focused LLM call.
-/// The frontend renders these as clickable chips via <c>SprkChatSuggestions</c>.
+/// Data payload for "suggestions" SSE events emitted after the main response completes
+/// (spaarkeai-assistant-enhancements-r4 task 021a — FR-04). Contains up to a few TYPED follow-on
+/// items — capability chips (a real selected <c>targetBindingId</c>), question chips (text that
+/// re-enters the grounded loop), and the deterministic missing-context action chips. The frontend
+/// (021b) renders these via <c>SprkChatSuggestions</c>, branching on <see cref="ChatSseFollowupItem.Kind"/>.
+/// This REPLACES the retired untyped <c>string[]</c> payload the ungrounded free-string generator emitted.
 /// </summary>
-/// <param name="Suggestions">Array of 1-3 follow-up suggestion strings (each max 80 chars).</param>
-public record ChatSseSuggestionsData(string[] Suggestions);
+/// <param name="Suggestions">The ordered typed follow-on items (actions first, then capabilities, then questions). Empty events are not emitted.</param>
+public record ChatSseSuggestionsData(IReadOnlyList<ChatSseFollowupItem> Suggestions);
+
+/// <summary>
+/// One TYPED follow-on item on the "suggestions" SSE event (task 021a). The <see cref="Kind"/> is
+/// STRUCTURAL — the client renders and routes by it, never by a keyword heuristic on the label:
+/// <list type="bullet">
+///   <item><c>capability</c> — carries <see cref="TargetBindingId"/> (a real, model-selected Binding id);
+///     clicking dispatches that Binding via the existing Click path. Guaranteed to work.</item>
+///   <item><c>question</c> — carries only <see cref="Label"/> (a question); clicking re-enters the
+///     grounded chat loop (safe by construction). No id.</item>
+///   <item><c>action</c> — carries <see cref="ActionId"/> (<c>upload</c> | <c>search</c> | <c>select</c>);
+///     the client special-routes it (file-input / document-search pane / matter picker). The deterministic
+///     missing-context chips, re-typed from the legacy <c>"[action:*]"</c> string encoding.</item>
+/// </list>
+/// </summary>
+/// <param name="Kind">The structural kind: <c>capability</c>, <c>question</c>, or <c>action</c>.</param>
+/// <param name="Label">The chip text (imperative for capability/action; interrogative for question).</param>
+/// <param name="TargetBindingId">The selected Binding id for a <c>capability</c>; null otherwise.</param>
+/// <param name="ActionId">The deterministic action route (<c>upload</c>|<c>search</c>|<c>select</c>) for an <c>action</c>; null otherwise.</param>
+public record ChatSseFollowupItem(
+    string Kind,
+    string Label,
+    string? TargetBindingId = null,
+    string? ActionId = null);
 
 /// <summary>Response body for GET /playbooks — playbook discovery.</summary>
 /// <param name="Playbooks">Available playbooks (user-owned + public, deduplicated).</param>

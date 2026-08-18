@@ -122,9 +122,7 @@ export function effortChoiceToScore(choice: string | null | undefined): number {
  */
 export function scoreToPriorityChoice(score: number | null | undefined): TodoPriorityChoice {
   if (score === null || score === undefined) return DEFAULT_PRIORITY_CHOICE;
-  const match = (Object.keys(PRIORITY_TO_SCORE) as TodoPriorityChoice[]).find(
-    key => PRIORITY_TO_SCORE[key] === score
-  );
+  const match = (Object.keys(PRIORITY_TO_SCORE) as TodoPriorityChoice[]).find(key => PRIORITY_TO_SCORE[key] === score);
   return match ?? DEFAULT_PRIORITY_CHOICE;
 }
 
@@ -135,19 +133,12 @@ export function scoreToPriorityChoice(score: number | null | undefined): TodoPri
  */
 export function scoreToEffortChoice(score: number | null | undefined): TodoEffortChoice {
   if (score === null || score === undefined) return DEFAULT_EFFORT_CHOICE;
-  const match = (Object.keys(EFFORT_TO_SCORE) as TodoEffortChoice[]).find(
-    key => EFFORT_TO_SCORE[key] === score
-  );
+  const match = (Object.keys(EFFORT_TO_SCORE) as TodoEffortChoice[]).find(key => EFFORT_TO_SCORE[key] === score);
   return match ?? DEFAULT_EFFORT_CHOICE;
 }
 
 /** Ordered list of priority choices, for rendering Dropdown/RadioGroup options. */
-export const TODO_PRIORITY_CHOICES: readonly TodoPriorityChoice[] = Object.freeze([
-  'Urgent',
-  'High',
-  'Medium',
-  'Low',
-]);
+export const TODO_PRIORITY_CHOICES: readonly TodoPriorityChoice[] = Object.freeze(['Urgent', 'High', 'Medium', 'Low']);
 
 /** Ordered list of effort choices, for rendering Dropdown/RadioGroup options. */
 export const TODO_EFFORT_CHOICES: readonly TodoEffortChoice[] = Object.freeze([

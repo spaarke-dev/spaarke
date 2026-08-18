@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Advisory pre-filter bounded-tool allow-list scoping on the one decider (FR-02)</title>
+    <phase>1 — E1 grounded-recommend tier</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-16 (opus/xhigh, FULL): re-scoped to Option A (owner-approved; notes/011-012-advisory-nested-turn-design.md).
+         The original framing ("narrow the TOP-LEVEL PreFilter when the capability is advisory") was proven ADR-039-incompatible — the
+         top-level turn selects no Action yet, so narrowing there = a forbidden second decider (escalation record in current-task.md). Option A
+         builds a NESTED advisory turn instead. 011 delivered the DETERMINISTIC PROJECTION PRIMITIVE for that turn (the machinery — runner +
+         SessionDispatchOrchestrator routing — moved to 012 per the §3a seam refinement, where it is integration-testable with the real advisory
+         Action; mirrors 010=data → 011=primitive → 012=runner+consumer). Shipped: (1) AgentToolFilterContext.AdvisoryToolAllowList optional
+         null-inert structural fact (mirrors OpenTabContextTypes → every existing construction site byte-identical); (2) AgentToolProjection.PreFilter
+         narrowing branch — when non-null, DROP all BindingCapabilityTool + RefusalCapabilityTool (nested turn structurally cannot dispatch a second
+         capability) and keep ONLY grounded handler tools whose SanitiseToolName-normalized name ∈ the allow-list (matches task-010 sprk_toolid
+         entries like spaarke.grid_overview); null = inert byte-identical projection; empty non-null = fail-closed zero tools; (3) AdvisoryAllowListContains
+         helper. 5 new unit tests (mounts-only-allow-list, drops-all-capability+refusal / no-second-decider, case+sanitisation robustness, null-inert,
+         empty-fail-closed); 44/44 AgentTurnLoopContractTests pass; BFF build 0 errors; publish 44.96 MB compressed (Δ0.00, ≤60 MB); CVE clean.
+         Step 9.5 gates CLEAN (adr-check: ADR-039/013/§10/§11 all compliant, 0 violations — the field is grep-verifiable inert until the 012 runner
+         sets it; code-review: PASS, 0 blocking, 1 low-conf suggestion). /conflict-check OWED before the PR (AgentToolProjection = BFF watchlist;
+         compose-r5/r6 + assistant-r3 share the Chat projection files). -->
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the ADR-039 deterministic PreFilter / tool projection — the defining constraint of the whole project; requires code-review + adr-check.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The bounded allow-list MUST narrow the deterministic pre-filter and MUST NOT become a second decider / classifier — the highest ADR-039 sensitivity point in R4.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>Wave1-E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits AgentToolProjection / AgentToolCatalogProjector (shared BFF, ADR-039 boundary) — sequential Services/Ai spine with 010/012; coordinate assistant-r3; run /conflict-check before the PR.</parallel-reason>
+    <deps>010</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+  <prompt>Scope the FR-03 per-Action bounded grounded-tool allow-list onto the sanctioned deterministic pre-filter so that, for an advisory capability's turn, ONLY its declared allow-listed grounded tools mount. Express this as DETERMINISTIC PRE-FILTER narrowing in `AgentToolProjection.PreFilter` (~:123–187) + `AgentToolCatalogProjector` (~:74–433) — a context-scoping predicate keyed off the Action's allow-list. The single Text-path agent turn MUST remain the sole probabilistic decider: add NO classifier, NO second intent-detection, NO routing surface. Verify against ADR-039 MUST-NOTs.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Deep familiarity with the ADR-039 deterministic tool-projection / PreFilter path and the closed-catalog invariant (one decider, pre-filter is the only aid).</role>
+  <goal>For an advisory capability's turn, only its declared allow-listed grounded tools mount (via the deterministic pre-filter); the single Text-path agent turn stays the sole decider; no classifier / second dispatch surface is added.</goal>
+  <context>
+    <background>FR-02 — advisory mode + bounded allow-list on the one decider. ADR-039 permits exactly ONE probabilistic decider (the Text-path agent turn) and FORBIDS any new capability-selecting surface. So the bounded tool set from FR-03 (task 010) MUST be expressed as DETERMINISTIC PRE-FILTER narrowing — a context-scoping predicate in `AgentToolProjection.PreFilter` (~:123–187) + `AgentToolCatalogProjector` (~:74–433) — NOT a new executor, classifier, or routing config. The 2026-07-25 ADR-039 amendment added `output_determinism: fact|advisory`; `advisory` sanctions grounded reasoning + recommendations with every fact cited. This task narrows the mounted tool set to the Action's allow-list when the capability is advisory; task 010 supplies the per-Action opt-in, task 012 authors the advisory Action that opts in to {grid_overview, daily_briefing_overview}. redesign-r2 is CLOSED so Services/Ai is editable by R4 — still keep AI-facade discipline (ADR-013) and /conflict-check with assistant-r3 + compose-r5/r6 on the shared projection files.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentToolProjection.cs (PreFilter ~:123–187 — add the allow-list narrowing predicate here)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentToolCatalogProjector.cs (~:74–433 — the catalog projection that mounts tools)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs (the FR-03 opt-in from task 010 — source of the allow-list)</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md (the MUST-NOTs to verify against: one decider; no classifier; no routing outside the Binding table)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (projection unit tests with/without allow-list — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the pre-filter narrowing predicate">The bounded allow-list is deterministic pre-filtering ONLY; MUST NOT add a classifier, a second intent-detection, or any routing config outside the Binding table; the single Text-path agent turn MUST remain the sole probabilistic decider. Advisory factual claims elsewhere MUST be cited — the projection MUST NOT loosen that.</constraint>
+    <constraint source="ADR-013" scope="Services/Ai placement">Preserve the AI-facade discipline; do NOT inject AI-internal types into CRUD code even though Services/Ai is R4-editable (redesign-r2 closed).</constraint>
+    <constraint source="project" scope="scoping expression">The allow-list narrowing MUST be a context-scoping predicate on the existing PreFilter — MUST NOT be a new executor or dispatch surface (§11 reuse-first / NFR-06 / NFR-03).</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report absolute + delta; no new HIGH CVE.</constraint>
+    <constraint source="NFR-08" scope="the projection change">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/ (projection with/without the allow-list).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the FR-03 opt-in from task 010 (the per-Action bounded-tool allow-list on `AnalysisAction`) and the current PreFilter / catalog projector flow.</step>
+    <step order="2">In `AgentToolProjection.PreFilter` (~:123–187) add a predicate that narrows the mounted tool set to the Action's allow-list when the capability is advisory (deterministic context scoping — no intent detection).</step>
+    <step order="3">Thread the narrowing through `AgentToolCatalogProjector` (~:74–433) so non-advisory turns are unaffected.</step>
+    <step order="4">Verify against ADR-039 MUST-NOTs: no classifier, no second intent-detection, no routing config outside the Binding table; the Text-path agent turn stays the sole decider.</step>
+    <step order="5">Unit-test the projection with and without the allow-list (advisory turn mounts only allow-listed tools; non-advisory unaffected).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute size + delta; run the vulnerable-package scan.</step>
+    <step order="7">/conflict-check before the PR; update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If scoping the allow-list cannot be expressed as deterministic pre-filtering and appears to need any capability-SELECTING logic (intent detection / routing / a second dispatch), STOP and escalate (ADR-039 forbids a second decider) rather than adding routing.</trigger>
+  </escalation>
+  <justification>
+    <existing>`AgentToolProjection.PreFilter` (~:123–187) + `AgentToolCatalogProjector` (~:74–433) already perform the sanctioned deterministic tool projection.</existing>
+    <extension>Add a context-scoping predicate that narrows the mounted set to the Action's allow-list when advisory — no new surface.</extension>
+    <cost-of-doing-nothing>Without pre-filter narrowing, an advisory Action either mounts nothing or the whole catalog; the bounded grounded-recommend tier (task 012) cannot mount exactly its two tools without adding a forbidden second decider.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentToolProjection.cs (PreFilter allow-list narrowing predicate)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AgentToolCatalogProjector.cs (narrowing threaded through)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ projection unit tests (with/without allow-list)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">An advisory turn mounts ONLY the allow-listed grounded tools (via the deterministic pre-filter).</criterion>
+    <criterion testable="true">Non-advisory turns are unaffected by the narrowing.</criterion>
+    <criterion testable="true">No classifier / second intent-detection / routing surface is added (negative case, verified against ADR-039 MUST-NOTs).</criterion>
+    <criterion testable="true">The single Text-path agent turn remains the sole probabilistic decider.</criterion>
+    <criterion testable="true">Projection unit test passes (with/without allow-list) in tests/unit/Sprk.Bff.Api.Tests/.</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>The defining ADR-039 constraint of R4 lives here: bounded tool set = deterministic pre-filter narrowing, NEVER a second decider. Depends on task 010's opt-in field. Task 012 authors the advisory Action whose allow-list = {grid_overview, daily_briefing_overview}. /conflict-check with assistant-r3 + compose-r5/r6 before the PR.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

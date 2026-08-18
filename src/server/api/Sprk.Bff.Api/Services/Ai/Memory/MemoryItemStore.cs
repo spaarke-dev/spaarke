@@ -425,6 +425,11 @@ public sealed class MemoryItemStore : IMemoryItemStore
         AppendSection(sb, "**Key Dates**", facts, MemoryFactType.KeyDate);
         AppendSection(sb, "**Prior Analyses**", facts, MemoryFactType.PriorAnalysis);
         AppendSection(sb, "**Key Facts**", facts, MemoryFactType.KeyFact);
+        // FR-07 (task 030): the governed preference channel. Rendered LAST (after the record-fact
+        // sections) so it is most salient in the User-scope "About You" fragment while leaving the
+        // existing section order byte-identical. Shared by ToRecordPromptFragmentAsync +
+        // ToUserPromptFragmentAsync via BuildBudgetedFragment, so preferences recall in both scopes.
+        AppendSection(sb, "**Preferences**", facts, MemoryFactType.Preference);
 
         return sb.ToString().TrimEnd();
     }

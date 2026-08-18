@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Feedback→memory pipeline — thumbs-down/comment / "do this every time" → governed preference item (FR-08)</title>
+    <phase>3 — E3 feedback→memory loop</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>NEW wiring connecting the one-way feedback sink to the governed memory write path — governance-sensitive persistence.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Governance-sensitive — must write with correct MemoryOrigin/ConfirmedByUser semantics and must not auto-mutate anything beyond the user's own preference.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave3-E3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Ai/Feedback + the memory write path (BFF) — coordinate BFF PRs via /conflict-check; depends on 030 (the Preference fact type).</parallel-reason>
+    <deps>030</deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Wire the one-way `FeedbackService` (the `feedback` Cosmos container; thumbs up/down + ≤500-char comment; `SubmitAsync` ~:57 — nothing consumes it into memory today) into the governed memory write path so that a thumbs-down+comment OR an explicit "do this every time" standing directive persists a governed `Preference` memory item (from task 030) tied to that user, with correct `MemoryOrigin` / `ConfirmedByUser` semantics. Reuse the CRUD-safe capture facade discipline (`PublicContracts/IComposeMemoryCapture.cs` pattern). Keep it per-user only — NO global catalog mutation (ADR-039 catalog stays HITL). Keep `trustLevel` carried inert (ADR-042 #616).</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI memory-governance expertise; comfortable with the ADR-042 memory model, the ADR-013 AI facade boundary (PublicContracts write-facades), and the Cosmos `feedback` / `memory-items` containers.</role>
+  <goal>A thumbs-down+comment OR an explicit "do this every time" directive writes a governed `Preference` memory item (correct `MemoryOrigin` / `ConfirmedByUser`) tied to that user — closing the P3 learning loop that the one-way feedback sink leaves open today.</goal>
+  <context>
+    <background>FR-08 — the second E3 step. `FeedbackService.cs` (`SubmitAsync` ~:57) writes thumbs up/down + a ≤500-char comment to the `feedback` Cosmos container, but it is a ONE-WAY SINK: nothing consumes it into memory today, so thumbs/feedback never improves behavior and the learning loop never closes. This task adds the pipeline: a governed trigger (an explicit standing directive such as "do this every time", and/or a thumbs-down+comment) writes a `Preference` memory item (the type added in task 030) via the memory write path, tied to that user, with `MemoryOrigin` (user vs ai-derived) and `ConfirmedByUser` set appropriately. The write reuses the CRUD-safe capture-facade discipline seen in `PublicContracts/IComposeMemoryCapture.cs`. It is strictly per-user: the ADR-039 global capability catalog stays HITL — no auto-mutation. ADR-042's deferred hard-governance stays deferred to #616 (`trustLevel` carried inert). Recall of the resulting preference item is already covered by task 030 (userFragment via `ToUserPromptFragmentAsync`).</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Feedback/FeedbackService.cs (`feedback` Cosmos container; thumbs up/down + ≤500-char comment; SubmitAsync ~:57 — one-way sink today)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/MemoryWriteHandler.cs (the governed memory write path — reuse; Preference wired in task 030)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MemoryFactType.cs (`Preference` — added in task 030)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IComposeMemoryCapture.cs (the CRUD-safe write-facade pattern to mirror)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/MemoryItem.cs (v1 — MemoryScope/MemoryOrigin — bind consumers here)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (add/update unit tests — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the pipeline's persistence target">Persist ONLY a per-user `Preference` memory item — MUST NOT mutate the global capability catalog (stays HITL); no auto-promotion of a user preference into shared/global state.</constraint>
+    <constraint source="ADR-042" scope="the memory write">Set `MemoryOrigin` (user vs ai-derived) and `ConfirmedByUser` per the actual trigger; preserve the deferred hard-governance (#616) — `trustLevel` carried INERT; do NOT implement untrusted-origin ban / trustLevel enforcement / memory-poisoning evals.</constraint>
+    <constraint source="ADR-013" scope="the feedback→memory wiring">Write through the CRUD-safe capture-facade discipline (`IComposeMemoryCapture.cs` pattern); bind to `PublicContracts/MemoryItem.cs` v1; do NOT inject AI-internal types into CRUD code.</constraint>
+    <constraint source="project" scope="the pipeline">NEW wiring (nothing consumes feedback today) — reuse `FeedbackService` + the `MemoryWriteHandler` path; do NOT build a parallel feedback store or a second memory write path (§11).</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report absolute + delta; no new HIGH CVE.</constraint>
+    <constraint source="NFR-08" scope="the pipeline">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-042-memory-architecture-governance.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Define the trigger: an explicit standing directive ("do this every time") and/or a thumbs-down+comment surfaced through `FeedbackService.SubmitAsync` (~:57).</step>
+    <step order="2">On the trigger, write a `Preference` memory item (task 030's type) via the governed memory write path, tied to that user (User scope), reusing the `IComposeMemoryCapture`-style CRUD-safe capture-facade discipline.</step>
+    <step order="3">Set `MemoryOrigin` (user for an explicit directive; ai-derived where the pipeline infers it) and `ConfirmedByUser` appropriately per the trigger.</step>
+    <step order="4">Keep it per-user only — assert NO global capability-catalog mutation (ADR-039 HITL); keep `trustLevel` inert (ADR-042 #616).</step>
+    <step order="5">Add/extend unit tests in tests/unit/Sprk.Bff.Api.Tests/ (explicit directive persists a Preference item tied to the user; correct origin/confirmed semantics; no global mutation).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute size + delta; run the vulnerable-package scan.</step>
+    <step order="7">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If closing the loop appears to require mutating the global capability catalog or auto-promoting a user preference into shared/global state, STOP and escalate (ADR-039 HITL / owner Q4 out-of-scope operator queue) rather than widening beyond per-user memory.</trigger>
+  </escalation>
+  <justification>
+    <existing>`FeedbackService` is a one-way sink (thumbs up/down + comment to the `feedback` container) — nothing consumes it into memory today.</existing>
+    <extension>NO existing extension covers this — new wiring from feedback→memory; it reuses `FeedbackService` + the `MemoryWriteHandler` path (no new store).</extension>
+    <cost-of-doing-nothing>Thumbs/feedback never improves behavior; the learning loop never closes — an explicit "do this every time" directive is discarded.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">the feedback→memory pipeline (Services/Ai/Feedback + governed memory write path)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ feedback→memory pipeline unit tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">An explicit standing directive ("do this every time") persists as a `Preference` memory item tied to the user.</criterion>
+    <criterion testable="true">The written item carries correct `MemoryOrigin` (user vs ai-derived) and `ConfirmedByUser` semantics for the trigger.</criterion>
+    <criterion testable="true">NO global capability-catalog mutation occurs — the write is strictly per-user (negative case, ADR-039 HITL).</criterion>
+    <criterion testable="true">The write uses the CRUD-safe capture-facade discipline and binds to `MemoryItem` v1; `trustLevel` carried inert (ADR-042 #616).</criterion>
+    <criterion testable="true">Unit tests added/updated in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>Code-trace anchors: FeedbackService.SubmitAsync ~:57 (one-way sink); Preference fact type from task 030; IComposeMemoryCapture is the write-facade pattern to mirror. Depends on 030 (needs the `Preference` fact type). Task 032 consumes the persisted preference into a pre-turn tool hint. Run /conflict-check before the BFF PR.
+
+COMPLETED 2026-08-17 (opus/high FULL). NOT committed/pushed (owner reviews governance-sensitive memory code). Files:
+- NEW `Services/Ai/PublicContracts/IPreferenceMemoryCapture.cs` — CRUD-safe capture facade (mirrors IComposeMemoryCapture): PreferenceCaptureInput + PreferenceMemoryCaptureOutcome/Status DTOs.
+- NEW `Services/Ai/PublicContracts/PreferenceMemoryCapture.cs` — resolves AAD oid → canonical Dataverse systemuserid (ISystemUserIdentityResolver), builds a User-scope MemoryItem (Fact.Type=Preference), persists via SHARED IMemoryItemStore.UpsertAsync. TrustLevel=null inert; Tier-3 envelope; best-effort (never throws except honored cancel; unresolvable user → Skipped, NO write).
+- EDIT `Services/Ai/Feedback/FeedbackService.cs` — injects the facade (optional, mirrors optional IAuditLogService precedent); after the feedback write, fires the trigger: standing-directive marker in comment (any rating) → origin=user + ConfirmedByUser=true; thumbs-down+comment w/o directive → origin=ai-derived + ConfirmedByUser=false; else no capture. Non-blocking (feedback id always returned even if capture throws).
+- EDIT `Infrastructure/DI/AiPersistenceModule.cs` — registered IPreferenceMemoryCapture (Scoped).
+- TESTS: NEW PreferenceMemoryCaptureTests (8) + extended FeedbackServiceTests (5 trigger cases). 20/20 targeted pass.
+Governance: per-user ONLY (User scope, keyed by systemuserid — never oid, never Record/global); NO capability-catalog mutation (ADR-039 HITL preserved); trustLevel inert (ADR-042 #616 deferred). BFF build 0 errors; publish 43.67 MB compressed (≤60; no packages added); CVE clean. Step 9.5: code-review PASS (0 critical/0 blocking) + adr-check CLEAN (ADR-013/042/039/010, §10). Escalation trigger did NOT fire (loop closes wholly within per-user memory).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>
