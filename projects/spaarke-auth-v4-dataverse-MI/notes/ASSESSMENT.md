@@ -1,5 +1,22 @@
 # Assessment — Eliminate the BFF client secret via Managed Identity (OBO → MI Federated Credentials)
 
+> ## ⚠️ SUPERSEDED — origin record only
+>
+> The research phase this document called for has been **completed** (2026-08-17). Where this file and the
+> findings disagree, **the findings win**:
+>
+> - **[`RESEARCH-FINDINGS.md`](RESEARCH-FINDINGS.md)** — verified platform research, live tenant verification,
+>   option analysis, and an explicit **§3 corrections list** against this document.
+> - **[`CREDENTIAL-INVENTORY.md`](CREDENTIAL-INVENTORY.md)** — the exhaustive `file:line` credential audit.
+> - **[`../design.md`](../design.md)** — the resulting project design.
+>
+> **Headline corrections**: the central hypothesis is **confirmed** (MI-as-FIC is GA, and OBO works with it), but
+> this document undercounts the surface (8 confidential-client sites, not 5; 5 config keys + a 6th Key Vault alias,
+> not 3), mis-states that ADR-028 documents the OBO secret (**it does not** — so even the status quo needs an ADR
+> edit), and describes `customer-provisioning-orchestration-r1` as design-phase when it is **executing** (PR #779).
+>
+> Retained unchanged below as the origin record.
+
 > **Status**: INVESTIGATION SEED (pre-research) · **Date**: 2026-08-17
 > **Origin**: surfaced during `code-quality-and-assurance-r3` task 011/#3b (the app-only Dataverse MI migration).
 > **Author note**: this writeup captures what was found live on `spaarke-bff-dev`; it is a **seed for a proper
