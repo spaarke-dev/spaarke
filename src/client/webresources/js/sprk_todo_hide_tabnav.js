@@ -12,19 +12,18 @@
  *    independently of the tab's `ShowLabel`/`Label` (which is why formxml
  *    `showlabel="false"` and formjson `"ShowLabel":false` had NO effect). Fixed
  *    with `formContext.ui.headerSection.setTabNavigatorVisible(false)`.
- * 2. **Blank the header entity/table name ("To Do")** — the `entity_name_span`
- *    in the form header. Fixed with `formContext.ui.setFormEntityName(" ")`
- *    (a single space blanks it reliably; the empty string can be ignored). This
- *    is the documented supported method (Microsoft Learn: "Sets the name of the
- *    table to be displayed on the form"). smart-todo-r5 UAT 2026-08-18 item #2.
  *
- * Both MUST run from a FORM OnLoad handler so they also fire when the form is
- * opened as an `Xrm.Navigation.navigateTo` modal dialog (the SmartTodo
- * "+ New Task" / open path, target:2).
+ * NOTE (2026-08-18 UAT): a second attempt to blank the header entity-name
+ * SUBTITLE ("To Do") via `formContext.ui.setFormEntityName(" ")` was REVERTED —
+ * empirically that API prefixes the record TITLE (renders "{name}: {primary}"),
+ * so a space produced a stray ": " colon in front of the record name and did
+ * NOT touch the "To Do" subtitle. No supported Client API hides that subtitle.
  *
- * Refs (Microsoft Learn, Unified Interface only):
+ * MUST run from a FORM OnLoad handler so it also fires when the form is opened
+ * as an `Xrm.Navigation.navigateTo` modal dialog (target:2).
+ *
+ * Ref (Microsoft Learn, Unified Interface only):
  *   - formContext.ui.headerSection.setTabNavigatorVisible
- *   - formContext.ui.setFormEntityName
  *
  * # Form events to register
  *
@@ -33,13 +32,13 @@
  *
  * # Behavior
  *
- * - On form load: hides the tab navigator AND blanks the header entity name.
- * - Never throws / never blocks the form: each step is independently guarded;
- *   any failure logs to console and continues (mirrors the sibling convention).
+ * - On form load: hides the tab navigator so the single-tab form reads clean.
+ * - Never throws / never blocks the form: guarded; failures log and continue.
  *
  * # Version
  *
- * v1.1.0 — add header entity-name blanking (UAT item #2, 2026-08-18)
+ * v1.2.0 — revert setFormEntityName (caused a ": " colon; wrong element) (2026-08-18)
+ * v1.1.0 — add header entity-name blanking (later reverted) (2026-08-18)
  * v1.0.0 — initial: hide single-tab navigator (UAT item #3, 2026-08-18)
  *
  * @namespace Spaarke.SmartTodo.HideTabNav
@@ -55,7 +54,7 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
 
 (function (ns) {
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.1.0";
+    ns.VERSION = "1.2.0";
 
     /**
      * Form OnLoad handler. Cleans up the form-header chrome via SUPPORTED
@@ -87,17 +86,12 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
             console.error("[SmartTodo.HideTabNav v" + ns.VERSION + "] setTabNavigatorVisible error:", err);
         }
 
-        // 2) Blank the header entity/table name ("To Do"). A single space blanks
-        //    it reliably (the empty string can be ignored by the renderer).
-        try {
-            if (typeof formContext.ui.setFormEntityName === "function") {
-                formContext.ui.setFormEntityName(" ");
-            } else {
-                console.warn("[SmartTodo.HideTabNav v" + ns.VERSION + "] setFormEntityName unavailable");
-            }
-        } catch (err) {
-            console.error("[SmartTodo.HideTabNav v" + ns.VERSION + "] setFormEntityName error:", err);
-        }
+        // 2) (Reverted 2026-08-18 UAT) — `setFormEntityName(" ")` was NOT the
+        //    right lever for the "To Do" entity-name SUBTITLE: empirically it
+        //    PREFIXES the record TITLE (rendered "{name}: {primary}"), so a
+        //    single space produced a stray ": " colon in front of the record
+        //    name AND left the "To Do" subtitle untouched. Removed. The subtitle
+        //    hide (if pursued) needs a different, non-title mechanism.
     };
 
     // -----------------------------------------------------------------------
