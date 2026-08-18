@@ -167,9 +167,9 @@ Set-VaultSecret -Name "ai-search-endpoint" `
     -Value "https://spaarke-search-prod.search.windows.net/" `
     -Description "Azure AI Search endpoint"
 
-Set-VaultSecret -Name "ai-search-key" `
+Set-VaultSecret -Name "AiSearch--AdminKey" `
     -Value "placeholder-search-key" `
-    -Description "Azure AI Search admin key (update with real key)" `
+    -Description "Azure AI Search admin key (canonical per canonical-secret-catalog manifest; update with real key)" `
     -IsPlaceholder $true
 
 Set-VaultSecret -Name "PromptFlow-Endpoint" `
