@@ -118,6 +118,10 @@ public sealed class ComposeMemoryCapture : IComposeMemoryCapture
         catch (Exception ex)
         {
             // Best-effort: never propagate. The caller's Save has already succeeded on its own terms.
+            // A CosmosException (e.g. the R-5 ttl:null → 400 write outage) lands here — surface it as the
+            // alertable cosmos.write_failures{container=memory-items} metric so a persistent memory-write
+            // stoppage is detectable, not just a swallowed Warning.
+            Sprk.Bff.Api.Telemetry.CosmosPersistenceTelemetry.RecordWriteFailure("memory-items");
             _logger.LogWarning(ex,
                 "Compose memory-capture: threw while capturing insights for {SubjectType}/{SubjectId} — best-effort, caller unaffected.",
                 subjectType, subjectId);
