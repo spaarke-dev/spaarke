@@ -88,9 +88,18 @@ Redeploying a web resource to test a selector is a slow guess-loop. Instead, ope
 
 The chrome script is a JS **web resource** (`webresourcetype: 3`) registered as an OnLoad handler on the form. To update: PATCH the web resource `content` (base64), then `PublishXml` the web resource + entity. Handler registration (formLibraries `<Library>` + onload `<Handler>`) is a one-time formxml edit. Reference deploy script: `scripts/`-style Web-API PATCH + PublishXml (see the R5 UAT script `register-tabnav.ps1`).
 
+## Worked example 2: theme-restyle the dialog chrome (dark bar + scrollbar)
+
+Two more chrome tweaks ship in the same reference script (v1.7.0), both **gated on the app theme**:
+
+- **Dark chrome recolor** — the `navigateTo` dialog top bar (title + pop-out/close icons) is painted WHITE by UCI in `window.top` even in dark mode, with no supported API to theme it. Recolor it via the confirmed console geometry: within the `[aria-modal]/[role=dialog]` element, find the wide light bar near the top → dark background + WHITE descendants (`color` + `fill`), and the thin light divider → dark. **Scoped to the dialog** so the shell behind is untouched. Run as **bounded timed passes** (`[0,150,400,800,1500,3000]ms`) — the chrome re-renders a few times just after open — rather than a permanent observer, to keep layout cost near zero.
+- **Thin scrollbar** — inject the Spaarke thin scrollbar `<style>` (see [`thin-scrollbar.md`](thin-scrollbar.md)) into the **FORM's own document + its child iframes only, NOT `window.top`** — so it scopes to the modal's form content and never restyles the whole MDA shell.
+
+**Theme gating ("follow the app theme", not the OS)**: sample the **shell chrome luminance** in `window.top` (body / app-region background) and treat < 128 as dark; fall back to `prefers-color-scheme` only when the shell background is transparent/unreadable. This tracks whatever theme the model-driven app actually renders per-user. In **light** mode the recolor is skipped entirely — zero DOM mutation on the common path.
+
 ## Reference implementation
 
-- **`src/client/webresources/js/sprk_todo_hide_tabnav.js`** (v1.6.0) — the canonical example: `setTabNavigatorVisible(false)` (supported) + cross-frame observer-backed `entity_name_span` hide (unsupported, operator-approved). Read the header comment block — it narrates the full v1.0→v1.6 root-cause trail.
+- **`src/client/webresources/js/sprk_todo_hide_tabnav.js`** (v1.7.0) — the canonical example. Items: (1) `setTabNavigatorVisible(false)` supported; (2) cross-frame observer-backed `entity_name_span` hide; (3) modal thin-scrollbar inject; (4) app-theme-gated dark chrome recolor. Shared helpers `collectDocs()` (frame set) + `isAppDark()` (shell-luminance theme detection). Read the header comment block — it narrates the full v1.0→v1.7 trail.
 
 ## Supported API reference (Microsoft Learn — Unified Interface only)
 

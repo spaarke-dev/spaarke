@@ -36,7 +36,7 @@
 
 import * as React from "react";
 import { makeStyles, tokens } from "@fluentui/react-components";
-import { CreateTodoWizard } from "@spaarke/ui-components";
+import { CreateTodoWizard, thinScrollbarDescendantStyle } from "@spaarke/ui-components";
 import type { Orientation, ToolbarAction } from "@spaarke/ui-components";
 import {
   createXrmDataService,
@@ -109,6 +109,11 @@ const useStyles = makeStyles({
     height: "100%",
     overflow: "hidden",
     backgroundColor: tokens.colorNeutralBackground1,
+    // Thin, theme-aware scrollbar for EVERY scroll container in the code page
+    // (kanban columns, dialogs, grids). Descendant variant because
+    // ::-webkit-scrollbar does not cascade — one spread here covers the whole
+    // surface. Canonical: @spaarke/ui-components theme/scrollbar.ts.
+    ...thinScrollbarDescendantStyle,
   },
   /** Primary surface row — fills remaining height under the header. */
   primaryPanel: {
