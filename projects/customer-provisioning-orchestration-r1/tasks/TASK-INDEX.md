@@ -128,7 +128,7 @@ Two additional corrections independently caught by task-gen subagents:
 | 064 | ✅ | Author 5 new ArchTests for §4D I1–I5 tenant-isolation invariants (test-modifying → unconditional FULL) | FULL | sonnet / xhigh | none (dep 042 for I1 coverage) | 042 |
 | 065 | ✅ | Phase A audit sweep of every BFF service touching AI Search / Cosmos / Graph / SPE for I2–I5 compliance | FULL | sonnet / xhigh | none (dep 064) | 064 |
 | 066 | ✅ | Verify `Register-EntraAppRegistrations.ps1:63` fix + add pre-commit tenant-shaped GUID scan ArchTest | FULL | sonnet / high | none (dep 064) | 064 |
-| 067 | ⏸ | Nightly Graph app-role parity ArchTest (queued behind CI-wiring per r3 coord) — parallel-safe:false | FULL | sonnet / high | none (coord PR dep) | 005, 053, 064, 088 |
+| 067 | ✅ | Nightly Graph app-role parity ArchTest (test project + BFF↔L2 mirror drift-guard landed; workflow wiring deferred to ci-cd-r1 coord PR per notes/graph-app-role-parity-coord-pr.md) | FULL | sonnet / high | none (coord PR dep) | 005, 053, 064, 088 |
 
 ### Phase C' — Config-Seed Manifest + H12/H14 Implementations (5 tasks)
 

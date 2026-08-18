@@ -3,8 +3,8 @@
   <metadata>
     <title>Author nightly Graph app-role parity ArchTest — reads GraphAppRoles.cs + queries UAMI SP appRoleAssignments + fails on mismatch (coordinated PR with ci-cd-r1)</title>
     <phase>C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'testing','integration-test','auth','ci-workflows'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Also T3 silent-fail trap parity — a mismatch means Graph 403s silently in production.</rigor-reason>
     <model-tier>sonnet</model-tier>
