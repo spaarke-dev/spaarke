@@ -229,6 +229,16 @@ export interface ComposeWorkspaceState {
    * cleanly (the common case). Reset on save-start / load.
    */
   partialApply: ComposePartialApplyInfo | null;
+  /**
+   * UAT-13 (2026-08-18, honest/safe): populated when a create-on-save SUCCEEDED (the sprk_document
+   * exists) but the follow-on parent/regarding association write FAILED — the document is saved but
+   * ORPHANED (not filed under its matter). The old code only `console.warn`'d this, so the user saw an
+   * unqualified success while the doc was silently unfiled — load-bearing for the Field-Mapping /
+   * set-regarding framework. Drives an honest dismissible banner with a Retry-link action (re-invokes
+   * the host association write with `documentRecordId`). `null` when the association succeeded or none
+   * was attempted. Reset on save-start / load.
+   */
+  associationWarning: { documentRecordId: string } | null;
   /** Last assistant-inserted draft staged for confirm (Flow 5 R1 manual-confirm gate). */
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /** SPE check-out lifecycle (Task 050 / Spike #3 §9; Task 051 multi-tab UX). */
@@ -434,6 +444,9 @@ export type ComposeWorkspaceAction =
   // 026-F5 (task 012, r6): REPLACE the save-time degradation-warning set. Dispatched on EVERY
   // successful save: warnings present → set; none → null (a clean save clears the stale banner).
   | { kind: 'saveDegradationWarnings'; warnings: Array<{ code: string; count: number }> | null }
+  // UAT-13 (2026-08-18): set/clear the create-on-save association-orphan warning. `documentRecordId`
+  // non-null → the doc saved but its parent association write failed (retryable); null → clear.
+  | { kind: 'associationWarning'; documentRecordId: string | null }
   | { kind: 'pendingAssistantInsert'; payload: ComposeAssistantToWorkspaceFlow }
   | { kind: 'clearPendingAssistantInsert' }
   // ── Task 050 (Spike #3 §9): SPE check-out lifecycle actions ───────────────
@@ -474,6 +487,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   errorMessage: null,
   saveErrorIsLock: false,
   partialApply: null,
+  associationWarning: null,
   pendingAssistantInsert: null,
   checkoutStatus: 'idle',
   checkoutLockedBy: null,
@@ -685,7 +699,15 @@ export function composeWorkspaceReducer(
       };
     case 'requestSave':
       if (state.status !== 'loaded') return state;
-      return { ...state, status: 'saving', errorMessage: null, saveErrorIsLock: false, partialApply: null };
+      return {
+        ...state,
+        status: 'saving',
+        errorMessage: null,
+        saveErrorIsLock: false,
+        partialApply: null,
+        // UAT-13: clear a prior association-orphan warning at the start of a new save attempt.
+        associationWarning: null,
+      };
     case 'saveSucceeded':
       return {
         ...state,
@@ -775,6 +797,13 @@ export function composeWorkspaceReducer(
     // dispatches this; null (a clean save) clears the stale banner.
     case 'saveDegradationWarnings':
       return { ...state, saveDegradationWarnings: action.warnings };
+    // UAT-13: the create-on-save succeeded but the parent-association write failed (or a retry just
+    // succeeded/failed). Non-null → surface the orphan banner; null → clear it (retry succeeded).
+    case 'associationWarning':
+      return {
+        ...state,
+        associationWarning: action.documentRecordId ? { documentRecordId: action.documentRecordId } : null,
+      };
     case 'pendingAssistantInsert':
       return { ...state, pendingAssistantInsert: action.payload };
     case 'clearPendingAssistantInsert':

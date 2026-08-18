@@ -682,6 +682,21 @@ export interface ComposeWorkspaceProps {
   containerId?: string;
 
   /**
+   * UAT-11 (2026-08-18, honest/safe): a RETRY resolver the host supplies so a transient-create Save
+   * can RE-RESOLVE the BU container at save time instead of relying solely on the one-shot mount-time
+   * `containerId`. The mount resolver runs once in a `useEffect([])`; if Xrm wasn't ready, a transient
+   * 401, or a Dataverse query fault made it fail, `containerId` stays undefined and the save gate used
+   * to emit a DISHONEST "your BU has no storage container configured" — telling the admin to fix a
+   * correctly-configured BU. This callback lets the save path (a) retry the resolution and (b) learn
+   * WHY it's still missing so the banner is honest:
+   *   - `resolved`     → a container id (use it — the retry recovered a transient mount failure)
+   *   - `no-container` → the query succeeded but the BU genuinely has no `sprk_containerid`
+   *   - `unavailable`  → the resolution couldn't run/complete (no Xrm host, threw, transient fault)
+   * Optional — a host that omits it keeps the pre-UAT-11 one-shot behavior + generic message.
+   */
+  resolveContainer?: () => Promise<{ containerId?: string; outcome: 'resolved' | 'no-container' | 'unavailable' }>;
+
+  /**
    * FR-05 create-on-save (task 100): invoked once a transient draft is persisted as a NEW
    * `sprk_document` on first Save, with the server-minted `sprk_documentid`. The host wires this
    * to `useCreateOnSaveAssociation.associate(newDocumentId)` so a chosen parent association is
@@ -823,6 +838,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     driveId,
     tenantId,
     containerId,
+    resolveContainer,
     onCreateOnSaveComplete,
     onBrowseRequested,
     onSearchRequested,
@@ -854,6 +870,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   React.useEffect(() => {
     containerIdRef.current = containerId;
   }, [containerId]);
+
+  // UAT-11 (honest/safe): keep the host's save-time container RETRY resolver in a ref so the save
+  // callback can re-resolve without re-subscribing (mirrors containerIdRef). See the prop docs.
+  const resolveContainerRef = React.useRef(resolveContainer);
+  React.useEffect(() => {
+    resolveContainerRef.current = resolveContainer;
+  }, [resolveContainer]);
 
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
@@ -1478,7 +1501,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             )
         : null;
       const forkLogicalId = forkNew ? startNewComposeLogicalId() : undefined;
-      const saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
+      // `let` (UAT-11): the transient-create gate below may REPLACE this with a save-time retry result.
+      let saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
       // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
       // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
       // which the host `driveId` prop does NOT identify) over the host default. This is the drive the
@@ -1493,18 +1517,40 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         return;
       }
       if (isTransientCreate) {
-        if (!saveContainerId) {
-          // gap 1.4: don't abort silently as the pre-100 code did — surface an honest, actionable
-          // banner. The container resolves from the user's Business Unit; if it's missing the BU is
-          // unconfigured (or we're in a non-Dataverse host).
-          dispatch({
-            kind: 'saveFailed',
-            errorMessage:
-              'Cannot save this new document — your Business Unit has no storage container configured. ' +
-              'Contact an administrator to set the container on your Business Unit.',
-          });
+        let resolvedContainerId = saveContainerId;
+        // UAT-11 (2026-08-18, honest/safe): the mount-time container resolver is a one-shot
+        // useEffect([]) — if Xrm wasn't ready, a transient 401, or a Dataverse fault made it fail,
+        // `containerId` stays undefined and the OLD gate emitted a DISHONEST "your BU has no storage
+        // container configured" for what may be a correctly-configured BU. RETRY here (if the host
+        // supplied a resolver) and only claim "no container configured" when the query actually
+        // confirms the BU has none — otherwise say honestly that we couldn't determine it.
+        let containerOutcome: 'resolved' | 'no-container' | 'unavailable' | 'unknown' = resolvedContainerId
+          ? 'resolved'
+          : 'unknown';
+        if (!resolvedContainerId && resolveContainerRef.current) {
+          try {
+            const retry = await resolveContainerRef.current();
+            containerOutcome = retry.outcome;
+            if (retry.containerId) {
+              resolvedContainerId = retry.containerId;
+              containerIdRef.current = retry.containerId; // cache for subsequent saves this mount
+            }
+          } catch {
+            containerOutcome = 'unavailable';
+          }
+        }
+        if (!resolvedContainerId) {
+          const errorMessage =
+            containerOutcome === 'no-container'
+              ? 'Cannot save this new document — your Business Unit has no storage container configured. ' +
+                'Contact an administrator to set the container on your Business Unit.'
+              : // unavailable / unknown: do NOT blame the BU config — the resolution didn't complete.
+                "Cannot save this new document yet — we couldn't determine your storage container " +
+                '(the Dataverse context may still be loading). Please try again in a moment.';
+          dispatch({ kind: 'saveFailed', errorMessage });
           return;
         }
+        saveContainerId = resolvedContainerId;
       } else if (!saveDriveId) {
         dispatch({
           kind: 'saveFailed',
@@ -2015,14 +2061,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
         // FR-05 (task 100, gap 1.8): once a transient draft is persisted as a NEW sprk_document,
         // let the host write any chosen parent association (associate() no-ops on "none"). The
-        // document already exists, so an association failure is non-fatal — do not surface it as a
-        // save failure.
+        // document already exists, so an association failure is NOT a save failure.
+        // UAT-13 (2026-08-18, honest/safe): but it is NOT nothing either — a failed association leaves
+        // the document ORPHANED (saved but not filed under its matter). The old code only console.warn'd
+        // it, so the user saw an unqualified "Saved ✓" while the doc was silently unfiled. Surface an
+        // honest, dismissible, RETRYABLE banner instead of swallowing it.
         if (isTransientCreate && onCreateOnSaveComplete && payload.documentRecordId) {
           try {
             await onCreateOnSaveComplete(payload.documentRecordId);
           } catch (assocErr) {
             // eslint-disable-next-line no-console
-            console.warn('[ComposeWorkspace] create-on-save association write failed (non-fatal):', assocErr);
+            console.warn('[ComposeWorkspace] create-on-save association write failed (surfaced):', assocErr);
+            dispatch({ kind: 'associationWarning', documentRecordId: payload.documentRecordId });
           }
         }
       } catch (err) {
@@ -4080,6 +4130,27 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // Prong 1 (task 055): when the last save could only anchor PART of the batch, show the honest
             // "N edits couldn't be saved — please redo them" warning (replaces the plain Saved ✓ bar).
             partialApply={state.partialApply}
+            // UAT-13 (2026-08-18): when a create-on-save persisted the document but its parent-
+            // association write failed, show the honest "saved but not filed under its matter" banner
+            // with a Retry that re-runs the host association write (clears on success).
+            associationWarning={state.associationWarning}
+            onRetryAssociation={
+              state.associationWarning && onCreateOnSaveComplete
+                ? () => {
+                    const docId = state.associationWarning?.documentRecordId;
+                    if (!docId) return;
+                    void (async () => {
+                      try {
+                        await onCreateOnSaveComplete(docId);
+                        dispatch({ kind: 'associationWarning', documentRecordId: null }); // succeeded → clear
+                      } catch (retryErr) {
+                        // eslint-disable-next-line no-console
+                        console.warn('[ComposeWorkspace] association retry failed (banner stays):', retryErr);
+                      }
+                    })();
+                  }
+                : undefined
+            }
             // FIX #7a: the transient "Open preview" link was REMOVED from the Saved ✓ banner — the
             // persistent affordance now lives in the Assistant chat (a "Saved to the DMS" message
             // with "Open preview", posted via the save-completed conduit). The banner keeps its

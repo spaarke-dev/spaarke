@@ -34,6 +34,39 @@ const TWO_WARNINGS = [
   { type: 'ignored', message: 'b' },
 ];
 
+describe('ComposeBannerStack — UAT-13 association-orphan warning (saved but not filed)', () => {
+  it('renders the honest "not filed under its matter" banner with a Retry action', () => {
+    const onRetry = jest.fn();
+    renderStack({ associationWarning: { documentRecordId: 'doc-1' }, onRetryAssociation: onRetry });
+
+    expect(screen.getByTestId('compose-workspace-association-warning-banner')).toBeInTheDocument();
+    expect(screen.getByText('Saved, but not filed under its matter')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-association-warning-retry')).toBeInTheDocument();
+  });
+
+  it('invokes onRetryAssociation when Retry is clicked', async () => {
+    const user = userEvent.setup();
+    const onRetry = jest.fn();
+    renderStack({ associationWarning: { documentRecordId: 'doc-1' }, onRetryAssociation: onRetry });
+
+    await user.click(screen.getByTestId('compose-workspace-association-warning-retry'));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the banner on dismiss', async () => {
+    const user = userEvent.setup();
+    renderStack({ associationWarning: { documentRecordId: 'doc-1' }, onRetryAssociation: jest.fn() });
+
+    await user.click(screen.getByTestId('compose-workspace-association-warning-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-association-warning-banner')).not.toBeInTheDocument();
+  });
+
+  it('renders nothing for the banner when associationWarning is null', () => {
+    renderStack({ associationWarning: null });
+    expect(screen.queryByTestId('compose-workspace-association-warning-banner')).not.toBeInTheDocument();
+  });
+});
+
 describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () => {
   // FR-21 (R3 carry-in): dismissal is now content-signature-keyed sessionStorage (see
   // ComposeBannerStack.tsx). Several `it`s below reuse the SAME `TWO_WARNINGS` content, so the
@@ -277,7 +310,9 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
     // … but the SAVE-degradation banner still renders — the 026-F5 fix.
     const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
     expect(banner).toBeInTheDocument();
-    expect(screen.getByText('Some content was simplified when saving')).toBeInTheDocument();
+    // UAT-07b (committed earlier) renamed the banner TITLE to "Some formatting was simplified when
+    // saving"; this assertion was left on the old "content" wording. Match the shipped title.
+    expect(screen.getByText('Some formatting was simplified when saving')).toBeInTheDocument();
     expect(banner.textContent).toContain('A text box was converted to regular text.');
     expect(banner.textContent).toContain("A comment's anchor could not be placed; the comment text was kept. (×2)");
   });

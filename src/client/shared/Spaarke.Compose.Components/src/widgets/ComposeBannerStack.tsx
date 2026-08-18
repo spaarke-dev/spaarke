@@ -104,6 +104,15 @@ export interface ComposeBannerStackProps {
    */
   partialApply?: ComposePartialApplyInfo | null;
   /**
+   * UAT-13 (2026-08-18, honest/safe): populated when a create-on-save persisted the document but its
+   * parent/regarding association write failed — the doc is saved but ORPHANED (not filed under its
+   * matter). Renders an honest, dismissible warning bar with a Retry action. Null when the association
+   * succeeded or none was attempted.
+   */
+  associationWarning?: { documentRecordId: string } | null;
+  /** UAT-13: re-run the host association write for {@link associationWarning}. Clears the banner on success. */
+  onRetryAssociation?: () => void;
+  /**
    * ai-advanced-capabilities-agreements-r1 task 032 (FR-16 128KB budget, Leg B) — populated when a
    * prior agreement-review's findings could not be fully restored on reopen (the 128KB inline-payload
    * cap silently dropped the ledger entry server-side, or a present-but-corrupted findings payload
@@ -181,10 +190,6 @@ function writeImportWarningsDismissed(signature: string): void {
 
 const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'comment-anchor-dropped': "A comment's anchor could not be placed; the comment text was kept.",
-  // UAT-22 (2026-08-18): a session/advisory comment whose anchored text changed so it could NOT be
-  // written into the saved document (distinct from -dropped above, where the text is retained).
-  'comment-anchor-unresolved':
-    "A comment couldn't be saved to the document because its anchored text changed — re-add it if it's still needed.",
   // UAT-23 (2026-08-18): an edit whose anchor drifted during editing so it couldn't be re-anchored on
   // save (a still-valid edit the op-log path had to drop) — surfaced instead of vanishing silently.
   'edit-anchor-lost': "An edit couldn't be saved because its location changed while editing — please redo it.",
@@ -203,7 +208,11 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'edited-paragraph-page-break-dropped': 'A page break inside an edited paragraph was dropped.',
   'edited-paragraph-line-break-dropped': 'A line break inside an edited paragraph was dropped.',
   'edited-table-structure-rebuilt': "An edited table's structure was rebuilt; some table formatting may be simplified.",
-  'comment-anchor-unresolved': 'A comment could not be anchored and was not saved.',
+  // UAT-22 (2026-08-18): a session/advisory comment the user sees in the gutter whose anchored text
+  // changed so it could NOT be written into the saved document — surfaced (counted) instead of silently
+  // dropped. (Distinct from -dropped above, where the comment text is retained.)
+  'comment-anchor-unresolved':
+    "A comment couldn't be saved to the document because its anchored text changed — re-add it if it's still needed.",
   // Task 041 (FR-06, PDF intake): the pdf-intake-* degradation family (task 040's projector) — these
   // ride ContentModelWarnings on a PDF open and fold into the first model-path save like the docx
   // flatten codes. Honest, non-alarming copy; the general reflow fact also drives the PDF notice banner.
@@ -317,6 +326,8 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     pendingAssistantInsert,
     saveSuccessToken = 0,
     partialApply = null,
+    associationWarning = null,
+    onRetryAssociation,
     reviewFindingsDegraded = null,
   } = props;
 
@@ -406,6 +417,16 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   }, [reviewFindingsDegraded]);
   const showReviewFindingsDegradedBanner = showReviewFindingsDegraded && !reviewFindingsDegradedDismissed;
 
+  // UAT-13 (2026-08-18): the create-on-save persisted the document but its parent association write
+  // failed — the doc is saved but not filed under its matter. Dismissable; re-shows on a NEW warning
+  // (fresh object per failed association), stays dismissed for the same reference.
+  const showAssociationWarning = !!associationWarning;
+  const [associationWarningDismissed, setAssociationWarningDismissed] = React.useState(false);
+  React.useEffect(() => {
+    setAssociationWarningDismissed(false);
+  }, [associationWarning]);
+  const showAssociationWarningBanner = showAssociationWarning && !associationWarningDismissed;
+
   // UAT-05 (owner 2026-08-18): the generic Save-error banner previously had NO dismiss ✕ (unlike the
   // warning/info banners), so a stale "Save error" could not be cleared. Add a local dismissal reset
   // whenever the message changes (a NEW error re-shows). The parent still owns `errorMessage`; this only
@@ -425,6 +446,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     showSaveSuccessBanner ||
     showPartialApplyBanner ||
     showReviewFindingsDegradedBanner ||
+    showAssociationWarningBanner ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -528,6 +550,41 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
               />
             }
           />
+        </MessageBar>
+      ) : null}
+
+      {showAssociationWarningBanner ? (
+        // UAT-13 (2026-08-18): the document SAVED but its parent-association write failed — honest
+        // "saved but not filed" notice with a Retry (re-runs the host association write). The document
+        // itself is safe; only the matter/regarding link is missing.
+        <MessageBar intent="warning" data-testid="compose-workspace-association-warning-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Saved, but not filed under its matter</MessageBarTitle>
+            {'This document was saved, but it couldn’t be linked to its matter/parent record. ' +
+              'It won’t appear under that record until the link is written.'}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-association-warning-dismiss"
+                onClick={() => setAssociationWarningDismissed(true)}
+              />
+            }
+          >
+            {onRetryAssociation ? (
+              <Button
+                appearance="primary"
+                size="small"
+                data-testid="compose-workspace-association-warning-retry"
+                onClick={onRetryAssociation}
+              >
+                Retry
+              </Button>
+            ) : null}
+          </MessageBarActions>
         </MessageBar>
       ) : null}
 

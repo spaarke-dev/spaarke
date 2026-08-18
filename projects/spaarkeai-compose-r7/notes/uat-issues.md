@@ -217,8 +217,19 @@ investigation/research pass to choose the correct write-model before building.
   into a new `anchorLostFlag` = re-derivation FAILURE that is NOT a genuine deletion (a still-valid edit the
   op-log filter drops). ComposeWorkspace counts these and folds an `edit-anchor-lost` degradation warning
   (op-log path) — genuine deletions stay quiet (no false alarm). +2 interceptor tests; 64/64 green.
-- 🔧 Do next (the batch): **UAT-11** (container residual — honest signal + retry), **UAT-12** (surface dropped
-  tracked-changes/comments on read failure), **UAT-13** (surface association orphan),
+- ✅ **UAT-11 Fixed** (2026-08-18): the one-shot mount-time container resolver became a reusable
+  `resolveContainer()` returning a discriminated outcome (`resolved`/`no-container`/`unavailable`), threaded to
+  ComposeWorkspace as a new optional prop. The transient-create save gate now RETRIES resolution at save time
+  and only says "your BU has no storage container configured" when the query CONFIRMS none — otherwise an honest
+  "couldn't determine your storage container, the Dataverse context may still be loading — try again." Both hosts
+  (ComposeDirectWidget + composeEditor.registration) provide it. tsc-clean; end-to-end verify awaits real-env UAT
+  (create-on-save render hits the known FR-13 FormModal env-only test gap).
+- ✅ **UAT-13 Fixed** (2026-08-18): a create-on-save association failure used to only `console.warn` (doc saved
+  but silently ORPHANED, not filed under its matter). Now surfaces an honest dismissible "Saved, but not filed
+  under its matter" banner with a **Retry** that re-runs the host association write (clears on success). New
+  `associationWarning` state/action/reducer + banner + 4 ComposeBannerStack tests (also fixed a stale UAT-07b
+  title assertion); 34/34 green.
+- 🔧 Do next (the batch): **UAT-12** (surface dropped tracked-changes/comments on read failure — BFF),
   **UAT-24** (tolerant-but-SURFACED resolver — propose-don't-auto-place; UAT-21 already applied the SURFACE half),
   the warned-but-cryptic copy gap (friendly copy for footnote/field/content-control/numbering codes), plus the
   earlier-triaged **UAT-04** (progress indicator), **UAT-08** (promote + auto-create Analysis), **UAT-09**

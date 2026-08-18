@@ -157,37 +157,51 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
   // knows which container to mint the new sprk_document in. Covers ALL compose entry paths
   // (SpaarkeAi three-pane AND standalone LegalWorkspace). Undefined in a non-Dataverse host or
   // until resolution completes — ComposeWorkspace gates a transient Save on it.
+  // UAT-11 (2026-08-18, honest/safe): the container resolution is a REUSABLE function returning a
+  // discriminated outcome, so a transient-create Save can RETRY it (threaded to ComposeWorkspace
+  // `resolveContainer`) instead of the mount-only one-shot that left `containerId` undefined — and a
+  // dishonest "no container configured" save error — whenever Xrm wasn't ready, a transient 401, or a
+  // Dataverse query fault hit at mount time.
+  const resolveContainer = React.useCallback(async (): Promise<{
+    containerId?: string;
+    outcome: "resolved" | "no-container" | "unavailable";
+  }> => {
+    try {
+      // The SpaarkeAi/LegalWorkspace code page runs in an iframe where Xrm lives on the PARENT/TOP
+      // window, not the iframe's own globalThis — use the SAME fallback every other SpaarkeAi Xrm
+      // consumer uses (WorkspacePane, ManageWorkspacesPane, usePlaybookOptions, main.tsx).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm;
+      const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
+      const webApi = xrm?.WebApi;
+      if (!rawUserId || !webApi) return { outcome: "unavailable" }; // no Dataverse host / not ready
+      // cleanGuid: the Xrm user id is brace-wrapped and flows into `/systemusers(id)` inside
+      // resolveUserBuDefaults — wrap it here (no-op on bare GUIDs) per the cleanGuid constraint.
+      const userId = cleanGuid(rawUserId);
+      const defaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
+      return defaults.containerId
+        ? { containerId: defaults.containerId, outcome: "resolved" }
+        : { outcome: "no-container" };
+    } catch (err) {
+      // Non-fatal: transient Save can retry via this same resolver and surfaces an honest banner.
+      // eslint-disable-next-line no-console
+      console.warn("[ComposeSectionMount] BU container resolution failed:", err);
+      return { outcome: "unavailable" };
+    }
+  }, []);
+
   const [containerId, setContainerId] = React.useState<string | undefined>(undefined);
   React.useEffect(() => {
     let cancelled = false;
     void (async () => {
-      try {
-        // The SpaarkeAi/LegalWorkspace code page runs in an iframe where Xrm lives on the PARENT/TOP
-        // window, not the iframe's own globalThis — use the SAME fallback every other SpaarkeAi Xrm
-        // consumer uses (WorkspacePane, ManageWorkspacesPane, usePlaybookOptions, main.tsx). Reading only
-        // globalThis.Xrm returned undefined here → the BU container never resolved → a false "no storage
-        // container configured" save error even when the BU has one (UAT 2026-08-18).
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const w = window as any;
-        const xrm = w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm;
-        const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
-        const webApi = xrm?.WebApi;
-        if (!rawUserId || !webApi) return; // no Dataverse host — create-on-save container unavailable
-        // cleanGuid: the Xrm user id is brace-wrapped and flows into `/systemusers(id)` inside
-        // resolveUserBuDefaults — wrap it here (no-op on bare GUIDs) per the cleanGuid constraint.
-        const userId = cleanGuid(rawUserId);
-        const defaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
-        if (!cancelled) setContainerId(defaults.containerId);
-      } catch (err) {
-        // Non-fatal: transient Save surfaces an honest "no container configured" banner if attempted.
-        // eslint-disable-next-line no-console
-        console.warn("[ComposeSectionMount] BU container resolution failed:", err);
-      }
+      const result = await resolveContainer();
+      if (!cancelled && result.containerId) setContainerId(result.containerId);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [resolveContainer]);
 
   return React.createElement(ComposeWorkspace, {
     bffBaseUrl,
@@ -195,6 +209,7 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
     tenantId,
     // FR-05 (task 100): host-resolved BU container + save-completion association callback.
     containerId,
+    resolveContainer,
     onCreateOnSaveComplete: composeLaunch?.onCreateOnSaveComplete,
     initialDocumentRef: composeLaunch?.document ?? null,
     // FR-03 (task 012): transient upload-mount pointer from a chat "open in Compose" on an
