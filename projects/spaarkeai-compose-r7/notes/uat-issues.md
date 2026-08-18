@@ -28,11 +28,11 @@ Disposition = **R7** (fix in this UAT round) · **Fidelity** (Compose render/anc
 |----|-------|-------|----------|--------------------|--------|-------------|
 | UAT-01 | "no storage container configured" save error (BU HAS a container) | 1 | Critical | Container resolver read only `globalThis.Xrm`; code page is an iframe → Xrm on `parent`/`top` | ✅ Fixed (redeploy `sprk_spaarkeai`) | R7 |
 | UAT-02 | Save 500: "not defined as keys" / "Found multiple records" | 1 | Critical | `sprk_graphitemid_uk` in `Failed` over 417 duplicate `sprk_document` rows | ✅ Fixed (dev) + hardening | R7 (+DEF-003) |
-| UAT-03 | No name-on-save modal on first save of a new/uploaded file | 2 | Medium | FR-02 modal likely skipped when the file already carries a name (upload) — expectation vs design | 🔎 Investigate | R7 |
-| UAT-04 | No progress indicator on toolbar actions (save, memo, …) | 1+2 | Medium | R7 added save-*state* text but no click-time busy/spinner feedback | 🟡 Open | R7 |
-| UAT-05 | Header banner messages can't be dismissed/cleared | 1 | Low-Med | Banners lack a consistent working dismiss control | 🟡 Open | R7 |
+| UAT-03 | No name-on-save modal on first save of a new/uploaded file | 2 | Medium | FR-02 modal skipped when the file already carries a name — `saveNeedsName` gated on `isUntitledDraftName` | ✅ Fixed `cdb1dbcb4` (redeploy) | R7 |
+| UAT-04 | No progress indicator on toolbar actions (save, memo, …) | 1+2 | Medium | R7 added save-*state* text but no click-time busy/spinner feedback | 🟡 Open (next) | R7 |
+| UAT-05 | Header banner messages can't be dismissed/cleared | 1 | Low-Med | Save-error banner (+ checkout/pending) had no dismiss ✕ | ✅ Fixed `cdb1dbcb4` (redeploy) | R7 |
 | UAT-06 | "suggested edit couldn't be placed — wording differs slightly" | 1+2 | Medium | AI redline target text didn't byte-match the doc → strict anchor placement failed (warn-don't-drop). Intermittent. | 🟡 Open | R7 (UX); engine=owner-decide |
-| UAT-07 | "content simplified when saving" warnings — unhelpful + real fidelity loss | 2 | Med-High | (a) render-on-save fidelity wideners not implemented; (b) warnings are cryptic to users | 🟡 Open | R7 (b UX); a=backlog DEF-002 (owner) |
+| UAT-07 | "content simplified when saving" warnings — unhelpful + real fidelity loss | 2 | Med-High | (a) render-on-save fidelity wideners not implemented; (b) warnings were cryptic (raw codes) | 🔧 **07b Fixed** `cdb1dbcb4`; 07a open | R7 (07b done); 07a=DEF-002 (owner: expand R7) |
 | UAT-08 | Create Summary Memo needs an Analysis; promote option missing; should auto-create | 1 | Med-High | Memo requires a session→Analysis link; "Promote to Analysis" not visible in History; design wants auto-create on analyze | 🟡 Open | R7 (Compose-triggered) |
 | UAT-09 | Advisory comments couldn't be anchored (2 of 10) + op-log unrepresentable `commentAnchor` | 2 | Medium | Comment anchor strict-resolution failed for some; `commentAnchor` mark outside the op-log closed set | 🔎 Investigate | R7 (investigate) |
 | UAT-10 | SignalR notifications 401 on negotiate (poll-fallback active) | 2 | Medium | Notifications hub auth returns 401 on negotiate | 🔎 Investigate | R7 (investigate) |
