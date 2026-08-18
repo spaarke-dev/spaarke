@@ -7,6 +7,49 @@
 
 ---
 
+## ✅ TASK 081.5 RESOLVED (2026-08-18, supersedes escalation below)
+
+**Task 081.5 is COMPLETE.** The subagent's escalation-record below is preserved for the postmortem but is **superseded** — main-session diagnosed + fixed + retried successfully.
+
+**What actually happened**: the subagent's root-cause hypothesis ("deploy script's fallback path is flaky") was wrong. Real cause: 4 missing Tier-1 IOptions on `spaarke-bff-dev` from Wave 4 tasks 042 (Onboarding) and 087 (PublicConfig) that were never rolled out to dev App Service — the subagent's deploy was the first Wave 4 BFF deploy to live dev and surfaced all latent config gaps at once. The subagent missed the actual `OptionsValidationException` because it only pulled `LogFiles/docker.log` (container-orchestration events) not `LogFiles/StartupLogs/{date}_failure.log` (actual .NET stdout with the stack trace).
+
+**Main-session recovery** (2026-08-18 ~15:50-16:04 UTC):
+1. Diagnosed: pulled `StartupLogs/*_failure.log` via SCM VFS → found `OptionsValidationException` enumerating 4 missing settings
+2. Applied 4 config values on `spaarke-bff-dev`: `PublicConfig__BffUrl`, `PublicConfig__MsalClientId`, `PublicConfig__TenantId`, `Onboarding__EnableDevBypass=true`
+3. `az webapp restart` → `/healthz` recovered to 200 in 53s
+4. Republished (44.96 MB) + deployed refactored code via direct `az webapp deploy` → `RuntimeSuccessful`, 0 failed
+5. Post-deploy `/healthz` = 200 on first poll → confirmed refactor works end-to-end
+
+**Task 082 is now UNBLOCKED.** The `[Obsolete]` fallback branch is no longer in production; grep of live source confirms zero remaining consumers of `_options.Environments` / `_options.DefaultEnvironment`.
+
+**Full postmortem**: [`notes/task-081.5-rollback.md`](notes/task-081.5-rollback.md) POSTMORTEM section (main-session appended after root-cause fix).
+
+**Governance-gap follow-up** identified for task 090 wrap-up: root CLAUDE.md §10 BINDING pre-check protects KV secret RENAMES but has no equivalent gate for new app-setting REQUIREMENTS introduced by new Tier-1 `IOptions`. When code adds `services.AddOptions<X>().ValidateOnStart()`, no CI check verifies the corresponding App Service settings are populated. Recommend adding a "Tier-1 IOptions deploy checklist" to `.claude/constraints/bff-extensions.md`.
+
+**Also learned**: when a BFF container fails startup with exit 134, ALWAYS pull `LogFiles/StartupLogs/{date}_failure.log` (not `LogFiles/{date}_docker.log`) — the StartupLogs directory has the actual .NET stdout with the boot exception stack trace.
+
+TASK-INDEX.md row 081.5 = ✅.
+
+---
+
+## ⚠ TASK 081.5 ESCALATION (2026-08-18 — subagent record, superseded by RESOLVED section above)
+
+**Task 081.5** (`RegistrationDataverseService` ctor refactor, unblocks 082) is **NOT complete**. The code refactor is done and fully validated (build 0/0, 10,484/0 BFF unit tests pass, zero HIGH CVEs, publish size unchanged at 44.96 MB — reapplied to the working tree, **uncommitted**), but the **deploy of the refactored code failed** at Step 8: the App Service container crashed on startup (`exit code 134`, ~12-13s) via `scripts/Deploy-BffApi.ps1`'s `stop → Kudu zipdeploy → start` auto-recovery path.
+
+**Critical evidence this is NOT a code defect**: redeploying the ORIGINAL (pre-refactor) code via the identical path failed the exact same way. The site only recovered via a plain `az webapp restart` (not a redeploy). This points to a flake/regression in the deploy script's fallback path itself, not either version of the source.
+
+> **NOTE FROM MAIN-SESSION**: this hypothesis was WRONG — see RESOLVED section above. Actual cause was 4 missing Tier-1 IOptions from Wave 4 tasks 042/087 rolled out for the first time by this deploy. Preserved verbatim below for postmortem trail.
+
+**Current live state (AT TIME OF SUBAGENT ESCALATION — since superseded)**: `spaarke-bff-dev` `/healthz` = 200, running the **original (pre-refactor, still-[Obsolete]) code**. `DATAVERSE_URL` app-setting remains correctly set (harmless either way; required for the eventual retry). Task 082 remains blocked (⏸) — 081.5 did not unblock it.
+
+**Full record**: [`notes/task-081.5-rollback.md`](notes/task-081.5-rollback.md) — timeline, root-cause assessment, recommended next steps (retry-with-live-log-capture vs. investigate the deploy script's fallback path first). Per the POML's "do NOT retry blindly" instruction, no further deploy attempts were made — this needs owner/main-session judgment on which path to take.
+
+TASK-INDEX.md row 081.5 set to 🔄 (needs-retry, not ✅ — per parallel-execution failure-isolation convention).
+
+> **[SUPERSEDED — see RESOLVED section above; row 081.5 is now ✅]**
+
+---
+
 ## ⚠ IN-FLIGHT AT HANDOFF (READ FIRST NEXT SESSION)
 
 **Task 082 subagent (`a4e4137017e220ab8`) was DISPATCHED just before this handoff and is still running in background.**

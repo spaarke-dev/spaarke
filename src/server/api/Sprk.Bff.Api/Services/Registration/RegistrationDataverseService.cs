@@ -4,15 +4,13 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Microsoft.Extensions.Options;
-using Sprk.Bff.Api.Configuration;
 
 namespace Sprk.Bff.Api.Services.Registration;
 
 /// <summary>
 /// Dataverse service for sprk_registrationrequest CRUD operations, systemuser sync,
 /// and team assignment in the Demo environment.
-/// Uses S2S (client secret) auth targeting the Demo Dataverse URL from DemoProvisioningOptions.
+/// Uses S2S (client secret) auth targeting the admin Dataverse URL from DATAVERSE_URL configuration.
 /// ADR-010: Registered as concrete type (no interface).
 /// </summary>
 public class RegistrationDataverseService : IDisposable
@@ -29,7 +27,6 @@ public class RegistrationDataverseService : IDisposable
     private readonly string _apiUrl;
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
-    private readonly DemoProvisioningOptions _options;
     private readonly TrackingIdGenerator _trackingIdGenerator;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -45,33 +42,22 @@ public class RegistrationDataverseService : IDisposable
 
     public RegistrationDataverseService(
         IConfiguration configuration,
-        IOptions<DemoProvisioningOptions> options,
         TrackingIdGenerator trackingIdGenerator,
         TokenCredential credential,
         IHttpClientFactory httpClientFactory,
         ILogger<RegistrationDataverseService> logger)
     {
         _logger = logger;
-        _options = options.Value;
         _trackingIdGenerator = trackingIdGenerator;
         _credential = credential;
         _httpClientFactory = httpClientFactory;
 
-        // Admin Dataverse URL: prefer DATAVERSE_URL config, fall back to legacy Environments config
+        // Admin Dataverse URL: required config (no fallback per FR-33 retirement).
         var dataverseUrl = configuration["DATAVERSE_URL"];
-#pragma warning disable CS0618 // Obsolete — legacy fallback until DemoExpirationService migration
-        if (string.IsNullOrEmpty(dataverseUrl) && _options.Environments.Length > 0)
-        {
-            var defaultEnv = _options.Environments.FirstOrDefault(e => e.Name == _options.DefaultEnvironment)
-                ?? _options.Environments.First();
-            dataverseUrl = defaultEnv.DataverseUrl;
-        }
-#pragma warning restore CS0618
-
         if (string.IsNullOrEmpty(dataverseUrl))
         {
             throw new InvalidOperationException(
-                "RegistrationDataverseService requires DATAVERSE_URL configuration (or legacy DemoProvisioning:Environments).");
+                "RegistrationDataverseService requires DATAVERSE_URL configuration.");
         }
 
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
