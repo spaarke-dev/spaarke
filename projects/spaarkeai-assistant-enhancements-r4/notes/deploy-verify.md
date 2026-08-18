@@ -1,7 +1,27 @@
 # 080 Deploy + Verify — spaarkeai-assistant-enhancements-r4
 
-> **Status**: PREP + GATES COMPLETE (2026-08-18). Remaining = seed advisory Action + 2 deploys + UAT (runbook below).
+> **Status**: ✅ DEPLOYS EXECUTED (2026-08-18). BFF + advisory Action seed + SpaarkeAi code page all deployed to dev (spaarkedev1). Owner UAT (7 DoDs) remains.
 > All R4 code is **merged to master** (PR #778) + this worktree branch is at current master. 040 (D9 + Refresh-clip fix) committed (`0702aad7e`).
+
+---
+
+## ✅ DEPLOY EXECUTION LOG (2026-08-18)
+
+| Step | Result |
+|---|---|
+| **0. Worktree ← master** | Merged origin/master (13 commits) clean; pulled in `Verify-ComposeIdentityKey.ps1` + master BFF `ComposeEndpoints.cs`. Release build clean (0 errors). |
+| **1. BFF deploy** | `Deploy-BffApi.ps1` → **44.96 MB**, all 4 critical files SHA-256 verified, `/healthz` 200. Routes registered (`/api/ai/chat/sessions`, `/api/ai/chat/playbooks` → **401** = auth-protected, not 404). |
+| **2. Advisory `list-tasks` Action seed** | The R5 `Deploy-AnalysisAction.ps1` is **incompatible** with `list-tasks.action.json` (single top-level object, not `actions[]`; numeric `actionType`, not `actionTypeName`; doesn't map modelTier/temperature/groundedToolAllowList). Seeded via controlled REST PATCH **from the authored JSON** onto row `57651aad-8e85-f111-8075-7c1e5268570d`: `sprk_modeltier=100000002 (Reasoning)`, `sprk_temperature=0.3`, `sprk_groundedtoolallowlist=["spaarke.grid_overview","spaarke.daily_briefing_overview"]`, advisory `sprk_systemprompt` (3839 ch), `sprk_outputschemajson` (454 ch), `sprk_description`. **Verified** via read_query. |
+| **2b. Grounded tools** | `spaarke.grid_overview` / `spaarke.daily_briefing_overview` are **code-registered handler constants** (GridOverviewHandler.ToolId / DailyBriefingOverviewHandler.ToolId, shipped R3) — NOT Dataverse `sprk_analysistool` rows. Runbook's "verify 2 tool rows" was a wrong assumption; the allow-list matches the code catalog. |
+| **2c. Binding** | `list-tasks` `sprk_playbookconsumer` (5b1870b9-...) disposition = **Surface Launch (100000007)** ✅. |
+| **3. SpaarkeAi code page** | Vite config resolves `@spaarke/*` → shared-lib **`src/`** (not dist/), so no separate shared-lib rebuild needed. `npm install --legacy-peer-deps` → clear cache → `npm run build`. Bundle verified to contain R4 markers: `workspace_tabs_snapshot` (023), `minHeight="0px"` (040), `onSuggestionCapabilitySelect` (021b). `Deploy-SpaarkeAi.ps1` → `sprk_spaarkeai` updated + published (5674 KB). |
+| **4. Compose-r7 guard** | `Verify-ComposeIdentityKey.ps1` → `sprk_graphitemid_uk = Active` (exit 0) ✅. |
+
+**Follow-up filed (script gap):** `Deploy-AnalysisAction.ps1` cannot seed advisory Actions authored as single-object JSON with numeric `actionType` + the R4 fields. Next advisory-Action author will hit the same gap. See "Notes" below.
+
+**Remaining:** owner UAT of the 7 spec Success Criteria (below).
+
+---
 
 ---
 
