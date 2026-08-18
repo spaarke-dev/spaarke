@@ -51,6 +51,7 @@
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Api;
+using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Endpoints;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
@@ -903,6 +904,85 @@ builder.Services.AddScoped<H9BffDeployHandler>();
 //     to avoid pulling Spaarke.Dataverse's Dataverse SDK transitively into
 //     the L2 publish (~several MB).
 builder.Services.AddReconcilerModule(builder.Configuration);
+
+// Task 059 (Wave C5): I5 same-customer concurrency guard — optimistic upsert
+// of sprk_dataverseenvironment.sprk_currentrunid (null -> newRunId). Registered
+// via extension method (parity with ReconcilerModule so Program.cs stays
+// god-class-ratchet-clean per ADR-010). All registrations UNCONDITIONAL per
+// ADR-032; the kill-switch lives on CustomerRunGuardOptions.Enabled (defaults
+// false — production deployments MUST set true after wiring the
+// CustomerRunGuard:TargetDataverseUrl + TenantId + ClientId + ClientSecret KV
+// references).
+//
+// Placement Justification (CLAUDE.md §10 / §11): L2-only. Consumes NO
+// AI-internal types (ADR-013 forcing-function rule). The guard is
+// orchestration infrastructure (Path A exception at L2 scope per spec.md
+// ADR Tensions row 1) — NOT itself an IJobHandler. Reuses IHttpClientFactory
+// (already registered by other handler modules) and IProvisioningRunRepository
+// (task 037 CosmosModule); no duplicate client instantiation.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-044 (Path C — comply): sprk_currentrunid stores canonical GUID
+//     form (bare, lowercase). CustomerRunGuard.CanonicalizeRunId normalizes
+//     at the guard's ingress boundary; RunIdEquals normalizes both sides
+//     defensively against a legacy non-canonical write.
+//   - ADR-032 (Path C — comply): registered UNCONDITIONALLY. Kill-switch
+//     lives INSIDE the guard (Enabled=false -> Success-always, WARN-logged)
+//     so the DI graph is a stable shape across staged rollout.
+//   - ADR-004 (Path A at L2 scope): the guard is orchestration infrastructure,
+//     NOT itself an IJobHandler. Same reasoning as StateReconcilerService
+//     (task 058) + CrashRecoveryStartupService (task 060).
+//   - spec.md §4D I5 / FR-23 / FR-32: same-customer serialization via
+//     optimistic upsert; cross-customer runs unaffected. Task 064's I5
+//     ArchTest will recognize this guard as the sanctioned pattern.
+//   - spec.md FR-24 integration hook: when the winning run's Cosmos status
+//     is Quarantined, TryAcquireAsync returns
+//     AcquireConflictReasonCodes.Quarantined so the operator sees a distinct
+//     signal from a routine "already in flight" (matches task 061's Rollback
+//     module: Quarantined runs KEEP sprk_currentrunid set until clear-quarantine).
+builder.Services.AddCustomerRunGuard(builder.Configuration);
+
+// Task 060 (Wave C5): I6 crash-recovery startup scan — CrashRecoveryStartupService
+// is an IHostedService that on L2 boot scans Cosmos (via task 058's shared
+// IActiveRunScanner) for status ∈ {Running, WaitingOnGate} runs whose last-
+// activity age exceeds MAX(2× CrashRecovery:MedianHandlerDuration,
+// CrashRecovery:FloorAge) and re-enqueues run.CurrentPhase via the SAME
+// IHandlerEnqueuer (task 038) the reconciler uses. Registers:
+//   - CrashRecoveryOptions (bound + validated; FloorAge >= 30s, MedianHandlerDuration >= 1s)
+//   - CrashRecoveryStartupService (IHostedService — one-shot on StartAsync)
+// Reuses TimeProvider.System already registered by AddReconcilerModule
+// (TryAddSingleton) so this does NOT double-register the production clock.
+//
+// PLACEMENT (CLAUDE.md §10 / §11): L2-only; consumes NO AI-internal types
+// (ADR-013 forcing-function rule). The scan is orchestration infrastructure —
+// the ADR-004 Path A exception at L2 scope applies (spec.md ADR Tensions row 1
+// / CLAUDE.md §6.5). Registered AFTER AddReconcilerModule so IActiveRunScanner
+// + TimeProvider + IHandlerEnqueuer scoped registrations are all in place.
+// Once task 059's guard lands as an IHandlerEnqueuer decorator (planned in a
+// follow-on iteration), crash-recovery re-enqueues transitively inherit the
+// same-customer serialization contract without a direct guard dependency here.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-004 (Path A at L2 scope): the crash-recovery service is orchestration
+//     infrastructure, NOT itself an IJobHandler. Same reasoning as
+//     StateReconcilerService (task 058).
+//   - ADR-036 (Path C — comply): 3-level idempotency intact —
+//     Level 1 is Service Bus MessageId dedup (crash-recovery re-enqueues use
+//     byte-identical ParametersJson to what the reconciler produces, so
+//     ComputeMessageId collapses them at the SB wire);
+//     Level 2 is BFF-side Redis IdempotencyService;
+//     Level 3 is Cosmos ETag + Dataverse alt-key upsert. Re-enqueueing
+//     currentPhase is safe under ALL crash timings.
+//   - ADR-032: registration UNCONDITIONAL — the kill-switch is a config flag
+//     (CrashRecovery:Enabled) that suppresses the SCAN, not the DI graph.
+//   - spec.md FR-23 SCOPE: the startup scan pairs with the reconciler's 5s
+//     tick loop — the scan is the FAST-path resume that catches orphans
+//     BEFORE the first reconciler tick fires; the reconciler is the ongoing
+//     DAG advancer. Redundant dispatches collapse at SB dedup (level-1).
+builder.Services.Configure<CrashRecoveryOptions>(
+    builder.Configuration.GetSection(CrashRecoveryOptions.SectionName));
+builder.Services.PostConfigure<CrashRecoveryOptions>(o => o.Validate());
+builder.Services.AddHostedService<CrashRecoveryStartupService>();
 
 var app = builder.Build();
 
