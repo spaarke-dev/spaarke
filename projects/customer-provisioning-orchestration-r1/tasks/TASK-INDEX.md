@@ -319,12 +319,14 @@ Per `notes/resource-discovery-2026-08-16.md`:
 | Metric | Value |
 |---|---|
 | **Total tasks** | 78 |
-| **not-started** 🔲 | 19 |
+| **not-started** 🔲 | 15 |
 | **in-progress** 🟡 | 0 |
-| **completed** ✅ | 59 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19; Wave 4 Batch 4A: 081, 084; Wave 4 Batch 4B: 052, 057, 064, 077) |
-| **Wave 4 Batch 4B COMPLETE (2026-08-17)** | 4 parallel subagents landed clean · 057 commit `b8dcdfaeb` (L2 REST — 8 endpoints, 440/0 L2 tests) · 052 commit `67e8830ba` (H9 BFF deploy — 486/0 L2 tests, 35 new H9 tests, rollback verified) · 077 commit `111773ffc` (per-tenant metering app-level — 10,477/0 BFF tests, 20 new, Δ 0.00 MB, SC #13 met) · 064 commit `40b09f837` (5 tenant-isolation ArchTests I1-I5 — 12 baseline violations filed to task 065 audit sweep per POML) |
-| **Wave 4 Batch 4A COMPLETE (2026-08-17)** | ArchTest debt `3b67a7b8d` · 081 `0b8ca53ba` (BFF Obsolete removal) · 084 `70abd9992` (Phase H manifest gen — 32 secrets) |
-| **Baseline violations filed to task 065** | 12 total — I1: 3 PS scripts · I2: 4 BFF services (SemanticSearch/InvoiceSearch/DataverseIndexSync/RecordMatch) · I3: 3 (FeedbackService×2 + PromptLibraryService) · I5: 1 (GraphClientFactory.cs:132 DefaultAzureCredential without explicit TenantId). Filed per POML step 7 + acceptance — do NOT weaken guards. Task 065 (Wave 4C) is the fix vehicle. |
+| **completed** ✅ | 63 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19; Wave 4A: 081+084; Wave 4B: 052+057+064+077; Wave 4C: 058+065+066+085) |
+| **Wave 4 Batch 4C COMPLETE (2026-08-17)** | 4 parallel subagents landed clean · 058 commit `1b0297c7b` (state-reconciler BackgroundService — 524/524 L2 tests, N=5 dedup verified) · 066 commit `e54cfb6e5` (verify 1834b77bc + regression seed test) · 085 commits `4ab4fbeda`+`06db97468` (AI Search alias collapse — 2 dev KV aliases deleted, health 200 after each step, soft-delete recovery until 2026-11-16) · 065 commit `f66a6add7` (12 baseline violations fixed + 47-site audit report; all 5 §4D ArchTests PASS 22/22 with neg-controls) |
+| **Wave 4 Batch 4B COMPLETE (2026-08-17)** | 057 `b8dcdfaeb` · 052 `67e8830ba` · 077 `111773ffc` · 064 `40b09f837` |
+| **Wave 4 Batch 4A COMPLETE (2026-08-17)** | ArchTest debt `3b67a7b8d` · 081 `0b8ca53ba` · 084 `70abd9992` |
+| **All 5 §4D tenant-isolation ArchTests GREEN (2026-08-17 post-4C)** | I1 (PS scripts), I2 (AI Search tenantId filter), I3 (Cosmos PartitionKey), I4 (SPE literals), I5 (Graph per-tenant token) all pass. Total 65/65 ArchTests suite pass. Zero baseline violations remaining. |
+| **Follow-on drift surfaced during 4C (per fix-at-discovery principle)** | (a) Task 065 flagged `ManagedIdentityCredentialFactory.cs:34-40` has same "no TenantId on options bag" gap as GraphClientFactory but sits OUTSIDE I5 ArchTest scope (`Infrastructure/Graph/**` only) — audit report §7.2 for owner decision: broaden I5 or targeted PR. (b) Task 085 flagged prod-side `Seed-ProductionKeyVault.ps1` + `Configure-ProductionAppSettings.ps1` + stale `platform.json` compiled artifact still reference `ai-search-key` — dev-scope fix succeeded but prod-side deferred. Both items follow-on candidates. |
 | **blocked** ⏸ | (per dep chains — resolvable) |
 | **Ready to start (no deps)** | 21 tasks: 001, 002, 003, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 018, 019, 020, 032, 033, 080 (Phase E), plus 023, 024 (Wave C1 pending 004) |
 
