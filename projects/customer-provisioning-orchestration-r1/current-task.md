@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-18 later ((`/context-handoff` #2 — Wave 4 100% COMPLETE + PUSHED; 089 harness subagent running; owner-invocation + 090 wrap-up remaining)
+> **Last Updated**: 2026-08-18 later (089 scaffolding-half subagent COMPLETE; owner-invocation + 090 wrap-up remaining)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
 > **Branch**: `work/customer-provisioning-orchestration-r1` @ `5b908591a` (draft PR #779 up-to-date; last remote push at `5b908591a` — **0 unpushed commits**)
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE)
@@ -12,10 +12,10 @@
 | Field | Value |
 |-------|-------|
 | **Project progress** | ~75/78 tasks ✅ · Wave 4 100% landed |
-| **Current phase** | F E2E Acceptance — task 089 in split-approach (subagent scaffolding running; owner invocation pending) |
-| **Active subagent** | `aab31dc9d86933b0c` running in background — authoring 089 verification harness + report skeleton + operator runbook + POML amendment |
-| **Next owner action** | (After 089 subagent completes) Review scaffolding → decide on Model 2 dedicated trial customer provisioning → invoke `/provision-environment` |
-| **Status** | Holding for 089 subagent completion notification |
+| **Current phase** | F E2E Acceptance — task 089 in split-approach (scaffolding half ✅ COMPLETE; owner invocation half pending) |
+| **Scaffolding subagent** | `aab31dc9d86933b0c` COMPLETE — landed POML amendment + 3 notes files + TASK-INDEX row 089 → 🟡 |
+| **Next owner action** | Follow `notes/phase-f-operator-runbook.md`: `az login` → `/provision-environment trial-2026-08-18 --tenancyModel Model2Dedicated --profile trial` → run `notes/phase-f-verification-harness.md` checks against the live stamp → fill `notes/phase-f-report-skeleton.md` into `notes/phase-f-e2e-acceptance-2026-08-18.md` → flip TASK-INDEX row 089 to ✅ → dispatch task 090 |
+| **Status** | Ready for owner interactive invocation of `/provision-environment` |
 
 ### What just happened (last few hours)
 
@@ -23,6 +23,7 @@
 2. Task 081.5 (`RegistrationDataverseService` ctor refactor) had a dramatic recovery: subagent's deploy failed with container exit 134, misdiagnosed as deploy-script flakiness; main-session took over, found actual cause via `LogFiles/StartupLogs/*_failure.log` (4 missing Tier-1 IOptions from Wave 4 tasks 042/087 never rolled out to dev), fixed the 4 config gaps, redeployed successfully
 3. Task 082 (Azure config delete + [Obsolete] class cleanup) — subagent completed core work then crashed with API error mid-run; main-session recovered + landed the commit
 4. Owner decided Model 2 dedicated as primary acceptance path (Path A exception per CLAUDE.md §6.5 — POML originally had Model 1 mandatory)
+5. Scaffolding-half subagent (`aab31dc9d86933b0c`) landed the Path A exception into `089-phase-f-e2e-acceptance.poml`, authored `notes/phase-f-verification-harness.md` (per-trap T1-T6 + per-invariant I1-I5 + naming + cost verification commands), `notes/phase-f-report-skeleton.md` (owner fill-in template), and `notes/phase-f-operator-runbook.md` (step-by-step `/provision-environment` wrapper). No live Azure/Dataverse mutation performed by the subagent (scope-compliant). TASK-INDEX row 089 → 🟡.
 
 ### Azure state (spaarke-bff-dev) — NOT in git
 

@@ -172,7 +172,7 @@ Two additional corrections independently caught by task-gen subagents:
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 089 | ⏸ | Provision fresh `trial-{yyyymmdd}` customer stamp using Model 1 profile via new pipeline; verify `Setup Status = Ready` + all 6 traps + all 5 invariants + naming-conformance + cost envelope | FULL | sonnet / xhigh | none (dep ALL) | ALL previous phases |
+| 089 | 🟡 | **[SPLIT MODE, amended 2026-08-18]** Provision fresh `trial-2026-08-18` customer stamp using **Model 2 (dedicated) profile** (Path A exception — swapped from Model 1 primary; Model 1 now discretionary) via new pipeline; verify `Setup Status = Ready` + all 6 traps + all 5 invariants + naming-conformance + cost envelope. Scaffolding half (harness + report skeleton + operator runbook) landed by subagent; owner interactive invocation of `/provision-environment` pending. | FULL | sonnet / xhigh | none (dep ALL) | ALL previous phases |
 
 ### Wrap-up (1 task — MANDATORY per task-create Step 3.7)
 
@@ -250,7 +250,7 @@ Waves per plan.md § 3 Implementation Approach. Groups within a wave are paralle
 
 | Group | Tasks | Prerequisite | Notes |
 |---|---|---|---|
-| **Phase F** | 089 (E2E dry run on `trial-{yyyymmdd}` Model 1) | ALL previous phases | Final acceptance |
+| **Phase F** | 089 (E2E dry run on `trial-2026-08-18` — Model 2 dedicated primary per 2026-08-18 Path A exception; Model 1 discretionary) | ALL previous phases | Final acceptance — SPLIT MODE (scaffolding landed, owner invocation pending) |
 
 ### Wave 7 — Wrap-up
 
