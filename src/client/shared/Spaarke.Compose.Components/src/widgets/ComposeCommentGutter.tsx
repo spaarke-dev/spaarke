@@ -165,29 +165,6 @@ const useStyles = makeStyles({
       backgroundColor: tokens.colorNeutralStroke1,
     },
   },
-  // UAT round-6 #3 — the notes scroll-down affordance, CENTERED on the notes container's bottom (not
-  // off to a corner). Circular, elevated; nudges the document down to reveal notes clipped below.
-  scrollNotesDown: {
-    position: 'absolute',
-    bottom: tokens.spacingVerticalM,
-    left: '50%',
-    transform: 'translateX(-50%)',
-    zIndex: 3,
-    pointerEvents: 'auto',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '28px',
-    height: '28px',
-    padding: 0,
-    borderRadius: '9999px',
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground2,
-    boxShadow: tokens.shadow8,
-    cursor: 'pointer',
-    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
-  },
   // UAT round-6 #2 — a drag strip on the rail's BOTTOM edge to resize the Review Notes container HEIGHT.
   bottomResizeHandle: {
     position: 'absolute',
@@ -688,15 +665,6 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
 
   const cardElementsRef = React.useRef<Map<string, HTMLDivElement>>(new Map());
   const [cardTops, setCardTops] = React.useState<Record<string, number>>({});
-  // UAT round-6 #3 — true when at least one card sits at/below the (bounded) rail's bottom edge, so the
-  // centered scroll-down affordance appears.
-  const [hasClippedBelow, setHasClippedBelow] = React.useState(false);
-  const onScrollNotesDown = React.useCallback((): void => {
-    const el = scrollContainerRef.current;
-    if (!el) return;
-    const step = railRef.current?.clientHeight ?? el.clientHeight;
-    el.scrollTo({ top: el.scrollTop + step * 0.8, behavior: 'smooth' });
-  }, [scrollContainerRef]);
   // Per-card expand/collapse (item #5). A Set of thread ids whose full text is shown.
   const [expandedIds, setExpandedIds] = React.useState<ReadonlySet<string>>(() => new Set());
 
@@ -745,12 +713,6 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
         nextKeys.every(id => Math.abs((prev[id] ?? Number.NaN) - next[id]) < 0.5);
       return unchanged ? prev : next;
     });
-
-    // UAT round-6 #3 — does any card sit at/below the bounded rail's bottom edge (clipped)? If so, show
-    // the centered scroll-down affordance. `clientHeight` reflects the current (possibly resized) rail.
-    const railClientHeight = railRef.current.clientHeight;
-    const clipped = Object.values(next).some(top => top > railClientHeight - 24);
-    setHasClippedBelow(prev => (prev === clipped ? prev : clipped));
 
     // A card that just got its FIRST position (this pass) wasn't in `cardElementsRef` yet (it only
     // mounts once `cardTops` includes it), so this pass used the DEFAULT_CARD_HEIGHT_PX estimate for
@@ -908,19 +870,9 @@ export function ComposeCommentGutter(props: ComposeCommentGutterProps): React.JS
           aria-label="Resize the Review Notes height"
           data-testid="compose-comment-gutter-resize-bottom"
         />
-        {/* UAT round-6 #3 — a down-arrow, centered on the notes container, appears when cards are clipped
-          below the (resized) bottom edge; it nudges the document down to bring the next note into view. */}
-        {hasClippedBelow ? (
-          <button
-            type="button"
-            className={styles.scrollNotesDown}
-            aria-label="Scroll down for more notes"
-            onClick={onScrollNotesDown}
-            data-testid="compose-comment-gutter-scroll-down"
-          >
-            <ChevronDoubleDown16Regular />
-          </button>
-        ) : null}
+        {/* UAT (2026-08-18, owner #6): the blue scroll-down double-chevron affordance was REMOVED per
+          UAT feedback — it cluttered the Compose surface. Cards below the fold are reached by normal
+          scrolling. (`hasClippedBelow` / `onScrollNotesDown` retired with it.) */}
         {/* Task 041 (FR-11) — the batch sub-toolbar: appears once ≥1 note is checked. Action list =
           `noteTools` (the SAME `getToolsForSurface('review-note', activeWorkType)` set the ⋮ menu
           uses — no batch-only actions). "Select all" only when EXACTLY 1 is selected (spec). */}

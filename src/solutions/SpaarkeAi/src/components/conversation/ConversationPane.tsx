@@ -72,7 +72,6 @@ import { useRerunFullAnalysisCard } from "./useRerunFullAnalysisCard";
 import { useContextEventBridge } from "./useContextEventBridge";
 import { useDocQaCitationBridge } from "./useDocQaCitationBridge";
 import { useNdaReviewAdvisoryCommentsBridge, isNdaReviewResult } from "./useNdaReviewAdvisoryCommentsBridge";
-import { useComposeAnalysisAutoCreate } from "./useComposeAnalysisAutoCreate";
 import { useNdaReviewRunProgress } from "./useNdaReviewRunProgress";
 import { NdaReviewProgressModal } from "./NdaReviewProgressModal";
 import { usePlaybookSelection } from "./usePlaybookSelection";
@@ -1499,11 +1498,6 @@ export function ConversationPane(): React.JSX.Element {
   // useComposeWorkspaceReceivers materializes a comment thread per flagged clause. See
   // useNdaReviewAdvisoryCommentsBridge.ts for the full rationale.
   const ndaReviewAdvisoryComments = useNdaReviewAdvisoryCommentsBridge({ dispatch, getSessionId });
-  // UAT-08 (2026-08-18, owner): when an analysis/review COMPLETES in Compose, ensure a matching
-  // sprk_analysis record exists + is bound to the session so it appears in history and can be reopened.
-  // Reuses POST /api/ai/analysis/promote (create + bind + already-bound guard); once-per-session; never
-  // blocks the analysis flow. See useComposeAnalysisAutoCreate.ts.
-  const composeAnalysisAutoCreate = useComposeAnalysisAutoCreate({ bffBaseUrl, authenticatedFetch });
   // nda-r1 follow-up: publish emitFromResult to the ref the chips controller reaches (declared above the
   // useConsumerChips call), so the "Review an NDA" card dispatch materializes flagged clauses as comments.
   ndaReviewEmitRef.current = ndaReviewAdvisoryComments.emitFromResult;
@@ -1536,17 +1530,10 @@ export function ConversationPane(): React.JSX.Element {
           // shapes, so it renders via the formatEventOutputMarkdown fallback AND, here,
           // separately materializes as document comments; no-op for any other action's result).
           ndaReviewAdvisoryComments.emitFromResult(dispatched.result);
-          // UAT-08 (2026-08-18, owner): an analysis/review just completed in Compose — ensure a matching
-          // sprk_analysis record exists + is bound to this session so it shows in history and can be
-          // reopened. Named "{document} — {review type}" (renameable via history). Once-per-session +
-          // server already-bound guard prevent duplicates; fire-and-forget, never blocks the flow. Fires
-          // for ANY completed informational Compose analysis (owner: "on any completed analysis/review").
-          const autoAnalysisReviewLabel = isNdaReviewResult(dispatched.result) ? "Review" : "Analysis";
-          const autoAnalysisDocLabel = activeSourceDocRef.current?.fileName ?? "Document";
-          composeAnalysisAutoCreate.ensureForSession(
-            getSessionId(),
-            `${autoAnalysisDocLabel} — ${autoAnalysisReviewLabel}`
-          );
+          // UAT (2026-08-18, owner): auto-creating the sprk_analysis on review COMPLETION was reverted —
+          // the owner's model is SAVE-driven: the Document + Analysis are created when the user Saves (the
+          // user may not want to persist a run). The create+bind now happens on create-on-save completion,
+          // not here. See [[compose-analysis-save-model]].
         }
         // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
         // Capture the applied compose ledger key so the FR-17 undo/replace affordance targets THIS
@@ -1604,10 +1591,6 @@ export function ConversationPane(): React.JSX.Element {
       emitComposeApplyLeg,
       trackAppliedEdit,
       ndaReviewAdvisoryComments.emitFromResult,
-      // UAT-08: stable (memoized on [bffBaseUrl, authenticatedFetch]) + getSessionId is stable; added so
-      // the auto-create closure never goes stale.
-      composeAnalysisAutoCreate.ensureForSession,
-      getSessionId,
     ]
   );
 
