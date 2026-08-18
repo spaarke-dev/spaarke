@@ -1,9 +1,9 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-17 (Wave 3 WRAP-UP FULLY COMPLETE — master merged, branch pushed, draft PR opened)
+> **Last Updated**: 2026-08-17 (Wave 4 Batch 4A COMPLETE — ArchTest debt + 081 + 084 all landed)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` @ `9ec26ffe0` (pushed to origin; **draft PR #779 open**)
-> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DO NOT MERGE — Wave 4 pending)
+> **Branch**: `work/customer-provisioning-orchestration-r1` @ `70abd9992` (draft PR #779 open; last local push at `23ae1aed9` — 3 new commits unpushed: 3b67a7b8d + 0b8ca53ba + 70abd9992)
+> **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE)
 
 ---
 
@@ -11,13 +11,37 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **Wave 3 COMPLETE (53/78 tasks = 68%)** — Wave 4 dispatch pending owner go-ahead |
-| **Task** | none (wave boundary) |
-| **Status** | wave-boundary — READY for Wave 4 |
-| **Next Action** | On owner go-ahead: dispatch **Wave 4 Batch 4A** (3 parallel: ArchTest debt refactor to `KeyVaultSecretRef` · task 081 remove [Obsolete] from RegistrationEndpoints · task 084 Phase H canonical secret-catalog manifest generator) |
-| **Blocker** | None. All 3 pre-Wave-4 owner decisions closed: (a) ArchTest debt → refactor to `KeyVaultSecretRef` (Wave 4 4A opener); (b) master merge → **DONE (9ec26ffe0)**; (c) push/PR → **DONE (#779 draft)** |
-| **L2 project state** | 428/428 tests pass · `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` 0/0 · TreatWarningsAsErrors=true · CVE clean · Program.cs at ADR-010 target · **post-merge verified 2026-08-17** |
-| **Master sync** | Merged origin/master `9ec26ffe0` — 112 upstream commits absorbed, 1 conflict resolved (researcher MEMORY.md, append-only union merge), zero L2 breakage |
+| **Project phase** | **Wave 4 Batch 4A COMPLETE (55/78 tasks = 70.5%)** — Batch 4B dispatch pending owner go-ahead |
+| **Task** | none (batch boundary) |
+| **Status** | batch-boundary — READY for Batch 4B |
+| **Next Action** | On owner go-ahead: dispatch **Wave 4 Batch 4B** (4 parallel: 057 L2 REST endpoints opus/high · 064 tenant-isolation ArchTests · 052 H9 blue-green slot swap · 077 token metering). Also: push 3 new commits to remote when appropriate. |
+| **Blocker** | None. Batch 4A wrap-up decisions all closed. 084 unblocks 085/086/088; 081 unblocks 082; ArchTest refactor unblocks nothing but resolves task-025 forcing-function debt. |
+| **L2 project state** | 428/428 tests pass · `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` 0/0 · TreatWarningsAsErrors=true · CVE clean · ArchTest 5/5 pass |
+| **BFF state** | 10,457/0 tests pass · 0 warnings (was 4 `[Obsolete]` on `RegistrationEndpoints.cs`) · publish size 44.96 MB (Δ 0.00 vs baseline) · CVE clean |
+| **Master sync** | Merged origin/master `9ec26ffe0` — 112 upstream commits absorbed. Feature branch is now 82 commits ahead of master (79 previous + 3 Batch 4A). |
+
+---
+
+## Wave 4 Batch 4A — COMPLETE (2026-08-17)
+
+### Commit map
+
+| Sub-task | Commit | Summary |
+|---|---|---|
+| **4A/1-5** ArchTest debt refactor | `3b67a7b8d` | 17 files (156+/36−). Mixed Path C (7 vault-identifier renames: KeyVaultName→VaultName, KeyVaultResourceId→VaultResourceId, KeyVaultSecretsUserRoleId→KvSecretsUserRoleId) + Path A extension (EnvVarValuesOptions + EnvVarValuesWriteRequest added to `ExcludedTypeFullNames` — mirrors SolutionImport precedent from task 049). ArchTest 4/5 → **5/5**. |
+| **4A/6a** Task 081 BFF refactor | `0b8ca53ba` | 4 files. `SubmitDemoRequest` migrated off `[Obsolete] DemoProvisioningOptions.Environments/DefaultEnvironment` to `DataverseEnvironmentService`. Extracted `BuildRegistrationRecordUrl` pure helper + 6 new tests at KEEP path #6. Endpoint contract unchanged. **Unblocks task 082** (Azure App Service config removal). |
+| **4A/6b** Task 084 Phase H manifest | `70abd9992` | 9 files, 3,767 lines. `scripts/canonical-secret-catalog/` — manifest.yaml (32 canonical secrets across 8 categories + 12 aliases), Invoke-CatalogGenerator.ps1 (deterministic, --dry-run + --verify, BINDING never-delete guard + dev-vault-exception guard), README, 4 generated outputs (seeder, Configure, tokens.md, Bicep). PSScriptAnalyzer clean. **Unblocks 085/086/088**. |
+
+### Notes files
+- `notes/wave-4-batch-4a-archtest-debt.md` — Mixed remediation rationale (why not pure Path A, why not pure Path C, follow-on Wave-C5 refactor after task 084's KV resolver seam lands).
+- `notes/task-081-deviations.md` — no deviations.
+- `notes/task-084-deviations.md` — no material deviations (StaticKvSecretManifest DI swap deferred per POML `<notes>`).
+
+---
+
+## Wave 4 Plan — remaining 23 tasks
+
+Original plan preserved in Wave 3 wrap-up. Batches 4B/4C/4D/4E to be dispatched sequentially with owner approval at each batch boundary.
 
 ---
 

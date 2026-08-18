@@ -319,11 +319,11 @@ Per `notes/resource-discovery-2026-08-16.md`:
 | Metric | Value |
 |---|---|
 | **Total tasks** | 78 |
-| **not-started** 🔲 | 25 |
+| **not-started** 🔲 | 23 |
 | **in-progress** 🟡 | 0 |
-| **completed** ✅ | 53 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19 — 034, 041-051, 053, 054, 069-073) |
-| **Wave 3 COMPLETE** | 53 tasks · Wave 3A/3B/3C/3D/3E/3F all landed · L2 build 0/0 clean · **428 tests pass** · CVE clean · zero ArchTest debt on new Batch 3E/3F handlers |
-| **Wave 3 ArchTest debt** | Tasks 046 (`EntraAppRegRequest.KeyVaultName`) + 047 (`KvSecretsPopulation.*` types) trip `CosmosProvisioningSecretGuardTests`. Pre-existing, not blocking Wave 4. Path A remediation (extend `ExcludedTypeFullNames`) or refactor to `KeyVaultSecretRef` — Wave 4 backlog item. |
+| **completed** ✅ | 55 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19 — 034, 041-051, 053, 054, 069-073; Wave 4 Batch 4A: 081, 084) |
+| **Wave 4 Batch 4A COMPLETE (2026-08-17)** | ArchTest debt commit `3b67a7b8d` (mixed Path C rename + Path A extension) · 081 commit `0b8ca53ba` (BFF Obsolete removal — 4 warnings gone) · 084 commit `70abd9992` (Phase H canonical secret-catalog manifest gen — 32 secrets, deterministic, 5/5 verifications pass) · L2 build 0/0 · L2 tests 428/428 · BFF tests 10,457/0 · ArchTest 5/5 · BFF publish 44.96 MB (Δ 0.00) · CVE clean |
+| **Wave 3 ArchTest debt** | ✅ RESOLVED by Batch 4A commit `3b67a7b8d` — see `notes/wave-4-batch-4a-archtest-debt.md`. |
 | **blocked** ⏸ | (per dep chains — resolvable) |
 | **Ready to start (no deps)** | 21 tasks: 001, 002, 003, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 018, 019, 020, 032, 033, 080 (Phase E), plus 023, 024 (Wave C1 pending 004) |
 
