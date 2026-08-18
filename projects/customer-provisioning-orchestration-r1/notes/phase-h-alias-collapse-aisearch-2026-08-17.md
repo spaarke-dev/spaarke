@@ -388,7 +388,7 @@ Commit SHA: see git log post-commit (§7.6).
 
 ### 7.6 Commit
 
-Commit SHA: `<to-be-filled-after-commit>`
+Commit SHA: `4ab4fbeda` (branch `work/customer-provisioning-orchestration-r1`)
 
 Files committed:
 - `infrastructure/bicep/stacks/model1-shared.bicep`
