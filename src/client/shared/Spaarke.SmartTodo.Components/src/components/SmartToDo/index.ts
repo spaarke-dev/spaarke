@@ -12,36 +12,36 @@
  * to avoid clobbering the externally-consumed root `KanbanCard` export.
  */
 
-export { SmartToDo, LazyTodoAISummaryDialog, TodoAISummaryFallback } from "./SmartToDo";
-export type { ISmartToDoProps } from "./SmartToDo";
+export { SmartToDo, LazyTodoAISummaryDialog, TodoAISummaryFallback } from './SmartToDo';
+export type { ISmartToDoProps } from './SmartToDo';
 
-export { SmartToDoDialog } from "./SmartToDoDialog";
-export type { ISmartToDoDialogProps } from "./SmartToDoDialog";
+export { SmartToDoDialog } from './SmartToDoDialog';
+export type { ISmartToDoDialogProps } from './SmartToDoDialog';
 
-export { KanbanCard } from "./KanbanCard";
-export type { IKanbanCardProps } from "./KanbanCard";
+export { KanbanCard } from './KanbanCard';
+export type { IKanbanCardProps } from './KanbanCard';
 
-export { KanbanHeader } from "./KanbanHeader";
-export type { IKanbanHeaderProps } from "./KanbanHeader";
+export { KanbanHeader } from './KanbanHeader';
+export type { IKanbanHeaderProps } from './KanbanHeader';
 
-export { AddTodoBar } from "./AddTodoBar";
-export type { IAddTodoBarProps } from "./AddTodoBar";
+export { AddTodoBar } from './AddTodoBar';
+export type { IAddTodoBarProps } from './AddTodoBar';
 
-export { DismissedSection } from "./DismissedSection";
-export type { IDismissedSectionProps } from "./DismissedSection";
+export { DismissedSection } from './DismissedSection';
+export type { IDismissedSectionProps } from './DismissedSection';
 
-export { ThresholdSettingsPopover } from "./ThresholdSettings";
-export { default as ThresholdSettings } from "./ThresholdSettings";
-export type { IThresholdSettingsProps } from "./ThresholdSettings";
+export { ThresholdSettingsPopover } from './ThresholdSettings';
+export { default as ThresholdSettings } from './ThresholdSettings';
+export type { IThresholdSettingsProps } from './ThresholdSettings';
 
-export { TodoDetailPane } from "./TodoDetailPane";
-export type { ITodoDetailPaneProps } from "./TodoDetailPane";
+export { TodoDetailPane } from './TodoDetailPane';
+export type { ITodoDetailPaneProps } from './TodoDetailPane';
 
-export { TodoAISummaryDialog } from "./TodoAISummaryDialog";
-export type { ITodoAISummaryDialogProps } from "./TodoAISummaryDialog";
+export { TodoAISummaryDialog } from './TodoAISummaryDialog';
+export type { ITodoAISummaryDialogProps } from './TodoAISummaryDialog';
 
-export { PriorityScoreCard } from "./PriorityScoreCard";
-export type { IPriorityScoreCardProps } from "./PriorityScoreCard";
+export { PriorityScoreCard } from './PriorityScoreCard';
+export type { IPriorityScoreCardProps } from './PriorityScoreCard';
 
-export { EffortScoreCard } from "./EffortScoreCard";
-export type { IEffortScoreCardProps } from "./EffortScoreCard";
+export { EffortScoreCard } from './EffortScoreCard';
+export type { IEffortScoreCardProps } from './EffortScoreCard';

@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Follow-on cards to open Briefing/Smart To Do — gated on not-already-open (FR-06)</title>
+    <phase>2 — E2 follow-ons</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Edits the ConversationPane transcriptFooter / useConsumerChips spine — a sequential SpaarkeAi spine shared with active worktrees; requires code-review + adr-check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Reuses R3 open-tab awareness + the 022 launch entries + the useConsumerChips card render path; the gating logic is well-specified and the element-type rules are named — no architectural invention.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave2-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits ConversationPane (the sequential SpaarkeAi spine) — coordinate with compose-r5/r6 + assistant-r3; run /conflict-check before the PR.</parallel-reason>
+    <deps>022, 012</deps>
+    <tags>frontend, fluent-ui, spaarkeai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>After the FR-01 task-agenda answer, render capability-backed follow-on CARDS to open Daily Briefing and Smart To Do — but ONLY if that tab is not already open (reuse the R3 open-tab awareness / workspace-state block). Clicking a card dispatches the single-surface launch from task 022 (via `launchSurface` / `handleSurfaceLaunch`); no duplicate tabs. Cards (persistent act-on items) NOT chips, per ASSISTANT-UI-ELEMENT-CRITERIA; if both cards show, collapse the proactive-card stack behind one disclosure header. Render in `ConversationPane` `transcriptFooter` (~:2889–2910) via `useConsumerChips.tsx`.</prompt>
+  <role>SPAARKE frontend developer. Fluent UI v9 + React 18 expertise; comfortable with the ConversationPane transcriptFooter / useConsumerChips follow-on-card render path, the R3 open-tab awareness (workspace-state) block, and the surfaceLaunch dispatch (launchSurface / handleSurfaceLaunch).</role>
+  <goal>After the FR-01 task-agenda answer, capability-backed follow-on CARDS to open Daily Briefing + Smart To Do render ONLY if that tab is not already open (reusing R3 open-tab awareness); clicking dispatches the task-022 single-surface launch with no duplicate tab; the cards are cards (not chips) and a two-card stack collapses under one disclosure header.</goal>
+  <context>
+    <background>FR-06 — capability-backed Briefing / Smart To Do cards. After the FR-01 grounded task-agenda answer (dep 012), the Assistant offers to open Daily Briefing and Smart To Do. These are persistent act-on items, so per ASSISTANT-UI-ELEMENT-CRITERIA they are CARDS (not chips) and, when multiple proactive cards stack, they collapse behind ONE disclosure header. Follow-on cards render in `ConversationPane` `transcriptFooter` (~:2889–2910) via `useConsumerChips.tsx`. R3 shipped open-tab awareness (a workspace-state block that knows which tabs are open); reuse it to GATE each card — suppress a card when its target tab is already open (no duplicate tab). Clicking a card dispatches the single-surface launch entries added in task 022 (Daily Briefing, Smart To Do) via `launchSurface` / `handleSurfaceLaunch` (~:1245–1312), which routes workspace-tab entries generically through PaneEventBus `widget_load`. This is the card half of E2; task 021 gates the free-string suggestions and task 022 supplies the launch entries.</background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (transcriptFooter ~:2889–2910 — where follow-on cards render; handleSurfaceLaunch ~:1245–1312 — the launch dispatch; the R3 open-tab-awareness workspace-state block)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx (the follow-on-card render path to extend for the two gated cards)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/surfaceLaunchRegistry.ts (the task-022 Daily Briefing + Smart To Do entries the cards dispatch)</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md (cards vs chips; collapse a proactive-card stack behind one disclosure header)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA" scope="cards">Persistent act-on items are CARDS (not chips); when both cards show, collapse the proactive-card stack behind ONE disclosure header; no code in card labels; hover only on clickable regions.</constraint>
+    <constraint source="project" scope="gating">Suppress a card when its target tab is already open (reuse R3 open-tab awareness) — MUST NOT open a duplicate tab.</constraint>
+    <constraint source="project" scope="launch dispatch">Clicking a card dispatches the single-surface launch from task 022 via `launchSurface` / `handleSurfaceLaunch`; MUST NOT add a per-card code branch (the generic workspace-tab dispatch handles it).</constraint>
+    <constraint source="ADR-021" scope="the card styling">Fluent v9 tokens-only; host-agnostic — MUST NOT regress other ConversationPane / SprkChat consumers or the full-page/widget hosts.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the R3 open-tab-awareness workspace-state block in ConversationPane to know which tabs (Daily Briefing, Smart To Do) are currently open.</step>
+    <step order="2">In `transcriptFooter` (~:2889–2910) via `useConsumerChips.tsx`, render the two follow-on CARDS after the FR-01 answer — but only when the respective tab is closed.</step>
+    <step order="3">Wire each card's click to the single-surface launch (task 022 entries) via `launchSurface` / `handleSurfaceLaunch`.</step>
+    <step order="4">When both cards show, collapse the proactive-card stack behind ONE disclosure header (ASSISTANT-UI-ELEMENT-CRITERIA).</step>
+    <step order="5">Verify no duplicate tab opens and no regression to other ConversationPane / SprkChat consumers.</step>
+    <step order="6">/conflict-check before the PR; update TASK-INDEX ✅.</step>
+  </steps>
+  <justification>
+    <existing>The `transcriptFooter` / `useConsumerChips` follow-on-card path + R3 open-tab awareness + the task-022 launch entries all exist.</existing>
+    <extension>Render two gated cards in the existing footer path and dispatch the existing launch entries — no new card system, no new dispatch.</extension>
+    <cost-of-doing-nothing>After the FR-01 answer the user has no capability-backed way to open Briefing / Smart To Do, or (without gating) opens duplicate tabs.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (gated follow-on cards in transcriptFooter)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/useConsumerChips.tsx (the two gated card renders + collapse-under-one-header)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">With the Briefing tab already open, its card is suppressed (negative case).</criterion>
+    <criterion testable="true">With the Briefing tab closed, the card appears and clicking it opens the Briefing tab with no duplicate.</criterion>
+    <criterion testable="true">Same open/closed gating and single-surface launch for Smart To Do.</criterion>
+    <criterion testable="true">The follow-ons are CARDS, not chips (per ASSISTANT-UI-ELEMENT-CRITERIA).</criterion>
+    <criterion testable="true">When both cards are present, the stack is collapsed behind one disclosure header.</criterion>
+  </acceptance-criteria>
+  <notes>Cards, not chips (persistent act-on items). Gate on the R3 open-tab awareness to avoid duplicate tabs. Clicking dispatches the task-022 single-surface entries via the generic workspace-tab path — no per-card branch. Dep 012 supplies the FR-01 answer these cards follow; dep 022 supplies the launch entries. /conflict-check with compose-r5/r6 + assistant-r3 before the PR (shared ConversationPane spine).
+
+  ── COMPLETION (2026-08-17, sonnet/high FULL) ──
+  OWNER ESCALATION (§6.5): the POML premise "reuse R3 open-tab awareness (workspace-state block)" was factually wrong — NO client-side layoutId-keyed open-tab set existed (ConversationPane tracked only the ACTIVE tab; the `openTabs` resolver input is a hardcoded `[]` stub; the bus emitted no open/close snapshot). Owner chose (1) CLIENT LAUNCHER on the `list-tasks` FR-01 surface_launch (structural consumerType signal, no keyword heuristic; NO new Dataverse Bindings/chipTransitions → 080 scope UNCHANGED); (2) ADDITIVE WorkspacePane→bus open-layouts snapshot event (scope grew to WorkspacePane.tsx + ai-widgets event union — /conflict-check showed no open PR on either).
+
+  IMPLEMENTED (7 files): (a) `PaneEventTypes.ts` — additive `workspace_tabs_snapshot { openLayoutIds }` on WorkspacePaneEvent (ADR-030). (b) `WorkspacePane.tsx` — broadcast the open `widgetType:'workspace'` layoutId set at the single `syncState` choke point (via ref → syncState stays []-stable). (c) `WorkspaceLauncherCard.tsx` (NEW) — dumb presentational card (icon/title/desc/trailing-arrow; ADR-021 tokens-only; hover only on the clickable region; no code in label). (d) `agendaFollowOnCards.tsx` (NEW) — pure `buildAgendaFollowOnSlots({armed,openLayoutIds,onOpenSurface})` → 2 gated ProactiveCardSlots; layoutId + display title read from the task-022 registry (`resolveSurfaceLaunch`) — no re-hardcoded GUID. (e) `ConversationPane.tsx` — `agendaFollowOnArmed` (armed when handleSurfaceLaunch fires for `list-tasks`; reset on new session) + `openLayoutIds` state (from the snapshot subscriber, with a referential-equality guard so unrelated tab mutations don't re-render); slots spread into the existing `ProactiveCardStack` (collapse-2+-behind-one-header for free). Click → the SAME `handleSurfaceLaunch({consumerType})` → 022 registry (no per-card branch). "No duplicate tab" is guaranteed by WorkspacePane's existing layoutId de-dupe independent of the gate. (f) test `agendaFollowOnCards.test.tsx` — all 5 acceptance criteria (armed/unarmed, briefing-open-suppressed, smart-todo-open-suppressed, both-open-none, click-dispatches-by-consumerType, both→one-disclosure-header, lone→unwrapped).
+
+  VERIFY: surface-gate typecheck — my 5 production files 0 errors (test file carries only the same baseline "Cannot find module 'react'" noise dozens of sibling tests have). Local jest/eslint unavailable in this worktree (hoisted deps absent — CI runs both; matches 021b). Step 9.5: code-review 1 finding fixed Path C (re-render perf guard); adr-check ADR-039 (structural consumerType signal, no keyword heuristic, no new decider) / ADR-021 / ADR-012 / ADR-030 / NFR-07 all clean. Client-only — no BFF publish/CVE impact. Deploy: no new Dataverse data; ships with the SpaarkeAi rebuild at 080.</notes>
+  <ui-tests>
+    <test name="Card suppressed when tab already open">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={appid}&amp;pagetype=custom&amp;name=sprk_spaarkeai</url>
+      <steps>
+        <step>Open the Daily Briefing tab, then ask the Assistant "what do I need to do today"</step>
+        <step>Verify NO "Open Daily Briefing" follow-on card renders (tab already open)</step>
+        <step>Repeat with the Smart To Do tab open → its card is suppressed</step>
+      </steps>
+      <expected>A follow-on card is suppressed when its target tab is already open; no duplicate-tab affordance.</expected>
+    </test>
+    <test name="Card renders + opens the surface when tab closed">
+      <steps>
+        <step>With Daily Briefing + Smart To Do tabs closed, ask "what do I need to do today"</step>
+        <step>Verify both cards render as CARDS (not chips), collapsed under one disclosure header</step>
+        <step>Click "Open Daily Briefing" → the Daily Briefing tab opens exactly once (no dup); repeat for Smart To Do</step>
+      </steps>
+      <expected>Cards render (collapsed under one header), each opens the correct tab once via the surfaceLaunchRegistry entry.</expected>
+    </test>
+    <test name="Dark mode compliance">
+      <steps>
+        <step>Toggle dark mode; verify the cards adapt (semantic tokens, ADR-021)</step>
+      </steps>
+      <expected>All colors use semantic Fluent v9 tokens per ADR-021.</expected>
+    </test>
+  </ui-tests>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

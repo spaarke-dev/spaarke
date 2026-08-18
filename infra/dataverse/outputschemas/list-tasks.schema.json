@@ -1,13 +1,13 @@
 {
-  "title": "list-tasks output schema — list-tasks capability (spaarkeai-assistant-enhancements-r1 task 050). Repo mirror of sprk_analysisaction.sprk_outputschemajson (row 57651aad-8e85-f111-8075-7c1e5268570d on spaarkedev1). The capability opens the 'My Tasks' workspace grid tab (surface_launch disposition); its LLM output is a one-line acknowledgement only — the grid shows the real records. acknowledgement is the sole field; the tasks are NEVER enumerated by the LLM (no grounding, no fabrication — ADR-039).",
+  "title": "list-tasks output schema — advisory task-agenda capability (spaarkeai-assistant-enhancements-r4 task 012; upgraded from the R1 ack-only tier). Repo mirror of sprk_analysisaction.sprk_outputschemajson (row 57651aad-8e85-f111-8075-7c1e5268570d on spaarkedev1). The capability opens the 'My Tasks' workspace grid tab (surface_launch disposition) AND now returns a grounded, cited task-agenda summary + recommendation: AdvisoryCapabilityRunner runs a nested bounded agent turn over the two allowed grounded tools (grid_overview My-Tasks + daily_briefing_overview, OBO) and assembles the drained, cited narration into acknowledgement (ADR-040 store-before-render). On this advisory path the schema documents the stored payload shape; it is NOT constrained-decode-enforced (the nested function-calling turn produces free narration). acknowledgement is the sole field; every count/name/date in it is grounded + cited to a tool result — no fabrication (ADR-039 advisory mode).",
   "type": "object",
   "additionalProperties": false,
   "required": ["acknowledgement"],
   "properties": {
     "acknowledgement": {
       "type": "string",
-      "maxLength": 200,
-      "description": "A brief one-line confirmation that the user's task list is opening. Never contains fabricated task details."
+      "maxLength": 4000,
+      "description": "The grounded, cited task-agenda summary + prioritized recommendation the advisory nested turn produced (counts/names/dates each cited to a tool result; nothing fabricated). Rendered as the assistant's answer alongside the Tasks tab opening."
     }
   }
 }

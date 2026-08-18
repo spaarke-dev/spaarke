@@ -993,6 +993,48 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
     }
 
     /// <summary>
+    /// spaarkeai-assistant-enhancements-r4 task 021a (FR-04) — deterministic UNION context-type
+    /// pre-filter for the CONVERSATIONAL suggestion candidate set. Keeps a candidate when its
+    /// <see cref="Binding.ContextTypeTags"/> intersect ANY of <paramref name="contextTypes"/>
+    /// (ordinal-case-insensitive) OR are empty (empty = relevant to ANY context). Deterministic:
+    /// preserves the input order (the candidate list is already deterministically ordered by
+    /// <see cref="SelectTextProjectable"/>) and de-dups by identity via the single-pass filter.
+    /// An empty/null <paramref name="contextTypes"/> returns the input unchanged (no narrowing) —
+    /// mirroring <see cref="FilterByContextType"/>'s blank-passthrough.
+    /// </summary>
+    /// <remarks>
+    /// This is the conversational-moment analogue of <see cref="FilterByContextType"/>: the same
+    /// ONLY-permitted ADR-039 aid (a deterministic context-scoping PRE-FILTER over the closed
+    /// catalog), widened from ONE focused context-type to the UNION of the open-tab context-types
+    /// (task 030 <see cref="Chat.WidgetContextTypeResolver.ResolveOpenTabContextTypes"/>). It is
+    /// never a ranker, classifier, or decider — the ONE grounded suggestion turn downstream
+    /// (<see cref="Chat.AssistantSuggestionService"/>) is the sole decider of WHICH ≤3 followups to
+    /// propose. Pure + static for direct unit testability.
+    /// </remarks>
+    internal static IReadOnlyList<Binding> FilterByContextTypes(
+        IReadOnlyList<Binding> candidates,
+        IEnumerable<string>? contextTypes)
+    {
+        var typeSet = contextTypes is null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(
+                contextTypes.Where(t => !string.IsNullOrWhiteSpace(t)),
+                StringComparer.OrdinalIgnoreCase);
+
+        if (typeSet.Count == 0)
+        {
+            // No context types to scope to ⇒ no narrowing (parity with FilterByContextType's
+            // blank-passthrough). The caller still caps the candidate count downstream.
+            return candidates;
+        }
+
+        return candidates
+            .Where(b => b.ContextTypeTags.Count == 0
+                        || b.ContextTypeTags.Any(typeSet.Contains))
+            .ToList();
+    }
+
+    /// <summary>
     /// FR-1R-03 selection algorithm. Filters by consumer-code and environment,
     /// applies the JSON match-conditions predicate, then picks the highest-
     /// priority record. Tiebreaks: lower priority wins; specific consumer-code

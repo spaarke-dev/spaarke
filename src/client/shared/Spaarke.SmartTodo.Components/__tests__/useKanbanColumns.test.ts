@@ -66,11 +66,11 @@ describe('bucketTodoItems — default-hidden regression (no Completed items in t
     const columns = bucketTodoItems(items);
 
     expect(columns).toHaveLength(3);
-    expect(columns.map((c) => c.id)).toEqual(['Today', 'Tomorrow', 'Future']);
+    expect(columns.map(c => c.id)).toEqual(['Today', 'Tomorrow', 'Future']);
     const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
     expect(totalItems).toBe(2);
-    expect(columns[0].items.some((i) => i.sprk_todoid === 't1')).toBe(true);
-    expect(columns[1].items.some((i) => i.sprk_todoid === 't2')).toBe(true);
+    expect(columns[0].items.some(i => i.sprk_todoid === 't1')).toBe(true);
+    expect(columns[1].items.some(i => i.sprk_todoid === 't2')).toBe(true);
   });
 });
 
@@ -93,13 +93,13 @@ describe('bucketTodoItems — Completed-item bucketing (FR-07 core guarantee)', 
 
     expect(columns).toHaveLength(3);
 
-    const today = columns.find((c) => c.id === 'Today')!;
-    const future = columns.find((c) => c.id === 'Future')!;
+    const today = columns.find(c => c.id === 'Today')!;
+    const future = columns.find(c => c.id === 'Future')!;
 
-    expect(today.items.some((i) => i.sprk_todoid === 'completed-today')).toBe(true);
-    expect(today.items.some((i) => i.sprk_todoid === 'open-today')).toBe(true);
-    expect(future.items.some((i) => i.sprk_todoid === 'completed-future')).toBe(true);
-    expect(future.items.some((i) => i.sprk_todoid === 'completed-undated')).toBe(true);
+    expect(today.items.some(i => i.sprk_todoid === 'completed-today')).toBe(true);
+    expect(today.items.some(i => i.sprk_todoid === 'open-today')).toBe(true);
+    expect(future.items.some(i => i.sprk_todoid === 'completed-future')).toBe(true);
+    expect(future.items.some(i => i.sprk_todoid === 'completed-undated')).toBe(true);
 
     const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
     expect(totalItems).toBe(items.length);
@@ -124,11 +124,11 @@ describe('bucketTodoItems — pinned Completed item', () => {
     ];
 
     const columns = bucketTodoItems(items);
-    const future = columns.find((c) => c.id === 'Future')!;
-    const today = columns.find((c) => c.id === 'Today')!;
+    const future = columns.find(c => c.id === 'Future')!;
+    const today = columns.find(c => c.id === 'Today')!;
 
-    expect(future.items.some((i) => i.sprk_todoid === 'completed-pinned-future-column')).toBe(true);
-    expect(today.items.some((i) => i.sprk_todoid === 'completed-pinned-future-column')).toBe(false);
+    expect(future.items.some(i => i.sprk_todoid === 'completed-pinned-future-column')).toBe(true);
+    expect(today.items.some(i => i.sprk_todoid === 'completed-pinned-future-column')).toBe(false);
   });
 });
 
@@ -152,7 +152,7 @@ describe('bucketTodoItems — Dismissed-shape unaffected (negative regression)',
     const totalItems = columns.reduce((sum, c) => sum + c.items.length, 0);
 
     expect(totalItems).toBe(1);
-    expect(columns.find((c) => c.id === 'Tomorrow')!.items.some((i) => i.sprk_todoid === 'dismissed-1')).toBe(true);
+    expect(columns.find(c => c.id === 'Tomorrow')!.items.some(i => i.sprk_todoid === 'dismissed-1')).toBe(true);
   });
 });
 
@@ -171,9 +171,9 @@ describe('bucketTodoItems — Dismissed-shape unaffected (negative regression)',
 describe('bucketTodoItems — subtle-coloring token mapping (FR-08 data contract)', () => {
   it('preserves the semantic red/yellow/green token mapping and the yellow-contrast countTextColor fix, with zero hex/rgb literals', () => {
     const columns = bucketTodoItems([]);
-    const today = columns.find((c) => c.id === 'Today')!;
-    const tomorrow = columns.find((c) => c.id === 'Tomorrow')!;
-    const future = columns.find((c) => c.id === 'Future')!;
+    const today = columns.find(c => c.id === 'Today')!;
+    const tomorrow = columns.find(c => c.id === 'Tomorrow')!;
+    const future = columns.find(c => c.id === 'Future')!;
 
     // Semantic mapping preserved: red=Today, yellow=Tomorrow, green=Future.
     expect(today.accentColor).toBe(tokens.colorPaletteRedBorder2);

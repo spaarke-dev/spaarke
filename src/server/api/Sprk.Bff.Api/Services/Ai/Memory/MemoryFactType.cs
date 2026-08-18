@@ -30,4 +30,14 @@ public enum MemoryFactType
     /// Any other structured fact about the matter — contract value, governing law, jurisdiction, etc.
     /// </summary>
     KeyFact = 3,
+
+    /// <summary>
+    /// A standing user preference / directive (e.g. "always summarize my tasks first") — the governed
+    /// preference channel the E3 feedback→memory loop writes to (FR-07). Recalled into the User-scope
+    /// "About You" fragment each turn so standing directives can bias behavior. NOTE: adding this
+    /// member does NOT implement ADR-042's deferred hard-governance (trustLevel enforcement,
+    /// untrusted-origin ban, poisoning evals) — those remain deferred to security project #616;
+    /// a preference item is a normal Tier-3 user-owned memory item with <c>trustLevel</c> carried inert.
+    /// </summary>
+    Preference = 4,
 }

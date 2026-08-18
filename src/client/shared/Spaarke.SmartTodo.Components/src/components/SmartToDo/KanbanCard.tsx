@@ -23,48 +23,37 @@
  * parent Kanban column.
  */
 
-import * as React from "react";
-import {
-  tokens,
-  Text,
-  Button,
-  makeStyles,
-  mergeClasses,
-} from "@fluentui/react-components";
-import { PinRegular, PinFilled, Flag16Filled } from "@fluentui/react-icons";
-import type { ITodo } from "../../types/entities";
-import {
-  computeDueLabel,
-  computeTodoScore,
-  parseDueDate,
-  type DueUrgency,
-} from "../../utils/todoScoring";
-import { RecordCardShell, CardIcon } from "@spaarke/ui-components";
+import * as React from 'react';
+import { tokens, Text, Button, makeStyles, mergeClasses } from '@fluentui/react-components';
+import { PinRegular, PinFilled, Flag16Filled } from '@fluentui/react-icons';
+import type { ITodo } from '../../types/entities';
+import { computeDueLabel, computeTodoScore, parseDueDate, type DueUrgency } from '../../utils/todoScoring';
+import { RecordCardShell, CardIcon } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // Due badge
 // ---------------------------------------------------------------------------
 
-const DUE_BADGE_STYLE: Record<Exclude<DueUrgency, "none">, React.CSSProperties> = {
+const DUE_BADGE_STYLE: Record<Exclude<DueUrgency, 'none'>, React.CSSProperties> = {
   overdue: { backgroundColor: tokens.colorPaletteRedBackground3, color: tokens.colorNeutralForegroundOnBrand },
-  "3d": { backgroundColor: tokens.colorPaletteDarkOrangeBackground3, color: tokens.colorNeutralForegroundOnBrand },
-  "7d": { backgroundColor: tokens.colorPaletteYellowBackground3, color: tokens.colorNeutralForeground1 },
-  "10d": { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 },
+  '3d': { backgroundColor: tokens.colorPaletteDarkOrangeBackground3, color: tokens.colorNeutralForegroundOnBrand },
+  '7d': { backgroundColor: tokens.colorPaletteYellowBackground3, color: tokens.colorNeutralForeground1 },
+  '10d': { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 },
 };
 
 const badgeBase: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
   borderRadius: tokens.borderRadiusSmall,
-  paddingTop: "1px",
-  paddingBottom: "1px",
+  paddingTop: '1px',
+  paddingBottom: '1px',
   paddingLeft: tokens.spacingHorizontalXS,
   paddingRight: tokens.spacingHorizontalXS,
   fontSize: tokens.fontSizeBase100,
   fontWeight: tokens.fontWeightSemibold,
   lineHeight: tokens.lineHeightBase100,
-  whiteSpace: "nowrap",
+  whiteSpace: 'nowrap',
 };
 
 // ---------------------------------------------------------------------------
@@ -94,18 +83,16 @@ interface IKanbanCardPriorityEffortFields {
 }
 
 /** Priority glyph tone (icon colour + accessible label) per `sprk_priority` option. */
-export function derivePriorityGlyph(
-  value: number | null | undefined
-): { label: string; color: string } | undefined {
+export function derivePriorityGlyph(value: number | null | undefined): { label: string; color: string } | undefined {
   switch (value) {
     case 100000000:
-      return { label: "Urgent", color: tokens.colorStatusDangerForeground1 };
+      return { label: 'Urgent', color: tokens.colorStatusDangerForeground1 };
     case 100000001:
-      return { label: "High", color: tokens.colorStatusWarningForeground1 };
+      return { label: 'High', color: tokens.colorStatusWarningForeground1 };
     case 100000002:
-      return { label: "Medium", color: tokens.colorStatusSuccessForeground1 };
+      return { label: 'Medium', color: tokens.colorStatusSuccessForeground1 };
     case 100000003:
-      return { label: "Low", color: tokens.colorNeutralForeground3 };
+      return { label: 'Low', color: tokens.colorNeutralForeground3 };
     default:
       // Unset or an unrecognised value — neutral no-op (no glyph rendered).
       return undefined;
@@ -118,15 +105,33 @@ export function deriveEffortBadge(
 ): { label: string; style: React.CSSProperties } | undefined {
   switch (value) {
     case 100000000:
-      return { label: "None", style: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 } };
+      return {
+        label: 'None',
+        style: { backgroundColor: tokens.colorNeutralBackground3, color: tokens.colorNeutralForeground2 },
+      };
     case 100000001:
-      return { label: "Very High", style: { backgroundColor: tokens.colorStatusDangerBackground1, color: tokens.colorStatusDangerForeground1 } };
+      return {
+        label: 'Very High',
+        style: { backgroundColor: tokens.colorStatusDangerBackground1, color: tokens.colorStatusDangerForeground1 },
+      };
     case 100000002:
-      return { label: "High", style: { backgroundColor: tokens.colorPaletteDarkOrangeBackground1, color: tokens.colorPaletteDarkOrangeForeground1 } };
+      return {
+        label: 'High',
+        style: {
+          backgroundColor: tokens.colorPaletteDarkOrangeBackground1,
+          color: tokens.colorPaletteDarkOrangeForeground1,
+        },
+      };
     case 100000003:
-      return { label: "Medium", style: { backgroundColor: tokens.colorStatusWarningBackground1, color: tokens.colorStatusWarningForeground1 } };
+      return {
+        label: 'Medium',
+        style: { backgroundColor: tokens.colorStatusWarningBackground1, color: tokens.colorStatusWarningForeground1 },
+      };
     case 100000004:
-      return { label: "Low", style: { backgroundColor: tokens.colorStatusSuccessBackground1, color: tokens.colorStatusSuccessForeground1 } };
+      return {
+        label: 'Low',
+        style: { backgroundColor: tokens.colorStatusSuccessBackground1, color: tokens.colorStatusSuccessForeground1 },
+      };
     default:
       // Unset or an unrecognised value — neutral no-op (no badge rendered).
       return undefined;
@@ -138,40 +143,40 @@ export function deriveEffortBadge(
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
-  completed: { opacity: "0.6" },
+  completed: { opacity: '0.6' },
   /**
    * Title row — wraps the title text + the FR-02 priority glyph so the
    * glyph sits inline with the title without breaking the title's
    * ellipsis-on-overflow behaviour (task 012).
    */
   titleRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXXS,
     minWidth: 0,
   },
   title: {
-    display: "block",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground1,
-    flex: "1 1 auto",
+    flex: '1 1 auto',
     minWidth: 0,
   },
   titleCompleted: {
-    textDecorationLine: "line-through",
+    textDecorationLine: 'line-through',
     textDecorationColor: tokens.colorNeutralForeground3,
     color: tokens.colorNeutralForeground3,
   },
   metadataRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    flexWrap: "wrap",
+    flexWrap: 'wrap',
   },
   fieldLabel: {
     fontWeight: tokens.fontWeightSemibold,
@@ -191,10 +196,10 @@ const useStyles = makeStyles({
 function formatDueDate(date: Date): string {
   const now = new Date();
   const sameYear = date.getFullYear() === now.getFullYear();
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    ...(sameYear ? {} : { year: "numeric" }),
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
   });
 }
 
@@ -219,131 +224,134 @@ export interface IKanbanCardProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(
-  ({ todo, onPinToggle, onClick, accentColor }) => {
-    const styles = useStyles();
+export const KanbanCard: React.FC<IKanbanCardProps> = React.memo(({ todo, onPinToggle, onClick, accentColor }) => {
+  const styles = useStyles();
 
-    const dueDate = parseDueDate(todo.sprk_duedate);
-    const dueLabel = computeDueLabel(dueDate);
-    const { todoScore } = computeTodoScore(todo);
-    const roundedScore = Math.round(todoScore);
-    // Completed = statuscode 2 (per task 009 mapping).
-    const isCompleted = todo.statuscode === 2;
-    const isPinned = todo.sprk_todopinned === true;
-    const dueDateFormatted = dueDate ? formatDueDate(dueDate) : null;
-    const colors = scoreCircleColors(roundedScore);
+  const dueDate = parseDueDate(todo.sprk_duedate);
+  const dueLabel = computeDueLabel(dueDate);
+  const { todoScore } = computeTodoScore(todo);
+  const roundedScore = Math.round(todoScore);
+  // Completed = statuscode 2 (per task 009 mapping).
+  const isCompleted = todo.statuscode === 2;
+  const isPinned = todo.sprk_todopinned === true;
+  const dueDateFormatted = dueDate ? formatDueDate(dueDate) : null;
+  const colors = scoreCircleColors(roundedScore);
 
-    // FR-02/FR-03 (task 012): priority glyph + effort badge, read from the raw
-    // Choice fields (see the local structural type + helpers above).
-    const { sprk_priority: priorityChoice, sprk_effort: effortChoice } = todo as unknown as IKanbanCardPriorityEffortFields;
-    const priorityGlyph = derivePriorityGlyph(priorityChoice);
-    const effortBadge = deriveEffortBadge(effortChoice);
+  // FR-02/FR-03 (task 012): priority glyph + effort badge, read from the raw
+  // Choice fields (see the local structural type + helpers above).
+  const { sprk_priority: priorityChoice, sprk_effort: effortChoice } =
+    todo as unknown as IKanbanCardPriorityEffortFields;
+  const priorityGlyph = derivePriorityGlyph(priorityChoice);
+  const effortBadge = deriveEffortBadge(effortChoice);
 
-    const handlePinClick = React.useCallback(() => {
-      onPinToggle?.(todo.sprk_todoid);
-    }, [onPinToggle, todo.sprk_todoid]);
+  const handlePinClick = React.useCallback(() => {
+    onPinToggle?.(todo.sprk_todoid);
+  }, [onPinToggle, todo.sprk_todoid]);
 
-    const handleCardClick = React.useCallback(() => {
-      onClick?.(todo.sprk_todoid);
-    }, [onClick, todo.sprk_todoid]);
+  const handleCardClick = React.useCallback(() => {
+    onClick?.(todo.sprk_todoid);
+  }, [onClick, todo.sprk_todoid]);
 
-    const ariaLabel = [
-      todo.sprk_name,
-      isCompleted ? "Completed." : "Open.",
-      isPinned ? "Pinned." : "",
-      dueDateFormatted ? `Due: ${dueDateFormatted}.` : "",
-      dueLabel.label ? `${dueLabel.label}.` : "",
-      priorityGlyph ? `Priority: ${priorityGlyph.label}.` : "",
-      effortBadge ? `Effort: ${effortBadge.label}.` : "",
-      `To Do Score: ${roundedScore}.`,
-    ].filter(Boolean).join(" ");
+  const ariaLabel = [
+    todo.sprk_name,
+    isCompleted ? 'Completed.' : 'Open.',
+    isPinned ? 'Pinned.' : '',
+    dueDateFormatted ? `Due: ${dueDateFormatted}.` : '',
+    dueLabel.label ? `${dueLabel.label}.` : '',
+    priorityGlyph ? `Priority: ${priorityGlyph.label}.` : '',
+    effortBadge ? `Effort: ${effortBadge.label}.` : '',
+    `To Do Score: ${roundedScore}.`,
+  ]
+    .filter(Boolean)
+    .join(' ');
 
-    // Secondary content: due date row + assigned row
-    const secondaryContent = (
-      <>
-        {(dueDateFormatted || dueLabel.urgency !== "none") && (
-          <div className={styles.metadataRow}>
-            {dueDateFormatted && (
-              <>
-                <span className={styles.fieldLabel}>Due:</span>
-                <span className={styles.fieldValue}>{dueDateFormatted}</span>
-              </>
-            )}
-            {dueLabel.urgency !== "none" && (
-              <>
-                {dueDateFormatted && (
-                  <Text as="span" size={200} style={{ color: tokens.colorNeutralForeground3 }}>{"·"}</Text>
-                )}
-                <span role="img" aria-label={dueLabel.label} style={{ ...badgeBase, ...DUE_BADGE_STYLE[dueLabel.urgency] }}>
-                  {dueLabel.label}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-        {todo.assignedToName && (
-          <div className={styles.metadataRow}>
-            <span className={styles.fieldLabel}>Assigned:</span>
-            <span className={styles.fieldValue}>{todo.assignedToName}</span>
-          </div>
-        )}
-        {effortBadge && (
-          <div className={styles.metadataRow}>
-            <span className={styles.fieldLabel}>Effort:</span>
-            <span role="img" aria-label={`Effort: ${effortBadge.label}`} style={{ ...badgeBase, ...effortBadge.style }}>
-              {effortBadge.label}
-            </span>
-          </div>
-        )}
-      </>
-    );
-
-    return (
-      <RecordCardShell
-        icon={
-          <CardIcon
-            size={40}
-            backgroundColor={colors.bg}
-            iconColor={colors.fg}
-          >
-            <span style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, lineHeight: "1" }}>
-              {roundedScore}
-            </span>
-          </CardIcon>
-        }
-        accentColor={accentColor ?? "none"}
-        primaryContent={
-          <div className={styles.titleRow}>
-            <Text as="span" size={300} className={mergeClasses(styles.title, isCompleted && styles.titleCompleted)}>
-              {todo.sprk_name}
-            </Text>
-            {priorityGlyph && (
-              <Flag16Filled
-                style={{ color: priorityGlyph.color, flexShrink: 0 }}
+  // Secondary content: due date row + assigned row
+  const secondaryContent = (
+    <>
+      {(dueDateFormatted || dueLabel.urgency !== 'none') && (
+        <div className={styles.metadataRow}>
+          {dueDateFormatted && (
+            <>
+              <span className={styles.fieldLabel}>Due:</span>
+              <span className={styles.fieldValue}>{dueDateFormatted}</span>
+            </>
+          )}
+          {dueLabel.urgency !== 'none' && (
+            <>
+              {dueDateFormatted && (
+                <Text as="span" size={200} style={{ color: tokens.colorNeutralForeground3 }}>
+                  {'·'}
+                </Text>
+              )}
+              <span
                 role="img"
-                aria-label={`Priority: ${priorityGlyph.label}`}
-                title={`Priority: ${priorityGlyph.label}`}
-              />
-            )}
-          </div>
-        }
-        secondaryContent={secondaryContent}
-        tools={
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={isPinned ? <PinFilled /> : <PinRegular />}
-            onClick={handlePinClick}
-            aria-label={isPinned ? `Unpin "${todo.sprk_name}"` : `Pin "${todo.sprk_name}"`}
-            title={isPinned ? "Unpin from column" : "Pin to column"}
-          />
-        }
-        onClick={handleCardClick}
-        ariaLabel={ariaLabel}
-        className={isCompleted ? styles.completed : undefined}
-      />
-    );
-  }
-);
+                aria-label={dueLabel.label}
+                style={{ ...badgeBase, ...DUE_BADGE_STYLE[dueLabel.urgency] }}
+              >
+                {dueLabel.label}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+      {todo.assignedToName && (
+        <div className={styles.metadataRow}>
+          <span className={styles.fieldLabel}>Assigned:</span>
+          <span className={styles.fieldValue}>{todo.assignedToName}</span>
+        </div>
+      )}
+      {effortBadge && (
+        <div className={styles.metadataRow}>
+          <span className={styles.fieldLabel}>Effort:</span>
+          <span role="img" aria-label={`Effort: ${effortBadge.label}`} style={{ ...badgeBase, ...effortBadge.style }}>
+            {effortBadge.label}
+          </span>
+        </div>
+      )}
+    </>
+  );
 
-KanbanCard.displayName = "KanbanCard";
+  return (
+    <RecordCardShell
+      icon={
+        <CardIcon size={40} backgroundColor={colors.bg} iconColor={colors.fg}>
+          <span style={{ fontWeight: tokens.fontWeightSemibold, fontSize: tokens.fontSizeBase300, lineHeight: '1' }}>
+            {roundedScore}
+          </span>
+        </CardIcon>
+      }
+      accentColor={accentColor ?? 'none'}
+      primaryContent={
+        <div className={styles.titleRow}>
+          <Text as="span" size={300} className={mergeClasses(styles.title, isCompleted && styles.titleCompleted)}>
+            {todo.sprk_name}
+          </Text>
+          {priorityGlyph && (
+            <Flag16Filled
+              style={{ color: priorityGlyph.color, flexShrink: 0 }}
+              role="img"
+              aria-label={`Priority: ${priorityGlyph.label}`}
+              title={`Priority: ${priorityGlyph.label}`}
+            />
+          )}
+        </div>
+      }
+      secondaryContent={secondaryContent}
+      tools={
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={isPinned ? <PinFilled /> : <PinRegular />}
+          onClick={handlePinClick}
+          aria-label={isPinned ? `Unpin "${todo.sprk_name}"` : `Pin "${todo.sprk_name}"`}
+          title={isPinned ? 'Unpin from column' : 'Pin to column'}
+        />
+      }
+      onClick={handleCardClick}
+      ariaLabel={ariaLabel}
+      className={isCompleted ? styles.completed : undefined}
+    />
+  );
+});
+
+KanbanCard.displayName = 'KanbanCard';

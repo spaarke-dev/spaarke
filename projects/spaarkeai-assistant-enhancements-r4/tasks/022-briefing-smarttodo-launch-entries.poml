@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Daily Briefing + Smart To Do surfaceLaunchRegistry entries (FR-06 launch targets)</title>
+    <phase>2 — E2 follow-ons</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Additive registry entries (new config keys) reusing the shipped list-tasks precedent; no code branch added and no shared-file rewrite.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Additive config following a named precedent (the list-tasks workspace-tab entry) — no architectural judgment; the generic dispatcher already handles workspace-tab entries.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>Wave1-independent</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Additive registry keys only — no shared-file rewrite; still /conflict-check the shared lib (surfaceLaunchRegistry.ts) before the PR.</parallel-reason>
+    <deps></deps>
+    <tags>frontend, spaarkeai, config</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+  <prompt>Add two new single-surface `kind:'workspace-tab'` entries to `surfaceLaunchRegistry` (Daily Briefing, Smart To Do) so the FR-06 follow-on cards (task 023) have launch targets. The registry is keyed by consumerType (one entry → one surface); the `list-tasks` entry (~:147) is the `kind:'workspace-tab'` precedent to follow. `handleSurfaceLaunch` (`ConversationPane.tsx` ~:1245–1312) already dispatches any workspace-tab/layout entry generically via PaneEventBus `widget_load` — do NOT add a code branch. No registry shape change (single-surface, per owner decision — no multi-surface fan-out).</prompt>
+  <role>SPAARKE frontend developer. React 18 + shared-lib expertise; comfortable with the surfaceHandoff `surfaceLaunchRegistry` contract, the consumerType → single-surface lookup, and the generic `handleSurfaceLaunch` workspace-tab dispatch via PaneEventBus `widget_load`.</role>
+  <goal>Two new single-surface `kind:'workspace-tab'` registry entries (Daily Briefing, Smart To Do) exist and resolve via `resolveSurfaceLaunch`, so FR-06 follow-on cards have launch targets — with `handleSurfaceLaunch` dispatching them generically and no code branch added.</goal>
+  <context>
+    <background>FR-06 launch targets. The `surfaceLaunchRegistry` (`src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/surfaceLaunchRegistry.ts`) is keyed by consumerType, one entry → one surface. The `list-tasks` entry (~:147) is the shipped `kind:'workspace-tab'` precedent: it names a workspace widget `surface` (widget type), a `title`, and optional `widgetData`, and `handleSurfaceLaunch` (`ConversationPane.tsx` ~:1245–1312) dispatches ANY workspace-tab/layout entry generically via PaneEventBus `widget_load` — no per-entry code branch. This task adds two sibling entries following that precedent so the FR-06 follow-on cards (task 023) can open the Daily Briefing and Smart To Do tabs. Owner decision (spec Out of Scope): NO `surfaceLaunchRegistry` shape change and NO multi-surface launch fan-out — these are two individual single-surface entries. This task is additive config only; task 023 renders and gates the cards that dispatch these entries.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/surfaceLaunchRegistry.ts (add the two entries; the list-tasks entry ~:147 is the kind:'workspace-tab' precedent)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (handleSurfaceLaunch ~:1245–1312 — the generic workspace-tab dispatcher; verify no branch needed)</file>
+      <file>the registered workspace widget types for Daily Briefing + Smart To Do (the `surface`/widget-type values the two entries point at)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="the two registry entries">Add exactly two single-surface `kind:'workspace-tab'` entries (Daily Briefing, Smart To Do) following the `list-tasks` precedent; MUST NOT change the registry shape and MUST NOT introduce a multi-surface fan-out (owner Out-of-Scope decision).</constraint>
+    <constraint source="project" scope="handleSurfaceLaunch">Reuse the generic workspace-tab dispatch — MUST NOT add a code branch to `handleSurfaceLaunch` (it already dispatches workspace-tab/layout entries generically via PaneEventBus `widget_load`).</constraint>
+    <constraint source="ADR-021" scope="any styling touched">Fluent v9 tokens-only; host-agnostic shared component — additive config must not regress other surfaceLaunch consumers.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Find the registered workspace widget types for Daily Briefing + Smart To Do (the `surface`/widget-type values the entries will point at).</step>
+    <step order="2">Read the `list-tasks` entry (~:147) as the single-surface `kind:'workspace-tab'` precedent (surface, title, optional widgetData).</step>
+    <step order="3">Add the two `SURFACE_LAUNCH_REGISTRY` entries (kind `workspace-tab`, surface = the widget type, title, optional widgetData) following the precedent.</step>
+    <step order="4">Verify `resolveSurfaceLaunch` returns both entries and that `handleSurfaceLaunch` dispatches them via the existing generic workspace-tab path — no new branch.</step>
+    <step order="5">/conflict-check the shared lib before the PR; update TASK-INDEX ✅.</step>
+  </steps>
+  <justification>
+    <existing>`surfaceLaunchRegistry` with the `list-tasks` single-surface workspace-tab precedent (~:147) already exists; `handleSurfaceLaunch` dispatches workspace-tab entries generically.</existing>
+    <extension>Add two single-surface entries following the precedent — no registry shape change, no new dispatch code.</extension>
+    <cost-of-doing-nothing>The FR-06 follow-on cards (task 023) have no launch target — clicking them cannot open the Daily Briefing / Smart To Do tabs.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/surfaceHandoff/surfaceLaunchRegistry.ts (two single-surface workspace-tab entries)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Both entries (Daily Briefing, Smart To Do) resolve via `resolveSurfaceLaunch`.</criterion>
+    <criterion testable="true">Clicking (wired in task 023) opens the correct tab via the generic workspace-tab dispatch.</criterion>
+    <criterion testable="true">No registry shape change — the entries are single-surface, per the owner decision (negative case: no multi-surface fan-out).</criterion>
+    <criterion testable="true">No code branch is added to `handleSurfaceLaunch` (it dispatches the entries generically).</criterion>
+  </acceptance-criteria>
+  <notes>Owner Out-of-Scope: no `surfaceLaunchRegistry` shape change, no multi-surface fan-out — two individual single-surface entries. The `list-tasks` entry (~:147) is the exact precedent. Task 023 renders + gates the cards that dispatch these entries. /conflict-check the shared lib before the PR (compose-r5/r6 + assistant-r3 overlap on SpaarkeAi/shared).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

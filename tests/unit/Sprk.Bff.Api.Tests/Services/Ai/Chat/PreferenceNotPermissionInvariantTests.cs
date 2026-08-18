@@ -151,6 +151,14 @@ public sealed class PreferenceNotPermissionInvariantTests
             // workspace tabs currently open (mapped from live session.Tabs), NOT a profile/learned signal.
             // A tab's context-type scopes WHICH parity tools mount (economy), never a user preference.
             "IReadOnlyCollection`1 OpenTabContextTypes",
+            // Added by spaarkeai-assistant-enhancements-r4 task 011 (FR-02): a STRUCTURAL, deterministic
+            // per-Action allow-list — the grounded READ tools an ALREADY-SELECTED advisory Action opts into
+            // (catalog data resolved by binding id in AdvisoryCapabilityRunner), null/inert on every other
+            // turn. Exactly like OpenTabContextTypes it is a structural fact, NOT a profile/preference/learned
+            // signal: no stated or learned user signal reaches it (the E3 preference hint is prompt-only and
+            // never touches AgentToolFilterContext — see PreferenceLoop_BiasesARealCataloguedCapability). The
+            // injection-defense invariant is preserved; this is a bounded tool-scoping fact, not a profile channel.
+            "IReadOnlyCollection`1 AdvisoryToolAllowList",
         }, "these structural session facts are the ONLY inputs the grounding pre-filter ever sees — " +
            "there is no parameter, profile or otherwise, through which a stated or learned user signal " +
            "could reach AgentToolProjection.PreFilter");

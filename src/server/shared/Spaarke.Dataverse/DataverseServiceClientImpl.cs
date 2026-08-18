@@ -10,23 +10,36 @@ using Microsoft.Xrm.Sdk.Query;
 namespace Spaarke.Dataverse;
 
 /// <summary>
-/// Dataverse service implementation using ServiceClient for .NET 8.0.
-/// Uses ClientSecretCredential authentication (same approach as Graph/SPE) for server-to-server scenarios.
-/// Requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration.
-/// Per Microsoft documentation: https://learn.microsoft.com/en-us/power-apps/developer/data-platform/authenticate-dot-net-framework
+/// Dataverse service implementation using the Power Platform <c>ServiceClient</c> SDK.
 /// </summary>
+/// <remarks>
+/// Auth (ADR-028 §24 / #3b): prefers <b>Managed Identity</b> via a ServiceClient token-provider function when
+/// <c>Graph:ManagedIdentity:Enabled=true</c> (resolving the UAMI from <c>ManagedIdentity:ClientId</c>);
+/// otherwise falls back to <b>ClientSecret</b> (connection-string method) requiring <c>TENANT_ID</c> /
+/// <c>API_APP_ID</c> / <c>API_CLIENT_SECRET</c>. The secret path is retained as a local-dev fallback and MUST
+/// NOT be removed until MI attribution is proven live per env.
+/// Ref: https://learn.microsoft.com/power-apps/developer/data-platform/authenticate-dot-net-framework
+/// </remarks>
 public class DataverseServiceClientImpl : IDataverseService, IDisposable
 {
-    private readonly ServiceClient _serviceClient;
+    private readonly Lazy<ServiceClient> _lazyServiceClient;
     private readonly ILogger<DataverseServiceClientImpl> _logger;
     private bool _disposed = false;
 
     /// <summary>
+    /// The underlying <see cref="ServiceClient"/>, resolved LAZILY — the Dataverse connection is established on
+    /// FIRST USE, never in the constructor. #3b/task-011: an eager connect in the ctor runs on the DI
+    /// <c>ValidateOnBuild</c> startup thread, where the Managed-Identity token bridge aborted the process
+    /// (SIGABRT). Deferring the connect keeps startup off the network; the token is acquired synchronously.
+    /// </summary>
+    private ServiceClient _serviceClient => _lazyServiceClient.Value;
+
+    /// <summary>
     /// Exposes the underlying ServiceClient for direct SDK operations (QueryExpression, UpsertRequest, etc.)
     /// Used by domain services (e.g., SpendSnapshotService) that need generic entity operations
-    /// beyond what IDataverseService provides.
+    /// beyond what IDataverseService provides. Triggers the lazy connect on first access.
     /// </summary>
-    public ServiceClient OrganizationService => _serviceClient;
+    public ServiceClient OrganizationService => _lazyServiceClient.Value;
 
     public DataverseServiceClientImpl(
         IConfiguration configuration,
@@ -38,47 +51,99 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
-        // Use same authentication approach as Graph/SPE (ClientSecretCredential)
-        var tenantId = configuration["TENANT_ID"];
-        var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["API_CLIENT_SECRET"];
+        // ADR-028 §24 (#3b): prefer Managed Identity when enabled; ClientSecret is the local-dev fallback.
+        // The secret path is retained (do NOT remove API_CLIENT_SECRET) until MI attribution is proven live.
+        var useManagedIdentity = string.Equals(
+            configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 
-        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+        // Build the ServiceClient FACTORY here (validating config, failing fast on missing values) but DEFER
+        // the actual Dataverse CONNECT to first use via the Lazy below. Rationale (#3b/task-011): net10
+        // ValidateOnBuild constructs singletons on the startup thread; an eager connect there aborted the
+        // process (SIGABRT) because the MI token was acquired sync-over-async. Deferring keeps startup off the
+        // network, and the MI token is acquired SYNCHRONOUSLY (credential.GetToken → completed Task) so there is
+        // no async bridge on any connect/refresh.
+        Func<ServiceClient> connectFactory;
+        if (useManagedIdentity)
         {
-            throw new InvalidOperationException(
-                "Dataverse authentication requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration. " +
-                "These should match the same values used for Graph/SPE authentication.");
-        }
+            var miClientId = configuration["ManagedIdentity:ClientId"]
+                ?? configuration["Graph:ManagedIdentity:ClientId"];
+            var options = new DefaultAzureCredentialOptions();
+            if (!string.IsNullOrEmpty(miClientId))
+                options.ManagedIdentityClientId = miClientId;
+            var credential = new DefaultAzureCredential(options);
+            var instanceUri = new Uri(dataverseUrl);
+            // Token scope = the Dataverse ENVIRONMENT ROOT authority (e.g. https://spaarkedev1.crm.dynamics.com/.default).
+            // #3b root cause: the ServiceClient token-provider is invoked with the full SOAP endpoint URL
+            // (".../XRMServices/2011/Organization.svc/web?SDKClientVersion=…") as its resourceUri — that is NOT a valid
+            // AAD resource, and deriving the scope from it returned HTTP 400 (managed_identity_request_failed). Always
+            // request the token for the environment authority, ignoring the path/query the provider is handed.
+            var dataverseScope = instanceUri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/.default";
 
-        _logger.LogInformation("Initializing Dataverse ServiceClient with ClientSecret for {DataverseUrl}", dataverseUrl);
-        _logger.LogInformation("Using ClientId (masked): ...{Suffix}", clientId.Substring(Math.Max(0, clientId.Length - 8)));
-
-        try
-        {
-            // Use connection string method (Microsoft's recommended approach for server-to-server auth)
-            // Format: AuthType=ClientSecret;url=...;tenantId=...;clientId=...;clientSecret=...
-            var connectionString = $"AuthType=ClientSecret;Url={dataverseUrl};TenantId={tenantId};ClientId={clientId};ClientSecret={clientSecret}";
-
-            _logger.LogInformation("Using ClientSecret authentication (connection string method)");
-
-            // Create ServiceClient using connection string
-            _serviceClient = new ServiceClient(connectionString);
-
-            if (!_serviceClient.IsReady)
+            connectFactory = () =>
             {
-                var error = _serviceClient.LastError ?? "Unknown error";
-                _logger.LogError("Failed to initialize Dataverse ServiceClient: {Error}", error);
-                throw new InvalidOperationException($"Failed to connect to Dataverse: {error}");
+                _logger.LogInformation(
+                    "Connecting Dataverse ServiceClient via Managed Identity (clientId {ClientId}, scope {Scope})",
+                    miClientId ?? "(system-assigned)", dataverseScope);
+                return new ServiceClient(
+                    instanceUrl: instanceUri,
+                    tokenProviderFunction: (string resourceUri) =>
+                    {
+                        // Ignore resourceUri (SOAP endpoint URL); request the env-authority scope. Synchronous
+                        // GetToken (no async bridge); the credential caches tokens so refreshes are infrequent.
+                        var token = credential.GetToken(
+                            new TokenRequestContext(new[] { dataverseScope }), CancellationToken.None);
+                        return Task.FromResult(token.Token);
+                    },
+                    useUniqueInstance: true);
+            };
+        }
+        else
+        {
+            // Fallback: ClientSecret (Graph/SPE parity). Required only when MI is disabled.
+            var tenantId = configuration["TENANT_ID"];
+            var clientId = configuration["API_APP_ID"];
+            var clientSecret = configuration["API_CLIENT_SECRET"];
+
+            if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+            {
+                throw new InvalidOperationException(
+                    "Dataverse authentication requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration " +
+                    "when Managed Identity is disabled (Graph:ManagedIdentity:Enabled=false).");
             }
 
-            _logger.LogInformation("Dataverse ServiceClient connected successfully to {OrgName} ({OrgId})",
-                _serviceClient.ConnectedOrgFriendlyName, _serviceClient.ConnectedOrgId);
+            var connectionString = $"AuthType=ClientSecret;Url={dataverseUrl};TenantId={tenantId};ClientId={clientId};ClientSecret={clientSecret}";
+            connectFactory = () =>
+            {
+                _logger.LogInformation("Connecting Dataverse ServiceClient via ClientSecret (local-dev fallback)");
+                return new ServiceClient(connectionString);
+            };
         }
-        catch (Exception ex)
+
+        _logger.LogInformation(
+            "DataverseServiceClientImpl configured for {DataverseUrl} using {AuthMode} (connection deferred to first use)",
+            dataverseUrl, useManagedIdentity ? "Managed Identity (ADR-028)" : "ClientSecret (local-dev fallback)");
+
+        _lazyServiceClient = new Lazy<ServiceClient>(() =>
         {
-            _logger.LogError(exception: ex, message: "Exception initializing Dataverse ServiceClient");
-            throw;
-        }
+            try
+            {
+                var client = connectFactory();
+                if (!client.IsReady)
+                {
+                    var error = client.LastError ?? "Unknown error";
+                    _logger.LogError("Failed to connect Dataverse ServiceClient: {Error}", error);
+                    throw new InvalidOperationException($"Failed to connect to Dataverse: {error}");
+                }
+                _logger.LogInformation("Dataverse ServiceClient connected successfully to {OrgName} ({OrgId})",
+                    client.ConnectedOrgFriendlyName, client.ConnectedOrgId);
+                return client;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(exception: ex, message: "Exception connecting Dataverse ServiceClient");
+                throw;
+            }
+        }, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)
@@ -2900,7 +2965,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     {
         if (!_disposed)
         {
-            _serviceClient?.Dispose();
+            // Only dispose if the connection was actually established — never trigger the lazy connect
+            // just to dispose it.
+            if (_lazyServiceClient.IsValueCreated)
+                _lazyServiceClient.Value.Dispose();
             _disposed = true;
         }
     }

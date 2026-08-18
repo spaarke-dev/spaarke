@@ -192,10 +192,17 @@ public sealed class ContextBinderOrgContextTests
         // like HasAttachedRecord — the "no organization-derived member" invariant is preserved. (Merge
         // reconciliation 2026-08-11: task 030 updated the two sibling ctor-surface governance tests; this
         // org-context test landed on master concurrently and is reconciled here on the same reasoning.)
+        // AdvisoryToolAllowList added by spaarkeai-assistant-enhancements-r4 task 011 (FR-02) — the resolved
+        // Action's grounded-tool allow-list, applied only on an advisory capability's NESTED bounded turn
+        // AFTER the Action was selected by binding id (deterministic context scoping). A structural
+        // tool-projection fact, NOT a business-unit/team/profile/User-fragment member; the "no org-derived
+        // member" invariant is preserved. (task 032 FR-09 adds a preference-directive USER-FRAGMENT producer
+        // but NO member here — its hint is prompt-only, so this set stays unchanged: the proof that a
+        // preference never reaches the grounding filter context.)
         typeof(AgentToolFilterContext).GetProperties()
             .Select(p => p.Name)
             .Should().BeEquivalentTo(
-                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord", "OpenTabContextTypes" },
+                new[] { "Surface", "HasSessionFiles", "HasActiveDocument", "HasAnalysisBinding", "HasAttachedRecord", "OpenTabContextTypes", "AdvisoryToolAllowList" },
                 "the grounding filter context is structural-facts-only — no business-unit/team-derived member exists");
     }
 

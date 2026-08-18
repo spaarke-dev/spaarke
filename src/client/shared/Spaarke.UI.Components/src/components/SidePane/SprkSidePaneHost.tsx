@@ -247,21 +247,27 @@ export const SprkSidePaneHost: React.FC<SprkSidePaneHostProps> = ({
     <FluentProvider theme={resolvedTheme} applyStylesToPortals={true} className={styles.root}>
       <div ref={layoutRef} className={styles.layout} data-testid="sprk-sidepane-host">
         <div className={styles.content}>
-          <SidePaneShell header={<PaneHeader title={activeEntry?.title ?? paneTitle} icon={activeEntry?.icon} />} footer={<></>}>
+          <SidePaneShell
+            header={<PaneHeader title={activeEntry?.title ?? paneTitle} icon={activeEntry?.icon} />}
+            footer={<></>}
+          >
             {ActiveComponent ? (
               <ActiveComponent paneId={paneId} />
             ) : (
               <div className={styles.emptyState} data-testid="sprk-sidepane-host-empty-state">
-                {entries.length === 0
-                  ? 'No side-pane sections are registered.'
-                  : 'This section is unavailable.'}
+                {entries.length === 0 ? 'No side-pane sections are registered.' : 'This section is unavailable.'}
               </div>
             )}
           </SidePaneShell>
         </div>
 
         {entries.length > 0 && (
-          <div className={styles.rail} role="tablist" aria-label="Side pane sections" data-testid="sprk-sidepane-host-rail">
+          <div
+            className={styles.rail}
+            role="tablist"
+            aria-label="Side pane sections"
+            data-testid="sprk-sidepane-host-rail"
+          >
             {entries.map(entry => (
               <Tooltip
                 key={entry.id}

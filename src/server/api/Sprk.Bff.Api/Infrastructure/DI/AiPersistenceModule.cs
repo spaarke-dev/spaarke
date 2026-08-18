@@ -109,6 +109,16 @@ public static class AiPersistenceModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IComposeMemoryCapture,
             Sprk.Bff.Api.Services.Ai.PublicContracts.ComposeMemoryCapture>();
 
+        // FR-08 (task 031): IPreferenceMemoryCapture — the E3 feedback→memory seam. The canonical ADR-013
+        // CRUD-safe facade through which FeedbackService persists a governed per-user `Preference` memory
+        // item (task 030 fact type) into the SHARED IMemoryItemStore above. No forked store, no second
+        // memory write path (§11). Resolves the caller's AAD oid → canonical Dataverse systemuserid via the
+        // Singleton ISystemUserIdentityResolver (registered in NotificationsModule) so the preference recalls
+        // under the same key chat-side user memory uses. Per-user ONLY: never mutates the ADR-039 global
+        // catalog; `trustLevel` carried inert (#616). Scoped: the store it delegates to is Scoped.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IPreferenceMemoryCapture,
+            Sprk.Bff.Api.Services.Ai.PublicContracts.PreferenceMemoryCapture>();
+
         // AIR2-052: memory-governance authorization port (FR-B-03). Thin seam over the existing
         // IDataversePrivilegeChecker (record-read alignment — caller-derived, no parallel ACL) +
         // NotificationService (AAD oid → systemuserid). Scoped: both dependencies are Singletons, so
