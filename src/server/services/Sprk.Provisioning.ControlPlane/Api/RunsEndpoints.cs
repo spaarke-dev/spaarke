@@ -1,0 +1,797 @@
+// -----------------------------------------------------------------------------
+// RunsEndpoints.cs
+//
+// L2 CONTROL-PLANE REST API — /api/runs surface (task 057, Wave C5).
+//
+// SPEC / DESIGN references:
+//   - spec.md FR-21:  All 9 L2 REST endpoints per §4.2 must be exposed;
+//                     OpenAPI at /swagger enumerates them.
+//   - spec.md FR-22:  Handler-invoking endpoints ENQUEUE via Service Bus +
+//                     return 202 Accepted in <100ms — no synchronous handler
+//                     execution in the HTTP request path. App Service 230s
+//                     HTTP timeout vs 30-min handlers.
+//   - spec.md FR-20:  JWT bearer + audience api://spaarke-provisioning-controlplane-{env}
+//                     + Operator/Reader app-roles.
+//   - spec.md FR-24 / §4C: POST /api/runs/{id}/clear-quarantine REQUIRES a
+//                     `reason` parameter and MUST audit-log the action + actor
+//                     tid to App Insights.
+//   - spec.md §4D I3 / FR-30: EVERY Cosmos read/write MUST include an explicit
+//                     /customerId partition-key predicate — never a cross-
+//                     partition query.
+//   - design.md §4.2 endpoint table: authoritative surface.
+//   - design.md §4.2 handler execution model (v3.2 Fable M-9): fire-and-forget
+//                     via Service Bus + state-reconciler BackgroundService in L2.
+//
+// ADR references:
+//   - ADR-004 (Path A per CLAUDE.md §6.5 + spec.md ADR Tensions row 1):
+//                     L2 orchestration is documented custom state machine.
+//                     Handlers themselves are IJobHandler-shape (§5.1).
+//   - ADR-010:        Endpoints register in L2 DI (this project), NOT BFF.
+//                     No feature-module DI added here — the endpoint mapping
+//                     is composed in Program.cs via the extension method
+//                     .MapRunsEndpoints() at the SAME layer as the health
+//                     placeholder + module composition.
+//   - ADR-032:        No conditional service branches — all endpoints map
+//                     unconditionally. Feature-gating (if any) is per-handler
+//                     via the Null-Object kill-switch pattern, never here.
+//   - ADR-036:        Enqueue uses the shared IHandlerEnqueuer abstraction
+//                     (task 038). Do NOT invent a new queuing abstraction.
+//   - ADR-028 (via AuthModule task 036): JWT bearer auth is composed via
+//                     Microsoft.Identity.Web AddMicrosoftIdentityWebApi;
+//                     policies Operator + Reader are enforced by name.
+//
+// SCOPE (task 057):
+//   Maps 7 of 8 L2 endpoints under /api/runs:
+//     1. POST   /api/runs                                     Operator
+//     2. POST   /api/runs/{id}/preflight                      Operator
+//     3. GET    /api/runs/{id}                                Reader
+//     4. POST   /api/runs/{id}/gates/{gateId}/advance         Operator
+//     5. POST   /api/runs/{id}/resume                         Operator
+//     6. POST   /api/runs/{id}/cancel                         Operator
+//     7. POST   /api/runs/{id}/clear-quarantine               Operator
+//   The 8th L2 endpoint — GET /api/runs/{id}/phases/{phaseId}/logs — is in the
+//   sibling file Api/RunLogsEndpoints.cs (separated for readability + so
+//   /swagger's tag grouping cleanly splits "Runs" from "RunLogs").
+//   The 9th endpoint per §4.2 — POST /api/onboarding/consent-callback — is
+//   BFF-side (D18 Anonymous+HMAC redirect from Microsoft admin-consent flow)
+//   and is NOT part of this L2 project's surface. See design.md §4.3a.2
+//   "Model 2 self-service exception".
+//
+// PARTITION-KEY DISCIPLINE (§4D I3 / FR-30):
+//   Every endpoint that identifies a run by {id} REQUIRES the customerId
+//   query parameter (or, for POST /api/runs, the JSON body). All Cosmos reads
+//   route through IProvisioningRunRepository which requires customerId as its
+//   first parameter — cross-partition access is a compile-time impossibility.
+//
+// AUTH POLICY BOUNDARY:
+//   - Operator: mutating endpoints (POST create/init/advance/resume/cancel/
+//               preflight/clear-quarantine). Operator implicitly satisfies Reader.
+//   - Reader:   read-only endpoints (GET). Reader alone cannot invoke mutating.
+//
+// ENQUEUE PATH (POST endpoints, FR-22 / R20):
+//   All handler-invoking POST endpoints:
+//     (a) validate the request shape (400 on bad body/missing required field)
+//     (b) verify the run exists in the caller-supplied customerId partition
+//         (404 on miss; §4D I3 enforced by construction)
+//     (c) enqueue a HandlerEnvelope via IHandlerEnqueuer — MessageId is
+//         deterministic per (HandlerId, RunId, CustomerId, paramHash), so
+//         duplicate submissions are dedup'd at the Service Bus wire (FR-22
+//         level-1 idempotency).
+//     (d) return 202 Accepted with Location header pointing at GET /api/runs/{id}.
+//   Latency target: <100ms end-to-end (excluding first-hit Cosmos client
+//   handshake). Measured in tests via 202-latency spot-check.
+//
+// AUDIT-LOG (POST /api/runs/{id}/clear-quarantine, spec FR-24):
+//   The clear-quarantine endpoint REQUIRES a `reason` query parameter (400
+//   otherwise) and emits a structured `ILogger.LogInformation` record with
+//   message prefix "QuarantineCleared:" carrying actor tid + oid + runId +
+//   customerId + reason. The record flows through the OpenTelemetry -> Azure
+//   Monitor pipeline (task 039 TelemetryModule) into App Insights `traces`
+//   with structured customDimensions. The general AuditLogMiddleware (task
+//   039) ALSO emits an AuditableAction record for every mutating request;
+//   the QuarantineCleared record is IN ADDITION per spec FR-24's explicit
+//   requirement for a purpose-built event (Kusto queries can pivot on either).
+//
+// STATE-TRANSITION SCOPE (this task):
+//   This task's endpoints WRITE new runs (POST /api/runs) and READ existing
+//   runs (GET /api/runs/{id}). Everything else ENQUEUES a handler — actual
+//   state transitions (Running -> Failed, Quarantined -> Cleared, etc.) are
+//   owned by:
+//     - Task 058 (state-reconciler) — DAG advancement, retry dispatch.
+//     - Task 059 (I5 concurrency guard) — same-customer serialization.
+//     - Task 060 (I6 crash recovery) — orphaned-run scan.
+//     - Task 061 (§4C rollback semantics) — Quarantined transitions, clear-
+//                                            quarantine state mutation.
+//   The endpoints here are the intake surface; the state machine advances
+//   asynchronously. This separation is deliberate per the Fable M-9
+//   resolution (design.md §4.2 v3.2).
+// -----------------------------------------------------------------------------
+
+using System.Diagnostics;
+using System.Security.Claims;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Models;
+using Sprk.Provisioning.ControlPlane.Modules;
+using Sprk.Provisioning.ControlPlane.Repositories;
+
+namespace Sprk.Provisioning.ControlPlane.Api;
+
+/// <summary>
+/// L2 REST API endpoints under <c>/api/runs</c>. Maps 7 of the 8 L2 endpoints
+/// per spec §4.2; the read-only phase-logs endpoint lives in the sibling
+/// <see cref="RunLogsEndpoints"/> file.
+/// </summary>
+public static class RunsEndpoints
+{
+    /// <summary>Stable log-event prefix for the FR-24 clear-quarantine audit record.</summary>
+    public const string QuarantineClearedEventName = "QuarantineCleared";
+
+    /// <summary>
+    /// Downstream handler dispatched by <c>POST /api/runs</c> on run creation
+    /// and by <c>POST /api/runs/{id}/preflight</c>. H0 is the preflight-quota
+    /// probe per design.md §4.1 catalog.
+    /// </summary>
+    private const string InitialHandlerId = "H0";
+
+    /// <summary>
+    /// Handler identifier the resume + cancel + advance + clear-quarantine
+    /// endpoints use as their <c>HandlerId</c> tag on the enqueued envelope.
+    /// The state-reconciler (task 058) inspects the envelope's ApplicationProperties
+    /// to route to the correct in-flight handler; a stable per-action tag keeps
+    /// the dispatch loop readable.
+    /// </summary>
+    private const string ResumeActionId = "Resume";
+
+    private const string CancelActionId = "Cancel";
+    private const string GateAdvanceActionId = "GateAdvance";
+    private const string ClearQuarantineActionId = "ClearQuarantine";
+
+    /// <summary>
+    /// Serializer for the opaque <see cref="HandlerEnvelope.ParametersJson"/>
+    /// payload. camelCase parity with ServiceBusHandlerEnqueuer + Cosmos wire.
+    /// </summary>
+    private static readonly JsonSerializerOptions ParametersJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        WriteIndented = false,
+    };
+
+    /// <summary>Maps all seven <c>/api/runs</c> endpoints onto the application.</summary>
+    public static IEndpointRouteBuilder MapRunsEndpoints(this IEndpointRouteBuilder app)
+    {
+        ArgumentNullException.ThrowIfNull(app);
+
+        var group = app.MapGroup("/api/runs").WithTags("Runs");
+
+        // (1) POST /api/runs — create the run + enqueue H0 preflight.
+        group.MapPost("/", CreateRun)
+            .RequireAuthorization(AuthModule.Policies.Operator)
+            .WithName("CreateRun")
+            .WithSummary("Initialize a provisioning run against an environment record")
+            .WithDescription(
+                "Creates a new ProvisioningRun in Cosmos (partition /customerId, " +
+                "status=NotStarted) and enqueues H0 preflight via Service Bus. " +
+                "Returns 202 Accepted with Location header pointing at GET /api/runs/{id}.")
+            .Produces<CreateRunResponse>(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        // (2) POST /api/runs/{id}/preflight — re-run H0 preflight for an existing run.
+        group.MapPost("/{id}/preflight", RunPreflight)
+            .RequireAuthorization(AuthModule.Policies.Operator)
+            .WithName("RunPreflight")
+            .WithSummary("Enqueue H0 preflight for the specified run")
+            .WithDescription(
+                "Re-dispatches H0 preflight quota-probe against the existing " +
+                "ProvisioningRun. Idempotent — repeat calls are wire-level dedup'd " +
+                "on the deterministic Service Bus MessageId.")
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // (3) GET /api/runs/{id} — read current run state.
+        group.MapGet("/{id}", GetRun)
+            .RequireAuthorization(AuthModule.Policies.Reader)
+            .WithName("GetRun")
+            .WithSummary("Return current phase, completed phases, gate states, and quarantine info")
+            .WithDescription(
+                "Point-reads the ProvisioningRun from Cosmos. REQUIRES ?customerId=" +
+                " query parameter — §4D I3 forbids cross-partition reads.")
+            .Produces<ProvisioningRun>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // (4) POST /api/runs/{id}/gates/{gateId}/advance — operator advances a manual gate.
+        group.MapPost("/{id}/gates/{gateId}/advance", AdvanceGate)
+            .RequireAuthorization(AuthModule.Policies.Operator)
+            .WithName("AdvanceGate")
+            .WithSummary("Mark a manual gate as cleared (operator override)")
+            .WithDescription(
+                "Enqueues a gate-advance dispatch for the specified gate. The " +
+                "reconciler (task 058) picks up the envelope and applies the " +
+                "Verified transition to the ProvisioningRun's gateStates map.")
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // (5) POST /api/runs/{id}/resume — resume a failed run from failure point.
+        group.MapPost("/{id}/resume", ResumeRun)
+            .RequireAuthorization(AuthModule.Policies.Operator)
+            .WithName("ResumeRun")
+            .WithSummary("Resume a Failed run from its current failure point")
+            .WithDescription(
+                "Enqueues a resume-dispatch envelope; the reconciler picks up " +
+                "and re-runs the current phase. Idempotency handles duplicate " +
+                "resumes (3-level per ADR-004).")
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // (6) POST /api/runs/{id}/cancel — operator explicitly cancels a run.
+        group.MapPost("/{id}/cancel", CancelRun)
+            .RequireAuthorization(AuthModule.Policies.Operator)
+            .WithName("CancelRun")
+            .WithSummary("Cancel an in-progress run")
+            .WithDescription(
+                "Enqueues a cancel-dispatch envelope; the reconciler transitions " +
+                "the run to Cancelled and clears sprk_currentrunid on the " +
+                "registry row (task 059 concurrency guard).")
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        // (7) POST /api/runs/{id}/clear-quarantine — v3.2 §4C reversible clear.
+        group.MapPost("/{id}/clear-quarantine", ClearQuarantine)
+            .RequireAuthorization(AuthModule.Policies.Operator)
+            .WithName("ClearQuarantine")
+            .WithSummary("Clear a Quarantined run (v3.2 §4C) — REQUIRES ?reason= parameter")
+            .WithDescription(
+                "Explicitly releases a Quarantined run so a new run can start " +
+                "against the same customerId. REQUIRES ?reason= parameter (400 " +
+                "otherwise) and audit-logs the action + actor tid + oid to App " +
+                "Insights `traces` with message prefix 'QuarantineCleared:' " +
+                "(spec FR-24 acceptance).")
+            .Produces(StatusCodes.Status202Accepted)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        return app;
+    }
+
+    // -------------------------------------------------------------------------
+    // Endpoint handlers
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// POST /api/runs. Creates a new ProvisioningRun in Cosmos + enqueues H0
+    /// preflight via Service Bus. Returns 202 Accepted with Location header.
+    /// </summary>
+    private static async Task<IResult> CreateRun(
+        CreateRunRequest request,
+        IProvisioningRunRepository repository,
+        IHandlerEnqueuer enqueuer,
+        HttpContext httpContext,
+        ILogger<RunsMarker> logger,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(repository);
+        ArgumentNullException.ThrowIfNull(enqueuer);
+
+        if (request is null)
+        {
+            return BadRequest(httpContext, "Request body is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.CustomerId))
+        {
+            return BadRequest(httpContext, "customerId is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.EnvironmentId))
+        {
+            return BadRequest(httpContext, "environmentId is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.TenancyModel))
+        {
+            return BadRequest(httpContext, "tenancyModel is required.");
+        }
+        if (string.IsNullOrWhiteSpace(request.Profile))
+        {
+            return BadRequest(httpContext, "profile is required.");
+        }
+
+        var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
+        var now = DateTimeOffset.UtcNow;
+
+        var run = new ProvisioningRun
+        {
+            RunId = runId,
+            CustomerId = request.CustomerId,
+            EnvironmentId = request.EnvironmentId,
+            TenancyModel = request.TenancyModel,
+            Profile = request.Profile,
+            Status = RunStatus.NotStarted,
+            CreatedOn = now,
+            Parameters = new RunParameters(),
+        };
+
+        // Copy non-secret parameters into the run. Cleartext secrets are
+        // structurally impossible on this endpoint — CreateRunRequest exposes
+        // NonSecret (Dictionary<string,string>) only; the KeyVaultSecretRef
+        // channel is populated by handlers (H3/H4) later in the DAG, never
+        // by the intake body.
+        if (request.NonSecretParameters is not null)
+        {
+            foreach (var kvp in request.NonSecretParameters)
+            {
+                run.Parameters.NonSecret[kvp.Key] = kvp.Value;
+            }
+        }
+
+        try
+        {
+            // §4D I3: repository requires customerId as first parameter — the
+            // shape prevents a cross-partition write by construction.
+            await repository.CreateRunAsync(run, cancellationToken).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException ex)
+        {
+            // 409 Conflict — a run with this id already exists in the partition.
+            // Extremely unlikely given the NewGuid — surfaces only on determined
+            // collision or replay attack.
+            logger.LogWarning(ex,
+                "CreateRun: id collision (customerId={CustomerId}, runId={RunId})",
+                run.CustomerId, run.RunId);
+            return Results.Problem(
+                statusCode: StatusCodes.Status409Conflict,
+                title: "Conflict",
+                detail: $"A run with id '{runId}' already exists.",
+                extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+        }
+
+        // Enqueue H0 preflight. Deterministic MessageId (FR-22 level-1) dedup's
+        // duplicate submissions on the wire.
+        var envelope = new HandlerEnvelope
+        {
+            HandlerId = InitialHandlerId,
+            RunId = runId,
+            CustomerId = request.CustomerId,
+            ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
+            {
+                CustomerId = request.CustomerId,
+                RunId = runId,
+                Action = "create-run",
+            }),
+            EnqueuedAt = now,
+        };
+        await enqueuer.EnqueueAsync(envelope, cancellationToken).ConfigureAwait(false);
+
+        var location = $"/api/runs/{runId}?customerId={Uri.EscapeDataString(request.CustomerId)}";
+        return Results.Accepted(location, new CreateRunResponse
+        {
+            RunId = runId,
+            CustomerId = request.CustomerId,
+            Status = RunStatus.NotStarted.ToString(),
+            Location = location,
+        });
+    }
+
+    /// <summary>
+    /// POST /api/runs/{id}/preflight. Enqueues H0 preflight for an existing run.
+    /// </summary>
+    private static async Task<IResult> RunPreflight(
+        string id,
+        string? customerId,
+        IProvisioningRunRepository repository,
+        IHandlerEnqueuer enqueuer,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
+        {
+            return validationResult;
+        }
+
+        // Verify the run exists — 404 if not.
+        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (read is null)
+        {
+            return NotFound(httpContext, id, customerId!);
+        }
+
+        await enqueuer.EnqueueAsync(
+            new HandlerEnvelope
+            {
+                HandlerId = InitialHandlerId,
+                RunId = id,
+                CustomerId = customerId!,
+                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
+                {
+                    CustomerId = customerId!,
+                    RunId = id,
+                    Action = "preflight",
+                }),
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+    }
+
+    /// <summary>
+    /// GET /api/runs/{id}. Point-reads the run from Cosmos.
+    /// </summary>
+    private static async Task<IResult> GetRun(
+        string id,
+        string? customerId,
+        IProvisioningRunRepository repository,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
+        {
+            return validationResult;
+        }
+
+        // §4D I3: partition-key predicate enforced by construction.
+        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (read is null)
+        {
+            return NotFound(httpContext, id, customerId!);
+        }
+        return Results.Ok(read.Run);
+    }
+
+    /// <summary>
+    /// POST /api/runs/{id}/gates/{gateId}/advance.
+    /// </summary>
+    private static async Task<IResult> AdvanceGate(
+        string id,
+        string gateId,
+        string? customerId,
+        IProvisioningRunRepository repository,
+        IHandlerEnqueuer enqueuer,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
+        {
+            return validationResult;
+        }
+        if (string.IsNullOrWhiteSpace(gateId))
+        {
+            return BadRequest(httpContext, "gateId is required.");
+        }
+
+        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (read is null)
+        {
+            return NotFound(httpContext, id, customerId!);
+        }
+
+        await enqueuer.EnqueueAsync(
+            new HandlerEnvelope
+            {
+                HandlerId = GateAdvanceActionId,
+                RunId = id,
+                CustomerId = customerId!,
+                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
+                {
+                    CustomerId = customerId!,
+                    RunId = id,
+                    Action = "gate-advance",
+                    GateId = gateId,
+                }),
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+    }
+
+    /// <summary>
+    /// POST /api/runs/{id}/resume.
+    /// </summary>
+    private static async Task<IResult> ResumeRun(
+        string id,
+        string? customerId,
+        IProvisioningRunRepository repository,
+        IHandlerEnqueuer enqueuer,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
+        {
+            return validationResult;
+        }
+
+        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (read is null)
+        {
+            return NotFound(httpContext, id, customerId!);
+        }
+
+        await enqueuer.EnqueueAsync(
+            new HandlerEnvelope
+            {
+                HandlerId = ResumeActionId,
+                RunId = id,
+                CustomerId = customerId!,
+                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
+                {
+                    CustomerId = customerId!,
+                    RunId = id,
+                    Action = "resume",
+                    CurrentPhase = read.Run.CurrentPhase,
+                }),
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+    }
+
+    /// <summary>
+    /// POST /api/runs/{id}/cancel.
+    /// </summary>
+    private static async Task<IResult> CancelRun(
+        string id,
+        string? customerId,
+        IProvisioningRunRepository repository,
+        IHandlerEnqueuer enqueuer,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
+        {
+            return validationResult;
+        }
+
+        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (read is null)
+        {
+            return NotFound(httpContext, id, customerId!);
+        }
+
+        await enqueuer.EnqueueAsync(
+            new HandlerEnvelope
+            {
+                HandlerId = CancelActionId,
+                RunId = id,
+                CustomerId = customerId!,
+                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
+                {
+                    CustomerId = customerId!,
+                    RunId = id,
+                    Action = "cancel",
+                }),
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+    }
+
+    /// <summary>
+    /// POST /api/runs/{id}/clear-quarantine. Reason parameter REQUIRED; the
+    /// clearing action is audit-logged to App Insights with actor tid + oid.
+    /// </summary>
+    private static async Task<IResult> ClearQuarantine(
+        string id,
+        string? customerId,
+        string? reason,
+        IProvisioningRunRepository repository,
+        IHandlerEnqueuer enqueuer,
+        HttpContext httpContext,
+        ILogger<RunsMarker> logger,
+        CancellationToken cancellationToken)
+    {
+        if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
+        {
+            return validationResult;
+        }
+        // FR-24 acceptance: reason MUST be present + non-empty; audit-log MUST
+        // NOT emit on the 400 path (only on the enqueue-successful path).
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            return BadRequest(httpContext, "reason is required (spec FR-24).");
+        }
+
+        var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (read is null)
+        {
+            return NotFound(httpContext, id, customerId!);
+        }
+
+        // Enqueue the clear-quarantine dispatch — the reconciler (task 061)
+        // applies the QuarantineState=Cleared transition + updates
+        // Quarantine.ClearedBy/ClearedAt.
+        await enqueuer.EnqueueAsync(
+            new HandlerEnvelope
+            {
+                HandlerId = ClearQuarantineActionId,
+                RunId = id,
+                CustomerId = customerId!,
+                ParametersJson = SerializeEnqueueParameters(new EnqueuePayload
+                {
+                    CustomerId = customerId!,
+                    RunId = id,
+                    Action = "clear-quarantine",
+                    Reason = reason,
+                }),
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        // FR-24 audit-log — structured record with stable prefix so a Kusto
+        // query can pivot on 'QuarantineCleared' independently of the general
+        // AuditableAction stream. The general AuditLogMiddleware (task 039)
+        // ALSO fires for this request; the two records complement (this one
+        // carries the reason + a distinct event name).
+        var actorTid = ExtractTenantId(httpContext.User);
+        var actorOid = ExtractObjectId(httpContext.User);
+        logger.LogInformation(
+            QuarantineClearedEventName + ": RunId={RunId} CustomerId={CustomerId} " +
+            "Reason={Reason} ActorTid={ActorTid} ActorOid={ActorOid} RequestId={RequestId}",
+            id,
+            customerId,
+            reason,
+            actorTid ?? string.Empty,
+            actorOid ?? string.Empty,
+            httpContext.TraceIdentifier);
+
+        return Results.Accepted($"/api/runs/{id}?customerId={Uri.EscapeDataString(customerId!)}");
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Validates the route id + customerId query parameter. Returns true when
+    /// both are non-empty; otherwise sets <paramref name="failure"/> to a 400
+    /// ProblemDetails result and returns false.
+    /// </summary>
+    private static bool TryValidateRouteAndPartition(
+        string id,
+        string? customerId,
+        HttpContext httpContext,
+        out IResult failure)
+    {
+        if (string.IsNullOrWhiteSpace(id))
+        {
+            failure = BadRequest(httpContext, "runId is required.");
+            return false;
+        }
+        if (string.IsNullOrWhiteSpace(customerId))
+        {
+            failure = BadRequest(httpContext,
+                "customerId query parameter is required (§4D I3 forbids cross-partition reads).");
+            return false;
+        }
+        failure = Results.Empty;
+        return true;
+    }
+
+    private static IResult BadRequest(HttpContext httpContext, string detail) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status400BadRequest,
+            title: "Bad Request",
+            detail: detail,
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
+            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+
+    private static IResult NotFound(HttpContext httpContext, string runId, string customerId) =>
+        Results.Problem(
+            statusCode: StatusCodes.Status404NotFound,
+            title: "Not Found",
+            detail: $"ProvisioningRun '{runId}' not found in customer partition '{customerId}'.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+
+    private static string SerializeEnqueueParameters(EnqueuePayload payload) =>
+        JsonSerializer.Serialize(payload, ParametersJsonOptions);
+
+    // Claim extraction — mirrors AuditLogMiddleware.ExtractTenantId/ExtractObjectId
+    // so the QuarantineCleared record + the general AuditableAction record use
+    // identical actor identities without cross-class coupling.
+    internal static string? ExtractTenantId(ClaimsPrincipal? user) =>
+        user?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+            ?? user?.FindFirst("tid")?.Value;
+
+    internal static string? ExtractObjectId(ClaimsPrincipal? user) =>
+        user?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+            ?? user?.FindFirst("oid")?.Value;
+
+    /// <summary>
+    /// DTO for the POST /api/runs request body. Non-secret parameters only —
+    /// the KeyVaultSecretRef channel is populated by handlers (H3/H4) later
+    /// in the DAG, never by intake body.
+    /// </summary>
+    public sealed record CreateRunRequest
+    {
+        [JsonPropertyName("customerId")]
+        public string CustomerId { get; init; } = string.Empty;
+
+        [JsonPropertyName("environmentId")]
+        public string EnvironmentId { get; init; } = string.Empty;
+
+        /// <summary>Values: <c>Model1Shared</c> | <c>Model2Dedicated</c> (per <see cref="ProvisioningRun.TenancyModel"/>).</summary>
+        [JsonPropertyName("tenancyModel")]
+        public string TenancyModel { get; init; } = string.Empty;
+
+        /// <summary>Values: <c>spaarke-hosted-model2</c> | <c>customer-owned-model2</c> | <c>spaarke-hosted-model1-trial</c>.</summary>
+        [JsonPropertyName("profile")]
+        public string Profile { get; init; } = string.Empty;
+
+        /// <summary>Optional non-secret parameter map (target-env, feature flags, etc.).</summary>
+        [JsonPropertyName("nonSecretParameters")]
+        public IDictionary<string, string>? NonSecretParameters { get; init; }
+    }
+
+    /// <summary>Response body for POST /api/runs — the 202 Accepted payload.</summary>
+    public sealed record CreateRunResponse
+    {
+        [JsonPropertyName("runId")]
+        public string RunId { get; init; } = string.Empty;
+
+        [JsonPropertyName("customerId")]
+        public string CustomerId { get; init; } = string.Empty;
+
+        [JsonPropertyName("status")]
+        public string Status { get; init; } = string.Empty;
+
+        [JsonPropertyName("location")]
+        public string Location { get; init; } = string.Empty;
+    }
+
+    /// <summary>
+    /// Serialized shape of the ParametersJson body enqueued via IHandlerEnqueuer.
+    /// The reconciler (task 058) + downstream handlers deserialize this. Optional
+    /// fields are omitted when null (see <see cref="ParametersJsonOptions"/>).
+    /// </summary>
+    internal sealed record EnqueuePayload
+    {
+        [JsonPropertyName("customerId")]
+        public string CustomerId { get; init; } = string.Empty;
+
+        [JsonPropertyName("runId")]
+        public string RunId { get; init; } = string.Empty;
+
+        [JsonPropertyName("action")]
+        public string Action { get; init; } = string.Empty;
+
+        [JsonPropertyName("gateId")]
+        public string? GateId { get; init; }
+
+        [JsonPropertyName("currentPhase")]
+        public string? CurrentPhase { get; init; }
+
+        [JsonPropertyName("reason")]
+        public string? Reason { get; init; }
+    }
+}
+
+/// <summary>
+/// Marker type used solely so <see cref="ILogger{TCategoryName}"/> resolves
+/// with a stable category name for RunsEndpoints — <c>ILogger&lt;RunsEndpoints&gt;</c>
+/// would work but <see cref="RunsEndpoints"/> is a static class (illegal as a
+/// generic argument in some analyzer configurations). Kept internal.
+/// </summary>
+internal sealed class RunsMarker { }

@@ -114,7 +114,7 @@ Two additional corrections independently caught by task-gen subagents:
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 057 | ⏸ | Implement L2 REST endpoints (9 endpoints per §4.2) with `Operator`/`Reader` app-roles | FULL | opus / high | none (dep 036, 042) | 036, 042 |
+| 057 | ✅ | Implement L2 REST endpoints (9 endpoints per §4.2) with `Operator`/`Reader` app-roles | FULL | opus / high | none (dep 036, 042) | 036, 042 |
 | 058 | ⏸ | Implement state-reconciler `BackgroundService` (5s polling + DAG advancement) | FULL | opus / xhigh | none (dep 037, 038, 057) | 037, 038, 057 |
 | 059 | ⏸ | Implement I5 concurrency guard (optimistic upsert `sprk_currentrunid`; 409 conflict) | FULL | sonnet / xhigh | none (dep 023, 058) | 023, 058 |
 | 060 | ⏸ | Implement I6 crash recovery (startup scan orphaned `Running`/`WaitingOnGate` runs) | FULL | sonnet / xhigh | none (dep 058, 059) | 058, 059 |

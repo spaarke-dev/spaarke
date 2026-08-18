@@ -50,6 +50,7 @@
 // Sprk.Bff.Api assemblies from here).
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Api;
 using Sprk.Provisioning.ControlPlane.Endpoints;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
@@ -805,6 +806,45 @@ app.UseAuthorization();
 
 // ---- Endpoints ----
 app.MapHealthEndpoints();
+
+// Task 057 (Wave C5): the real L2 REST surface — 8 of the 9 endpoints per
+// spec.md §4.2 (POST /api/runs, POST /api/runs/{id}/preflight, GET /api/runs/{id},
+// POST /api/runs/{id}/gates/{gateId}/advance, POST /api/runs/{id}/resume,
+// POST /api/runs/{id}/cancel, POST /api/runs/{id}/clear-quarantine, and
+// GET /api/runs/{id}/phases/{phaseId}/logs). The 9th endpoint —
+// POST /api/onboarding/consent-callback — is BFF-side (D18 Anonymous+HMAC)
+// and is not part of this L2 project's surface.
+//
+// Placement Justification (CLAUDE.md §10): the endpoint layer lives in L2
+// (not BFF) per spec §5.2 / D3 / D8 / D12; it consumes NO AI-internal types
+// (ADR-013 forcing-function rule — no IActionResolver, IActionRunner,
+// IOpenAiClient, IPlaybookService injection). Uses IProvisioningRunRepository
+// (task 037) + IHandlerEnqueuer (task 038); no BFF-facade dependencies.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-004 (Path A per spec.md ADR Tensions row 1): the L2 endpoint layer
+//     is part of the documented custom state machine — mutating endpoints
+//     enqueue via Service Bus + return 202 <100ms; handlers themselves remain
+//     IJobHandler-shape (proven with the 19 handler impls in Handlers/).
+//   - ADR-028 UAMI outbound: JWT bearer via Microsoft.Identity.Web (AuthModule),
+//     bound to audience api://spaarke-provisioning-controlplane-{env};
+//     Operator + Reader app-role policies from configuration.
+//   - §4D I3 partition-key discipline: every /api/runs/{id}/* endpoint that
+//     identifies a run REQUIRES the ?customerId= query parameter (or, for
+//     POST /api/runs, the JSON body); IProvisioningRunRepository enforces the
+//     partition-key predicate by construction (interface shape).
+//   - spec FR-24: POST /api/runs/{id}/clear-quarantine requires ?reason=
+//     (400 if missing); emits a structured "QuarantineCleared:" audit record
+//     with actor tid + oid + reason + runId to App Insights `traces` via
+//     ILogger + the OpenTelemetry -> Azure Monitor pipeline (task 039).
+//
+// State-transition scope: this task's endpoints WRITE new runs (POST) + READ
+// runs (GET); everything else ENQUEUES. Actual state-machine transitions
+// (Running -> Failed, Quarantined -> Cleared, DAG advancement) are owned by
+// tasks 058 (reconciler) / 059 (I5 concurrency) / 060 (I6 crash recovery) /
+// 061 (§4C rollback).
+app.MapRunsEndpoints();
+app.MapRunLogsEndpoints();
 
 app.Run();
 

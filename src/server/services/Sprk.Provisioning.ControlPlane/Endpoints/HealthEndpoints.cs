@@ -1,37 +1,36 @@
 // -----------------------------------------------------------------------------
 // HealthEndpoints.cs
 //
-// L2 CONTROL-PLANE PLACEHOLDER ENDPOINTS (Wave C3 scaffold).
+// L2 CONTROL-PLANE HEALTH endpoint (originally Wave C3 scaffold, task 036).
 //
-// SCOPE (task 036 ONLY):
-//   - GET  /ping         — anonymous, returns 200 "ok". Smoke-tests routing
-//                          + hosting; not a full /healthz (task 037+ adds a
-//                          real Cosmos + Service Bus health-check surface).
-//   - POST /api/runs     — Operator policy required (401 without bearer;
-//                          403 with a non-Operator token; 501 Not Implemented
-//                          with a valid Operator token). Placeholder to prove
-//                          the auth pipeline wiring end-to-end. The real
-//                          handler that enqueues Service Bus messages + writes
-//                          Cosmos state lands in Wave C5 (spec FR-21/FR-22).
+// SCOPE:
+//   - GET  /ping — anonymous, returns 200 "ok". Smoke-tests routing +
+//                  hosting; not a full /healthz (a real Cosmos + Service Bus
+//                  health probe surface can layer on in a future task).
 //
-// FR-20 acceptance mapping (verified by these endpoints):
-//   - "L3 skill can auth via az account get-access-token"          → POST /api/runs 501 with valid Operator token.
-//   - "Operator-role required for mutating endpoints returns 403"  → POST /api/runs 403 with valid Reader-only token.
-//   - Standard bearer flow                                          → POST /api/runs 401 without any bearer.
+// HISTORY (task 057 — Wave C5, 2026-08-17):
+//   The original scaffold also mapped a POST /api/runs PLACEHOLDER that
+//   returned 501 Not Implemented under the Operator policy. Task 057 replaces
+//   that with the real L2 REST surface (RunsEndpoints.MapRunsEndpoints +
+//   RunLogsEndpoints.MapRunLogsEndpoints under /api/runs). The placeholder is
+//   REMOVED here to avoid a duplicate-route registration collision with the
+//   real POST /api/runs — ASP.NET Core throws AmbiguousMatchException at
+//   request-dispatch time when two endpoints share the same method + template.
+//
+// FR-20 acceptance mapping is now proven by the REAL endpoints in
+// RunsEndpoints.cs (401 no-bearer / 403 wrong-role / 202 valid-Operator).
 // -----------------------------------------------------------------------------
-
-using Sprk.Provisioning.ControlPlane.Modules;
 
 namespace Sprk.Provisioning.ControlPlane.Endpoints;
 
 /// <summary>
-/// Wave C3 placeholder endpoints. Task 037 replaces <c>/ping</c> with a real
-/// <c>/healthz</c> surface; Wave C5 replaces <c>POST /api/runs</c> with the
-/// initial-provisioning enqueue handler.
+/// L2 health-surface endpoint (currently just /ping — anonymous smoke test).
+/// The real POST /api/runs handler moved to <see cref="Api.RunsEndpoints"/>
+/// in Wave C5 (task 057).
 /// </summary>
 public static class HealthEndpoints
 {
-    /// <summary>Maps the two placeholder endpoints onto the application.</summary>
+    /// <summary>Maps the /ping smoke-test endpoint onto the application.</summary>
     public static WebApplication MapHealthEndpoints(this WebApplication app)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -44,17 +43,6 @@ public static class HealthEndpoints
             .AllowAnonymous()
             .WithName("Ping")
             .WithTags("Health");
-
-        // Placeholder mutating endpoint. Auth pipeline runs BEFORE the handler
-        // body:
-        //   - No bearer                    → 401 (JwtBearer authn middleware)
-        //   - Bearer without Operator role → 403 (Operator policy)
-        //   - Bearer with Operator role    → handler runs → 501 Not Implemented
-        // Wave C5 (task 041+) replaces the body with the real enqueue path.
-        app.MapPost("/api/runs", () => Results.StatusCode(StatusCodes.Status501NotImplemented))
-            .RequireAuthorization(AuthModule.Policies.Operator)
-            .WithName("CreateRunPlaceholder")
-            .WithTags("Runs");
 
         return app;
     }
