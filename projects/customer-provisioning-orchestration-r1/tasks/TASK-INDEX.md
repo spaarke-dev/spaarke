@@ -165,7 +165,7 @@ Two additional corrections independently caught by task-gen subagents:
 | 085 | ✅ | Alias collapse for AI Search key with BINDING pre-check protocol (§7.9) | FULL | sonnet / xhigh | none (dep 084) | 084 |
 | 086 | ✅ | IaC alignment — Bicep secret names + BFF app-setting keys to canonical | FULL | sonnet / high | none (dep 084, 085) | 084, 085 |
 | 087 | ✅ | Implement `/config.json` runtime endpoint for external-spa + code-pages (parallel-safe:false — external-spa surface overlap) | FULL | sonnet / xhigh | none | 086 |
-| 088 | ⏸ | Coordinate `.github/workflows/**` gate wiring via PR to `ci-cd-unit-test-remediation-r1` — parallel-safe:false | STANDARD | sonnet / medium | none (dep 064-067 + 084-087) | 064, 065, 066, 067, 084, 085, 086, 087 |
+| 088 | ✅ | Coordinate `.github/workflows/**` gate wiring via PR to `ci-cd-unit-test-remediation-r1` (umbrella spec notes/phase-h-ci-wiring-coord-pr.md: naming-conformance + I1-I5 ArchTests + nightly Graph parity; consolidates 067's partial as §3 detail source) — parallel-safe:false | STANDARD | sonnet / medium | none (dep 064-067 + 084-087) | 064, 065, 066, 067, 084, 085, 086, 087 |
 
 ### Phase F — E2E Acceptance (1 task)
 

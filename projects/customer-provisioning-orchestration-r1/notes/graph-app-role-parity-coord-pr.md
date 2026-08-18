@@ -1,11 +1,13 @@
 # Coord-PR Spec — Nightly Graph App-Role Parity CI Wiring
 
+> **Status (2026-08-18)**: **PRESERVED AS DETAIL SOURCE** for §3 of the umbrella coord PR at [`phase-h-ci-wiring-coord-pr.md`](./phase-h-ci-wiring-coord-pr.md) (r1 task 088). This file is the canonical source for the nightly-Graph-parity YAML + secrets contract + failure modes + rollback. The umbrella spec bundles this §3 with §1 (naming-conformance) + §2 (I1–I5 ArchTests) into a single coord PR to `ci-cd-unit-test-remediation-r1`. Ci-cd-r1 reviewers should read the umbrella FIRST for the overall context, then this file for §3 detail.
+>
 > **Author**: customer-provisioning-orchestration-r1 task 067 (Wave C6 Batch 4E)
 > **Date**: 2026-08-18
 > **Target worktree**: `ci-cd-unit-test-remediation-r1` (28-day owner of `.github/workflows/**`)
 > **Resolution path**: CLAUDE.md §6.5 **Path A** (documented project-scoped deferral) — matches the r3 precedent set by [`projects/code-quality-and-assurance-r3/notes/task-042-063-ci-gate-wiring-deferral.md`](../../code-quality-and-assurance-r3/notes/task-042-063-ci-gate-wiring-deferral.md)
 > **Coord contract**: r1 authors + compile-verifies the test project in isolation; ci-cd-r1 applies the workflow-file diff below in a coordinated PR after `/conflict-check`.
-> **Consumed by**: r1 task 088 (Phase H CI-workflows coord PR) — 088 lists 067 in its coord-artifact enumeration.
+> **Consumed by**: r1 task 088 (Phase H CI-workflows coord PR) — 088 references this file as its §3 detail source (see 088 spec §3.1).
 
 ---
 
