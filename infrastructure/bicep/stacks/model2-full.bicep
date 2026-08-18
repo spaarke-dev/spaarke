@@ -43,6 +43,9 @@ param communicationDefaultMailbox string = ''
 @description('Display name for the default communication mailbox')
 param communicationDefaultDisplayName string = ''
 
+@description('BFF User-Assigned Managed Identity name (T5 structural fix per task 029; ONE stable identity bound to prod + staging slots). Convention: sprk-{env}-{customerId}-uami per uami.bicep header.')
+param bffUamiName string = 'sprk-${environment}-${customerId}-uami'
+
 @description('Tags applied to all resources')
 param tags object = {
   customer: customerId
@@ -140,6 +143,24 @@ module serviceBus '../modules/service-bus.bicep' = {
 }
 
 // ============================================================================
+// USER-ASSIGNED MANAGED IDENTITY (T5 structural fix per task 029)
+// ONE stable per-customer identity bound to prod + staging slots of the BFF
+// App Service so slot-swap does NOT rotate downstream KV / Storage / Cosmos /
+// Graph / Dataverse App-User grants. Declared BEFORE storage + bffApi because
+// both consume `bffUami.outputs.principalId` for RBAC.
+// ============================================================================
+
+module bffUami '../modules/uami.bicep' = {
+  scope: rg
+  name: 'uami-${baseName}'
+  params: {
+    name: bffUamiName
+    location: location
+    tags: tags
+  }
+}
+
+// ============================================================================
 // STORAGE ACCOUNT (Temp files, document processing)
 // ============================================================================
 
@@ -153,7 +174,9 @@ module storage '../modules/storage-account.bicep' = {
     containers: ['temp-files', 'document-processing', 'ai-chunks']
     disableSharedKeyAccess: enableVnet  // Only disable shared keys when VNet is active (RBAC ready)
     allowedSubnetId: enableVnet ? vnet.outputs.snetAppId : ''
-    appServicePrincipalId: bffApi.outputs.appServicePrincipalId
+    // T5 structural fix: grant Storage Blob Data Contributor to the stable
+    // per-customer UAMI (task 029) rather than the removed SA-MI principal.
+    appServicePrincipalId: bffUami.outputs.principalId
     tags: tags
   }
 }
@@ -181,8 +204,10 @@ module bffApi '../modules/app-service.bicep' = {
     appServiceName: '${baseName}-api'
     appServicePlanId: appServicePlan.outputs.planId
     location: location
-    keyVaultName: keyVault.outputs.keyVaultName
-    enableManagedIdentity: true
+    // T5 structural fix (task 029): UAMI-only, no SA-MI. keyVaultName +
+    // enableManagedIdentity params were removed from app-service.bicep;
+    // KV Secrets User grant to the UAMI is emitted by kvRbacAppService below.
+    userAssignedIdentityResourceId: bffUami.outputs.id
     vnetIntegrationSubnetId: enableVnet ? vnet.outputs.snetAppId : ''
     appSettings: {
       // Dataverse configuration
@@ -241,7 +266,10 @@ module kvRbacAppService '../modules/role-assignment-keyvault.bicep' = {
   name: 'kvRbac-${baseName}'
   params: {
     keyVaultName: keyVault.outputs.keyVaultName
-    principalId: bffApi.outputs.appServicePrincipalId
+    // T5 structural fix (task 029): grant KV Secrets User to the stable UAMI
+    // (survives slot swaps + App Service delete/recreate) rather than the
+    // removed SA-MI principal.
+    principalId: bffUami.outputs.principalId
     roleDefinitionId: keyVaultSecretsUserRoleId
     principalType: 'ServicePrincipal'
   }
@@ -259,7 +287,9 @@ module membershipTopic '../modules/membership-topic.bicep' = {
   name: 'membershipTopic-${baseName}'
   params: {
     serviceBusNamespaceName: serviceBus.outputs.serviceBusName
-    bffPrincipalId: bffApi.outputs.appServicePrincipalId
+    // T5 structural fix (task 029): grant Sender/Receiver to the stable UAMI
+    // rather than the removed BFF SA-MI principal.
+    bffPrincipalId: bffUami.outputs.principalId
   }
 }
 
@@ -468,7 +498,12 @@ output location string = location
 
 // API
 output apiUrl string = bffApi.outputs.appServiceUrl
-output apiPrincipalId string = bffApi.outputs.appServicePrincipalId
+// T5 structural fix (task 029): apiPrincipalId is the stable UAMI principal,
+// not the removed SA-MI. Downstream consumers (App User registration, Graph
+// app-role grants) MUST bind to this stable principalId.
+output apiPrincipalId string = bffUami.outputs.principalId
+output apiUamiResourceId string = bffUami.outputs.id
+output apiUamiClientId string = bffUami.outputs.clientId
 
 // Key Vault
 output keyVaultName string = keyVault.outputs.keyVaultName

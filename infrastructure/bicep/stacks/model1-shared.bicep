@@ -110,6 +110,9 @@ param sharedDocIntelligenceName string = '${sharedBaseName}-docintel'
 @description('SHARED PLATFORM — BFF App Service name (single multi-tenant deployment serving all Model 1 tenants; per-request tenant context resolved from tid claim per §4D I5).')
 param sharedBffAppServiceName string = '${sharedBaseName}-api'
 
+@description('SHARED PLATFORM — UAMI name for the shared multi-tenant BFF App Service (T5 structural fix per task 029; ONE stable identity bound to prod + staging slots so slot-swap does NOT rotate downstream RBAC / Dataverse App User / Graph app-role grants). Convention: sprk-{env}-shared-bff-uami.')
+param sharedBffUamiName string = 'sprk-${environment}-shared-bff-uami'
+
 @description('SHARED PLATFORM — App Service Plan SKU (fixed-floor lever per §3A A1).')
 @allowed(['S1', 'S2', 'S3', 'P1v3', 'P2v3', 'P3v3'])
 param sharedAppServicePlanSku string = 'S1'
@@ -391,6 +394,26 @@ module sharedDocIntelligence '../modules/doc-intelligence.bicep' = {
 }
 
 // ============================================================================
+// SHARED PLATFORM — BFF UAMI (T5 structural fix per task 029)
+// ONE stable identity for the shared multi-tenant BFF App Service. Bound to
+// prod + staging slots so slot-swap does NOT rotate downstream RBAC /
+// Dataverse App User / Graph app-role grants. Per-tenant UAMIs (perTenantUami
+// below) are still emitted for per-tenant KV secret access + per-tenant Graph
+// app-role parity + per-tenant Dataverse App User registration — this shared
+// UAMI is a DIFFERENT concern (the BFF process identity).
+// ============================================================================
+
+module sharedBffUami '../modules/uami.bicep' = {
+  scope: sharedRg
+  name: 'uami-shared-bff'
+  params: {
+    name: sharedBffUamiName
+    location: location
+    tags: sharedTags
+  }
+}
+
+// ============================================================================
 // SHARED PLATFORM — BFF APP SERVICE (single multi-tenant deployment)
 // The multi-tenant BFF resolves per-request tenant context from the caller's
 // AAD tid claim (§4D I5). Per-tenant secrets (Dataverse URL, SPE container ID)
@@ -404,8 +427,13 @@ module sharedBffApi '../modules/app-service.bicep' = {
     appServiceName: sharedBffAppServiceName
     appServicePlanId: sharedAppServicePlan.outputs.planId
     location: location
-    keyVaultName: sharedKeyVault.outputs.keyVaultName
-    enableManagedIdentity: true
+    // T5 structural fix (task 029): UAMI-only, no SA-MI. keyVaultName +
+    // enableManagedIdentity params were removed from app-service.bicep.
+    // KV Secrets User grant to the shared BFF UAMI is a follow-on concern
+    // (parallel to the per-tenant Data-plane RBAC deferral noted below); the
+    // shared KV was previously granted to the removed SA-MI, which is why the
+    // legacy `keyVaultName` param was here.
+    userAssignedIdentityResourceId: sharedBffUami.outputs.id
     appSettings: {
       // Multi-tenant mode marker consumed by BFF at boot for per-request
       // tenant-context resolution (§4D I5).
@@ -573,7 +601,11 @@ output sharedEnvironment string = environment
 
 // Shared BFF endpoint (multi-tenant)
 output sharedApiUrl string = sharedBffApi.outputs.appServiceUrl
-output sharedApiPrincipalId string = sharedBffApi.outputs.appServicePrincipalId
+// T5 structural fix (task 029): sharedApiPrincipalId is the stable UAMI
+// principal, not the removed SA-MI. Downstream consumers MUST bind here.
+output sharedApiPrincipalId string = sharedBffUami.outputs.principalId
+output sharedApiUamiResourceId string = sharedBffUami.outputs.id
+output sharedApiUamiClientId string = sharedBffUami.outputs.clientId
 output sharedAppServicePlanId string = sharedAppServicePlan.outputs.planId
 
 // Shared KV
