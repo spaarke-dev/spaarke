@@ -1,7 +1,7 @@
 # Current Task State — Smart To Do R5
 
-> **Last Updated**: 2026-08-17 (context-handoff — widget⇄Code Page unification awaiting UAT)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5`, all work committed+pushed+on master through **`ce84a0436`**. Working tree clean.
+> **Last Updated**: 2026-08-17 (checkpoint — UAT round 2 fixes deployed, awaiting re-UAT)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5` @ **`904e216e5`** (pushed; NOT yet on master — held pending re-UAT). Working tree clean (except `.husky/_/*` env artifacts).
 
 ---
 
@@ -9,10 +9,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Project CLOSED 2026-08-17 (090 ✅). Now in a **post-close enhancement stream**: **SmartTodo widget ⇄ Code Page UNIFICATION** (operator: "a code page and its widget must use shared-lib components"). **Awaiting operator UAT** after the latest deploy. |
-| **Status** | All committed+pushed+on master through **`ce84a0436`** (HEAD on origin/master; master since advanced +27 via other projects — MY work is safely on master). Working tree clean. Both code pages deployed to spaarkedev1: `sprk_spaarkeai` (widget) + `sprk_smarttodo` (Code Page). |
-| **Active task** | **Widget = Code Page unification — awaiting UAT, then fix what it surfaces.** |
-| **Next Action** | Operator UATs the widget in the SpaarkeAi workspace (hard-refresh). Verify: toolbar/cards/search/selection-Open now match the Code Page. **Then**: (a) if "+ New Task" doesn't open the OOB form → fix host `onAddTodo` wiring; (b) if operator wants TRUE 100% → do the **body reconciliation** (unify the two `SmartToDo` bodies — see below). |
+| **Phase** | Project CLOSED 2026-08-17 (090 ✅). **Post-close UAT stream**: operator ran UAT, filed **6 items** (2026-08-17). Round-2 fixes done + deployed; awaiting re-UAT. |
+| **Status** | Branch pushed @ `904e216e5` (2 UAT commits + master merge, +35 from other projects). **Both code pages redeployed to spaarkedev1**: `sprk_smarttodo` (2.0MB) + `sprk_spaarkeai` (5.7MB), published. **NOT merged to master yet** — holding until re-UAT confirms. |
+| **Active task** | **UAT round 2 — 3 of 6 items shipped; 3 pending operator input.** |
+| **Next Action** | Operator re-UATs #4/#6/#1 (hard-refresh both surfaces). **Pending operator input**: #2 needs the "member group" definition (then scope a plugin task); #3 = Dataverse form tab-label toggle (offer to do via MCP/maker); #1 widget-wizard path (CreateTodoWizard) default is a small follow-up. |
+
+### 🧪 UAT ROUND 2 (2026-08-17) — 6 items, status
+1. **#1 default Assigned To → current user's contact** — ✅ DONE (Code Page "+ New Task" OOB form). `SmartTodoApp` resolves `useCurrentContactId` → `launchNewTaskCreateForm(…, {contactId,contactName})` → three-key `sprk_assignedto`/…name/…type='contact' default. Field Mapping Framework does NOT apply. +3 tests (22 pass). **Widget "+ New Task" uses CreateTodoWizard (separate path) — assignee-default there is a noted follow-up.**
+2. **#2 parent-team members can access child To Dos** — ⏸️ PENDING. Explained access-team-share to operator; needs the **"member group" definition** (owning team? access team? participants subgrid?). Server-side plugin → its own task. Security blast radius.
+3. **#3 hide "General" tab title on To Do main form** — ⏸️ Dataverse form edit (tab → uncheck "Show tab label"). Form XML NOT in repo (live-configured). Offered to do via MCP/maker roundtrip OR operator toggles. (Distinct from the won't-do 032 form-HEADER hide.)
+4. **#4 header single row** — ✅ DONE + deployed. `Header.tsx`: title + Filter/+New Task/⋮ consolidated onto ONE row (reverses 2026-06-19 two-row split). Shared → both surfaces.
+5. **#5 flag icon = priority** — ✅ ANSWERED (no change). `Flag16Filled` colored by `sprk_priority` (red Urgent/orange High/green Medium/gray Low; none when unset). `derivePriorityGlyph`.
+6. **#6 "[3d]" on a task due today** — ✅ DONE + deployed. `todoScoring.ts::computeDueLabel` now emits a real calendar-day countdown ("Overdue"/"Today"/"{n}d") instead of the tier name; colour tiers unchanged. Also fixed date-only (`YYYY-MM-DD`) parse → LOCAL midnight (was UTC → day-early in western TZ). Mirrored into Code Page `dueLabelUtils.ts` (List/Dismissed). Both cards import the shared util → both surfaces fixed. 68 shared-lib tests pass.
+
+**Commits**: `Header+todoScoring` (shared, #4+#6) → `newTaskLauncher+SmartTodoApp+dueLabelUtils` (code page, #1+#6-mirror). Deploy via `scripts/Deploy-SmartTodo.ps1` + `scripts/Deploy-SpaarkeAi.ps1` (Web API PATCH `content` + PublishXml; `-DataverseUrl https://spaarkedev1.crm.dynamics.com`; `az`-token, pac profile [3] spaarkedev1).
 
 ### 🔗 UNIFICATION WORK — what's DONE + what REMAINS (this enhancement stream, 2026-08-17)
 **Principle (operator)**: a code page and its corresponding widget MUST compose the same shared-lib components. Root cause was divergence: the Code Page (`src/solutions/SmartTodo/`) and the workspace widget (`SmartTodoWidget` in `@spaarke/smart-todo-components`) reimplemented the same UI.
