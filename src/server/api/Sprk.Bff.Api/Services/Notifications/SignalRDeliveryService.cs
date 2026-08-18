@@ -218,6 +218,17 @@ public class SignalRDeliveryService
             throw new InvalidOperationException(
                 "Azure SignalR negotiation returned no Url/AccessToken; cannot mint client connection info.");
         }
+        // UAT-10 (2026-08-18) diagnostic hardening: the BFF mints the token locally from the configured
+        // connection string, so a negotiate SUCCESS here still yields a client-side SDK 401 when the Azure
+        // SignalR SERVICE rejects the token (connection-string AccessKey drift, wrong Endpoint, or a resource
+        // not in Serverless mode). Log the RESOLVED endpoint HOST (never the key or token) at Information so
+        // that env/config drift is diagnosable from server logs instead of only visible as a client 401.
+        var endpointHost = Uri.TryCreate(negotiation.Url, UriKind.Absolute, out var negUri) ? negUri.Host : "(unparseable)";
+        _logger.LogInformation(
+            "SignalR negotiate: minted client connection info for oid={UserOid} against endpoint host {EndpointHost}. " +
+            "A subsequent client-side 401 with a 200 here means the SignalR SERVICE rejected the token — verify the " +
+            "Notifications:SignalR connection-string AccessKey/Endpoint matches this resource and the resource is in Serverless mode.",
+            userOid, endpointHost);
         return new SignalRConnectionInfo(negotiation.Url, negotiation.AccessToken);
     }
 
