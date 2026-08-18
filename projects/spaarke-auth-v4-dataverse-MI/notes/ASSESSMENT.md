@@ -113,8 +113,62 @@ OAuth-standard confidential secret for OBO) is exactly the question this project
 - If it proceeds, it is an **ADR-028 amendment + staged OBO credential migration**, per env, with slot-based
   rollout and explicit rollback — not a quick change.
 
-## 8. Evidence pointers
+## 9. Broader secret inventory — other auth issues to fold into this project's research
 
+`BFF-API-ClientSecret` (OBO) is **not the only** secret-based credential. A true "zero-secret BFF" (if that is the
+goal) must reckon with all of these; at minimum they belong in this project's research scope:
+
+| Credential | Where | Type today | MI/secret-free candidate? |
+|---|---|---|---|
+| **`BFF-API-ClientSecret`** (= AzureAd/API_CLIENT/Dataverse ClientSecret) | Graph OBO + Dataverse OBO (`GraphClientFactory`, `DataverseAccessDataSource`, `DataverseUserClient`, `DataverseWebApiClient`) | client secret | MI-FIC or cert (the core of this project) |
+| **`PowerBi:ClientSecret`** | `ReportingEmbedService.cs:80`, `ReportingProfileManager.cs:77` (`WithClientSecret`), `[Required]` | **separate** client secret | Power BI SP → MI/FIC feasibility TBD |
+| **`AgentToken:ClientSecret`** | `AgentTokenService.cs:51` (`WithClientSecret`), `[Required]` | **separate** client secret | MI/FIC feasibility TBD |
+| **`AzureOpenAI:ApiKey`** | `AiModule.cs:122` (`ApiKeyCredential`) | API key — the ADR-028 documented **MI-401 exception** for AIServices-kind | **re-test**: has Microsoft fixed the AIServices MI 401 since? If so, drop the key |
+| **CIAM Graph app-only** | `CiamGraphClientFactory.cs:131` (`WithCertificate`) | **certificate** (KV) — already secret-free | ✅ **PRECEDENT**: cert-based confidential auth already works in this codebase |
+
+**Issues to raise for the project:**
+1. **Scope decision — one secret or all of them?** "Zero-secret" only lands if PowerBi + AgentToken (+ the OpenAI
+   key) are also addressed. Decide whether this project is "OBO/BFF secret only" or "eliminate all BFF secrets."
+2. **The CIAM certificate is a working precedent** for the §6-Q5 "MI-FIC vs certificate" decision — cert-based
+   confidential auth is already proven in `CiamGraphClientFactory`. That may make **certificate** the lower-risk,
+   already-validated choice over MI-FIC.
+3. **Re-evaluate the AzureOpenAI MI-401 exception** — it may no longer be needed (Microsoft may have fixed the
+   AIServices-kind MI issue); if so, that's a quick secret elimination independent of OBO.
+4. **Unify the confidential-credential pattern** — five confidential clients each roll their own credential
+   handling (Graph OBO, Dataverse OBO, PowerBi, AgentToken, CIAM). A single injected "confidential credential
+   provider" (MI-FIC or cert) would make secret elimination systematic instead of per-call-site.
+5. **Local-dev auth story** — removing the ClientSecret fallback pushes local dev onto `DefaultAzureCredential`
+   (az CLI). Define + document that so `dotnet run` locally still works.
+
+## 10. Coupling with `customer-provisioning-orchestration-r1` (IMPORTANT — cross-project dependency)
+
+`customer-provisioning-orchestration-r1` productizes customer onboarding: it **provisions and stores the auth
+credentials** (KV secrets, app registrations, MI, Dataverse App User) as part of standing up each environment,
+in **two models** — Model 1 (Spaarke-hosted tenant) and **Model 2 (the customer's own tenant)**.
+
+**This project decides the auth MODEL; provisioning implements the per-tenant SETUP of that model.** They meet at
+"how does the BFF authenticate, per environment/tenant." Implications:
+
+1. **Provisioning is currently design-phase and explicitly does NOT own the credential migration** (r3 handoff §5:
+   "#3b … is NOT yours"). This project is the continuation of that credential track — so **provisioning is the
+   downstream consumer of whatever this project decides.**
+2. **The outcome changes the provisioning runbook:**
+   - MI-FIC → **no per-customer secret to create/store/rotate** (simpler + removes rotation lifecycle), but ADD a
+     per-tenant **Federated Identity Credential** on the app registration.
+   - Certificate → provision + rotate a per-tenant cert (KV) — the CIAM path already does this.
+   - Either way, provisioning's "create BFF-API-ClientSecret in KV" step and the r3 handoff's *"never remove
+     `BFF-API-ClientSecret`"* pre-check would be **superseded / rewritten**.
+3. **Model 2 is the hard case.** MI-FIC / cert setup **inside a customer's own tenant** (their app registration,
+   their federated credential) is materially more complex than in the Spaarke-hosted tenant. **This project's
+   solution MUST be evaluated against BOTH models**, or provisioning inherits an unsolvable per-tenant step.
+4. **Sequencing:** provisioning should **not finalize its auth-provisioning design** until this project's model is
+   chosen (or should design that step to be pluggable). Recommend a lightweight inbound note into
+   `customer-provisioning-orchestration-r1` so it doesn't bake in the secret-based model prematurely.
+
+## 11. Evidence pointers
+
+- **Other secrets/credentials (§9):** `Api/Reporting/ReportingEmbedService.cs:80` + `ReportingProfileManager.cs:77` + `PowerBiOptions.cs:44` (PowerBi:ClientSecret) · `Api/Agent/AgentTokenService.cs:51` + `AgentTokenOptions.cs:38` (AgentToken:ClientSecret) · `Infrastructure/DI/AiModule.cs:122` (AzureOpenAI ApiKey / MI-401 exception) · `Infrastructure/Graph/CiamGraphClientFactory.cs:131` (**certificate precedent**)
+- **Provisioning coupling (§10):** `projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md` §5 (#3b not theirs) + §4a (never-remove pre-check) · `projects/customer-provisioning-orchestration-r1/README.md` (Model 1 / Model 2)
 - `src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs` (OBO CCA + `WithClientSecret`, lines ~20-21, 55, 83-88)
 - `src/server/shared/Spaarke.Dataverse/DataverseAccessDataSource.cs:22,49-75,105-130` (OBO CCA; `// No OBO support with managed identity`)
 - `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/Dataverse/DataverseUserClient.cs:85` · `Spaarke.Dataverse/DataverseWebApiClient.cs:39`
