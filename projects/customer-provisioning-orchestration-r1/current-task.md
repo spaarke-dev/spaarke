@@ -1,9 +1,49 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-18 (`/context-handoff` — Wave 4 Batch 4E MOSTLY COMPLETE; 5 tasks remaining for next session)
+> **Last Updated**: 2026-08-18 later ((`/context-handoff` #2 — Wave 4 100% COMPLETE + PUSHED; 089 harness subagent running; owner-invocation + 090 wrap-up remaining)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` @ `e3919a0ef` (draft PR #779 open; last remote push at `ccd858b7c` — **17 new commits unpushed** = 10 from 4D + 7 from 4E-so-far)
+> **Branch**: `work/customer-provisioning-orchestration-r1` @ `5b908591a` (draft PR #779 up-to-date; last remote push at `5b908591a` — **0 unpushed commits**)
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE)
+
+---
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Project progress** | ~75/78 tasks ✅ · Wave 4 100% landed |
+| **Current phase** | F E2E Acceptance — task 089 in split-approach (subagent scaffolding running; owner invocation pending) |
+| **Active subagent** | `aab31dc9d86933b0c` running in background — authoring 089 verification harness + report skeleton + operator runbook + POML amendment |
+| **Next owner action** | (After 089 subagent completes) Review scaffolding → decide on Model 2 dedicated trial customer provisioning → invoke `/provision-environment` |
+| **Status** | Holding for 089 subagent completion notification |
+
+### What just happened (last few hours)
+
+1. Wave 4 tasks 075/076/081.5/082 all landed today across 3 commits (`78a50edf3`, `17063669b`, `5b908591a`) + pushed to PR #779
+2. Task 081.5 (`RegistrationDataverseService` ctor refactor) had a dramatic recovery: subagent's deploy failed with container exit 134, misdiagnosed as deploy-script flakiness; main-session took over, found actual cause via `LogFiles/StartupLogs/*_failure.log` (4 missing Tier-1 IOptions from Wave 4 tasks 042/087 never rolled out to dev), fixed the 4 config gaps, redeployed successfully
+3. Task 082 (Azure config delete + [Obsolete] class cleanup) — subagent completed core work then crashed with API error mid-run; main-session recovered + landed the commit
+4. Owner decided Model 2 dedicated as primary acceptance path (Path A exception per CLAUDE.md §6.5 — POML originally had Model 1 mandatory)
+
+### Azure state (spaarke-bff-dev) — NOT in git
+
+- 5 new app settings added: `DATAVERSE_URL`, `PublicConfig__BffUrl`, `PublicConfig__MsalClientId`, `PublicConfig__TenantId`, `Onboarding__EnableDevBypass=true`
+- 9 legacy `DemoProvisioning__Environments__*` + `DemoProvisioning__DefaultEnvironment` app settings deleted
+- Live BFF: refactored (no `[Obsolete]` fallback), 44.96 MB, `/healthz` = 200
+- Rollback snapshot preserved at [`notes/phase-e-config-snapshot.json`](notes/phase-e-config-snapshot.json)
+
+### Lessons learned to capture in task 090 wrap-up
+
+- **Governance-gap**: root CLAUDE.md §10 BINDING pre-check protects KV secret RENAMES but NOT new app-setting REQUIREMENTS. When code adds `services.AddOptions<X>().ValidateOnStart()`, no CI check verifies dev/staging/prod App Services have the corresponding settings. Add "Tier-1 IOptions deploy checklist" to `.claude/constraints/bff-extensions.md`.
+- **Diagnostic pattern**: BFF container exit 134 → ALWAYS pull `LogFiles/StartupLogs/{yyyy_mm_dd}_{instance-id}_failure.log`, NEVER `LogFiles/{date}_docker.log`. Docker log only shows platform events, not app stdout.
+- **Fix-drift-at-discovery reinforced**: the 4-config-gap discovery could easily have been deferred ("run 082 with the workaround; fix config later") — that path leads to accumulated drift. Owner reinforced principle by choosing "Recommended" fix on the spot.
+- **Split-approach for Phase F acceptance** is worthwhile — subagent handles the machinery-authoring; owner in-the-loop for real Azure mutations.
+
+### Remaining work (after 089 subagent + owner invocation)
+
+- Task 090 wrap-up: `/test-diet` + lessons-learned (governance-gap, diagnostic pattern, fix-drift reinforcement) + README status flip + INDEX.md row update + `repo-cleanup` archive
+- Optional: teardown Model 2 trial stamp after acceptance verified (`az group delete --resource-group rg-trial-2026-08-18-*` + Dataverse env decommission)
+
+---
 
 ---
 
