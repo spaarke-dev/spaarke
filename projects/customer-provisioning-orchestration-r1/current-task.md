@@ -1,9 +1,22 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-18 (Wave 4 Batch 4D COMPLETE — 6 parallel subagents + 3 drift fixes + 1 Path A wrap-up all landed clean)
+> **Last Updated**: 2026-08-18 (`/context-handoff` — Wave 4 Batch 4E MOSTLY COMPLETE; 5 tasks remaining for next session)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` @ `a70c4bf54` (draft PR #779 open; last remote push at `ccd858b7c` — 10 new commits unpushed)
+> **Branch**: `work/customer-provisioning-orchestration-r1` @ `e3919a0ef` (draft PR #779 open; last remote push at `ccd858b7c` — **17 new commits unpushed** = 10 from 4D + 7 from 4E-so-far)
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE)
+
+---
+
+## ⚠ IN-FLIGHT AT HANDOFF (READ FIRST NEXT SESSION)
+
+**Task 082 subagent (`a4e4137017e220ab8`) was DISPATCHED just before this handoff and is still running in background.**
+
+Scope: delete `DemoProvisioning__Environments__*` + `DemoProvisioning__DefaultEnvironment` from dev App Service `spaarke-bff-dev` config; optionally remove `DemoProvisioningOptions` class if grep-safe; verify BFF `/healthz` 200 post-delete. Subagent has BINDING pre-check safety valve.
+
+**On next session start**:
+1. Check the agent's completion notification via task ID `a4e4137017e220ab8` (its transcript is under `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-customer-provisioning-orchestration-r1\5aa5d91f-cd2d-4c24-88ae-ae9649a3fe2f\tasks\a4e4137017e220ab8.output` — DO NOT read it via shell; use SendMessage or check for task-notification).
+2. If it completed cleanly, git log will show a new commit — verify + update TASK-INDEX row 082 status if not already done.
+3. If it failed or stopped mid-work, review its report + main-session recovers.
 
 ---
 
@@ -11,16 +24,45 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **Wave 4 Batch 4D COMPLETE (67/78 tasks = 85.9%)** — Batch 4E (final serial wave) dispatch pending owner go-ahead |
-| **Task** | none (batch boundary) |
-| **Status** | batch-boundary — READY for final Batch 4E |
-| **Next Action** | Push 10 new commits to origin. Then on owner go-ahead: dispatch **Wave 4 Batch 4E** (SERIAL — 7 tasks: 087 `/config.json` runtime endpoint · 088 CI coord PR to ci-cd-unit-test-remediation-r1 · 062 load test · 055 H13 E2E gate handler · 078 E2E consent-callback verification · 089 E2E Model 1 `trial-{yyyymmdd}` acceptance · 090 wrap-up + /test-diet). Serial because 087 must land config surface before 088 wires CI; E2E tests need all handlers in place; wrap-up is terminal. |
-| **Blocker** | None active. All §4D ArchTests + FR-27 GREEN. L2 + BFF + ArchTest suites all clean. |
-| **L2 project state** | **618/618 tests pass** (was 524; +94 across 059/060/061 handlers) · `dotnet build` 0/0 · TreatWarningsAsErrors=true · CVE clean · State-reconciler live · Crash-recovery live · I5 concurrency guard live · §4C rollback semantics live (4-class taxonomy + QuarantineClearService) |
-| **BFF state** | **10,477/0 BFF tests pass** (preserved through 4D) · 0 warnings · publish size **44.96 MB (Δ 0.00** through Batch 4C; task 086 shrank to **43.64 MB Δ −1.32 MB** in Batch 4D) · CVE clean |
-| **ArchTest state** | **65/65 full suite** (5 §4D I1-I5 + FR-27 + all others) — I5 broadened to `Infrastructure/Auth/**` (drift 1) + Path A extended for `CustomerRunGuardOptions.ClientSecret` (drift 4) |
-| **KV state (dev)** | Alias collapse complete: AI Search aliases + orphan flat keys removed (soft-delete recovery). Never-delete guardrails intact. `AiSearch--AdminKey` canonical in use across Bicep + BFF + prod PS scripts. |
-| **Master sync** | Feature branch is now **101 commits ahead of master** (91 previous + 10 Batch 4D). |
+| **Project phase** | **Wave 4 Batches 4A-4E: 72-73/78 (92-94%)** depending on task 082 subagent outcome. 5-6 tasks remain for next session. |
+| **Task** | 082 in-flight (subagent); 075 + 076 + 089 + 090 pending main-session |
+| **Status** | context-handoff — READY for session refresh |
+| **Next Action** | (1) Check task 082 subagent outcome. (2) Main-session author task 075 (`/provision-environment` L3 skill) — 6-10 hrs estimated, MAIN-SESSION-ONLY per Sub-Agent Write Boundary. (3) Main-session author task 076 (fallback matrix — small extension of 075). (4) Dispatch task 089 with split-approach (subagent scaffolds report + verification harness; owner runs actual `/provision-environment` invocation). (5) Dispatch task 090 (wrap-up + /test-diet). (6) Final push. |
+| **Blocker** | None active. All prior gates GREEN. |
+| **L2 project state** | **662/662 tests pass** (was 618; +44 H13 tests) · `dotnet build` 0/0 · TreatWarningsAsErrors=true · CVE clean · State-reconciler + Crash-recovery + I5 guard + §4C rollback + H13 gate all live |
+| **BFF state** | **10,491/0 BFF tests pass** (10,477 baseline + 7 ConsentCallback E2E + 7 ConfigContractTests) · 0 warnings · publish size **43.67 MB (Δ +0.03 MB** vs 43.64 baseline; task 086 shrink held through 4E) · CVE clean |
+| **ArchTest state** | **65/65 full suite** · I5 broadened to Infrastructure/Auth/** · nightly Graph parity test project added (task 067) · CI coord spec ready for ci-cd-r1 (task 088) |
+| **L3 skill state** | **NOT AUTHORED YET** — task 075 is the next main-session priority |
+| **KV state (dev)** | Alias collapse complete (task 085 + 086); if task 082 completes cleanly, `DemoProvisioning__*` legacy App Service settings also removed |
+| **Master sync** | Feature branch is now **101-103 commits ahead of master** depending on 082 outcome |
+
+---
+
+## Wave 4 Batch 4E — 5 of 8 COMPLETE (2026-08-18) + 1 IN-FLIGHT at handoff
+
+### Landed (7 commits total)
+
+| Sub-task | Commit | Summary |
+|---|---|---|
+| **4E/pre** Drift-5 Bicep BCP cleanup | `6ff75702a` | 5 Bicep files + platform.json regen. Root cause: task 029 UAMI refactor never migrated stack callers; task 032 refactored around stale call site. Fixed w/ minimal UAMI wiring (`bffUamiName` param + module invocation + 5 `appServicePrincipalId` repoints). Both stacks `az bicep build` exit 0. |
+| **4E/1** Task 087 `/config.json` | `adbb11fa2` | BFF endpoint Anonymous + short-cache + strong ETag + `If-None-Match` → 304. Tier-1 IOptions w/ env-aware custom validator (r3 task 061 pattern) — avoided 30-fixture sweep. 2 code-pages migrated (SpaarkeAi + LegalWorkspace); external-spa deferred (coord recipe in D2). BFF 10,484/0. Publish Δ +0.03 MB. |
+| **4E/1.5** Task 067 nightly Graph parity | `e8f300b4d` | New NightlyTests project. `GraphAppRoleParityTest.cs` reads GraphAppRoles.cs reflectively + queries UAMI SP appRoleAssignments via Graph SDK v6 with explicit tenantId per §4D I5. Also L2 mirror drift-guard as bonus 2nd Fact. 4 GH Actions secrets contract. Coord spec preserved as detail source. |
+| **4E/2** Task 088 CI coord PR spec | `d98d64ec3` | Comprehensive coord-PR spec: 3 sections (naming-conformance step in code-quality + new dedicated tenant-isolation top-level job avoiding continue-on-error swallow + nightly Graph parity in nightly-health.yml). 14 referenced paths verified. Zero workflow-file edits. 067's spec preserved as detail source (Option B). |
+| **4E/3** Task 062 load test | `e1959426b` | dotnet custom harness (xUnit + `Parallel.ForEachAsync` + `WebApplicationFactory`) — zero package footprint. 3 scenarios PASS: enqueue p95=9ms (target <100ms), 30-min compressed to 3s (202 in 60ms + 13 polls), reconciler concurrency N=3/5/3 × M=1/10/5 = 70 enqueue calls → 14 distinct MessageIds (dedup ratio 5). 5/5 tests in 29s. |
+| **4E/4** Task 055 H13 acceptance gate | `63f843273` | Handler + 6 seams (E2EValidationRunner + TrapVerifier + InvariantVerifier + NamingConformanceChecker + CostEnvelopeChecker + RegistrySetupStatusUpdater). Trap/invariant verifiers ship as PLACEHOLDERS returning InfraFault → live-probes deferred to task 089 (Phase F E2E has live customer stamp access). Wave-C4 placeholder pattern. Cost-drift = advisory-warn by default. Deterministic aggregation priority. L2 662/662 (was 618, +44). |
+| **4E/5** Task 078 consent-callback E2E | `e3919a0ef` | Synthetic signed HMAC payload approach (avoids live-tenant + ADR-038 compliant). 4 paths: happy + re-consent no-op + restart from H0 + invalid HMAC 401. Idempotency via `ServiceBusProvisioningEnqueuer.ComputeMessageId` (internal via existing `InternalsVisibleTo`). Fixture-scoped Mock<IDataverseService> mirrors PlaybookByIdIntegrationTestFixture pattern. 7/7 tests in 2s. ADR-clean across 7 ADRs. |
+
+### In-flight at handoff (1)
+
+- **4E/6-alt** Task 082 legacy config delete — subagent `a4e4137017e220ab8` running. Deletes `DemoProvisioning__Environments__*` + `__DefaultEnvironment` from dev App Service; optionally removes `DemoProvisioningOptions` class if grep-safe; verifies BFF /healthz 200. See ⚠ IN-FLIGHT AT HANDOFF section above for recovery instructions.
+
+### Remaining for next session (5 tasks)
+
+- **075** `/provision-environment` L3 operator skill — MAIN-SESSION-ONLY (Sub-Agent Write Boundary; writes to `.claude/skills/`). 6-10 hrs estimated. Reference model: `.claude/skills/deploy-new-release/SKILL.md`. Owner authorized full authoring next session.
+- **076** Fallback matrix impl in `/provision-environment` skill (MCP disconnect handling) — MAIN-SESSION-ONLY, small extension of 075.
+- **089** Phase F E2E Model 1 acceptance — owner authorized SPLIT approach: subagent authors verification harness + report scaffold + operator runbook; owner (interactive main-session) runs actual `/provision-environment` skill invocation against dev + fills observed results. Preserves E2E integrity + doesn't fake live provisioning.
+- **090** Project wrap-up + `/test-diet` — the final task. Marks project Complete, runs `/test-diet` reconciliation per ADR-038, updates README, writes lessons-learned.
+- **Final push** — 17+ commits accumulated (last push at `ccd858b7c`). Owner's Decision 3 posture: push at each batch boundary. This handoff would be a valid push point; deferred so owner reviews first if desired.
 
 ---
 
