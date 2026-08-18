@@ -147,7 +147,7 @@ Two additional corrections independently caught by task-gen subagents:
 | 075 | 🔲 | Author `/provision-environment` skill at `.claude/skills/provision-environment/SKILL.md` (Sub-Agent Write Boundary — MAIN-SESSION-ONLY) | STANDARD | opus / high | none (parallel-safe:false) | 057 |
 | 076 | 🔲 | Author fallback matrix impl in `/provision-environment` skill (MCP disconnect handling) | MINIMAL | sonnet / medium | none (parallel-safe:false; touches `.claude/skills/**`) | 075 |
 | 077 | ✅ | Implement per-tenant token-metering layer (D19 — APIM OR app-level custom App Insights metric) — chose **app-level** (extends existing observability shipped by ai-architecture-redesign-r1 task 054; adds `TenantBudgetPolicy` + `InMemoryTenantTokenLedger` enforcement seam on `OpenAiClient`); build 0/0, 20/20 metering tests pass, publish 44.96 MB (Δ 0.00), CVE clean | FULL | opus / high | none (dep Phase A decision) | 001-008 (Phase A) |
-| 078 | ⏸ | Verify `POST /api/onboarding/consent-callback` E2E with actual Model 2 admin-consent flow | FULL | sonnet / high | none (dep 042, 057) | 042, 057 |
+| 078 | ✅ | Verify `POST /api/onboarding/consent-callback` E2E (signed-synthetic-payload path per POML alternative) — 7 E2E tests at `tests/integration/Sprk.Bff.Api.IntegrationTests/Onboarding/` cover 4 POML paths (happy · re-consent idempotency · restart · 401 HMAC) + §4D I1 · missing-sig-header · base64-signature; 7/7 PASS; BFF 10,484/0/97 preserved; publish 44.96 MB Δ +0.00; CVE clean; report `notes/consent-callback-e2e-2026-08-18.md`; 5 documented deviations (all Path C except D-078-4 Path A — L2 state-check scoping) | FULL | sonnet / high | none (dep 042, 057) | 042, 057 |
 
 ### Phase E — DemoExpirationService Migration (3 tasks) — parallel with C/C'/D
 
