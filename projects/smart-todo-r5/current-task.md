@@ -10,7 +10,7 @@
 | Field | Value |
 |-------|-------|
 | **Phase** | Project CLOSED 2026-08-17 (090 ✅). **Post-close UAT stream** (4 rounds). All UI items done + deployed + on master `3ec9563d0`. Two things OPEN: (a) operator re-UATs round-4 (#3 subtitle hide, #4 smaller modal); (b) the access-control cascade is a NEW project awaiting a go-ahead. |
-| **Status** | Branch = origin/master = **`3ec9563d0`**. **Deployed to spaarkedev1** (all published): `sprk_smarttodo` (2.0MB), `sprk_spaarkeai` (5.7MB), `sprk_createtodowizard` (1.9MB); `sprk_todo` **To Do main form** (formxml + OnLoad form script `sprk_todo_hide_tabnav` v1.4.0). |
+| **Status** | Branch = origin/master = **`73b95b48a`** (main repo local master synced). **Deployed to spaarkedev1** (all published): `sprk_smarttodo` (2.0MB), `sprk_spaarkeai` (5.7MB), `sprk_createtodowizard` (1.9MB); `sprk_todo` **To Do main form** (formxml + OnLoad form script `sprk_todo_hide_tabnav` **v1.5.0** — entity-name hide now UNSCOPED; v1.4.0 dialog-scope skipped the span. Awaiting operator re-UAT). |
 | **Active task** | **Awaiting operator re-UAT of round-4 modal-chrome + a decision on the access-control project.** |
 | **Next Action** | (1) Operator hard-refreshes + reopens a To Do to verify #3 ("To Do" subtitle gone) + #4 (modal = 70%×80% `createForm`). (2) **Access-control cascade** — read [`notes/unified-access-control-cascade.md`](notes/unified-access-control-cascade.md); if operator says go → `/design-to-spec` a new `unified-access-control-cascade-r1` project (BFF feature, reuses ADR-034 resolver + POA GrantAccess). (3) Optional interim: enable ONE parental relationship (matter→todo, owner+team only) — operator's call. |
 
