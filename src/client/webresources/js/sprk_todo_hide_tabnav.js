@@ -39,6 +39,7 @@
  *
  * # Version
  *
+ * v1.4.0 — entity-name hide made durable: closest()-scoped + MutationObserver re-hide (2026-08-18)
  * v1.3.0 — hide entity-name subtitle via scoped DOM hide (UAT #2, operator-approved) (2026-08-18)
  * v1.2.0 — revert setFormEntityName (caused a ": " colon; wrong element) (2026-08-18)
  * v1.1.0 — add header entity-name blanking (later reverted) (2026-08-18)
@@ -57,7 +58,7 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
 
 (function (ns) {
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.3.0";
+    ns.VERSION = "1.4.0";
 
     /**
      * Form OnLoad handler. Cleans up the form-header chrome via SUPPORTED
@@ -99,26 +100,43 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
         //    manipulation of UCI; the `data-id="entity_name_span"` hook is
         //    reasonably stable but MAY break on a platform UI update.
         //
-        //    SCOPED to the `navigateTo` modal dialog (`[aria-modal="true"]`) so
-        //    it NEVER hides a background full-page form's entity name (which
-        //    would stay hidden after the modal closes). Bounded retry (~2s)
-        //    covers the header's async render inside the dialog.
+        //    v1.4.0 rewrite: the v1.3.0 one-shot descendant-selector hide DID
+        //    NOT stick — UCI renders/refreshes the header in PHASES (the form
+        //    loads to "- Saved"), so a single early hide is undone by a later
+        //    re-render. This version:
+        //      • finds spans anywhere, hides ONLY those inside a dialog (via
+        //        `closest('[aria-modal],[role=dialog]')`) so a background
+        //        full-page form is never affected;
+        //      • installs a MutationObserver that RE-HIDES on every re-render;
+        //      • disconnects after 30s (safety) so no observer lingers.
         try {
-            var attempts = 0;
-            var hideEntityName = function () {
-                attempts++;
-                var spans = document.querySelectorAll('[aria-modal="true"] [data-id="entity_name_span"]');
-                if (spans.length > 0) {
-                    for (var i = 0; i < spans.length; i++) {
-                        spans[i].style.display = "none";
+            var hideDialogEntityNames = function () {
+                var spans = document.querySelectorAll('[data-id="entity_name_span"]');
+                for (var i = 0; i < spans.length; i++) {
+                    var span = spans[i];
+                    var inDialog = span.closest && span.closest('[aria-modal="true"], [role="dialog"]');
+                    if (inDialog) {
+                        span.style.display = "none";
                     }
-                    return;
-                }
-                if (attempts < 20) {
-                    window.setTimeout(hideEntityName, 100);
                 }
             };
-            hideEntityName();
+            hideDialogEntityNames(); // immediate pass
+            if (typeof MutationObserver === "function") {
+                var mo = new MutationObserver(hideDialogEntityNames);
+                mo.observe(document.body, { childList: true, subtree: true });
+                window.setTimeout(function () {
+                    try { mo.disconnect(); } catch (e) { /* no-op */ }
+                }, 30000);
+            } else {
+                // No observer — fall back to a bounded retry for async render.
+                var attempts = 0;
+                var retry = function () {
+                    attempts++;
+                    hideDialogEntityNames();
+                    if (attempts < 30) { window.setTimeout(retry, 100); }
+                };
+                retry();
+            }
         } catch (err) {
             console.error("[SmartTodo.HideTabNav v" + ns.VERSION + "] entity-name hide error:", err);
         }
