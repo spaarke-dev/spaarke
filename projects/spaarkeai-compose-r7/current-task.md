@@ -11,9 +11,9 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | ✅ **PROJECT COMPLETE — 20/20 tasks.** 090 wrap-up done + deployed to dev 2026-08-17. |
-| **Step** | Done. BFF (44.95 MB net10, hash-verified, `/healthz` 200, Compose routes 401) + `sprk_spaarkeai` (published, R7 markers verified) deployed TOGETHER to dev (NFR-05). README→Complete, plan ✅, TASK-INDEX 090→✅, 090 POML completed. |
-| **Next Action** | Optional: `/devops-project-register` (board), archive the worktree. Operator interactive UAT: PDF end-to-end in a DI-enabled env + manual IME check (the two ⚙️ graduation criteria). Fidelity-wideners fast-follow = DEF-002/#777. |
+| **Task** | 🔬 **R7 IN UAT — NOT closed.** 20/20 tasks built + deployed to dev; now resolving UAT findings. **Tracking: [`notes/uat-issues.md`](notes/uat-issues.md)** (single source of truth). |
+| **Step** | UAT rounds 1+2 triaged into 10 issues (UAT-01…10). **UAT-01 (container "no container" — iframe Xrm fallback) FIXED `68e1ffcc8`; needs `sprk_spaarkeai` redeploy.** UAT-02 (key/dedup) fixed (dev data + #1/#4a; DEF-003 for prod-safety). 8 open. |
+| **Next Action** | Owner disposition on the 10 UAT issues (which stay in R7 vs move to Fidelity/SpaarkeAi/Platform — see uat-issues.md roll-up). Redeploy `sprk_spaarkeai` for UAT-01. Investigate UAT-03 (name modal), knock out UAT-04/05/07b (UX). Project closes only when all rows are Fixed or Deferred-with-link. |
 
 ### ✅ Done this session (all on master @ b8befe571)
 - **Merge-to-master**: `/worktree-sync` Full Sync — 46 commits fast-forwarded to master, 0 conflicts, main repo synced.

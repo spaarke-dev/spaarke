@@ -1,8 +1,8 @@
 # Spaarke Compose R7 — Editor UX
 
-> **Last Updated**: 2026-08-17
+> **Last Updated**: 2026-08-18
 >
-> **Status**: ✅ Complete — all 20 tasks shipped; BFF + `sprk_spaarkeai` deployed together to dev (2026-08-17)
+> **Status**: 🔬 **In UAT (NOT closed)** — all 20 tasks shipped + deployed to dev (2026-08-17), now resolving UAT findings. The project closes only when every issue in [`notes/uat-issues.md`](notes/uat-issues.md) is Fixed or explicitly Deferred to a named follow-up.
 
 ## Overview
 
@@ -22,10 +22,10 @@ Compose R7 is the **editor-UX layer above R6's save/PDF engines**: a Save / Save
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | ✅ Complete (deployed to dev) |
-| **Progress** | 100% (20/20 tasks) |
+| **Phase** | 🔬 In UAT (code 100% + deployed; resolving UAT issues) |
+| **Progress** | Build 100% (20/20 tasks); UAT open — [`notes/uat-issues.md`](notes/uat-issues.md) |
 | **Target Date** | — |
-| **Completed Date** | 2026-08-17 |
+| **Completed Date** | — (pending UAT sign-off) |
 | **Owner** | Ralph Schroeder |
 
 ## Problem Statement
