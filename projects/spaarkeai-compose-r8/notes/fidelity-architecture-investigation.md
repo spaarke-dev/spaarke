@@ -90,6 +90,40 @@ The audit suggested directions; **R8 must investigate + validate before committi
 
 ---
 
+## 4b. The AI-edit resolver: strict-only today → "tolerant-match" for R8 (UAT-24)
+
+**What "tolerant-match" means (plain English).** When the Assistant proposes an edit ("change clause 4.2 to
+say X"), the client has to LOCATE the exact span of text the edit targets before it can render the redline.
+Today that lookup is **strict**: it succeeds only when the model's echoed `target_text` is a (near-)exact
+substring of the live document. It already tolerates *typographic* drift via a **strictly 1:1 character fold**
+(curly quotes → straight, NBSP → space, en/em dashes → hyphen) and a whitespace-collapsed pass — but nothing
+beyond that. So the moment the model **paraphrases** the clause, drops/adds a word, or the doc has been edited
+since the model read it, the exact lookup **misses**.
+
+**"Tolerant-match" = fuzzy/approximate location** — edit-distance (Levenshtein) matching, token-level
+similarity, ligature/zero-width normalization beyond 1:1 — so a **near-match** target still resolves to the
+right span instead of dead-ending. It is the missing half of the audit's "tolerant-**but-surfaced**" resolver.
+
+**Why it's R8, not R7.** R7 already shipped the **SURFACED** half (UAT-21): a miss now *always* surfaces an
+honest banner and places NOTHING — no silent mis-placement, no false "applied". That closes the *trust* defect.
+The **TOLERANT** half — actually finding the span on a paraphrase — is a **fidelity/quality** improvement, and
+it carries real risk: a fuzzy matcher that mis-locates would re-introduce exactly the wrong-text-edit hazard
+UAT-21 removed. Non-1:1 folds also **desynchronize** the char→ProseMirror-position map (`buildCharIndex`), so
+tolerant matching needs a position-mapping redesign, not a bolt-on. That is architecture work of the same class
+as the write-model decision this project owns — hence R8.
+
+**Entry-points**: `usePendingRedline.ts` (`resolveTargetSpans` ~337-388, `findTargetMatches`, `MATCH_FOLD`,
+`collapseWhitespaceIndex`, `buildCharIndex`) in `src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/`.
+R7 note: the `not_found` path was made "propose-don't-auto-place" (no live-selection fallback) — the tolerant
+matcher must preserve that honesty (surface every residual miss; never guess when confidence is low).
+
+**Research questions this adds to §4**: which similarity metric + threshold balances recall against
+mis-location risk on the worst-offender corpus? How does the tolerant span map back to exact PM positions
+without desyncing the index? Should low-confidence matches render as a *proposed* placement the user confirms
+(vs auto-place)? How does this interact with the write model (a tolerant read anchor still writes an exact op)?
+
+---
+
 ## 5. What R8 is NOT
 
 - Not an R7 UAT fix — R7 owns the honest/safe signal layer (surface losses, no mis-placement).

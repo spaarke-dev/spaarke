@@ -274,7 +274,14 @@ investigation/research pass to choose the correct write-model before building.
   false-positives in the normal flow (first save uses load-time eTag, 2nd+ uses stamp — both match live when no
   external writer). BFF builds 0 errors; +1 vertical-slice-seam test (`Save_StaleBase_ContentModelPath_Refuses412`)
   — 5/5 concurrency seam + 191 Compose save tests green.
-- 🔧 Do next: **UAT-10** (notifications 401 — investigated: ENV/CONFIG, see below), **UAT-08** (auto-create
-  Analysis record — investigated: buildable via the existing `/promote` machinery, see below), **UAT-24**
-  (tolerant/fuzzy resolver — SURFACE half done via UAT-21; tolerant half → compose-r8).
+- ✅ **UAT-10 Root-caused = ENV/CONFIG** (see the UAT-10 detail section) — Azure SignalR *service* rejects the
+  BFF-minted token (connection-string key drift / wrong endpoint / non-Serverless mode); ops fix, not code.
+  R7 code portion done: a diagnostic endpoint-host log in `SignalRDeliveryService.NegotiateAsync`.
+- ✅ **UAT-24 dispositioned → compose-r8** (2026-08-18): the SURFACE half ("propose, don't auto-place") shipped
+  in R7 via UAT-21. The remaining **tolerant/fuzzy-match** half (locate an AI edit on a paraphrase / near-match,
+  not just an exact 1:1-folded substring) is fidelity/quality work with real mis-location risk + a position-map
+  redesign → documented in `projects/spaarkeai-compose-r8/notes/fidelity-architecture-investigation.md` §4b with
+  entry-points + research questions. Not an R7 honesty fix.
+- 🔧 Do next: **UAT-08** (auto-create Analysis record — investigated: buildable via the existing `/promote`
+  machinery at the review-completion hook; see below).
 - **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".
