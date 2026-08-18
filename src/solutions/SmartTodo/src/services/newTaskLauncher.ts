@@ -92,6 +92,45 @@ interface IRegardingSource {
   recordName?: string;
 }
 
+/**
+ * The current user's CONTACT (the `sprk_todo.sprk_assignedto` lookup targets the
+ * OOB `contact` table, resolved from systemuser via `contact.sprk_systemuser` —
+ * see `useCurrentContactId`). Passed by the caller so a new To Do opens with
+ * "Assigned To" pre-filled to the current user (smart-todo-r5 UAT 2026-08-17,
+ * item #1 — client default at form launch; NOT the Field Mapping Framework,
+ * which is for wizard creates that inherit from a parent record).
+ */
+export interface INewTaskAssignee {
+  /** The current user's `contactid` GUID (bare, no braces). */
+  contactId: string;
+  /** The contact's `fullname`, for the form's lookup display text. */
+  contactName?: string;
+}
+
+/**
+ * Merge the current-user "Assigned To" default into a `defaultValues` map using
+ * the same three-key lookup convention the regarding pre-seed uses (MS Learn —
+ * "Set column values using parameters passed to a form"): `{lookup}` = id,
+ * `{lookup}name` = display, `{lookup}type` = target logical name. The
+ * `sprk_assignedto` lookup targets `contact`. Uses the LOWERCASE logical name
+ * (the three-key form convention), NOT the PascalCase `sprk_AssignedTo`
+ * navigation property required by the Web API `@odata.bind` create path.
+ * Creates the map if the regarding pre-seed produced none.
+ */
+function applyAssigneeDefault(
+  defaultValues: Record<string, unknown> | undefined,
+  assignee: INewTaskAssignee | undefined,
+): Record<string, unknown> | undefined {
+  if (!assignee?.contactId) return defaultValues;
+  const next = defaultValues ? { ...defaultValues } : {};
+  next['sprk_assignedto'] = assignee.contactId;
+  next['sprk_assignedtotype'] = 'contact';
+  if (assignee.contactName) {
+    next['sprk_assignedtoname'] = assignee.contactName;
+  }
+  return next;
+}
+
 /** `true` when `entityType` is one of the 12 canonical sprk_todo regarding targets. */
 function isSupportedRegardingTarget(entityType: string | undefined): boolean {
   return !!entityType && TODO_REGARDING_CATALOG.some((c) => c.entityType === entityType);
@@ -210,9 +249,11 @@ function buildDefaultValuesFromRegarding(regarding: IRegardingSource): Record<st
  */
 export function buildNewTaskDefaultValues(
   launchContext: ILaunchContext | undefined,
+  assignee?: INewTaskAssignee,
 ): Record<string, unknown> | undefined {
   const regarding = resolvePreferredRegarding(launchContext);
-  return regarding ? buildDefaultValuesFromRegarding(regarding) : undefined;
+  const base = regarding ? buildDefaultValuesFromRegarding(regarding) : undefined;
+  return applyAssigneeDefault(base, assignee);
 }
 
 /**
@@ -229,9 +270,13 @@ export function buildNewTaskDefaultValues(
 export async function launchNewTaskCreateForm(
   launchContext: ILaunchContext | undefined,
   onSaved: () => void,
+  assignee?: INewTaskAssignee,
 ): Promise<void> {
   const regarding = resolvePreferredRegarding(launchContext);
-  const defaultValues = regarding ? buildDefaultValuesFromRegarding(regarding) : undefined;
+  const defaultValues = applyAssigneeDefault(
+    regarding ? buildDefaultValuesFromRegarding(regarding) : undefined,
+    assignee,
+  );
   const createFromEntity = regarding
     ? { entityType: regarding.entityType, id: regarding.recordId, name: regarding.recordName }
     : undefined;

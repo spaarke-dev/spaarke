@@ -52,7 +52,7 @@ import { resolveRuntimeConfig, initAuth, authenticatedFetch } from "@spaarke/aut
 import { TodoProvider, useTodoContext } from "./context/TodoContext";
 import { SmartToDo } from "./components/SmartToDo";
 // ListView import removed 2026-06-19 per UAT: list view discontinued — kanban only.
-import { Header } from "@spaarke/smart-todo-components";
+import { Header, useCurrentContactId } from "@spaarke/smart-todo-components";
 // smart-todo-r5 UAT 2026-08-17 — the structured Filter pane (task 021,
 // FR-06 / F-3: Priority / Status / Due-date / Assigned-To) is REPLACED by a
 // single expanding text search, mounted against task 020's
@@ -161,6 +161,18 @@ function SmartTodoLayout(): React.ReactElement {
     [updateViewPrefs],
   );
 
+  // ── smart-todo-r5 UAT 2026-08-17 (item #1) — default "Assigned To" to the
+  //    current user's contact when "+ New Task" opens the OOB create form.
+  //    `sprk_todo.sprk_assignedto` targets the OOB `contact` table (resolved
+  //    from systemuser via `contact.sprk_systemuser`), so we resolve the
+  //    current user's contact once at mount and thread it into the launcher's
+  //    three-key lookup default. The Field Mapping Framework does NOT apply
+  //    here (it's for wizard creates that inherit from a parent record). When
+  //    the user has no associated contact, this stays null and the form opens
+  //    with Assigned To blank (today's behavior — never an error).
+  const { contactId: currentContactId, contactName: currentContactName } =
+    useCurrentContactId({ webApi: getWebApi(), userId: getUserId() });
+
   // R4-104 — Settings opener callback ref. The inner `<SmartToDo>` exposes
   // its threshold-settings popover trigger via `onSettingsOpenerReady`; we
   // capture it here so the consolidated Header's Settings button can open
@@ -262,8 +274,16 @@ function SmartTodoLayout(): React.ReactElement {
   // `LaunchCreateTodoWizardHost` / `CreateTodoWizard` below — that stays the
   // Outlook/parent-ribbon entry point (FR-19, out of this task's scope).
   const handleNewTask = React.useCallback(() => {
-    void launchNewTaskCreateForm(launchContext, handleRefresh);
-  }, [launchContext, handleRefresh]);
+    void launchNewTaskCreateForm(
+      launchContext,
+      handleRefresh,
+      // smart-todo-r5 UAT item #1 — pre-fill Assigned To with the current
+      // user's contact (undefined when unresolved → form opens blank).
+      currentContactId
+        ? { contactId: currentContactId, contactName: currentContactName ?? undefined }
+        : undefined,
+    );
+  }, [launchContext, handleRefresh, currentContactId, currentContactName]);
 
   // R2 FR-13 (2026-07-01) — The hybrid `<SmartTodoModal>` (R4 task 040) that
   // used to overlay this component has been retired. The `OPEN_TODOS_EVENT`
