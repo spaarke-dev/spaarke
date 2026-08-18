@@ -448,6 +448,47 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     // -------------------------------------------------------------------------
+    // Task 061 addition: POST clear-quarantine on a non-Quarantined run
+    // returns 409 (wrong-state) — the QuarantineClearService's Conflict path
+    // maps to HTTP 409 per POML acceptance §7 negative case.
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData(RunStatus.Running)]
+    [InlineData(RunStatus.WaitingOnGate)]
+    [InlineData(RunStatus.Completed)]
+    [InlineData(RunStatus.Failed)]
+    [InlineData(RunStatus.Cancelled)]
+    public async Task ClearQuarantine_OnNonQuarantinedRun_Returns409_WrongState_AndDoesNotAuditLog(RunStatus currentStatus)
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(new ProvisioningRun
+        {
+            RunId = "run-q",
+            CustomerId = TestCustomerId,
+            EnvironmentId = "env-1",
+            TenancyModel = "Model1Shared",
+            Profile = "spaarke-hosted-model1-trial",
+            Status = currentStatus,
+        });
+
+        var client = factory.CreateClient();
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/runs/run-q/clear-quarantine?customerId={TestCustomerId}&reason=x");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "run in {0} state is not eligible for clear-quarantine (task 061 wrong-state guard).", currentStatus);
+
+        // No enqueue + no audit-log on the 409 path — enqueue + audit-log fire ONLY on Success.
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+        factory.AuditLogSink.QuarantineClearedRecords.Should().BeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
     // Resume + cancel + gate-advance + preflight — smoke pass with Operator
     // token; Reader → 403 for one representative (cancel) to keep the auth-
     // matrix compact.

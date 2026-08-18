@@ -76,7 +76,10 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Models;
+using Sprk.Provisioning.ControlPlane.Repositories;
+using Sprk.Provisioning.ControlPlane.Rollback;
 
 namespace Sprk.Provisioning.ControlPlane.Reconciler;
 
@@ -324,6 +327,164 @@ public sealed class StateReconcilerService : BackgroundService
             EnqueuedAt = _timeProvider.GetUtcNow(),
         };
     }
+
+    /// <summary>
+    /// Task 061: Applies a handler outcome (Success | Failure) to the
+    /// ProvisioningRun's Cosmos state per the §4C rollback taxonomy.
+    ///
+    /// Resolves <see cref="IFailureClassifier"/> from the per-tick DI scope +
+    /// consults <see cref="RollbackTransitions"/> (pure static, exhaustive
+    /// switch) for the target <see cref="RunStatus"/> + re-enqueue decision.
+    /// On a re-enqueue-worthy outcome (§4C RetryableWithCleanup), the same
+    /// handler envelope is re-dispatched with a fresh EnqueuedAt so the
+    /// deterministic MessageId path re-fires (Service Bus wire dedup + Redis
+    /// idempotency owns retry-safety).
+    ///
+    /// EXHAUSTIVE-SWITCH GUARD: routes through <see cref="RollbackTransitions"/>
+    /// exclusively — a new FailureClass value added to the enum WITHOUT a
+    /// corresponding branch in RollbackTransitions fails the build at CS8524
+    /// (warning-as-error via TreatWarningsAsErrors inherited from
+    /// Directory.Build.props). See RollbackTransitions.cs file header for the
+    /// full rationale.
+    ///
+    /// USAGE:
+    /// Exposed as an <c>internal</c> method so tests can drive it directly.
+    /// The production dispatch path (Service Bus consumer -> handler ->
+    /// outcome -> reconciler) is out-of-process (handlers execute in the BFF's
+    /// IJobHandler infrastructure per ADR-036); the wiring hook lives here so
+    /// the classifier + transition table are the SINGLE source of truth for
+    /// any future consumer (in-process test dispatcher, sidecar reconciler
+    /// worker, etc.).
+    /// </summary>
+    /// <param name="run">Run to update. The document's ETag must be current for the persisted <see cref="IProvisioningRunRepository.ReplaceRunAsync"/> call.</param>
+    /// <param name="ifMatchEtag">The ETag returned by the most recent <see cref="IProvisioningRunRepository.ReadRunAsync"/>.</param>
+    /// <param name="outcome">Handler outcome to translate into a Cosmos state transition.</param>
+    /// <param name="handlerId">Handler identifier for provenance + re-enqueue envelope construction.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The transition applied (target status + whether a re-enqueue was fired).</returns>
+    internal async Task<HandlerOutcomeApplied> ApplyHandlerOutcomeAsync(
+        ProvisioningRun run,
+        string ifMatchEtag,
+        HandlerResult outcome,
+        string handlerId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        ArgumentException.ThrowIfNullOrWhiteSpace(ifMatchEtag);
+        ArgumentNullException.ThrowIfNull(outcome);
+        ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
+
+        using var scope = _scopeFactory.CreateScope();
+        var classifier = scope.ServiceProvider.GetRequiredService<IFailureClassifier>();
+        var repository = scope.ServiceProvider.GetRequiredService<IProvisioningRunRepository>();
+        var enqueuer = scope.ServiceProvider.GetRequiredService<IHandlerEnqueuer>();
+
+        // Success path — handlers own the CompletedPhases append + Cosmos
+        // write. The reconciler does NOT double-write on Success (parity with
+        // the existing "reconciler DOES NOT write to Cosmos" invariant in the
+        // file header; the write here fires ONLY on the Failure path where
+        // Status transitions per §4C).
+        if (outcome is HandlerResult.Success)
+        {
+            return new HandlerOutcomeApplied(
+                TargetStatus: run.Status,
+                Reenqueued: false,
+                FailureClass: null);
+        }
+
+        var failure = (HandlerResult.Failure)outcome;
+        var failureClass = classifier.Classify(failure);
+
+        // §4C exhaustive-switch state mapping — see RollbackTransitions.cs.
+        var targetStatus = RollbackTransitions.MapToRunStatus(failureClass);
+        var shouldReenqueue = RollbackTransitions.ShouldReEnqueue(failureClass);
+
+        // Mutate + persist. Quarantine metadata populated on QuarantineRequired
+        // per design.md §4C Quarantined row.
+        run.Status = targetStatus;
+        run.CurrentPhase = handlerId;
+        run.ErrorDetail = $"[{failure.RejectionCode}] {failure.Diagnostic}";
+        var now = _timeProvider.GetUtcNow();
+
+        if (failureClass == FailureClass.QuarantineRequired)
+        {
+            run.Quarantine = new QuarantineInfo
+            {
+                State = QuarantineState.Quarantined,
+                Reason = failure.Diagnostic,
+                QuarantinedByHandler = handlerId,
+                QuarantinedAt = now,
+            };
+        }
+
+        // Terminal-transition timestamp for auditability.
+        if (targetStatus is RunStatus.Completed
+            or RunStatus.Failed
+            or RunStatus.Cancelled
+            or RunStatus.Quarantined)
+        {
+            run.CompletedOn = now;
+        }
+
+        var replace = await repository
+            .ReplaceRunAsync(run, ifMatchEtag, cancellationToken)
+            .ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "ReconcilerOutcomeApplied: HandlerId={HandlerId} RunId={RunId} CustomerId={CustomerId} " +
+            "FailureClass={FailureClass} TargetStatus={TargetStatus} RejectionCode={RejectionCode}",
+            handlerId, run.RunId, run.CustomerId,
+            failureClass, targetStatus, failure.RejectionCode);
+
+        if (replace is ReplaceRunResult.Conflict)
+        {
+            // Concurrent writer landed the same/similar transition — the
+            // reconciler is idempotent by design; a next tick picks up the
+            // freshly-written state. Do NOT re-enqueue on Conflict — the
+            // sibling writer may already have.
+            return new HandlerOutcomeApplied(targetStatus, Reenqueued: false, FailureClass: failureClass);
+        }
+
+        if (!shouldReenqueue)
+        {
+            return new HandlerOutcomeApplied(targetStatus, Reenqueued: false, FailureClass: failureClass);
+        }
+
+        // Auto-retry path (§4C RetryableWithCleanup) — re-fire the same
+        // envelope. Deterministic MessageId path re-fires; Service Bus wire
+        // dedup + Redis idempotency own retry-safety per ADR-036.
+        var envelope = BuildEnvelope(handlerId, run);
+        try
+        {
+            await enqueuer.EnqueueAsync(envelope, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "ReconcilerOutcomeReenqueueFailed: HandlerId={HandlerId} RunId={RunId} CustomerId={CustomerId} " +
+                "— transition landed but re-enqueue failed; next reconciler tick will retry from state.",
+                handlerId, run.RunId, run.CustomerId);
+            return new HandlerOutcomeApplied(targetStatus, Reenqueued: false, FailureClass: failureClass);
+        }
+
+        return new HandlerOutcomeApplied(targetStatus, Reenqueued: true, FailureClass: failureClass);
+    }
+
+    /// <summary>
+    /// Result record for <see cref="ApplyHandlerOutcomeAsync"/> — captures what
+    /// the reconciler decided per the §4C rollback taxonomy so tests + Kusto
+    /// pivots can assert on it. <see cref="FailureClass"/> is null on the
+    /// Success path (no classification fired).
+    /// </summary>
+    internal sealed record HandlerOutcomeApplied(
+        RunStatus TargetStatus,
+        bool Reenqueued,
+        FailureClass? FailureClass);
 
     /// <summary>
     /// Deterministic envelope payload for reconciler-initiated dispatches.

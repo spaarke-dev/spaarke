@@ -74,6 +74,7 @@ using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
 using Sprk.Provisioning.ControlPlane.Reconciler;
 using Sprk.Provisioning.ControlPlane.Registry;
+using Sprk.Provisioning.ControlPlane.Rollback;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -983,6 +984,39 @@ builder.Services.Configure<CrashRecoveryOptions>(
     builder.Configuration.GetSection(CrashRecoveryOptions.SectionName));
 builder.Services.PostConfigure<CrashRecoveryOptions>(o => o.Validate());
 builder.Services.AddHostedService<CrashRecoveryStartupService>();
+
+// Task 061 (Wave C5): §4C rollback surface — IFailureClassifier + IQuarantineClearService.
+// Provides the exhaustive FailureClass -> RunStatus mapping (RollbackTransitions)
+// + the Quarantined -> Failed transition invoked by
+// POST /api/runs/{id}/clear-quarantine (spec FR-24). All registrations
+// UNCONDITIONAL per ADR-032 — no feature-gate branches; §4C is domain-
+// authoritative (not a feature flag). Extension method keeps Program.cs
+// god-class-ratchet-clean per ADR-010.
+//
+// Placement Justification (CLAUDE.md §10 / §11): L2-only (parity with the
+// reconciler / crash-recovery / customer-run-guard); no BFF references; no
+// AI-internal injection (ADR-013 forcing-function rule). The QuarantineClearService
+// encapsulates the Quarantined -> Failed Cosmos transition (ETag-safe, one-
+// shot semantic) so the endpoint layer stays intake-shaped.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - Path C (comply): FailureClass enum stays in Handlers/HandlerResult.cs
+//     (57 files already reference the Handlers namespace); moving it would
+//     churn 57 files for zero behavioral gain. RollbackTransitions consumes
+//     Handlers.FailureClass by using-directive — no duplicate enum.
+//     Deviation logged in notes/task-061-deviations.md.
+//   - §4C rollback: RollbackTransitions.MapToRunStatus + ShouldReEnqueue +
+//     ShouldReleaseCustomerGuard encode the §4C table as three exhaustive
+//     switch expressions; UnreachableException at the default guard forces
+//     any new FailureClass value to be handled at BUILD time (CS8524 warning-
+//     as-error via TreatWarningsAsErrors inherited from Directory.Build.props).
+//   - spec FR-24 SCOPE: QuarantineRequired keeps the customer-run-guard held
+//     (ShouldReleaseCustomerGuard returns false) — new runs against the same
+//     customerId are BLOCKED until clear-quarantine explicitly runs. This is
+//     the hook task 059's ICustomerRunGuard.TryAcquireAsync reads to return
+//     AcquireConflictReasonCodes.Quarantined; the state on the run doc is the
+//     source of truth (no coupling between task 061 + task 059 code paths).
+builder.Services.AddRollbackModule();
 
 var app = builder.Build();
 
