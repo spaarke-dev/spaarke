@@ -319,11 +319,12 @@ Per `notes/resource-discovery-2026-08-16.md`:
 | Metric | Value |
 |---|---|
 | **Total tasks** | 78 |
-| **not-started** 🔲 | 23 |
+| **not-started** 🔲 | 19 |
 | **in-progress** 🟡 | 0 |
-| **completed** ✅ | 55 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19 — 034, 041-051, 053, 054, 069-073; Wave 4 Batch 4A: 081, 084) |
-| **Wave 4 Batch 4A COMPLETE (2026-08-17)** | ArchTest debt commit `3b67a7b8d` (mixed Path C rename + Path A extension) · 081 commit `0b8ca53ba` (BFF Obsolete removal — 4 warnings gone) · 084 commit `70abd9992` (Phase H canonical secret-catalog manifest gen — 32 secrets, deterministic, 5/5 verifications pass) · L2 build 0/0 · L2 tests 428/428 · BFF tests 10,457/0 · ArchTest 5/5 · BFF publish 44.96 MB (Δ 0.00) · CVE clean |
-| **Wave 3 ArchTest debt** | ✅ RESOLVED by Batch 4A commit `3b67a7b8d` — see `notes/wave-4-batch-4a-archtest-debt.md`. |
+| **completed** ✅ | 59 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19; Wave 4 Batch 4A: 081, 084; Wave 4 Batch 4B: 052, 057, 064, 077) |
+| **Wave 4 Batch 4B COMPLETE (2026-08-17)** | 4 parallel subagents landed clean · 057 commit `b8dcdfaeb` (L2 REST — 8 endpoints, 440/0 L2 tests) · 052 commit `67e8830ba` (H9 BFF deploy — 486/0 L2 tests, 35 new H9 tests, rollback verified) · 077 commit `111773ffc` (per-tenant metering app-level — 10,477/0 BFF tests, 20 new, Δ 0.00 MB, SC #13 met) · 064 commit `40b09f837` (5 tenant-isolation ArchTests I1-I5 — 12 baseline violations filed to task 065 audit sweep per POML) |
+| **Wave 4 Batch 4A COMPLETE (2026-08-17)** | ArchTest debt `3b67a7b8d` · 081 `0b8ca53ba` (BFF Obsolete removal) · 084 `70abd9992` (Phase H manifest gen — 32 secrets) |
+| **Baseline violations filed to task 065** | 12 total — I1: 3 PS scripts · I2: 4 BFF services (SemanticSearch/InvoiceSearch/DataverseIndexSync/RecordMatch) · I3: 3 (FeedbackService×2 + PromptLibraryService) · I5: 1 (GraphClientFactory.cs:132 DefaultAzureCredential without explicit TenantId). Filed per POML step 7 + acceptance — do NOT weaken guards. Task 065 (Wave 4C) is the fix vehicle. |
 | **blocked** ⏸ | (per dep chains — resolvable) |
 | **Ready to start (no deps)** | 21 tasks: 001, 002, 003, 004, 005, 006, 007, 008, 010, 011, 012, 013, 014, 016, 018, 019, 020, 032, 033, 080 (Phase E), plus 023, 024 (Wave C1 pending 004) |
 

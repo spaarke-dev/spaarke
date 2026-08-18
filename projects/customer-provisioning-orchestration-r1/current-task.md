@@ -1,8 +1,8 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-17 (Wave 4 Batch 4A COMPLETE — ArchTest debt + 081 + 084 all landed)
+> **Last Updated**: 2026-08-17 (Wave 4 Batch 4B COMPLETE — 4 parallel subagents all landed clean)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` @ `70abd9992` (draft PR #779 open; last local push at `23ae1aed9` — 3 new commits unpushed: 3b67a7b8d + 0b8ca53ba + 70abd9992)
+> **Branch**: `work/customer-provisioning-orchestration-r1` @ `40b09f837` (draft PR #779 open; last remote push at `9e936e911` — 4 new commits unpushed: b8dcdfaeb + 111773ffc + 67e8830ba + 40b09f837)
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE)
 
 ---
@@ -11,14 +11,45 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **Wave 4 Batch 4A COMPLETE (55/78 tasks = 70.5%)** — Batch 4B dispatch pending owner go-ahead |
+| **Project phase** | **Wave 4 Batch 4B COMPLETE (59/78 tasks = 75.6%)** — Batch 4C dispatch pending owner go-ahead |
 | **Task** | none (batch boundary) |
-| **Status** | batch-boundary — READY for Batch 4B |
-| **Next Action** | On owner go-ahead: dispatch **Wave 4 Batch 4B** (4 parallel: 057 L2 REST endpoints opus/high · 064 tenant-isolation ArchTests · 052 H9 blue-green slot swap · 077 token metering). Also: push 3 new commits to remote when appropriate. |
-| **Blocker** | None. Batch 4A wrap-up decisions all closed. 084 unblocks 085/086/088; 081 unblocks 082; ArchTest refactor unblocks nothing but resolves task-025 forcing-function debt. |
-| **L2 project state** | 428/428 tests pass · `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` 0/0 · TreatWarningsAsErrors=true · CVE clean · ArchTest 5/5 pass |
-| **BFF state** | 10,457/0 tests pass · 0 warnings (was 4 `[Obsolete]` on `RegistrationEndpoints.cs`) · publish size 44.96 MB (Δ 0.00 vs baseline) · CVE clean |
-| **Master sync** | Merged origin/master `9ec26ffe0` — 112 upstream commits absorbed. Feature branch is now 82 commits ahead of master (79 previous + 3 Batch 4A). |
+| **Status** | batch-boundary — READY for Batch 4C |
+| **Next Action** | Push 4 new commits to origin. Then on owner go-ahead: dispatch **Wave 4 Batch 4C** (4 parallel: 058 state-reconciler BackgroundService opus/xhigh · 065 audit sweep BFF services for I2–I5 (fixes 12 baseline violations from task 064) · 066 verify Register-EntraAppRegistrations.ps1:63 fix · 085 alias collapse — BINDING pre-check required). |
+| **Blocker** | None active. Task 065 (Batch 4C) is designed to fix the 12 baseline violations surfaced by task 064's new ArchTests — until 065 lands, CI on PR #779 will show 4 failing ArchTests (I1/I2/I3/I5). This is INTENTIONAL per POML acceptance criterion — task 064 shipped the strong guards; task 065 fixes the drift. |
+| **L2 project state** | **486/486 tests pass** (was 428; +35 H9 + 23 endpoint tests) · `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` 0/0 · TreatWarningsAsErrors=true · CVE clean · +85-line Program.cs DI additions from 052 landed cleanly beside 057's endpoint mapping (2 parallel L2 writers, zero destructive resets) |
+| **BFF state** | **10,477/0 BFF tests pass** (was 10,457; +20 metering tests) · 0 warnings · publish size **44.96 MB (Δ 0.00** vs baseline; app-level metering added zero size) · CVE clean · Model 1 429-gating for over-budget tenants (SC #13 met) |
+| **ArchTest state** | 5 new TenantIsolation tests added (I1-I5). **4 baseline violations FAIL by design** — 12 pre-existing violations catalogued for task 065 fix. Do NOT weaken guards per POML step 7 + CLAUDE.md §6.5. |
+| **Master sync** | Feature branch is now 86 commits ahead of master (82 previous + 4 Batch 4B). |
+
+---
+
+## Wave 4 Batch 4B — COMPLETE (2026-08-17)
+
+### Commit map
+
+| Sub-task | Commit | Summary |
+|---|---|---|
+| **4B/1** Task 057 L2 REST | `b8dcdfaeb` | 4 new files + 3 modified. 8 L2 REST endpoints under `/api/runs` + logs. 23 new tests (WebApplicationFactory-based). Audit-log via `ILogger` (parity with `AuditLogMiddleware`, D-057-4). `?customerId=` required on `/{id}` endpoints (§4D I3 enforcement, D-057-3). 6 documented deviations. |
+| **4B/2** Task 064 ArchTests | `40b09f837` | 5 tests I1-I5 + `AllowCrossPartitionScanAttribute` in `Spaarke.Core.Attributes`. **4 of 5 tests fail on baseline by design** — 12 pre-existing violations filed to task 065 audit sweep (I4 passes cleanly). Suite runtime <1s for TenantIsolation subset. |
+| **4B/3** Task 052 H9 BFF deploy | `67e8830ba` | 14 new files + 2 modified. Handler w/ 6 seams (PowerShellRunner, SlotSwapper, HealthProbe, R3GateVerifier, PublishSizeReporter). 35 new tests. Rollback re-swap verified; both-slots-bad escalation code. `Deploy-Release.ps1` already hardened (task 013 done). 2 Path C deviations. |
+| **4B/4** Task 077 metering | `111773ffc` | 7 new production + 2 new tests + 3 modified. **Phase A: app-level custom App Insights metric** (rejected APIM). ONLY the enforcement delta on top of existing `AiTelemetry.RecordMeteredTokens` observability (from ai-architecture-redesign-r1 task 054). SC #13 met: Model 1 → 429; Model 2 → observation-only. |
+
+### Cross-agent coordination achievements
+- **2 parallel L2 Program.cs writers** (057 + 052): read-late narrow-hunk pattern held again. 057 committed first (endpoint mapping), 052 second (85-line DI hunk landed beside). Zero destructive resets — Wave 3's pattern scaled trivially.
+- **Task 077's scope discipline**: subagent recognized POML `<justification><existing>` was wrong (observability layer already existed from a merged sibling project), reshaped scope to enforcement delta only per CLAUDE.md §11 no-duplication rule. Documented as D1.
+- **Task 064's guard integrity**: subagent chose NOT to weaken guards to make baseline pass; correctly filed 12 violations to task 065. This is the FORCING FUNCTION working as designed.
+
+### Notes files
+- `notes/task-057-deviations.md` — 6 deviations (D-057-1..6).
+- `notes/task-064-deviations.md` — 12 baseline violations catalogued for task 065.
+- `notes/task-052-deviations.md` — 2 Path C deviations.
+- `notes/task-077-deviations.md` + Phase A design doc (`per-tenant-metering-impl-2026-08-17.md`).
+
+---
+
+## Wave 4 Plan — remaining 19 tasks
+
+Batches 4C/4D/4E to be dispatched sequentially with owner approval at each batch boundary.
 
 ---
 
