@@ -135,4 +135,61 @@ Findings are appended below as **UAT-11+** with the same fields (root cause, sev
 Severity here uses **⛔ BLOCKER** (Compose not usable / legally wrong for real documents) deliberately, so
 severity mis-classification (the 07a mistake) is not repeated.
 
-_(Audit in progress — findings pending.)_
+### Audit dimension 2 (silent failures & accepted limits) — findings
+
+Recurring anti-pattern found: a `catch`/early-return degrades a value to `undefined`/empty, and the
+downstream consumer emits a **generic or absent** message — the same shape as UAT-01/UAT-08.
+
+| ID | Issue | Severity | Root cause / evidence | Resolution | Tracked? |
+|----|-------|----------|-----------------------|------------|----------|
+| **UAT-11** | Container-resolution residual — UAT-01 only fixed the iframe-Xrm READ | ⛔ BLOCKER | The resolver is a one-shot `useEffect([],)` with **no retry** + a swallowed `catch`→`console.warn`. Any *other* failure (Xrm not ready at that instant, transient 401, Dataverse query fault, half-provisioned BU) leaves `containerId` undefined → the save gate emits the **dishonest** "your BU has no storage container configured" — telling the admin to fix a correctly-configured BU. `ComposeDirectWidget.tsx:201,205-208` + `composeEditor.registration.ts` (same shape) → `ComposeWorkspace.tsx:1496-1506` | (a) distinguish "resolution failed" from "BU genuinely has no container" and show an honest message; (b) retry / re-resolve on the save attempt instead of one-shot-on-mount | ❌ (UAT-01 marked fixed; this residual new) |
+| **UAT-12** | Imported Word **tracked-changes + comments silently dropped** on any annotation-read failure at load | ⛔ BLOCKER | `LoadAsync` annotation read wrapped in a catch that sets `importedRevisions=[]` + `importedComments=[]` on ANY exception, no warning, no client signal → a doc WITH redlines/reviewer comments mounts looking **clean**. Trust-breaking on a legal-review surface. `ComposeService.cs:681-688` (`LogWarning` only) | Surface an honest banner ("this document's tracked changes/comments couldn't be read — do not treat as clean") when the annotation read fails; never show a silently-clean doc | ❌ new |
+| **UAT-13** | Create-on-save **matter/regarding association silently fails** ("non-fatal") | MAJOR | After a new `sprk_document` is created, `onCreateOnSaveComplete` writes the parent/regarding link; a throw is caught + `console.warn` only. Save shows success, but the doc is **orphaned** (not filed under its matter) — load-bearing for the Field-Mapping/set-regarding framework. `ComposeWorkspace.tsx:1986-1992`; contract `context/composeLaunchContext.ts:60-67` | Surface a warning when the association write fails (the doc saved but isn't linked); offer a retry/relink | ❌ new |
+| **UAT-14** | Stale-base re-anchor degrades the **whole edit batch to orphan** on an AUTO-band patch failure | MAJOR | On a concurrent/stale-base save, a single AUTO re-anchor failure returns `currentBytes` + all-orphan summary — none of the user's edits land. Surfaced via the orphan/partial banner (same family as UAT-06), so not fully silent — but VERIFY the summary reliably reaches the banner in this branch. `ComposeService.cs:2148-2157` (`BuildAllOrphanSummary`) | Verify the orphan summary always surfaces here; consider a stronger "your edits weren't saved — reload and redo" prompt | ⚠️ partial (UAT-06) |
+
+**MINOR (noted, low priority)**: re-anchor summary persist swallow (`ComposeService.cs:2159-2171`); load-time SPE version-id lookup swallow → retained-bytes fallback (`:708-713`); refresh-profile / background memory-capture best-effort swallows (`ComposeWorkspace.tsx:2046-2050`, `ComposeService.cs:2543-2549/3022-3024/3387-3392`) — the refresh-profile one pairs with UAT-04 (a click that throws shows spinner-then-nothing).
+
+**Confirmed-sound (NOT issues)**: the PDF-intake gate is the exemplary model (typed `ComposePdfIntakeException`→503/422, never a silent empty mount) — the swallow sites above should follow it. Checkout lifecycle + the banner translation layer are honest.
+
+### Audit dimension 1 (fidelity) — findings
+
+**Architectural root cause**: the render-on-save path (`ComposeDocumentRenderer.RenderIntoCarrier`, `:399/:449`
+`body.RemoveAllChildren()`) **re-authors the entire `<w:body>` from `ComposeContentModel`** — a THIN model whose
+run type (`ComposeContentModel.cs:276`) carries only Text/Bold/Italic/Underline/Href + tracked-change facts.
+Anything not in that model is lost on the FIRST save of ANY imported legal document. The original survives in
+version history (ADR-049 net), but the live SPE doc that reopens in Word is degraded. **The most dangerous
+losses are SILENT (no warning code at all)** — worse than the loud "×62" ones.
+
+| ID | Loss | Severity | Silent? | Evidence |
+|----|------|----------|---------|----------|
+| **UAT-15** | **Direct character formatting** — font family, SIZE, COLOR, highlight/shading, super/subscript, caps/small-caps, underline style+color, char spacing — stripped whole-document to Normal default | ⛔ BLOCKER | **SILENT** (only bold/italic/underline captured; strikethrough warns) | `ComposeDocxProjectionBuilder.cs:2644-2677`; `ComposeInlineRun` `ComposeContentModel.cs:276` |
+| **UAT-16** | **Footnotes / endnotes** dropped from flow (reference vanishes; `footnotes.xml` orphaned → footnote text invisible in saved doc) | ⛔ BLOCKER | warned but code not in friendly-copy → cryptic | `ComposeDocxProjectionBuilder.cs:2748-2753, 866-869` |
+| **UAT-17** | **Word fields** — cross-references (`REF`), TOC, page/section refs, DATE/DOCPROPERTY — flattened to STATIC text; live reference lost (stale if numbering shifts) | ⛔ BLOCKER | warned but cryptic | `ComposeDocxProjectionBuilder.cs:2414, 2445` |
+| **UAT-18** | **Paragraph spacing** — line spacing (single/1.5/double), space-before/after, shading, borders, keepNext/keepLines, tab-STOP defs — dropped (BLOCKER for court filings w/ double-spacing rules) | ⛔ BLOCKER (context) | **SILENT** | `ComposeDocxProjectionBuilder.cs:1935-2090` |
+| **UAT-19** | **Content controls / SDT** (form fields, dropdowns, date pickers, repeating sections) flattened to text/opaque; data-binding lost | MAJOR (BLOCKER for templates) | warned cryptic | `:316, 1892, 1885, 2520, 410` |
+| **UAT-20** | Grouped fidelity MAJORs: strikethrough dropped (`:2669`); numbering-unresolved loses number (`:1006-1021, 2166`); complex/floating objects dropped + text-boxes flattened/repositioned (`:1919-1923, 2438...`); comment rich-content + reply-thread flattened, 4-part threaded comments unrepresentable (`ComposeContentModel.cs:45-46`, `IComposeService.cs:571-572`) | MAJOR | warned cryptic | (see codes) |
+
+**Meta**: (1) **Silent > loud** is the real hazard — UAT-15/18 emit NO warning, so UAT won't flag them; users just see a "wrong-looking" doc after save. (2) **Warned-but-cryptic gap**: ~12 emitted codes (`unrepresented-footnote-reference`, `field-flattened-to-text`, `content-control`, `strikethrough-flattened`, `numbering-unresolved`, …) are absent from `SAVE_DEGRADATION_COPY` → fall through to the raw-code line (UAT-07b added friendly copy for the widener family but NOT these).
+
+### Audit dimension 3 (anchor / op-log / comment robustness) — findings
+
+The op-log WRITE path is robust (paraId-anchored, refuse-don't-mis-place; server prong-1 partial-apply honors "never silently drop"). The **client resolution/placement layer leaks the invariant**. Representable op-log set = 13 ops (`compose-operations.ts:54-70`); `commentAnchor` is a mark outside it → the `mark-outside-closed-set:commentAnchor` line (UAT-09).
+
+| ID | Failure | Severity | Evidence |
+|----|---------|----------|----------|
+| **UAT-21** | **AI redline falls back to the user's LIVE SELECTION on a target miss and reports "applied"** — can strike-and-replace the WRONG text (stale caret / replayed redline), presented as success. Silent mis-placement of a legal edit. | ⛔ BLOCKER | `usePendingRedline.ts:667-690` |
+| **UAT-22** | **Comments silently dropped from the SAVE payload** — 3 `continue` paths (anchor mark gone / start unresolved / range in different paragraph), no banner/count → a comment the user sees in the gutter never reaches Word | ⛔ BLOCKER | `ComposeCommentThread.types.ts:240-263` |
+| **UAT-23** | **`deletedContentFlag` ops filtered out of save with NO surface** — flag set by genuine deletion AND by rebasing drift (derive-null); the drift subcase discards a still-valid edit silently (no callback, unlike unrepresentable/refused which warn) | ⛔ BLOCKER | `ComposeWorkspace.tsx:1542-1544`; `stepOperationInterceptor.ts:1438-1483` |
+| **UAT-24** | **Strict-only resolution, no fuzzy match** → AI edits miss on ANY paraphrase (normal for AI drafting). Root of UAT-06/09/21/22. Whole-doc `materializeMany` silently skips misses. | MAJOR | `usePendingRedline.ts:337-388, 811-816` |
+| **UAT-25** | **Mainstream ContentModel save bypasses stale-base detection** — the eTag staleness assert only runs on the transitional op-log path; a post-cutover imported dirty save (ContentModel) never checks → **lost update** on a concurrent Word/tab writer | MAJOR | `ComposeService.cs:1216` |
+| **UAT-26** | **First Compose save of a pre-existing item has no concurrency guard** (no prior stamp to assert against → blind overwrite of external edits since load); + op-log ambiguous-order resolved by unverified guess with no surface (`onAmbiguousOrder` never wired); + deferred/unrepresentable/refused collapse to ONE vague banner (user can't tell an EDIT was dropped vs formatting) | MAJOR | `ComposeService.cs:1180,1216-1221`; `stepOperationInterceptor.ts:1655-1662`; `ComposeEditor.tsx:1931-1957` |
+
+**Highest-leverage fix (both auditors agree)**: the strict-only resolver (`resolveTargetSpans`) — UAT-06, 09, 21, 22 all trace to it. A **tolerant-but-surfaced** resolver ("propose, don't auto-place") neutralizes the wrong-location fallback AND the silent skips at once.
+
+---
+
+## Consolidated severity picture (post-audit, 2026-08-18)
+
+- **⛔ BLOCKER (10)**: UAT-01(residual→11), 02✅, 07a, 11, 12, 15, 16, 17, 18, 21, 22, 23. Several are **SILENT data/fidelity loss** — the class UAT would NOT surface as a warning.
+- **The architectural finding**: render-on-save re-authors the whole body from a THIN content model (text + bold/italic/underline/href). This is not a "widener" gap — the model itself can't carry real legal-document fidelity. UAT-07a + UAT-15/16/17/18/20 are all facets of ONE root cause. **This is compose-r8-architecture-sized**, not a batch of patches.
+- **The trust finding**: the edit/comment placement layer can mis-place a redline onto the wrong text and report success (UAT-21), and silently drop comments (UAT-22) and valid edits (UAT-23). For a legal-review product these are correctness/trust defects, not cosmetics.
