@@ -65,6 +65,10 @@ const MOCK_TODO_REGARDING_CATALOG = [
 jest.mock('@spaarke/ui-components', () => ({
   navigateToEntityRecordSurfaceAsync: mockNavigateToEntityRecordSurfaceAsync,
   TODO_REGARDING_CATALOG: MOCK_TODO_REGARDING_CATALOG,
+  // The launcher calls getOobModalSize('createForm'); return that size (70 x 80).
+  getOobModalSize: function () {
+    return { width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } };
+  },
 }));
 
 import {
@@ -244,8 +248,8 @@ describe('launchNewTaskCreateForm (handleNewTask delegate)', () => {
     expect('entityId' in callArgs).toBe(false);
     // UAT 2026-08-18 #1 — unified dialog title (was 'New To Do').
     expect(callArgs.title).toBe('Smart To Do Item');
-    // UAT 2026-08-18 #3 — one size down: record (85%×85%), not fullCover.
-    expect(callArgs.size).toEqual({ width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' } });
+    // UAT 2026-08-18 — createForm (70%×80%), two steps down from fullCover.
+    expect(callArgs.size).toEqual({ width: { value: 70, unit: '%' }, height: { value: 80, unit: '%' } });
   });
 
   it('invokes the refresh callback when the outcome carries a savedEntityReference (user saved)', async () => {

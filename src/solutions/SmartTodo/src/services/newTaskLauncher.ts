@@ -291,8 +291,9 @@ export async function launchNewTaskCreateForm(
     title: NEW_TASK_DIALOG_TITLE,
     defaultValues,
     createFromEntity,
-    // UAT 2026-08-18 #3 — one size down from fullCover (100%) to record (85%).
-    size: getOobModalSize('record'),
+    // UAT 2026-08-18 — down to createForm (70%×80%): fullCover(100%) → record(85%)
+    // → createForm (two steps down from the original per operator UAT).
+    size: getOobModalSize('createForm'),
   });
   if (outcome.savedEntityReference) {
     onSaved();

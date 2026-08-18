@@ -13,14 +13,15 @@
  *    `showlabel="false"` and formjson `"ShowLabel":false` had NO effect). Fixed
  *    with `formContext.ui.headerSection.setTabNavigatorVisible(false)`.
  *
- * NOTE (2026-08-18 UAT): a second attempt to blank the header entity-name
- * SUBTITLE ("To Do") via `formContext.ui.setFormEntityName(" ")` was REVERTED —
- * empirically that API prefixes the record TITLE (renders "{name}: {primary}"),
- * so a space produced a stray ": " colon in front of the record name and did
- * NOT touch the "To Do" subtitle. No supported Client API hides that subtitle.
+ * 2. **Hide the header entity-name SUBTITLE ("To Do")** — the
+ *    `entity_name_span`. There is NO supported Client API for it
+ *    (`setFormEntityName` targets the record-title PREFIX, not this span — it
+ *    added a stray ": " colon and was reverted). So this uses an UNSUPPORTED,
+ *    operator-approved DOM hide, SCOPED to the `navigateTo` modal dialog
+ *    (`[aria-modal="true"]`) so it never affects a background full-page form.
  *
- * MUST run from a FORM OnLoad handler so it also fires when the form is opened
- * as an `Xrm.Navigation.navigateTo` modal dialog (target:2).
+ * Both MUST run from a FORM OnLoad handler so they also fire when the form is
+ * opened as an `Xrm.Navigation.navigateTo` modal dialog (target:2).
  *
  * Ref (Microsoft Learn, Unified Interface only):
  *   - formContext.ui.headerSection.setTabNavigatorVisible
@@ -32,14 +33,16 @@
  *
  * # Behavior
  *
- * - On form load: hides the tab navigator so the single-tab form reads clean.
- * - Never throws / never blocks the form: guarded; failures log and continue.
+ * - On form load: hides the tab navigator AND (DOM-hide) the modal's entity-name
+ *   subtitle so the single-tab form reads clean.
+ * - Never throws / never blocks the form: each step guarded; failures log and continue.
  *
  * # Version
  *
+ * v1.3.0 — hide entity-name subtitle via scoped DOM hide (UAT #2, operator-approved) (2026-08-18)
  * v1.2.0 — revert setFormEntityName (caused a ": " colon; wrong element) (2026-08-18)
  * v1.1.0 — add header entity-name blanking (later reverted) (2026-08-18)
- * v1.0.0 — initial: hide single-tab navigator (UAT item #3, 2026-08-18)
+ * v1.0.0 — initial: hide single-tab navigator (2026-08-18)
  *
  * @namespace Spaarke.SmartTodo.HideTabNav
  * @see src/client/webresources/js/sprk_todo_score_onchange.js (sibling convention this file mirrors)
@@ -54,7 +57,7 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
 
 (function (ns) {
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.2.0";
+    ns.VERSION = "1.3.0";
 
     /**
      * Form OnLoad handler. Cleans up the form-header chrome via SUPPORTED
@@ -86,12 +89,39 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
             console.error("[SmartTodo.HideTabNav v" + ns.VERSION + "] setTabNavigatorVisible error:", err);
         }
 
-        // 2) (Reverted 2026-08-18 UAT) — `setFormEntityName(" ")` was NOT the
-        //    right lever for the "To Do" entity-name SUBTITLE: empirically it
-        //    PREFIXES the record TITLE (rendered "{name}: {primary}"), so a
-        //    single space produced a stray ": " colon in front of the record
-        //    name AND left the "To Do" subtitle untouched. Removed. The subtitle
-        //    hide (if pursued) needs a different, non-title mechanism.
+        // 2) Hide the header entity-name SUBTITLE ("To Do").
+        //
+        //    ⚠ UNSUPPORTED DOM approach — used deliberately (operator-approved,
+        //    2026-08-18 UAT) because there is NO supported Client API for this
+        //    span: `setFormEntityName` targets the record-title PREFIX (it added
+        //    a stray ": " colon — reverted in v1.2.0), and `headerSection`
+        //    exposes no entity-name setter. Microsoft discourages DOM
+        //    manipulation of UCI; the `data-id="entity_name_span"` hook is
+        //    reasonably stable but MAY break on a platform UI update.
+        //
+        //    SCOPED to the `navigateTo` modal dialog (`[aria-modal="true"]`) so
+        //    it NEVER hides a background full-page form's entity name (which
+        //    would stay hidden after the modal closes). Bounded retry (~2s)
+        //    covers the header's async render inside the dialog.
+        try {
+            var attempts = 0;
+            var hideEntityName = function () {
+                attempts++;
+                var spans = document.querySelectorAll('[aria-modal="true"] [data-id="entity_name_span"]');
+                if (spans.length > 0) {
+                    for (var i = 0; i < spans.length; i++) {
+                        spans[i].style.display = "none";
+                    }
+                    return;
+                }
+                if (attempts < 20) {
+                    window.setTimeout(hideEntityName, 100);
+                }
+            };
+            hideEntityName();
+        } catch (err) {
+            console.error("[SmartTodo.HideTabNav v" + ns.VERSION + "] entity-name hide error:", err);
+        }
     };
 
     // -----------------------------------------------------------------------

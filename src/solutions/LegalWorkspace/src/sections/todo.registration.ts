@@ -158,8 +158,9 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
           entityId: todoId,
           // smart-todo-r5 UAT 2026-08-18 #1 — uniform dialog title (not sprk_name).
           title: "Smart To Do Item",
-          // smart-todo-r5 UAT 2026-08-18 #3 — one size down: fullCover(100%) → record(85%).
-          size: getOobModalSize("record"),
+          // smart-todo-r5 UAT 2026-08-18 — down to createForm (70%×80%):
+          // fullCover(100%) → record(85%) → createForm (two steps down per UAT).
+          size: getOobModalSize("createForm"),
         }).then((outcome) => {
           if (outcome.launched) {
             // task 033 (FR-14) — the OOB form dialog closed. An existing-record
