@@ -66,8 +66,9 @@ export async function launchOpenTodoForm(
     entityId: todoId,
     // UAT 2026-08-18 #1 — uniform dialog title (not the record's sprk_name).
     title: TODO_DIALOG_TITLE,
-    // UAT 2026-08-18 #3 — one size down from fullCover (100%) to record (85%).
-    size: getOobModalSize('record'),
+    // UAT 2026-08-18 — down to createForm (70%×80%): fullCover(100%) → record(85%,
+    // "not smaller enough") → createForm. (Two steps down from the original.)
+    size: getOobModalSize('createForm'),
   });
   if (!outcome.launched) {
     // eslint-disable-next-line no-console
