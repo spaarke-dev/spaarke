@@ -242,7 +242,10 @@ describe('launchNewTaskCreateForm (handleNewTask delegate)', () => {
     const callArgs = mockNavigateToEntityRecordSurfaceAsync.mock.calls[0][0];
     expect(callArgs.entityName).toBe('sprk_todo');
     expect('entityId' in callArgs).toBe(false);
-    expect(callArgs.title).toBe('New To Do');
+    // UAT 2026-08-18 #1 — unified dialog title (was 'New To Do').
+    expect(callArgs.title).toBe('Smart To Do Item');
+    // UAT 2026-08-18 #3 — one size down: record (85%×85%), not fullCover.
+    expect(callArgs.size).toEqual({ width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' } });
   });
 
   it('invokes the refresh callback when the outcome carries a savedEntityReference (user saved)', async () => {

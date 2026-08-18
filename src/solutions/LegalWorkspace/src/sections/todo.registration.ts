@@ -62,6 +62,7 @@ import type {
   ContentSectionConfig,
 } from "@spaarke/ui-components";
 import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync } from "@spaarke/ui-components";
+import { getOobModalSize } from "@spaarke/ui-components/utils/adapters/oobModalSizes";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
 import type { IFeedSyncBridge, SmartTodoWidgetProps } from "@spaarke/smart-todo-components";
@@ -156,6 +157,10 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
         void navigateToEntityRecordSurfaceAsync({
           entityName: "sprk_todo",
           entityId: todoId,
+          // smart-todo-r5 UAT 2026-08-18 #1 — uniform dialog title (not sprk_name).
+          title: "Smart To Do Item",
+          // smart-todo-r5 UAT 2026-08-18 #3 — one size down: fullCover(100%) → record(85%).
+          size: getOobModalSize("record"),
         }).then((outcome) => {
           if (outcome.launched) {
             // task 033 (FR-14) — the OOB form dialog closed. An existing-record

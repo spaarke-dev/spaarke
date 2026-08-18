@@ -72,14 +72,19 @@ import {
   navigateToEntityRecordSurfaceAsync,
   TODO_REGARDING_CATALOG,
 } from '@spaarke/ui-components';
+import { getOobModalSize } from '@spaarke/ui-components/utils/adapters/oobModalSizes';
 import type { ILaunchContext } from '../hooks/useLaunchContext';
 import { getXrm } from './xrmProvider';
 
 /** Entity logical name for the sprk_todo OOB create form (spec FR-10). */
 const TODO_ENTITY_NAME = 'sprk_todo';
 
-/** Dialog title passed to `navigateToEntityRecordSurfaceAsync`. */
-const NEW_TASK_DIALOG_TITLE = 'New To Do';
+/**
+ * Dialog title passed to `navigateToEntityRecordSurfaceAsync`. smart-todo-r5
+ * UAT 2026-08-18 (item #1): unified to "Smart To Do Item" so EVERY To Do modal
+ * (create + open) shows the same chrome title (was "New To Do").
+ */
+const NEW_TASK_DIALOG_TITLE = 'Smart To Do Item';
 
 /**
  * Narrow shape shared by all regarding branches this module reads
@@ -286,6 +291,8 @@ export async function launchNewTaskCreateForm(
     title: NEW_TASK_DIALOG_TITLE,
     defaultValues,
     createFromEntity,
+    // UAT 2026-08-18 #3 — one size down from fullCover (100%) to record (85%).
+    size: getOobModalSize('record'),
   });
   if (outcome.savedEntityReference) {
     onSaved();
