@@ -79,9 +79,10 @@ Disposition = **R7** (fix in this UAT round) · **Fidelity** (Compose render/anc
 ### UAT-07 — "content simplified when saving" warnings — unhelpful + real loss — 🟡 Open
 - **Rounds**: R2 items 3d/3f. Observed: indentation-dropped ×23, paragraph-style-flattened ×62, table-formatting-flattened ×29, section-break ×3, tab ×5, line-break ×2, internal-link-flattened, link-target-not-preserved.
 - **Two facets**:
-  - **(a) Real fidelity loss** — the render-on-save model flattens these features today. This is the **fidelity-widener backlog → DEF-002 / GitHub #777** (`spaarkeai-compose-fidelity-wideners-r1`).
-  - **(b) UX** — the raw warnings ("paragraph-style-flattened ×62") are meaningless to end users. R7-scope UX fix: aggregate + translate into plain language (e.g., "Some formatting (indentation, table styling) was simplified to save. The text is intact.") or gate behind a "details" affordance.
-- **Resolution**: (a) DEF-002 fast-follow; (b) R7 UX rewrite of the warning surface.
+  - **(a) Real fidelity loss — ⛔ BLOCKER (owner, 2026-08-18)**: the render-on-save model flattens these features today. Owner: *"if this isn't fixed then Compose is really not usable."* This is **no longer deferrable backlog** — it MUST be fully fixed. Whether it ships as an R7 phase or a new `compose-r8` is **semantic**; the binding point is full remediation of render-on-save fidelity (indentation, paragraph styles, tables, section breaks, tabs, line breaks, internal links survive the save round-trip). Supersedes the DEF-002 "fast-follow / deferred" framing.
+  - **(b) UX — ✅ Fixed `cdb1dbcb4`**: raw warnings ("paragraph-style-flattened ×62") replaced with a concise plain-language summary ("Some formatting (indentation, paragraph styles, tables) was simplified … your text and content are intact").
+- **Root-cause of the miss (process)**: the loss was **known and deliberately deferred** (R4/R6 "warn-don't-drop" + the R6 defer-register §C widener backlog), NOT hidden — but it was **mis-classified as "acceptable degradation / cosmetic widener"** when it is actually a usability blocker for real legal documents. Lesson: re-audit every "accepted degradation" for true severity (see the Proactive Hidden-Issue Audit section below).
+- **Resolution**: (a) full render-on-save fidelity remediation — **must-fix**, scoped as its own workstream (R7 phase or compose-r8, owner's naming call); (b) done.
 
 ### UAT-08 — Create Summary Memo / Analysis workflow — 🟡 Open
 - **Rounds**: R1 item 7.
@@ -117,3 +118,21 @@ in-progress project is directly and currently addressing the issue.* No phantom 
 
 R7 closes only when every row is ✅ Fixed, or 📦 Deferred with an explicit owner decision + a tracking link.
 Update this file as each is resolved.
+
+---
+
+## Proactive Hidden-Issue Audit (owner-requested 2026-08-18)
+
+**Why**: UAT-07a (render-on-save fidelity loss) was a *fundamental* problem that had been consciously
+deferred/mis-classified rather than hidden — and it nearly shipped as "acceptable." To avoid being
+surprised again, we ran a **proactive audit** hunting other "accepted limitations" that are actually
+blockers, across three dimensions:
+1. **Fidelity** — everything Compose drops/flattens/approximates on load AND save (07a's siblings).
+2. **Silent failures & accepted limits** — swallowed errors, feature gates, stubs/"thin wiring", deferred-as-OK.
+3. **Anchor/op-log/comment robustness** — where AI edits + comments can silently fail or lose work (UAT-06/09's siblings).
+
+Findings are appended below as **UAT-11+** with the same fields (root cause, severity, resolution, disposition).
+Severity here uses **⛔ BLOCKER** (Compose not usable / legally wrong for real documents) deliberately, so
+severity mis-classification (the 07a mistake) is not repeated.
+
+_(Audit in progress — findings pending.)_
