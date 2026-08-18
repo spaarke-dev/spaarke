@@ -110,6 +110,48 @@ typed-carry addition to the render-on-save model with a seam test proving surviv
 
 ---
 
+### DEF-003 — Compose save-identity prod-safety (self-heal dupes, retroactive dedup tool, runtime key-health probe)
+
+| Field | Value |
+|---|---|
+| **Status** | Open (partial — #1 + #4a shipped, rest deferred) |
+| **Urgency** | next-round |
+| **Filed** | 2026-08-17 |
+| **Source** | dev UAT 2026-08-17 — Compose save 500s traced to a `Failed` `sprk_graphitemid_uk` key over 417 duplicate `sprk_document` rows |
+| **GitHub Issue** | [#781](https://github.com/spaarke-dev/spaarke/issues/781) |
+
+**Description**
+
+Follow-on hardening for R7 FR-07(d) (atomic upsert on `sprk_graphitemid_uk`). The atomic-upsert dedup is
+*preventive* and has an unmet precondition: the unique key can only be `Active` when `sprk_document.sprk_graphitemid`
+is already unique. `spaarkedev1` carried **105 duplicated graphitemids / 417 excess rows** (the mis-scoped D1
+debt — spec said "5"), so the key sat `Failed` and every save through the promote path threw a raw 500
+(`not defined as keys / Not Active`, and `Found multiple records`). The preventive dedup literally could not run
+because the duplicates it prevents blocked its own key.
+
+**Shipped now (post-R7):**
+- **#1 graceful error** — `ComposeEndpoints.Save` maps the two identity-key fault signatures → actionable 409/503 ProblemDetails (not an opaque 500). *Needs BFF deploy to take effect.*
+- **#4a deploy-verification** — `scripts/Verify-ComposeIdentityKey.ps1` asserts the key is `Active` (run post-deploy / CI). Verified `Active` in dev 2026-08-17 after the cleanup.
+
+**Deferred (this DEF):**
+- **#2 self-heal on "found multiple"** — promote catch resolves a duplicated graphitemid deterministically (pick canonical, update, orphan rest) so touching a dup heals it.
+- **#3 retroactive dedup admin tool** — package the one-time dedupe+reactivate flow (run by hand for dev) as a repeatable operation for prod.
+- **#4b runtime key-health probe** — startup IHostedService asserting the key is `Active` (needs new Dataverse key-metadata retrieval in the BFF).
+
+**Entry-points**
+
+- `src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs:2769` — `PromoteIfEphemeralAsync` upsert + catch (#2 site)
+- `src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs` Save handler — the shipped #1 catch
+- `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:1954` — `UpsertAsync`
+- `scripts/Verify-ComposeIdentityKey.ps1` — shipped #4a (basis for #4b)
+- `src/server/api/Sprk.Bff.Api/Services/Documents/ContentDedupDetector.cs` — the *content*-dedup tool (from `sdap-file-duplication-detector-r1`); distinct axis from identity dedup
+
+**Estimated effort**: ~1–2 days. BFF hot-path → §10 gates apply.
+**Blockers**: none technical. Prod MUST have `sprk_graphitemid_uk` `Active` before Compose ships there (run #4a).
+**Related**: DEF-001/#776, DEF-002/#777; the D1 deferral (spec Out-of-Scope) was mis-scoped and is the root cause.
+
+---
+
 ## Issues (ISS)
 
 _None filed._
