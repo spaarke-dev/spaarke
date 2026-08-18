@@ -1,0 +1,257 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.46.1.21595",
+      "templateHash": "3162801486435280577"
+    }
+  },
+  "parameters": {
+    "appServiceName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the L2 control-plane App Service (typically spaarke-provisioning-controlplane-{env} to match the FR-20 audience)."
+      }
+    },
+    "appServicePlanId": {
+      "type": "string",
+      "metadata": {
+        "description": "App Service Plan resource ID."
+      }
+    },
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Location for the App Service + slot."
+      }
+    },
+    "userAssignedIdentityResourceId": {
+      "type": "string",
+      "metadata": {
+        "description": "Resource ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep). Bound to BOTH prod + staging slots (T1/T5 structural fix)."
+      }
+    },
+    "jwtAudience": {
+      "type": "string",
+      "metadata": {
+        "description": "AAD bearer audience for the L2 REST API - MUST equal api://spaarke-provisioning-controlplane-{env} per FR-20 acceptance."
+      }
+    },
+    "jwtTenantId": {
+      "type": "string",
+      "metadata": {
+        "description": "AAD tenant ID for JWT bearer authority validation. Single-issuer per spec.md §4.2."
+      }
+    },
+    "controlPlaneAppRegClientId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Client ID of the L2 control-plane app-reg (used for informational logging + config surface)."
+      }
+    },
+    "uamiClientId": {
+      "type": "string",
+      "metadata": {
+        "description": "AZURE_CLIENT_ID pins DefaultAzureCredential to the bound UAMI (per ADR-028). Pass the UAMI clientId from uami.bicep outputs."
+      }
+    },
+    "cosmosAccountEndpoint": {
+      "type": "string",
+      "metadata": {
+        "description": "Cosmos DB account endpoint (from cosmos-provisioning.bicep outputs)."
+      }
+    },
+    "cosmosDatabaseName": {
+      "type": "string",
+      "metadata": {
+        "description": "Cosmos database name (spaarke-provisioning per task 024 spec)."
+      }
+    },
+    "cosmosRunsContainerName": {
+      "type": "string",
+      "metadata": {
+        "description": "Cosmos runs container name (runs per task 024 spec)."
+      }
+    },
+    "keyVaultName": {
+      "type": "string",
+      "metadata": {
+        "description": "Key Vault name (for @Microsoft.KeyVault references in appSettings)."
+      }
+    },
+    "serviceBusKeyVaultSecretName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the KV secret holding the Service Bus connection string (ADR-036 reuse - no new SB created here)."
+      }
+    },
+    "dataverseClientSecretName": {
+      "type": "string",
+      "metadata": {
+        "description": "Name of the KV secret holding the Dataverse S2S ClientSecret used by H5/H6/H10."
+      }
+    },
+    "appInsightsConnectionString": {
+      "type": "string",
+      "metadata": {
+        "description": "App Insights connection string (from monitoring.bicep outputs)."
+      }
+    },
+    "aadLoginEndpoint": {
+      "type": "string",
+      "defaultValue": "[environment().authentication.loginEndpoint]",
+      "metadata": {
+        "description": "AAD authority login endpoint (typically environment().authentication.loginEndpoint to remain cloud-portable)."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {},
+      "metadata": {
+        "description": "Tags for the resource."
+      }
+    }
+  },
+  "resources": [
+    {
+      "type": "Microsoft.Web/sites",
+      "apiVersion": "2023-01-01",
+      "name": "[parameters('appServiceName')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "kind": "app,linux",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', parameters('userAssignedIdentityResourceId'))]": {}
+        }
+      },
+      "properties": {
+        "serverFarmId": "[parameters('appServicePlanId')]",
+        "httpsOnly": true,
+        "clientAffinityEnabled": false,
+        "siteConfig": {
+          "linuxFxVersion": "DOTNETCORE|10.0",
+          "alwaysOn": true,
+          "http20Enabled": true,
+          "minTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "healthCheckPath": "/healthz",
+          "appSettings": [
+            {
+              "name": "AzureAd__Audience",
+              "value": "[parameters('jwtAudience')]"
+            },
+            {
+              "name": "AzureAd__TenantId",
+              "value": "[parameters('jwtTenantId')]"
+            },
+            {
+              "name": "AzureAd__ClientId",
+              "value": "[parameters('controlPlaneAppRegClientId')]"
+            },
+            {
+              "name": "AzureAd__Instance",
+              "value": "[parameters('aadLoginEndpoint')]"
+            },
+            {
+              "name": "Cosmos__Endpoint",
+              "value": "[parameters('cosmosAccountEndpoint')]"
+            },
+            {
+              "name": "Cosmos__Database",
+              "value": "[parameters('cosmosDatabaseName')]"
+            },
+            {
+              "name": "Cosmos__RunsContainer",
+              "value": "[parameters('cosmosRunsContainerName')]"
+            },
+            {
+              "name": "ServiceBus__ConnectionString",
+              "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('serviceBusKeyVaultSecretName'))]"
+            },
+            {
+              "name": "Dataverse__ClientSecret",
+              "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('dataverseClientSecretName'))]"
+            },
+            {
+              "name": "AZURE_CLIENT_ID",
+              "value": "[parameters('uamiClientId')]"
+            },
+            {
+              "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
+              "value": "[parameters('appInsightsConnectionString')]"
+            },
+            {
+              "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
+              "value": "~3"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "type": "Microsoft.Web/sites/slots",
+      "apiVersion": "2023-01-01",
+      "name": "[format('{0}/{1}', parameters('appServiceName'), 'staging')]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "identity": {
+        "type": "UserAssigned",
+        "userAssignedIdentities": {
+          "[format('{0}', parameters('userAssignedIdentityResourceId'))]": {}
+        }
+      },
+      "properties": {
+        "serverFarmId": "[parameters('appServicePlanId')]",
+        "httpsOnly": true,
+        "clientAffinityEnabled": false,
+        "siteConfig": {
+          "linuxFxVersion": "DOTNETCORE|10.0",
+          "alwaysOn": true,
+          "http20Enabled": true,
+          "minTlsVersion": "1.2",
+          "ftpsState": "Disabled",
+          "healthCheckPath": "/healthz"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Web/sites', parameters('appServiceName'))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "appServiceId": {
+      "type": "string",
+      "value": "[resourceId('Microsoft.Web/sites', parameters('appServiceName'))]"
+    },
+    "appServiceName": {
+      "type": "string",
+      "value": "[parameters('appServiceName')]"
+    },
+    "appServiceDefaultHostName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites', parameters('appServiceName')), '2023-01-01').defaultHostName]"
+    },
+    "appServiceUrl": {
+      "type": "string",
+      "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites', parameters('appServiceName')), '2023-01-01').defaultHostName)]"
+    },
+    "stagingSlotName": {
+      "type": "string",
+      "value": "staging"
+    },
+    "stagingSlotDefaultHostName": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Web/sites/slots', parameters('appServiceName'), 'staging'), '2023-01-01').defaultHostName]"
+    },
+    "stagingSlotUrl": {
+      "type": "string",
+      "value": "[format('https://{0}', reference(resourceId('Microsoft.Web/sites/slots', parameters('appServiceName'), 'staging'), '2023-01-01').defaultHostName)]"
+    }
+  }
+}

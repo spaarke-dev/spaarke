@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author fallback matrix implementation in /provision-environment skill (MCP disconnect → pac data or raw Web API; az token expiry → auto-refresh; L2 unreachable → escalation)</title>
+    <phase>D L3 Skill + BFF Integration Endpoints + Metering</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Skill-documentation-only augmentation of task-075's skill file; no code changes; small doc scope. Per root CLAUDE.md §8 MINIMAL row.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Focused fallback-matrix documentation with clear per-failure-mode rules. Step 3.5.5b sonnet @ medium.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches .claude/skills/** — Sub-Agent Write Boundary per root CLAUDE.md §3 forces MAIN-SESSION-ONLY.</parallel-reason>
+    <deps>075</deps>
+    <tags>skill-directive, deploy</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the fallback matrix section in the /provision-environment skill file per spec.md FR-25 + §4.3a.5. Cover: (a) Dataverse MCP disconnect → fallback to `pac data` or raw Web API PowerShell; (b) az token expiry mid-run → auto-refresh via `az account get-access-token`; (c) L2 unreachable (5xx, timeout) → escalation-to-owner message with actionable diagnostic. Each fallback path documented as a decision-tree in the skill file with example commands.</prompt>
+
+  <role>SPAARKE platform skill author. Fluent with Dataverse MCP tool set (mcp__dataverse__*), pac CLI (`pac data create/update/query`), Dataverse Web API PowerShell shape, and Azure CLI token lifecycle. Follow ADRs strictly.</role>
+
+  <goal>The .claude/skills/provision-environment/SKILL.md file (from task 075) has a Fallback Matrix section documenting the 3 primary failure modes and their fallback paths with example commands. Section title matches spec.md §4.3a.5 reference.</goal>
+
+  <context>
+    <background>Per spec.md FR-25 acceptance + §4.3a.5: the skill's tool matrix has MCP as the preferred Dataverse tool but must degrade gracefully when MCP is disconnected (dev environments, first-time setup, connector auth expiry). Similarly the L2 REST call needs auto-refresh on az token expiry and clear escalation when L2 is unreachable. This task adds the fallback matrix to the skill file — no separate implementation code; the skill executes these fallbacks itself when its primary path fails.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file role="canonical-reference">.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="075" status="pending">Skill file exists</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-25">SCOPE: Fallback matrix covers 3 primary modes — MCP disconnect / az token expiry / L2 unreachable.</constraint>
+    <constraint source="spec.md §4.3a.5">SCOPE: MCP-disconnect fallback is `pac data` or raw Web API PS — NOT a re-connect attempt loop.</constraint>
+    <constraint source="CLAUDE.md-§3">SCOPE: Writes to .claude/skills/** — MAIN-SESSION-ONLY per Sub-Agent Write Boundary.</constraint>
+    <constraint source="project">SCOPE: Each fallback documented as decision-tree with the primary command + fallback command + escalation trigger.</constraint>
+    <constraint source="project">SCOPE: az token auto-refresh MUST call `az account get-access-token --resource api://spaarke-provisioning-controlplane-{env}` and NOT re-authenticate the operator (already logged in).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fallback matrix for MCP disconnect + az token refresh + L2 unreachable</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Skill decision-tree format" location=".claude/skills/deploy-new-release/SKILL.md">Existing skill uses decision-tree format for failure handling; copy shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (MINIMAL). Load spec.md §4.3a.5.</step>
+    <step order="1" name="Section design">Draft Fallback Matrix section structure: 3 subsections (MCP disconnect, az token expiry, L2 unreachable), each with decision-tree.</step>
+    <step order="2" name="Author">Add Fallback Matrix section to .claude/skills/provision-environment/SKILL.md with example commands.</step>
+    <step order="3" name="Cross-ref">Add cross-reference from Step 4 (execute loop) in the skill file to the Fallback Matrix.</step>
+    <step order="4" name="Dry-run">Manually verify the skill file renders + Fallback Matrix is discoverable.</step>
+    <step order="5" name="Index update">Update TASK-INDEX.md: task 076 → ✅.</step>
+    <step order="6" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Verify skill rendering</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/skills/provision-environment/SKILL.md (Fallback Matrix section added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">.claude/skills/provision-environment/SKILL.md contains a "Fallback Matrix" section with 3 subsections (MCP disconnect, az token expiry, L2 unreachable).</criterion>
+    <criterion testable="true">Each subsection includes primary command + fallback command + escalation trigger.</criterion>
+    <criterion testable="true">MCP-disconnect fallback documents `pac data create/update/query` OR raw Web API PS example — NOT a reconnect loop.</criterion>
+    <criterion testable="true">az token-expiry subsection references `az account get-access-token --resource api://spaarke-provisioning-controlplane-{env}` for auto-refresh.</criterion>
+    <criterion testable="true">Step 4 (execute loop) in the skill file cross-references the Fallback Matrix.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-25 + §4.3a.5. Companion to task 075.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

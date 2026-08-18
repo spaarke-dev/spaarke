@@ -130,6 +130,22 @@ public static class AnalysisServicesModule
         // unconditional registration (pattern precedent: EventRulesTelemetry above).
         services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
 
+        // ── Per-tenant token-budget enforcement (customer-provisioning-orchestration-r1 task 077,
+        //    D19 + spec.md FR-13 §M1/M2 + SC #13) ────────────────────────────────────────────────
+        // UNCONDITIONAL registration per ADR-032 F.1 (feature is opt-in via config, not DI gate).
+        // Pattern: options bound from configuration section 'TenantBudget'; ledger tracks month-
+        // to-date USD spend per tenant; policy reads ambient AiMeteringContext.TenantId + options
+        // + ledger to make the pre-call 429 decision.
+        // Design rationale: notes/per-tenant-metering-impl-2026-08-17.md (Phase A decision) —
+        // extends existing observability shipped by task 054 (AiTelemetry.RecordMeteredTokens),
+        // adds enforcement seam without duplicating any observability code (CLAUDE.md §11).
+        services.Configure<Services.Ai.Metering.TenantBudgetOptions>(
+            configuration.GetSection(Services.Ai.Metering.TenantBudgetOptions.SectionName));
+        services.AddSingleton<Services.Ai.Metering.ITenantTokenLedger,
+                              Services.Ai.Metering.InMemoryTenantTokenLedger>();
+        services.AddSingleton<Services.Ai.Metering.ITenantBudgetPolicy,
+                              Services.Ai.Metering.TenantBudgetPolicy>();
+
         // task 024 (ADR-013 / BFF §10 bullet 3) — IFileSummarizeAi PublicContracts facade.
         // TRULY UNCONDITIONAL, mirroring the always-mapped
         // WorkspaceFileEndpoints.MapWorkspaceFileEndpoints (the non-AI /api/workspace/files/summarize

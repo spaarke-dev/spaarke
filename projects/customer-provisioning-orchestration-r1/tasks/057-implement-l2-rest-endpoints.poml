@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="057" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement L2 REST endpoints per §4.2 API surface (all 9 endpoints)</title>
+    <phase>C Wave C5 — L2 REST + Reconciler</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','bff-api','auth'; modifies .cs files; implements the public control-plane surface consumed by L3 skill; FR-21 acceptance scope; PR-time /conflict-check obligated.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Public API surface for the L2 control plane spanning 9 endpoints with app-role authorization, OpenAPI export, audit-log wiring, and 202-Accepted enqueue semantics. High-blast-radius (any endpoint bug is a control-plane defect) per Step 3.5.5b Opus/Fable tier criteria.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 042</deps>
+    <tags>l2-controlplane, bff-api, auth, azure-deployment</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement all 9 L2 REST endpoints in the L2 control-plane project per spec.md §4.2 API surface: POST /api/runs (init), POST /api/runs/{id}/preflight, GET /api/runs/{id}, POST /api/runs/{id}/gates/{gateId}/advance, POST /api/runs/{id}/resume, GET /api/runs/{id}/phases/{phaseId}/logs, POST /api/runs/{id}/cancel, POST /api/runs/{id}/clear-quarantine (v3.2 §4C), plus the H0.5 consent-callback shape. Each mutating endpoint requires the `Operator` app-role; read-only endpoints require `Reader`. Enqueue-and-return-202 for handler-invoking endpoints (FR-22 / R20); synchronous read for GET endpoints. OpenAPI at /swagger. Audit-log every mutating action to App Insights with actor tid.</prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 10 Minimal API endpoint filters, JWT bearer + Microsoft.Identity.Web app-role authorization, Cosmos DB SDK partition-key predicates, Service Bus Sender enqueue with MessageId dedup, and OpenAPI/Swagger generation. Follow ADRs strictly.</role>
+
+  <goal>All 9 endpoints exist under src/server/services/Sprk.Provisioning.ControlPlane/Api/**; each enforces the correct app-role (Operator vs Reader) via [Authorize(Roles = "...")] or per-endpoint filter; mutating endpoints enqueue via Service Bus + return 202 Accepted in &lt;100ms; GET endpoints read from Cosmos with /customerId partition-key predicate; POST /api/runs/{id}/clear-quarantine requires a reason parameter and audit-logs to App Insights; OpenAPI export at /swagger includes all 9 endpoints; unit tests cover authorized/unauthorized/malformed cases.</goal>
+
+  <context>
+    <background>Per spec.md FR-21 + design.md §4.2: the L2 control plane exposes a REST surface consumed by the L3 /provision-environment skill (Phase D). The 9-endpoint set is designed for fire-and-forget execution (FR-22 / R20 — App Service 230s HTTP timeout vs 30-min handlers) with state polled via GET. clear-quarantine (added v3.2 §4C) is the operator's reversible mechanism to release a Quarantined run that would otherwise block new runs against the same customerId.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunLogsEndpoints.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.Tests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Registration/</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold (Program.cs + DI + JWT bearer + Cosmos + Service Bus wiring)</dependency>
+      <dependency task="042" status="pending">H0.5 consent-callback endpoint shape (BFF-side)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-21">SCOPE: All 9 endpoints per §4.2 must be exposed; missing any endpoint fails FR-21 acceptance.</constraint>
+    <constraint source="spec.md FR-22">SCOPE: Handler-invoking endpoints (POST /api/runs, POST /api/runs/{id}/preflight, POST /api/runs/{id}/resume) MUST enqueue via Service Bus and return 202 Accepted in &lt;100ms — no synchronous handler execution in HTTP request path.</constraint>
+    <constraint source="spec.md FR-20">SCOPE: JWT bearer + audience `api://spaarke-provisioning-controlplane-{env}` + `Operator`/`Reader` app-roles; requests without correct role return 403.</constraint>
+    <constraint source="spec.md FR-24">SCOPE: POST /api/runs/{id}/clear-quarantine REQUIRES a reason parameter and MUST audit-log the action + actor tid to App Insights (spec.md FR-24 acceptance).</constraint>
+    <constraint source="ADR-010">SCOPE: These endpoints register in the L2 control-plane DI container, NOT BFF DI (per spec.md §5.2 + D3/D8/D12). Do NOT add L2 registrations to BFF.</constraint>
+    <constraint source="ADR-036">SCOPE: Enqueue uses the shared Service Bus infrastructure (via Sender + MessageId); do NOT invent a new queuing abstraction.</constraint>
+    <constraint source="spec.md §4D I3">SCOPE: All Cosmos reads/writes in these endpoints include the /customerId partition-key predicate explicitly — no cross-partition queries.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: L2 control plane is a NEW component (`src/server/services/Sprk.Provisioning.ControlPlane`) separate from BFF; register /conflict-check before merging (19 active BFF worktrees per r3 handoff §7).</constraint>
+    <constraint source="CLAUDE.md-§6.5">SCOPE: ADR-004 Path A (L2 orchestration exception) applies — this API is part of the documented custom state machine per spec.md ADR Tensions row 1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 control-plane REST API — fire-and-forget enqueue + Cosmos state read + app-role auth</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Minimal-API endpoint filter with app-role auth" location="src/server/api/Sprk.Bff.Api/Api/Registration/">Endpoint-filter shape: MapGroup + [Authorize(Roles = "...")] + result types; copy for L2 endpoint shape.</pattern>
+      <pattern name="202-Accepted enqueue pattern" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Service Bus Sender with MessageId for dedup + immediate 202 with Location header pointing at GET /api/runs/{id}.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit RIGOR LEVEL block (FULL). Load spec.md §4.2 (full endpoint table) + design.md §4.2 + CLAUDE.md §6.5 ADR Tension row 1 + this project's CLAUDE.md.</step>
+    <step order="1" name="Inventory">Read task 036 L2 scaffold (Program.cs + DI + JWT bearer + Cosmos + Service Bus wiring). Read task 042 H0.5 endpoint shape. Grep-verify no existing RunsEndpoints.cs exists.</step>
+    <step order="2" name="Author endpoints">Author Api/RunsEndpoints.cs + Api/RunLogsEndpoints.cs; map all 9 endpoints per §4.2. Wire per-endpoint app-role via [Authorize(Roles = ...)].</step>
+    <step order="3" name="Enqueue path">For POST /api/runs + preflight + resume + gates/advance + cancel + clear-quarantine: enqueue via Service Bus Sender with MessageId = correlation-key; return 202 Accepted with Location header.</step>
+    <step order="4" name="Read path">For GET /api/runs/{id} + GET /api/runs/{id}/phases/{phaseId}/logs: read from Cosmos with /customerId partition-key predicate explicitly.</step>
+    <step order="5" name="Audit-log">POST /api/runs/{id}/clear-quarantine: require reason parameter (400 if missing); write actor tid + reason to App Insights TelemetryClient.TrackEvent("QuarantineCleared", ...).</step>
+    <step order="6" name="OpenAPI">Verify /swagger renders all 9 endpoints via Swashbuckle or built-in OpenAPI generator.</step>
+    <step order="7" name="Tests">Author RunsEndpoints.Tests.cs: authorized happy path per endpoint + 401 (no token) + 403 (wrong role) + 400 (malformed body / missing reason on clear-quarantine) + 202 latency spot-check.</step>
+    <step order="8" name="Verify">dotnet build + dotnet test targeting L2 project = green; dotnet format; zero analyzer warnings.</step>
+    <step order="9" name="Publish size">If any change bleeds into BFF, run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and report size + delta per NFR-01.</step>
+    <step order="10" name="Index update">Update TASK-INDEX.md: task 057 → ✅.</step>
+    <step order="11" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If an endpoint per §4.2 cannot be implemented as specified (e.g., app-role predicate blocks a legitimate flow, or Cosmos partition-key predicate rejects a required cross-run query), STOP and escalate per CLAUDE.md §6 rather than mutating the API surface. §4.2 is the authoritative surface.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunLogsEndpoints.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (endpoint mapping edit)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 9 endpoints per spec.md §4.2 are exposed and callable; OpenAPI at /swagger enumerates them.</criterion>
+    <criterion testable="true">Given a valid `Operator`-role bearer token, when POST /api/runs is invoked, then the response is 202 Accepted with a Location header pointing at GET /api/runs/{id}; response latency &lt;100ms; a message is enqueued on Service Bus with MessageId = correlation-key.</criterion>
+    <criterion testable="true">Given a valid `Reader`-role bearer token (no `Operator`), when POST /api/runs is invoked, then the response is 403 Forbidden.</criterion>
+    <criterion testable="true">Given no bearer token, when any endpoint is invoked, then the response is 401 Unauthorized.</criterion>
+    <criterion testable="true">Given a valid `Reader`-role bearer token, when GET /api/runs/{id} is invoked, then the response is 200 with the Cosmos run record; the underlying Cosmos read explicitly passes /customerId as partition key (§4D I3).</criterion>
+    <criterion testable="true">Given POST /api/runs/{id}/clear-quarantine invoked WITHOUT a `reason` parameter, then the response is 400 Bad Request; audit-log NOT written.</criterion>
+    <criterion testable="true">Given POST /api/runs/{id}/clear-quarantine invoked WITH a reason parameter by an Operator, then App Insights receives a `QuarantineCleared` event with actor tid + reason (spec.md FR-24 acceptance).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test for the L2 project exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-20/FR-21/FR-22/FR-24 + design.md §4.2 endpoint table + §4C rollback semantics. Consumed by task 075 /provision-environment skill.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -93,7 +93,7 @@ $settings = @(
     "DocumentIntelligence__DocIntelEndpoint=$(KVRef 'ai-docintel-endpoint')",
     "DocumentIntelligence__DocIntelKey=$(KVRef 'ai-docintel-key')",
     "DocumentIntelligence__AiSearchEndpoint=$(KVRef 'ai-search-endpoint')",
-    "DocumentIntelligence__AiSearchKey=$(KVRef 'ai-search-key')",
+    "DocumentIntelligence__AiSearchKey=$(KVRef 'AiSearch--AdminKey')",
 
     # --- Analysis ---
     "Analysis__PromptFlowEndpoint=$(KVRef 'PromptFlow-Endpoint')",

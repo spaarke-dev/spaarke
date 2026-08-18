@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Consolidate 4+ deploy guides into one authoritative SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</title>
+    <phase>A Doc Consolidation + Audits</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <completed-on>2026-08-17</completed-on>
+    <completion-notes>Consolidated 6 customer-provisioning guides into new authoritative docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (851 lines). Retired guides converted to stubs (git history preserved). Root CLAUDE.md §17 pointer row added. Path A exception documented for retained component-scoped release guides (PCF/AI/COMMUNICATION/M365-COPILOT/DECLARATIVE/DEPLOYMENT-VERIFICATION); see projects/customer-provisioning-orchestration-r1/notes/task-001-consolidation-deviations.md.</completion-notes>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation-only consolidation; no code changes; no ADR touch; no tests. Per root CLAUDE.md §8 rigor table, docs-only work is MINIMAL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard documentation authoring with clear canonical references; no cross-cutting refactor or novel design. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>groupA-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs, audit, deploy</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Consolidate the 4+ existing deployment guides in docs/guides/ (auth-deployment-setup.md, PCF-DEPLOYMENT-GUIDE.md, ENVIRONMENT-DEPLOYMENT-GUIDE.md, plus any *DEPLOY*.md / *ONBOARDING*.md) into ONE authoritative docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md covering all provisioning phases end-to-end (per Gap 4 / R6). Leave explicit stub files at the old paths pointing at the new authoritative guide. This is the operator-facing manual that L3 skill (Phase D) will link users to.
+  </prompt>
+
+  <role>SPAARKE platform documentation author. Fluent with Spaarke's provisioning architecture (Model 1 shared + Model 2 dedicated), Azure Bicep, Dataverse, SPE, BFF deployment, and the r3-landed baseline (net10, GraphAppRoles.cs, ValidateOnStart). Follow docs/standards conventions strictly.</role>
+
+  <goal>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md exists as the single authoritative deploy guide; 4+ pre-existing deploy/onboarding guides are either merged into it or replaced with explicit stub files that redirect readers to the new guide; grep for orphan guides in docs/guides/*DEPLOY*.md returns only the authoritative file plus explicit stubs.</goal>
+
+  <context>
+    <background>
+Per spec.md Gap 4 + R6 doc-drift carry-over + plan.md Phase A Objective 1. Today the operator merges 3 docs by hand every provisioning (design.md §2 fragmented 3-generation state). The new pipeline (L1 handlers + L2 control-plane + L3 skill) needs ONE deployment guide as the customer-facing referenceable target. Owner reviewed 4+ guides during r3 handoff and confirmed consolidation is Phase A scope.
+    </background>
+    <relevant-files>
+      <file role="new">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file role="modify">docs/guides/auth-deployment-setup.md</file>
+      <file role="modify">docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file role="modify">docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file role="canonical-reference">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase A is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Consolidation is DOCUMENTATION ONLY. Do NOT edit any script, Bicep, or code file as part of this task. Per Gap 4 + R6 doc-drift.</constraint>
+    <constraint source="spec.md">SCOPE: Every old deploy/onboarding guide left in docs/guides/ MUST become an explicit stub pointing at SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md — no orphan content, no silent deletion.</constraint>
+    <constraint source="project">SCOPE: The new authoritative guide MUST cover BOTH Model 1 (shared trial) and Model 2 (dedicated stamp) tiers per design.md §3A. Single-tier documentation is a defect.</constraint>
+    <constraint source="project">SCOPE: The new authoritative guide MUST reference canonical KV secret + resource naming per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md; do NOT reproduce naming rules — link to them.</constraint>
+    <constraint source="CLAUDE.md-§17">SCOPE: The new guide MUST be reachable from root CLAUDE.md §17 Pointers table (adding the pointer row is part of this task's outputs).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Documentation consolidation + Spaarke docs conventions</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke docs style" location="docs/guides/">Follow existing docs/guides/ tone: front-matter (Last Updated + Purpose), numbered top-level sections, tables for reference matrices, code-fenced bash/pwsh snippets, cross-references via relative links.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block per root CLAUDE.md §8. Load spec.md Gap 4 + R6 sections and design.md §2 (3-generation fragmentation).</step>
+    <step order="1" name="Enumerate">Grep docs/guides/ for *DEPLOY*.md / *ONBOARDING*.md / auth-deployment-setup.md; produce inventory of each guide's coverage area and 3-generation status.</step>
+    <step order="2" name="Outline">Draft the authoritative guide's section outline covering: Prerequisites, Model 1 vs Model 2 selection, Handler catalog (H0-H14), KV secret bootstrap, Bicep infra, Dataverse env, SPE container-type, BFF deploy, Post-deploy integrations, Acceptance gate, Upgrade model reference, Troubleshooting.</step>
+    <step order="3" name="Draft">Write docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md; link (do not duplicate) canonical naming standard, ADR-028, project design.md.</step>
+    <step order="4" name="Stub">Replace each pre-existing deploy/onboarding guide with a short stub (single H1 + one-paragraph redirect notice + link to new guide); preserve git history via edit-not-delete.</step>
+    <step order="5" name="Cross-reference">Add pointer row to root CLAUDE.md §17 Pointers table linking the new guide.</step>
+    <step order="6" name="Verify">Grep docs/guides/ for *DEPLOY*.md; confirm result = 1 authoritative + explicit stubs only. Verify all internal links resolve.</step>
+    <step order="7" name="Index update">Update projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md: set task 001 status to ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>docs/guides/auth-deployment-setup.md + docs/guides/PCF-DEPLOYMENT-GUIDE.md + docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md + related *DEPLOY*.md/*ONBOARDING*.md files — 4+ partially-overlapping guides today per spec.md Gap 4.</existing>
+    <extension>No — the existing 4+ guides are fragmentary snapshots of a 3-generation history (Gen 1 manual, Gen 2 PS, Gen 3 registry); they cannot be extended without perpetuating the fragmentation. Consolidation IS the design intent per Gap 4.</extension>
+    <cost-of-doing-nothing>Every provisioning today requires the operator to merge 3 docs manually (design.md §2), which is one of the 13 known issues in the Gen 1 manual guide. Without consolidation, the L3 /provision-environment skill (Phase D) has no single target to link customers to, and the U-CB customer-comms templates (task 007) have no canonical guide to cite.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">grep / rg for guide enumeration</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</output>
+    <output type="docs">docs/guides/auth-deployment-setup.md (stub)</output>
+    <output type="docs">docs/guides/PCF-DEPLOYMENT-GUIDE.md (stub)</output>
+    <output type="docs">docs/guides/ENVIRONMENT-DEPLOYMENT-GUIDE.md (stub)</output>
+    <output type="docs">CLAUDE.md (pointer row added in §17)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given docs/guides/, when grepping for *DEPLOY*.md, then result contains SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md AND every other match is a one-paragraph stub linking to it.</criterion>
+    <criterion testable="true">Given the new authoritative guide, when reading top-to-bottom, then it covers Model 1 AND Model 2 provisioning with clearly labeled sections (not a Model-2-only doc).</criterion>
+    <criterion testable="true">Given the new guide, when following any internal link, then the target file exists (no dead links).</criterion>
+    <criterion testable="true">Given root CLAUDE.md §17, when scanning the Pointers table, then a row references docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md.</criterion>
+    <criterion testable="true">Negative: no new script/Bicep/code file is modified as part of this task (git diff shows only *.md changes).</criterion>
+    <criterion testable="true">Negative: no old guide is silently deleted (each has either merged content OR an explicit stub).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec Gap 4 + R6 doc-drift carry-over. This is the top of the Phase A parallel wave; task 006 (version-compatibility matrix), 007 (customer-comms templates), and this guide together form the customer-facing documentation surface. The L3 skill in Phase D links here.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

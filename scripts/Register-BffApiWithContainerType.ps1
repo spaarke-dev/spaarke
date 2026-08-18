@@ -1,47 +1,75 @@
 # Register owning app with SharePoint Embedded Container Type
 # The owning app (BFF API) gets full delegated + full appOnly permissions
+#
+# T6 FIX (spec.md FR-11 + § MUST rules): This script now acquires its
+# SharePoint token via confidential-client CERT-BASED flow. The prior
+# client_secret path was removed on 2026-08-17 by task 011 because
+# Microsoft Graph SPE APIs reject public/delegated clients with 403
+# "public client not allowed" (silent-fail trap T6, design.md §4B).
+#
+# Prerequisite (H0 preflight):
+#   Cert uploaded to KV as PFX secret AND registered on the owning app
+#   registration (24h SPE cert-replication window per FR-01).
 
 param(
-    [string]$ContainerTypeId = $env:SPE_CONTAINER_TYPE_ID,
-    [string]$OwningAppId = $env:API_APP_ID,
-    # Retrieve from Key Vault: az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
-    [string]$OwningAppSecret = $env:API_CLIENT_SECRET,
-    [string]$TenantId = $env:TENANT_ID,
-    [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN  # e.g., "spaarke.sharepoint.com"
+    [string]$ContainerTypeId  = $env:SPE_CONTAINER_TYPE_ID,
+    [string]$OwningAppId      = $env:API_APP_ID,
+    [string]$TenantId         = $env:TENANT_ID,
+    [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN,   # e.g., "spaarke.sharepoint.com"
+
+    # Cert bootstrap — PRODUCTION path (KV): pass both.
+    [string]$KeyVaultName     = $env:SPE_KV_NAME,
+    [string]$CertSecretName   = $env:SPE_CERT_SECRET_NAME,
+
+    # Cert bootstrap — DEV FALLBACK: pass thumbprint (cert already in CurrentUser\My).
+    [string]$CertThumbprint   = $env:SPE_CERT_THUMBPRINT
 )
 
-if (-not $ContainerTypeId) { throw "ContainerTypeId required. Pass -ContainerTypeId or set SPE_CONTAINER_TYPE_ID env var." }
-if (-not $OwningAppId) { throw "OwningAppId required. Pass -OwningAppId or set API_APP_ID env var." }
-if (-not $OwningAppSecret) { throw "OwningAppSecret required. Pass -OwningAppSecret or set API_CLIENT_SECRET env var." }
-if (-not $TenantId) { throw "TenantId required. Pass -TenantId or set TENANT_ID env var." }
+$ErrorActionPreference = 'Stop'
+
+if (-not $ContainerTypeId)  { throw "ContainerTypeId required. Pass -ContainerTypeId or set SPE_CONTAINER_TYPE_ID env var." }
+if (-not $OwningAppId)      { throw "OwningAppId required. Pass -OwningAppId or set API_APP_ID env var." }
+if (-not $TenantId)         { throw "TenantId required. Pass -TenantId or set TENANT_ID env var." }
 if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
 
-Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+$useKeyVault = ($KeyVaultName -and $CertSecretName)
+if (-not $useKeyVault -and -not $CertThumbprint) {
+    throw "Cert bootstrap required. Pass -KeyVaultName + -CertSecretName (production) or -CertThumbprint (dev). Env vars: SPE_KV_NAME + SPE_CERT_SECRET_NAME, or SPE_CERT_THUMBPRINT."
+}
+
+# --- Dot-source the SPE cert-based token helper (T6 fix) ---
+. (Join-Path $PSScriptRoot 'common/Get-SpeConfidentialClientToken.ps1')
+
+Write-Host "===============================================" -ForegroundColor Cyan
 Write-Host "REGISTER OWNING APP WITH CONTAINER TYPE" -ForegroundColor Cyan
-Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+Write-Host "===============================================" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Auth mode:         confidential-client cert-based (T6 fix, FR-11)" -ForegroundColor Green
+Write-Host "Cert source:       $(if ($useKeyVault) { "Key Vault '$KeyVaultName' secret '$CertSecretName'" } else { "CurrentUser cert store thumbprint $CertThumbprint" })" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Container Type ID: $ContainerTypeId" -ForegroundColor White
 Write-Host "Owning App ID:     $OwningAppId" -ForegroundColor White
 Write-Host "SharePoint Domain: $SharePointDomain" -ForegroundColor White
 Write-Host ""
 
-# Step 1: Get token for SharePoint using owning app credentials
-Write-Host "Step 1: Getting SharePoint access token..." -ForegroundColor Yellow
-
-$tokenBody = @{
-    client_id = $OwningAppId
-    client_secret = $OwningAppSecret
-    scope = "https://$SharePointDomain/.default"
-    grant_type = "client_credentials"
-}
-
 try {
-    $tokenResponse = Invoke-RestMethod -Uri "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token" `
-        -Method Post `
-        -Body $tokenBody `
-        -ErrorAction Stop
+    # Step 1: Get SharePoint token (confidential-client, cert-based)
+    Write-Host "Step 1: Acquiring SharePoint access token (confidential-client, cert-based)..." -ForegroundColor Yellow
 
-    $accessToken = $tokenResponse.access_token
+    $tokenArgs = @{
+        TenantId = $TenantId
+        ClientId = $OwningAppId
+        Scope    = "https://$SharePointDomain/.default"
+    }
+    if ($useKeyVault) {
+        $tokenArgs.KeyVaultName   = $KeyVaultName
+        $tokenArgs.CertSecretName = $CertSecretName
+    }
+    else {
+        $tokenArgs.CertThumbprint = $CertThumbprint
+    }
+
+    $accessToken = Get-SpeConfidentialClientToken @tokenArgs
 
     Write-Host "Got SharePoint access token" -ForegroundColor Green
     Write-Host ""
@@ -53,17 +81,17 @@ try {
     $registrationBody = @{
         value = @(
             @{
-                appId = $OwningAppId
+                appId     = $OwningAppId
                 delegated = @("full")
-                appOnly = @("full")
+                appOnly   = @("full")
             }
         )
     } | ConvertTo-Json -Depth 3
 
     $headers = @{
         "Authorization" = "Bearer $accessToken"
-        "Content-Type" = "application/json"
-        "Accept" = "application/json"
+        "Content-Type"  = "application/json"
+        "Accept"        = "application/json"
     }
 
     $uri = "https://$SharePointDomain/_api/v2.1/storageContainerTypes/$ContainerTypeId/applicationPermissions"
@@ -79,9 +107,11 @@ try {
 
     Write-Host "REGISTRATION SUCCESSFUL!" -ForegroundColor Green
     Write-Host ""
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "T6 cleared: container-type $ContainerTypeId registration applied via confidential-client cert-based auth." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host "REGISTRATION RESULT" -ForegroundColor Cyan
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host ""
 
     if ($response.value) {
@@ -96,9 +126,9 @@ try {
         $response | ConvertTo-Json -Depth 5
     }
 
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host "NEXT STEPS" -ForegroundColor Cyan
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "1. Restart the BFF API app service to clear MSAL cache:" -ForegroundColor White
     Write-Host "   az webapp restart --name <app-service-name> --resource-group <rg-name>" -ForegroundColor Gray
@@ -139,9 +169,18 @@ try {
     }
 
     Write-Host ""
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "===============================================" -ForegroundColor Cyan
     Write-Host "TROUBLESHOOTING" -ForegroundColor Cyan
-    Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
+    Write-Host "===============================================" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "If error is 'invalid_client' / 'AADSTS700027' (cert not trusted):" -ForegroundColor Yellow
+    Write-Host "  - Verify cert public key is attached to app registration:" -ForegroundColor Gray
+    Write-Host "     az ad app credential list --id $OwningAppId" -ForegroundColor Gray
+    Write-Host "  - Re-append if missing: az ad app credential reset --id <app> --cert @cert.cer --append" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "If error is 'Public client not allowed' (T6) — should NOT occur under this refactor:" -ForegroundColor Yellow
+    Write-Host "  - This script now uses confidential-client cert-based auth" -ForegroundColor Gray
+    Write-Host "  - If you see this, verify no delegated fallback was added" -ForegroundColor Gray
     Write-Host ""
     Write-Host "If error is 'Access denied' or '401/403':" -ForegroundColor Yellow
     Write-Host "  - Verify the OwningAppId is the actual owner of this container type" -ForegroundColor Gray
@@ -154,4 +193,5 @@ try {
     Write-Host "  - Add Microsoft Graph > Application > FileStorageContainer.Selected" -ForegroundColor Gray
     Write-Host "  - Grant admin consent" -ForegroundColor Gray
     Write-Host ""
+    exit 1
 }

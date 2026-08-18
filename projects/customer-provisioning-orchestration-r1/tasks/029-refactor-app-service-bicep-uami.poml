@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="029" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Refactor app-service.bicep to consume UAMI + bind BOTH production and staging slots (T5 structural fix)</title>
+    <phase>C Wave C2 — Bicep + UAMI</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-tag (UAMI is the App Service identity) + azure-deployment scope + T5 slot-swap trap structural fix. Blast radius: every customer BFF App Service. task-create Step 3.5.5 FULL (auth tag; deploy tag; azure-deployment.md constraints apply).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric: high-blast-radius Bicep refactor + structural T5 fix that must correctly bind ONE identity to BOTH slots (the whole point of the fix). Getting the identity.type + userAssignedIdentities map right is a load-bearing architectural constraint. Rubric row: "Opus 4.8 / Fable 5 for L2 scaffold + UAMI migration".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC2-parallel</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deps on task 028 — needs uami.bicep output shape (resourceId) before app-service.bicep can be refactored to consume it.</parallel-reason>
+    <deps>028</deps>
+    <tags>azure, bicep, azure-deployment, auth, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Refactor infrastructure/bicep/modules/app-service.bicep to accept a userAssignedIdentityResourceId parameter, set identity: { type: 'UserAssigned', userAssignedIdentities: { '${userAssignedIdentityResourceId}': {} } } on the App Service resource, and apply the SAME identity binding to BOTH the production App Service AND its staging slot (whether the slot is inline here or in modules/deployment-slot.bicep / app-service-slot.bicep — inspect + propagate correctly). Remove any existing System-Assigned MI declaration (identity: enableManagedIdentity or type: 'SystemAssigned'). This is the T5 structural fix — one identity, both slots, never rotates on slot-swap.</prompt>
+  <role>SPAARKE platform developer with Bicep + Azure App Service slot expertise. Understand the T5 anti-pattern: System-Assigned MI is different per slot, rotates on delete/recreate, causes silent 503 windows on slot-swap. UAMI binding is the fix; both slots MUST attach to the SAME UAMI resource ID.</role>
+  <goal>infrastructure/bicep/modules/app-service.bicep + any related slot module (deployment-slot.bicep or app-service-slot.bicep) accept userAssignedIdentityResourceId, bind identity: { type: 'UserAssigned', userAssignedIdentities: {...} } to BOTH production and staging slots, and NO LONGER emit System-Assigned MI. az bicep build passes; az deployment group what-if against dev shows the identity change diff on both slot resources.</goal>
+
+  <context>
+    <background>Spec FR-37 + T5 (silent-fail trap): today app-service.bicep emits identity: enableManagedIdentity — this is System-Assigned MI, which is per-slot and rotates on any App Service recreate. KV RBAC grants + Dataverse App User + Graph app-roles all attach to the wrong-slot MI after every swap → silent 503 window until manually re-granted. UAMI is one identity, survives recreates, and can attach to both slots. This task consumes uami.bicep (task 028) and eliminates T5 structurally.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/modules/app-service.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/deployment-slot.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/app-service-slot.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/uami.bicep (task 028 output)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="028" status="pending">uami.bicep module + resourceId output — the identity resource ID this refactor binds to both slots.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: app-service.bicep + slot module MUST bind UAMI ONLY — do NOT co-emit System-Assigned MI (identity type MUST be 'UserAssigned', not 'SystemAssigned, UserAssigned'). The two coexisting is the anti-pattern spec.md § New Components row 4 explicitly eliminates.</constraint>
+    <constraint source="project">Scope (this task only): app-service + slot identity binding — do NOT migrate RBAC assignments (task 030) and do NOT touch keyVaultReferenceIdentity (that is H4 handler concern, informed by this task's output).</constraint>
+    <constraint source="project">MUST bind the SAME userAssignedIdentityResourceId to BOTH the production App Service AND the staging slot — this is the T5 fix. If the two are in different bicep files, propagate consistently.</constraint>
+    <constraint source="project">Interim mitigation stays: existing dual-slot System-Assigned MI KV RBAC grants (per plan.md §3 "interim (pre-Phase C): grant KV RBAC to BOTH System-Assigned MI principals") STAY in place until UAMI proven. This task's success does NOT require ripping out interim SA-MI grants — task 030 handles migration; H4 runs SA-MI grants until UAMI RBAC proven.</constraint>
+    <constraint source="project">Publish-size impact: bicep-only, expected zero delta. If any BFF code path is touched (should be none), report per CLAUDE.md §10 NFR-01.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>App Service slot identity binding; UAMI attach semantics</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="task-028 uami.bicep output shape" location="infrastructure/bicep/modules/uami.bicep">Consume outputs.resourceId as the identity binding key.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason — auth tag + T5 structural fix). Load spec.md FR-37, ADR-028, task 028's uami.bicep output shape.</step>
+    <step order="1">Inspect existing app-service.bicep, deployment-slot.bicep, app-service-slot.bicep to catalog current identity declaration + slot topology.</step>
+    <step order="2">Add a userAssignedIdentityResourceId parameter to app-service.bicep + slot module(s); pass through from customer.bicep (task 027 already declares the param at the customer level).</step>
+    <step order="3">Replace identity: enableManagedIdentity (or identity: { type: 'SystemAssigned' }) with identity: { type: 'UserAssigned', userAssignedIdentities: { '${userAssignedIdentityResourceId}': {} } } on the production App Service.</step>
+    <step order="4">Apply the same identity binding to the staging slot — inspect the slot module authoring pattern; propagate the userAssignedIdentityResourceId param to the slot resource declaration.</step>
+    <step order="5">Search for any remaining System-Assigned MI references in modules/ (e.g. keyVaultReferenceIdentity fallback) — leave in place only where explicitly interim per plan.md §3.</step>
+    <step order="6">Run az bicep build for app-service.bicep + affected slot modules — verify 0 errors, 0 warnings.</step>
+    <step order="7">Run az deployment group what-if against dev — verify identity change diff on BOTH slot resources.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document deviation (e.g. slot-module topology, System-Assigned MI removal nuance) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If slot-swap smoke test (dev subscription, post-deploy) still produces cold-start KV-ref failures despite this refactor, STOP and escalate per CLAUDE.md §6 — do NOT paper over with a retry-loop; the T5 fix must be structurally verified.</trigger>
+    <trigger>If UAMI resource cannot be bound to both slots simultaneously (Azure ARM refuses the same UAMI on two slot resources), STOP and escalate — this is a platform-level constraint that would invalidate the entire Phase C UAMI strategy.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/modules/app-service.bicep</output>
+    <output type="code">infrastructure/bicep/modules/deployment-slot.bicep (or app-service-slot.bicep — verify local topology)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the modified modules, az bicep build succeeds with 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given az deployment group what-if against dev, both the production App Service and the staging slot show identity.type = 'UserAssigned' bound to the same userAssignedIdentities key.</criterion>
+    <criterion testable="true">Given a grep for 'SystemAssigned' or 'enableManagedIdentity' in the two modules, 0 results (excluding comments or interim-mitigation notes).</criterion>
+    <criterion testable="true">Negative: no RBAC role assignment changes in this task (task 030 owns those).</criterion>
+    <criterion testable="true">Negative: no BFF code changes triggered (bicep-only) — publish-size delta = 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-37 + T5 elimination. Slot-swap smoke test is a Phase F acceptance criterion (Success Criterion 21) — this task's structural correctness feeds that gate. Interim SA-MI KV RBAC grants stay until task 030 migrates them and H4 handler proves UAMI RBAC works.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

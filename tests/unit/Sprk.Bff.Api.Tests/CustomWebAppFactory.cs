@@ -50,6 +50,15 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 ["Graph:UseManagedIdentity"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
 
+                // PublicConfig options (customer-provisioning-orchestration-r1 task 087)
+                // Tier-1 fail-fast at startup — required for GET /api/config endpoint and for
+                // any test that boots the host (the ValidateOnStart() gate fires unconditionally).
+                ["PublicConfig:BffUrl"] = "https://spaarke-bff-test.example.com",
+                ["PublicConfig:MsalClientId"] = "test-app-id",
+                ["PublicConfig:TenantId"] = "test-tenant-id",
+                ["PublicConfig:FeatureFlags:testFeatureEnabled"] = "true",
+                ["PublicConfig:FeatureFlags:testFeatureDisabled"] = "false",
+
                 // Dataverse options (required by DataverseOptions validation)
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",

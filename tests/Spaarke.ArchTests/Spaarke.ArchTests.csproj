@@ -32,4 +32,25 @@
     <ProjectReference Include="..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
 
+  <!--
+    NOTE: Sprk.Provisioning.ControlPlane is intentionally NOT a <ProjectReference>.
+    CosmosProvisioningSecretGuardTests (task 025 — customer-provisioning-orchestration-r1
+    spec FR-27) loads the L2 assembly at TEST RUNTIME via Assembly.LoadFrom, resolving
+    the DLL from src/server/services/Sprk.Provisioning.ControlPlane/bin/**. Two reasons:
+      1) Sprk.Bff.Api and Sprk.Provisioning.ControlPlane are BOTH Web SDK projects with a
+         compiler-synthesized top-level `Program` class; a plain ProjectReference collides
+         (CS0433) with `typeof(Program)` used across ADR001/007/008/... An extern alias
+         would fix that, but option (2) is a stronger reason for runtime loading anyway.
+      2) L2 is a POCO surface in this project's Wave 2 phase — its NuGet stack evolves
+         through parallel Wave 2 tasks (Cosmos SDK via task 037, Service Bus via 038,
+         AppInsights via 039). A compile-time ProjectReference would couple this test to
+         the composite build health of a fast-moving sibling package graph. Runtime
+         reflection over the already-published L2 DLL keeps this ArchTest robust across
+         sibling churn — the invariant it enforces is a POCO-shape invariant, not a
+         wiring invariant, so the DLL is the right artifact to inspect.
+    Consequence: L2 must be built at least once before this test runs (CI's full-sln
+    `dotnet build` satisfies this automatically; local dev is guided by the assertion
+    diagnostic when the DLL is missing).
+  -->
+
 </Project>

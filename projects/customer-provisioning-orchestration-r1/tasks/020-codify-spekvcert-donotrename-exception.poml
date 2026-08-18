@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Codify spaarke-spekvcert DO-NOT-RENAME dev exception in Bicep param defaults + config; publish exception registry</title>
+    <phase>G Canonical Naming Compliance</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies Bicep param defaults + writes new notes registry (NEW-surface documentation-adjacent). Per root CLAUDE.md §8, cross-file config + docs = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped codification with explicit exception name; no cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>groupG-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bicep, docs, azure-deployment</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Codify `spaarke-spekvcert` as a DO-NOT-RENAME dev exception per spec.md FR-35 + §7.9 R3. Bicep param defaults MUST allow this vault name to pass through unchanged when the target env is dev; publish projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md listing this and any other codified exceptions with rationale + expiry (if any). Owner directive #3: this exception is a permanent dev-artifact carve-out; do NOT propose renaming in this task.
+  </prompt>
+
+  <role>SPAARKE platform infrastructure engineer + documentation author. Familiar with the canonical naming standard (docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "Naming Exception Registry" if any) and the r3 task 063 handoff §4a on dev-vault exceptions.</role>
+
+  <goal>(a) Bicep param defaults in customer.bicep + modules/key-vault.bicep (from task 018) explicitly document + honor the `spaarke-spekvcert` DO-NOT-RENAME exception when env == dev; (b) projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md exists listing all codified exceptions with rationale + owner + expiry policy; (c) any consumer of the naming standard (Phase H manifest generator, task 021 naming-conformance-check) can reference the registry as the single source of exceptions.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-35 + §7.9 R3 + owner directive #3 + r3 task 063 handoff §4a. `spaarke-spekvcert` is a live dev-artifact whose rename would break dev-env cert-based flows; owner explicitly carved it out. Codifying prevents future well-meaning conformance-check pass from proposing its rename.
+    </background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/customer.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/key-vault.bicep</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md</file>
+      <file role="canonical-reference">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase G is startable in parallel with A/B; task 018 is a parallel sibling — coordinate if both touch the same Bicep files (typically task 018 lands the param, task 020 lands the exception-annotation comment + registry note)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: `spaarke-spekvcert` is a DO-NOT-RENAME dev exception per FR-35 + §7.9 R3. This task codifies it; do NOT rename it in Bicep or seeders.</constraint>
+    <constraint source="spec.md">SCOPE: Owner directive #3 — codify the dev-artifact carve-out; do NOT propose migration to a canonical form.</constraint>
+    <constraint source="project">SCOPE: The registry note MUST list every codified exception (not just spekvcert); include rationale, owner, and expiry (or "permanent — dev artifact"). Missing an exception is a defect.</constraint>
+    <constraint source="project">SCOPE: Bicep param annotations MUST be inline comments referencing the registry note so a future editor sees the carve-out reason without diving into r3-handoff or owner-directive history.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Naming exception registries + Bicep param annotation</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Bicep exception annotation" location="infrastructure/bicep/">`@description('Vault name. Default follows sprk-{env}-kv canonical; dev exception spaarke-spekvcert per naming-exception-registry.md.')`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load spec FR-35 + r3 handoff §4a + AZURE-RESOURCE-NAMING-CONVENTION.md.</step>
+    <step order="1" name="Enumerate exceptions">Compile the list of codified exceptions: at minimum `spaarke-spekvcert`; scan spec/design/r3-handoff for others (Dataverse-ClientSecret and BFF-API-ClientSecret are secret-name exceptions handled in task 019, but note them here for completeness cross-ref).</step>
+    <step order="2" name="Author registry note">Write projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md with table: exception | scope (vault/secret) | rationale | owner | expiry.</step>
+    <step order="3" name="Bicep annotation">In customer.bicep + modules/key-vault.bicep, add `@description` annotation on the vault-name param referencing the registry note and naming the dev exception.</step>
+    <step order="4" name="Coordinate with task 018">If task 018 already committed the param, this task adds the annotation-comment-only edit; ensure git diff scope stays minimal.</step>
+    <step order="5" name="Naming-conformance dry-run">Invoke scripts/naming-conformance-check.ps1 (advisory) against updated Bicep; verify spekvcert is not flagged (or if flagged, note that task 021 wires exception awareness into the check invocation).</step>
+    <step order="6" name="Index update">Update TASK-INDEX.md: set task 020 status to ✅.</step>
+    <step order="7" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No prior naming-exception registry file exists in projects/customer-provisioning-orchestration-r1/notes/. AZURE-RESOURCE-NAMING-CONVENTION.md may mention exceptions but does not enumerate the r1-specific carve-outs.</existing>
+    <extension>No — AZURE-RESOURCE-NAMING-CONVENTION.md is the general standard; r1-specific dev-artifact carve-outs (spekvcert + secret exceptions) belong in a project-scoped registry to keep the general doc uncluttered.</extension>
+    <cost-of-doing-nothing>Without codification, task 021 (H13 acceptance invocation of naming-conformance-check) OR a future conformance sweep would flag `spaarke-spekvcert` as canonical drift and propose rename, which would break live dev cert-based flows. Silent flag → operator confusion → risk of breaking rename applied by well-meaning editor.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+    <tool name="az">Azure CLI + Bicep for build verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md</output>
+    <output type="code">infrastructure/bicep/customer.bicep (annotation comment)</output>
+    <output type="code">infrastructure/bicep/modules/key-vault.bicep (annotation comment)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the registry note, when reading, then it lists at minimum `spaarke-spekvcert` (vault, dev, permanent, owner) with rationale citing FR-35 + owner directive #3.</criterion>
+    <criterion testable="true">Given customer.bicep + modules/key-vault.bicep, when scanning the vault-name param declaration, then a `@description` (or inline comment) references naming-exception-registry.md.</criterion>
+    <criterion testable="true">Given `az bicep build` on the modified files, when running, then exit 0 with no new warnings.</criterion>
+    <criterion testable="true">Given scripts/naming-conformance-check.ps1 (advisory) against updated Bicep + exception registry aware invocation, when running, then `spaarke-spekvcert` is NOT flagged as canonical drift.</criterion>
+    <criterion testable="true">Negative: no rename of `spaarke-spekvcert` proposed or applied (owner directive #3).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-35 + §7.9 R3 + owner directive #3 + r3 handoff §4a. Feeds task 021 (H13 acceptance invocation).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

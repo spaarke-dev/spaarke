@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="088" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Coordinate .github/workflows/** gate wiring for naming-conformance + tenant-isolation ArchTests via PR to ci-cd-unit-test-remediation-r1</title>
+    <phase>H KV Federation Full Remediation</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Coord-PR spec authoring only; no code changes in this task; ci-cd-r1 worktree applies the actual workflow edits. NFR-08 acceptance scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Focused coord-PR spec authoring; describes the required .github/workflows/** wiring for another worktree to apply. Step 3.5.5b sonnet @ medium.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Coordinated PR spec targeting the ci-cd-unit-test-remediation-r1 worktree which owns .github/workflows/** for the current 28-day window per r3 task-042-063-ci-gate-wiring-deferral.md; must not be applied unilaterally.</parallel-reason>
+    <deps>064, 065, 066, 067, 084, 085, 086, 087</deps>
+    <tags>ci-workflows, testing, integration-test, deploy</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author a coordinated PR spec at projects/customer-provisioning-orchestration-r1/notes/phase-h-ci-wiring-coord-pr.md targeting the ci-cd-unit-test-remediation-r1 worktree. The spec describes the .github/workflows/** wiring required to run: (a) naming-conformance-check ArchTest per FR-35; (b) 5 tenant-isolation ArchTests (I1-I5) per FR-28..FR-32; (c) nightly Graph app-role parity ArchTest per FR-13/T3 (task 067). Do NOT edit .github/workflows/** in isolation per r3 task-042-063-ci-gate-wiring-deferral.md. NFR-08 acceptance requires this coord.</prompt>
+
+  <role>SPAARKE platform CI/CD engineer. Expert in GitHub Actions workflow syntax, the r3 forcing-functions ecosystem (`.github/workflows/sdap-ci.yml`), and coord-PR authoring for cross-worktree hot-path (ci-workflows=Y). Follow ADRs strictly.</role>
+
+  <goal>Coord-PR spec at projects/customer-provisioning-orchestration-r1/notes/phase-h-ci-wiring-coord-pr.md describes: (a) required workflow additions (naming-conformance ArchTest per PR + I1-I5 ArchTests per PR + nightly Graph app-role parity job); (b) exact YAML diff snippets against .github/workflows/sdap-ci.yml; (c) test-matrix implications; (d) failure-mode + rollback; (e) coord message ready to send to ci-cd-r1 worktree.</goal>
+
+  <context>
+    <background>Per spec.md NFR-08 + r3 task-042-063-ci-gate-wiring-deferral.md + this project's CLAUDE.md coord table: ci-cd-unit-test-remediation-r1 worktree owns .github/workflows/** for the 28-day window. Any r1 project needing new workflow-file gates coordinates via PR spec, not unilateral edit. This task authors the spec so the ci-cd-r1 owner can apply cleanly.</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/phase-h-ci-wiring-coord-pr.md</file>
+      <file role="canonical-reference">.github/workflows/sdap-ci.yml</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/graph-app-role-parity-coord-pr.md (from task 067)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="064" status="pending">5 ArchTests I1-I5 exist</dependency>
+      <dependency task="065" status="pending">Audit sweep complete — no violations in baseline</dependency>
+      <dependency task="066" status="pending">Generalized I1 test present</dependency>
+      <dependency task="067" status="pending">Graph app-role parity test exists + partial coord PR spec authored</dependency>
+      <dependency task="084" status="pending">Manifest generator available (for naming-conformance ArchTest to gate against)</dependency>
+      <dependency task="085" status="pending">Alias collapse complete</dependency>
+      <dependency task="086" status="pending">IaC alignment complete</dependency>
+      <dependency task="087" status="pending">/config.json endpoint complete</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md NFR-08">SCOPE: 5 new ArchTests (I1-I5) sequence into r3 forcing-functions via CI-wiring coord PR with ci-cd-unit-test-remediation-r1.</constraint>
+    <constraint source="spec.md FR-35">SCOPE: naming-conformance-check.ps1 gate wiring per PR (advisory OR blocking per r3 policy — reference the r3 handoff decision).</constraint>
+    <constraint source="spec.md FR-13">SCOPE: Nightly Graph app-role parity ArchTest per T3.</constraint>
+    <constraint source="project">SCOPE: Coord-PR spec is DOCUMENTATION — this task does NOT edit .github/workflows/** files. ci-cd-r1 worktree applies.</constraint>
+    <constraint source="project">SCOPE: Consolidate task 067's partial coord-PR spec into this task's comprehensive spec — one coord PR covers all 3 wiring additions.</constraint>
+    <constraint source="CLAUDE.md-§6.5">SCOPE: Coordinated PR with ci-cd-r1 is Path C compliance (ci-workflows=Y per hot-path declaration); do NOT unilaterally merge to .github/workflows/**.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: This task is a coord-PR spec authoring task, not a BFF code change; no publish-size measurement needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Coord-PR spec for .github/workflows/** wiring targeting ci-cd-r1</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing sdap-ci workflow" location=".github/workflows/sdap-ci.yml">Reference for step + job shape to preserve in the coord-PR YAML snippets.</pattern>
+      <pattern name="Task 067 partial coord spec" location="projects/customer-provisioning-orchestration-r1/notes/graph-app-role-parity-coord-pr.md">Consolidate into this task's comprehensive spec.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD). Load spec.md NFR-08 + FR-35 + FR-13 + r3 handoff + task 067 partial coord spec.</step>
+    <step order="1" name="Inventory">Read .github/workflows/sdap-ci.yml to understand current gate shape (jobs, steps, matrix).</step>
+    <step order="2" name="Outline">Draft coord-PR spec structure: 3 wiring additions (naming-conformance, I1-I5 ArchTests, nightly Graph parity), each with rationale + YAML diff + failure-mode.</step>
+    <step order="3" name="Author">Write projects/customer-provisioning-orchestration-r1/notes/phase-h-ci-wiring-coord-pr.md with all 3 sections + YAML diff snippets.</step>
+    <step order="4" name="Consolidate">Merge task 067 partial coord spec into this task's spec; task 067's file can be marked superseded or link to this consolidated version.</step>
+    <step order="5" name="Coord message">Author the coord-message body (short, actionable, ready to paste in a PR-mention to ci-cd-r1 owner).</step>
+    <step order="6" name="Verify links">Confirm every reference in the spec (test file paths, ArchTest names, PS script paths) resolves against the current branch.</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: task 088 → ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Verify file paths</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/phase-h-ci-wiring-coord-pr.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/phase-h-ci-wiring-coord-pr.md exists with 3 sections: naming-conformance wiring + I1-I5 ArchTest wiring + nightly Graph app-role parity wiring.</criterion>
+    <criterion testable="true">Each section includes rationale + YAML diff snippet against .github/workflows/sdap-ci.yml + failure-mode + rollback.</criterion>
+    <criterion testable="true">A coord-message body is included, ready to paste in a PR-mention to the ci-cd-r1 worktree owner.</criterion>
+    <criterion testable="true">Every referenced test file path (I1-I5 tests, Graph app-role parity test, naming-conformance-check.ps1) resolves against the current branch.</criterion>
+    <criterion testable="true">Task 067's partial coord spec is consolidated (or explicitly superseded with a link to this file).</criterion>
+    <criterion testable="true">Negative: this task does NOT edit .github/workflows/** files directly (verified via git diff at completion).</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md NFR-08 + FR-35 + FR-13 + r3 task-042-063-ci-gate-wiring-deferral.md + project CLAUDE.md coord table.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

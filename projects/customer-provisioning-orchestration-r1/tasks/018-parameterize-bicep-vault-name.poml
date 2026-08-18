@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="018" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Parameterize vault name in customer.bicep + platform.bicep + modules/key-vault.bicep (sprk-{env}-kv canonical)</title>
+    <phase>G Canonical Naming Compliance</phase>
+    <gate>startable</gate>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies Bicep files (existing infra); azure-deployment scope; no BFF code. Per root CLAUDE.md §8, Bicep + explicit naming constraints = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical Bicep parameterization with a clear canonical target (docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret &amp; Resource Naming Standard"). Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>groupG-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bicep, azure-deployment, deploy</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+Parameterize vault name in infrastructure/bicep/customer.bicep + infrastructure/bicep/platform.bicep + infrastructure/bicep/modules/key-vault.bicep per spec.md FR-35 + §7.9 R3. Adopt canonical `sprk-{env}-kv` pattern. Vault name MUST be a Bicep parameter (not hardcoded) so H4 handler + Phase H seeder can address correctly-named per-env vaults deterministically. Owner directive #3: bake into NEW provisioning only; do NOT remediate live-dev.
+  </prompt>
+
+  <role>SPAARKE platform infrastructure engineer fluent with Azure Bicep parameterization, docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md canonical standard, and the r1 provisioning entry-point Bicep composition.</role>
+
+  <goal>infrastructure/bicep/customer.bicep + infrastructure/bicep/platform.bicep + infrastructure/bicep/modules/key-vault.bicep all accept vault name as a Bicep parameter (default = `sprk-${env}-kv` per canonical) with NO hardcoded vault-name literals in the three files; `az bicep build` on each exits 0; `az deployment group what-if` against a test RG shows vault being created with the parameterized name (not a hardcoded fallback).</goal>
+
+  <context>
+    <background>
+Per spec.md FR-35 + §7.9 R3 + design.md § handlers H4 + r3 task 063 handoff §4a. Historic dev-env has `spaarke-dev-*` mixed pattern; canonical is `sprk-{env}-kv`. Owner directive #3 (2026-08-15): bake canonical into NEW provisioning only; do NOT remediate live-dev drift. Vault name as Bicep parameter is the enforcement mechanism — hardcoded literal blocks Phase H canonical secret-catalog manifest from targeting the right vault.
+    </background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/customer.bicep</file>
+      <file role="modify">infrastructure/bicep/platform.bicep</file>
+      <file role="modify">infrastructure/bicep/modules/key-vault.bicep</file>
+      <file role="canonical-reference">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+      <file role="canonical-reference">.claude/constraints/config.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase G is startable in parallel with A/B</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Vault name MUST be a Bicep parameter in ALL three files. Hardcoded literal in ANY of the three is a defect.</constraint>
+    <constraint source="spec.md">SCOPE: Default value MUST follow `sprk-{env}-kv` per §7.9 R3 canonical standard (docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md).</constraint>
+    <constraint source="spec.md">SCOPE: The `spaarke-spekvcert` DO-NOT-RENAME dev exception is codified via task 020 (not this task). This task's parameterization must NOT enforce a rename of the dev-exception vault when it's the target — the parameter allows override.</constraint>
+    <constraint source="project">SCOPE: Owner directive #3: This task changes IaC only. Do NOT re-run any live-dev deployment that would rename dev vaults. Owner explicitly rejected live-dev remediation.</constraint>
+    <constraint source="project">SCOPE: `az bicep build` on each modified file MUST exit 0 after change; `az deployment group what-if` against a test RG MUST show vault being created with the parameterized name.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Bicep parameterization + canonical naming standard</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    </files>
+    <patterns>
+      <pattern name="Bicep param + default" location="infrastructure/bicep/">`param keyVaultName string = 'sprk-${env}-kv'` — allows caller override for dev exception.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load AZURE-RESOURCE-NAMING-CONVENTION.md + azure-deployment constraint + design.md H4.</step>
+    <step order="1" name="Baseline">Read each of the 3 Bicep files; identify every hardcoded vault name literal.</step>
+    <step order="2" name="Parameterize modules/key-vault.bicep">Introduce `keyVaultName` param with default `sprk-${env}-kv`; replace hardcoded references.</step>
+    <step order="3" name="Parameterize customer.bicep">Introduce/propagate the vault-name param; ensure passed to module invocation.</step>
+    <step order="4" name="Parameterize platform.bicep">Same, but scoped to platform vault (sprk-{env}-kv per platform layer).</step>
+    <step order="5" name="Build verification">`az bicep build` on each; verify exit 0 + no new warnings.</step>
+    <step order="6" name="What-if verification">`az deployment group what-if` on customer.bicep against dev RG with parameterized vault name; verify vault created with the correct name.</step>
+    <step order="7" name="Grep verification">Grep all 3 files for hardcoded vault-name literals; verify zero remaining.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: set task 018 status to ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Azure CLI + Bicep for build + what-if</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/customer.bicep</output>
+    <output type="code">infrastructure/bicep/platform.bicep</output>
+    <output type="code">infrastructure/bicep/modules/key-vault.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given each of the 3 Bicep files, when grepping for hardcoded vault name literals (e.g., `'spaarke-dev-kv'`, `'sprk-dev-kv'` in place of param), then zero occurrences remain.</criterion>
+    <criterion testable="true">Given each file, when running `az bicep build`, then exit 0 with no new warnings.</criterion>
+    <criterion testable="true">Given `az deployment group what-if -g {dev-rg} -f customer.bicep -p keyVaultName=sprk-test-kv`, when running, then plan output shows KV account being created with name `sprk-test-kv`.</criterion>
+    <criterion testable="true">Given the module contract, when reading, then `keyVaultName` param exists with default `sprk-${env}-kv` per §7.9 R3 canonical.</criterion>
+    <criterion testable="true">Negative: git diff scope = only the 3 named Bicep files (no drift into modules or other stacks).</criterion>
+    <criterion testable="true">Negative: no live-dev deployment triggered by this task (per owner directive #3).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-35 + §7.9 R3 + owner directive #3. Feeds Phase H canonical secret-catalog manifest (Phase H can target correct vault) + task 020 dev-exception codification.
+
+Completion (2026-08-17, Wave 0 Batch 3 parallel dispatch):
+- `infrastructure/bicep/customer.bicep`: (a) `param platformKeyVaultName` default changed from hardcoded `'sprk-platform-prod-kv'` to canonical `'sprk-${environmentName}-kv'` per §7.9 R3; (b) `var keyVaultName` converted to `param keyVaultName string = take('sprk-${customerId}-${environmentName}-kv', 24)` (per-customer canonical incorporates customerId; 24-char cap preserved). Task 020's DO-NOT-RENAME registry comment block kept intact.
+- `infrastructure/bicep/platform.bicep`: `var keyVaultName = 'sprk-platform-${environmentName}-kv'` converted to `param keyVaultName string = 'sprk-${environmentName}-kv'` — drops legacy `-platform-` qualifier from default per §7.9 R3 canonical.
+- `infrastructure/bicep/modules/key-vault.bicep`: NO CHANGE required — `keyVaultName` was already a required `param` (correct SRP for leaf module which has no env context). Task 020 has already added the canonical + dev-exception `@description` annotation.
+- Verification: `az bicep build` on both customer.bicep + platform.bicep exit 0 with no new warnings (pre-existing warnings on unrelated concerns: ACS null-safety BCP318, ai-search listQueryKeys, ACS webhook URL). Grep verification: zero hardcoded vault-name string literals remain in the 3 scoped files.
+- Deferred (documented deviation): `az deployment group what-if` NOT run — requires interactive Azure auth + target RG unavailable in Wave 0 sub-agent context; owner directive #3 also forbids re-running live-dev deployments. IaC-only verification (bicep build + grep + git diff scope) satisfied; what-if defers to next operator-driven deploy.
+- Sibling coordination: task 020 (`spaarke-spekvcert` DO-NOT-RENAME codification) landed comment blocks + `@description` annotations concurrently on customer.bicep + modules/key-vault.bicep; my param conversion was applied in-place preserving 020's comments (minimal diff scope, no conflict).
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

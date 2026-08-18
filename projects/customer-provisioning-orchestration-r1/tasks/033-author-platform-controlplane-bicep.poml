@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author NEW infrastructure/bicep/platform-controlplane.bicep — L2 orchestrator infrastructure</title>
+    <phase>C Wave C2 — Bicep + UAMI</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment-touching new stack for the L2 control plane; enables Phase D + F. task-create Step 3.5.5 FULL (deploy tag; azure-deployment scope; NEW surface).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric: high-blast-radius Bicep authoring for the ORCHESTRATOR's home infra — App Service + Cosmos + platform KV + App Insights + Log Analytics — every provisioning run flows through this stack. Getting the SKU / capacity / monitoring topology right first time is architectural.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC2-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure, bicep, azure-deployment, deploy, l2-controlplane</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author NEW infrastructure/bicep/platform-controlplane.bicep composing the L2 orchestrator infra: (a) App Service (parity with BFF per B2 — .NET 10 stack, ≥ P1v3 SKU) + slot; (b) Cosmos DB serverless (for the spaarke-provisioning database + runs container from task 024); (c) platform Key Vault (spaarke-controlplane-{env}-kv); (d) App Insights + Log Analytics workspace. Consumes uami.bicep (task 028) for the App Service identity. Separate resource group naming: rg-spaarke-platform-{env} per B2.</prompt>
+  <role>SPAARKE platform developer with Bicep + Azure resource composition expertise. This stack is the home of the L2 control-plane .NET 10 App Service — the single fleet-scoped orchestrator that dispatches all 19 handlers.</role>
+  <goal>infrastructure/bicep/platform-controlplane.bicep exists composing App Service (with UAMI binding) + Cosmos DB + platform KV + App Insights + Log Analytics in rg-spaarke-platform-{env}. az bicep build passes; az deployment group what-if against dev shows the expected additions; the L2 project (task 036) has a Bicep-driven home.</goal>
+
+  <context>
+    <background>Spec FR-20 + spec.md § New Components row 6 + design.md §7: L2 control plane hosts .NET 10 App Service in rg-spaarke-platform-{env} (parity with BFF per B2); REST API + JWT bearer + audience api://spaarke-provisioning-controlplane-{env} + Operator/Reader app-roles. Cosmos DB is the state store for ProvisioningRun (task 024). Platform KV holds control-plane secrets. Without this stack, the L2 project (task 036) has no bicep-driven infra home; every provisioning run has nowhere to execute.</background>
+    <relevant-files>
+      <file role="new">infrastructure/bicep/platform-controlplane.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/customer.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/platform.bicep (task 031 output)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/app-service.bicep (task 029 UAMI-refactored)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/cosmos-db.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/key-vault.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/monitoring.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/uami.bicep (task 028)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite r1 task — parallel-safe within Wave C2 (does NOT overlap task 027 or 031 files).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Scope: L2 App Service MUST bind UAMI (task 028) — NEVER System-Assigned MI. keyVaultReferenceIdentity PATCHed to UAMI on both prod + staging slots (via H4 handler later; this task provisions the resource shape).</constraint>
+    <constraint source="ADR-036">Scope: L2 reuses existing Service Bus (fleet-scoped) — this stack does NOT create a new Service Bus; ensure the parameter surface accepts a service-bus-connection reference from the env-scope service-bus resource.</constraint>
+    <constraint source="project">Scope (this task only): compose control-plane infra ONLY. Do NOT overlap with task 031 (platform.bicep rebuild) — this is a separate file. Coordinate topology: either platform.bicep delegates to platform-controlplane.bicep OR platform-controlplane.bicep is invoked directly by ops scripts.</constraint>
+    <constraint source="project">MUST scope Cosmos DB serverless (matches R20 single-digit-runs/day cadence — do NOT provision provisioned throughput).</constraint>
+    <constraint source="project">MUST name L2 App Service audience api://spaarke-provisioning-controlplane-{env} per FR-20 acceptance.</constraint>
+    <constraint source="project">MUST NOT provision per-customer resources (OpenAI, AI Search, Doc Intelligence, per-customer Cosmos) — those live in customer.bicep.</constraint>
+    <constraint source="project">MUST report absolute + delta publish-size impact = 0 (bicep-only, no BFF code).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 control-plane infra composition</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing customer.bicep composition" location="infrastructure/bicep/customer.bicep">Mirror the compose-modules pattern (invoke modules with a scoped param set); do NOT recreate module contents inline.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason). Load spec.md FR-20, design.md §7, ADR-028, ADR-036, task 028's uami.bicep output shape.</step>
+    <step order="1">Inspect infrastructure/bicep/platform.bicep + customer.bicep for the compose-modules dialect + naming conventions.</step>
+    <step order="2">Declare parameter surface: env (dev/staging/prod), location, resourceGroupName (default rg-spaarke-platform-{env}), userAssignedIdentityResourceId (from task 028), serviceBusConnectionRef (from env-scope).</step>
+    <step order="3">Invoke modules/uami.bicep IF UAMI should be created here (control-plane UAMI is distinct from per-customer UAMI); otherwise consume the passed-in userAssignedIdentityResourceId.</step>
+    <step order="4">Invoke modules/app-service.bicep (task 029 UAMI-refactored) — .NET 10 stack, ≥ P1v3 SKU, appSettings including audience api://spaarke-provisioning-controlplane-{env}.</step>
+    <step order="5">Invoke modules/cosmos-db.bicep serverless — this Cosmos account hosts the spaarke-provisioning database + runs container from task 024.</step>
+    <step order="6">Invoke modules/key-vault.bicep — vault name spaarke-controlplane-{env}-kv (or per canonical naming per Phase G).</step>
+    <step order="7">Invoke modules/monitoring.bicep — App Insights + Log Analytics workspace shared for L2 telemetry (NFR-11 auditable operator action).</step>
+    <step order="8">Run az bicep build platform-controlplane.bicep — verify 0 errors, 0 warnings.</step>
+    <step order="9">Run az deployment group what-if against dev — verify all 5 resource families (App Service + slot, Cosmos, KV, App Insights, Log Analytics) added; UAMI binding present.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document deviation (e.g. control-plane UAMI vs shared UAMI decision, SKU nuance) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>None. platform.bicep v2 held per-customer AI resources (moved out per D12 in task 031). Grep of infrastructure/bicep/ for "platform-controlplane" returns none.</existing>
+    <extension>No — rebuild is the design intent per D12 (spec.md § New Components row 6). Shrinking platform.bicep + adding a separate platform-controlplane.bicep is the topology that keeps concerns explicitly separated.</extension>
+    <cost-of-doing-nothing>Without this stack, the L2 project (task 036) has no bicep-driven infra home; per-customer AI resources stuck in platform.bicep violates D3 dedication + D12 control-plane placement (per spec.md § New Components row 6 concrete cost). Every provisioning run has nowhere to execute.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/platform-controlplane.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the new stack, az bicep build succeeds with 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given az deployment group what-if against dev, all 5 resource families (App Service + slot, Cosmos DB, KV, App Insights, Log Analytics) are added; App Service identity is UserAssigned bound to UAMI.</criterion>
+    <criterion testable="true">Given the App Service appSettings, audience is api://spaarke-provisioning-controlplane-{env}.</criterion>
+    <criterion testable="true">Given the Cosmos DB resource, the account is serverless (capabilities include EnableServerless).</criterion>
+    <criterion testable="true">Negative: NO per-customer AI resources (OpenAI, AI Search, Doc Intelligence, per-customer Cosmos) are declared in this stack.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-20 + § New Components row 6. The L2 App Service in this stack hosts the .NET 10 project scaffolded in task 036. Cosmos DB account here hosts task-024's spaarke-provisioning database. Coordinate with task 031 (platform.bicep rebuild) — platform.bicep either delegates to this stack OR is invoked adjacent to it by ops scripts.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

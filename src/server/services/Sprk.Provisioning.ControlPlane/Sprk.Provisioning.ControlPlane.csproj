@@ -1,0 +1,110 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Sprk.Provisioning.ControlPlane — L2 fleet-scoped orchestration service.
+    Peer service to Sprk.Bff.Api, NOT a BFF extension (ADR-010 DI minimalism +
+    project MUST rule: no Sprk.Bff.Api project/assembly reference).
+
+    - TargetFramework net10.0 pinned via Directory.Build.props inheritance.
+    - TreatWarningsAsErrors=true + Nullable=enable inherited from root
+      Directory.Build.props (analyzers-as-errors per NFR-06/07).
+    - Publish target: linux-x64 framework-dependent (parity with BFF —
+      App Service Linux Plan per platform-controlplane.bicep §5).
+    - Scaffold ONLY: JWT bearer + Operator/Reader policies + /ping + /swagger
+      + placeholder POST /api/runs. Cosmos / Service Bus / App Insights
+      wiring belongs to tasks 037/038/039 respectively.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Sprk.Provisioning.ControlPlane</AssemblyName>
+    <RootNamespace>Sprk.Provisioning.ControlPlane</RootNamespace>
+    <UserSecretsId>a1c2e0a2-1f4a-4a2e-9a5e-2b8f3c9d4e5f</UserSecretsId>
+
+    <!-- FR-A1 parity with BFF: framework-dependent linux-x64 publish
+         (L2 App Service is Linux per platform-controlplane.bicep). -->
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Inbound JWT validation (ADR-028 MUST rule: Microsoft.Identity.Web's
+         AddMicrosoftIdentityWebApi for BFF + any new .NET API service).
+         Version pinned to BFF's Microsoft.Identity.Web 4.14.2 line to keep
+         a single auth stack version across services. -->
+    <PackageReference Include="Microsoft.Identity.Web" Version="4.14.2" />
+    <!-- JwtBearer transitive via Microsoft.Identity.Web but referenced
+         directly per POML step 2 for explicit intent. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+
+    <!-- OpenAPI / Swagger — pinned to a net10-compatible release. -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.5" />
+
+    <!-- Azure Identity — DefaultAzureCredential for MI-outbound (Cosmos, KV,
+         Service Bus) per ADR-028 MI-outbound MUST rule. Pinned to 1.21.0 to
+         match BFF's version (single Azure.Identity across services) and to
+         satisfy Microsoft.Identity.Web.Certificate 4.14.2's ≥1.17.2 floor. -->
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+
+    <!-- Azure Cosmos DB SDK — L2 state store (`spaarke-provisioning/runs`
+         container, partition /customerId). Task 037 wiring; pinned to 3.62.1
+         to match BFF's version (single Cosmos SDK across services; no ambient
+         version drift risk when both projects are co-hosted in the same
+         solution). Requires DefaultAzureCredential (RBAC-only data plane —
+         cosmos-provisioning.bicep sets `disableLocalAuth: true`; task 030
+         grants Cosmos DB Built-in Data Contributor to L2 App Service MI). -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
+
+    <!-- Azure Service Bus SDK — L2 handler-enqueue path (task 038). Pinned
+         to 7.20.2 to match BFF's version (single SB SDK across services;
+         same reasoning as Cosmos pin — avoid ambient drift when both are
+         co-hosted in the same solution). Requires DefaultAzureCredential
+         data-plane access — service-bus.bicep + platform-controlplane.bicep
+         wiring binds L2 App Service UAMI with "Azure Service Bus Data
+         Sender" (task 030 RBAC grant). NEVER account-key credential per
+         ADR-028 MI-outbound rule. -->
+    <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />
+
+    <!-- Newtonsoft.Json — required BY the Cosmos SDK's build target
+         (`Microsoft.Azure.Cosmos.targets` line 72 checks the graph for an
+         explicit reference ≥ 10.0.2; the check exists so the SDK doesn't
+         silently bind to an older transitive that mishandles its
+         serialization). The BFF picks this up transitively via
+         `Microsoft.Azure.Core.NewtonsoftJson` 1.0.0 but the L2 project
+         doesn't reference any Azure SDK that pulls it in, so an explicit
+         ref is required here. 13.0.3 matches the BFF's resolved version
+         (single JSON.NET across services). NOT used by L2 code — the
+         Cosmos SDK uses System.Text.Json for user documents via
+         CosmosSerializationOptions (see CosmosModule.cs). No known HIGH
+         CVEs on 13.0.3 as of 2026-08 (dotnet list package /vulnerable
+         run at task-close). -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+
+    <!-- Telemetry — deviation from POML step 2 which named the classic
+         Microsoft.ApplicationInsights.AspNetCore SDK. dotnet-10-upgrade-r1
+         task 014 (FR-06) retired the classic SDK across the BFF in favor
+         of the OpenTelemetry → Azure Monitor exporter. Aligning L2 with
+         the same telemetry stack from birth avoids an immediate rework in
+         task 039. Deferred wiring (UseAzureMonitor + AzureMonitorGuard) is
+         still task 039's scope; this task only references the package.
+         Deviation logged in notes/task-036-deviations.md. -->
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.6.0" />
+  </ItemGroup>
+
+  <!-- Exclude the template config from publish output (parity with BFF —
+       real config comes from Azure App Service settings + Key Vault refs
+       in production; local dev copies the template to appsettings.json which
+       is .gitignore-excluded per Spaarke convention). -->
+  <ItemGroup>
+    <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!-- Expose internal test seams to the L2 test project (parity with BFF).
+       Currently used by ServiceBusSmokeTests to verify the internal
+       ComputeMessageId helper (FR-22 level-1 idempotency contract) without
+       promoting it to public API. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
+  </ItemGroup>
+
+</Project>

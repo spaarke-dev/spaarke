@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Complete 11 of 14 null AppRoleId GUIDs in Infrastructure/Auth/GraphAppRoles.cs via az enumeration</title>
+    <phase>A Doc Consolidation + Audits</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF code file (src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs); tag includes bff-api + auth. Per root CLAUDE.md §8 rigor table, bff-api + auth tags = FULL. Wrong GUID silently fails T3 (Graph app-role parity) at H10 — high blast radius per plan.md § High-Risk Items.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical GUID population with az CLI evidence; a clear canonical constant (r3 task 062 landed the file); no novel algorithm. Per Step 3.5.5b: single-component code implementation with explicit reference = sonnet.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial per-GUID commit discipline: each of 10 GUIDs commits in isolation with az output cited (plan.md § High-Risk Items). Parallel dispatch would race on the same file.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Complete the 11 of 14 null AppRoleId GUIDs in src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs (spec/design says "10 of 14" but actual count verified by discovery is 11 — see notes/resource-discovery-2026-08-16.md §12; only 3 GUIDs populated: `IdUserReadWriteAll`, `IdGroupMemberReadWriteAll`, `IdDirectoryReadWriteAll` at lines 152/154/156). For each null AppRoleId, enumerate the corresponding Microsoft Graph resource service-principal via `az ad sp show --id 00000003-0000-0000-c000-000000000000` (Graph) or `az ad sp show --id 00000007-0000-0000-c000-000000000000` (Dynamics), extract the exact appRole GUID matching the constant's role name, and populate it. Commit each GUID in an isolated small commit with the az output cited in the commit message. This is the H10 escalation gate — MUST complete before first production customer provisioning (spec MUST rules). At completion, ALSO reconcile spec.md FR-06/Prerequisites/SC #16b + design.md §4.1 H10 + CLAUDE.md § Applicable ADRs to say "11 of 14 null" (was incorrectly stated as "10 of 14").
+  </prompt>
+
+  <role>SPAARKE platform BFF developer with expertise in Microsoft Graph app-only auth, Azure CLI (az ad sp show), and the r3-landed GraphAppRoles.cs constant surface. Follow ADR-028 (Spaarke Auth v2) + CLAUDE.md §10 BFF Hygiene strictly.</role>
+
+  <goal>src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs contains all 14 AppRoleId GUIDs populated (11 previously-null now filled); each of the 11 fills lives in its own isolated commit with the exact az CLI invocation + output snippet quoted in the commit message; dotnet build succeeds with zero new warnings (net10 analyzers-as-errors per NFR-06); the BFF publish size delta is reported in the PR description (NFR-01); spec.md/design.md/CLAUDE.md references to "10 of 14 null" reconciled to "11 of 14 null" via follow-up doc PR.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-13 + Phase A escalation gate + design.md §7 + notes/r3-handoff.md. r3 task 062 landed the GraphAppRoles.cs constant surface (14 role names) but left 11 AppRoleId GUIDs null pending az enumeration (discovery report notes/resource-discovery-2026-08-16.md §12 verified actual count = 11, not 10 as claimed in spec/design/CLAUDE.md). H10 handler (Wave C4) grants Graph app-roles from this constant onto the UAMI SP — a null GUID silently fails T3 (parity check) and produces app-only Graph 403s in production. Owner directive: complete in Phase A r1 (spec.md § Unresolved Questions resolved to "r1 owns" per plan.md).
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file role="canonical-reference">.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md</file>
+      <file role="canonical-reference">.claude/constraints/auth.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase A is startable; r3 task 062 landed on master (`be3f12bb6`)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: This task modifies ONLY src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs. Do NOT refactor auth code, do NOT change the constant surface shape, do NOT add new roles.</constraint>
+    <constraint source="spec.md">SCOPE: Each of the 10 GUID fills MUST be an isolated commit with the exact `az ad sp show` invocation + relevant output line quoted in the commit message. A single "populate all 10" commit is a defect (per plan.md § High-Risk Items).</constraint>
+    <constraint source="ADR-028">SCOPE: The 14 role IDs are the Graph + Dynamics app-role surface Spaarke's BFF uses; no other constant may be introduced. Follow ADR-028 21-MUST rules for auth ceremony.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching task — load .claude/constraints/bff-extensions.md; report BFF publish size + delta in PR description per NFR-01 (baseline 44.96 MB incl. PDBs on net10 per r3 handoff).</constraint>
+    <constraint source="NFR-06">SCOPE: Analyzers-as-errors — zero new warnings; CS8601/CS8604 nullable are errors. `dotnet build` MUST succeed on net10 baseline.</constraint>
+    <constraint source="project">SCOPE: For each populated GUID, verify against the OFFICIAL Microsoft Graph app-role catalog (via az) — do NOT hand-type GUIDs from documentation snippets. Blindly-typed GUIDs are the T3 failure mode per plan.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Microsoft Graph app-only auth + BFF Hygiene</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Isolated per-change commit with az evidence" location="plan.md § High-Risk Items">One GUID = one commit. Message body quotes the `az ad sp show --id ... --query "appRoles[?value=='{roleName}'] | [0]"` invocation + result GUID; this is the audit trail for T3 later.</pattern>
+      <pattern name="ADR-028 MI-Dataverse-App-User" location=".claude/adr/ADR-028-spaarke-auth-architecture.md">Graph app-role grants are ceremony-critical; wrong GUID silently 403s app-only calls. GraphAppRoles.cs is the r3-landed compile-time constant that H10 (Wave C4) will iterate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block (FULL). Load bff-extensions.md + ADR-028 + auth.md + patterns/auth/spaarke-sso-binding.md + notes/r3-handoff.md.</step>
+    <step order="1" name="Baseline">Read GraphAppRoles.cs; enumerate the 11 null AppRoleId slots (verify count per discovery report §12: FileStorageContainerSelected, FilesReadAll, FilesReadWriteAll, SitesReadAll, SitesReadWriteAll, UserReadAll, GroupReadAll, MailRead, MailReadWrite, MailSend, MailboxSettingsRead); capture the exact role-name string for each.</step>
+    <step order="2" name="Verify az auth">Run `az account show` to confirm operator's own AAD identity is authenticated (NOT a service principal, per spec.md NFR-11 auditability).</step>
+    <step order="3" name="Enumerate Graph SP">Run `az ad sp show --id 00000003-0000-0000-c000-000000000000 --query "appRoles[]" -o json` and save output to a scratchpad file for evidence.</step>
+    <step order="4" name="Enumerate Dynamics SP (if any)">If any of the 10 null roles are Dynamics roles (not Graph), run `az ad sp show --id 00000007-0000-0000-c000-000000000000 --query "appRoles[]" -o json` similarly.</step>
+    <step order="5" name="Per-GUID commit loop">For each of the 11 null roles: (a) locate matching role in az output by role-name; (b) extract exact GUID; (c) populate GraphAppRoles.cs; (d) `dotnet build src/server/api/Sprk.Bff.Api/` to verify no new warnings; (e) commit with message quoting the az invocation + result line. Repeat 11 times.</step>
+    <step order="6" name="Verify build">Full `dotnet build` on Sprk.Bff.Api succeeds with zero new warnings (net10 analyzers-as-errors).</step>
+    <step order="7" name="Publish-size report">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` per CLAUDE.md §10 bullet 4. Measure compressed size; report absolute + delta vs 44.96 MB net10 baseline in PR description scratch.</step>
+    <step order="8" name="CVE scan">Run `dotnet list package --vulnerable --include-transitive` per NFR-02; report zero HIGH-severity CVEs.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: set task 005 status to ✅.</step>
+    <step order="10" name="Deviations">Document any deviation (e.g., role-name not found in az output — see escalation) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If az enumeration returns unexpected/missing role IDs (any of the 10 role names does not match an appRole in the Graph OR Dynamics SP catalog), STOP and escalate per CLAUDE.md §6 rather than filling a Guess-GUID. Silent wrong GUID is the exact T3 silent-failure mode this task exists to prevent (per plan.md § High-Risk Items + spec.md § Human Escalation Triggers for CLAUDE.md project row).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az">Azure CLI for `ad sp show` enumeration</tool>
+    <tool name="dotnet">Build + publish + vulnerability scan</tool>
+    <tool name="git">Per-GUID isolated commits</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs (11 GUIDs populated)</output>
+    <output type="doc">Doc-reconciliation commit updating spec.md FR-06/Prerequisites/SC #16b + design.md §4.1 H10 + CLAUDE.md § Applicable ADRs from "10 of 14 null" to "11 of 14 null"</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given GraphAppRoles.cs, when scanning all 14 AppRoleId slots, then all are populated with valid GUIDs (no `null` values remain).</criterion>
+    <criterion testable="true">Given `git log --oneline src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs`, when counting commits in this task's PR, then exactly 11 commits populate GUIDs (one per GUID); +1 doc-reconciliation commit updating spec.md/design.md/CLAUDE.md "10 of 14" → "11 of 14".</criterion>
+    <criterion testable="true">Given each populated GUID's commit message, when reading, then it quotes the exact `az ad sp show --id ...` invocation + the response line naming the role.</criterion>
+    <criterion testable="true">Given `dotnet build src/server/api/Sprk.Bff.Api/`, when running, then build succeeds with zero new warnings (net10 analyzers-as-errors).</criterion>
+    <criterion testable="true">Given `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, when measuring compressed output, then publish size ≤ 60 MB AND delta vs 44.96 MB baseline is reported in PR description (per NFR-01).</criterion>
+    <criterion testable="true">Given `dotnet list package --vulnerable --include-transitive`, when running, then zero HIGH-severity CVEs (per NFR-02).</criterion>
+    <criterion testable="true">Negative: no other file in src/server/api/Sprk.Bff.Api/ is modified (git diff scope = 1 file).</criterion>
+    <criterion testable="true">Negative: if any GUID could not be resolved from az output, the escalation trigger fired (BLOCKED.md exists) — the task did NOT proceed with a guess.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-13 H10 escalation gate + Phase A owner directive. Wrong GUID silently fails T3 in H10 (Wave C4) → app-only Graph 403s in production. Feeds Phase B task 015 (Grant-GraphAppRoles.ps1 helper) and Wave C4 H10 handler.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

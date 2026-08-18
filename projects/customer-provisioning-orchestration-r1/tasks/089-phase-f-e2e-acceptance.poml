@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="089" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Phase F E2E acceptance — provision fresh trial-{yyyymmdd} customer stamp using Model 1 profile via new pipeline</title>
+    <phase>F E2E Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'deploy','integration-test','testing','bff-api'; final project acceptance gate; verifies ALL 6 §4B traps + ALL 5 §4D invariants + naming-conformance + cost envelope. FR-18 + SC #5 + SC #6 scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Full E2E dry-run against dev subscription orchestrating every prior phase's deliverables. Step 3.5.5b sonnet @ xhigh justified (broad-impact validation gate).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>057, 058, 059, 060, 061, 062, 064, 065, 066, 067, 069, 070, 071, 072, 073, 075, 076, 077, 078, 080, 081, 082, 084, 085, 086, 087, 088</deps>
+    <tags>deploy, integration-test, testing, bff-api, azure-deployment, dataverse, auth, l2-controlplane</tags>
+    <estimated-effort>8-16 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Execute the Phase F E2E acceptance per spec.md FR-18 + SC #5 + design.md §15: provision a fresh trial-{yyyymmdd} customer stamp using the Model 1 profile via the new pipeline invoked through /provision-environment skill. Verify: (a) Setup Status transitions to Ready; (b) all 6 §4B silent-fail traps (T1-T6) cleared by owning handler post-conditions; (c) all 5 §4D tenant-isolation invariants (I1-I5) sample-verified; (d) scripts/naming-conformance-check.ps1 exits 0 on r1-owned surfaces; (e) cost envelope conforms per §15 #14 targets (Model 1 marginal ≤ $430/mo, shared platform floor ≤ $400/mo); (f) Model 1/2 handler behavior differences per §4.1a verified (Model 1 dry-run minimum; Model 2 dry-run if reasonable). Publish full E2E verification report at projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-XX-XX.md.</prompt>
+
+  <role>SPAARKE platform senior engineer + operator. Expert in the full 19-handler pipeline (H0..H14), L2 REST + reconciler operation, §4B trap catalog + §4D invariant enforcement, cost envelope measurement via Azure Cost Management, and E2E verification-report authoring. Follow ADRs strictly.</role>
+
+  <goal>A fresh trial-{yyyymmdd} customer stamp exists in dev Azure with Model 1 profile; Setup Status = Ready in Dataverse; all 6 §4B traps verified cleared; all 5 §4D invariants sample-verified; naming-conformance-check.ps1 exits 0; cost envelope report shows conformance to §15 #14 targets. Verification report at projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-XX-XX.md documents every check + verdict + supporting evidence.</goal>
+
+  <context>
+    <background>Per spec.md FR-18 + SC #5 + design.md §15 north-star + plan.md Phase F: this is the project's final acceptance gate. Fresh trial-{yyyymmdd} customer using Model 1 profile invoked via the L3 /provision-environment skill (task 075) exercises the entire pipeline end-to-end. Trap + invariant + naming + cost verification confirms the pipeline delivers a customer environment that meets binding acceptance criteria. Any failure blocks project completion (task 090).</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-XX-XX.md</file>
+      <file role="canonical-reference">scripts/Validate-DeployedEnvironment.ps1</file>
+      <file role="canonical-reference">scripts/naming-conformance-check.ps1</file>
+      <file role="canonical-reference">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="057" status="pending">L2 REST endpoints</dependency>
+      <dependency task="058" status="pending">State-reconciler</dependency>
+      <dependency task="059" status="pending">I5 concurrency guard</dependency>
+      <dependency task="060" status="pending">I6 crash recovery</dependency>
+      <dependency task="061" status="pending">§4C rollback semantics</dependency>
+      <dependency task="062" status="pending">L2 load test verified</dependency>
+      <dependency task="064" status="pending">ArchTests I1-I5</dependency>
+      <dependency task="065" status="pending">Tenant-isolation audit sweep</dependency>
+      <dependency task="066" status="pending">I1 generalized coverage</dependency>
+      <dependency task="067" status="pending">Nightly Graph parity</dependency>
+      <dependency task="069" status="pending">Seed manifest</dependency>
+      <dependency task="070" status="pending">H12a handler</dependency>
+      <dependency task="071" status="pending">H12b handler</dependency>
+      <dependency task="072" status="pending">H12c handler</dependency>
+      <dependency task="073" status="pending">H14 handler</dependency>
+      <dependency task="075" status="pending">/provision-environment skill</dependency>
+      <dependency task="076" status="pending">Fallback matrix</dependency>
+      <dependency task="077" status="pending">Per-tenant metering</dependency>
+      <dependency task="078" status="pending">Consent-callback E2E</dependency>
+      <dependency task="080" status="pending">DemoExpirationService refactor</dependency>
+      <dependency task="081" status="pending">RegistrationEndpoints refactor</dependency>
+      <dependency task="082" status="pending">Legacy config deleted</dependency>
+      <dependency task="084" status="pending">Canonical secret-catalog manifest</dependency>
+      <dependency task="085" status="pending">Alias collapse</dependency>
+      <dependency task="086" status="pending">IaC alignment</dependency>
+      <dependency task="087" status="pending">/config.json endpoint</dependency>
+      <dependency task="088" status="pending">CI wiring coord PR</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-18">SCOPE: H13 acceptance gate exits 0 AND registry Setup Status = Ready; both required.</constraint>
+    <constraint source="spec.md SC #5">SCOPE: E2E acceptance target = trial-{yyyymmdd} Model 1 stamp reaches Ready via new pipeline (not manual invocation).</constraint>
+    <constraint source="spec.md SC #6">SCOPE: All 6 §4B T1-T6 traps verified cleared by owning handler post-conditions.</constraint>
+    <constraint source="spec.md §4D">SCOPE: All 5 I1-I5 invariants sample-verified — I1 (no hardcoded tenant), I2 (tenantId filter on AI Search), I3 (Cosmos partition key), I4 (SPE container-id resolver), I5 (Graph per-tenant token).</constraint>
+    <constraint source="spec.md FR-35">SCOPE: naming-conformance-check.ps1 exits 0 on r1-owned surfaces post-provisioning.</constraint>
+    <constraint source="spec.md §15 #14">SCOPE: Cost envelope — Model 1 marginal ≤ $430/mo; shared platform floor ≤ $400/mo; deviations &gt;20% flagged.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: If E2E surfaces a BFF issue, remediation follows §10 BFF Hygiene; /conflict-check before any fix PR.</constraint>
+    <constraint source="project">SCOPE: E2E provisioning uses REAL L3 skill invocation via /provision-environment against dev L2 — NOT a scripted bypass. Skill invocation is the acceptance path.</constraint>
+    <constraint source="project">SCOPE: Model 2 dry-run is discretionary per plan.md §4 Phase F — Model 1 is MANDATORY; document Model 2 result or explicit skip rationale.</constraint>
+    <constraint source="project">SCOPE: If ANY trap OR invariant OR cost check fails, STOP + escalate per CLAUDE.md §6.5 rather than lowering the threshold.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>E2E acceptance orchestration — 19-handler pipeline via /provision-environment skill</topic>
+    <files>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Validate-DeployedEnvironment invocation" location="scripts/Validate-DeployedEnvironment.ps1">Extended by H13 handler; also invocable standalone for acceptance verification.</pattern>
+      <pattern name="Cost Management report" location="docs/architecture/">Azure Cost Management API for per-resource-group cost — invoke against the trial stamp's RG.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-18 + SC #5 + SC #6 + §4B + §4D + §15 #14 + design.md §15.</step>
+    <step order="1" name="Prereq check">Verify all dep tasks (057-088) status = ✅ in TASK-INDEX.md; verify /provision-environment skill is invocable.</step>
+    <step order="2" name="Model 1 provision">Invoke /provision-environment with customerId=trial-{yyyymmdd}, tenancyModel=Model1Shared, profile=trial. Walk through skill Step 0 → completion; capture handoff report.</step>
+    <step order="3" name="Setup Status check">Query sprk_dataverseenvironment for the trial customer; verify sprk_provisioning_setupstatus = Ready.</step>
+    <step order="4" name="Trap verification">For each of T1-T6, run the trap-verification query (per §4B) against the trial stamp; document result per trap.</step>
+    <step order="5" name="Invariant verification">Sample-verify each of I1-I5: (I1) grep provisioning scripts for tenant-shaped defaults; (I2) sample AI Search query; (I3) sample Cosmos query; (I4) verify SPE container-ID resolution; (I5) verify Graph token per-tenant scope.</step>
+    <step order="6" name="Naming conformance">Run `pwsh -File scripts/naming-conformance-check.ps1 -Scope r1-owned`; expect exit 0.</step>
+    <step order="7" name="Cost envelope">Query Azure Cost Management API for the trial stamp's RG + shared-tier resources; compare against §15 #14 targets.</step>
+    <step order="8" name="Model 2 dry-run">Discretionary — if reasonable in dev budget, provision a second stamp with tenancyModel=Model2Dedicated + verify §4.1a differences hold; else document skip rationale.</step>
+    <step order="9" name="Report">Write notes/phase-f-e2e-acceptance-2026-XX-XX.md with per-check verdict + evidence + Setup Status screenshot equivalent + cost report + Model 2 result-or-skip.</step>
+    <step order="10" name="Cleanup">Discretionary teardown OR leave trial stamp for reference (per plan.md Phase F Deliverables).</step>
+    <step order="11" name="Index update">Update TASK-INDEX.md: task 089 → ✅.</step>
+    <step order="12" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY trap OR ANY invariant OR cost drift &gt;20% fails, STOP and escalate per CLAUDE.md §6.5 rather than lowering the threshold or silently proceeding. Phase F acceptance is BINDING — a fail here blocks task 090 wrap-up. Owner input required on remediation path (path A exception documented; path B ADR amendment; path C fix + re-run).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">Invoke skill + scripts</tool>
+    <tool name="az">Query Azure resources + Cost Management</tool>
+    <tool name="dotnet">Verify BFF + L2 build/test</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-XX-XX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Fresh trial-{yyyymmdd} customer stamp exists in dev Azure; sprk_dataverseenvironment.sprk_provisioning_setupstatus = Ready.</criterion>
+    <criterion testable="true">All 6 §4B traps (T1-T6) verified cleared; per-trap query documented + result cited in report.</criterion>
+    <criterion testable="true">All 5 §4D invariants (I1-I5) sample-verified; per-invariant sample-query documented + result cited.</criterion>
+    <criterion testable="true">scripts/naming-conformance-check.ps1 -Scope r1-owned exits 0.</criterion>
+    <criterion testable="true">Cost envelope report shows Model 1 marginal ≤ $430/mo AND shared platform floor ≤ $400/mo; deviations &gt;20% flagged.</criterion>
+    <criterion testable="true">Model 1 provisioning invoked via /provision-environment skill (not manual REST/script bypass).</criterion>
+    <criterion testable="true">Model 2 dry-run documented — either performed with §4.1a differences verified, OR explicit skip rationale.</criterion>
+    <criterion testable="true">Report notes/phase-f-e2e-acceptance-2026-XX-XX.md exists with per-check verdict + evidence.</criterion>
+    <criterion testable="true">Negative: any failure triggers escalation, NOT silent proceed to task 090.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-18 + SC #5 + SC #6 + §15 #14 + design.md §15. Final acceptance gate before 090 wrap-up.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

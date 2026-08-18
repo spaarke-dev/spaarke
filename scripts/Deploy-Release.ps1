@@ -11,7 +11,10 @@
       Per-environment loop (sequential):
         Phase 2: BFF API deployment (calls Deploy-BffApi.ps1)
         Phase 3: Dataverse solution import (calls Deploy-DataverseSolutions.ps1)
-        Phase 4: Web resource deployment (calls Deploy-AllWebResources.ps1)
+        Phase 4: Web resource deployment — customerId-driven (Gap 2 / FR-28)
+                 Target env resolved from sprk_dataverseenvironment registry keyed
+                 on -CustomerId (NOT from -EnvironmentUrl loop iterand). Calls
+                 Deploy-AllWebResources.ps1 against the resolved customer env.
         Phase 5: Post-deploy validation (calls Validate-DeployedEnvironment.ps1)
       Phase 6: Tag release in git
 
@@ -22,9 +25,31 @@
 
     Environment configuration is read from config/environments.json.
 
+    Phase 4 hardening (Gap 2 / FR-28 / §4D I1): -CustomerId is Mandatory. Phase 4
+    resolves its target Dataverse environment via the sprk_dataverseenvironment
+    registry (customer lookup on sprk_name / sprk_envaccountdomain). No hardcoded
+    default tenant or environment is permitted in this script. Missing -CustomerId
+    fails fast with a mandatory-parameter diagnostic before any deployment side-effect.
+
 .PARAMETER EnvironmentUrl
     One or more Dataverse environment URLs or environment names from config/environments.json.
-    Examples: "https://spaarkedev1.crm.dynamics.com", "dev", "demo"
+    Drives Phases 1/2/3/5 (build, BFF API, solutions, validation). Phase 4 target is
+    resolved separately via -CustomerId + registry lookup (Gap 2 / FR-28).
+    Examples: "https://{tenant}.crm.dynamics.com", "dev", "demo"
+
+.PARAMETER CustomerId
+    Customer identifier (lowercase alphanumeric + hyphens, 2-64 chars). MANDATORY.
+    Drives Phase 4 (Web Resources) target env resolution: the sprk_dataverseenvironment
+    registry is queried for a row where sprk_name eq '{CustomerId}' OR
+    sprk_envaccountdomain eq '{CustomerId}'; the row's sprk_dataverseurl becomes the
+    Phase 4 deployment target. Per §4D I1 / FR-28: NO hardcoded default; missing
+    -CustomerId errors immediately.
+
+.PARAMETER AdminEnvironmentUrl
+    Dataverse URL of the platform admin environment hosting the sprk_dataverseenvironment
+    registry. Defaults to $env:SPAARKE_ADMIN_DATAVERSE_URL. When neither is set, falls
+    back to the first entry in config/environments.json marked isPlatformAdmin:true,
+    otherwise the first non-template entry (with a warning).
 
 .PARAMETER Version
     Release version tag in v{major}.{minor}.{patch} format (e.g., v1.2.0).
@@ -46,30 +71,42 @@
     then prompts interactively.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev
-    # Full release pipeline to the dev environment with auto-suggested version tag.
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev -CustomerId acme
+    # Full release pipeline: Phases 1/2/3/5 target the dev env; Phase 4 (Web
+    # Resources) targets whatever env the acme customer registry row points at.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev, demo -Version v2.1.0
-    # Deploy to dev then demo, tag as v2.1.0.
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl dev, demo -CustomerId acme -Version v2.1.0
+    # Phases 1/2/3/5 loop dev then demo; Phase 4 targets acme's registry-resolved env
+    # (idempotent — same customer env each iteration). Tags as v2.1.0.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -SkipBuild -SkipPhase Validation
-    # Deploy to demo, skipping build and validation phases.
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -CustomerId acme `
+        -SkipBuild -SkipPhase BffApi,Solutions,Validation
+    # H9 handler invocation pattern: only Phase 4 runs; target env comes from
+    # the acme registry lookup; other phases skipped.
 
 .EXAMPLE
-    .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -WhatIf
+    .\scripts\Deploy-Release.ps1 -EnvironmentUrl demo -CustomerId acme -WhatIf
     # Preview the full release pipeline without executing anything.
 
 .NOTES
     Project: spaarke-production-release-procedure
     Task: PRPR-023
+    Phase 4 hardening: customer-provisioning-orchestration-r1 task 013 (Gap 2 / FR-28)
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [Parameter(Mandatory)]
     [string[]]$EnvironmentUrl,
+
+    # Gap 2 / FR-28 / §4D I1: -CustomerId is Mandatory. NO hardcoded default.
+    # Missing value produces PowerShell's built-in mandatory-parameter diagnostic
+    # (non-zero exit) BEFORE any deployment side-effect.
+    [Parameter(Mandatory)]
+    [ValidatePattern('^[a-z0-9][a-z0-9-]{1,63}$')]
+    [string]$CustomerId,
 
     [ValidatePattern('^v\d+\.\d+\.\d+$')]
     [string]$Version,
@@ -81,7 +118,12 @@ param(
 
     [bool]$StopOnFailure = $true,
 
-    [string]$ClientSecret
+    [string]$ClientSecret,
+
+    # Platform admin Dataverse env hosting the sprk_dataverseenvironment registry.
+    # Resolution order: explicit param -> $env:SPAARKE_ADMIN_DATAVERSE_URL ->
+    # config/environments.json (isPlatformAdmin:true) -> first non-template entry.
+    [string]$AdminEnvironmentUrl = $env:SPAARKE_ADMIN_DATAVERSE_URL
 )
 
 $ErrorActionPreference = "Stop"
@@ -191,6 +233,70 @@ function Resolve-Environment {
     }
 
     return $null
+}
+
+function Resolve-CustomerEnvironmentFromRegistry {
+    <#
+    .SYNOPSIS
+        Resolves a customer's target Dataverse environment via the sprk_dataverseenvironment
+        registry (Gap 2 / FR-28 / §4D I1 — no hardcoded tenant/env in provisioning scripts).
+    .DESCRIPTION
+        Queries the platform admin Dataverse env for a sprk_dataverseenvironment record
+        matching the supplied CustomerId (against sprk_name OR sprk_envaccountdomain).
+        Returns the record's sprk_dataverseurl (customer's environment URL) plus metadata.
+        Fails fast (throws) if the registry lookup returns zero rows OR the row has an
+        empty sprk_dataverseurl. Called by Phase 4 to determine its deployment target.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$CustomerId,
+        [Parameter(Mandatory)][string]$AdminEnvUrl
+    )
+
+    $normalizedAdminUrl = $AdminEnvUrl.TrimEnd('/')
+    Write-Step "Registry lookup: customerId='$CustomerId' via $normalizedAdminUrl"
+
+    $tokenRaw = az account get-access-token --resource $normalizedAdminUrl --query accessToken -o tsv 2>&1
+    if ($LASTEXITCODE -ne 0 -or -not $tokenRaw) {
+        throw "Registry lookup failed: cannot acquire Dataverse access token for $normalizedAdminUrl (az exit=$LASTEXITCODE). Ensure 'az login' has been run with an account that has access to the admin Dataverse env."
+    }
+
+    $escapedId = $CustomerId.Replace("'", "''")
+    $filter = "sprk_name eq '$escapedId' or sprk_envaccountdomain eq '$escapedId'"
+    $select = "sprk_dataverseenvironmentid,sprk_name,sprk_dataverseurl,sprk_environmenttype,sprk_envaccountdomain"
+    $encodedFilter = [System.Uri]::EscapeDataString($filter)
+    $encodedSelect = [System.Uri]::EscapeDataString($select)
+    $uri = "$normalizedAdminUrl/api/data/v9.2/sprk_dataverseenvironments?`$filter=$encodedFilter&`$select=$encodedSelect&`$top=1"
+
+    $headers = @{
+        'Authorization'    = "Bearer $tokenRaw"
+        'Accept'           = 'application/json'
+        'OData-MaxVersion' = '4.0'
+        'OData-Version'    = '4.0'
+    }
+
+    try {
+        $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method GET -ErrorAction Stop
+    } catch {
+        throw "Registry lookup HTTP failure at $normalizedAdminUrl : $_"
+    }
+
+    if (-not $response.value -or $response.value.Count -eq 0) {
+        throw "Registry lookup found NO sprk_dataverseenvironment row for customerId='$CustomerId' in $normalizedAdminUrl. Verify the customer registry record exists with sprk_name eq '$CustomerId' OR sprk_envaccountdomain eq '$CustomerId'. No hardcoded fallback — Gap 2 / FR-28 forbids default env."
+    }
+
+    $rec = $response.value[0]
+    if ([string]::IsNullOrWhiteSpace($rec.sprk_dataverseurl)) {
+        throw "Registry row for customerId='$CustomerId' has empty sprk_dataverseurl (registryId=$($rec.sprk_dataverseenvironmentid)). Cannot resolve Phase 4 target."
+    }
+
+    return [PSCustomObject]@{
+        CustomerId      = $CustomerId
+        RegistryId      = $rec.sprk_dataverseenvironmentid
+        RegistryName    = $rec.sprk_name
+        DataverseUrl    = $rec.sprk_dataverseurl.TrimEnd('/')
+        EnvironmentType = $rec.sprk_environmenttype
+        AccountDomain   = $rec.sprk_envaccountdomain
+    }
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -363,6 +469,63 @@ Write-Host "│  StopOnFail:   $StopOnFailure" -ForegroundColor Magenta
 Write-Host "└─────────────────────────────────────────────────────────────────┘" -ForegroundColor Magenta
 
 # ─────────────────────────────────────────────────────────────────────
+# Phase 4 target — resolve customer env via sprk_dataverseenvironment registry
+# (Gap 2 / FR-28 / §4D I1 — no hardcoded default; customerId-driven).
+# Resolved ONCE up front so all loop iterations share the same customer target
+# (Phase 4 is idempotent per customer). Skipped only if WebResources is skipped.
+# ─────────────────────────────────────────────────────────────────────
+
+$phase4CustomerEnv = $null
+if (-not (Test-PhaseSkipped 'WebResources')) {
+    $resolvedAdminUrl = $AdminEnvironmentUrl
+    if (-not $resolvedAdminUrl) {
+        $adminEntry = $envRegistry.PSObject.Properties |
+            Where-Object { $_.Name -ne '_template' -and $_.Value.PSObject.Properties['isPlatformAdmin'] -and $_.Value.isPlatformAdmin -eq $true } |
+            Select-Object -First 1
+        if ($adminEntry) {
+            $resolvedAdminUrl = $adminEntry.Value.dataverseUrl
+        }
+    }
+    if (-not $resolvedAdminUrl) {
+        $firstEntry = $envRegistry.PSObject.Properties |
+            Where-Object { $_.Name -ne '_template' } |
+            Select-Object -First 1
+        if ($firstEntry) {
+            $resolvedAdminUrl = $firstEntry.Value.dataverseUrl
+            Write-Warn "AdminEnvironmentUrl not set; falling back to '$($firstEntry.Name)' ($resolvedAdminUrl) as registry lookup source. Set -AdminEnvironmentUrl or `$env:SPAARKE_ADMIN_DATAVERSE_URL for explicit control."
+        }
+    }
+    if (-not $resolvedAdminUrl) {
+        Write-Fail "Cannot resolve admin Dataverse env URL for registry lookup. Provide -AdminEnvironmentUrl or set `$env:SPAARKE_ADMIN_DATAVERSE_URL, or add an entry to config/environments.json."
+        exit 1
+    }
+
+    if ($WhatIfPreference) {
+        Write-Phase "Phase 4 Preflight" "Registry lookup (WhatIf) — customerId=$CustomerId adminEnv=$resolvedAdminUrl"
+        $phase4CustomerEnv = [PSCustomObject]@{
+            CustomerId      = $CustomerId
+            RegistryId      = '<whatif>'
+            RegistryName    = "<whatif:$CustomerId>"
+            DataverseUrl    = "<whatif:resolved-from-registry>"
+            EnvironmentType = $null
+            AccountDomain   = $CustomerId
+        }
+        Write-Ok "WhatIf: registry lookup would resolve customerId='$CustomerId'"
+    } else {
+        Write-Phase "Phase 4 Preflight" "Resolve customer env from registry"
+        try {
+            $phase4CustomerEnv = Resolve-CustomerEnvironmentFromRegistry `
+                -CustomerId $CustomerId `
+                -AdminEnvUrl $resolvedAdminUrl
+            Write-Ok "Registry resolved: customerId='$CustomerId' -> env=$($phase4CustomerEnv.DataverseUrl) (registryId=$($phase4CustomerEnv.RegistryId))"
+        } catch {
+            Write-Fail "Phase 4 preflight failed: $_"
+            exit 1
+        }
+    }
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # Phase 1: Build
 # ─────────────────────────────────────────────────────────────────────
 
@@ -479,14 +642,21 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
         }
     }
 
-    # ── Phase 4: Web Resources ────────────────────────────────────
+    # ── Phase 4: Web Resources (Gap 2 / FR-28 — customerId-driven) ──
+    # Target env comes from the sprk_dataverseenvironment registry (resolved
+    # up front as $phase4CustomerEnv), NOT from $env.DataverseUrl. -CustomerId
+    # is mandatory; no hardcoded default env is permitted (§4D I1).
 
     if ($envFailed -and $StopOnFailure) {
         Write-Phase "Phase 4" "Web Resources — SKIPPED (previous phase failed)"
     } elseif (Test-PhaseSkipped 'WebResources') {
         Write-Phase "Phase 4" "Web Resources — SKIPPED"
     } else {
-        Write-Phase "Phase 4" "Web Resources → $($env.DataverseUrl)"
+        # $phase4CustomerEnv is guaranteed non-null here (resolved before the loop;
+        # failure would have exited already).
+        $phase4TargetUrl = $phase4CustomerEnv.DataverseUrl
+        Write-Phase "Phase 4" "Web Resources -> $phase4TargetUrl"
+        Write-Host "  Phase 4 target: customerId=$CustomerId env=$phase4TargetUrl" -ForegroundColor Gray
         $phaseStart = Get-Date
 
         $wrScript = Join-Path $ScriptDir "Deploy-AllWebResources.ps1"
@@ -495,10 +665,10 @@ for ($i = 0; $i -lt $targetEnvironments.Count; $i++) {
             $envFailed = $true
         } else {
             $wrParams = @{
-                DataverseUrl = $env.DataverseUrl
+                DataverseUrl = $phase4TargetUrl
             }
 
-            if ($PSCmdlet.ShouldProcess("$($env.DataverseUrl)", "Deploy web resources")) {
+            if ($PSCmdlet.ShouldProcess($phase4TargetUrl, "Deploy web resources (customerId=$CustomerId)")) {
                 try {
                     & $wrScript @wrParams
                     if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) {

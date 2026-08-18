@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="087" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement runtime /config.json fetch for external-spa + code-pages (BFF exposes endpoint; consumers fetch at bootstrap)</title>
+    <phase>H KV Federation Full Remediation</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api','auth','deploy'; introduces cross-worktree runtime config endpoint replacing bake-at-build-time pattern; blast-radius = every external-spa + code-page bootstrap. FR-36 scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped endpoint + consumer-migration; requires care with cross-worktree coordination (external-spa) but no design. Step 3.5.5b sonnet @ xhigh justified (broad-impact brownfield touching multiple consumer surfaces).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>External-spa surface is shared with spaarke-SPA-external-access-platform-r1/r2 worktrees; must coordinate via /conflict-check before merge to avoid conflict; not parallel-safe with other worktrees editing external-spa bootstrap.</parallel-reason>
+    <deps>086</deps>
+    <tags>bff-api, auth, deploy, azure-deployment</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement runtime /config.json fetch for external-spa + code-pages per spec.md FR-36 + design.md §7.9 close-pattern. BFF exposes GET /api/config (Anonymous + short-cache) returning the per-env public config bundle (BFF URL, MSAL client ID, tenant ID, feature flags). External-spa + code-pages fetch this at bootstrap instead of relying on the bake-at-build-time pattern. Coordinate with spaarke-SPA-external-access-platform-r1/r2 on the external-spa impl via /conflict-check before merge.</prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 10 Minimal API endpoints, React/Vite bootstrap patterns, BFF /config surface design, and cross-worktree coordination via /conflict-check. Follow ADRs strictly.</role>
+
+  <goal>BFF endpoint GET /api/config returns a public config bundle (BFF URL, MSAL client ID, tenant ID, feature flags — NEVER secrets); external-spa main entry fetches /api/config at bootstrap before rendering; code-pages main.tsx fetches at bootstrap; bake-at-build-time is closed. Unit tests cover happy path + response-shape stability. Integration test with a fresh external-spa bootstrap succeeds.</goal>
+
+  <context>
+    <background>Per spec.md FR-36 + design.md §7.9: today external-spa + code-pages consume env-config baked at build time (npm run build produces different bundles per env). Every env-config change requires re-build + re-deploy per surface. Runtime /config.json fetch closes the pattern — one build, N envs. The BFF endpoint is Anonymous (public config only, no secrets) + short-cached. Coord with spaarke-SPA-external-access-platform-r1/r2 required per hot-path overlap.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ConfigEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Api/ConfigEndpoints.Tests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file role="modify">external-spa main entry (path TBD via coord with spaarke-SPA-external-access-platform-r1/r2)</file>
+      <file role="modify">src/solutions/*/src/main.tsx (per code-page)</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="086" status="pending">IaC alignment complete — canonical config keys stable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-36">SCOPE: /config.json (Anonymous) returns public env-config bundle; consumers fetch at bootstrap; bake-at-build-time closed.</constraint>
+    <constraint source="spec.md §7.9">SCOPE: Endpoint response body includes ONLY public config (BFF URL, MSAL client ID, tenant ID, feature flags); NEVER secrets, KV references, or connection strings.</constraint>
+    <constraint source="ADR-013">SCOPE: If endpoint touches Services/Ai/ paths, use PublicContracts/ facade — MUST NOT inject IActionResolver/IActionRunner directly. Likely no AI touch.</constraint>
+    <constraint source="ADR-010">SCOPE: Register endpoint in BFF with minimal DI impact (single small module).</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching + external-spa + code-pages surface — /conflict-check before PR (19 active BFF worktrees + external-spa worktrees); publish-size delta per NFR-01.</constraint>
+    <constraint source="spec.md §4D I1">SCOPE: /config.json returns THE TENANT-SCOPED config for the current env (per host header or configured mapping); does NOT hardcode a default tenant.</constraint>
+    <constraint source="NFR-05">SCOPE: /config.json values are backed by IOptions&lt;PublicConfigOptions&gt; classified Tier-1 + validated-on-start per r3 task 061 pattern.</constraint>
+    <constraint source="project">SCOPE: Coordinate external-spa impl via /conflict-check + explicit coord message with spaarke-SPA-external-access-platform-r1/r2 worktree owners; do NOT unilaterally edit external-spa without coord.</constraint>
+    <constraint source="project">SCOPE: Response includes ETag or Cache-Control (short cache: 60s or similar) — reduces load without preventing cache-bust.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Runtime /config.json BFF endpoint + external-spa + code-pages bootstrap migration</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Anonymous BFF endpoint" location="src/server/api/Sprk.Bff.Api/Api/">Existing Anonymous endpoints (/healthz, /ping) as shape reference.</pattern>
+      <pattern name="Code-page bootstrap" location="src/solutions/">Existing main.tsx bootstrap pattern for React SPA in code-page.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-36 + §7.9 + this project's CLAUDE.md coordination table.</step>
+    <step order="1" name="Coord">Post coord message to spaarke-SPA-external-access-platform-r1/r2 worktree owners (via /conflict-check + PR mention) describing external-spa touchpoint.</step>
+    <step order="2" name="Endpoint design">Design /api/config response schema: bffUrl + msalClientId + tenantId + featureFlags (extensible dict).</step>
+    <step order="3" name="Author endpoint">Author Api/ConfigEndpoints.cs — Anonymous, short-cache, IOptions&lt;PublicConfigOptions&gt;.</step>
+    <step order="4" name="Options validation">Classify PublicConfigOptions as Tier-1 (per r3 task 061); validate-on-start.</step>
+    <step order="5" name="Tests">Author unit tests + response-shape stability test.</step>
+    <step order="6" name="Migrate external-spa">Update external-spa main entry to fetch /api/config at bootstrap before MSAL init (coord PR).</step>
+    <step order="7" name="Migrate code-pages">Update each src/solutions/*/src/main.tsx to fetch /api/config at bootstrap.</step>
+    <step order="8" name="Publish size">Report BFF publish-size delta per NFR-01.</step>
+    <step order="9" name="Verify">Deploy BFF; verify external-spa + code-pages bootstrap in dev; grep for hardcoded env-config in consumer bundles — expect zero.</step>
+    <step order="10" name="Index update">Update TASK-INDEX.md: task 087 → ✅.</step>
+    <step order="11" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the coord message to spaarke-SPA-external-access-platform-r1/r2 surfaces a merge conflict that would delay this task beyond Phase F acceptance, OR if the response schema conflicts with an established external-spa contract, STOP and escalate per CLAUDE.md §6 rather than unilaterally editing external-spa. Coord is BINDING per hot-path overlap.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: BFF /healthz + /ping Anonymous endpoints (different concern — liveness vs config). Grep for `/api/config` in src/server/** returns none.</existing>
+    <extension>No — /healthz + /ping return terse liveness signals; /api/config returns a structured config bundle with a different shape + caching semantics + response-shape stability contract. Extending /healthz would break its single-purpose semantics.</extension>
+    <cost-of-doing-nothing>Without /api/config runtime fetch, external-spa + code-pages continue bake-at-build-time: every env-config change requires per-surface re-build + re-deploy (spec.md FR-36 explicitly cites the close-pattern intent). Adding a customer env forces re-build of every consumer. /api/config is the endpoint that breaks that coupling.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test BFF</tool>
+    <tool name="npm">Build external-spa + code-pages</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ConfigEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (endpoint mapping)</output>
+    <output type="code">external-spa main entry (via coord PR)</output>
+    <output type="code">src/solutions/*/src/main.tsx (per code-page)</output>
+    <output type="test">src/server/api/Sprk.Bff.Api/Api/ConfigEndpoints.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">GET /api/config returns 200 Anonymous with a structured JSON body containing bffUrl + msalClientId + tenantId + featureFlags.</criterion>
+    <criterion testable="true">Response body contains ZERO secrets (grep of response for KV references, connection strings, client secrets returns zero matches).</criterion>
+    <criterion testable="true">Response has ETag or Cache-Control (short cache).</criterion>
+    <criterion testable="true">External-spa + code-pages fetch /api/config at bootstrap before MSAL init (verified via manual dev bootstrap trace).</criterion>
+    <criterion testable="true">Grep of consumer bundles for hardcoded env-config values returns zero matches post-migration.</criterion>
+    <criterion testable="true">PublicConfigOptions classified Tier-1 + validated-on-start; BFF /health fails on missing config (NFR-05).</criterion>
+    <criterion testable="true">BFF publish-size delta reported per NFR-01.</criterion>
+    <criterion testable="true">Negative: coord conflict with external-spa worktree triggers escalation, not unilateral merge.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings; zero new HIGH CVEs.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-36 + §7.9 close-pattern + hot-path overlap with spaarke-SPA-external-access-platform-r1/r2 per this project's CLAUDE.md coordination table.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

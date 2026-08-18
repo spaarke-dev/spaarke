@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H12b app-config seed handler (DataGrid, field-mapping, workspace-layout, chart-def — DAG-parallel with H12a)</title>
+    <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse'; handler in the DAG whose failure blocks Setup Status = Ready. FR-16 acceptance scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component IJobHandler implementation invoking existing seeder scripts; well-scoped. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveCp-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>069</deps>
+    <tags>l2-controlplane, job-handler, dataverse</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H12b app-config seed handler as an IJobHandler in the L2 control plane per spec.md FR-16. H12b seeds DataGrid configs (sprk_gridconfiguration) + field-mapping profiles + rules (sprk_fieldmapping*) + system workspace layouts (sprk_workspacelayout) + chart definitions per the task-069 declarative manifest. DAG-parallel with H12a — no cross-dependency. Idempotency key: h12b-{customerId}-{manifestHash}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract (ADR-004), Dataverse seeder script patterns, DataGrid + field-mapping + workspace-layout schema (per docs/architecture pointers), and DAG-parallel handler placement. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12bAppConfigSeedHandler.cs exists, implements IJobHandler, registers in L2 DI, invokes the app-config seeder subset of the task-069 manifest (DataGrid + field-mapping + workspace-layout + chart-def), and asserts idempotency + reports outcome to Cosmos runNotes. Unit tests cover happy path + per-seeder-failure paths + idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-16 + design.md §4.1 H12b row: app-config seed populates the non-AI configuration records — DataGrid configs, field-mapping profiles/rules, workspace layouts, chart definitions — that every customer environment needs to render UI. DAG-parallel with H12a means both handlers can enqueue simultaneously post-H7. No cross-dependency; they touch different entity sets.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12bAppConfigSeedHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12bAppConfigSeedHandler.Tests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">scripts/seed-data/manifest.yaml</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="069" status="pending">manifest.yaml declares which app-config artifacts H12b owns</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-16">SCOPE: H12b seeds DataGrid + field-mapping + workspace-layout + chart-def only; does NOT touch AI-related records (H12a's scope).</constraint>
+    <constraint source="ADR-004">SCOPE: Single IJobHandler; one message, one handler, one outcome.</constraint>
+    <constraint source="ADR-010">SCOPE: Registers in L2 control-plane DI container, NOT the BFF.</constraint>
+    <constraint source="ADR-036">SCOPE: 3-level idempotency (MessageId + Redis lock + deterministic key h12b-{customerId}-{manifestHash}).</constraint>
+    <constraint source="project">SCOPE: DAG-parallel with H12a — task 058 reconciler enqueues both simultaneously post-H7; no cross-dependency.</constraint>
+    <constraint source="project">SCOPE: Seeder invocation goes through the task-069 manifest generator with an app-config filter (e.g., -Filter DataGrid,FieldMapping,WorkspaceLayout,ChartDef).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H12b app-config seed handler (DAG-parallel with H12a AI seed)</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Reference handler shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Any handler is a shape exemplar.</pattern>
+      <pattern name="3-level idempotency" location="src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs">Reuse the shared idempotency stack.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-16 + task 069 manifest.</step>
+    <step order="1" name="Author">Author H12bAppConfigSeedHandler.cs — inject IIdempotencyService, ICosmosRunStore, IPowerShellInvoker.</step>
+    <step order="2" name="Invoke">HandleAsync invokes Invoke-SeedManifest.ps1 with app-config filter subset.</step>
+    <step order="3" name="Register">Register in L2 Program.cs DI.</step>
+    <step order="4" name="DAG position">Confirm task 058 DagAdvancer marks H12b as DAG-parallel with H12a — both fire post-H7.</step>
+    <step order="5" name="Tests">Unit tests: happy path; per-seeder-failure path; idempotency.</step>
+    <step order="6" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: task 071 → ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12bAppConfigSeedHandler.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (DI registration)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H12bAppConfigSeedHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">H12bAppConfigSeedHandler implements IJobHandler and registers in L2 DI.</criterion>
+    <criterion testable="true">HandleAsync invokes Invoke-SeedManifest.ps1 with the app-config filter subset (DataGrid, FieldMapping, WorkspaceLayout, ChartDef).</criterion>
+    <criterion testable="true">Idempotency key = h12b-{customerId}-{manifestHash}; second invocation with same key is a no-op.</criterion>
+    <criterion testable="true">Reconciler (task 058) fires H12a + H12b in parallel post-H7 — verified via DagAdvancer test.</criterion>
+    <criterion testable="true">Given the seeder script exits non-zero for any single artifact, when HandleAsync runs, then handler returns Failed with the offending artifact + stderr captured.</criterion>
+    <criterion testable="true">Negative: H12b does NOT seed any AI record type — grep of manifest filter for AI record types returns none in H12b's invocation.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-16 + design.md §4.1 H12b row + task 069 manifest.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
