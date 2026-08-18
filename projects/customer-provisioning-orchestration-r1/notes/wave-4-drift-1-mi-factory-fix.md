@@ -183,7 +183,7 @@ The `<hot-path-declaration>` for `customer-provisioning-orchestration-r1` alread
 | CVE audit clean | ✅ (§4.6) |
 | `TASK-INDEX.md` updated with follow-on drift fix row | ✅ (this commit) |
 | Notes file at `notes/wave-4-drift-1-mi-factory-fix.md` | ✅ (this file) |
-| Commit message per task prompt | ✅ (see commit `<sha>`) |
+| Commit message per task prompt | ✅ (commit `ed4cdee42`) |
 
 ---
 
