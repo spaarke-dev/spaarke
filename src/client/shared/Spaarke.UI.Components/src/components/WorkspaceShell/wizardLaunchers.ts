@@ -51,7 +51,7 @@
 // percentage literals in this file.
 // ---------------------------------------------------------------------------
 
-import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
+import { OOB_MODAL_SIZES, type OobModalSize } from '../../utils/adapters/oobModalSizes';
 
 // ---------------------------------------------------------------------------
 // Internal: Xrm.Navigation feature detection (frame-walking)
@@ -443,6 +443,15 @@ export interface EntityRecordSurfaceParams {
    * it is a no-op until a real form GUID is supplied.
    */
   formId?: string;
+  /**
+   * Optional dialog size override (both branches). When omitted, defaults to
+   * `fullCover` (100%×100%) — the pre-existing behavior every current caller
+   * relied on (task 032). Pass a named size (e.g. `getOobModalSize('record')`,
+   * 85%×85%) to open smaller. smart-todo-r5 UAT 2026-08-18 (item: "next size
+   * down") uses `record` for the To Do surfaces, without changing the default
+   * for the other generic consumers (surfaceHandoff / Communication launchers).
+   */
+  size?: OobModalSize;
 }
 
 /**
@@ -541,24 +550,22 @@ export async function navigateToEntityRecordSurfaceAsync(
   if (params.formId) {
     pageInput.formId = params.formId;
   }
+  // Dialog size — `params.size` when the caller overrides (smart-todo-r5 UAT
+  // 2026-08-18: To Do surfaces pass `record` 85%×85%), else the `fullCover`
+  // (100%×100%) default every pre-existing caller relied on (task 032).
+  const modalSize = params.size ?? OOB_MODAL_SIZES.fullCover;
   const navOptions: Record<string, unknown> = isOpenExisting
     ? {
-        // `fullCover` OOB size (100% × 100%) + centered position — task 032
-        // / spec FR-13 (was `record` 85%×85% / Layout 1 pre-032; see the
-        // function doc comment above for the full-cover rationale).
         target: DEFAULT_TARGET,
         position: 1,
-        width: OOB_MODAL_SIZES.fullCover.width,
-        height: OOB_MODAL_SIZES.fullCover.height,
+        width: modalSize.width,
+        height: modalSize.height,
       }
     : {
-        // `fullCover` OOB size (100% × 100%) — task 032 / spec FR-13 (was
-        // `createForm` 70%×80% pre-032; see the function doc comment above).
-        // This launches an OOB entity CREATE form (`pageType: 'entityrecord'`,
-        // no existing entityId).
+        // OOB entity CREATE form (`pageType: 'entityrecord'`, no existing entityId).
         target: DEFAULT_TARGET,
-        width: OOB_MODAL_SIZES.fullCover.width,
-        height: OOB_MODAL_SIZES.fullCover.height,
+        width: modalSize.width,
+        height: modalSize.height,
       };
   if (params.title !== undefined) {
     navOptions.title = params.title;

@@ -71,6 +71,7 @@
 import {
   navigateToEntityRecordSurfaceAsync,
   TODO_REGARDING_CATALOG,
+  getOobModalSize,
 } from '@spaarke/ui-components';
 import type { ILaunchContext } from '../hooks/useLaunchContext';
 import { getXrm } from './xrmProvider';
@@ -78,8 +79,12 @@ import { getXrm } from './xrmProvider';
 /** Entity logical name for the sprk_todo OOB create form (spec FR-10). */
 const TODO_ENTITY_NAME = 'sprk_todo';
 
-/** Dialog title passed to `navigateToEntityRecordSurfaceAsync`. */
-const NEW_TASK_DIALOG_TITLE = 'New To Do';
+/**
+ * Dialog title passed to `navigateToEntityRecordSurfaceAsync`. smart-todo-r5
+ * UAT 2026-08-18 (item #1): unified to "Smart To Do Item" so EVERY To Do modal
+ * (create + open) shows the same chrome title (was "New To Do").
+ */
+const NEW_TASK_DIALOG_TITLE = 'Smart To Do Item';
 
 /**
  * Narrow shape shared by all regarding branches this module reads
@@ -90,6 +95,45 @@ interface IRegardingSource {
   entityType: string;
   recordId: string;
   recordName?: string;
+}
+
+/**
+ * The current user's CONTACT (the `sprk_todo.sprk_assignedto` lookup targets the
+ * OOB `contact` table, resolved from systemuser via `contact.sprk_systemuser` —
+ * see `useCurrentContactId`). Passed by the caller so a new To Do opens with
+ * "Assigned To" pre-filled to the current user (smart-todo-r5 UAT 2026-08-17,
+ * item #1 — client default at form launch; NOT the Field Mapping Framework,
+ * which is for wizard creates that inherit from a parent record).
+ */
+export interface INewTaskAssignee {
+  /** The current user's `contactid` GUID (bare, no braces). */
+  contactId: string;
+  /** The contact's `fullname`, for the form's lookup display text. */
+  contactName?: string;
+}
+
+/**
+ * Merge the current-user "Assigned To" default into a `defaultValues` map using
+ * the same three-key lookup convention the regarding pre-seed uses (MS Learn —
+ * "Set column values using parameters passed to a form"): `{lookup}` = id,
+ * `{lookup}name` = display, `{lookup}type` = target logical name. The
+ * `sprk_assignedto` lookup targets `contact`. Uses the LOWERCASE logical name
+ * (the three-key form convention), NOT the PascalCase `sprk_AssignedTo`
+ * navigation property required by the Web API `@odata.bind` create path.
+ * Creates the map if the regarding pre-seed produced none.
+ */
+function applyAssigneeDefault(
+  defaultValues: Record<string, unknown> | undefined,
+  assignee: INewTaskAssignee | undefined,
+): Record<string, unknown> | undefined {
+  if (!assignee?.contactId) return defaultValues;
+  const next = defaultValues ? { ...defaultValues } : {};
+  next['sprk_assignedto'] = assignee.contactId;
+  next['sprk_assignedtotype'] = 'contact';
+  if (assignee.contactName) {
+    next['sprk_assignedtoname'] = assignee.contactName;
+  }
+  return next;
 }
 
 /** `true` when `entityType` is one of the 12 canonical sprk_todo regarding targets. */
@@ -210,9 +254,11 @@ function buildDefaultValuesFromRegarding(regarding: IRegardingSource): Record<st
  */
 export function buildNewTaskDefaultValues(
   launchContext: ILaunchContext | undefined,
+  assignee?: INewTaskAssignee,
 ): Record<string, unknown> | undefined {
   const regarding = resolvePreferredRegarding(launchContext);
-  return regarding ? buildDefaultValuesFromRegarding(regarding) : undefined;
+  const base = regarding ? buildDefaultValuesFromRegarding(regarding) : undefined;
+  return applyAssigneeDefault(base, assignee);
 }
 
 /**
@@ -229,9 +275,13 @@ export function buildNewTaskDefaultValues(
 export async function launchNewTaskCreateForm(
   launchContext: ILaunchContext | undefined,
   onSaved: () => void,
+  assignee?: INewTaskAssignee,
 ): Promise<void> {
   const regarding = resolvePreferredRegarding(launchContext);
-  const defaultValues = regarding ? buildDefaultValuesFromRegarding(regarding) : undefined;
+  const defaultValues = applyAssigneeDefault(
+    regarding ? buildDefaultValuesFromRegarding(regarding) : undefined,
+    assignee,
+  );
   const createFromEntity = regarding
     ? { entityType: regarding.entityType, id: regarding.recordId, name: regarding.recordName }
     : undefined;
@@ -241,6 +291,8 @@ export async function launchNewTaskCreateForm(
     title: NEW_TASK_DIALOG_TITLE,
     defaultValues,
     createFromEntity,
+    // UAT 2026-08-18 #3 — one size down from fullCover (100%) to record (85%).
+    size: getOobModalSize('record'),
   });
   if (outcome.savedEntityReference) {
     onSaved();

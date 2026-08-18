@@ -51,6 +51,10 @@ describe('launchOpenTodoForm (SmartTodoApp OPEN call site)', () => {
     const callArgs = mockNavigateToEntityRecordSurfaceAsync.mock.calls[0][0];
     expect(callArgs.entityName).toBe('sprk_todo');
     expect(callArgs.entityId).toBe('todo-guid-1');
+    // UAT 2026-08-18 #1 — uniform dialog title (not the record's sprk_name).
+    expect(callArgs.title).toBe('Smart To Do Item');
+    // UAT 2026-08-18 #3 — one size down: record (85%×85%), not fullCover (100%).
+    expect(callArgs.size).toEqual({ width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' } });
   });
 
   it('invokes onClose (refetch) unconditionally on a clean dialog close — the OPEN Save & Close case', async () => {

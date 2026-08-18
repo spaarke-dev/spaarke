@@ -3,8 +3,8 @@
   <metadata>
     <title>D9 — host-proof flex-chain fix for the Assistant transcript in the Open-in-Compose iframe (FR-11)</title>
     <phase>4 — D9 viewport fix</phase>
-    <gate>startable</gate>
-    <status>pending</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Frontend Fluent-v9 change on the shared SprkChat/ConversationPane subtree (auto-FULL on .tsx) with ui-tests + live-DOM diagnosis; regressions would hit every SprkChat host</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,7 +82,11 @@
     <criterion testable="true">If fixed in SprkChat: one other SprkChat consumer surface spot-checked and unaffected.</criterion>
     <criterion testable="true">If live-DOM shows D9 no longer reproduces: task converted to verification-only + a regression guard added (per escalation), not speculatively edited.</criterion>
   </acceptance-criteria>
-  <notes>Client-only — ships with `sprk_spaarkeai` rebuild + `Deploy-SpaarkeAi.ps1`; no BFF. SprkChat/ConversationPane is a contended spine shared with compose-r5/r6 + assistant-r3 — run /conflict-check before the PR and coordinate merge order. The live-DOM confirm BEFORE editing is load-bearing (the partial fix may already have resolved D9).</notes>
+  <notes>Client-only — ships with `sprk_spaarkeai` rebuild + `Deploy-SpaarkeAi.ps1`; no BFF. SprkChat/ConversationPane is a contended spine shared with compose-r5/r6 + assistant-r3 — run /conflict-check before the PR and coordinate merge order. The live-DOM confirm BEFORE editing is load-bearing (the partial fix may already have resolved D9).
+
+  ── COMPLETION (2026-08-18, owner live-DOM UAT) ──
+  D9 CORE RESOLVED by the merged partial fix (`messageList min-height:0`): owner confirmed the "Open in Compose" transcript is now BOUNDED (internal scroll, composer pinned, no clipped rows) — the escalation's "does NOT reproduce" path. So NO speculative flex-chain edit was made.
+  Owner live-DOM UAT surfaced the REMAINING piece of the handoff's dead-whitespace hypothesis 2: the pin-to-top trailing spacer (`SprkChat.tsx:1439`, sized to `container.clientHeight` on send) NEVER shrank back, leaving a large dead region after the transcript footer that clipped the last footer row (the task-023 "Refresh suggestions" affordance) at the fold in a long conversation. FIX: in the auto-scroll effect, COLLAPSE the spacer (`minHeight:0`) once real content (scrollHeight − spacer) fills the viewport; short responses keep the spacer (pin-to-top preserved). Tokens-only, host-agnostic, no measured height added. 374/374 SprkChat shared-lib tests pass. Ships with the 080 SpaarkeAi deploy; owner verifies the Refresh-row clip is gone live post-deploy.</notes>
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
