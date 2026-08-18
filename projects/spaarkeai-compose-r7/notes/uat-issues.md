@@ -304,3 +304,22 @@ investigation/research pass to choose the correct write-model before building.
     redline placement, save banners, concurrency 412, auto-Analysis, progress indicator); (2) **UAT-10 ops
     action** on the UAT Azure SignalR resource (connection-string key/endpoint/Serverless mode — NOT code).
 - **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".
+
+---
+
+## Follow-up UAT round (2026-08-18, session 3) — Analysis/Memo/Save model + gutter
+
+Owner UAT on the deployed build surfaced a **model correction**: the Document + Analysis are created on
+**Save** (user-driven), NOT on upload/run, and the **Assistant conversation History is not part of the
+Analysis-linking flow**. (My prior UAT-08 auto-create-on-review was the wrong model — reverted.)
+
+| # | Item | Resolution | Status |
+|---|------|-----------|--------|
+| R-1 | History should not be part of the Analysis-linking process | Removed History/"Promote" language from the memo flow; the Analysis is created on Save. | ✅ |
+| R-2 | Don't create Document/Analysis on upload/run; show "not saved" notice; **Save creates both** | Save-driven: new `ComposeWorkspace.onReviewedDocumentCreated` (create-on-save-only, gated on `reviewSummaryFindings>0`) → SpaarkeAi `useReviewedDocumentAnalysis` create+binds `sprk_analysis` via `/promote`. "Not saved yet — click Save to create" info banner (ComposeBannerStack, clears on Save). Aligns with reopen (existing-doc saves = replace/version path → no re-create). +8 tests. | ✅ |
+| R-3 | Memo before save → "save first" (remove Promote instructions) | Server `ReviewMemoEndpoints` 400 copy + client `MEMO_SESSION_NOT_BOUND_MESSAGE` rewritten to "Save the document first (that creates its Analysis)…". Contract + unit tests updated. | ✅ |
+| R-4 | Remove "Set related record" in History unless it saves the conversation to a record | **Kept** — owner confirmed it saves the conversation to a matter/project record (distinct purpose). No change. | ✅ |
+| R-5 | History stale (last shows Aug 7) | **Root-caused (2026-08-18)**: History reads the **Cosmos "warm tier" ONLY** (`SessionPersistenceService.ListRecentSessionsAsync`, `SELECT … ORDER BY c.lastActivity DESC WHERE tenantId=@t`). Cosmos writes are **best-effort/fire-and-forget with silently-swallowed failures** (`UpsertToCosmosAsync` logs Warning `"Cosmos DB write failed … store=Cosmos"` and continues); only the FIRST user message is awaited. Chat still works because it's served from **Redis/Dataverse**, not Cosmos. Symptom (frozen at a date, chat fine) = Cosmos warm-tier writes stopped landing ~Aug 7. **Primary = ENV** (like UAT-10): check App Service logs for that Warning ~Aug 7 + Cosmos 429/RU/credential/`CosmosPersistence:Endpoint` + tenant-partition (`tid`) match. **Durable CODE fix (follow-up, NOT in this round)**: back History with the authoritative `sprk_aichatsummary` Dataverse store (written synchronously at creation) instead of the lossy Cosmos tier — needs a new tenant-scoped list-recent query on `ChatDataverseRepository`; + make the Cosmos write-loss observable (metric). | 🔎 ENV + follow-up |
+| R-6 | Remove the blue scroll-down arrow in Compose | Removed the `ChevronDoubleDown` "scroll notes down" affordance + dead code in `ComposeCommentGutter`. | ✅ |
+
+**Redeploy**: R-2/R-3/R-6 + the revert are code — needs BFF (R-3 memo copy) + `sprk_spaarkeai` redeploy together (NFR-05). R-5 is ENV (no code this round) + a documented durable follow-up.
