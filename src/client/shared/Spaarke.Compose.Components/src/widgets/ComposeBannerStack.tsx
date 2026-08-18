@@ -113,6 +113,14 @@ export interface ComposeBannerStackProps {
   /** UAT-13: re-run the host association write for {@link associationWarning}. Clears the banner on success. */
   onRetryAssociation?: () => void;
   /**
+   * UAT (2026-08-18, owner): shown while the document has NOT been saved to the DMS yet — a file
+   * uploaded / a review run persists nothing until the user Saves (the owner's SAVE-driven model).
+   * Informs the user that the Document (and, when a review ran, its Analysis) isn't saved and that
+   * Save creates it. `null` once the document is persisted. `reviewRan` tailors the copy (mentions the
+   * Analysis) — the Analysis is created on Save only when a review actually ran.
+   */
+  unsavedDocumentNotice?: { reviewRan: boolean } | null;
+  /**
    * UAT-12 (2026-08-18, honest/safe): true when the server's annotation read FAILED on load, so the
    * document's imported tracked changes / reviewer comments are EMPTY as a fallback — NOT proof the
    * document is clean. Renders a prominent honest warning so the reviewer never treats a
@@ -361,6 +369,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     associationWarning = null,
     onRetryAssociation,
     annotationReadFailed = false,
+    unsavedDocumentNotice = null,
     reviewFindingsDegraded = null,
   } = props;
 
@@ -469,6 +478,10 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   }, [annotationReadFailed]);
   const showAnnotationReadFailedBanner = annotationReadFailed && !annotationReadFailedDismissed;
 
+  // UAT (2026-08-18, owner): the "not saved yet — Save to create" notice. Non-dismissible: it reflects
+  // LIVE persistence state and clears automatically when the parent stops passing it (i.e. on Save).
+  const showUnsavedDocumentNotice = !!unsavedDocumentNotice;
+
   // UAT-05 (owner 2026-08-18): the generic Save-error banner previously had NO dismiss ✕ (unlike the
   // warning/info banners), so a stale "Save error" could not be cleared. Add a local dismissal reset
   // whenever the message changes (a NEW error re-shows). The parent still owns `errorMessage`; this only
@@ -490,6 +503,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     showReviewFindingsDegradedBanner ||
     showAssociationWarningBanner ||
     showAnnotationReadFailedBanner ||
+    showUnsavedDocumentNotice ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -593,6 +607,19 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
               />
             }
           />
+        </MessageBar>
+      ) : null}
+
+      {showUnsavedDocumentNotice ? (
+        // UAT (2026-08-18, owner): SAVE-driven persistence — nothing is saved until the user clicks Save.
+        // Informational (info intent), non-dismissible; clears automatically once the document is saved.
+        <MessageBar intent="info" data-testid="compose-workspace-unsaved-notice" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Not saved yet</MessageBarTitle>
+            {unsavedDocumentNotice?.reviewRan
+              ? 'This document and its analysis haven’t been saved yet — click Save to create them.'
+              : 'This document hasn’t been saved yet — click Save to keep it.'}
+          </MessageBarBody>
         </MessageBar>
       ) : null}
 

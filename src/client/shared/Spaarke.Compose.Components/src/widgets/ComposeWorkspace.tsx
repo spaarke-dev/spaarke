@@ -704,6 +704,21 @@ export interface ComposeWorkspaceProps {
    */
   onCreateOnSaveComplete?: (newSprkDocumentId: string) => void | Promise<void>;
 
+  /**
+   * UAT (2026-08-18, owner): the Document + Analysis are created on SAVE. Invoked ONCE, on the FIRST
+   * save (create-on-save) of a NEW document, WHEN a review/analysis actually ran on it (there are
+   * review findings) — with the server-minted `sprk_documentid`. The host wires this to create + bind
+   * the `sprk_analysis` for the review session (so the Summary Memo works and the Analysis is
+   * reopenable from history). NOT called for a plain drafting doc (no review), nor on subsequent saves
+   * / a reopened Analysis (those are the replace/version path and the Analysis already exists). Fired
+   * after the parent-association write so both land on the freshly-created document.
+   */
+  onReviewedDocumentCreated?: (
+    newSprkDocumentId: string,
+    sessionId: string,
+    documentName: string
+  ) => void | Promise<void>;
+
   /** Called when the user clicks Browse in the empty state. */
   onBrowseRequested?: () => void;
 
@@ -852,6 +867,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     containerId,
     resolveContainer,
     onCreateOnSaveComplete,
+    onReviewedDocumentCreated,
     onBrowseRequested,
     onSearchRequested,
     onComposeMount,
@@ -864,6 +880,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   } = props;
 
   const [state, dispatch] = React.useReducer(composeWorkspaceReducer, INITIAL_STATE);
+
+  // UAT (2026-08-18, save-driven Analysis): refs the save closure reads for the first-save Analysis
+  // create. `onReviewedDocumentCreatedRef` mirrors the host callback; `hasReviewFindingsRef` mirrors
+  // "a review actually ran on this doc" (reviewSummaryFindings.length > 0, defined further down — the
+  // ref lets the earlier-declared save callback read it without a stale closure). Updated via effects.
+  const onReviewedDocumentCreatedRef = React.useRef(onReviewedDocumentCreated);
+  React.useEffect(() => {
+    onReviewedDocumentCreatedRef.current = onReviewedDocumentCreated;
+  }, [onReviewedDocumentCreated]);
+  const hasReviewFindingsRef = React.useRef<boolean>(false);
 
   // spaarkeai-compose-r2 (multi-Compose-tab): keep the latest active-tab flag in a ref so the
   // async load effects + the single-slot visibility conduit handler (both of which capture their
@@ -2109,6 +2135,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             dispatch({ kind: 'associationWarning', documentRecordId: payload.documentRecordId });
           }
         }
+        // UAT (2026-08-18, owner): SAVE-driven Analysis. On the FIRST save of a NEW document that had a
+        // review/analysis run on it, tell the host to create + bind the sprk_analysis (so the Summary
+        // Memo works and the Analysis is reopenable). Gated on `hasReviewFindingsRef` — a plain drafting
+        // doc creates NO Analysis. Only on the transient-create (first) save; subsequent saves and a
+        // reopened Analysis are the replace/version path (no create-on-save → the Analysis already
+        // exists). Fire-and-forget — a failure never fails the save (the host handles it honestly).
+        if (isTransientCreate && payload.documentRecordId && hasReviewFindingsRef.current && state.sessionId) {
+          try {
+            await onReviewedDocumentCreatedRef.current?.(
+              payload.documentRecordId,
+              state.sessionId,
+              forkDisplayName ?? state.documentRef?.fileName ?? 'Document'
+            );
+          } catch (analysisErr) {
+            // eslint-disable-next-line no-console
+            console.warn('[ComposeWorkspace] reviewed-document Analysis create failed (non-fatal):', analysisErr);
+          }
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
@@ -2438,6 +2482,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // `onAdvisoryComments` receiver further down also writes to (ADR-040 — one ledgered NDA-REVIEW
   // result, two renderings, never a second server read).
   const [reviewSummaryFindings, setReviewSummaryFindings] = React.useState<readonly NdaReviewFindingSummary[]>([]);
+  // UAT (2026-08-18): mirror "a review ran on this doc" into a ref the (earlier-declared) save closure
+  // reads to gate the first-save Analysis create.
+  React.useEffect(() => {
+    hasReviewFindingsRef.current = reviewSummaryFindings.length > 0;
+  }, [reviewSummaryFindings]);
   const [reviewSummaryOpen, setReviewSummaryOpen] = React.useState<boolean>(false);
   const [reviewSummaryFailedCount, setReviewSummaryFailedCount] = React.useState<number>(0);
   // Task 032 — server-asserted overall risk (the event/payload field task 030 planted but nothing
@@ -4200,6 +4249,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // server annotation read failed — so a doc that may CONTAIN redlines/comments is never
             // presented as clean.
             annotationReadFailed={state.annotationReadFailed}
+            // UAT (2026-08-18, owner): SAVE-driven persistence — while the document has no SPE identity
+            // yet (never persisted), show the "not saved yet — Save to create" notice. `reviewRan`
+            // tailors the copy (and matches when Save will also create the Analysis). Clears
+            // automatically once create-on-save gives the document its speDriveItemId.
+            unsavedDocumentNotice={
+              (state.status === 'loaded' || state.status === 'saving') &&
+              !!state.documentRef &&
+              !state.documentRef.speDriveItemId
+                ? { reviewRan: reviewSummaryFindings.length > 0 }
+                : null
+            }
             // UAT-13 (2026-08-18): when a create-on-save persisted the document but its parent-
             // association write failed, show the honest "saved but not filed under its matter" banner
             // with a Retry that re-runs the host association write (clears on success).

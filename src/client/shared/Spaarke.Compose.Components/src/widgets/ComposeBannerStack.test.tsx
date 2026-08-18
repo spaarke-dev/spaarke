@@ -54,6 +54,29 @@ describe('ComposeBannerStack — UAT-12 annotation-read-failed warning (do not t
   });
 });
 
+describe('ComposeBannerStack — UAT save-driven "not saved yet" notice', () => {
+  it('renders the doc-only notice when no review ran', () => {
+    renderStack({ unsavedDocumentNotice: { reviewRan: false } });
+    expect(screen.getByTestId('compose-workspace-unsaved-notice')).toBeInTheDocument();
+    expect(screen.getByText('Not saved yet')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-unsaved-notice').textContent).toContain(
+      'This document hasn’t been saved yet'
+    );
+  });
+
+  it('mentions the analysis when a review ran', () => {
+    renderStack({ unsavedDocumentNotice: { reviewRan: true } });
+    expect(screen.getByTestId('compose-workspace-unsaved-notice').textContent).toContain(
+      'This document and its analysis haven’t been saved yet'
+    );
+  });
+
+  it('renders nothing when the document is saved (notice null)', () => {
+    renderStack({ unsavedDocumentNotice: null });
+    expect(screen.queryByTestId('compose-workspace-unsaved-notice')).not.toBeInTheDocument();
+  });
+});
+
 describe('ComposeBannerStack — UAT-13 association-orphan warning (saved but not filed)', () => {
   it('renders the honest "not filed under its matter" banner with a Retry action', () => {
     const onRetry = jest.fn();

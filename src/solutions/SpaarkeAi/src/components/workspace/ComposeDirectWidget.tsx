@@ -42,6 +42,7 @@ import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
 import { resolveTenantIdSync } from "@spaarke/auth";
 import { EntityCreationService, cleanGuid } from "@spaarke/ui-components";
 import type { ComposeWidgetData, ComposeWidgetSeed } from "./composeWidgetData";
+import { useReviewedDocumentAnalysis } from "./useReviewedDocumentAnalysis";
 
 // ---------------------------------------------------------------------------
 // FIX #6 (spaarkeai-compose-r2) — bounded height host for the DIRECT mount.
@@ -170,8 +171,11 @@ const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({
   isActiveTab = true,
   initialSessionId,
 }) => {
-  const { bffBaseUrl } = useAiSession();
+  const { bffBaseUrl, authenticatedFetch } = useAiSession();
   const composeLaunch = useComposeLaunch();
+  // UAT (2026-08-18, owner): SAVE-driven Analysis create+bind for a reviewed document (see
+  // useReviewedDocumentAnalysis / ComposeWorkspace.onReviewedDocumentCreated).
+  const createReviewedDocumentAnalysis = useReviewedDocumentAnalysis({ bffBaseUrl, authenticatedFetch });
   // FR-13: forward the Assistant serial-dispatch queue ONLY when the bridge is
   // present AND a host dispatcher is registered — else omit so the inline AI
   // toolbar falls back to its own dispatcher.
@@ -232,6 +236,10 @@ const ComposeDirectMount: React.FC<ComposeDirectMountProps> = ({
     containerId,
     resolveContainer,
     onCreateOnSaveComplete: composeLaunch?.onCreateOnSaveComplete,
+    // UAT (2026-08-18, owner): SAVE-driven Analysis. On the first save of a NEW document that had a
+    // review run on it, create + bind the sprk_analysis for the review session (create-on-save-only;
+    // reopened/subsequent saves are the replace/version path). See useReviewedDocumentAnalysis.
+    onReviewedDocumentCreated: createReviewedDocumentAnalysis,
     initialDocumentRef: composeLaunch?.document ?? null,
     initialUploadRef: composeLaunch?.upload ?? null,
     initialDraftRef: composeLaunch?.draft ?? null,
