@@ -161,7 +161,7 @@ Two additional corrections independently caught by task-gen subagents:
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 084 | ⏸ | Author canonical secret-catalog manifest + generator (r3 Phase 3b) | FULL | opus / xhigh | none (dep 018-020) | 018, 019, 020 |
+| 084 | ✅ | Author canonical secret-catalog manifest + generator (r3 Phase 3b) | FULL | opus / xhigh | none (dep 018-020) | 018, 019, 020 |
 | 085 | ⏸ | Alias collapse for AI Search key with BINDING pre-check protocol (§7.9) | FULL | sonnet / xhigh | none (dep 084) | 084 |
 | 086 | ⏸ | IaC alignment — Bicep secret names + BFF app-setting keys to canonical | FULL | sonnet / high | none (dep 084, 085) | 084, 085 |
 | 087 | ⏸ | Implement `/config.json` runtime endpoint for external-spa + code-pages (parallel-safe:false — external-spa surface overlap) | FULL | sonnet / xhigh | none | 086 |
