@@ -1,7 +1,7 @@
 # Current Task State — Smart To Do R5
 
-> **Last Updated**: 2026-08-17 (checkpoint — UAT round 2 fixes deployed, awaiting re-UAT)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5` @ **`904e216e5`** (pushed; NOT yet on master — held pending re-UAT). Working tree clean (except `.husky/_/*` env artifacts).
+> **Last Updated**: 2026-08-18 (context-handoff — UAT round 4 deployed + on master; fresh session)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5` @ **`3ec9563d0`** = origin/master (all work merged). Working tree clean (except `.husky/_/*` env artifacts).
 
 ---
 
@@ -9,10 +9,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Project CLOSED 2026-08-17 (090 ✅). **Post-close UAT stream**: operator filed **6 items** (2026-08-17). **5 of 6 done + deployed**; #2 = a new scoped project (not built). Awaiting re-UAT. |
-| **Status** | Branch pushed @ `29423eb1e` (UAT commits + master merge). **Deployed to spaarkedev1**: `sprk_smarttodo` (2.0MB) + `sprk_spaarkeai` (5.7MB) + `sprk_createtodowizard` (1.9MB), all published; `sprk_todo` **To Do main form** formxml patched+published (#3). **NOT merged to master yet** — holding until re-UAT. |
-| **Active task** | **UAT round 2 — 5 of 6 shipped (#1,#3,#4,#5,#6); #2 = separate BFF project (needs member-group def).** |
-| **Next Action** | Operator re-UATs #1/#3/#4/#6 (hard-refresh both surfaces + reopen a To Do record for #3). **Only remaining**: #2 — define "member group of the parent" (owning team? access team? participants subgrid?), then I scope it as its own BFF project (BFF=N here, so new project + §10 placement + webhook trigger). |
+| **Phase** | Project CLOSED 2026-08-17 (090 ✅). **Post-close UAT stream** (4 rounds). All UI items done + deployed + on master `3ec9563d0`. Two things OPEN: (a) operator re-UATs round-4 (#3 subtitle hide, #4 smaller modal); (b) the access-control cascade is a NEW project awaiting a go-ahead. |
+| **Status** | Branch = origin/master = **`3ec9563d0`**. **Deployed to spaarkedev1** (all published): `sprk_smarttodo` (2.0MB), `sprk_spaarkeai` (5.7MB), `sprk_createtodowizard` (1.9MB); `sprk_todo` **To Do main form** (formxml + OnLoad form script `sprk_todo_hide_tabnav` v1.3.0). |
+| **Active task** | **Awaiting operator re-UAT of round-4 modal-chrome + a decision on the access-control project.** |
+| **Next Action** | (1) Operator hard-refreshes + reopens a To Do to verify #3 ("To Do" subtitle gone) + #4 (modal = 70%×80% `createForm`). (2) **Access-control cascade** — read [`notes/unified-access-control-cascade.md`](notes/unified-access-control-cascade.md); if operator says go → `/design-to-spec` a new `unified-access-control-cascade-r1` project (BFF feature, reuses ADR-034 resolver + POA GrantAccess). (3) Optional interim: enable ONE parental relationship (matter→todo, owner+team only) — operator's call. |
+
+### 🧪 UAT ROUND 4 (2026-08-18) — modal chrome polish (all done + deployed + on master)
+- **#1 title** = "Smart To Do Item" (uniform) via `navigateTo` title param — DONE (round 3).
+- **#2 hide "To Do" entity-name subtitle** — DONE via **operator-approved UNSUPPORTED DOM hide** in `sprk_todo_hide_tabnav.js` v1.3.0 (scoped to `[aria-modal]`; bounded retry). `setFormEntityName(" ")` was the WRONG lever (prefixes the record TITLE → stray ": " colon; reverted). No supported Client API for the subtitle.
+- **#3 hide "General" tab pivot** — DONE (`setTabNavigatorVisible(false)`, form OnLoad).
+- **#4 modal size** — `fullCover`(100%) → `record`(85%, "not smaller enough") → **`createForm`(70%×80%)**. Added optional `size?: OobModalSize` to `navigateToEntityRecordSurfaceAsync` (default fullCover for other consumers); 3 To Do sites pass `getOobModalSize('createForm')`. **Import gotcha**: use the BARREL `@spaarke/ui-components` (SmartTodo vite can't resolve the deep `utils/adapters/oobModalSizes` subpath). **Test gotcha**: `getOobModalSize` mock must be a `function(){return…}` not an arrow-returning-`({…})` (babel-jest-hoist can't parse the latter). 27 tests green.
+- **Researcher memory** committed: `.claude/agent-memory/researcher/{uci-single-tab-navigator-hide,uci-hide-form-header-entity-name,dataverse-cascade-share-parent-child-access}-2026-08-18.md`.
+
+### 🔑 ACCESS-CONTROL CASCADE (the last open thread — a NEW project)
+Full investigation + proposal: [`notes/unified-access-control-cascade.md`](notes/unified-access-control-cascade.md). Key facts: (a) membership resolution ALREADY exists — ADR-034 `MembershipResolverService` (BFF, generic, metadata-driven, user→records) + `IDataverseAccessGrantService.GrantAccessAsync` (POA share). (b) A parent's "members" = the identities its lookup fields reference (no dedicated member entity); e.g. sprk_event = owner/owning-team + `sprk_assigned*`/regarding contacts+orgs. (c) Config-only = ONE parental relationship = owner+owning-team only, one parent path, incl. future children (lookups grant NO access). (d) The general cascade = a CODE feature (reuse resolver+grant, webhook→BFF trigger + reconciliation for removals; lean owning-team-sync over per-user share to avoid POA bloat). (e) The To Do "Access Permission: Standard" field is `sprk_communication`'s, display-only, unwired. Proposed project: `unified-access-control-cascade-r1` (BFF=N here → its own project + §10 placement).
 
 ### 🧪 UAT ROUND 3 (2026-08-18) — modal chrome (3 items, all done + deployed + on master `8299f851e`)
 Confirmed #3 (tab-nav) worked. Three more modal-header changes:
