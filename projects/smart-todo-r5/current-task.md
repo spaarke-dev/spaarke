@@ -1,7 +1,7 @@
 # Current Task State — Smart To Do R5
 
-> **Last Updated**: 2026-08-17 (deploy pass complete; INBOUND fix in progress)
-> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5`, all deploy-pass work committed+pushed through **`226ee6154`** (46 behind origin/master — not yet synced).
+> **Last Updated**: 2026-08-17 (context-handoff — widget⇄Code Page unification awaiting UAT)
+> **Recovery**: Read "Quick Recovery" first. Branch `work/smart-todo-r5`, all work committed+pushed+on master through **`ce84a0436`**. Working tree clean.
 
 ---
 
@@ -9,10 +9,31 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | ✅ **PROJECT COMPLETE (2026-08-17)** — with operator-accepted deferrals. 090 ✅. |
-| **Status** | All core FRs shipped + merged to master + deployed (spaarkedev1 PCF/ribbon/code-pages + `spaarke-bff-dev` INBOUND). This session: UAT deploys, INBOUND BFF fix (deployed, dry-run gated), 041 Playwright (authored+wired), 060 (Step 1.7 real-DV gate), 090 close (#508 CLOSED, lessons-learned, `/code-review` clean, `/test-diet` 0-scaffolding). |
-| **Active task** | **none — project complete.** |
-| **Follow-ups (operator-accepted deferrals, tracked D-10..D-13 + pre-existing D-1..D-4/D-6)** | **(1)** 051/052 — ribbon on 5 more entities (live deploys, when operator can eyeball); **(2)** 041 — Playwright real-env run if/when Playwright adopted; **(3)** D-13 — review BFF dry-run counts → flip `EnableEventSourcedGeneration` → ping r3 hardening owner (Epic #427); **(4)** file GitHub issues for open defer entries (D-1..D-4/D-6, D-10..D-13) for cross-project visibility. 032 header-hide = won't-do (design constraint). Merge branch→master for the 090 close commits. |
+| **Phase** | Project CLOSED 2026-08-17 (090 ✅). Now in a **post-close enhancement stream**: **SmartTodo widget ⇄ Code Page UNIFICATION** (operator: "a code page and its widget must use shared-lib components"). **Awaiting operator UAT** after the latest deploy. |
+| **Status** | All committed+pushed+on master through **`ce84a0436`** (HEAD on origin/master; master since advanced +27 via other projects — MY work is safely on master). Working tree clean. Both code pages deployed to spaarkedev1: `sprk_spaarkeai` (widget) + `sprk_smarttodo` (Code Page). |
+| **Active task** | **Widget = Code Page unification — awaiting UAT, then fix what it surfaces.** |
+| **Next Action** | Operator UATs the widget in the SpaarkeAi workspace (hard-refresh). Verify: toolbar/cards/search/selection-Open now match the Code Page. **Then**: (a) if "+ New Task" doesn't open the OOB form → fix host `onAddTodo` wiring; (b) if operator wants TRUE 100% → do the **body reconciliation** (unify the two `SmartToDo` bodies — see below). |
+
+### 🔗 UNIFICATION WORK — what's DONE + what REMAINS (this enhancement stream, 2026-08-17)
+**Principle (operator)**: a code page and its corresponding widget MUST compose the same shared-lib components. Root cause was divergence: the Code Page (`src/solutions/SmartTodo/`) and the workspace widget (`SmartTodoWidget` in `@spaarke/smart-todo-components`) reimplemented the same UI.
+
+**✅ DONE + deployed + on master:**
+- **Search predicate** (`6c3564e94`): hoisted `todoSearchUtils` (`matchesTodoSearchQuery`/`buildTodoDueDateSearchBlob`, structural `TodoSearchableFields` type) into the shared lib; both surfaces import it. Widget now matches name/description/regarding/assigned/**date**.
+- **Card data** (`315f4719a`): widget `$select` widened (`sprk_priority` + regarding text) + maps formatted-value annotations (`assignedToName`, `dueDateFormatted`) → the SAME shared `KanbanCard` now shows the **Assigned line + priority flag** in the widget.
+- **Toolbar** (`b0f0ddbdc`): **hoisted `Header` + `SearchFilter`** from the Code Page into the shared lib (`src/components/Header`, `src/components/SearchFilter`; tests at package-root `__tests__/`). Code Page's `SmartTodoApp` + `SmartToDo.tsx` now import `Header`/`QUICK_ADD_TODO_EVENT` from `@spaarke/smart-todo-components`. Widget renders the SAME `<Header>` (Filter · + New Task · overflow Layout/Refresh + inline SearchFilter) — replacing its bespoke quick-add toolbar. Old widget toolbar wrapped in `{false && (…)}` (keeps refs, no dead-code errors). 28/28 Header+SearchFilter tests pass.
+- **Selection Open action** (`ce84a0436`): widget wires `toolbarActions=[Open]` → shared `SelectionAwareToolbar` shows Open when ≥1 selected.
+
+**⚠️ REMAINING GAPS (documented for operator; NOT rushed pre-UAT):**
+1. **Settings (⋮ overflow)**: hidden in the widget (Code Page has it). Requires the widget to adopt threshold-preferences state — body-level.
+2. **Selection cluster**: widget shows Open only; Code Page also has Delete/Email/Pin (widget lacks those handlers).
+3. **Full body swap** (dismissed section, detail pane): **the two `SmartToDo` bodies have DIVERGENT contracts** — Code Page local `src/solutions/SmartTodo/src/components/SmartToDo.tsx` (~1090 lines, **self-fetching**: `webApi`+`userId`) vs shared `src/client/shared/Spaarke.SmartTodo.Components/src/components/SmartToDo/SmartToDo.tsx` (788 lines, **prop-fed**: `items`). A true unify = make BOTH render ONE shared prop-fed `SmartToDo`; large + risky (could destabilize the working Code Page). **This is the last real duplication (D-3-adjacent) — deferred to a dedicated staged pass.**
+4. **"+ New Task"**: widget wires `onNewTask={onAddTodo}` (host callback) — UNVERIFIED whether it opens the OOB form like the Code Page.
+
+**Deploy mechanic (reuse)**: large code-page webresources (`sprk_spaarkeai` ~5.8MB, `sprk_smarttodo` ~2.06MB) via temp-solution roundtrip (create temp sol → AddSolutionComponent type 61 → export → replace WebResources file → repack .NET ZipFile → import --publish-changes → delete temp). Shared lib is source-bundled by consumers (Vite alias → `/src`); rebuild BOTH code pages after any shared-lib change. `SMART_TODO_URL`/env for e2e.
+
+<details><summary>Prior project-close state (090 ✅, deferrals D-10..D-13) — kept for reference</summary>
+Project closed 2026-08-17: all core FRs shipped+merged+deployed (spaarkedev1 PCF/ribbon/code-pages + `spaarke-bff-dev` INBOUND dry-run-gated). #508 CLOSED, lessons-learned, `/code-review` clean, `/test-diet` 0-scaffolding. Operator-accepted deferrals: 051/052 ribbon (5 more entities), 041 Playwright real-env run, D-13 INBOUND flag-flip + ping r3 owner (Epic #427), file GH issues for D-1..D-4/D-6 + D-10..D-13. 032 header-hide = won't-do (design constraint).
+</details>
 
 ### 📄 Task 041 (Playwright NFR suite) — files authored (this session)
 - `tests/e2e/pages/smart-todo/SmartTodoPage.ts` — Code Page page object (does NOT extend BasePCFPage per POML); locators from source (filter `data-testid=search-filter`, "Add to-do item", "More options", toolbar "Smart To Do toolbar", columns `role=list`, cards `role=listitem`); `waitForReady`, `flipOrientationViaLayout`, `selectCard`, `setColorScheme`, `assertNoLayoutGlitch`.
