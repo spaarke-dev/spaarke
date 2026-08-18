@@ -119,7 +119,7 @@ Two additional corrections independently caught by task-gen subagents:
 | 059 | ✅ | Implement I5 concurrency guard (optimistic upsert `sprk_currentrunid`; 409 conflict) | FULL | sonnet / xhigh | none (dep 023, 058) | 023, 058 |
 | 060 | ✅ | Implement I6 crash recovery (startup scan orphaned `Running`/`WaitingOnGate` runs) | FULL | sonnet / xhigh | none (dep 058, 059) | 058, 059 |
 | 061 | ✅ | Implement §4C rollback semantics (4-class taxonomy + `Quarantined` state + clear-quarantine audit-log) | FULL | sonnet / xhigh | none (dep 057, 058) | 057, 058 |
-| 062 | ⏸ | Load test — L2 REST enqueue-and-return-202 + reconciler DAG advancement (test-modifying → unconditional FULL) | FULL | sonnet / high | none (dep 057-061) | 057, 058, 059, 060, 061 |
+| 062 | ✅ | Load test — L2 REST enqueue-and-return-202 + reconciler DAG advancement (test-modifying → unconditional FULL) | FULL | sonnet / high | none (dep 057-061) | 057, 058, 059, 060, 061 |
 
 ### Phase C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep (4 tasks)
 
