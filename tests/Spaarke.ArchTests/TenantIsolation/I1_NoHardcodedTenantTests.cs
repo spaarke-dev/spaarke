@@ -115,8 +115,37 @@ public class I1_NoHardcodedTenantTests
             Directory.Exists(scriptsDir),
             $"scripts/ directory not found at '{scriptsDir}'. The I1 ArchTest cannot run without it.");
 
+        var offenders = ScanForI1Offenders(scriptsDir, ExcludedRelDirs);
+
+        Assert.True(
+            offenders.Count == 0,
+            "§4D I1 violation: PowerShell provisioning script(s) have a hardcoded tenant-shaped GUID " +
+            "default on a Param(). Running such a script without an explicit -TenantId would provision " +
+            "against the wrong tenant — a cross-tenant identity leak (severity HIGH). Remove the default; " +
+            "mark the parameter [Parameter(Mandatory=$true)].\n" +
+            $"Offenders:\n{string.Join("\n", offenders.OrderBy(x => x, StringComparer.Ordinal))}");
+    }
+
+    /// <summary>
+    /// Scans every <c>*.ps1</c> under <paramref name="scanRoot"/> (recursive, skipping
+    /// any file whose repo-relative path starts with a prefix in
+    /// <paramref name="excludedRelPrefixes"/>) and returns a list of offender strings
+    /// in the shape <c>{relPath}:{line} — Param [string]${name} = '{guid}' …</c>.
+    ///
+    /// <para>
+    /// Extracted from <see cref="ProvisioningScripts_HaveNoHardcodedTenantDefault"/>
+    /// (task 066) so the scanner can be exercised against arbitrary scan roots — the
+    /// regression-seed test <see cref="ScanForI1Offenders_TempScriptWithTenantDefault_ReportsFileAndLine"/>
+    /// authors a temporary script under <see cref="Path.GetTempPath"/> and asserts the
+    /// scanner catches it end-to-end (proves the predicate catches what it claims —
+    /// closes the "does the ArchTest actually see a real offender file, or only a
+    /// regex-in-a-string?" negative-control gap task 064 left open).
+    /// </para>
+    /// </summary>
+    private static List<string> ScanForI1Offenders(string scanRoot, string[] excludedRelPrefixes)
+    {
         var offenders = new List<string>();
-        foreach (var file in EnumerateProvisioningScripts(scriptsDir))
+        foreach (var file in EnumerateProvisioningScripts(scanRoot, excludedRelPrefixes))
         {
             var text = File.ReadAllText(file);
             var paramMatches = ParamBlock.Matches(text);
@@ -143,14 +172,7 @@ public class I1_NoHardcodedTenantTests
                 }
             }
         }
-
-        Assert.True(
-            offenders.Count == 0,
-            "§4D I1 violation: PowerShell provisioning script(s) have a hardcoded tenant-shaped GUID " +
-            "default on a Param(). Running such a script without an explicit -TenantId would provision " +
-            "against the wrong tenant — a cross-tenant identity leak (severity HIGH). Remove the default; " +
-            "mark the parameter [Parameter(Mandatory=$true)].\n" +
-            $"Offenders:\n{string.Join("\n", offenders.OrderBy(x => x, StringComparer.Ordinal))}");
+        return offenders;
     }
 
     // -----------------------------------------------------------------------
@@ -201,17 +223,86 @@ public class I1_NoHardcodedTenantTests
             "Regex should NOT flag a non-tenant parameter with a GUID default (out of I1 scope).");
     }
 
+    /// <summary>
+    /// Regression-seed / end-to-end negative control (task 066, POML step 6): authors
+    /// a temporary <c>.ps1</c> file under <see cref="Path.GetTempPath"/> with a
+    /// tenant-shaped GUID default on a <c>[string]$TenantId</c> Param(), runs the
+    /// full scanner against JUST the temp directory, asserts the offender is reported
+    /// with the correct file name AND line number, and deletes the temp file.
+    ///
+    /// <para>
+    /// Why this exists: the two regex-only negative controls above prove the REGEX
+    /// catches the shape in-memory, but they do NOT prove the scanner's end-to-end
+    /// wiring (file enumeration, Param() extraction, line-number arithmetic, offender
+    /// formatting) actually catches a real file. This test closes that gap by feeding
+    /// a real file into <see cref="ScanForI1Offenders"/> — the same code path the main
+    /// test uses — and asserting on the offender string the main test would emit if
+    /// this file lived under <c>scripts/</c>.
+    /// </para>
+    ///
+    /// <para>
+    /// Deliberately placed under <see cref="Path.GetTempPath"/> (not under
+    /// <c>scripts/</c>) so the file is invisible to the main test's scan and cannot
+    /// pollute the real repo tree if the test process is killed mid-run — the temp
+    /// dir carries a unique <see cref="Guid"/> suffix and is deleted in <c>finally</c>.
+    /// </para>
+    /// </summary>
+    [Fact(DisplayName = "FR-28 regression seed: temp .ps1 with tenant-shaped default is detected end-to-end by ScanForI1Offenders (proves the scanner catches a real file, not only an in-memory regex)")]
+    public void ScanForI1Offenders_TempScriptWithTenantDefault_ReportsFileAndLine()
+    {
+        var tempDir = Path.Combine(
+            Path.GetTempPath(),
+            "spaarke-i1-regression-seed-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var scriptPath = Path.Combine(tempDir, "SeedRegression.ps1");
+
+            // File layout (line numbers 1-based, matching what LineNumberFor reports):
+            //   1: # Seed regression control — NOT a real provisioning script.
+            //   2: param(
+            //   3:     [Parameter()][string]$TenantId = 'a221a95e-6abc-4434-aecc-e48338a1b2f2'
+            //   4: )
+            // The tenant-shaped default sits on line 3. This matches the shape the
+            // pre-1834b77bc Register-EntraAppRegistrations.ps1:63 offender had.
+            File.WriteAllText(
+                scriptPath,
+                "# Seed regression control - NOT a real provisioning script.\n" +
+                "param(\n" +
+                "    [Parameter()][string]$TenantId = 'a221a95e-6abc-4434-aecc-e48338a1b2f2'\n" +
+                ")\n");
+
+            var offenders = ScanForI1Offenders(tempDir, Array.Empty<string>());
+
+            Assert.Single(offenders);
+            var offender = offenders[0];
+            Assert.Contains("SeedRegression.ps1", offender);
+            Assert.Contains("$TenantId", offender);
+            Assert.Contains("a221a95e-6abc-4434-aecc-e48338a1b2f2", offender);
+            Assert.Contains(":3 —", offender);
+            Assert.Contains("[Parameter(Mandatory=$true)]", offender);
+            Assert.Contains("1834b77bc", offender);
+        }
+        finally
+        {
+            if (Directory.Exists(tempDir))
+            {
+                Directory.Delete(tempDir, recursive: true);
+            }
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
 
-    private static IEnumerable<string> EnumerateProvisioningScripts(string scriptsDir)
+    private static IEnumerable<string> EnumerateProvisioningScripts(string scriptsDir, string[] excludedRelPrefixes)
     {
         foreach (var file in Directory.EnumerateFiles(scriptsDir, "*.ps1", SearchOption.AllDirectories))
         {
             var rel = RelPath(file).Replace('\\', '/');
             var excluded = false;
-            foreach (var ex in ExcludedRelDirs)
+            foreach (var ex in excludedRelPrefixes)
             {
                 if (rel.StartsWith(ex, StringComparison.OrdinalIgnoreCase))
                 {
