@@ -1475,6 +1475,8 @@ public static class ComposeEndpoints
             DisplayName = body.DisplayName,
             // R4 FR-06 (task 032): the op-log's base version + the ordered op-log the engine applies onto it.
             BaselineVersionId = body.BaselineVersionId,
+            // UAT-25/26 (2026-08-18): the load-time ETag for honest stale-base detection on the save path.
+            BaselineETag = body.BaselineETag,
             OperationLog = body.OperationLog,
             Comments = body.Comments,
             ContentModel = body.ContentModel,
@@ -2473,6 +2475,11 @@ public sealed record SaveComposeDocumentBody(
     /// BASE VERSION. Sent on a dirty-loaded save when the client no longer holds the retained
     /// <see cref="Content"/> bytes so the server re-fetches the load-time version as the patch baseline.</summary>
     [property: JsonPropertyName("baselineVersionId")] string? BaselineVersionId = null,
+    /// <summary>UAT-25/26 (2026-08-18): the LOAD-TIME SPE ETag the client's edits are based on. SaveAsync
+    /// compares the live ETag against the effective baseline (Compose save-stamp, else this) and refuses the
+    /// whole-body ContentModel re-author with a 412 on a mismatch instead of silently overwriting an external
+    /// writer. Optional — an older client that omits it keeps the stamp-only check.</summary>
+    [property: JsonPropertyName("baselineETag")] string? BaselineETag = null,
     /// <summary>R4 FR-06 (task 032, the write-path cutover): the client's ordered, rebased task-003 OPERATION
     /// LOG for a dirty save. <see cref="IComposeService.SaveAsync"/> applies it via the single
     /// <c>ComposeShadowPatchEngine</c> onto the resolved baseline (ID-anchored, no write-path text-search) —

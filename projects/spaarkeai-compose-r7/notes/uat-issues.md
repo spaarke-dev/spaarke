@@ -259,9 +259,19 @@ investigation/research pass to choose the correct write-model before building.
   outside the op-log's closed set; the comment itself rides the separate (now-honest) anchored-comments save path.
   No silent loss to fix. (Optional future enhancement: a proactive banner so the count is visible without opening
   the Review panel — not required for honesty.)
-- 🔧 Do next (the batch): **UAT-24** (tolerant/fuzzy resolver — the SURFACE half is done via UAT-21; the tolerant
-  half leans compose-r8), **UAT-08** (promote + auto-create Analysis — **needs an owner design call** on
-  auto-create; escalate before coding), **UAT-10** (notifications 401 — investigate; likely hub-auth/env, may not
-  be a pure code fix), **UAT-25/26** (concurrency-guard on the ContentModel save path — honest lost-update
-  prevention/warning; MAJOR, server-side).
+- ✅ **UAT-25/26 Fixed** (2026-08-18, owner-approved "honest fix"): the mainstream ContentModel (whole-body
+  re-author) save path skipped the stale-base check (`ComposeService.cs` gated it on `ContentModel is null`) →
+  silent lost-update of a concurrent Word/tab writer. Now: (a) a new load-time `BaselineETag` on the save request
+  (`IComposeService`/`ComposeEndpoints`/client `replaceCommon`) gives the client's "base I edited from" reference —
+  closing the first-save no-stamp gap (UAT-26); (b) the model path detects a moved base (stamp ?? load-time eTag ≠
+  live eTag) and **refuses with 412** (reuses `EtagPreconditionFailedException` → "Document Changed — reload and
+  reapply, nothing overwritten") since a whole-body re-author can't re-anchor; (c) the op-log path keeps its
+  graceful re-anchor, now also using the load-time reference (UAT-26 closed symmetrically); (d) client routes the
+  412 to the honest external-change reload banner (preserves pending edits, never silently discards). No
+  false-positives in the normal flow (first save uses load-time eTag, 2nd+ uses stamp — both match live when no
+  external writer). BFF builds 0 errors; +1 vertical-slice-seam test (`Save_StaleBase_ContentModelPath_Refuses412`)
+  — 5/5 concurrency seam + 191 Compose save tests green.
+- 🔧 Do next: **UAT-10** (notifications 401 — investigated: ENV/CONFIG, see below), **UAT-08** (auto-create
+  Analysis record — investigated: buildable via the existing `/promote` machinery, see below), **UAT-24**
+  (tolerant/fuzzy resolver — SURFACE half done via UAT-21; tolerant half → compose-r8).
 - **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".

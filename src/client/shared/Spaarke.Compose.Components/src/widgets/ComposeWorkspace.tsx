@@ -1825,6 +1825,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             sessionId: state.sessionId,
             documentRecordId: state.documentRef.sprkDocumentId ?? null,
             displayName: state.documentRef.fileName ?? null,
+            // UAT-25/26 (2026-08-18): the load-time SPE ETag this save's edits are based on, for honest
+            // stale-base detection server-side. On the whole-body ContentModel re-author path a stale base
+            // is refused (412 reload-and-reapply) instead of silently overwriting an external writer; on
+            // the op-log path it re-anchors. The server prefers its own save-stamp when this session has
+            // already saved — this covers the first-save-of-a-pre-existing-item gap.
+            baselineETag: state.etag ?? undefined,
           };
           if (bornInEditor) {
             // Shape 1 — in-session born-in-editor re-save: re-author from the content model (no retained
@@ -1894,6 +1900,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 'This document is open in Word — close it there, then Retry. It also releases automatically within a few minutes. Your Compose changes are safe and still pending.',
               isLock: true,
             });
+            return;
+          }
+          // UAT-25/26 (2026-08-18, honest/safe): 412 = the server refused the save because the document
+          // changed since we opened it (an external Word/tab writer landed a new version) — nothing was
+          // overwritten. Route to the honest external-change banner (explicit Reload; the user's pending
+          // edits are preserved, never silently discarded) instead of a dead-end save error. This is the
+          // "reload and reapply" recovery the 412 ProblemDetails describes.
+          if (response.status === 412) {
+            dispatch({ kind: 'externalChangeDetected' });
             return;
           }
           const msg =

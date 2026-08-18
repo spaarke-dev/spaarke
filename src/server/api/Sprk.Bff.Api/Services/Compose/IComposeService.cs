@@ -780,6 +780,21 @@ public sealed record SaveComposeDocumentRequest
     public string? BaselineVersionId { get; init; }
 
     /// <summary>
+    /// UAT-25/26 (2026-08-18, honest/safe concurrency): the LOAD-TIME SPE ETag the client's in-memory
+    /// document is based on (<see cref="LoadComposeDocumentResult.ETag"/>). It is the client's "base I
+    /// edited from" reference for stale-base detection. <see cref="SaveAsync"/> compares the LIVE SPE ETag
+    /// at save time against the effective baseline (the Compose save-version STAMP if this session has
+    /// already saved, else this load-time ETag) — a mismatch means an external writer (Word / another tab)
+    /// landed a new version since the client loaded. On the whole-body <see cref="ContentModel"/> re-author
+    /// path (which CANNOT re-anchor another writer's changes) a mismatch is refused with a 412 (reload +
+    /// reapply — nothing overwritten) rather than SILENTLY overwriting the external change. Providing it on
+    /// the FIRST Compose save of a pre-existing item closes the prior no-stamp-yet concurrency gap (UAT-26).
+    /// Null on a transient create-on-save (no prior base) or an older client that predates this field
+    /// (then only the stamp-based check applies, unchanged).
+    /// </summary>
+    public string? BaselineETag { get; init; }
+
+    /// <summary>
     /// R4 FR-06 (task 032, the write-path cutover — supersedes the retired R3 paragraph-diff decision, Path B /
     /// ADR-049): the ordered, rebased task-003 OPERATION LOG the client captured this dirty session
     /// (<c>(paraId, runIndex, run-local-offset)</c>-anchored insertText/deleteRange/replaceRange/setMark/
