@@ -143,6 +143,24 @@ public class CosmosProvisioningSecretGuardTests
     /// Path A exception; Path C alternative deferred to task 084 as above.
     /// Added by Wave 4 Batch 4A ArchTest debt remediation (2026-08-17).
     /// </para>
+    /// <para>
+    /// <b>CustomerRunGuardOptions</b> (task 059, Wave 4 Batch 4D) — IConfiguration
+    /// binding POCO for the I5 concurrency guard's confidential-client auth to
+    /// the admin Dataverse env (registry table home). Direct parity with the
+    /// <c>SolutionImportOptions</c> / <c>EnvVarValuesOptions</c> precedent
+    /// above. The <c>ClientSecret</c> property is populated by App Service at
+    /// app-setting-binding time from an <c>@Microsoft.KeyVault(SecretUri=…)</c>
+    /// reference. The property's own XML doc explicitly states "cleartext value
+    /// NEVER traverses Cosmos or logs" — the options bag is transient in-process
+    /// state used to construct <c>ClientSecretCredential</c> for token acquisition.
+    /// Path A exception. Path C alternative (options carries a
+    /// <see cref="Models.KeyVaultSecretRef"/> + runtime resolver seam) is
+    /// deferred to a future task after task 084's KV resolver seam is available
+    /// AND the L2 UAMI receives a Dataverse App User on the admin env
+    /// (documented in CustomerRunGuardOptions XML doc "FUTURE MIGRATION"
+    /// section — swap ClientSecretCredential for DefaultAzureCredential). Added
+    /// by Wave 4 Batch 4D wrap-up (2026-08-18).
+    /// </para>
     /// </remarks>
     private static readonly HashSet<string> ExcludedTypeFullNames = new(StringComparer.Ordinal)
     {
@@ -151,6 +169,7 @@ public class CosmosProvisioningSecretGuardTests
         "Sprk.Provisioning.ControlPlane.Handlers.SolutionImport.SolutionImportRequest",
         "Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues.EnvVarValuesOptions",
         "Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues.EnvVarValuesWriteRequest",
+        "Sprk.Provisioning.ControlPlane.Concurrency.CustomerRunGuardOptions",
     };
 
     /// <summary>
