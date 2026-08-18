@@ -319,9 +319,10 @@ Per `notes/resource-discovery-2026-08-16.md`:
 | Metric | Value |
 |---|---|
 | **Total tasks** | 78 |
-| **not-started** 🔲 | 15 |
+| **not-started** 🔲 | 11 |
 | **in-progress** 🟡 | 0 |
-| **completed** ✅ | 63 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19; Wave 4A: 081+084; Wave 4B: 052+057+064+077; Wave 4C: 058+065+066+085) |
+| **completed** ✅ | 67 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19; Wave 4A: 081+084; Wave 4B: 052+057+064+077; Wave 4C: 058+065+066+085; Wave 4D: 059+060+061+086) |
+| **Wave 4 Batch 4D COMPLETE (2026-08-18)** | 4 POML tasks + 3 drift fixes + 1 Path A drift wrap-up landed clean · 059 `3964bba4c` (I5 concurrency guard — 18 new tests, Quarantined reason-code fully wired) · 060 `869b650ab` (I6 crash recovery — 24 new tests, MessageId byte-identity to reconciler) · 061 `22ad121a8` (§4C rollback — Rollback module with 4-class taxonomy + QuarantineClearService) · 086 `fa121e534` (5 Bicep files + platform.json regen, 0 orphans to delete, publish 43.64 MB Δ −1.32 MB) · Drift 1 `ed4cdee42`+`cf6de1d3b` (MI factory TenantId + I5 broadened to Infrastructure/Auth/**) · Drift 2 `55997daf3` (2 prod PS scripts, source only) · Drift 3 `1d204667e` (RecordMatchServiceTests compile fix unblocked BFF verification) · Drift 4 `a70c4bf54` (ArchTest Path A for CustomerRunGuardOptions.ClientSecret) |
 | **Wave 4 Batch 4C COMPLETE (2026-08-17)** | 4 parallel subagents landed clean · 058 commit `1b0297c7b` (state-reconciler BackgroundService — 524/524 L2 tests, N=5 dedup verified) · 066 commit `e54cfb6e5` (verify 1834b77bc + regression seed test) · 085 commits `4ab4fbeda`+`06db97468` (AI Search alias collapse — 2 dev KV aliases deleted, health 200 after each step, soft-delete recovery until 2026-11-16) · 065 commit `f66a6add7` (12 baseline violations fixed + 47-site audit report; all 5 §4D ArchTests PASS 22/22 with neg-controls) |
 | **Wave 4 Batch 4B COMPLETE (2026-08-17)** | 057 `b8dcdfaeb` · 052 `67e8830ba` · 077 `111773ffc` · 064 `40b09f837` |
 | **Wave 4 Batch 4A COMPLETE (2026-08-17)** | ArchTest debt `3b67a7b8d` · 081 `0b8ca53ba` · 084 `70abd9992` |

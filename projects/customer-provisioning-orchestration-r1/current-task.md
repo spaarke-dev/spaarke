@@ -1,8 +1,8 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-17 (Wave 4 Batch 4C COMPLETE — 4 parallel subagents all landed clean; all §4D tenant-isolation ArchTests now GREEN)
+> **Last Updated**: 2026-08-18 (Wave 4 Batch 4D COMPLETE — 6 parallel subagents + 3 drift fixes + 1 Path A wrap-up all landed clean)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` @ `f66a6add7` (draft PR #779 open; last remote push at `1d28c5f81` — 5 new commits unpushed: e54cfb6e5 + 1b0297c7b + 4ab4fbeda + 06db97468 + f66a6add7)
+> **Branch**: `work/customer-provisioning-orchestration-r1` @ `a70c4bf54` (draft PR #779 open; last remote push at `ccd858b7c` — 10 new commits unpushed)
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE)
 
 ---
@@ -11,16 +11,73 @@
 
 | Field | Value |
 |-------|-------|
-| **Project phase** | **Wave 4 Batch 4C COMPLETE (63/78 tasks = 80.8%)** — Batch 4D dispatch pending owner go-ahead |
+| **Project phase** | **Wave 4 Batch 4D COMPLETE (67/78 tasks = 85.9%)** — Batch 4E (final serial wave) dispatch pending owner go-ahead |
 | **Task** | none (batch boundary) |
-| **Status** | batch-boundary — READY for Batch 4D |
-| **Next Action** | Push 5 new commits to origin. Then on owner go-ahead: dispatch **Wave 4 Batch 4D** (4 parallel: 059 I5 concurrency guard sonnet/xhigh · 060 I6 crash recovery sonnet/xhigh · 061 §4C rollback semantics sonnet/xhigh · 086 IaC alignment sonnet/high). |
-| **Blocker** | None active. All §4D ArchTests I1-I5 GREEN. All baseline violations fixed. PR CI should be clean once 4C commits push. |
-| **L2 project state** | **524/524 tests pass** (was 486; +38 reconciler tests) · `dotnet build src/server/services/Sprk.Provisioning.ControlPlane/` 0/0 · TreatWarningsAsErrors=true · CVE clean · Reconciler live in DI (BackgroundService), TimeProvider discipline verified, N=5 concurrent dedup verified |
-| **BFF state** | **10,477/0 BFF tests pass** (baseline preserved from task 077) · 0 warnings · publish size **44.96 MB (Δ 0.00** vs baseline through Batch 4C) · CVE clean |
-| **ArchTest state** | **All 5 §4D TenantIsolation tests PASS + neg-controls (22/22)**. Full ArchTests suite **65/65**. Zero baseline violations. |
-| **KV state (dev)** | AI Search alias collapse complete: 2 aliases deleted (soft-delete recovery until 2026-11-16), canonical `AiSearch--AdminKey` in use. Never-delete guardrails intact (Dataverse-ClientSecret + BFF-API-ClientSecret preserved). |
-| **Master sync** | Feature branch is now 91 commits ahead of master (86 previous + 5 Batch 4C). |
+| **Status** | batch-boundary — READY for final Batch 4E |
+| **Next Action** | Push 10 new commits to origin. Then on owner go-ahead: dispatch **Wave 4 Batch 4E** (SERIAL — 7 tasks: 087 `/config.json` runtime endpoint · 088 CI coord PR to ci-cd-unit-test-remediation-r1 · 062 load test · 055 H13 E2E gate handler · 078 E2E consent-callback verification · 089 E2E Model 1 `trial-{yyyymmdd}` acceptance · 090 wrap-up + /test-diet). Serial because 087 must land config surface before 088 wires CI; E2E tests need all handlers in place; wrap-up is terminal. |
+| **Blocker** | None active. All §4D ArchTests + FR-27 GREEN. L2 + BFF + ArchTest suites all clean. |
+| **L2 project state** | **618/618 tests pass** (was 524; +94 across 059/060/061 handlers) · `dotnet build` 0/0 · TreatWarningsAsErrors=true · CVE clean · State-reconciler live · Crash-recovery live · I5 concurrency guard live · §4C rollback semantics live (4-class taxonomy + QuarantineClearService) |
+| **BFF state** | **10,477/0 BFF tests pass** (preserved through 4D) · 0 warnings · publish size **44.96 MB (Δ 0.00** through Batch 4C; task 086 shrank to **43.64 MB Δ −1.32 MB** in Batch 4D) · CVE clean |
+| **ArchTest state** | **65/65 full suite** (5 §4D I1-I5 + FR-27 + all others) — I5 broadened to `Infrastructure/Auth/**` (drift 1) + Path A extended for `CustomerRunGuardOptions.ClientSecret` (drift 4) |
+| **KV state (dev)** | Alias collapse complete: AI Search aliases + orphan flat keys removed (soft-delete recovery). Never-delete guardrails intact. `AiSearch--AdminKey` canonical in use across Bicep + BFF + prod PS scripts. |
+| **Master sync** | Feature branch is now **101 commits ahead of master** (91 previous + 10 Batch 4D). |
+
+---
+
+## Wave 4 Batch 4D — COMPLETE (2026-08-18)
+
+### Commit map (10 commits total)
+
+| Sub-task | Commit | Summary |
+|---|---|---|
+| **4D/1** Task 059 I5 concurrency | `3964bba4c` | 8 new files. `CustomerRunGuard` w/ optimistic Dataverse upsert on `sprk_currentrunid`. 18 new tests. **Fully wired Quarantined reason-code integration** (better than POML minimum). Created `IQuarantineClearService` stub to unblock 061. 5 Path C deviations. |
+| **4D/2** Task 060 I6 crash recovery | `869b650ab` | 3 new files + 698-line test suite. `CrashRecoveryStartupService` at boot; scans Cosmos for orphaned runs > `max(2× median, 5min floor)`. **MessageId byte-identity to reconciler** — SB level-1 dedup collapses startup-scan + first 5s reconciler tick to ONE msg. 24 new tests, 65 Reconciler-scope pass. Absorbed 059's Program.cs DI (Wave 3 pattern). |
+| **4D/3** Task 061 §4C rollback | `22ad121a8` | 8 new files. `FailureClassifier` + `QuarantineClearService` + `RollbackTransitions` (pure-static §4C table via exhaustive switch). Wired reconciler dispatch + clear-quarantine endpoint. Replaced 059's `IQuarantineClearService` stub with real impl. 4-class taxonomy tests all pass. 6 Path C deviations. |
+| **4D/4** Task 086 IaC alignment | `fa121e534` | 5 Bicep files + platform.json regen. Zero orphans to delete (all already absent — no-op). Publish **43.64 MB (Δ −1.32 MB)** — Bicep-only changes shrank compressed output. Also auto-fixed drift-2's platform.json follow-on. |
+| **4D/5a** Drift 1 (MI factory + I5 broaden) | `ed4cdee42` | Set explicit `TenantId` on `ManagedIdentityCredentialFactory.cs` (was flagged by task 065 §7.2 as outside I5 scope). Broadened I5 ArchTest to scan `Infrastructure/Graph/**` AND `Infrastructure/Auth/**`. 5/5 I5 pass on broadened scope. |
+| **4D/5b** Drift 1 SHA fill | `cf6de1d3b` | doc-only: fill commit SHA in TASK-INDEX + notes. |
+| **4D/6** Drift 2 (prod PS scripts) | `55997daf3` | 2 lines in 2 PS scripts: `ai-search-key` → `AiSearch--AdminKey`. Source-only (no live prod). PSScriptAnalyzer clean. |
+| **4D/7** Drift 3 (RecordMatchServiceTests) | `1d204667e` | Repaired compile break introduced by task 065 (added missing `IConfiguration` ctor arg in 2 test methods). Unblocked BFF unit test verification for downstream work. |
+| **4D/8** Drift 4 (CustomerRunGuardOptions Path A) | `a70c4bf54` | Extended `CosmosProvisioningSecretGuardTests.ExcludedTypeFullNames` for `CustomerRunGuardOptions` (task 059's IOptions ClientSecret — same pattern as SolutionImportOptions + EnvVarValuesOptions precedent). FR-27 restored to 5/5. |
+| **4D/9** Dispatcher wrap-up | (this commit) | TASK-INDEX + current-task.md update. |
+
+### Cross-agent coordination achievements
+
+- **6 parallel subagents dispatched at once** — highest concurrency of the project. Zero destructive resets. Absorbed shared-file writes (Program.cs, RunsEndpoints.cs) via Wave 3 read-late + `git commit --only` pattern.
+- **Coordination behavior**: 060 absorbed 059's Program.cs DI + fixed a case-sensitivity typo in 059's uncommitted file (etagCounter → EtagCounter), left in tree for 059's commit. 061's clear-quarantine handler edits had been partially staged into 059's snapshot; final consolidation into 061 was clean.
+- **059 exceeded POML** by fully wiring Quarantined reason-code integration (POML only required a hook).
+- **061 avoided 57-file churn** by keeping FailureClass in Handlers namespace (per CLAUDE.md §11 minimalism) instead of moving to Rollback/.
+- **086 discovered orphan flat keys were already absent** — dry-run pre-check saved a no-op live-mutation cycle.
+- **Task 059 created + task 061 replaced** the `IQuarantineClearService` stub in-flight — cross-agent stub coordination worked without message-passing.
+
+### Discovered drift resolved during 4D (per fix-at-discovery principle)
+
+- ✅ **ManagedIdentityCredentialFactory gap** — fixed by drift 1
+- ✅ **Prod-side AI Search alias in PS scripts** — fixed by drift 2 (source only; prod deploy is a future gesture)
+- ✅ **RecordMatchServiceTests compile break** — fixed by drift 3 (regression from task 065)
+- ✅ **CustomerRunGuardOptions.ClientSecret ArchTest** — fixed by drift 4 (Path A per SolutionImport precedent)
+
+### Follow-on flag (for Wave 4 wrap-up / task 090)
+
+Pre-existing Bicep errors in `infrastructure/bicep/stacks/model1-shared.bicep` + `model2-full.bicep` (BCP035/037/053) inherited from task 032 refactor. NOT introduced by any Wave 4 task. Task 086 subagent explicitly noted this. Should be a small cleanup task in Batch 4E or a separate follow-up.
+
+---
+
+## Wave 4 Plan — remaining 11 tasks (Batch 4E, serial)
+
+| Task | Focus | Deps |
+|---|---|---|
+| **087** | `/config.json` runtime endpoint | 086 (canonical config surface) |
+| **088** | CI coord PR to `ci-cd-unit-test-remediation-r1` (wire the 5 new ArchTests + config-drift check) | 064-067 + 084-087 |
+| **062** | Load test (reconciler under concurrent runs) | 058-061 |
+| **055** | H13 E2E acceptance-gate handler | all C4 + C6 + C' |
+| **078** | E2E consent-callback verification | 042 + 057 |
+| **089** | E2E Model 1 `trial-{yyyymmdd}` acceptance | ALL |
+| **090** | Wrap-up + `/test-diet` + `README → Complete` + lessons-learned | 089 |
+
+Plus optional pre-4E: small Bicep cleanup task for `stacks/model{1,2}-*.bicep` BCP errors.
+
+**Serial dispatch rationale**: 087 must land config surface before 088 wires CI; E2E acceptance tests need all handlers in place; wrap-up is terminal.
 
 ---
 
