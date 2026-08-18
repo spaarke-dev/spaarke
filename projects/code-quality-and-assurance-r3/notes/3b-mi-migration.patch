@@ -1,5 +1,5 @@
 diff --git a/src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs b/src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs
-index 47c6f8b2d..0d50d40fe 100644
+index 47c6f8b2d..5e8cb266e 100644
 --- a/src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs
 +++ b/src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs
 @@ -10,23 +10,36 @@ using Microsoft.Xrm.Sdk.Query;
@@ -46,7 +46,7 @@ index 47c6f8b2d..0d50d40fe 100644
  
      public DataverseServiceClientImpl(
          IConfiguration configuration,
-@@ -38,47 +51,94 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
+@@ -38,47 +51,99 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
          if (string.IsNullOrEmpty(dataverseUrl))
              throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
  
@@ -81,21 +81,26 @@ index 47c6f8b2d..0d50d40fe 100644
 +                options.ManagedIdentityClientId = miClientId;
 +            var credential = new DefaultAzureCredential(options);
 +            var instanceUri = new Uri(dataverseUrl);
++            // Token scope = the Dataverse ENVIRONMENT ROOT authority (e.g. https://spaarkedev1.crm.dynamics.com/.default).
++            // #3b root cause: the ServiceClient token-provider is invoked with the full SOAP endpoint URL
++            // (".../XRMServices/2011/Organization.svc/web?SDKClientVersion=…") as its resourceUri — that is NOT a valid
++            // AAD resource, and deriving the scope from it returned HTTP 400 (managed_identity_request_failed). Always
++            // request the token for the environment authority, ignoring the path/query the provider is handed.
++            var dataverseScope = instanceUri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/.default";
 +
 +            connectFactory = () =>
 +            {
 +                _logger.LogInformation(
-+                    "Connecting Dataverse ServiceClient via Managed Identity (clientId {ClientId})",
-+                    miClientId ?? "(system-assigned)");
++                    "Connecting Dataverse ServiceClient via Managed Identity (clientId {ClientId}, scope {Scope})",
++                    miClientId ?? "(system-assigned)", dataverseScope);
 +                return new ServiceClient(
 +                    instanceUrl: instanceUri,
-+                    // Synchronous token acquisition (no async-over-sync bridge): credential.GetToken is the
-+                    // blocking API; the credential caches tokens so refreshes are infrequent.
 +                    tokenProviderFunction: (string resourceUri) =>
 +                    {
-+                        var scope = resourceUri.TrimEnd('/') + "/.default";
++                        // Ignore resourceUri (SOAP endpoint URL); request the env-authority scope. Synchronous
++                        // GetToken (no async bridge); the credential caches tokens so refreshes are infrequent.
 +                        var token = credential.GetToken(
-+                            new TokenRequestContext(new[] { scope }), CancellationToken.None);
++                            new TokenRequestContext(new[] { dataverseScope }), CancellationToken.None);
 +                        return Task.FromResult(token.Token);
 +                    },
 +                    useUniqueInstance: true);
@@ -174,7 +179,7 @@ index 47c6f8b2d..0d50d40fe 100644
      }
  
      public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)
-@@ -2900,7 +2960,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
+@@ -2900,7 +2965,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
      {
          if (!_disposed)
          {

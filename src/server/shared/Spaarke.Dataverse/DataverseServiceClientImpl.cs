@@ -72,21 +72,26 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 options.ManagedIdentityClientId = miClientId;
             var credential = new DefaultAzureCredential(options);
             var instanceUri = new Uri(dataverseUrl);
+            // Token scope = the Dataverse ENVIRONMENT ROOT authority (e.g. https://spaarkedev1.crm.dynamics.com/.default).
+            // #3b root cause: the ServiceClient token-provider is invoked with the full SOAP endpoint URL
+            // (".../XRMServices/2011/Organization.svc/web?SDKClientVersion=…") as its resourceUri — that is NOT a valid
+            // AAD resource, and deriving the scope from it returned HTTP 400 (managed_identity_request_failed). Always
+            // request the token for the environment authority, ignoring the path/query the provider is handed.
+            var dataverseScope = instanceUri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/.default";
 
             connectFactory = () =>
             {
                 _logger.LogInformation(
-                    "Connecting Dataverse ServiceClient via Managed Identity (clientId {ClientId})",
-                    miClientId ?? "(system-assigned)");
+                    "Connecting Dataverse ServiceClient via Managed Identity (clientId {ClientId}, scope {Scope})",
+                    miClientId ?? "(system-assigned)", dataverseScope);
                 return new ServiceClient(
                     instanceUrl: instanceUri,
-                    // Synchronous token acquisition (no async-over-sync bridge): credential.GetToken is the
-                    // blocking API; the credential caches tokens so refreshes are infrequent.
                     tokenProviderFunction: (string resourceUri) =>
                     {
-                        var scope = resourceUri.TrimEnd('/') + "/.default";
+                        // Ignore resourceUri (SOAP endpoint URL); request the env-authority scope. Synchronous
+                        // GetToken (no async bridge); the credential caches tokens so refreshes are infrequent.
                         var token = credential.GetToken(
-                            new TokenRequestContext(new[] { scope }), CancellationToken.None);
+                            new TokenRequestContext(new[] { dataverseScope }), CancellationToken.None);
                         return Task.FromResult(token.Token);
                     },
                     useUniqueInstance: true);

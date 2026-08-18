@@ -107,37 +107,51 @@ DataverseConnectionException: Failed to connect to Dataverse
  ---> MSAL MsalServiceException  ErrorCode: managed_identity_request_failed  StatusCode: 400
 ```
 
-**Root cause — ENVIRONMENTAL, not code.** The App Service managed identity returns **HTTP 400
-(`managed_identity_request_failed`)** when requesting a token for the **Dataverse** resource
-(`https://spaarkedev1.crm.dynamics.com`), while it successfully mints **Graph** tokens (the MSAL cache showed
-multiple cached tokens under UAMI partition `5967251e…_managed_identity_AppTokenCache`). The failing request uses
-the **identical scope + UAMI-pinned `DefaultAzureCredential`** as the app's canonical `DataverseHttpServiceBase`
-(scope `{dataverseUrl}/.default`, credential from `ManagedIdentityCredentialFactory`) — so no code change fixes it.
-There is **no proven working MI→Dataverse path anywhere in this App Service** (the "Phase C already migrated
-Services/Ai Dataverse to MI" assumption is unverified/likely never exercised at runtime — that camp injects the
-same credential and would hit the same 400). MI correlation ID for Azure support:
-**`f8b7a8ce-4606-4f38-8ba4-f025c1c3392c`**.
+**Initial (WRONG) hypothesis:** "environmental — the MI can't mint a Dataverse token." That was disproven — see
+the Resolution below. The 400 was a **scope-derivation bug in the ServiceClient token provider**, not an Azure/MI
+issue.
 
-Dev was restored to the ClientSecret build (redeploy of master `08cd5b5b7`); `/healthz` 200 and Dataverse
-`ServiceClient` paths work again (`/api/dataverse/metadata/account` → 200). Secrets untouched.
+Dev was restored to the ClientSecret build while investigating; `/healthz` 200 and Dataverse `ServiceClient` paths
+worked again. Secrets untouched throughout.
 
-### #3b is BLOCKED on an Azure/MI investigation (not code). To unblock:
+---
 
-Determine **why the App Service MI cannot obtain a Dataverse token (HTTP 400)** while Graph works. Candidate lines
-of investigation (operator / Azure support):
-1. **MSI endpoint variant** — is the App Service on the legacy `MSI_ENDPOINT` vs IMDS `IDENTITY_ENDPOINT`? Some
-   legacy App Service MSI endpoints mishandle certain resource strings. Check the resource actually sent
-   (`https://spaarkedev1.crm.dynamics.com` — try with/without trailing slash).
-2. **The 400 response body** — capture it (Azure support with the correlation ID above) for the real reason
-   (invalid_resource / unauthorized_client / identity-not-found).
-3. **UAMI token-request eligibility for the Dataverse resource** in this tenant/region.
-4. Compare against a **known-good MI→Dataverse App Service** elsewhere (if any) for config deltas.
+## ✅ RESOLVED (2026-08-17) — the 400 was a scope bug; MI→Dataverse now works end-to-end
 
-**Once the token 400 is resolved**, the code is ready: apply `3b-mi-migration.patch` (commit `d40f6c24a`) — it is
-the correct startup-safe implementation — deploy, verify the connect log + a Dataverse read, then (separately,
-operator-gated) remove `API_CLIENT_SECRET` / `Dataverse-ClientSecret`.
+**Diagnosis (instrument-and-observe, temporary anonymous probe endpoints, since removed):**
+1. `credential.GetTokenAsync`/`GetToken` for `https://spaarkedev1.crm.dynamics.com/.default` → **`ok:true`, valid
+   token** (both sync AND async). So the UAMI CAN mint a Dataverse token — the "environmental" hypothesis was wrong.
+2. A probe that built a **real `ServiceClient` with a capturing token provider** revealed the culprit: the Dataverse
+   `ServiceClient` invokes the token-provider function with the **full SOAP endpoint URL** as its `resourceUri`:
+   ```
+   https://spaarkedev1.crm.dynamics.com/XRMServices/2011/Organization.svc/web?SDKClientVersion=9.2.49.17970
+   ```
+   The attempt-1/attempt-2 provider derived the scope as `resourceUri.TrimEnd('/') + "/.default"` → a **garbage
+   AAD resource** (path+query included) → the MI endpoint correctly returned **HTTP 400
+   `managed_identity_request_failed`**. Not the MI, not the grant, not sync-vs-async, not Dataverse+MI — a one-line
+   scope bug.
 
-**Bottom line:** the code side of #3b is solved (startup-safe lazy connect + sync token, preserved). The remaining
-blocker is a **live Azure managed-identity configuration issue** (MI can't mint a Dataverse token) that must be
-diagnosed at the platform level before the migration can go live. This is very likely why #3b sat un-done: it's
-not a code task, it's an MI-enablement task for Dataverse in the App Service.
+**Fix (`DataverseServiceClientImpl`):** ignore the `resourceUri` the provider is handed; request the token for the
+Dataverse **environment ROOT authority**:
+```csharp
+var dataverseScope = new Uri(dataverseUrl).GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/.default";
+// → https://spaarkedev1.crm.dynamics.com/.default   (proven to mint a token)
+```
+Kept the startup-safe **lazy connect** (out of `ValidateOnBuild`). `DataverseWebApiService` already derived its
+scope from the authority (`{_apiUrl minus /api/data/v9.2}/.default`), so it had no bug — only the SDK
+ServiceClient provider did (because ONLY it is handed the SOAP URL).
+
+**Proven live on dev (2026-08-17):** deployed the fixed MI build (flag `Graph:ManagedIdentity:Enabled=true`):
+`/healthz` 200; `/api/dataverse/metadata/account` + `/sprk_matter` → **200** (SDK `ServiceClient` → MI);
+`/api/v1/field-mappings/profiles` → **200** (WebApi impl → MI). Both Dataverse camps now authenticate to dev
+Dataverse via the UAMI `mi-bff-api-dev`. Build + full BFF suite 10,427/0/97. Temporary diagnostic endpoints
+removed (verified 404). The updated `3b-mi-migration.patch` is the final working implementation.
+
+**Remaining (operator-gated, separate step):** now that MI attribution is proven live, `API_CLIENT_SECRET` /
+`Dataverse-ClientSecret` MAY be removed from Key Vault — but that is a deliberate, separately-gated action
+(keep the ClientSecret fallback until the operator chooses to remove it). `BFF-API-ClientSecret` stays regardless
+(OBO). Per-env repeat when demo/prod are re-provisioned (register the UAMI as a Dataverse App User there too).
+
+**Lesson:** the "needs Azure investigation" framing was premature — instrumenting the actual token request
+(what resource is really being asked for) found a trivial code bug in minutes. Always capture the real
+`resourceUri`/scope before concluding a managed-identity issue is environmental.
