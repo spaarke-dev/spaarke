@@ -1416,10 +1416,28 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // the scroll must re-anchor when the slot's node changes for the chips to land
   // visible. Hosts memoize the slot node so unrelated re-renders don't retrigger.
   React.useEffect(() => {
+    const container = messageListRef.current;
+    if (!container) return;
+    // spaarkeai-assistant-enhancements-r4 040 UAT (2026-08-18): COLLAPSE the
+    // pin-to-top trailing spacer once real content fills the viewport. The spacer
+    // is sized to the viewport height on send (below) so a short just-sent turn
+    // can reach the top; but it never shrank back, leaving a large dead region
+    // after the transcript footer (Click-path chips + the "Refresh suggestions"
+    // affordance) that clipped the last footer row at the fold in a long
+    // conversation (the handoff's dead-whitespace hypothesis 2). Once the content
+    // EXCLUDING the spacer already exceeds the viewport, the pin-to-top scroll
+    // room is unnecessary — clear it so the footer sits directly beneath the
+    // transcript with no dead space. Short responses (content < viewport) keep
+    // the spacer, preserving the pin-to-top behavior.
+    const spacer = trailingSpacerRef.current;
+    if (spacer && spacer.offsetHeight > 0 &&
+        container.scrollHeight - spacer.offsetHeight >= container.clientHeight) {
+      spacer.style.minHeight = '0px';
+    }
     // P1-4: only re-anchor when the user is pinned to the bottom (Copilot-style).
     // If they've scrolled up to read history, don't fight them.
-    if (messageListRef.current && isPinnedToBottomRef.current) {
-      messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+    if (isPinnedToBottomRef.current) {
+      container.scrollTop = container.scrollHeight;
     }
   }, [messages, streamedContent, transcriptFooterSlot]);
 
