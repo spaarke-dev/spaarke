@@ -209,32 +209,26 @@ resource diagnosticSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-pr
   scope: keyVault
   properties: {
     workspaceId: logAnalyticsWorkspaceId
+    // NOTE (2026-08-18): `retentionPolicy` on diagnosticSettings logs/metrics is
+    // no longer supported for new diagnostic settings — Microsoft moved retention
+    // to be per-Log-Analytics-workspace. Workspace retention is already set via
+    // monitoring.bicep `retentionInDays` param. Do NOT re-add retentionPolicy
+    // here or the deploy will fail with `BadRequest — Diagnostic settings does
+    // not support retention for new diagnostic settings`.
     logs: [
       {
         categoryGroup: 'audit'
         enabled: true
-        retentionPolicy: {
-          enabled: true
-          days: 90
-        }
       }
       {
         categoryGroup: 'allLogs'
         enabled: true
-        retentionPolicy: {
-          enabled: true
-          days: 30
-        }
       }
     ]
     metrics: [
       {
         category: 'AllMetrics'
         enabled: true
-        retentionPolicy: {
-          enabled: true
-          days: 30
-        }
       }
     ]
   }
