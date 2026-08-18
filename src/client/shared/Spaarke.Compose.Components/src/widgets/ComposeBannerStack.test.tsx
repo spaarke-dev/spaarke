@@ -324,6 +324,23 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
     expect(banner.textContent).toContain('Some content was simplified when saving (mystery-degradation ×3).');
   });
 
+  it('renders friendly copy (not the raw code) for previously-cryptic degradation codes (copy-gap 2026-08-18)', () => {
+    renderStack({
+      saveDegradationWarnings: [
+        { code: 'unrepresented-footnote-reference', count: 1 },
+        { code: 'field-flattened-to-text', count: 1 },
+        { code: 'hard-tier-sdt-flattened', count: 1 },
+      ],
+    });
+    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    expect(banner.textContent).toContain("A footnote couldn't be carried into the saved document.");
+    expect(banner.textContent).toContain('was saved as plain text and will no longer update automatically.');
+    expect(banner.textContent).toContain('A content control');
+    // The raw codes must NOT leak into the user-facing copy.
+    expect(banner.textContent).not.toContain('unrepresented-footnote-reference');
+    expect(banner.textContent).not.toContain('field-flattened-to-text');
+  });
+
   it('renders nothing for null or an empty set (a clean save clears the banner)', () => {
     renderStack({ saveDegradationWarnings: null });
     expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument();

@@ -208,6 +208,31 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'edited-paragraph-page-break-dropped': 'A page break inside an edited paragraph was dropped.',
   'edited-paragraph-line-break-dropped': 'A line break inside an edited paragraph was dropped.',
   'edited-table-structure-rebuilt': "An edited table's structure was rebuilt; some table formatting may be simplified.",
+  // Warned-but-cryptic copy gap (2026-08-18, honest/safe): the server EMITS these degradation codes
+  // but they had no friendly copy, so the banner fell through to the raw "…(code ×N)" line. Give each
+  // an honest, plain-language sentence (no false "your content is intact" — several are real content
+  // losses). Sibling of the DEF-002/compose-r8 fidelity work, which actually PRESERVES these; here we
+  // only make the existing WARNING legible.
+  'unrepresented-footnote-reference': "A footnote couldn't be carried into the saved document.",
+  'unrepresented-endnote-reference': "An endnote couldn't be carried into the saved document.",
+  'field-flattened-to-text':
+    'A Word field (such as a cross-reference, date, or page number) was saved as plain text and will no longer update automatically.',
+  'hard-tier-sdt-flattened': 'A content control (form field, dropdown, or date picker) was saved as plain text.',
+  'comment-flattened': "A comment's rich content was simplified when saving.",
+  'comment-anchor-flattened': "A comment's anchored range was simplified when saving.",
+  'strikethrough-flattened': 'Strikethrough formatting was not preserved.',
+  'numbering-unresolved': "An automatic list number couldn't be preserved and may differ.",
+  'numstylelink-unresolved': "A linked list-numbering style couldn't be preserved.",
+  'style-linked-numbering-dropped': 'Style-linked list numbering was simplified.',
+  'heading-direct-numbering-dropped': 'Direct numbering on a heading was simplified.',
+  'picture-bullet-unresolved': 'A picture bullet was replaced with a standard bullet.',
+  'ruby-phonetic-guide-dropped': 'A phonetic (ruby) guide was not preserved.',
+  'empty-table-dropped': 'An empty table was removed.',
+  'template-merge-comment-threading-dropped': 'Comment reply threading from a merged template was simplified.',
+  'template-merge-numbering-unresolved': "List numbering from a merged template couldn't be preserved.",
+  'template-merge-story-reference-dropped':
+    'A header, footer, or note reference from a merged template was not carried over.',
+  'template-merge-unresolved-reference': "A cross-reference from a merged template couldn't be preserved.",
   // UAT-22 (2026-08-18): a session/advisory comment the user sees in the gutter whose anchored text
   // changed so it could NOT be written into the saved document — surfaced (counted) instead of silently
   // dropped. (Distinct from -dropped above, where the comment text is retained.)

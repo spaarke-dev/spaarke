@@ -229,10 +229,17 @@ investigation/research pass to choose the correct write-model before building.
   under its matter" banner with a **Retry** that re-runs the host association write (clears on success). New
   `associationWarning` state/action/reducer + banner + 4 ComposeBannerStack tests (also fixed a stale UAT-07b
   title assertion); 34/34 green.
+- ✅ **Warned-but-cryptic copy gap Fixed** (2026-08-18): added honest plain-language `SAVE_DEGRADATION_COPY`
+  for the ~18 server-emitted codes that previously fell through to the raw "…(code ×N)" line — footnotes/endnotes
+  (`unrepresented-footnote/endnote-reference`), Word fields (`field-flattened-to-text`), content controls
+  (`hard-tier-sdt-flattened`), strikethrough, numbering (`numbering-unresolved`, `numstylelink-unresolved`,
+  `style-linked-numbering-dropped`, `heading-direct-numbering-dropped`, `picture-bullet-unresolved`), comments
+  (`comment-flattened`, `comment-anchor-flattened`), ruby, empty-table, and the 4 `template-merge-*` codes. No
+  false "content intact" reassurance (several are real losses; DEF-002/compose-r8 PRESERVES them — this only makes
+  the WARNING legible). +1 test; 35/35 green.
 - 🔧 Do next (the batch): **UAT-12** (surface dropped tracked-changes/comments on read failure — BFF),
   **UAT-24** (tolerant-but-SURFACED resolver — propose-don't-auto-place; UAT-21 already applied the SURFACE half),
-  the warned-but-cryptic copy gap (friendly copy for footnote/field/content-control/numbering codes), plus the
-  earlier-triaged **UAT-04** (progress indicator), **UAT-08** (promote + auto-create Analysis), **UAT-09**
+  plus the earlier-triaged **UAT-04** (progress indicator), **UAT-08** (promote + auto-create Analysis), **UAT-09**
   (comment anchoring signal), **UAT-10** (notifications 401), **UAT-25/26** (concurrency-guard on the
   ContentModel save path — honest lost-update prevention/warning).
 - **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".
