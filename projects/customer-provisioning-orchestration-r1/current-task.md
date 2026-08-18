@@ -1,9 +1,166 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-18 later (089 scaffolding-half subagent COMPLETE; owner-invocation + 090 wrap-up remaining)
+> **Last Updated**: 2026-08-18 evening (Phase F acceptance sprint session ended with **incomplete E2E**; next session = fresh Fable-model current-state-vs-required-state gap analysis)
 > **Working directory**: `c:\code_files\spaarke-wt-customer-provisioning-orchestration-r1`
-> **Branch**: `work/customer-provisioning-orchestration-r1` @ `5b908591a` (draft PR #779 up-to-date; last remote push at `5b908591a` — **0 unpushed commits**)
+> **Branch**: `work/customer-provisioning-orchestration-r1` — commits landed today: `78a50edf3`, `17063669b`, `5b908591a`, `d39dd926d`, `b70e83504`, `1d9a89a4e` (all pushed). 4 more uncommitted L2-code-fix files in worktree pending handoff commit.
 > **PR**: https://github.com/spaarke-dev/spaarke/pull/779 (DRAFT — DO NOT MERGE)
+
+---
+
+## 🎯 CRITICAL FRAMING FOR NEXT SESSION (READ THIS BEFORE ANY WORK)
+
+**The r1 project's stated goal is E2E customer provisioning (spec FR-18, SC #5, design.md §15 north-star). Today's Phase F acceptance attempt REVEALED THAT THIS GOAL IS NOT MET.** ~75/78 tasks are ✅ by task count but a load-bearing runtime component is missing.
+
+**Owner directive at session close** (verbatim): *"my concern is that we have not fully fleshed out what is required to meet the project objectives, or to introduce suggestions such as extending the bff.api. we need to do a full current-state v required state using Fable-model to determine what is actually required to complete this project"*
+
+**Next session's ONLY job**: fresh, rigorous **current-state vs required-state gap analysis using Fable-model**. Do NOT do reactive fixes. Do NOT suggest architectural changes (like "extend BFF") without grounding them in that analysis. Do NOT invoke the skill or run more provisioning attempts until the required-state has been rigorously mapped.
+
+**What this session got WRONG**:
+- Suggested extending BFF.API to consume the Service Bus queue as a fix for the dispatcher gap. This was reactive — **BFF is the operational customer-facing API, NOT the provisioning executor. Handlers ARE in L2. BFF has no role here.**
+- Framed "wrap-up as acceptance win" when actually r1 didn't deliver the stated E2E goal. The dispatcher gap is the acceptance finding; wrapping without addressing it = accepting the project failed to meet stated objectives.
+- Made 4 real L2 code fixes today but they were fixes to parts that DO exist. The bigger gap is a whole subsystem (wave C5 dispatcher) that was DESIGNED but never BUILT.
+
+---
+
+## Quick Recovery (READ THIS AFTER FRAMING)
+
+| Field | Value |
+|-------|-------|
+| **r1 stated goal** | E2E provisioning: fresh customer stamp reaches `Setup Status = Ready` via new pipeline (spec FR-18 / SC #5 / plan.md Phase F). |
+| **Actual delivered state** | Machinery **up to** the queue works (POST /api/runs → Cosmos persist → SB enqueue). **Nothing consumes the queue.** No handlers execute. No customer environment gets provisioned. |
+| **The load-bearing gap** | **Wave C5 dispatcher is missing.** Per L2 code comment (`Handlers/IProvisioningHandler.cs`): *"In wave C4, no dispatcher exists yet — planned wave C5 [will pull] a HandlerEnvelope off the fleet-scoped Service Bus queue via a BackgroundService drain loop."* Wave C5 was never built. `grep -rn "ServiceBusProcessor\|MessageReceived\|ProcessMessageAsync" src/server/services/Sprk.Provisioning.ControlPlane/ --include=*.cs` returns ZERO .cs matches. |
+| **Additional gap** | Handler CLASSES exist in L2 (`Sprk.Provisioning.ControlPlane/Handlers/*/H*Handler.cs`) but per task 055 comments, trap/invariant verifiers ship as PLACEHOLDERS returning `InfraFault`. Same may apply to some other handler impls — needs per-handler audit. |
+| **Second gap** | `StateReconcilerService` (BackgroundService that polls Cosmos + advances DAG) was authored (task 058) but never registered in `Program.cs`. Only `CrashRecoveryStartupService` gets `AddHostedService`. |
+
+---
+
+## What was actually accomplished this session (in order)
+
+### 1. Wave 4 finalization + push (BEFORE dispatcher-gap discovery)
+
+- Task 075 (`/provision-environment` L3 skill scaffolding) landed 78a50edf3
+- Task 076 (fallback matrix) landed 78a50edf3
+- Task 081.5 (RegistrationDataverseService ctor refactor + 4-config-gap fix on spaarke-bff-dev) landed 17063669b
+- Task 082 (delete `DemoProvisioning__Environments__*` from BFF Azure config) landed 5b908591a
+- 089 harness scaffolding subagent output (POML amendment + verification harness + report skeleton + operator runbook) landed b70e83504
+- Handoff commit d39dd926d
+- Bicep fix + running-notes commit 1d9a89a4e
+
+### 2. L2 deployment sprint (attempted E2E) — MULTI-STEP RECOVERY
+
+- **L2-0**: Created L2 AAD app-reg `spaarke-provisioning-controlplane-dev` (appId `70ba7b19-8969-47e5-a508-efe621dea1a4`); identifier URI `api://spaarke.com/provisioning-controlplane-dev` (tenant policy forced verified domain); app-roles Operator + Reader; SP objectId `583b34f7-6992-4a93-83d1-99296531325c`; Azure CLI SP created + delegated user_impersonation consent granted; Operator role assigned to owner (oid `c74ac1af-ff3b-46fb-83e7-3063616e959c`).
+- **L2-1**: Applied `platform-controlplane.bicep` to new `rg-spaarke-platform-dev`; created 7 resources (UAMI `sprk-controlplane-dev-uami` principalId `38f7693f-e6e2-4a3e-9acf-7f9e29dd4044` clientId `965a4a01-01e1-442b-97a6-6a98308018b3`; App Service Plan PremiumV3 `spaarke-controlplane-dev-plan`; Log Analytics `sprk-controlplane-dev-logs`; Cosmos `cosmos-spaarke-platform-dev`; App Insights `sprk-controlplane-dev-insights`; KV `sprk-controlplane-dev-kv`; App Service `spaarke-provisioning-controlplane-dev` + staging slot). Bicep fix needed: deprecated `retentionPolicy` on `diagnosticSettings` (fix in commit 1d9a89a4e).
+- **L2-1.5**: Seeded L2 KV with SB conn (copied from `spaarke-spekvcert`) + dummy `Dataverse-ClientSecret` (r3 dropped the real secret). Required owner-granted Key Vault Secrets Officer role (role assignment `e11d5f92-0cbd-4913-aca9-c62d7d3d7aa3`).
+- **L2-2**: Published + deployed `Sprk.Provisioning.ControlPlane` (6.57 MB).
+- **L2-3**: 4 config-key naming mismatches between Bicep + L2 code discovered via `LogFiles/StartupLogs/*_failure.log`; fixed with app-setting aliases (`Cosmos__AccountEndpoint`, `Cosmos__DatabaseName`, `Cosmos__ContainerName`, `ServiceBus__FullyQualifiedNamespace`, `ManagedIdentity__ClientId`).
+- **L2-4/5**: `/ping` = 200; role-probe `POST /api/runs` = 400 (not 403) → auth chain complete.
+
+### 3. Skill drift discovery + fixes
+
+- Skill/POML/runbook authored based on spec (`customerId + tenantId + tenancyModel + profile`) — but actual L2 code requires `environmentId` + uses different `profile` enum values (`spaarke-hosted-model2` etc.) + different URLs (`spaarke-provisioning-controlplane-dev` not `spaarke-provisioning-dev`) + different audience (`api://spaarke.com/provisioning-controlplane-dev` per tenant policy).
+- Minimum-viable skill fix applied: URL + audience replaced in `.claude/skills/provision-environment/SKILL.md` (**uncommitted**).
+- Other skill drift NOT yet fixed: profile enum values, environmentId collection, prerequisite `sprk_dataverseenvironment` record creation.
+
+### 4. Live invocation attempt — 4 real L2 code bugs discovered + fixed
+
+Each fix required rebuild + redeploy cycle (~10-15 min each).
+
+1. **Bug #17**: `ServiceBusHandlerEnqueuer` implements `IAsyncDisposable` only, not `IDisposable`. DI container can't dispose in sync scope teardown → 500 on every POST. **Fix committed to working tree** in `src/server/services/Sprk.Provisioning.ControlPlane/Enqueue/ServiceBusHandlerEnqueuer.cs` (added `IDisposable` interface + `Dispose()` bridging to `DisposeAsync()`) — **UNCOMMITTED**.
+2. **Bug #18** (documented; not yet fixed as code): `dataverseClientSecretName` Bicep default `Dataverse-ClientSecret` binds a secret that r3 task 060 dropped. Worked around by seeding a dummy KV value.
+3. **Bug #19**: `ProvisioningRun.Ttl` field serializes as `"ttl": null` on Cosmos write; Cosmos rejects (only accepts positive int or -1). **Fix in worktree** in `Models/ProvisioningRun.cs` — TTL property removed with comment explaining why (container-level TTL applies globally); **UNCOMMITTED**.
+4. **Bug #20**: `ProvisioningRun.RunId` uses `[JsonPropertyName("id")]` (System.Text.Json) but Cosmos SDK uses Newtonsoft.Json serializer by default — STJ attribute ignored on Cosmos write path. **Fix in worktree** in `Models/ProvisioningRun.cs` — added `[Newtonsoft.Json.JsonProperty("id")]` alongside; **UNCOMMITTED**.
+5. **Bug #21**: L2 UAMI missing `Azure Service Bus Data Sender` role on `spaarke-servicebus-dev`. Bicep created L2's own resources but didn't grant RBAC on the existing env-scoped SB namespace. Owner-granted (role assignment `2efad74b-cc0b-4ffc-920e-6b39c161adcd`).
+6. **Bug #22**: Service Bus queue `sprk-provisioning-jobs` doesn't exist. Created via `az servicebus queue create`.
+7. **Bug #23** (documented; not yet fixed as code): `StateReconcilerService` (task 058) never registered in `Program.cs` — only `CrashRecoveryStartupService` gets `AddHostedService`.
+8. **THE BIG ONE — architectural gap**: Wave C5 dispatcher (`ServiceBusProcessor` that drains `sprk-provisioning-jobs` + invokes handlers by HandlerId) **DOES NOT EXIST IN L2**. Was DESIGNED per code comments in `Handlers/IProvisioningHandler.cs` but NEVER BUILT.
+
+**Post-all-fixes state**: `POST /api/runs` returns 202 with a runId; ProvisioningRun document written to Cosmos; H0 envelope enqueued to `sprk-provisioning-jobs` (verified via `az servicebus queue show` — 1 active message). Run polls at `status: NotStarted` indefinitely. Reconciler doesn't advance (not registered). No consumer drains queue (dispatcher missing).
+
+---
+
+## Current live Azure state (NOT in git; all reversible)
+
+### `spaarke-bff-dev` — BFF (from earlier today's work)
+
+Post-task 081.5 + 082:
+- New app settings: `DATAVERSE_URL`, `PublicConfig__BffUrl`, `PublicConfig__MsalClientId`, `PublicConfig__TenantId`, `Onboarding__EnableDevBypass=true` (5 total)
+- Deleted app settings: 9 legacy `DemoProvisioning__Environments__*` + `DemoProvisioning__DefaultEnvironment` keys
+- Live BFF: refactored (no `[Obsolete]` fallback), 44.96 MB, `/healthz` = 200
+- Reversibility: snapshot preserved at `projects/customer-provisioning-orchestration-r1/notes/phase-e-config-snapshot.json`
+
+### `rg-spaarke-platform-dev` — L2 (new today; ~$110-120/mo baseline running)
+
+- `spaarke-provisioning-controlplane-dev` App Service (PremiumV3 plan) — L2 code deployed; `/ping` = 200; `POST /api/runs` accepts + persists but downstream consumer missing
+- `cosmos-spaarke-platform-dev/spaarke-provisioning/runs` — has 1 ProvisioningRun doc (id `65109e91-5968-4300-933e-9e79dea4109c`, customerId `trial-2026-08-18`) sitting at NotStarted
+- `sprk-controlplane-dev-kv` — has `ServiceBus-ConnectionString` (copied from `spaarke-spekvcert`) + dummy `Dataverse-ClientSecret`
+- `sprk-controlplane-dev-uami` — UAMI with KV Secrets User, Cosmos DB Built-in Data Contributor (via Bicep) + Azure Service Bus Data Sender on `spaarke-servicebus-dev` (owner-granted this session)
+- App Insights + Log Analytics collecting L2 traces
+- **Teardown command** (if project cancelled): `az group delete --resource-group rg-spaarke-platform-dev --yes --no-wait` (removes ~$110/mo). Also `az ad app delete --id 70ba7b19-8969-47e5-a508-efe621dea1a4` for the app-reg.
+
+### `spaarke-servicebus-dev` (in `SharePointEmbedded` RG)
+
+- New queue `sprk-provisioning-jobs` created (1 active message from today's test run, will grow if any more POSTs happen)
+- New role assignment: L2 UAMI granted `Azure Service Bus Data Sender` (role assignment `2efad74b-cc0b-4ffc-920e-6b39c161adcd`)
+- To reverse: `az servicebus queue delete --namespace-name spaarke-servicebus-dev --name sprk-provisioning-jobs --resource-group SharePointEmbedded`; delete the role assignment.
+
+### `spaarkedev1.crm.dynamics.com` — Admin Dataverse
+
+- New `sprk_dataverseenvironment` record: id `87d7b4a7-399b-f111-b8de-7ced8ddc4a05`, sprk_name `trial-2026-08-18`
+- To reverse: delete that record via `pac data` or Web API DELETE.
+
+---
+
+## What's UNCOMMITTED in the worktree (will be committed by handoff)
+
+1. `.claude/skills/provision-environment/SKILL.md` — URL/audience minimum-viable fix
+2. `src/server/services/Sprk.Provisioning.ControlPlane/Enqueue/ServiceBusHandlerEnqueuer.cs` — added `IDisposable` (bug #17 fix)
+3. `src/server/services/Sprk.Provisioning.ControlPlane/Models/ProvisioningRun.cs` — TTL removed + Newtonsoft `[JsonProperty("id")]` added (bugs #19, #20 fixes)
+4. `projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-08-18.md` — running-log entries from today
+
+---
+
+## Key evidence files for next session's analysis
+
+| File | Purpose |
+|---|---|
+| `projects/customer-provisioning-orchestration-r1/notes/phase-f-e2e-acceptance-2026-08-18.md` | Full running log of today's Phase F attempt — every gap discovered, every fix, every decision |
+| `projects/customer-provisioning-orchestration-r1/notes/task-081.5-rollback.md` | Earlier today's BFF story (Wave 4 config-gap fix + StartupLogs diagnostic pattern) |
+| `projects/customer-provisioning-orchestration-r1/spec.md` | Authoritative spec — FR-18, SC #5, §4.2 handler execution model, §15 north-star |
+| `projects/customer-provisioning-orchestration-r1/design.md` v3.3 | Design decisions D1-D20, handler catalog H0-H14, §4B trap catalog, §4C rollback, §4D tenant isolation |
+| `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` | Task status — ~75/78 ✅ but the delta between "task done" and "goal met" IS the analysis |
+| `src/server/services/Sprk.Provisioning.ControlPlane/Handlers/IProvisioningHandler.cs` | **CRITICAL** — comment header enumerates the wave-C5-dispatcher gap in the author's own words: "no dispatcher exists yet — planned wave C5..." |
+| `src/server/services/Sprk.Provisioning.ControlPlane/Program.cs` | L2 composition root — check which services actually get `AddHostedService` (StateReconciler is NOT one; only CrashRecoveryStartupService) |
+| `src/server/services/Sprk.Provisioning.ControlPlane/Handlers/*/H*Handler.cs` | 15+ handler classes — each needs audit: real impl vs placeholder returning InfraFault |
+| `src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.cs` | The BackgroundService that polls Cosmos + advances DAG — authored + tested but NOT REGISTERED in Program.cs |
+
+---
+
+## Next session — Fable-model gap analysis brief
+
+**Prompt to fresh session** (approximate — refine as needed):
+> Do a rigorous current-state vs required-state gap analysis for the r1 project's stated goal: "fresh customer environment provisioned end-to-end via the new pipeline, reaching sprk_dataverseenvironment.sprk_setupstatus = Ready" (spec FR-18 / SC #5). Do NOT propose fixes yet. Do NOT assume any architectural direction (like "extend BFF" — that was a reactive mistake last session). Just map: (a) what the required state looks like — every runtime component needed for E2E provisioning; (b) what actually exists in code today (grep-verified, not just "task marked ✅"); (c) the gap between them — every missing piece; (d) the delta of what would ACTUALLY need to be built/wired/tested. Use spec.md + design.md as authoritative for required state. Use the L2 code (`src/server/services/Sprk.Provisioning.ControlPlane/`) as authoritative for actual state. Use `notes/phase-f-e2e-acceptance-2026-08-18.md` as evidence of the gaps discovered in today's live invocation attempt. Produce a gap catalog + then let the owner decide direction (build the missing pieces, re-scope, or defer).
+
+**Non-negotiable guardrails for the analysis**:
+- Do NOT re-run the invocation. Analyze from artifacts.
+- Do NOT propose "extend BFF" or any similar reactive fix without grounding in the required-state map.
+- Do NOT invoke the `/provision-environment` skill.
+- Do NOT tear down L2 (owner may want state preserved for analysis).
+- DO grep the L2 code for every runtime concern (SB consumer, handler dispatcher, state advancement, handler impl real-vs-placeholder).
+- DO cross-reference each handler class against its POML task to verify what was scoped vs delivered.
+
+---
+
+## Remaining work (post-Fable analysis, TBD by owner)
+
+- Complete r1's stated E2E goal (dispatcher + placeholder→real handlers + reconciler wiring + tests)
+- OR formally re-scope r1 as "control-plane machinery" (accepting E2E is r2 or later)
+- OR defer + start fresh project for the dispatcher work
+- Task 090 wrap-up follows from that decision
+- L2 infrastructure teardown decision (~$110/mo running)
+
+---
+
+## Original context (retained for continuity — pre-Phase-F sections below)
 
 ---
 

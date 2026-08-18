@@ -34,10 +34,10 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 
 | Item | Value |
 |------|-------|
-| L2 API base (dev) | `https://spaarke-provisioning-dev.azurewebsites.net` |
-| L2 API base (prod) | `https://spaarke-provisioning-prod.azurewebsites.net` |
+| L2 API base (dev) | `https://spaarke-provisioning-controlplane-dev.azurewebsites.net` |
+| L2 API base (prod) | `https://spaarke-provisioning-controlplane-prod.azurewebsites.net` |
 | L2 REST surface | `POST /api/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/resume`, `POST /api/runs/{id}/clear-quarantine` |
-| L2 audience (token) | `api://spaarke-provisioning-controlplane-{env}` |
+| L2 audience (token) | `api://spaarke.com/provisioning-controlplane-{env}` |
 | Operator role required | `Operator` app-role (mutating) OR `Reader` (poll-only) |
 | Handler catalog | 15 handlers: H0 preflight → H0.5 consent-callback → H1..H14 provisioning steps (see [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14) |
 | Trap catalog | 6 traps T1-T6 (see design §4B) — each handler asserts its trap clear before reporting success |
@@ -53,7 +53,7 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 ### MUST:
 - **MUST** run all Step 0 prerequisite checks BEFORE any intake or preflight; any failure is a hard stop
 - **MUST** authenticate as the **operator's own AAD identity** (`az login`) — NEVER a service principal (NFR-11 auditable operator action)
-- **MUST** call L2 REST API with `Authorization: Bearer <token>` where token is acquired via `az account get-access-token --resource api://spaarke-provisioning-controlplane-{env}`
+- **MUST** call L2 REST API with `Authorization: Bearer <token>` where token is acquired via `az account get-access-token --resource api://spaarke.com/provisioning-controlplane-{env}`
 - **MUST** enqueue via L2 (`POST /api/runs`) and poll (`GET /api/runs/{id}`) — NEVER invoke handlers directly or reach into BFF Service Bus
 - **MUST** require an **explicit "proceed" phrase** at the Step 3 confirmation gate — a bare "y" or "yes" is INSUFFICIENT
 - **MUST** surface manual gates with actionable instructions (URL to click, `az` command to run, etc.) — never fake progress past a gate
@@ -109,12 +109,12 @@ Assertions:
 # Acquire token — env is one of {dev, prod}
 $env = "dev"  # or prod (from intake or arg)
 $token = az account get-access-token `
-  --resource "api://spaarke-provisioning-controlplane-$env" `
+  --resource "api://spaarke.com/provisioning-controlplane-$env" `
   --query accessToken -o tsv
 
 # Health check L2 (unauth endpoint)
-$l2Base = if ($env -eq "prod") { "https://spaarke-provisioning-prod.azurewebsites.net" } `
-          else { "https://spaarke-provisioning-dev.azurewebsites.net" }
+$l2Base = if ($env -eq "prod") { "https://spaarke-provisioning-controlplane-prod.azurewebsites.net" } `
+          else { "https://spaarke-provisioning-controlplane-dev.azurewebsites.net" }
 curl -sf "$l2Base/healthz"  # expect 200
 
 # Role probe — call a known Operator-only endpoint with a well-formed but obviously-invalid payload; expect 400 (validation error) NOT 403 (forbidden)
@@ -159,7 +159,7 @@ PRE-FLIGHT CHECKS
   [PASS] pac 1.36.3
   [PASS] git 2.42.0
   [PASS] AAD identity: ralph.schroeder@spaarke.com (tenant: a221a95e-...)
-  [PASS] L2 API reachable (dev): https://spaarke-provisioning-dev.azurewebsites.net
+  [PASS] L2 API reachable (dev): https://spaarke-provisioning-controlplane-dev.azurewebsites.net
   [PASS] Operator role granted
   [PASS] Dataverse MCP connected
   [PASS] Working directory: c:/code_files/spaarke-wt-customer-provisioning-orchestration-r1
@@ -208,7 +208,7 @@ INTAKE SUMMARY
   tenantId:      12345678-...-...-...  (customer tenant)
   tenancyModel:  Model1Shared
   profile:       dev
-  L2 API:        https://spaarke-provisioning-dev.azurewebsites.net
+  L2 API:        https://spaarke-provisioning-controlplane-dev.azurewebsites.net
 
 Proceed to preflight (H0)? (yes/no)
 ```
@@ -642,7 +642,7 @@ IF Invoke-RestMethod against $l2Base returns HTTP 401:
 
   2. Refresh via:
        $token = az account get-access-token `
-         --resource "api://spaarke-provisioning-controlplane-$env" `
+         --resource "api://spaarke.com/provisioning-controlplane-$env" `
          --query accessToken -o tsv
 
      `az` uses cached refresh tokens; this is silent + fast (<2s) if the
@@ -758,7 +758,7 @@ IF L2 call returns 5xx OR times out:
 | 2 | Invoke PowerShell scripts | `PowerShell` tool | `Bash` + `pwsh -File` |
 | 3 | Invoke bash tooling | `Bash` tool | — |
 | 4 | Call L2 REST API | `WebFetch` (bearer from #5) OR `Bash` + `curl` + `az account get-access-token` | `PowerShell` + `Invoke-RestMethod` |
-| 5 | AAD bearer for L2 | `az account get-access-token --resource api://spaarke-provisioning-controlplane-{env}` | Interactive `az login` first |
+| 5 | AAD bearer for L2 | `az account get-access-token --resource api://spaarke.com/provisioning-controlplane-{env}` | Interactive `az login` first |
 | 6 | Read Dataverse | `mcp__dataverse__read_query`, `mcp__dataverse__search` | `pac data` OR raw Web API |
 | 7 | Write Dataverse | `mcp__dataverse__update_record` | `pac data` OR raw Web API PATCH |
 | 8 | Read Azure resource state | `Bash` + `az resource show / az keyvault / az webapp` | Azure MCP if configured |
@@ -776,7 +776,7 @@ IF L2 call returns 5xx OR times out:
 
 **Identity**: operator's own AAD (`az login`) per NFR-11. NEVER a service principal.
 
-**Role**: `Operator` app-role on the control-plane app-reg `api://spaarke-provisioning-controlplane-{env}`. Assigned via:
+**Role**: `Operator` app-role on the control-plane app-reg `api://spaarke.com/provisioning-controlplane-{env}`. Assigned via:
 
 ```
 az ad app show --id api://spaarke-provisioning-controlplane-dev --query "id"
@@ -789,7 +789,7 @@ az rest --method POST --uri "https://graph.microsoft.com/v1.0/servicePrincipals/
 
 ```powershell
 $token = az account get-access-token `
-  --resource "api://spaarke-provisioning-controlplane-{env}" `
+  --resource "api://spaarke.com/provisioning-controlplane-{env}" `
   --query accessToken -o tsv
 ```
 
@@ -824,8 +824,8 @@ Dry-run is intended for pre-flight validation before a real customer deployment 
 
 | Issue | Cause | Resolution |
 |---|---|---|
-| Step 0c returns 403 on role probe | Operator not granted `Operator` app-role on `api://spaarke-provisioning-controlplane-{env}` | Ask a control-plane admin to run the `az rest` app-role assignment (see Auth Flow) |
-| Step 0c token acquisition fails: `AADSTS500011` | Resource URI wrong OR app-reg not exposed in operator's tenant | Verify `az ad app show --id api://spaarke-provisioning-controlplane-{env}` returns a value; if not, wrong env |
+| Step 0c returns 403 on role probe | Operator not granted `Operator` app-role on `api://spaarke.com/provisioning-controlplane-{env}` | Ask a control-plane admin to run the `az rest` app-role assignment (see Auth Flow) |
+| Step 0c token acquisition fails: `AADSTS500011` | Resource URI wrong OR app-reg not exposed in operator's tenant | Verify `az ad app show --id api://spaarke.com/provisioning-controlplane-{env}` returns a value; if not, wrong env |
 | Step 1 customerId probe returns 500 | L2 read-side broken; database issue | Check L2 App Insights + escalate to on-call — do NOT bypass |
 | Step 2 H0 times out (>60s) | Azure quota query hung OR L2 stuck | Check L2 logs; may need to abort + retry; occasional Azure quota API slowness |
 | Step 4 poll returns 401 mid-run | Token expired | Auto-refresh via `az account get-access-token` (see Fallback Matrix); retry the poll |

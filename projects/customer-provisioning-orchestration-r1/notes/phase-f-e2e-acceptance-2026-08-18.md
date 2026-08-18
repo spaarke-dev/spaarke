@@ -47,6 +47,51 @@ _Latest at bottom._
 az role assignment create --role "Key Vault Secrets Officer" --assignee c74ac1af-ff3b-46fb-83e7-3063616e959c --scope /subscriptions/484bc857-3802-427f-9ea5-ca47b43db0f0/resourceGroups/rg-spaarke-platform-dev/providers/Microsoft.KeyVault/vaults/sprk-controlplane-dev-kv
 ```
 When the grant lands, main-session verifies via `az keyvault secret list` and resumes L2-1.5 → L2-2 → L2-3 → L2-5/6/7.
+- `2026-08-18 [owner RBAC granted]` Owner ran the Secrets Officer grant successfully. Role assignment ID `e11d5f92-0cbd-4913-aca9-c62d7d3d7aa3`. RBAC propagated in ~45s.
+- `2026-08-18 [L2-1.5 DONE]` KV seeded with `ServiceBus-ConnectionString` (copied from `spaarke-spekvcert`) + dummy `Dataverse-ClientSecret` (r3 dropped the actual; Bicep default still binds it).
+- `2026-08-18 [L2-2 DONE]` `Sprk.Provisioning.ControlPlane` published (6.57 MB) + deployed via `az webapp deploy --type zip`. Deploy exit 0.
+- `2026-08-18 [L2-3 CONFIG-GAP-DISCOVERY]` `/healthz` = 503; `/ping` = 503. Applied StartupLogs pattern → fetched `LogFiles/StartupLogs/2026_08_18_ln1sdlwk002MUF_failure.log` → root: `System.InvalidOperationException: Configuration 'Cosmos:AccountEndpoint' is not set`. Investigation of L2 code (`Modules/CosmosModule.cs`, `Modules/ServiceBusModule.cs`) surfaced 4 config-key naming mismatches:
+    | Bicep set | L2 code expects | Fix |
+    |---|---|---|
+    | `Cosmos__Endpoint` | `Cosmos:AccountEndpoint` | Added alias `Cosmos__AccountEndpoint` |
+    | `Cosmos__Database` | `Cosmos:DatabaseName` (has default) | Added alias defensively |
+    | `Cosmos__RunsContainer` | `Cosmos:ContainerName` (has default) | Added alias defensively |
+    | `ServiceBus__ConnectionString` (SAS) | `ServiceBus:FullyQualifiedNamespace` (MI) | Added `ServiceBus__FullyQualifiedNamespace=spaarke-servicebus-dev.servicebus.windows.net` |
+    | `AZURE_CLIENT_ID` | `ManagedIdentity:ClientId` (alias) | Added alias for completeness |
+- `2026-08-18 [L2-3 DONE]` App-setting aliases applied → `az webapp restart` → `/ping` = 200 on attempt 2.
+- `2026-08-18 [L2-4/5 DONE]` Auth role-probe: `POST /api/runs` with Bearer token → HTTP 400 + ProblemDetails `"environmentId is required."` → **AUTH CHAIN COMPLETE**. Token audience valid, Operator role check passes (400 not 403), endpoint routes, validation runs. L2 REST fully operational.
+- `2026-08-18 [DRIFT DISCOVERED — L2 REST vs skill/POML/runbook]` L2 code's actual `CreateRunRequest` shape (from `Api/RunsEndpoints.cs:861-880`) differs materially from what the `/provision-environment` skill + operator runbook + task 089 POML I authored expect:
+    | Field | Skill authored | L2 code expects |
+    |---|---|---|
+    | `environmentId` | Not mentioned | REQUIRED — `sprk_dataverseenvironment` Dataverse record GUID |
+    | `profile` values | `trial`, `dev`, `prod` | `spaarke-hosted-model1-trial` / `spaarke-hosted-model2` / `customer-owned-model2` |
+    | `tenantId` | Top-level required | Not in request body — belongs in `nonSecretParameters` if needed |
+    | Base URL | `spaarke-provisioning-{env}.azurewebsites.net` | `spaarke-provisioning-controlplane-{env}.azurewebsites.net` |
+    | Audience | `api://spaarke-provisioning-controlplane-{env}` | `api://spaarke.com/provisioning-controlplane-{env}` (tenant policy required verified domain) |
+  Also NEW PREREQUISITE not in skill: placeholder `sprk_dataverseenvironment` Dataverse record MUST be created BEFORE calling `POST /api/runs` (that record's GUID = the `environmentId` param).
+- `2026-08-18 [commit 1d9a89a4e]` Committed the Bicep retentionPolicy fix + running notes to preserve state.
+- `2026-08-18 [owner-decision — Model 2 profile]` Owner clarified: `spaarke-hosted-model2` is a first-class profile — Spaarke hosts a customer's Model 2 dedicated stamp in Spaarke's own tenant. No cross-tenant admin-consent needed. Not an exception; a spec-supported pattern.
+- `2026-08-18 [owner-directive — no shortcuts]` Owner directive: "go through every step fully and completely, and document the issues, refinements, etc. Do not take any shortcuts otherwise we do not have an accurate assessment of the process--follow all steps."
+- `2026-08-18 [pivot — fix-then-invoke]` Rather than bypass the skill via direct L2 REST invocation, main-session will: (a) fix the skill/runbook/report drift discovered above, (b) create placeholder `sprk_dataverseenvironment` record, (c) invoke `/provision-environment` per its authored flow, (d) document every step + issue + refinement. This is a design-refinement exercise: pipeline validation via real experience, not spec compliance. Any additional drift discovered during invocation gets iteratively fixed + documented.
+- `2026-08-18 [skill fix STARTED]` Beginning systematic update of `.claude/skills/provision-environment/SKILL.md` + operator runbook + POML to reflect actual L2 code.
+- `2026-08-18 [skill fix — minimum-viable URL + audience]` Batch-replaced in SKILL.md: `spaarke-provisioning-dev.azurewebsites.net` → `spaarke-provisioning-controlplane-dev.azurewebsites.net`; `spaarke-provisioning-prod.azurewebsites.net` → `spaarke-provisioning-controlplane-prod.azurewebsites.net`; `api://spaarke-provisioning-controlplane-{env}` → `api://spaarke.com/provisioning-controlplane-{env}` (both `{env}` and `$env` variants).
+- `2026-08-18 [approach revised]` Rather than pre-emptively fixing all skill drift (I'm guessing at what will break), main-session will EXECUTE the skill's steps AS AUTHORED, hit each drift live, document + iterate. Minimum-viable URL/audience fix was needed just so Step 0/1 mechanics can execute.
+
+---
+
+## LIVE INVOCATION LOG — /provision-environment execution 2026-08-18
+
+Per owner directive: walk every step of the skill fully. Any drift/issue is captured here + skill updated iteratively.
+
+### Step 0 Prerequisites (COMPLETE per earlier L2-0-through-L2-5 work)
+
+Skill's Step 0 was effectively pre-validated during L2 sprint. Recap:
+- ✅ pwsh 7.6.3, az-cli 2.77.0, pac 1.36.3, git 2.51.0 — meet minimums
+- ✅ AAD identity: `ralph.schroeder@spaarke.com` (real UPN); tenant `a221a95e-6abc-4434-aecc-e48338a1b2f2` (Spaarke)
+- ✅ L2 API reachable: `https://spaarke-provisioning-controlplane-dev.azurewebsites.net/ping` = 200
+- ✅ Token acquisition: `az account get-access-token --resource api://spaarke.com/provisioning-controlplane-dev` returns 1855-char token with `aud=api://spaarke.com/provisioning-controlplane-dev`, `roles=['Operator']`, `upn=ralph.schroeder@spaarke.com`
+- ⚠️  Dataverse MCP status: not verified (skill treats as optional; will surface if needed at Step 6)
+- ✅ Working directory: `c:/code_files/spaarke-wt-customer-provisioning-orchestration-r1` (git repo root)
 
 ---
 
@@ -225,3 +270,33 @@ result + confirmation that §4.1a differences (H0/H2a/H2b/H4/H7/H10/H12c/H13 beh
 - [ ] Update `sprk_dataverseenvironment.sprk_setupstatus` to reflect decommissioned state if the schema supports it
 - [ ] Note final actual cost incurred for this acceptance run (for portfolio cost tracking)
 - [ ] If left standing for reference (not torn down): note the retention decision + expected teardown date here: `{date or "indefinite — reference stamp"}`
+
+---
+
+## SESSION CLOSE ENTRY — Phase F acceptance did NOT reach E2E (2026-08-18 evening)
+
+**Session outcome**: Phase F acceptance attempted; INTAKE + PERSISTENCE + ENQUEUE layer proven; **handler execution never happened; no customer environment provisioned**.
+
+**Total gap count discovered**: 23 distinct issues, of which:
+- 4 real L2 code bugs fixed in-session (bugs #17, #19, #20 committed to worktree; #23 documented only)
+- 3 RBAC gaps worked around (owner grants + one Azure CLI SP registration)
+- 4 config-key naming mismatches between Bicep + L2 code worked around via app-setting aliases
+- 5 skill/POML/runbook drift issues (URLs, audience, environmentId, profile enum, missing prereq step)
+- **1 ARCHITECTURAL GAP** — wave-C5 dispatcher (SB consumer + handler routing) DESIGNED but NEVER BUILT
+- Additional handler-implementation gap (task 055 shipped verifiers as placeholders returning InfraFault; may apply to other H0-H14 impls — needs audit)
+- + smaller items (tenant-policy identifier URI shape; deprecated Bicep retentionPolicy)
+
+**Bottom line**: r1 has ~75/78 tasks ✅ by count but the stated project goal (E2E customer provisioning per spec FR-18 / SC #5) is NOT met. Wave-C5 was designed in the L2 code comments but never turned into a POML task or code implementation. Handler execution layer needs completion (audit + fix placeholders where present). ~2-3 days of dedicated work minimum to close the goal-vs-delivery gap.
+
+**Owner directive to next session**: fresh Fable-model current-state vs required-state analysis. No more reactive fixes. Rigorous mapping first, then decisions on direction.
+
+**Handoff artifact**: `projects/customer-provisioning-orchestration-r1/current-task.md` (updated 2026-08-18 evening) is the primary recovery target with the full picture.
+
+**Live Azure state at session close**:
+- BFF (`spaarke-bff-dev`) — healthy; refactored code + 5 new app settings live from earlier today
+- L2 (`spaarke-provisioning-controlplane-dev`) — healthy; running with all in-session fixes DEPLOYED (but code fixes not yet COMMITTED). Cosmos has 1 ProvisioningRun doc at NotStarted. SB queue has 1 unclaimed message.
+- Cost: ~$110-120/mo for L2 baseline; teardown command in current-task.md if owner decides to save cost during analysis.
+
+---
+
+*Session ended with owner-preferred pause for analytical reset. Fable-model gap analysis next.*

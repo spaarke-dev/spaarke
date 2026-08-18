@@ -73,7 +73,7 @@ namespace Sprk.Provisioning.ControlPlane.Enqueue;
 /// for out-of-body routing) without compile-depending on the BFF assembly per
 /// the L2 project MUST rule.
 /// </summary>
-public sealed class ServiceBusHandlerEnqueuer : IHandlerEnqueuer, IAsyncDisposable
+public sealed class ServiceBusHandlerEnqueuer : IHandlerEnqueuer, IAsyncDisposable, IDisposable
 {
     private readonly ServiceBusSender _sender;
     private readonly ILogger<ServiceBusHandlerEnqueuer> _logger;
@@ -226,5 +226,25 @@ public sealed class ServiceBusHandlerEnqueuer : IHandlerEnqueuer, IAsyncDisposab
     public async ValueTask DisposeAsync()
     {
         await _sender.DisposeAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Sync <see cref="IDisposable"/> hook — the ASP.NET Core DI container falls
+    /// back to sync <see cref="Dispose"/> when scope disposal happens on the
+    /// synchronous path (e.g. during exception unwinding from an endpoint handler,
+    /// or when the container itself is disposed synchronously). Without this,
+    /// dev/prod BFF requests error at scope teardown with
+    /// "'ServiceBusHandlerEnqueuer' type only implements IAsyncDisposable. Use
+    /// DisposeAsync to dispose the container." — discovered during Phase F
+    /// acceptance 2026-08-18 (customer-provisioning-orchestration-r1 Phase F).
+    ///
+    /// Bridges to DisposeAsync via GetAwaiter().GetResult() — the ServiceBusSender
+    /// close is non-blocking work under the hood (idempotent AMQP link teardown)
+    /// so blocking briefly here is safe. This is the pattern the .NET runtime
+    /// itself uses in <see cref="System.IO.Stream"/> for the same shim.
+    /// </summary>
+    public void Dispose()
+    {
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
     }
 }

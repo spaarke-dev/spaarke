@@ -21,6 +21,10 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
+// NOTE (2026-08-18 Phase F acceptance): Cosmos SDK defaults to Newtonsoft.Json;
+// STJ [JsonPropertyName] alone is ignored on write path. Below uses fully-
+// qualified `Newtonsoft.Json.JsonProperty` on `id` to avoid namespace ambiguity
+// with STJ's [JsonIgnore] used elsewhere in this file.
 
 namespace Sprk.Provisioning.ControlPlane.Models;
 
@@ -40,6 +44,7 @@ public sealed class ProvisioningRun
     /// criterion.
     /// </summary>
     [JsonPropertyName("id")]
+    [Newtonsoft.Json.JsonProperty("id")]  // Newtonsoft attribute needed for Cosmos SDK write path (default serializer). Discovered Phase F 2026-08-18.
     public string RunId { get; set; } = default!;
 
     /// <summary>
@@ -154,14 +159,15 @@ public sealed class ProvisioningRun
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public QuarantineInfo? Quarantine { get; set; }
 
-    /// <summary>
-    /// Container-native TTL in seconds. Cosmos auto-expires after 365 days per
-    /// container config; setting a lower value here overrides per-item. Left
-    /// null (default) so container TTL applies.
-    /// </summary>
-    [JsonPropertyName("ttl")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public int? Ttl { get; set; }
+    // TTL: REMOVED 2026-08-18 (Phase F acceptance discovery). Cosmos SDK uses its
+    // own default serializer (Newtonsoft-based) which ignores System.Text.Json
+    // [JsonIgnore(WhenWritingNull)] attributes and emits `"ttl": null`. Cosmos
+    // server rejects that with `BadRequest — The input ttl 'null' is invalid`.
+    // Container-level TTL (365d per platform-controlplane.bicep cosmos-provisioning
+    // module) applies globally; per-item override was never actively used per the
+    // prior property's doc comment. If per-item TTL is ever needed, either
+    // (a) register a CosmosSystemTextJsonSerializer to make attributes work, or
+    // (b) set TTL via ItemRequestOptions on the CreateItem call, not via POCO.
 }
 
 /// <summary>
