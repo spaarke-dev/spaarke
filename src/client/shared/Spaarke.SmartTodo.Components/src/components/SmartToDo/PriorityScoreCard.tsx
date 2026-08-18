@@ -19,14 +19,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Text,
-  Card,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { makeStyles, shorthands, tokens, Text, Card, mergeClasses } from '@fluentui/react-components';
 import type { ITodoPriorityScore } from '../../types/todoScoringTypes';
 
 // ---------------------------------------------------------------------------
@@ -209,19 +202,20 @@ const LevelBadge: React.FC<ILevelBadgeProps> = ({ level }) => {
 
   const levelClass = React.useMemo(() => {
     switch (level) {
-      case 'Urgent':  return styles.levelBadgeUrgent;
-      case 'High':    return styles.levelBadgeHigh;
-      case 'Normal':  return styles.levelBadgeNormal;
+      case 'Urgent':
+        return styles.levelBadgeUrgent;
+      case 'High':
+        return styles.levelBadgeHigh;
+      case 'Normal':
+        return styles.levelBadgeNormal;
       case 'Low':
-      default:        return styles.levelBadgeLow;
+      default:
+        return styles.levelBadgeLow;
     }
   }, [level, styles]);
 
   return (
-    <span
-      className={mergeClasses(styles.levelBadge, levelClass)}
-      aria-label={`Priority level: ${level}`}
-    >
+    <span className={mergeClasses(styles.levelBadge, levelClass)} aria-label={`Priority level: ${level}`}>
       {level}
     </span>
   );
@@ -241,11 +235,16 @@ const LevelBadge: React.FC<ILevelBadgeProps> = ({ level }) => {
  */
 export function priorityChoiceLabel(value: number | null | undefined): string | undefined {
   switch (value) {
-    case 100000000: return 'Urgent';
-    case 100000001: return 'High';
-    case 100000002: return 'Medium';
-    case 100000003: return 'Low';
-    default: return undefined;
+    case 100000000:
+      return 'Urgent';
+    case 100000001:
+      return 'High';
+    case 100000002:
+      return 'Medium';
+    case 100000003:
+      return 'Low';
+    default:
+      return undefined;
   }
 }
 
@@ -269,11 +268,16 @@ const PriorityChoiceBadge: React.FC<{ value: number }> = ({ value }) => {
       return undefined; // Unrecognised value — neutral no-op (no badge rendered).
     }
     switch (value) {
-      case 100000000: return { label, toneClass: styles.levelBadgeUrgent };
-      case 100000001: return { label, toneClass: styles.levelBadgeHigh };
-      case 100000002: return { label, toneClass: styles.levelBadgeNormal };
-      case 100000003: return { label, toneClass: styles.levelBadgeLow };
-      default: return undefined;
+      case 100000000:
+        return { label, toneClass: styles.levelBadgeUrgent };
+      case 100000001:
+        return { label, toneClass: styles.levelBadgeHigh };
+      case 100000002:
+        return { label, toneClass: styles.levelBadgeNormal };
+      case 100000003:
+        return { label, toneClass: styles.levelBadgeLow };
+      default:
+        return undefined;
     }
   }, [value, styles]);
 
@@ -342,31 +346,36 @@ export const PriorityScoreCard: React.FC<IPriorityScoreCardProps> = React.memo(
             Choice selection, distinct from the score-derived level above. */}
         {typeof priorityChoice === 'number' && (
           <div className={styles.scoreRow}>
-            <Text size={100} className={styles.selectedLabel}>Selected:</Text>
+            <Text size={100} className={styles.selectedLabel}>
+              Selected:
+            </Text>
             <PriorityChoiceBadge value={priorityChoice} />
           </div>
         )}
 
         {/* Factor breakdown table */}
-        <table
-          className={styles.factorTable}
-          aria-label="Priority factor breakdown"
-        >
+        <table className={styles.factorTable} aria-label="Priority factor breakdown">
           <thead>
             <tr className={styles.factorTableHeader}>
               <th className={styles.thFactor}>
-                <Text size={100} className={styles.headerText}>Factor</Text>
+                <Text size={100} className={styles.headerText}>
+                  Factor
+                </Text>
               </th>
               <th className={styles.thValue}>
-                <Text size={100} className={styles.headerText}>Value</Text>
+                <Text size={100} className={styles.headerText}>
+                  Value
+                </Text>
               </th>
               <th className={styles.thPoints}>
-                <Text size={100} className={styles.headerText}>Pts</Text>
+                <Text size={100} className={styles.headerText}>
+                  Pts
+                </Text>
               </th>
             </tr>
           </thead>
           <tbody>
-            {priority.factors.map((factor) => (
+            {priority.factors.map(factor => (
               <tr key={factor.name} className={styles.factorRow}>
                 <td className={styles.tdFactor}>
                   <Text size={200}>{factor.name}</Text>
@@ -382,10 +391,14 @@ export const PriorityScoreCard: React.FC<IPriorityScoreCardProps> = React.memo(
             {/* Total row */}
             <tr className={styles.totalRow}>
               <td className={styles.tdTotal} colSpan={2}>
-                <Text size={200} weight="semibold">Total</Text>
+                <Text size={200} weight="semibold">
+                  Total
+                </Text>
               </td>
               <td className={styles.tdTotalPoints}>
-                <Text size={200} weight="bold">{totalPoints}</Text>
+                <Text size={200} weight="bold">
+                  {totalPoints}
+                </Text>
               </td>
             </tr>
           </tbody>

@@ -21,11 +21,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { SprkSidePaneHost } from '../SprkSidePaneHost';
-import {
-  registerSidePaneContributor,
-  clearSidePaneRegistry,
-  type SidePaneContributorProps,
-} from '../sidePaneRegistry';
+import { registerSidePaneContributor, clearSidePaneRegistry, type SidePaneContributorProps } from '../sidePaneRegistry';
 import { THEME_STORAGE_KEY } from '../../../utils/themeStorage';
 
 // ─────────────────────────────────────────────────────────────────────────────

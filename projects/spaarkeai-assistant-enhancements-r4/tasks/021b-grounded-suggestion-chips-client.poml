@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021b" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Render the typed two-kind suggestion structure — one chip family, capability vs question variants (FR-04)</title>
+    <phase>2 — E2 follow-ons</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <!-- Client half of the split from task 021 (notes/021-grounded-suggestions-design-delta.md). Consumes the typed
+         two-kind SSE contract 021a emits. Close coordination with 021a on that wire shape. -->
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend change on the shared SprkChat surface affecting suggestion rendering across ALL SprkChat consumers; touches the SpaarkeAi spine; requires code-review + adr-check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped render change against a typed contract 021a defines: two chip variants driven by the structural `kind`, reusing the existing chip infrastructure. No architectural invention (the architecture is the delta doc).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave2-E2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits SprkChat / SprkChatSuggestions (shared lib + SpaarkeAi spine); depends on 021a's wire contract; coordinate with compose-r5/r6; run /conflict-check before the PR.</parallel-reason>
+    <deps>021a</deps>
+    <tags>frontend, fluent-ui, spaarkeai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Render the typed two-kind follow-on suggestion structure 021a emits as ONE chip family with two visually-distinct, learnable variants, driven by the structural `kind` (NOT by phrasing). CAPABILITY variant: bordered + trailing arrow (→), imperative verb-first label; clicking dispatches the carried `targetBindingId` via the EXISTING Click path (dispatchConsumer). QUESTION variant: lighter pill, NO arrow, interrogative label; clicking re-enters the agent loop (send the text as a message). Remove the untyped free-string render path (a bare string with no kind is never rendered). Do NOT rebuild `ConsumerChips` (already backed). Update docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md with the action-chip-vs-question-chip sub-distinction. Follow notes/021-grounded-suggestions-design-delta.md §5a.</prompt>
+  <role>SPAARKE frontend developer. Fluent UI v9 + React 18; comfortable with the SprkChat suggestion/chip subsystem, the ConsumerChips bindingId/Click-path discipline (dispatchConsumer), and the ASSISTANT-UI-ELEMENT-CRITERIA decision rules.</role>
+  <goal>The Assistant renders one chip family with two learnable variants: capability chips (bordered+arrow, imperative, dispatch a real bindingId) and question chips (pill, no arrow, interrogative, re-enter the loop); no untyped free string is ever rendered; ConsumerChips behavior is unchanged; the element-criteria standard documents the distinction.</goal>
+  <context>
+    <background>Per notes/021-grounded-suggestions-design-delta.md §5 + §5a (owner-approved 2026-08-17): today the two styles look like unrelated UI (bordered-arrow ConsumerChips vs light free-string SprkChatSuggestions pills) and the style is an ACCIDENT of which pipeline drew the chip, not what it does — so a genuine action ("Send the email to Jon James Wiley") renders as a conversational pill (the visible bug). 021a replaces the untyped `suggestions: string[]` SSE event with a TYPED two-kind structure: `capability` (carries targetBindingId + label) and `question` (text). This task renders that structure. The kind is STRUCTURAL (targetBindingId present ⇒ capability), so mislabeling cannot happen. Capability chips dispatch via the existing deterministic Click path (dispatchConsumer / bindingId — the same discipline ConsumerChips use); question chips send their text back into the loop (grounded-outcomes-safe). Label grammar (authored server-side by 021a) reinforces the affordance: imperative+arrow for capability, interrogative+no-arrow for question — so the user learns "arrow = acts, no arrow = asks". Keep it light (throwaway followups per ASSISTANT-UI-ELEMENT-CRITERIA; don't over-chrome). The three deterministic [action:upload/search/select] chips remain handled as today.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatSuggestions.tsx (render the two-variant chip family from the typed structure; remove the untyped free-string path)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (handleSuggestionSelect ~:1583 — branch on kind: capability → dispatch bindingId via Click path; question → handleSend(text); keep the [action:*] routing)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts (the suggestions prop/types — evolve string[] → the typed two-kind shape 021a defines; ~:291/308/1628/1958)</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/dispatchConsumer.ts (the bindingId Click-path dispatch to reuse for capability chips)</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md (add the action-chip-vs-question-chip sub-distinction)</file>
+      <file>the SprkChat suggestion unit test suite (__tests__/SprkChatSuggestions.test.tsx + suggestionsIntegration.test.tsx)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="rendering">Render ONLY the typed structure; a suggestion with no kind / no backing is never rendered. Capability chips MUST dispatch a real targetBindingId via the existing Click path; question chips re-enter the loop. MUST NOT classify by keyword/phrasing.</constraint>
+    <constraint source="ASSISTANT-UI-ELEMENT-CRITERIA" scope="chips">One chip family, two variants; affordance encodes the promise (arrow=acts, no-arrow=asks); no code in chip labels; keep throwaway followups light. Document the distinction in the standard.</constraint>
+    <constraint source="project" scope="ConsumerChips">Leave ConsumerChips behavior unchanged — do NOT rebuild them (§11 reuse-first).</constraint>
+    <constraint source="ADR-021" scope="styling">Fluent v9 tokens-only styling; host-agnostic shared component — MUST NOT regress other SprkChat consumers or the full-page/widget hosts (NFR-09).</constraint>
+    <constraint source="ADR-022" scope="SprkChat">React 16/PCF-safe APIs only (the shared lib constraint).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/notes/021-grounded-suggestions-design-delta.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Confirm the typed two-kind SSE shape 021a emits (capability {targetBindingId,label} + question {text}); update the SprkChat suggestion types to match.</step>
+    <step order="2">Render one chip family, two variants (SprkChatSuggestions): capability = bordered + trailing arrow, imperative label; question = light pill, no arrow, interrogative label. Order actions first, then questions.</step>
+    <step order="3">Branch handleSuggestionSelect on kind: capability → dispatch the targetBindingId via the existing Click path (dispatchConsumer); question → handleSend(text). Keep the [action:upload/search/select] routing.</step>
+    <step order="4">Remove the untyped free-string render path (a bare string with no kind is never rendered).</step>
+    <step order="5">Update docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md with the action-chip-vs-question-chip rule (affordance + label grammar + structural-kind).</step>
+    <step order="6">Tests: a capability chip dispatches the bindingId (Click path); a question chip sends its text; an untyped/no-kind item does not render; the correct variant renders per kind. Verify no regression to other SprkChat consumers / full-page / widget hosts.</step>
+    <step order="7">/conflict-check before the PR; update TASK-INDEX.</step>
+  </steps>
+  <escalation>
+    <trigger>If the typed SSE shape from 021a is not yet available/stable, coordinate with 021a rather than inventing a divergent client-side shape (the two must agree on the wire contract).</trigger>
+  </escalation>
+  <justification>
+    <existing>SprkChat already has chip-rendering infrastructure (SprkChatSuggestions) + the Click-path dispatch (dispatchConsumer / ConsumerChips).</existing>
+    <extension>Render the typed two-kind structure as two variants of one chip family + branch the click by kind — reuse the existing dispatch, no new chip system.</extension>
+    <cost-of-doing-nothing>Without the typed render, 021a's backed suggestions can't reach the user correctly, and the capability-vs-question style stays an accident of pipeline (the visible mislabel bug).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatSuggestions.tsx (two-variant chip family)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx (handleSuggestionSelect branch by kind)</output>
+    <output type="doc">docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md (action-chip vs question-chip)</output>
+    <output type="test">SprkChat suggestion unit tests (capability dispatch, question send, untyped suppressed, variant-per-kind)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">A capability suggestion renders as the bordered+arrow variant and dispatches its targetBindingId via the Click path on click.</criterion>
+    <criterion testable="true">A question suggestion renders as the no-arrow pill variant and sends its text into the loop on click.</criterion>
+    <criterion testable="true">An untyped / no-kind suggestion is NOT rendered (negative case) — no dead-end.</criterion>
+    <criterion testable="true">ConsumerChips behavior is unchanged (not rebuilt).</criterion>
+    <criterion testable="true">ASSISTANT-UI-ELEMENT-CRITERIA.md documents the action-chip-vs-question-chip distinction.</criterion>
+    <criterion testable="true">No regression to other SprkChat consumers / full-page / widget hosts (NFR-09).</criterion>
+  </acceptance-criteria>
+  <notes>Depends on 021a's typed SSE contract — coordinate the exact shape before implementing. Dep 012 supplies the FR-01 advisory capability a "prioritize my tasks" capability chip maps to. /conflict-check with compose-r5/r6 before the PR.
+
+COMPLETED 2026-08-17. Rendered the typed two-kind chip family per §9a wire contract. Files: types.ts (SprkChatFollowupKind + ISprkChatFollowup; SSE/hook/props string[]→ISprkChatFollowup[]; new optional `onSuggestionCapabilitySelect` prop), useSseStream.ts (parseSuggestions drops untyped/kindless/capability-without-binding/action-without-routable-actionId), SprkChatSuggestions.tsx (one family, two variants: capability/action=brand+arrow, question=outline pill; retired `[action:*]` strip; data-suggestion-kind), SprkChat.tsx (handleSuggestionSelect branches on kind), SpaarkeAi ConversationPane.tsx (handleSuggestionCapability→chips.dispatchBinding, the SAME Click-path seam onNextStep uses; shared lib never imports dispatchConsumer — ADR-012), ASSISTANT-UI-ELEMENT-CRITERIA.md §5a. Reuse-first (§11): capability chips ride the existing dispatchBinding seam, no new dispatch surface (ADR-039 — routing purely by structural kind, no keyword heuristic). Tests: 374/374 shared-lib pass (40 suggestion-suite tests incl. capability-dispatch, question-send, action-route, untyped/unroutable-dropped negatives, variant-per-kind). ESLint 0 errors. SpaarkeAi surface-gate: no new production error. ConsumerChips untouched. Step 9.5: independent code-review (no Critical; 3 findings all fixed Path C) + adr-check (ADR-039/012/021/022 clean). MERGE-ORDER GATE: deploy WITH 021a at task 080 (SSE wire changed). PR HELD (owner).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files + the design delta. Follow task-execute skill.</protocol>
+  </execution>
+</task>

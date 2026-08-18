@@ -68,8 +68,8 @@ import { KanbanHeader } from "./KanbanHeader";
 // owns the QuickAdd input. It dispatches `QUICK_ADD_TODO_EVENT` window events
 // which this component subscribes to and routes through its existing
 // `handleAdd` (single-source optimistic add + Dataverse create logic).
-import { QUICK_ADD_TODO_EVENT } from "./Header";
-import type { QuickAddTodoEventDetail } from "./Header";
+import { QUICK_ADD_TODO_EVENT } from "@spaarke/smart-todo-components";
+import type { QuickAddTodoEventDetail } from "@spaarke/smart-todo-components";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
 import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../hooks/useTodoItems";
@@ -97,7 +97,9 @@ import { useUserPreferences } from "../hooks/useUserPreferences";
 import { DataverseService } from "../services/DataverseService";
 import { ITodo } from "../types/entities";
 import { computeTodoScore } from "../utils/todoScoreUtils";
-import { matchesTodoSearchQuery } from "../utils/todoSearchUtils";
+// Shared search predicate (§11 — single source in the shared lib; the widget uses
+// the same one). Moved out of this solution 2026-08-17 so both surfaces converge.
+import { matchesTodoSearchQuery } from "@spaarke/smart-todo-components";
 import { useOptionalTodoContext } from "../context/TodoContext";
 import type { TodoColumn } from "../types/enums";
 import type { DropResult } from "@hello-pangea/dnd";

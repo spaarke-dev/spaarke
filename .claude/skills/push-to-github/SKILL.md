@@ -237,6 +237,38 @@ IF NOT inside a project (ad-hoc work at repo root):
 
 **Why this step exists**: deferred work hidden in a project's `notes/` folder is invisible to anyone working on other projects. Surfacing entries as GitHub Issues at push time is the latest-possible reliable hook for visibility. See `/project-defer-issue-tracking` skill for the full protocol.
 
+### Step 1.7: Real-Dataverse Smoke Check (Widget/Dataverse Changes)
+
+**Added 2026-08-17 by `smart-todo-r5` task 060 per spec FR-20 / PROC-1. Advisory (ask-user-first), NOT a blocking CI gate — same shape as Steps 1.5/1.6.**
+
+```
+DETECT Dataverse-querying widget/component changes in this push:
+  git diff --name-only origin/{branch}..HEAD (or the staged set)
+  FLAG files that are widget/component/service changes which QUERY Dataverse
+  entities — e.g. anything touching Xrm.WebApi / IDataverseClient / a
+  `sprk_*` (or OOB `contact`/`systemuser`/…) entity name in a
+  `retrieveMultipleRecords` / FetchXML / OData `$select` path.
+
+  IF such changes are present:
+    → 🚨 WARNING: This push changes code that queries Dataverse entities.
+    → List the affected files.
+    → ASK: "Before merge, this change MUST have been exercised with ≥1
+       create + read against REAL Dataverse (not a prototype / mock harness).
+       Confirm:"
+      1. Yes — I ran a real create+read against real Dataverse (name the env)
+      2. No — exercised only against a mock/prototype harness (NOT sufficient)
+      3. N/A — this change does not actually touch a Dataverse query path
+    → IF user picks 2: 🚨 WARN explicitly that mock-only verification is the exact
+       failure this gate guards against; recommend a real-DV smoke before merge;
+       if the user still proceeds, log the choice in the commit/PR footer.
+    → REQUIRE an explicit decision — DO NOT silently proceed.
+
+  IF no Dataverse-querying changes:
+    → Continue to Step 2.
+```
+
+**Why this step exists**: R4 UAT rounds 5–6 burned multiple deploy cycles because the `spaarke-prototype` harness mocked a `sprk_contact` entity that **does not exist in real Dataverse** — the real entity is the OOB `contact`. The mock hid the entity-name bug until it reached a real environment. A mock passing proves nothing about real Dataverse's actual schema; only a real create+read does. R5's own FR-04 (RegardingResolver wiring, smoke-tested by task 014) and FR-06 (Assigned-To typeahead) satisfy this gate by example. This is **reviewer judgment**, not enforcement code — like `/test-diet` and the Step 1.6 defer audit, it surfaces a WARNING and asks; it never runs a `dotnet`/CI script or hard-blocks the merge.
+
 ### Step 2: Review Changes
 
 ```powershell
@@ -541,6 +573,7 @@ gh pr create                            # Create PR (if gh installed)
 
 - **CRITICAL: Always run Step 1.5 (untracked source file check) before ANY commit/push**
 - Untracked files have caused code loss - treat this check as mandatory, not optional
+- **Step 1.7 (real-Dataverse smoke): for any push that changes Dataverse-querying widget/component/service code, ASK whether a real create+read against real Dataverse was exercised — a mock/prototype harness passing is NOT sufficient (R4 `sprk_contact`-vs-OOB-`contact` regression). Advisory (ask-user-first), not a blocking CI gate.**
 - Always show `git status` before committing so user sees what's included
 - Propose a commit message based on changed files - don't just ask user to write one
 - If user is on main/master, strongly recommend creating a feature branch first

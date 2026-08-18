@@ -9,9 +9,18 @@
 
 | Field | Value |
 |-------|-------|
-| **Phase** | Core project 20/28 + modal spine done. UAT-fix + deploy loop with operator. **All 3 pending deploys are now DONE.** Then a NEW blocker surfaced: the **INBOUND** event-sourced-todo bug (operator wants it resolved before wrap-up). |
-| **Status** | ✅ **Deploy pass COMPLETE** (2026-08-17): all 4 UAT items + date-search LIVE on spaarkedev1. Operator re-testing. Now implementing the **INBOUND** fix (BFF). |
-| **Next Action** | Implement the **INBOUND fix — Option A gated** (see "INBOUND" below). It's a BFF change (Path-A exception to BFF=N, operator-authorized). Branch is **46 behind origin/master** — consider Update-Only sync before/with the BFF work (TodoGenerationService.cs identical to master; DataverseServiceClientImpl.cs +43 on master, stub NOT yet throwing). |
+| **Phase** | ✅ **PROJECT COMPLETE (2026-08-17)** — with operator-accepted deferrals. 090 ✅. |
+| **Status** | All core FRs shipped + merged to master + deployed (spaarkedev1 PCF/ribbon/code-pages + `spaarke-bff-dev` INBOUND). This session: UAT deploys, INBOUND BFF fix (deployed, dry-run gated), 041 Playwright (authored+wired), 060 (Step 1.7 real-DV gate), 090 close (#508 CLOSED, lessons-learned, `/code-review` clean, `/test-diet` 0-scaffolding). |
+| **Active task** | **none — project complete.** |
+| **Follow-ups (operator-accepted deferrals, tracked D-10..D-13 + pre-existing D-1..D-4/D-6)** | **(1)** 051/052 — ribbon on 5 more entities (live deploys, when operator can eyeball); **(2)** 041 — Playwright real-env run if/when Playwright adopted; **(3)** D-13 — review BFF dry-run counts → flip `EnableEventSourcedGeneration` → ping r3 hardening owner (Epic #427); **(4)** file GitHub issues for open defer entries (D-1..D-4/D-6, D-10..D-13) for cross-project visibility. 032 header-hide = won't-do (design constraint). Merge branch→master for the 090 close commits. |
+
+### 📄 Task 041 (Playwright NFR suite) — files authored (this session)
+- `tests/e2e/pages/smart-todo/SmartTodoPage.ts` — Code Page page object (does NOT extend BasePCFPage per POML); locators from source (filter `data-testid=search-filter`, "Add to-do item", "More options", toolbar "Smart To Do toolbar", columns `role=list`, cards `role=listitem`); `waitForReady`, `flipOrientationViaLayout`, `selectCard`, `setColorScheme`, `assertNoLayoutGlitch`.
+- `tests/e2e/specs/smart-todo/performance.spec.ts` — NFR-02 load <3s (Date.now bracket + annotations + P95, mirrors spe-file-viewer precedent).
+- `tests/e2e/specs/smart-todo/accessibility.spec.ts` — NFR-01 axe WCAG2.1AA light+dark (dark-on-yellow) + keyboard-nav (no-trap Tab walk + Enter/Space activation).
+- `tests/e2e/specs/smart-todo/orientation.spec.ts` — NFR-03 select→flip→selection persists→no layout glitch (boundingBox)→post-flip drag-drop membership change.
+- `tests/e2e/config/.env.example` — added `SMART_TODO_URL`. **Zero new npm deps** (playwright ^1.55.1 + axe ^4.10.2 already present); auto-wired via testDir (no package.json/config change).
+- ⚠️ Two selector assumptions to confirm on the real-env run (documented in-file): `selectCard()` (click→aria-selected vs explicit checkbox) and `setColorScheme()` (prefers-color-scheme vs themeStorage localStorage key).
 
 ### ✅ DEPLOY PASS COMPLETE (2026-08-17) — all live on spaarkedev1
 1. **RegardingResolver PCF v1.4.9** (`bdc1b6c2e`) — **pdfjs TRUE FIX shipped**: switched `RegardingResolverApp.tsx` + `handlers/ResolverWriteHandler.ts` from the root `@spaarke/ui-components` barrel to per-module deep dist imports (PolymorphicPicker, PolymorphicResolverService, TodoRegardingUpdateBuilder, oobModalSizes). Bundle 2.2MB→60KB, builds clean, no pdfjs. Also ships UAT #2 Regarding Name display fix. Imported+published; footer `v1.4.9 • Built 2026-08-17`.

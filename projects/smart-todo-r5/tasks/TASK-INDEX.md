@@ -13,27 +13,27 @@
 | 011 | Auto-score handler (Option B) + wizard/quick-add parity | 2 | FR-02/03 | sonnet/high | none | 010 | ✅ |
 | 012 | Priority/effort per-card UI in shared lib | 2 | FR-02/03 | sonnet/high | none | 003,010 | ✅ |
 | 013 | RegardingResolver wiring + full regarding field set on form | 2 | FR-04 | opus/high | none | 010 | ✅ |
-| 014 | Deploy schema+form; real-DV resolver smoke | 2 | FR-04/20 | sonnet/high | none | 011,012,013 | 🔄 |
+| 014 | Deploy schema+form; real-DV resolver smoke | 2 | FR-04/20 | sonnet/high | none | 011,012,013 | ✅ |
 | 020 | Code Page top-bar redesign (Filter/New Task/overflow) | 3 | FR-05 | sonnet/high | Q | 003 | ✅ |
 | 021 | Filter pane (Priority/Status/Due/Assigned-To; clear-all) | 3 | FR-06 | sonnet/high | none | 020 | ✅ |
 | 022 | Completed status + Show-Completed toggle | 3 | FR-07 | sonnet/high | Q | 003 | ✅ |
 | 023 | Subtle channel coloring + yellow-contrast audit | 3 | FR-08 | sonnet/high | Q | 003 | ✅ |
 | 024 | Widget default = side-by-side columns | 3 | FR-09 | sonnet/high | none | 003 | ✅ |
-| 025 | Deploy code page + widget; visual QA | 3 | deploy | sonnet/high | none | 020-024 | 🔲 |
+| 025 | Deploy code page + widget; visual QA | 3 | deploy | sonnet/high | none | 020-024 | ✅ |
 | 030 | + New Task opens OOB main form (create) modal | 4 | FR-10 | sonnet/high | none | 013 | ✅ |
 | 031 | Open shares same launch mechanism | 4 | FR-11 | sonnet/high | none | 030 | ✅ |
-| 032 | Full-cover sizing + hide main-form header | 4 | FR-12/13 | sonnet/high | none | 031 | 🔄 |
+| 032 | Full-cover sizing + hide main-form header | 4 | FR-12/13 | sonnet/high | none | 031 | ⛔ deferred (hiding OOB command bar removes Save — operator deferred; keep OOB full-cover form) |
 | 033 | Save & Close dismiss + kanban refresh (interceptor) | 4 | FR-14 | opus/xhigh | none | 032 | ✅ |
 | 034 | Migrate browse consumer → BrowseModal | 4 | FR-15 | sonnet/high | none | 003 | ✅ (already-resolved; verified) |
-| 035 | Deploy + modal QA | 4 | deploy | sonnet/high | none | 033,034 | 🔲 |
+| 035 | Deploy + modal QA | 4 | deploy | sonnet/high | none | 033,034 | ✅ |
 | 040 | vitest expansion + new coverage | 5 | FR-16 | sonnet/high | R | 011,021,022 | ✅ |
-| 041 | Playwright NFR suite (perf/a11y/orientation) | 5 | FR-17 | sonnet/high | R | 024,025 | 🔲 |
+| 041 | Playwright NFR suite (perf/a11y/orientation) | 5 | FR-17 | sonnet/high | R | 024,025 | ✅ authored+valid+wired (⚠️ real-env green run escalated — no live Power Apps env in sandbox; see notes/task-041-playwright-nfr.md) |
 | 042 | R-10 handleEmail seam + un-skip; RegardingResolver S1/N1 | 5 | FR-18 | sonnet/high | R | — | ✅ |
-| 050 | Refresh Matter ribbon icon + RibbonDiff | 6 | FR-19 | sonnet/high | S | — | 🔄 |
-| 051 | 5 per-entity ribbon solutions (Create To Do) | 6 | FR-19 | sonnet/high | none | 050 | 🔲 |
-| 052 | Deploy + smoke each parent button | 6 | deploy | sonnet/high | none | 051 | 🔲 |
-| 060 | PROC-1 real-DV smoke gate (skill checklist) | 7 | FR-20 | sonnet/high | none | — | 🔲 |
-| 090 | Project wrap-up (test-diet, close #508, archive) | 7 | wrap-up | sonnet/high | none | all | 🔲 |
+| 050 | Refresh Matter ribbon icon + RibbonDiff | 6 | FR-19 | sonnet/high | S | — | ✅ |
+| 051 | 5 per-entity ribbon solutions (Create To Do) | 6 | FR-19 | sonnet/high | none | 050 | ⛔ deferred (operator 2026-08-17 — 5 live ribbon deploys; do when operator can eyeball) |
+| 052 | Deploy + smoke each parent button | 6 | deploy | sonnet/high | none | 051 | ⛔ deferred (with 051) |
+| 060 | PROC-1 real-DV smoke gate (skill checklist) | 7 | FR-20 | sonnet/high | none | — | ✅ |
+| 090 | Project wrap-up (test-diet, close #508, archive) | 7 | wrap-up | sonnet/high | none | all | ✅ (2026-08-17 — #508 CLOSED; lessons-learned; `/code-review` clean; `/test-diet` reconciled 0-scaffolding; BFF INBOUND deployed; README→Complete w/ operator-accepted deferrals 051/052/041 + won't-do 032. Remaining tracked D-10..D-13.) |
 
 ## Parallel Execution Groups
 

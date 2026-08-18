@@ -546,8 +546,7 @@ export function composeWorkspaceReducer(
               // FR-09 (task 071): stamp the AUTHORITATIVE load-time drive so a later Reload-from-source
               // targets where the doc lives (never the `!loadDriveId → reset` blank). Mirrors the
               // saveSucceeded stamp below; a defensive empty/undefined falls back to the existing value.
-              driveId:
-                action.driveId && action.driveId.length > 0 ? action.driveId : state.documentRef.driveId,
+              driveId: action.driveId && action.driveId.length > 0 ? action.driveId : state.documentRef.driveId,
             }
           : state.documentRef,
         errorMessage: null,
@@ -746,8 +745,8 @@ export function composeWorkspaceReducer(
               // FR-07(a) (task 012): a Save-New fork adopts the uniquified fork name (action.fileName);
               // otherwise the PDF→docx rename or the existing name, unchanged.
               fileName:
-                action.fileName
-                ?? (state.sourceFormat === 'pdf'
+                action.fileName ??
+                (state.sourceFormat === 'pdf'
                   ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
                   : state.documentRef.fileName),
               // FR-07(a/b) (task 012/010): a fork adopts a NEW logical id (action.composeLogicalId);

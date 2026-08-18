@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Project wrap-up — /test-diet gate, lessons-learned, archive</title>
+    <phase>Wrap-up</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation + close-out orchestration; /test-diet is read-only (emits git rm/git mv for the reviewer, does not modify tests) so this is not a TEST-MODIFYING task</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Orchestrates existing gate skills (test-diet, code-review, adr-check) + doc updates — no novel implementation</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>Wrap-up</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final sequential task — aggregates the whole project; runs the project-close gate after deploy</parallel-reason>
+    <deps>080</deps>
+    <tags>docs, wrap-up</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+  <prompt>Close out R4: run the BINDING project-close /test-diet gate (reconcile tests added/modified during R4 against the ADR-038 build-vs-maintain classifier → notes/test-diet-report.md; read-only — emit git rm/git mv for the reviewer, do NOT auto-execute); run a final code-review + adr-check pass (clean or document exceptions per CLAUDE.md §6.5); update the project README status to Complete; write notes/lessons-learned.md; produce a Success-Criteria verification doc against the 7 spec criteria; archive the project in the portfolio + projects/INDEX.md.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. Expert in the Spaarke project-close lifecycle, the ADR-038 test diet, the code-review + adr-check gates, and repo/portfolio hygiene.</role>
+  <goal>R4 is formally complete: /test-diet run with a cited report, final code-review + adr-check clean (or exceptions documented), README marked Complete, lessons-learned recorded, the 7 Success Criteria verified, and the project archived.</goal>
+  <context>
+    <background>Mandatory final task for every project (task-create Step 3.7). Runs the project-close test-diet gate (CLAUDE.md §7): /test-diet reconciles tests added/modified during R4 against the ADR-038 17-ban build-vs-maintain classifier — MAINTAIN-class stay at their KEEP path, SCAFFOLDING-class are deleted, AMBIGUOUS require reviewer judgment. The skill is read-only — it emits git rm/git mv commands; it does not auto-execute or modify tests (so this task is NOT TEST-MODIFYING). Also runs a final code-review + adr-check pass across the R4 surface (advisory capability, per-Action opt-in, preference-producer, suggestion gating, D9 flex chain) — any ADR-039/ADR-042 tension either is clean or is documented as a path-A exception per CLAUDE.md §6.5. Then verifies the 7 spec Success Criteria, marks the README/plan Complete, writes lessons-learned, and archives the project (portfolio + projects/INDEX.md row).</background>
+    <relevant-files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/README.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/plan.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/tasks/TASK-INDEX.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/notes/lessons-learned.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/notes/test-diet-report.md</file>
+      <file>projects/INDEX.md</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="project" scope="project-close gate">Run /test-diet BEFORE marking the project complete (CLAUDE.md §7, ADR-038). It is read-only — emit git rm/git mv for the reviewer; do NOT auto-execute deletions.</constraint>
+    <constraint source="ADR-038" scope="test reconciliation">Reconcile tests added/modified during R4 against the build-vs-maintain classifier; SCAFFOLDING deleted, MAINTAIN kept at its KEEP path, AMBIGUOUS to reviewer judgment.</constraint>
+    <constraint source="project" scope="final gates">Run code-review + adr-check final; ADR-039/ADR-042 tensions must be clean or documented as path-A exceptions (CLAUDE.md §6.5).</constraint>
+    <constraint source="project" scope="success criteria">Produce a verification doc against the 7 spec Success Criteria (P1 DoD, advisory fidelity, P2 DoD, follow-on cards, P3 loop, P4/D9 DoD, BFF hygiene).</constraint>
+    <constraint source="project" scope="wrap-up PR">The wrap-up PR MUST cite the test-diet report or document the skip rationale (HARD WARNING if skipped).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <steps mode="prescriptive">
+    <step order="1">Run /test-diet to reconcile tests added/modified during R4 (ADR-038); write notes/test-diet-report.md; surface the emitted git rm/git mv for the reviewer (do NOT auto-execute).</step>
+    <step order="2">Run code-review + adr-check final across the R4 surface; resolve or document ADR-039/ADR-042 exceptions per CLAUDE.md §6.5.</step>
+    <step order="3">Produce a Success-Criteria verification doc against the 7 spec criteria (P1 / advisory fidelity / P2 / follow-on cards / P3 / P4-D9 / BFF hygiene).</step>
+    <step order="4">Create/append notes/lessons-learned.md (corrections + confirmed non-obvious approaches + why).</step>
+    <step order="5">Update README.md: Status=Complete, Phase=Complete, Progress=100%, Completed Date set, graduation criteria checked; update plan.md Status=Complete; mark milestones ✅.</step>
+    <step order="6">Update the R4 row in projects/INDEX.md to Complete; archive project artifacts; verify all tasks ✅ in TASK-INDEX.md; update this task to ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If /test-diet flags AMBIGUOUS tests that neither clearly maintain nor clearly scaffold, OR code-review/adr-check surfaces an ADR tension that is neither clean nor a clear path-A exception, STOP and request reviewer judgment rather than deleting/keeping or waving it through by default.</trigger>
+  </escalation>
+  <outputs>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r4/notes/test-diet-report.md</output>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r4/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarkeai-assistant-enhancements-r4/README.md (Status=Complete) + Success-Criteria verification doc</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">/test-diet run; notes/test-diet-report.md written; scaffolding vs maintain reconciled per ADR-038 (git rm/git mv emitted, not auto-executed).</criterion>
+    <criterion testable="true">code-review + adr-check final run; clean or exceptions documented per CLAUDE.md §6.5.</criterion>
+    <criterion testable="true">README + plan marked Complete; graduation criteria checked.</criterion>
+    <criterion testable="true">notes/lessons-learned.md created/updated.</criterion>
+    <criterion testable="true">The 7 spec Success Criteria verified in a verification doc.</criterion>
+    <criterion testable="true">projects/INDEX.md R4 row marked Complete; all tasks ✅ in TASK-INDEX.md; this task ✅.</criterion>
+  </acceptance-criteria>
+  <notes>Project-close test-diet gate is a HARD WARNING if skipped (CLAUDE.md §7). The wrap-up PR must cite the test-diet report. /test-diet is read-only reconciliation — it does not modify tests, so this task stays MINIMAL (not TEST-MODIFYING).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

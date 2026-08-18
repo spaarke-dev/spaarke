@@ -21,6 +21,15 @@ export type { IKanbanCardProps } from './KanbanCard';
 export { SmartTodoKanban } from './SmartTodoKanban';
 export type { ISmartTodoKanbanProps } from './SmartTodoKanban';
 
+// ── Shared top-bar (hoisted from the SmartTodo Code Page, R5 follow-up
+//    2026-08-17) so the Code Page AND SmartTodoWidget render the IDENTICAL
+//    Header (Filter · + New Task · overflow) + inline SearchFilter — a code page
+//    and its widget must compose the same shared-lib components. ──────────────
+export { Header, QUICK_ADD_TODO_EVENT } from './Header';
+export type { HeaderProps, QuickAddTodoEventDetail } from './Header';
+export { SearchFilter } from './SearchFilter';
+export type { SearchFilterProps } from './SearchFilter';
+
 // ── Rich Smart To Do subtree (LegalWorkspace hoist, R5 FR-01 / task 002) ─────
 export {
   SmartToDo,

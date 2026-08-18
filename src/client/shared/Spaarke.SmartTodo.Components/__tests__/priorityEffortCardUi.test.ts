@@ -81,7 +81,7 @@ describe('priority glyph + PriorityScoreCard label — sprk_priority value mappi
       expect(rich?.label).toBe(label);
 
       expect(priorityChoiceLabel(value)).toBe(label);
-    },
+    }
   );
 
   it('all 4 sprk_priority values map to distinct glyph colours (widget card) — acceptance: "distinctly colored"', () => {
@@ -118,7 +118,7 @@ describe('effort badge + EffortScoreCard label — sprk_effort value mapping (FR
       expect(rich?.label).toBe(label);
 
       expect(effortChoiceLabel(value)).toBe(label);
-    },
+    }
   );
 
   it('all 5 sprk_effort values map to distinct badge tones (widget card)', () => {
@@ -126,7 +126,7 @@ describe('effort badge + EffortScoreCard label — sprk_effort value mapping (FR
       EFFORT_CASES.map(({ value }) => {
         const badge = deriveWidgetEffortBadge(value);
         return `${badge?.style.backgroundColor}|${badge?.style.color}`;
-      }),
+      })
     );
     expect(distinctEffortColors.size).toBe(EFFORT_CASES.length);
   });
@@ -140,7 +140,7 @@ describe('effort badge + EffortScoreCard label — sprk_effort value mapping (FR
 describe('unset/out-of-range values — neutral no-op across all 6 lookup functions', () => {
   it.each([null, undefined, 999999999])(
     'is a no-op for %s — priority glyph, effort badge, and both score-card labels all return undefined, never throw',
-    (value) => {
+    value => {
       expect(deriveWidgetPriorityGlyph(value)).toBeUndefined();
       expect(deriveRichPriorityGlyph(value)).toBeUndefined();
       expect(priorityChoiceLabel(value)).toBeUndefined();
@@ -148,6 +148,6 @@ describe('unset/out-of-range values — neutral no-op across all 6 lookup functi
       expect(deriveWidgetEffortBadge(value)).toBeUndefined();
       expect(deriveRichEffortBadge(value)).toBeUndefined();
       expect(effortChoiceLabel(value)).toBeUndefined();
-    },
+    }
   );
 });

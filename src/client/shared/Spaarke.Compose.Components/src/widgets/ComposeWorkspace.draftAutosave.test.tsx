@@ -16,11 +16,7 @@
 import * as React from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
-import {
-  COMPOSE_DRAFT_CONTENT_KEY,
-  saveComposeDraft,
-  getComposeDraft,
-} from './composeDraftStore';
+import { COMPOSE_DRAFT_CONTENT_KEY, saveComposeDraft, getComposeDraft } from './composeDraftStore';
 import { COMPOSE_ACTIVE_DRAFT_ID_KEY, persistActiveComposeLogicalId } from './composeIdentity';
 
 if (typeof (globalThis as { ResizeObserver?: unknown }).ResizeObserver === 'undefined') {

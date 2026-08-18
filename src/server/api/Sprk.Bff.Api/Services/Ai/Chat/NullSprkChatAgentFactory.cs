@@ -60,6 +60,9 @@ public sealed class NullSprkChatAgentFactory : SprkChatAgentFactory
         string? activeContextTabId = null,
         IReadOnlyList<Models.Workspace.WorkspaceTab>? liveTabs = null,
         Models.Workspace.WorkspaceActiveItemHandle? activeItem = null,
+        // task 012 advisory nested-turn overload (mirror of the base signature; the Null factory throws).
+        IReadOnlyCollection<string>? advisoryToolAllowList = null,
+        string? advisorySystemPrompt = null,
         CancellationToken cancellationToken = default)
     {
         LogDisabled(nameof(CreateAgentAsync));

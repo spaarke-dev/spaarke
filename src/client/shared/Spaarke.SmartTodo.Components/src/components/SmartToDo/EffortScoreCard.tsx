@@ -20,18 +20,8 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  shorthands,
-  tokens,
-  Text,
-  Card,
-  mergeClasses,
-} from '@fluentui/react-components';
-import {
-  CheckmarkCircleRegular,
-  CircleRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, shorthands, tokens, Text, Card, mergeClasses } from '@fluentui/react-components';
+import { CheckmarkCircleRegular, CircleRegular } from '@fluentui/react-icons';
 import type { ITodoEffortScore } from '../../types/todoScoringTypes';
 
 // ---------------------------------------------------------------------------
@@ -208,18 +198,18 @@ const EffortLevelBadge: React.FC<IEffortLevelBadgeProps> = ({ level }) => {
 
   const levelClass = React.useMemo(() => {
     switch (level) {
-      case 'High': return styles.levelBadgeHigh;
-      case 'Med':  return styles.levelBadgeMed;
+      case 'High':
+        return styles.levelBadgeHigh;
+      case 'Med':
+        return styles.levelBadgeMed;
       case 'Low':
-      default:     return styles.levelBadgeLow;
+      default:
+        return styles.levelBadgeLow;
     }
   }, [level, styles]);
 
   return (
-    <span
-      className={mergeClasses(styles.levelBadge, levelClass)}
-      aria-label={`Effort level: ${level}`}
-    >
+    <span className={mergeClasses(styles.levelBadge, levelClass)} aria-label={`Effort level: ${level}`}>
       {level}
     </span>
   );
@@ -235,54 +225,46 @@ interface IMultiplierRowProps {
   applied: boolean;
 }
 
-const MultiplierRow: React.FC<IMultiplierRowProps> = React.memo(
-  ({ name, value, applied }) => {
-    const styles = useStyles();
+const MultiplierRow: React.FC<IMultiplierRowProps> = React.memo(({ name, value, applied }) => {
+  const styles = useStyles();
 
-    return (
-      <div
-        className={styles.multiplierRow}
-        role="listitem"
-        aria-label={`${name} ${value}x — ${applied ? 'applied' : 'not applied'}`}
-      >
-        {/* Icon: checkmark if applied, circle outline if not */}
-        {applied ? (
-          <CheckmarkCircleRegular
-            className={styles.multiplierIconApplied}
-            aria-hidden="true"
-          />
-        ) : (
-          <CircleRegular
-            className={styles.multiplierIconNotApplied}
-            aria-hidden="true"
-          />
+  return (
+    <div
+      className={styles.multiplierRow}
+      role="listitem"
+      aria-label={`${name} ${value}x — ${applied ? 'applied' : 'not applied'}`}
+    >
+      {/* Icon: checkmark if applied, circle outline if not */}
+      {applied ? (
+        <CheckmarkCircleRegular className={styles.multiplierIconApplied} aria-hidden="true" />
+      ) : (
+        <CircleRegular className={styles.multiplierIconNotApplied} aria-hidden="true" />
+      )}
+
+      {/* Multiplier name */}
+      <Text
+        size={200}
+        className={mergeClasses(
+          styles.multiplierName,
+          applied ? styles.multiplierNameApplied : styles.multiplierNameNotApplied
         )}
+      >
+        {name}
+      </Text>
 
-        {/* Multiplier name */}
-        <Text
-          size={200}
-          className={mergeClasses(
-            styles.multiplierName,
-            applied ? styles.multiplierNameApplied : styles.multiplierNameNotApplied
-          )}
-        >
-          {name}
-        </Text>
-
-        {/* Multiplier value */}
-        <Text
-          size={200}
-          className={mergeClasses(
-            styles.multiplierValue,
-            applied ? styles.multiplierValueApplied : styles.multiplierValueNotApplied
-          )}
-        >
-          {value.toFixed(1)}x
-        </Text>
-      </div>
-    );
-  }
-);
+      {/* Multiplier value */}
+      <Text
+        size={200}
+        className={mergeClasses(
+          styles.multiplierValue,
+          applied ? styles.multiplierValueApplied : styles.multiplierValueNotApplied
+        )}
+      >
+        {value.toFixed(1)}x
+      </Text>
+    </div>
+  );
+});
 
 MultiplierRow.displayName = 'MultiplierRow';
 
@@ -300,12 +282,18 @@ MultiplierRow.displayName = 'MultiplierRow';
  */
 export function effortChoiceLabel(value: number | null | undefined): string | undefined {
   switch (value) {
-    case 100000000: return 'None';
-    case 100000001: return 'Very High';
-    case 100000002: return 'High';
-    case 100000003: return 'Medium';
-    case 100000004: return 'Low';
-    default: return undefined;
+    case 100000000:
+      return 'None';
+    case 100000001:
+      return 'Very High';
+    case 100000002:
+      return 'High';
+    case 100000003:
+      return 'Medium';
+    case 100000004:
+      return 'Low';
+    default:
+      return undefined;
   }
 }
 
@@ -330,12 +318,18 @@ const EffortChoiceBadge: React.FC<{ value: number }> = ({ value }) => {
       return undefined; // Unrecognised value — neutral no-op (no badge rendered).
     }
     switch (value) {
-      case 100000000: return { label, toneClass: styles.levelBadgeChoiceNone };
-      case 100000001: return { label, toneClass: styles.levelBadgeHigh };
-      case 100000002: return { label, toneClass: styles.levelBadgeChoiceHigh };
-      case 100000003: return { label, toneClass: styles.levelBadgeMed };
-      case 100000004: return { label, toneClass: styles.levelBadgeLow };
-      default: return undefined;
+      case 100000000:
+        return { label, toneClass: styles.levelBadgeChoiceNone };
+      case 100000001:
+        return { label, toneClass: styles.levelBadgeHigh };
+      case 100000002:
+        return { label, toneClass: styles.levelBadgeChoiceHigh };
+      case 100000003:
+        return { label, toneClass: styles.levelBadgeMed };
+      case 100000004:
+        return { label, toneClass: styles.levelBadgeLow };
+      default:
+        return undefined;
     }
   }, [value, styles]);
 
@@ -378,69 +372,69 @@ export interface IEffortScoreCardProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const EffortScoreCard: React.FC<IEffortScoreCardProps> = React.memo(
-  ({ effort, isMockData, effortChoice }) => {
-    const styles = useStyles();
+export const EffortScoreCard: React.FC<IEffortScoreCardProps> = React.memo(({ effort, isMockData, effortChoice }) => {
+  const styles = useStyles();
 
-    return (
-      <Card className={styles.card} aria-label={`Effort score: ${effort.score}, level ${effort.level}`}>
-        {/* Section header */}
-        <Text size={100} className={styles.sectionLabel}>
-          Effort
-        </Text>
+  return (
+    <Card className={styles.card} aria-label={`Effort score: ${effort.score}, level ${effort.level}`}>
+      {/* Section header */}
+      <Text size={100} className={styles.sectionLabel}>
+        Effort
+      </Text>
 
-        {/* Large score + level badge */}
-        <div className={styles.scoreRow}>
-          <span className={styles.scoreValue} aria-hidden="true">
-            {effort.score}
-          </span>
-          <EffortLevelBadge level={effort.level} />
-        </div>
+      {/* Large score + level badge */}
+      <div className={styles.scoreRow}>
+        <span className={styles.scoreValue} aria-hidden="true">
+          {effort.score}
+        </span>
+        <EffortLevelBadge level={effort.level} />
+      </div>
 
-        {/* Selected-effort row (FR-03 / task 012) — the raw sprk_effort
+      {/* Selected-effort row (FR-03 / task 012) — the raw sprk_effort
             Choice selection, distinct from the score-derived level above. */}
-        {typeof effortChoice === 'number' && (
-          <div className={styles.scoreRow}>
-            <Text size={100} className={styles.baseEffortLabel}>Selected:</Text>
-            <EffortChoiceBadge value={effortChoice} />
-          </div>
-        )}
-
-        {/* Base effort display */}
-        <div className={styles.baseEffortRow}>
-          <Text size={200} className={styles.baseEffortLabel}>
-            Base effort:
+      {typeof effortChoice === 'number' && (
+        <div className={styles.scoreRow}>
+          <Text size={100} className={styles.baseEffortLabel}>
+            Selected:
           </Text>
-          <Text size={200} className={styles.baseEffortValue}>
-            {effort.baseEffort} pts
-          </Text>
+          <EffortChoiceBadge value={effortChoice} />
         </div>
+      )}
 
-        {/* Complexity multipliers checklist */}
-        <div className={styles.multipliersSection}>
-          <Text size={100} className={styles.multipliersLabel}>
-            Complexity multipliers
-          </Text>
-          <div role="list" aria-label="Complexity multipliers">
-            {effort.multipliers.map((multiplier) => (
-              <MultiplierRow
-                key={multiplier.name}
-                name={multiplier.name}
-                value={multiplier.value}
-                applied={multiplier.applied}
-              />
-            ))}
-          </div>
+      {/* Base effort display */}
+      <div className={styles.baseEffortRow}>
+        <Text size={200} className={styles.baseEffortLabel}>
+          Base effort:
+        </Text>
+        <Text size={200} className={styles.baseEffortValue}>
+          {effort.baseEffort} pts
+        </Text>
+      </div>
+
+      {/* Complexity multipliers checklist */}
+      <div className={styles.multipliersSection}>
+        <Text size={100} className={styles.multipliersLabel}>
+          Complexity multipliers
+        </Text>
+        <div role="list" aria-label="Complexity multipliers">
+          {effort.multipliers.map(multiplier => (
+            <MultiplierRow
+              key={multiplier.name}
+              name={multiplier.name}
+              value={multiplier.value}
+              applied={multiplier.applied}
+            />
+          ))}
         </div>
+      </div>
 
-        {isMockData && (
-          <Text size={100} className={styles.mockNotice}>
-            Preview data — connect to BFF for live scoring
-          </Text>
-        )}
-      </Card>
-    );
-  }
-);
+      {isMockData && (
+        <Text size={100} className={styles.mockNotice}>
+          Preview data — connect to BFF for live scoring
+        </Text>
+      )}
+    </Card>
+  );
+});
 
 EffortScoreCard.displayName = 'EffortScoreCard';

@@ -22,7 +22,7 @@
  *   - Support light, dark, and high-contrast modes (automatic via token system)
  */
 
-import * as React from "react";
+import * as React from 'react';
 import {
   makeStyles,
   tokens,
@@ -33,16 +33,10 @@ import {
   PopoverSurface,
   SpinButton,
   Field,
-} from "@fluentui/react-components";
-import type {
-  SpinButtonChangeEvent,
-  SpinButtonOnChangeData,
-} from "@fluentui/react-components";
-import {
-  DEFAULT_TODAY_THRESHOLD,
-  DEFAULT_TOMORROW_THRESHOLD,
-} from "../../hooks/useKanbanColumns";
-import type { ITodoKanbanPreferences } from "../../types/entities";
+} from '@fluentui/react-components';
+import type { SpinButtonChangeEvent, SpinButtonOnChangeData } from '@fluentui/react-components';
+import { DEFAULT_TODAY_THRESHOLD, DEFAULT_TOMORROW_THRESHOLD } from '../../hooks/useKanbanColumns';
+import type { ITodoKanbanPreferences } from '../../types/entities';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -50,27 +44,27 @@ import type { ITodoKanbanPreferences } from "../../types/entities";
 
 const useStyles = makeStyles({
   surface: {
-    display: "flex",
-    flexDirection: "column",
+    display: 'flex',
+    flexDirection: 'column',
     gap: tokens.spacingVerticalM,
     paddingTop: tokens.spacingHorizontalL,
     paddingBottom: tokens.spacingHorizontalL,
     paddingLeft: tokens.spacingHorizontalL,
     paddingRight: tokens.spacingHorizontalL,
-    minWidth: "280px",
+    minWidth: '280px',
   },
   fieldRow: {
-    display: "flex",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     gap: tokens.spacingHorizontalM,
   },
   footer: {
-    display: "flex",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+    display: 'flex',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     gap: tokens.spacingHorizontalM,
   },
   validationError: {
@@ -110,15 +104,9 @@ const ThresholdSettings: React.FC<IThresholdSettingsProps> = ({
   const styles = useStyles();
 
   // ── Local state ──────────────────────────────────────────────────────────
-  const [todayValue, setTodayValue] = React.useState<number>(
-    preferences.todayThreshold
-  );
-  const [tomorrowValue, setTomorrowValue] = React.useState<number>(
-    preferences.tomorrowThreshold
-  );
-  const [validationError, setValidationError] = React.useState<string | null>(
-    null
-  );
+  const [todayValue, setTodayValue] = React.useState<number>(preferences.todayThreshold);
+  const [tomorrowValue, setTomorrowValue] = React.useState<number>(preferences.tomorrowThreshold);
+  const [validationError, setValidationError] = React.useState<string | null>(null);
 
   // Sync local state from props each time the popover opens
   React.useEffect(() => {
@@ -131,22 +119,18 @@ const ThresholdSettings: React.FC<IThresholdSettingsProps> = ({
 
   // ── Validation ───────────────────────────────────────────────────────────
 
-  const validate = React.useCallback(
-    (today: number, tomorrow: number): string | null => {
-      if (today <= tomorrow) {
-        return "Today threshold must be greater than Tomorrow threshold.";
-      }
-      return null;
-    },
-    []
-  );
+  const validate = React.useCallback((today: number, tomorrow: number): string | null => {
+    if (today <= tomorrow) {
+      return 'Today threshold must be greater than Tomorrow threshold.';
+    }
+    return null;
+  }, []);
 
   // ── SpinButton handlers ──────────────────────────────────────────────────
 
   const handleTodayChange = React.useCallback(
     (_event: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
-      const newValue =
-        data.value ?? (data.displayValue ? Number(data.displayValue) : todayValue);
+      const newValue = data.value ?? (data.displayValue ? Number(data.displayValue) : todayValue);
 
       // Guard against NaN from invalid display input
       const safeValue = Number.isNaN(newValue) ? todayValue : newValue;
@@ -158,8 +142,7 @@ const ThresholdSettings: React.FC<IThresholdSettingsProps> = ({
 
   const handleTomorrowChange = React.useCallback(
     (_event: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
-      const newValue =
-        data.value ?? (data.displayValue ? Number(data.displayValue) : tomorrowValue);
+      const newValue = data.value ?? (data.displayValue ? Number(data.displayValue) : tomorrowValue);
 
       const safeValue = Number.isNaN(newValue) ? tomorrowValue : newValue;
       setTomorrowValue(safeValue);
@@ -189,14 +172,8 @@ const ThresholdSettings: React.FC<IThresholdSettingsProps> = ({
   // ── Render ───────────────────────────────────────────────────────────────
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(_event, data) => onOpenChange(data.open)}
-      positioning="below-end"
-    >
-      <PopoverTrigger disableButtonEnhancement>
-        {children}
-      </PopoverTrigger>
+    <Popover open={open} onOpenChange={(_event, data) => onOpenChange(data.open)} positioning="below-end">
+      <PopoverTrigger disableButtonEnhancement>{children}</PopoverTrigger>
 
       <PopoverSurface className={styles.surface}>
         {/* Title */}
@@ -205,9 +182,7 @@ const ThresholdSettings: React.FC<IThresholdSettingsProps> = ({
         </Text>
 
         {/* Description */}
-        <Text size={200}>
-          Items are assigned to Kanban columns based on their To Do Score.
-        </Text>
+        <Text size={200}>Items are assigned to Kanban columns based on their To Do Score.</Text>
 
         {/* Today threshold */}
         <Field label="Today threshold">
@@ -249,11 +224,7 @@ const ThresholdSettings: React.FC<IThresholdSettingsProps> = ({
           <Button appearance="subtle" onClick={handleReset}>
             Reset to Defaults
           </Button>
-          <Button
-            appearance="primary"
-            onClick={handleSave}
-            disabled={validationError !== null}
-          >
+          <Button appearance="primary" onClick={handleSave} disabled={validationError !== null}>
             Save
           </Button>
         </div>
@@ -262,10 +233,10 @@ const ThresholdSettings: React.FC<IThresholdSettingsProps> = ({
   );
 };
 
-ThresholdSettings.displayName = "ThresholdSettings";
+ThresholdSettings.displayName = 'ThresholdSettings';
 
 export default React.memo(ThresholdSettings);
 
 // Also export as named export for barrel file convenience
 export const ThresholdSettingsPopover = React.memo(ThresholdSettings);
-ThresholdSettingsPopover.displayName = "ThresholdSettings";
+ThresholdSettingsPopover.displayName = 'ThresholdSettings';

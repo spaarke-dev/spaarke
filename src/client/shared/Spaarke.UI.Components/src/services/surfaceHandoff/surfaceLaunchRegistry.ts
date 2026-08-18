@@ -165,6 +165,44 @@ export const SURFACE_LAUNCH_REGISTRY: Readonly<Record<string, SurfaceLaunchRegis
     surface: 'compose',
     title: 'Compose',
   },
+  // spaarkeai-assistant-enhancements-r4 task 022 (FR-06): the `daily-briefing` capability's
+  // surface identity — opens the registered `workspace` widget type, the SAME generic
+  // LegalWorkspaceApp-embedding dispatcher every "Switch Workspace" pick already uses
+  // (WorkspacePaneMenu / ManageWorkspacesPane both dispatch `widgetType: 'workspace'` with a
+  // `{ layoutId, layoutName }` payload — see register-workspace-widgets.ts item 16). There is no
+  // separate per-layout widget TYPE to tag (Daily Briefing/Calendar/Smart To Do all collapse to
+  // this one generic Dashboard identity server-side, per that file's task-022 comment) — the
+  // distinguishing input is `widgetData.layoutId`, a `sprk_workspacelayout` row id.
+  //
+  // `layoutId`/`layoutName` are the system "Daily Briefing" row (isSystem=true, isDefault=true)
+  // queried on spaarkedev1 — an ENVIRONMENT-SPECIFIC Dataverse row id, not a deploy-time code
+  // constant. This mirrors the EXISTING `ENTITY_VIEW_CONFIG_IDS` precedent in
+  // register-workspace-widgets.ts (hardcoded `sprk_gridconfiguration` GUIDs, e.g. `myTasks`) —
+  // the same accepted pattern, same environment-portability caveat: an environment without this
+  // exact row id needs the constant updated (see that file's "DEPLOYMENT REQUIREMENT" note).
+  // kind:'workspace-tab' per the owner's single-surface decision (FR-06 / spec Out-of-Scope: no
+  // registry shape change, no multi-surface fan-out) — `handleSurfaceLaunch` dispatches it via the
+  // SAME generic PaneEventBus `widget_load` path as `list-tasks`/`nda-review` (kind-branch only;
+  // no per-consumerType code). Task 023 authors the matching Binding row
+  // (`sprk_consumertype = "daily-briefing"`) that projects this capability into the agent turn.
+  'daily-briefing': {
+    kind: 'workspace-tab',
+    surface: 'workspace',
+    title: 'Daily Briefing',
+    widgetData: { layoutId: '6d41d537-fe55-f111-a824-3833c5ed9c11', layoutName: 'Daily Briefing' },
+  },
+  // spaarkeai-assistant-enhancements-r4 task 022 (FR-06): the `smart-todo` capability's surface
+  // identity — same `workspace` widget-type dispatcher as `daily-briefing` above, targeted at the
+  // system "Smart To Do List" `sprk_workspacelayout` row (isSystem=true) via `widgetData.layoutId`.
+  // Same environment-specific-GUID caveat as `daily-briefing` (queried on spaarkedev1; mirrors the
+  // `ENTITY_VIEW_CONFIG_IDS` precedent). Task 023 authors the matching Binding row
+  // (`sprk_consumertype = "smart-todo"`).
+  'smart-todo': {
+    kind: 'workspace-tab',
+    surface: 'workspace',
+    title: 'Smart To Do',
+    widgetData: { layoutId: 'a49f9e3a-fe55-f111-a824-7ced8dd899c3', layoutName: 'Smart To Do List' },
+  },
 };
 
 /**

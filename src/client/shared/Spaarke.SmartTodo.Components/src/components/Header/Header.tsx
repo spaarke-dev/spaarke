@@ -90,12 +90,7 @@ import {
   Search20Regular,
   SettingsRegular,
 } from '@fluentui/react-icons';
-import {
-  MicrosoftToDoIcon,
-  SelectionAwareToolbar,
-  type Orientation,
-  type ToolbarAction,
-} from '@spaarke/ui-components';
+import { MicrosoftToDoIcon, SelectionAwareToolbar, type Orientation, type ToolbarAction } from '@spaarke/ui-components';
 import { SearchFilter } from '../SearchFilter';
 import { useHeaderStyles } from './Header.styles';
 
@@ -236,16 +231,14 @@ export const Header: React.FC<HeaderProps> = ({
   const styles = useHeaderStyles();
 
   const hasSelection = selectedCount > 0;
-  const showLayoutMenuItem =
-    orientation !== undefined && onOrientationChange !== undefined;
+  const showLayoutMenuItem = orientation !== undefined && onOrientationChange !== undefined;
 
   const handleLayoutClick = React.useCallback(() => {
     if (orientation === undefined || onOrientationChange === undefined) return;
     onOrientationChange(NEXT_ORIENTATION[orientation]);
   }, [orientation, onOrientationChange]);
 
-  const LayoutIcon =
-    orientation === 'vertical' ? LayoutRowTwo20Regular : LayoutColumnTwo20Regular;
+  const LayoutIcon = orientation === 'vertical' ? LayoutRowTwo20Regular : LayoutColumnTwo20Regular;
 
   return (
     <div className={styles.headerColumn}>
@@ -260,30 +253,19 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      <Toolbar
-        aria-label="Smart To Do toolbar"
-        size="small"
-        className={styles.toolbar}
-      >
+      <Toolbar aria-label="Smart To Do toolbar" size="small" className={styles.toolbar}>
         <div className={styles.spacer} />
 
         {/* ── Right cluster: selection-aware actions OR Filter / + New Task
               / ⋮ overflow, per mockup order (Filter · + New Task · ⋮). ── */}
         {hasSelection ? (
           <div className={styles.rightGroup}>
-            <SelectionAwareToolbar
-              selectedCount={selectedCount}
-              actions={toolbarActions}
-            />
+            <SelectionAwareToolbar selectedCount={selectedCount} actions={toolbarActions} />
             {/* ── smart-todo-r5 UAT pass 2 (2026-08-17) — inline expanding
                   search, immediately to the LEFT of the Filter pill, on the
                   same toolbar row. Stays mounted across open/close (CSS
                   display toggle) — see SearchFilter.tsx module doc. ── */}
-            <SearchFilter
-              isOpen={isFilterPaneOpen}
-              value={searchQuery}
-              onChange={onSearchQueryChange}
-            />
+            <SearchFilter isOpen={isFilterPaneOpen} value={searchQuery} onChange={onSearchQueryChange} />
             <Button
               appearance="outline"
               size="small"
@@ -302,11 +284,7 @@ export const Header: React.FC<HeaderProps> = ({
                   same toolbar row as "+ New Task" / ⋮. Stays mounted across
                   open/close (CSS display toggle) — see SearchFilter.tsx
                   module doc. ── */}
-            <SearchFilter
-              isOpen={isFilterPaneOpen}
-              value={searchQuery}
-              onChange={onSearchQueryChange}
-            />
+            <SearchFilter isOpen={isFilterPaneOpen} value={searchQuery} onChange={onSearchQueryChange} />
             <Button
               appearance="outline"
               size="small"
