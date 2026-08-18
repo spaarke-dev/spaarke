@@ -3,8 +3,8 @@
   <metadata>
     <title>IaC alignment — update Bicep secret names + BFF app-setting keys to canonical (__ convention) + delete orphan flat keys</title>
     <phase>H KV Federation Full Remediation</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api','auth','azure-deployment'; modifies Bicep + BFF app-settings; deletes orphan KV keys with zero code binds; propagates canonical naming into IaC. FR-36 scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

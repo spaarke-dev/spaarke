@@ -126,10 +126,11 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 // Key Vault secret rotation policies are applied per-secret at creation time
 // (not declaratively via Bicep). Post-deployment scripts should use these values:
 //
-//   Secrets requiring rotation:
-//     redis-connection-string, servicebus-connection-string,
-//     storage-connection-string, openai-api-key, AiSearch--AdminKey,
-//     communication-webhook-secret
+//   Secrets requiring rotation (canonical names per
+//   scripts/canonical-secret-catalog/manifest.yaml; task 086 alignment):
+//     Redis-ConnectionString, ServiceBus-ConnectionString,
+//     Storage-ConnectionString, AzureOpenAI-ApiKey, AiSearch--AdminKey,
+//     DocumentIntelligence-ApiKey, Communication-WebhookClientState
 //
 //   Expiry: 365 days | Notify: 30 days before expiry
 //

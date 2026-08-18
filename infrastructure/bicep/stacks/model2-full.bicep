@@ -203,7 +203,8 @@ module bffApi '../modules/app-service.bicep' = {
 
       // AI Services (Key Vault references)
       OPENAI_ENDPOINT: openAi.outputs.openAiEndpoint
-      OPENAI_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=openai-api-key)'
+      // Canonical secret name per canonical-secret-catalog manifest (task 086 FR-36).
+      OPENAI_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=AzureOpenAI-ApiKey)'
       AI_SEARCH_ENDPOINT: aiSearch.outputs.searchServiceEndpoint
       AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=AiSearch--AdminKey)'
 

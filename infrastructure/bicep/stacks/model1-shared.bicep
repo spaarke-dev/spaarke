@@ -425,13 +425,15 @@ module sharedBffApi '../modules/app-service.bicep' = {
       // AI Services (shared) — multi-tenant safety enforced at BFF query layer
       // via §4D I2 (unconditional `tenantId eq` filter on every AI Search query).
       OPENAI_ENDPOINT: sharedOpenAi.outputs.openAiEndpoint
-      OPENAI_API_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=openai-api-key)'
+      // Canonical secret name per canonical-secret-catalog manifest (task 086 FR-36).
+      OPENAI_API_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=AzureOpenAI-ApiKey)'
       AI_SEARCH_ENDPOINT: sharedAiSearch.outputs.searchServiceEndpoint
       AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=AiSearch--AdminKey)'
 
       // Document Intelligence (shared)
       DOC_INTELLIGENCE_ENDPOINT: sharedDocIntelligence.outputs.docIntelligenceEndpoint
-      DOC_INTELLIGENCE_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=docintel-key)'
+      // Canonical secret name per canonical-secret-catalog manifest (task 086 FR-36).
+      DOC_INTELLIGENCE_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=DocumentIntelligence-ApiKey)'
 
       // Monitoring (shared)
       APPLICATIONINSIGHTS_CONNECTION_STRING: sharedMonitoring.outputs.connectionString
