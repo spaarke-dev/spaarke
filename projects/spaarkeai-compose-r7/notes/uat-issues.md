@@ -282,6 +282,19 @@ investigation/research pass to choose the correct write-model before building.
   not just an exact 1:1-folded substring) is fidelity/quality work with real mis-location risk + a position-map
   redesign → documented in `projects/spaarkeai-compose-r8/notes/fidelity-architecture-investigation.md` §4b with
   entry-points + research questions. Not an R7 honesty fix.
-- 🔧 Do next: **UAT-08** (auto-create Analysis record — investigated: buildable via the existing `/promote`
-  machinery at the review-completion hook; see below).
+- ✅ **UAT-08 Fixed** (2026-08-18, owner-approved design): when an analysis/review COMPLETES in Compose, the
+  session is now auto-promoted to a bound `sprk_analysis` record so the work shows in history and can be
+  reopened (the "reload prior work from history" the owner referenced). New `useComposeAnalysisAutoCreate` hook
+  reuses the EXISTING `POST /api/ai/analysis/promote` (create + bind + server-side already-bound guard — NO new
+  server surface), fired from `ConversationPane.dispatchComposeAction`'s informational-result branch. **Owner
+  decisions**: trigger = **any completed analysis/review**; name = **"{document} — {review type}"** (e.g.
+  "Acme NDA.docx — Review"; renameable via history). **Safety**: once-per-session (client guard) + server
+  already-bound 400 → no duplicates on re-runs; a no-anchor/transient session yields a benign 400 (skip);
+  fire-and-forget, NEVER blocks or throws in the analysis flow. +6 hook tests green; build surface-gate clean
+  (0 surface-owned errors). Real-env UAT: run an NDA review in Compose → confirm an Analysis record appears +
+  reopens from history. (The old manual "Promote"/"Set related record" affordance stays as-is for explicit
+  matter/project association — task 034.)
+- **BATCH COMPLETE** — every UAT row is now ✅ Fixed, ✅ Verified, or 📦 Deferred-to-r8 with an owner decision.
+  Remaining before R7 close: merge master → run BFF §10 publish-size gate → redeploy BFF + `sprk_spaarkeai`
+  together (NFR-05) → real-env UAT re-test.
 - **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".
