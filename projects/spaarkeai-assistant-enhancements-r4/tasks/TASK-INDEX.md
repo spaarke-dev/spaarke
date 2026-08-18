@@ -26,7 +26,7 @@
 | 031 | Feedback→memory pipeline | 3 E3 loop | FR-08 | opus / high | FULL | ❌ | 030 | ✅ |
 | 032 | Governed narrow-allow-list preference-producer | 3 E3 loop | FR-09 | opus / xhigh | FULL | ❌ | 030 | ✅ (PreferenceDirectiveProducer closed-allow-list → server-authored prompt hint; confirmed-only; never touches AgentToolFilterContext; 8 bounds tests + 2 invariant guards fixed, 85/85; publish 43.68 MB; CVE clean) |
 | 033 | E3 eval + preference-producer bounds tests | 3 E3 loop | FR-09, FR-10 | sonnet / high | FULL | ✅ | 031, 032 | ✅ (AR4-020 preference-loop golden case + PreferenceLoop grounding test in GoldenUtteranceEval gate 155/155; grounds the P3 loop vs the real catalog; negative check confirmed) |
-| 040 | D9 host-proof flex-chain fix (Open-in-Compose) | 4 D9 | FR-11 | sonnet / high | FULL | ❌ | — | 🔲 |
+| 040 | D9 host-proof flex-chain fix (Open-in-Compose) | 4 D9 | FR-11 | sonnet / high | FULL | ❌ | — | ✅ (D9 core resolved by merged `min-height:0` partial fix — owner live-DOM confirmed bounded, no speculative flex edit; remaining dead-whitespace/Refresh-row clip fixed by collapsing the pin-to-top trailing spacer once content fills the viewport; 374/374 SprkChat tests; ships w/ 080 deploy) |
 | 080 | Deploy + verify (BFF + sprk_spaarkeai; owner-gated) | Deploy | — | sonnet / high | STANDARD | ❌ | 013, 024, 033, 040 | 🔲 |
 | 090 | Project wrap-up (`/test-diet` gate) | Wrap-up | — | sonnet / med | MINIMAL | ❌ | 080 | 🔲 |
 
