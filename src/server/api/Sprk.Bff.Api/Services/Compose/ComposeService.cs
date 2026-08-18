@@ -647,6 +647,10 @@ public class ComposeService : IComposeService
         // still edits the doc).
         IReadOnlyList<ImportedRevision> importedRevisions;
         IReadOnlyList<ImportedComment> importedComments;
+        // UAT-12 (2026-08-18, honest/safe): track whether the annotation read actually FAILED (threw) vs
+        // genuinely returned nothing. An empty result on the failure path must NOT be presented as a clean
+        // document — the client surfaces an honest banner when this is true.
+        bool annotationReadFailed = false;
         try
         {
             var recovered = _annotationReader.Read(content.ToArray());
@@ -685,6 +689,7 @@ public class ComposeService : IComposeService
                 request.DriveId, request.DocumentSpeId);
             importedRevisions = Array.Empty<ImportedRevision>();
             importedComments = Array.Empty<ImportedComment>();
+            annotationReadFailed = true; // UAT-12: signal the client so it never shows this as clean
         }
 
         // FR-06 (E1, task 027): capture the LOAD-TIME SPE version id so a later dirty save that no longer
@@ -815,6 +820,7 @@ public class ComposeService : IComposeService
             Projection = projection,
             ImportedRevisions = importedRevisions,
             ImportedComments = importedComments,
+            AnnotationReadFailed = annotationReadFailed,
             ContentModel = contentModel,
             ContentModelWarnings = contentModelWarnings,
             Origin = origin,

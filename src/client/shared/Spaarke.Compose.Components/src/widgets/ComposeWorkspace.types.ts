@@ -164,6 +164,13 @@ export interface ComposeWorkspaceState {
    */
   importedComments: readonly ImportedComment[];
   /**
+   * UAT-12 (2026-08-18, honest/safe): true when the server's annotation read FAILED on this load, so
+   * {@link importedRevisions}/{@link importedComments} are an empty FALLBACK — NOT proof the document
+   * is clean. Drives an honest, prominent "tracked changes and comments couldn't be read — do not
+   * treat this as clean" banner. False on every normal load (an empty result then means no annotations).
+   */
+  annotationReadFailed: boolean;
+  /**
    * The server-side DOCX→editor projection from a STORED-DOCUMENT Load response. When present, the
    * editor mounts `projection.html` directly (the paraId extension parses `data-paraid`). Fail-closed:
    * `canEdit === false` ⇒ the editor renders a read-only / "Open in Word" state, NEVER a blank editable
@@ -302,6 +309,8 @@ export type ComposeWorkspaceAction =
       paraIdMap?: readonly ParaIdMapEntry[];
       importedRevisions?: readonly ImportedRevision[];
       importedComments?: readonly ImportedComment[];
+      // UAT-12: honest annotation-read-failed signal from the Load response (undefined → false).
+      annotationReadFailed?: boolean;
       // The server DOCX→editor projection. Undefined (older BFF) → null in the reducer → (task 013,
       // F-2) the editor renders an explicit error/unavailable state — no client fallback reader remains.
       projection?: ComposeServerProjection | null;
@@ -479,6 +488,7 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   paraIdMap: [],
   importedRevisions: [],
   importedComments: [],
+  annotationReadFailed: false,
   projection: null,
   loadedContentModel: null,
   loadedContentModelWarnings: null,
@@ -532,6 +542,8 @@ export function composeWorkspaceReducer(
         paraIdMap: action.paraIdMap ?? [],
         importedRevisions: action.importedRevisions ?? [],
         importedComments: action.importedComments ?? [],
+        // UAT-12: carry the honest annotation-read-failed signal (older BFF omits it → false).
+        annotationReadFailed: action.annotationReadFailed ?? false,
         // The server projection (null for an older BFF → task 013/F-2 error-unavailable state).
         projection: action.projection ?? null,
         // task 012 (r6): the canonical content model — set ATOMICALLY with projection (same source
@@ -621,6 +633,7 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
+        annotationReadFailed: false, // UAT-12: a non-load mount has no annotation read — clear any stale flag.
         // FR-01/FR-03 (tasks 010/011): both the assistant-upload door (POST /api/compose/upload)
         // AND the Browse-direct-upload door (POST /api/compose/project, T-2 path-A) now supply a
         // server projection built from the SAME mounted bytes (ComposeDocxProjectionBuilder) —
@@ -678,6 +691,7 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
+        annotationReadFailed: false, // UAT-12: a non-load mount has no annotation read — clear any stale flag.
         // No server round-trip → no projection. `docxBytes` is also null for this mount kind (the
         // editor seeds directly from `initialHtml`), so the editor's docx-mount branch (projection /
         // error-unavailable) is never reached here — this was never a mammoth consumer (task 012 audit).

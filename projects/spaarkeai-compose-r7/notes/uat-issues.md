@@ -237,9 +237,17 @@ investigation/research pass to choose the correct write-model before building.
   (`comment-flattened`, `comment-anchor-flattened`), ruby, empty-table, and the 4 `template-merge-*` codes. No
   false "content intact" reassurance (several are real losses; DEF-002/compose-r8 PRESERVES them — this only makes
   the WARNING legible). +1 test; 35/35 green.
-- 🔧 Do next (the batch): **UAT-12** (surface dropped tracked-changes/comments on read failure — BFF),
-  **UAT-24** (tolerant-but-SURFACED resolver — propose-don't-auto-place; UAT-21 already applied the SURFACE half),
-  plus the earlier-triaged **UAT-04** (progress indicator), **UAT-08** (promote + auto-create Analysis), **UAT-09**
-  (comment anchoring signal), **UAT-10** (notifications 401), **UAT-25/26** (concurrency-guard on the
-  ContentModel save path — honest lost-update prevention/warning).
+- ✅ **UAT-12 Fixed** (2026-08-18): the `LoadAsync` annotation-read catch used to force
+  `importedRevisions=[]`/`importedComments=[]` on ANY exception with no client signal — a doc WITH redlines/
+  comments mounted looking CLEAN (⛔ trust-breaking on a legal-review surface). Added an honest
+  `AnnotationReadFailed` flag end-to-end: `LoadComposeDocumentResult` (server) → `LoadComposeDocumentResponse`
+  wire field → client `annotationReadFailed` state → prominent "Tracked changes and comments couldn't be read —
+  don't treat this as clean, open in Word to review" banner. BFF builds clean (0 errors); +3 banner tests
+  (38/38). BFF §10 gates: additive bool field, zero new packages → publish-size delta ~0 / no new CVE (final
+  publish measurement batched to pre-deploy).
+- 🔧 Do next (the batch): **UAT-24** (tolerant-but-SURFACED resolver — propose-don't-auto-place; UAT-21 already
+  applied the SURFACE half), plus the earlier-triaged **UAT-04** (progress indicator), **UAT-08** (promote +
+  auto-create Analysis — needs an owner design call on auto-create), **UAT-09** (comment anchoring signal —
+  overlaps UAT-22/12), **UAT-10** (notifications 401 — investigate, likely hub-auth/env), **UAT-25/26**
+  (concurrency-guard on the ContentModel save path — honest lost-update prevention/warning).
 - **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".

@@ -34,6 +34,26 @@ const TWO_WARNINGS = [
   { type: 'ignored', message: 'b' },
 ];
 
+describe('ComposeBannerStack — UAT-12 annotation-read-failed warning (do not treat as clean)', () => {
+  it('renders the honest "tracked changes and comments couldn\'t be read" banner', () => {
+    renderStack({ annotationReadFailed: true });
+    expect(screen.getByTestId('compose-workspace-annotation-read-failed-banner')).toBeInTheDocument();
+    expect(screen.getByText("Tracked changes and comments couldn't be read")).toBeInTheDocument();
+  });
+
+  it('renders nothing for the banner when annotationReadFailed is false/omitted', () => {
+    renderStack({ annotationReadFailed: false });
+    expect(screen.queryByTestId('compose-workspace-annotation-read-failed-banner')).not.toBeInTheDocument();
+  });
+
+  it('hides the banner on dismiss', async () => {
+    const user = userEvent.setup();
+    renderStack({ annotationReadFailed: true });
+    await user.click(screen.getByTestId('compose-workspace-annotation-read-failed-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-annotation-read-failed-banner')).not.toBeInTheDocument();
+  });
+});
+
 describe('ComposeBannerStack — UAT-13 association-orphan warning (saved but not filed)', () => {
   it('renders the honest "not filed under its matter" banner with a Retry action', () => {
     const onRetry = jest.fn();

@@ -1128,6 +1128,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap?: ParaIdMapEntry[];
           importedRevisions?: ImportedRevision[];
           importedComments?: ImportedComment[];
+          // UAT-12 (2026-08-18): true when the server's annotation read FAILED, so the empty
+          // revisions/comments above are a fallback — NOT proof the document is clean. Parsed
+          // defensively (older BFF omits it → falsy → no banner).
+          annotationReadFailed?: boolean;
           // The server DOCX→editor projection. Optional so an older BFF (no projection) still parses —
           // task 013 (F-2): the editor now renders an error/unavailable state, not a mammoth fallback.
           projection?: {
@@ -1193,6 +1197,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           paraIdMap: hydratedParaIdMap,
           importedRevisions: hydratedImportedRevisions,
           importedComments: hydratedImportedComments,
+          // UAT-12: carry the honest annotation-read-failed signal into state so the banner stack can
+          // warn the user not to treat a doc-with-unreadable-annotations as clean.
+          annotationReadFailed: payload.annotationReadFailed === true,
           projection: hydratedProjection,
           // task 012 (r6): retain the canonical model atomically with the projection (same response).
           contentModel: payload.contentModel ?? null,
@@ -4130,6 +4137,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // Prong 1 (task 055): when the last save could only anchor PART of the batch, show the honest
             // "N edits couldn't be saved — please redo them" warning (replaces the plain Saved ✓ bar).
             partialApply={state.partialApply}
+            // UAT-12 (2026-08-18): honest "tracked changes/comments couldn't be read" banner when the
+            // server annotation read failed — so a doc that may CONTAIN redlines/comments is never
+            // presented as clean.
+            annotationReadFailed={state.annotationReadFailed}
             // UAT-13 (2026-08-18): when a create-on-save persisted the document but its parent-
             // association write failed, show the honest "saved but not filed under its matter" banner
             // with a Retry that re-runs the host association write (clears on success).

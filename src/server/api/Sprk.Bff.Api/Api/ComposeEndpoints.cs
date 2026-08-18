@@ -1347,6 +1347,9 @@ public static class ComposeEndpoints
                 ParaIdMap: result.ParaIdMap,
                 ImportedRevisions: result.ImportedRevisions,
                 ImportedComments: result.ImportedComments,
+                // UAT-12 (2026-08-18): honest signal that the annotation read FAILED (so the empty
+                // revisions/comments above are a fallback, NOT proof the document is clean).
+                AnnotationReadFailed: result.AnnotationReadFailed,
                 // Phase-1 mammoth removal: the server-side projection (paraId-tagged HTML + fail-closed status).
                 // FR-01 (task 010): mapping extracted to the shared MapProjectionResponse helper so the
                 // Upload endpoint (below) reuses the IDENTICAL wire-shape mapping instead of forking it
@@ -2542,6 +2545,9 @@ public sealed record LoadComposeDocumentResponse(
     [property: JsonPropertyName("paraIdMap")] IReadOnlyList<ParaIdMapEntry> ParaIdMap,
     [property: JsonPropertyName("importedRevisions")] IReadOnlyList<ImportedRevision> ImportedRevisions,
     [property: JsonPropertyName("importedComments")] IReadOnlyList<ImportedComment> ImportedComments,
+    // UAT-12 (2026-08-18): honest signal that the annotation read FAILED (fallback empties above are NOT
+    // proof the doc is clean). Optional — defaults false so an older client ignores it harmlessly.
+    [property: JsonPropertyName("annotationReadFailed")] bool AnnotationReadFailed,
     // Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md): the server-side
     // DOCX→editor projection — paraId-tagged HTML + fail-closed status the client mounts instead of running
     // mammoth. The client keys off Projection.status/canEdit, NOT html length.

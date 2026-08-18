@@ -576,6 +576,18 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     public IReadOnlyList<ImportedComment> ImportedComments { get; init; } = Array.Empty<ImportedComment>();
 
     /// <summary>
+    /// UAT-12 (2026-08-18, honest/safe): <c>true</c> when the existing-annotation read
+    /// (<see cref="DocxAnnotationReader"/>) THREW during Load, so <see cref="ImportedRevisions"/> and
+    /// <see cref="ImportedComments"/> were forced empty as a fallback. Without this flag a document that
+    /// genuinely CONTAINS tracked changes / reviewer comments would mount looking CLEAN — a trust-breaking
+    /// silent loss on a legal-review surface. The client surfaces an honest "this document's tracked
+    /// changes and comments couldn't be read — do not treat it as clean" banner when this is set.
+    /// <c>false</c> on the normal path (the read succeeded — an empty result then means the document
+    /// really has no annotations).
+    /// </summary>
+    public bool AnnotationReadFailed { get; init; }
+
+    /// <summary>
     /// Task 012 (spaarkeai-compose-r6, the client cutover): the CANONICAL content model projected from
     /// the SAME minted load-time bytes the HTML <see cref="Projection"/> is built from (one mint, two
     /// walks — paraIds agree by construction). The client RETAINS this as the loaded model and, on an

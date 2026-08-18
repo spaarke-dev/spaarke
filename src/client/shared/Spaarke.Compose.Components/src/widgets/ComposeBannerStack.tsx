@@ -113,6 +113,13 @@ export interface ComposeBannerStackProps {
   /** UAT-13: re-run the host association write for {@link associationWarning}. Clears the banner on success. */
   onRetryAssociation?: () => void;
   /**
+   * UAT-12 (2026-08-18, honest/safe): true when the server's annotation read FAILED on load, so the
+   * document's imported tracked changes / reviewer comments are EMPTY as a fallback — NOT proof the
+   * document is clean. Renders a prominent honest warning so the reviewer never treats a
+   * possibly-redlined legal document as clean. Dismissable per mount.
+   */
+  annotationReadFailed?: boolean;
+  /**
    * ai-advanced-capabilities-agreements-r1 task 032 (FR-16 128KB budget, Leg B) — populated when a
    * prior agreement-review's findings could not be fully restored on reopen (the 128KB inline-payload
    * cap silently dropped the ledger entry server-side, or a present-but-corrupted findings payload
@@ -353,6 +360,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     partialApply = null,
     associationWarning = null,
     onRetryAssociation,
+    annotationReadFailed = false,
     reviewFindingsDegraded = null,
   } = props;
 
@@ -452,6 +460,15 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   }, [associationWarning]);
   const showAssociationWarningBanner = showAssociationWarning && !associationWarningDismissed;
 
+  // UAT-12 (2026-08-18): the server annotation read failed — the document may CONTAIN tracked changes
+  // and comments that couldn't be read, so it must NOT be presented as clean. Per-mount dismissal
+  // (like the PDF notice): a fresh load re-warns (honesty over convenience).
+  const [annotationReadFailedDismissed, setAnnotationReadFailedDismissed] = React.useState(false);
+  React.useEffect(() => {
+    if (annotationReadFailed) setAnnotationReadFailedDismissed(false);
+  }, [annotationReadFailed]);
+  const showAnnotationReadFailedBanner = annotationReadFailed && !annotationReadFailedDismissed;
+
   // UAT-05 (owner 2026-08-18): the generic Save-error banner previously had NO dismiss ✕ (unlike the
   // warning/info banners), so a stale "Save error" could not be cleared. Add a local dismissal reset
   // whenever the message changes (a NEW error re-shows). The parent still owns `errorMessage`; this only
@@ -472,6 +489,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     showPartialApplyBanner ||
     showReviewFindingsDegradedBanner ||
     showAssociationWarningBanner ||
+    showAnnotationReadFailedBanner ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -572,6 +590,31 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 icon={<Dismiss16Regular />}
                 data-testid="compose-workspace-review-findings-degraded-dismiss"
                 onClick={() => setReviewFindingsDegradedDismissed(true)}
+              />
+            }
+          />
+        </MessageBar>
+      ) : null}
+
+      {showAnnotationReadFailedBanner ? (
+        // UAT-12 (2026-08-18): the server couldn't read this document's tracked changes / comments —
+        // it may CONTAIN redlines or reviewer comments that are NOT shown. Never let a legal reviewer
+        // treat it as clean. Prominent (warning intent), dismissable per mount.
+        <MessageBar intent="warning" data-testid="compose-workspace-annotation-read-failed-banner" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Tracked changes and comments couldn&apos;t be read</MessageBarTitle>
+            {"This document's existing tracked changes and comments couldn't be read, so they aren't " +
+              "shown here. Don't treat this document as clean — open it in Word to review its changes and " +
+              'comments before relying on it.'}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                aria-label="Dismiss"
+                icon={<Dismiss16Regular />}
+                data-testid="compose-workspace-annotation-read-failed-dismiss"
+                onClick={() => setAnnotationReadFailedDismissed(true)}
               />
             }
           />
