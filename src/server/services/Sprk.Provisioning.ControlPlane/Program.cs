@@ -55,6 +55,7 @@ using Sprk.Provisioning.ControlPlane.Endpoints;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 using Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain;
 using Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed;
+using Sprk.Provisioning.ControlPlane.Handlers.BffDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
@@ -774,6 +775,90 @@ builder.Services.AddH12cRuntimeReferencesHandler(builder.Configuration);
 // documented per CLAUDE.md §6.5) are recorded in
 // projects/customer-provisioning-orchestration-r1/notes/task-073-h14-deviations.md.
 builder.Services.AddH14IntegrationWiringHandler(builder.Configuration);
+
+// Task 052 (Batch 4B): H9 BFF-deploy handler + FIVE collaborator seams
+// (IR3GateVerifier = DotnetR3GateVerifier — shells to dotnet CLI + pwsh for
+// the five r3-era gates: analyzers-as-errors (r3 task 041) + god-class ratchet
+// (r3 task 040) + 4 tenant-isolation ArchTests (r1 task 064 pending) +
+// naming-conformance (r3 task 063 pending) + Graph app-role parity (r3 task
+// 062 / r1 task 067 pending) — gates whose artifacts are not yet in the tree
+// are reported as Skipped rather than Failed so pending-artifact tasks don't
+// pre-emptively block H9; IBffDeployRunner = DeployBffApiScriptRunner shells
+// out to the shipped scripts/Deploy-BffApi.ps1 for build + zip + staging-slot
+// deploy + staging-slot health check (script's steps 1-3); IAppServiceSlotSwapper
+// = AzCliAppServiceSlotSwapper shells out to `az webapp deployment slot swap`
+// for both the initial staging=>production swap AND the rollback re-swap;
+// IHealthProbe = HttpHealthProbe issues HttpClient GETs against BFF /healthz
+// with retry parity to Deploy-BffApi.ps1's Test-HealthCheck (24 x 5s) — NFR-05
+// proof-of-KV-ref-resolution because BFF ValidateOnStart (r3 task 061) throws
+// at boot on missing Tier-1 KV refs, so /healthz returning 200 IS the resolution
+// evidence; IBffPublishSizeReporter = FileBffPublishSizeReporter measures the
+// compressed publish zip + computes NFR-01 delta vs 44.96 MB baseline +
+// flags threshold-tripped conditions). All registrations UNCONDITIONAL per
+// ADR-032 - no feature-gate branches. H9's idempotency key is
+// bff-{customerId}-{buildId} per POML constraint (buildId = BFF CI build
+// number — a new build = new key = re-deploys; same build = level-3 no-op).
+//
+// Placement Justification (CLAUDE.md §10): H9 lives in L2 (not BFF) per spec
+// §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-function
+// rule - no IActionResolver, IActionRunner, IOpenAiClient, IPlaybookService
+// injection). H9 uses IProvisioningRunRepository (task 037) + the five
+// dedicated seams; no BFF-facade dependencies. The L2 App Service's UAMI
+// authenticates every outbound Azure call inside AzCliAppServiceSlotSwapper's
+// operator az CLI chain; the BFF's OWN keyVaultReferenceIdentity=UAMI wiring
+// (task 047 H4) is what the /healthz smoke test verifies post-swap.
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - Path C (comply): r3-era gate verification is a POML-mandated pre-swap
+//     gate — the five gates block slot-swap with distinct rejection codes
+//     per failing gate (POML criterion 2). Where gate artifacts have not yet
+//     landed (r1 tasks 064 / 067 + r3 task 063 script), the verifier reports
+//     Skipped rather than Failed. This is an INTERIM posture, NOT a
+//     silent-bypass — once the pending artifacts land, the verifier auto-
+//     picks them up (filesystem-based discovery, not compile-time-bound).
+//     Full rationale + per-gate status inline in IR3GateVerifier.cs +
+//     DotnetR3GateVerifier.cs file headers.
+//   - Path C (comply): the shipped Deploy-BffApi.ps1 does NOT expose a
+//     -SkipSwap switch, so the runner invokes the script against the STAGING
+//     App Service (targets `{AppServiceName}-{SlotName}` directly) rather
+//     than passing -UseSlotDeploy. This confines the script to its
+//     build + zip + deploy + verify-staging-health scope (steps 1-3) while
+//     the handler owns the swap + prod smoke test + rollback in-process for
+//     tight Cosmos state coupling. Full rationale inline in
+//     DeployBffApiScriptRunner.cs file header.
+//   - Path C (comply — Gap 2 assertion per POML criterion 5): H9 performs a
+//     defense-in-depth spaarkedev1-literal scan on Deploy-Release.ps1 before
+//     the swap. Task 013 hardened Phase 4 to be customerId-driven with
+//     -CustomerId Mandatory (no spaarkedev1 fallback); the handler-side scan
+//     is the secondary belt-and-braces guard against a regression. A hit
+//     fails the deploy QuarantineRequired with Spaarkedev1HardcodeDetected;
+//     script-not-found is tolerated (task 013's hardening is the primary
+//     defense; the handler-side scan is opportunistic).
+//   - ADR-028 UAMI outbound: az CLI slot-swap ARM call flows through the
+//     operator az CLI auth chain (L2 App Service's own UAMI via
+//     DefaultAzureCredential); the BFF's OWN keyVaultReferenceIdentity=UAMI
+//     wiring is what the post-swap /healthz smoke test verifies (BFF cannot
+//     boot to 200 without every Tier-1 KV ref resolving).
+//   - spec.md NFR-01 (publish-size ≤60 MB ceiling; ≥+5 MB per-task delta =
+//     explicit justification): H9 REJECTS deploy BEFORE swap when either
+//     threshold is exceeded (QuarantineRequired + PublishSizeDeltaExceeded).
+//     Baseline 44.96 MB (2026-08-13 net10 fw-dependent linux-x64); overridable
+//     via BffDeployOptions.BaselinePublishSizeBytes as newer baselines land.
+//   - §4C rollback: parameter guards + run-not-found = Resumable; spaarkedev1
+//     hardcode + publish-size threshold + smoke-test-failure-AND-rollback-
+//     failure = QuarantineRequired; r3-gate failure + deploy runner failure
+//     + deploy runner infra fault + publish-size reporter infra fault =
+//     Resumable (fix + resume); slot-swap failure/infra-fault + smoke-test-
+//     failure-with-successful-rollback = RetryableWithCleanup. Full mapping
+//     table inline in H9BffDeployHandler.cs file header.
+builder.Services.Configure<BffDeployOptions>(
+    builder.Configuration.GetSection(nameof(BffDeployOptions)));
+builder.Services.AddSingleton<IR3GateVerifier, DotnetR3GateVerifier>();
+builder.Services.AddSingleton<IBffDeployRunner, DeployBffApiScriptRunner>();
+builder.Services.AddSingleton<IAppServiceSlotSwapper, AzCliAppServiceSlotSwapper>();
+builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
+builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();
+builder.Services.AddScoped<H9BffDeployHandler>();
 
 var app = builder.Build();
 
