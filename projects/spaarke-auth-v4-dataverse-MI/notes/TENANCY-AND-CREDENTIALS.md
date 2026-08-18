@@ -31,7 +31,12 @@ Two secondary constraints, neither of which changes any decision below: **cross-
 
 ### Model 1 — shared Spaarke environment, 20+ customers
 
-Per [`stacks/model1-shared.bicep`](../../../infrastructure/bicep/stacks/model1-shared.bicep):
+> ⚠️ **Source**: `infrastructure/bicep/stacks/model1-shared.bicep` **as it exists on the
+> `customer-provisioning-orchestration-r1` branch (PR #779, task 032 — not yet merged)**. The copy on `master` is
+> still the older 309-line shared-only scaffold with no per-tenant hooks and none of the identities named below.
+> Re-verify against `master` once #779 lands.
+
+Per that branch's version of the stack:
 
 - **Shared platform RG** (deployed once, idempotent thereafter): App Service Plan, OpenAI, AI Search, Redis,
   Service Bus, Monitoring, Doc Intelligence, shared KV, and — the important one — **ONE shared multi-tenant BFF
@@ -52,7 +57,7 @@ per-tenant data resources. This is the fact that decides Model 1's credential st
 
 ### Model 2 — customer-dedicated stamp
 
-Per `customer.bicep` / `stacks/model2-full.bicep`: a full dedicated stamp — its own App Service **and** App Service
+Per `customer.bicep` / `stacks/model2-full.bicep` (same branch caveat as Model 1 above): a full dedicated stamp — its own App Service **and** App Service
 Plan, its own UAMI, KV, Cosmos, Storage, AI Search, OpenAI. Strictly ADR-027 compliant (one subscription per
 customer). It deploys **either into the Spaarke tenant or into the customer's own tenant** (`design.md:1006`:
 "the app registrations live in whichever tenant hosts the deployment").
