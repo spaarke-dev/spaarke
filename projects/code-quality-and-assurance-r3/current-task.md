@@ -20,13 +20,16 @@
 3. **Handoffs**: `customer-provisioning-orchestration-r1` (unblocked; `projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md`) · `ci-cd-unit-test-remediation-r1` (RED-3) · **`email-communication-intelligence-r2` merged to master** for them.
 4. **RED follow-on projects**: **RED-1** `projects/speadmin-decomposition-r1/` + **RED-2** `projects/chatendpoints-decomposition-r1/` (folders, initialize-only) · RED-3 routed to ci-cd-r1 · **RED-4** Fable-verified assessment (`notes/red-item-analyses/RED-4-dataverse-two-stack-ASSESSMENT.md`) → set up **C** `projects/dataverse-access-unification-r1/`, routed **#3b** MI→task 011/NG1 (`notes/task-011-ng1-3b-mi-migration.md`), delivered **B keystone** (`docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md`), found **DEF-1**.
 
-### ▶ Open threads (next)
-- **DEF-1** (`notes/defer-issues.md`, ROUTED→smart-todo-r5): 2 of 5 `TodoGenerationService` rules (Overdue events :322, Deadline :~460) silently make zero To Dos — query `sprk_event` via composite→SDK silent-empty stub. **smart-todo-r5 decides** (A: inject `IEventDataverseService`; B: remove Rules 1&3 as legacy) per `projects/smart-todo-r5/notes/INBOUND-event-sourced-todo-generation-broken.md`. **Then** the RED-4 B "silent-empty stubs→throw" step can run (sequenced after — else it crashes the generator). GitHub issue for DEF-1 left in r5 per operator.
-- **RED-4 B** (branch `work/dataverse-access-hardening`, `e94987071`, NOT pushed): ✅ **dead-code deletion DONE** — `DataverseWebApiService` 2,822→1,409 LOC (−1,414), class narrowed to `IEventDataverseService, IFieldMappingDataverseService`, waiver removed (frozen 14→13), all builds + BFF 10,402 tests + ArchTests 38/38 green. ⏳ **silent-empty→throw** still gated on DEF-1. 🔔 **split-brain → DEF-2** (see below) — owner decision needed.
-- **DEF-2** (`notes/defer-issues.md`, ✅ FIXED RED-4 B): `DataverseWebApiService.GetEntitySetNameAsync` (`:176`) threw NotImplementedException, breaking the 3 live field-mapping methods (`RetrieveRecordFieldsAsync:785`, `QueryChildRecordIdsAsync:839`, `UpdateRecordFieldsAsync:1050`). Owner chose "fix now" → implemented against `EntityDefinitions` metadata (cached, fails loud), mirroring `GetEntityObjectTypeCodeAsync`. Live-gated regression added (`Spe.Integration.Tests/DataverseWebApiFieldMappingRegressionTests.cs`). **Remaining**: live-dev smoke to confirm behaviorally; #3b MI migration must keep EntityDefinitions read for the app-user.
-- **#3b MI migration** → task 011/NG1 (both Dataverse impls; operator prereqs: register MI as Dataverse App User + grant `prvActOnBehalfOfAnotherUser`; never remove secret until MI proven live).
-- **Operator-gated execution**: RED-1, RED-2, C (worktree + task breakdown created at start via `/design-to-spec`→`/project-pipeline`).
-- **Backlog carryovers**: CI-workflow gate wiring (042/063) coordinated PR w/ ci-cd-r1 · TS per-surface mechanical baseline · CS0618 retirement (DemoExpiration refactor) · Console→ILogger (39 DI sites) · #772 deferred pkg majors.
+### ✅ Resolved (all merged to master, 2026-08-16/17)
+- **DEF-1** — smart-todo-r5 fixed it (Option A reroute, commit `8e0aa4e6e`). DONE.
+- **RED-4 B** — dead-code deletion + DEF-2 fix + silent-empty stubs→throw. All merged + deployed to dev. DONE (all 4 routing-doc traps closed).
+- **DEF-2** — WebApi `GetEntitySetNameAsync` implemented; CLOSED, deployed + live-verified.
+- **#3b MI migration (task 011)** — both Dataverse impls migrated to Managed Identity, **proven live on dev** (root cause was a token-scope bug: ServiceClient hands the provider the SOAP URL; fixed by requesting the env-authority scope + lazy connect). Merged. Operator prereqs (App User + sys-admin + MI settings) verified. **Secret removal is NOT a #3b step** — the secret is the shared OBO `BFF-API-ClientSecret` → superseded by the `spaarke-auth-v4-dataverse-MI` project.
+
+### ▶ Open threads (all operator-gated / future — NO active r3 work)
+- **Seed projects (initialize-only, not started):** RED-1 `speadmin-decomposition-r1` · RED-2 `chatendpoints-decomposition-r1` · RED-4 C `dataverse-access-unification-r1` · **`spaarke-auth-v4-dataverse-MI`** (research-first — eliminate the BFF client secret via MI-FIC/cert for OBO). All listed in `notes/follow-on-quality-backlog.md`.
+- **Backlog carryovers** (`notes/follow-on-quality-backlog.md`): CI-workflow gate wiring (042/063, coordinated PR w/ ci-cd-r1) · TS per-surface mechanical baseline · CS0618 retirement (DemoExpiration refactor) · Console→ILogger (39 DI sites) · #772 deferred pkg majors.
+- **A+ gap** (report card): two additional projects not yet chartered — code-pages build-sprawl consolidation + plugins rebuild/retire — needed for every surface ≥ A–.
 
 ---
 
