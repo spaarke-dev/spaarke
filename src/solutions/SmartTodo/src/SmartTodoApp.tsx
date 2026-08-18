@@ -638,6 +638,12 @@ function LaunchCreateTodoWizardHost(): React.ReactElement | null {
     return getSpeContainerIdFromBusinessUnit(webApi);
   }, []);
 
+  // smart-todo-r5 UAT 2026-08-17 (item #1) — default "Assigned To" to the
+  // current user's contact here too (Outlook / parent-ribbon wizard launch),
+  // matching the CreateTodoWizard Code Page + the OOB "+ New Task" form.
+  const { contactId: currentContactId, contactName: currentContactName } =
+    useCurrentContactId({ webApi: getWebApi(), userId: getUserId() });
+
   const handleClose = React.useCallback(() => {
     setWizardOpen(false);
   }, []);
@@ -660,6 +666,11 @@ function LaunchCreateTodoWizardHost(): React.ReactElement | null {
       authenticatedFetch={authenticatedFetch}
       bffBaseUrl={bffBaseUrl}
       resolveSpeContainerId={resolveSpeContainerId}
+      defaultAssignedTo={
+        currentContactId
+          ? { contactId: currentContactId, contactName: currentContactName ?? undefined }
+          : undefined
+      }
     />
   );
 }

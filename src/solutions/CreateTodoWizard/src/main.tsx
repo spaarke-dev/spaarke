@@ -119,6 +119,42 @@ function App() {
   );
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
 
+  // smart-todo-r5 UAT 2026-08-17 (item #1) — default "Assigned To" to the
+  // current user's CONTACT. `sprk_todo.sprk_assignedto` targets the OOB
+  // `contact` table, resolved from systemuser via the custom `contact
+  // .sprk_systemuser` lookup (same query as `useCurrentContactId`, inlined here
+  // because this Code Page intentionally does NOT depend on
+  // `@spaarke/smart-todo-components` — see the BroadcastChannel note above).
+  // Defensive: any failure leaves the assignee blank (today's behavior).
+  const [defaultAssignedTo, setDefaultAssignedTo] = React.useState<
+    { contactId: string; contactName?: string } | undefined
+  >(undefined);
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+        const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
+        const userId = rawUserId ? rawUserId.replace(/[{}]/g, "") : "";
+        if (!userId) return;
+        const res = await dataService.retrieveMultipleRecords(
+          "contact",
+          `?$select=contactid,fullname&$filter=_sprk_systemuser_value eq ${userId}&$top=2`,
+        );
+        const first = (res.entities ?? [])[0] as { contactid?: string; fullname?: string } | undefined;
+        if (!cancelled && first?.contactid) {
+          setDefaultAssignedTo({ contactId: first.contactid, contactName: first.fullname });
+        }
+      } catch (err) {
+        console.warn("[CreateTodoWizard] current-user contact resolve failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataService]);
+
   const handleClose = React.useCallback(() => {
     navigationService.closeDialog({ confirmed: true });
   }, [navigationService]);
@@ -156,6 +192,7 @@ function App() {
         authenticatedFetch={authenticatedFetch}
         bffBaseUrl={resolvedBffBaseUrl}
         resolveSpeContainerId={resolveSpeContainerId}
+        defaultAssignedTo={defaultAssignedTo}
       />
     </FluentProvider>
   );

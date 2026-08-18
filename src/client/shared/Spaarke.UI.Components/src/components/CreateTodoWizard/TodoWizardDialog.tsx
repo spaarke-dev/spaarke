@@ -99,6 +99,16 @@ export interface ICreateTodoWizardProps {
    * will be skipped.
    */
   resolveSpeContainerId?: () => Promise<string>;
+  /**
+   * Optional default assignee (smart-todo-r5 UAT 2026-08-17, item #1). When
+   * supplied, the wizard opens with "Assigned To" pre-filled to this CONTACT
+   * (typically the current user's contact — `sprk_todo.sprk_assignedto` targets
+   * the OOB `contact` table). Seeded non-destructively: it fills the field only
+   * while it's still empty, so a user's own pick (or a late-resolving contact)
+   * is never clobbered. Omitted / no `contactId` → opens blank (today's
+   * behavior).
+   */
+  defaultAssignedTo?: { contactId: string; contactName?: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -115,6 +125,7 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
   bffBaseUrl,
   embedded,
   resolveSpeContainerId,
+  defaultAssignedTo,
 }) => {
   const [formValid, setFormValid] = React.useState(false);
   const [formValues, setFormValues] = React.useState<ICreateTodoFormState>(EMPTY_TODO_FORM);
@@ -127,6 +138,25 @@ const TodoWizardDialog: React.FC<ICreateTodoWizardProps> = ({
       setFormValues(EMPTY_TODO_FORM);
     }
   }, [open]);
+
+  // smart-todo-r5 UAT 2026-08-17 (item #1) — seed "Assigned To" with the
+  // default contact (the current user) when the wizard opens. Separate from the
+  // reset effect above and NON-DESTRUCTIVE: it fills the field only while it's
+  // still empty, so it never clobbers a user's own pick — and it re-seeds
+  // correctly if the contact resolves asynchronously AFTER the wizard opened
+  // (the host resolves it via a Dataverse query). Keyed on the primitive fields
+  // (not the object identity) so it doesn't re-run on every render.
+  const defaultAssignedContactId = defaultAssignedTo?.contactId;
+  const defaultAssignedContactName = defaultAssignedTo?.contactName;
+  React.useEffect(() => {
+    if (open && defaultAssignedContactId) {
+      setFormValues(prev =>
+        prev.assignedToId
+          ? prev
+          : { ...prev, assignedToId: defaultAssignedContactId, assignedToName: defaultAssignedContactName ?? '' }
+      );
+    }
+  }, [open, defaultAssignedContactId, defaultAssignedContactName]);
 
   const handleSearchContacts = React.useCallback(
     (query: string) => searchContactsAsLookup(dataService, query),
