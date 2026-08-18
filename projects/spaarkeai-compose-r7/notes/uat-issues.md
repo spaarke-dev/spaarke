@@ -193,3 +193,23 @@ The op-log WRITE path is robust (paraId-anchored, refuse-don't-mis-place; server
 - **⛔ BLOCKER (10)**: UAT-01(residual→11), 02✅, 07a, 11, 12, 15, 16, 17, 18, 21, 22, 23. Several are **SILENT data/fidelity loss** — the class UAT would NOT surface as a warning.
 - **The architectural finding**: render-on-save re-authors the whole body from a THIN content model (text + bold/italic/underline/href). This is not a "widener" gap — the model itself can't carry real legal-document fidelity. UAT-07a + UAT-15/16/17/18/20 are all facets of ONE root cause. **This is compose-r8-architecture-sized**, not a batch of patches.
 - **The trust finding**: the edit/comment placement layer can mis-place a redline onto the wrong text and report success (UAT-21), and silently drop comments (UAT-22) and valid edits (UAT-23). For a legal-review product these are correctness/trust defects, not cosmetics.
+
+## Owner-approved split (2026-08-18): Honest-now (R7) / Faithful-next (compose-r8)
+
+**R8 created** — 📦 the FAITHFUL-bar fidelity issues MOVE to a new project **`spaarkeai-compose-r8`**
+(investigation-first): [`projects/spaarkeai-compose-r8/notes/fidelity-architecture-investigation.md`](../../spaarkeai-compose-r8/notes/fidelity-architecture-investigation.md).
+Moved (tracked there, not dropped): **UAT-07a, UAT-15, UAT-16, UAT-17, UAT-18, UAT-19, UAT-20** (the
+render-on-save architecture — preserve formatting/structure through save). R8's first job is a full
+investigation/research pass to choose the correct write-model before building.
+
+**Stays in R7 (HONEST + SAFE batch — proceed now)**:
+- ✅ Done: UAT-01(base), 02, 03, 05, 07b.
+- 🔧 Do next (the batch): **UAT-11** (container residual — honest signal + retry), **UAT-12** (surface dropped
+  tracked-changes/comments on read failure), **UAT-13** (surface association orphan), **UAT-21** (fix the
+  wrong-selection redline fallback — highest trust priority), **UAT-22/23** (surface silently-dropped
+  comments/edits), **UAT-24** (tolerant-but-SURFACED resolver — propose-don't-auto-place; neutralizes 06/09/21/22),
+  the warned-but-cryptic copy gap (friendly copy for footnote/field/content-control/numbering codes), plus the
+  earlier-triaged **UAT-04** (progress indicator), **UAT-08** (promote + auto-create Analysis), **UAT-09**
+  (comment anchoring signal), **UAT-10** (notifications 401), **UAT-25/26** (concurrency-guard on the
+  ContentModel save path — honest lost-update prevention/warning).
+- **R7 batch theme**: make Compose *never lie* — no silent drops, no mis-placement, no false "saved/applied".
