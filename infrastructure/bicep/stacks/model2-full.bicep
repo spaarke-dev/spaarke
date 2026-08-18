@@ -205,7 +205,7 @@ module bffApi '../modules/app-service.bicep' = {
       OPENAI_ENDPOINT: openAi.outputs.openAiEndpoint
       OPENAI_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=openai-api-key)'
       AI_SEARCH_ENDPOINT: aiSearch.outputs.searchServiceEndpoint
-      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=aisearch-admin-key)'
+      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=AiSearch--AdminKey)'
 
       // Monitoring
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString

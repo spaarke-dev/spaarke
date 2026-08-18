@@ -3,8 +3,8 @@
   <metadata>
     <title>Alias collapse for AI Search key (aisearch-admin-key + 2 aliases → AiSearch--AdminKey canonical) with BINDING pre-check FIRST</title>
     <phase>H KV Federation Full Remediation</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>completed</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'auth','deploy','azure-deployment'; deletes LIVE KV secret aliases — BINDING pre-check GATE FIRST per §7.9. Bug here breaks live App Service.</rigor-reason>
     <model-tier>sonnet</model-tier>

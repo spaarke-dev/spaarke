@@ -531,7 +531,7 @@ resource secretOpenAiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 
 resource secretSearchAdminKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
-  name: 'aisearch-admin-key'
+  name: 'AiSearch--AdminKey'
   properties: {
     value: aiSearch.listAdminKeys().primaryKey
   }

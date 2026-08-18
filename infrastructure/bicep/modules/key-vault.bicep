@@ -128,7 +128,7 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 //
 //   Secrets requiring rotation:
 //     redis-connection-string, servicebus-connection-string,
-//     storage-connection-string, openai-api-key, aisearch-admin-key,
+//     storage-connection-string, openai-api-key, AiSearch--AdminKey,
 //     communication-webhook-secret
 //
 //   Expiry: 365 days | Notify: 30 days before expiry

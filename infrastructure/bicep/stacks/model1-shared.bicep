@@ -427,7 +427,7 @@ module sharedBffApi '../modules/app-service.bicep' = {
       OPENAI_ENDPOINT: sharedOpenAi.outputs.openAiEndpoint
       OPENAI_API_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=openai-api-key)'
       AI_SEARCH_ENDPOINT: sharedAiSearch.outputs.searchServiceEndpoint
-      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=aisearch-admin-key)'
+      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=AiSearch--AdminKey)'
 
       // Document Intelligence (shared)
       DOC_INTELLIGENCE_ENDPOINT: sharedDocIntelligence.outputs.docIntelligenceEndpoint
