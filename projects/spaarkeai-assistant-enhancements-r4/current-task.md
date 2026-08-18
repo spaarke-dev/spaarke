@@ -9,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Project** | spaarkeai-assistant-enhancements-r4 — **16 of 17 tasks done**; only 080 (deploy) partially remaining |
-| **Task** | 🟡 **080** — Deploy + verify (owner-gated). PREP + ALL GATES DONE; the 3 production deploys + UAT remain. |
-| **Status** | in-progress (paused before production deploys — heavy context use; clean handoff preferred over mid-deploy risk) |
-| **Next Action** | Execute `notes/deploy-verify.md` §Remaining, in order: **(1)** seed advisory `list-tasks` Action from `infra/dataverse/actions/list-tasks.action.json` via `pwsh scripts/Deploy-AnalysisAction.ps1` (still ack-only: allow-list/modeltier/prompt empty on row `57651aad-8e85-f111-8075-7c1e5268570d`) → **(2)** `/bff-deploy` (44.96 MB net10 publish; column already exists) → **(3)** `/code-page-deploy` (ships 021a+021b+023+040) → **(4)** 7-DoD owner UAT. |
+| **Project** | spaarkeai-assistant-enhancements-r4 — **17 of 17 code tasks done**; 080 deploys EXECUTED; only 090 wrap-up + owner UAT remain |
+| **Task** | ✅ **080** — Deploys executed to dev (2026-08-18) + merged to master (PR #782, commit 62751d84b). 🔲 **090** wrap-up next. |
+| **Status** | Deployed + merged. Owner UAT of the 7 spec DoDs pending (owner-gated, not agent-completable). |
+| **Next Action** | **(A)** Owner runs the 7-DoD UAT per `notes/deploy-verify.md` (P1 grounded task-agenda answer + Tasks tab, no dead-end chips, Briefing/SmartToDo follow-on cards, preference loop, D9 viewport + Refresh-row clip gone). **(B)** Run **090** wrap-up (`/test-diet` gate) to close the project. **(C)** Owner: delete orphan Dataverse column `sprk_grounded_tool_allow_list` in maker portal. |
 
 ### Files Modified This Session (ALL COMMITTED — clean tree)
 - `SprkChat.tsx` — 040 fix: collapse pin-to-top trailing spacer once content fills viewport (Refresh-row clip / dead-whitespace). Committed `0702aad7e`.
