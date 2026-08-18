@@ -154,7 +154,7 @@ Two additional corrections independently caught by task-gen subagents:
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
 | 080 | ✅ | Refactor `DemoExpirationService.cs` off `[Obsolete]` `DemoProvisioningOptions.Environments`/`DefaultEnvironment` → `DataverseEnvironmentService` | FULL | sonnet / xhigh | none (serial BFF touch; frozen file mod) | none |
-| 081 | ⏸ | Refactor `RegistrationEndpoints.cs` lines 466/468/469 (remove 4 `[Obsolete]` warnings) | FULL | sonnet / high | none (dep 080) | 080 |
+| 081 | ✅ | Refactor `RegistrationEndpoints.cs` lines 466/468/469 (remove 4 `[Obsolete]` warnings) | FULL | sonnet / high | none (dep 080) | 080 |
 | 082 | ⏸ | Delete `DemoProvisioning__Environments__*` + `__DefaultEnvironment` from Azure config; verify BFF `/health` + publish size delta | FULL | sonnet / high | none (dep 080, 081 + deploy) | 080, 081 |
 
 ### Phase H — KV Federation Full Remediation (5 tasks)
