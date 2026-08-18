@@ -1430,8 +1430,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // transcript with no dead space. Short responses (content < viewport) keep
     // the spacer, preserving the pin-to-top behavior.
     const spacer = trailingSpacerRef.current;
-    if (spacer && spacer.offsetHeight > 0 &&
-        container.scrollHeight - spacer.offsetHeight >= container.clientHeight) {
+    if (spacer && spacer.offsetHeight > 0 && container.scrollHeight - spacer.offsetHeight >= container.clientHeight) {
       spacer.style.minHeight = '0px';
     }
     // P1-4: only re-anchor when the user is pinned to the bottom (Copilot-style).

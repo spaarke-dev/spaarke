@@ -23,6 +23,10 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-08-18 — Navigator side-pane architecture pointer · spaarke-side-pane-navigation-history-r1 close-out)
+
+- **Added — root `CLAUDE.md` §17 pointer** to [`docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md`](../docs/architecture/SPAARKE-SIDE-PANE-NAVIGATION.md) (the docked "Navigator" pane). Makes the reusable feature discoverable — most importantly the `ensureNavigatorSidePane()` code-page registrar, which the doc designates a **standard code-page build step**. Doc itself refreshed post-UAT (not a `.claude/` file, no changelog obligation, noted here for context): access-based Monitored (Dataverse security trim, no owner filter — no BFF), `sprk_communication`→Email-code-page routing, name-resolution for bookmarks, the filled-evenodd-ring technique for outline pane icons, and entity-scoped ribbon ids.
+
 ### Changed (2026-08-17 — ADR-028 **Amendment A4**: secret-free confidential credential for OBO · `spaarke-auth-v4-dataverse-MI`)
 
 Owner-directed §6.5 **path B** amendment. Fixes a rule that was **unsatisfiable for OBO** and had been generating recurring false-positive findings on every auth-touching task.
@@ -34,7 +38,6 @@ Owner-directed §6.5 **path B** amendment. Fixes a rule that was **unsatisfiable
 - **Changed — [`.claude/patterns/auth/service-principal.md`](patterns/auth/service-principal.md)**: updated to A4 (two credential classes, shared provider, singleton CCA caching); corrected the stale claim that the Dataverse SDK is constructed with `ClientSecretCredential` — migrated to MI by `code-quality-and-assurance-r3` #3b.
 
 Evidence base: `projects/spaarke-auth-v4-dataverse-MI/notes/{RESEARCH-FINDINGS,CREDENTIAL-INVENTORY,TENANCY-AND-CREDENTIALS}.md`. MI-as-FIC is **GA since 2025-05-08**; Microsoft ranks client secrets *"Development and testing only."*
-
 ### Changed (2026-08-17 — push-to-github Step 1.7 real-DV smoke gate · smart-todo-r5 task 060)
 
 - **Changed — [`.claude/skills/push-to-github/SKILL.md`](skills/push-to-github/SKILL.md)**: added **Step 1.7 — Real-Dataverse Smoke Check (Widget/Dataverse Changes)** (spec FR-20 / PROC-1). For any push that changes Dataverse-querying widget/component/service code, the pre-flight flow now WARNs + asks whether ≥1 real create+read against **real** Dataverse was exercised — a mock/prototype harness passing is not sufficient. Advisory (ask-user-first), same non-blocking shape as Steps 1.5/1.6 — **not** a CI script or hard block (§11 — extended the existing skill rather than authoring a new `/real-dv-smoke` command). Rationale cited in-step: R4 UAT-5/6 burned deploy cycles because the `spaarke-prototype` harness mocked a `sprk_contact` entity that doesn't exist in real Dataverse (real is OOB `contact`); the mock hid the entity-name bug. Also added a "Tips for AI" pointer.
