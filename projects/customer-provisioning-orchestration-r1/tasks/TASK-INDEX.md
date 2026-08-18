@@ -108,7 +108,7 @@ Two additional corrections independently caught by task-gen subagents:
 | 052 | ✅ | Implement H9 BFF deploy (blue-green slot swap) | H9 | FULL | sonnet / xhigh | none (dep 047 — needs KV ready) | 013, 047 |
 | 053 | ✅ | Implement H10 Dataverse App User + Graph app-role parity (T2 + T3 owner; 2 App Users incl. BffAppReg system user) | H10 | FULL | sonnet / xhigh | Batch 3E parallel | 005, 015 |
 | 054 | ✅ | Implement H11 user provisioning (identity preset per D6; NativeAccount + B2BGuest as alternative branches per Path C) | H11 | FULL | sonnet / high | Batch 3F parallel | 036 |
-| 055 | ⏸ | Implement H13 E2E acceptance-gate (ALL 6 T1-T6 traps + ALL 5 I1-I5 invariants + naming-conformance + cost envelope) | H13 | FULL | sonnet / xhigh | none (dep 041-054 + 064-067 + 070-073) | ALL C4 + C6 + C' handlers |
+| 055 | ✅ | Implement H13 E2E acceptance-gate (ALL 6 T1-T6 traps + ALL 5 I1-I5 invariants + naming-conformance + cost envelope) | H13 | FULL | sonnet / xhigh | none (dep 041-054 + 064-067 + 070-073) | ALL C4 + C6 + C' handlers |
 
 ### Phase C Wave C5 — L2 REST Endpoints + State Reconciler (6 tasks)
 

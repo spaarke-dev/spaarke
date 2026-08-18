@@ -61,6 +61,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Sprk.Provisioning.ControlPlane.Handlers.ConsentCapture;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 using Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
+using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 using Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 using Sprk.Provisioning.ControlPlane.Handlers.EnvVarValues;
 using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
@@ -862,6 +863,84 @@ builder.Services.AddSingleton<IAppServiceSlotSwapper, AzCliAppServiceSlotSwapper
 builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
 builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();
 builder.Services.AddScoped<H9BffDeployHandler>();
+
+// Task 055 (Batch 4E): H13 E2E acceptance-gate handler + SIX collaborator seams
+// (IE2EValidationRunner = ValidateDeployedEnvironmentScriptRunner wraps the
+// Phase-B extended scripts/Validate-DeployedEnvironment.ps1 for SC #5 sample
+// checks; IE2ETrapVerifier = PlaceholderTrapVerifier — Wave-C4 stub that
+// returns InfraFault for every T1–T6 so H13 classifies Resumable when
+// invoked against a live customer stamp without the full probe wiring in
+// place [swap to real per-trap live-probe impl in Phase F task 089];
+// IE2EInvariantVerifier = PlaceholderInvariantVerifier — parity stub for
+// I1–I5; INamingConformanceChecker = NamingConformanceScriptRunner shells
+// out to r3 task 063's scripts/naming-conformance-check.ps1 INDEPENDENTLY of
+// the wrapped call inside Validate-DeployedEnvironment.ps1 so SC #17 is a
+// distinct pass/fail boundary; ICostEnvelopeChecker = AzCliCostEnvelopeChecker
+// shells out to `az costmanagement query` per subscription + compares against
+// §15 #14 envelopes; IRegistrySetupStatusUpdater = DataverseRegistrySetupStatusUpdater
+// is a Wave-C4 placeholder returning Success WITHOUT a real Dataverse write —
+// Wave-C5 swaps for a real Web API PATCH once the L2 Dataverse client wiring
+// lands, parity with H0.5's IDataverseEnvironmentRegistryClient placeholder-
+// then-real evolution). H13 also REUSES IDataverseEnvironmentRegistryClient
+// (task 042) for the idempotency-short-circuit registry Ready-check lookup.
+// All registrations UNCONDITIONAL per ADR-032 — no feature-gate branches.
+//
+// H13's idempotency key is validate-{customerId}-{buildId} per POML constraint
+// (buildId = BFF CI build number — a new build = new key = re-verifies; same
+// build = level-3 no-op).
+//
+// Placement Justification (CLAUDE.md §10): H13 lives in L2 (not BFF) per spec
+// §5.2 / D3 / D8 / D12; consumes NO AI-internal types (ADR-013 forcing-function
+// rule — no IActionResolver, IActionRunner, IOpenAiClient, IPlaybookService
+// injection). H13 uses IProvisioningRunRepository (task 037) + 6 dedicated
+// seams; no BFF-facade dependencies. H13 is the SOLE authority for the
+// Dataverse registry `sprk_setupstatus → Ready` transition — the r1
+// acceptance floor per spec.md FR-18.
+//
+// Component Justification (CLAUDE.md §11):
+//   - Existing: scripts/Validate-DeployedEnvironment.ps1 (operator-invocable
+//     capstone) + scripts/naming-conformance-check.ps1 (r3 task 063). Neither
+//     extends the automated per-run Cosmos state transition + registry-status
+//     transition + §4C Quarantine semantics H13 needs.
+//   - Extension: no — H13 is the SOLE authoritative gate. An IProvisioningHandler
+//     is REQUIRED because only handlers own Cosmos state transitions +
+//     §4C Quarantined semantics.
+//   - Cost-of-doing-nothing: registry rows could transition to Ready with
+//     silent trap failures still present (T1 keyVaultReferenceIdentity
+//     mismatch → BFF boots with null KV refs → customer-visible runtime
+//     failures the moment the operator hands the env over).
+//
+// ADR Tension citations for PR description (per CLAUDE.md §6.5):
+//   - ADR-004 (Path A at L2 scope per spec.md ADR Tensions row 1): H13 is a
+//     single IProvisioningHandler-shape impl that aggregates 6 collaborator
+//     outcomes into ONE §4C classification decision. Same posture as H14's
+//     parent handler (task 073) — the "one message one handler one outcome"
+//     spirit is preserved; the fan-out is an INTERNAL orchestration detail.
+//   - ADR-036 (Path C — comply): 3-level idempotency intact. Level 1 = SB
+//     MessageId dedup (reconciler-owned); Level 3 = ProvisioningRun.
+//     CompletedPhases scan for (Phase="H13", key==validate-{customerId}-
+//     {buildId}). Level 2 (Redis) is NOT YET IMPLEMENTED in L2 (parity with
+//     all sibling wave-C4 handlers).
+//   - ADR-028 UAMI-outbound + §4D I5 explicit-tenant: every collaborator
+//     seam uses the run's explicit tenantId parameter for token acquisition —
+//     never an ambient default-tenant credential. IRegistrySetupStatusUpdater's
+//     real Wave-C5 Dataverse Web API impl will follow the same DefaultAzureCredential
+//     posture as H10/H11/H12c.
+//   - Cost drift semantic (per POML deviation note, spec.md Unresolved Questions):
+//     default posture is ADVISORY-WARN (Ready still transitions if all else
+//     green; the drift is attached to the run's ErrorDetail advisory suffix +
+//     gate-state). Opt-in fail-run via E2EAcceptance:CostDriftFailsRun=true.
+//     Full rationale in projects/customer-provisioning-orchestration-r1/notes/task-055-deviations.md.
+//   - §4C rollback: trap/invariant Failed + naming Failed + extended-validate
+//     Failed + cost-drift-with-CostDriftFailsRun = QuarantineRequired;
+//     trap/invariant InfraFault + validate-script infra fault + naming infra
+//     fault + cost-query infra fault + registry-update failure = Resumable.
+//     Full mapping table inline in H13E2EAcceptanceGateHandler.cs file header.
+//
+// Deviations from the task POML's literal wording (Path C pivot-to-comply
+// per CLAUDE.md §6.5) are recorded in
+// projects/customer-provisioning-orchestration-r1/notes/task-055-deviations.md.
+builder.Services.AddH13E2EAcceptanceGateHandler(builder.Configuration);
 
 // Task 058 (Wave C5): state-reconciler BackgroundService — polls Cosmos every
 // 5s (configurable via ReconcilerOptions.PollInterval) for runs with status ∈
