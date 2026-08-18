@@ -857,7 +857,12 @@ describe('SprkChat - Combined Suggestions and Citations Flow', () => {
       {
         type: 'suggestions',
         content: null,
-        data: { suggestions: ['Explain the policy', 'Show related documents'] },
+        data: {
+          suggestions: [
+            { kind: 'question', label: 'Explain the policy', targetBindingId: null, actionId: null },
+            { kind: 'question', label: 'Show related documents', targetBindingId: null, actionId: null },
+          ],
+        },
       },
       { type: 'done', content: null },
     ];
@@ -893,7 +898,12 @@ describe('SprkChat - Combined Suggestions and Citations Flow', () => {
       {
         type: 'suggestions',
         content: null,
-        data: { suggestions: ['Tell me more', 'What else?'] },
+        data: {
+          suggestions: [
+            { kind: 'question', label: 'Tell me more', targetBindingId: null, actionId: null },
+            { kind: 'question', label: 'What else?', targetBindingId: null, actionId: null },
+          ],
+        },
       },
       { type: 'done', content: null },
     ];

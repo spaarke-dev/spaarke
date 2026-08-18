@@ -123,7 +123,7 @@ export const App: React.FC = () => {
       <FluentProvider theme={theme} style={{ height: "100%" }}>
         <FeedTodoSyncProvider>
           <div className={styles.root}>
-            <SmartToDo webApi={webApi} userId={userId} useDialogForDetail />
+            <SmartToDo webApi={webApi} userId={userId} />
           </div>
         </FeedTodoSyncProvider>
       </FluentProvider>

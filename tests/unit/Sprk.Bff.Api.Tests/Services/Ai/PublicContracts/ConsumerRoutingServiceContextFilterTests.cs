@@ -76,4 +76,79 @@ public sealed class ConsumerRoutingServiceContextFilterTests
 
         result.Should().BeEmpty();
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // FilterByContextTypes (spaarkeai-assistant-enhancements-r4 task 021a / FR-04) — the UNION
+    // pre-filter for the conversational suggestion moment: keep a binding when its tags intersect ANY
+    // of the supplied context types (the union of the open-tab context-types) OR are empty; an empty
+    // type set narrows nothing. Same ADR-039-permitted deterministic aid, widened to the union.
+    // ---------------------------------------------------------------------------------------------
+
+    [Fact]
+    public void FilterByContextTypes_KeepsBindingsMatchingAnyOfTheSuppliedTypes()
+    {
+        var doc = BindingWithTags("document");
+        var email = BindingWithTags("email");
+        var calendarOnly = BindingWithTags("calendar");
+
+        var result = ConsumerRoutingService.FilterByContextTypes(
+            new[] { doc, email, calendarOnly }, new[] { "document", "email" });
+
+        result.Select(b => b.BindingId).Should().BeEquivalentTo(new[] { doc.BindingId, email.BindingId });
+    }
+
+    [Fact]
+    public void FilterByContextTypes_KeepsEmptyTagBindings_AndDropsNonMatching()
+    {
+        var anyContext = BindingWithTags();        // empty tags = relevant to ANY context
+        var matching = BindingWithTags("email");
+        var nonMatching = BindingWithTags("calendar");
+
+        var result = ConsumerRoutingService.FilterByContextTypes(
+            new[] { anyContext, matching, nonMatching }, new[] { "email" });
+
+        result.Select(b => b.BindingId).Should().BeEquivalentTo(new[] { anyContext.BindingId, matching.BindingId });
+    }
+
+    [Fact]
+    public void FilterByContextTypes_MatchesUnionCaseInsensitively()
+    {
+        var match = BindingWithTags("Document");
+
+        var result = ConsumerRoutingService.FilterByContextTypes(new[] { match }, new[] { "document" });
+
+        result.Should().ContainSingle().Which.BindingId.Should().Be(match.BindingId);
+    }
+
+    [Fact]
+    public void FilterByContextTypes_WithEmptyTypeSet_ReturnsAllCandidatesUnnarrowed()
+    {
+        var candidates = new[] { BindingWithTags("email"), BindingWithTags("document"), BindingWithTags() };
+
+        var result = ConsumerRoutingService.FilterByContextTypes(candidates, Array.Empty<string>());
+
+        result.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public void FilterByContextTypes_WithNullTypeSet_ReturnsAllCandidatesUnnarrowed()
+    {
+        var candidates = new[] { BindingWithTags("email"), BindingWithTags() };
+
+        var result = ConsumerRoutingService.FilterByContextTypes(candidates, contextTypes: null);
+
+        result.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public void FilterByContextTypes_IgnoresBlankTypesInTheSet()
+    {
+        var email = BindingWithTags("email");
+        var doc = BindingWithTags("document");
+
+        // A set of only blank entries collapses to "no narrowing" (parity with FilterByContextType's blank passthrough).
+        var result = ConsumerRoutingService.FilterByContextTypes(new[] { email, doc }, new[] { "  ", "" });
+
+        result.Should().HaveCount(2);
+    }
 }

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="smart-todo-r5">
+  <metadata>
+    <title>Playwright NFR suite — perf &lt;3s, WCAG 2.1 AA + keyboard, orientation flip (FR-17)</title>
+    <phase>5: Tests + hygiene</phase>
+    <gate>024,025 complete</gate>
+    <status>authored-valid-wired; real-env green run escalated (no live Power Apps env in sandbox) — see notes/task-041-playwright-nfr.md</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying override (root CLAUDE.md §8, TEST-MODIFYING row): this task adds files under `tests/e2e/**` and carries the `testing`/`e2e-test` tags, so FULL rigor + code-review/adr-check at Step 9.5 apply UNCONDITIONALLY.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified e2e-test authoring against an already-wired Playwright harness (config, page-object pattern, axe-core dependency all pre-existing); no architectural or security blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>R</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>024,025</deps>
+    <tags>testing, e2e-test, frontend, a11y</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+  </metadata>
+
+  <prompt>Add a Playwright NFR suite for the SmartTodo Code Page + SpaarkeAi widget covering NFR-02 (page-load &lt;3s), NFR-01 (WCAG 2.1 AA via axe-core + keyboard navigation), and NFR-03 (orientation flip preserves drag-drop + selection state, no layout glitch). EXTEND the repo's existing `tests/e2e/` Playwright harness (config at `tests/e2e/config/playwright.config.ts`, page-object pattern under `tests/e2e/pages/`, spec convention under `tests/e2e/specs/`) — do not stand up a second/parallel e2e framework. `@playwright/test` and `@axe-core/playwright` are ALREADY root devDependencies; this task needs zero new npm packages.</prompt>
+
+  <role>Spaarke platform developer. Expert in Playwright e2e testing for Power Apps model-driven-app-hosted Code Pages, axe-core accessibility scanning, and keyboard-navigation testing. Follow the existing `tests/e2e/` conventions strictly.</role>
+
+  <goal>Three new Playwright spec files under `tests/e2e/specs/smart-todo/` (performance, accessibility, orientation) plus a `SmartTodoPage` page object under `tests/e2e/pages/`, runnable via the existing `npm run test:e2e` script (no new config, no new dependencies), each with an executable, non-manual check for its NFR: load time asserted &lt;3000ms; an `AxeBuilder` scan asserting zero WCAG 2.1 AA violations (including a dark-theme pass, since NFR-01 specifically calls out dark-on-yellow contrast) plus a keyboard-navigation walkthrough of top bar/filter/kanban; an orientation-flip test that selects a card, flips orientation via the overflow "Layout" action, and asserts both the selection and a post-flip drag-drop still function with no overlapping/broken layout.</goal>
+
+  <context>
+    <background>Spec FR-17 (TEST-2): "Add a Playwright-based NFR suite: page-load &lt;3s (NFR-02), WCAG 2.1 AA via axe-core + keyboard nav (NFR-01), orientation flip without layout glitch (NFR-03)." The Assumptions section names Playwright + axe-core as the framework decision "unless owner prefers another" — CONFIRMED already the case: root `package.json` already lists `"@playwright/test": "^1.55.1"` and `"@axe-core/playwright": "^4.10.2"` as devDependencies, with `test:e2e*` npm scripts pointing at `tests/e2e/config/playwright.config.ts`. A full e2e harness already exists at `tests/e2e/` (config, `pages/BasePCFPage.ts` base page object, `specs/{spe-file-viewer,secure-project,...}/*.spec.ts`) with an existing performance-test precedent (`tests/e2e/specs/spe-file-viewer/performance.spec.ts` — `Date.now()` before/after a ready-state wait, `test.info().annotations.push(...)` for reporting, explicit `expect(elapsed).toBeLessThan(target)`). This task is a straight extension of that harness for the SmartTodo surface, not a new framework decision.</background>
+    <relevant-files>
+      <file role="canonical-reference">tests/e2e/config/playwright.config.ts</file>
+      <file role="canonical-reference">tests/e2e/pages/BasePCFPage.ts</file>
+      <file role="canonical-reference">tests/e2e/specs/spe-file-viewer/performance.spec.ts</file>
+      <file role="new">tests/e2e/pages/smart-todo/SmartTodoPage.ts</file>
+      <file role="new">tests/e2e/specs/smart-todo/performance.spec.ts</file>
+      <file role="new">tests/e2e/specs/smart-todo/accessibility.spec.ts</file>
+      <file role="new">tests/e2e/specs/smart-todo/orientation.spec.ts</file>
+      <file role="modify">package.json</file>
+      <file role="canonical-reference">src/solutions/SmartTodo/src/SmartTodoApp.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="024" status="pending">Widget default = side-by-side columns — the orientation config this suite exercises (and flips away from/back to).</dependency>
+      <dependency task="025" status="pending">Deploy code page + widget; provides a reachable environment/URL for the suite to target.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST extend the existing `tests/e2e/` harness — same `playwright.config.ts`, same reporter set (html/json/junit/list), same page-object pattern (`BasePCFPage`-style). MUST NOT add a second Playwright config or a competing e2e dependency set (§11 — `@playwright/test` and `@axe-core/playwright` are already present with zero net-new packages needed).</constraint>
+    <constraint source="spec">NFR-01: WCAG 2.1 AA, incl. dark-on-yellow contrast, keyboard navigation of top bar/filter/kanban, screen-reader smoke.</constraint>
+    <constraint source="spec">NFR-02: Code Page load &lt; 3s.</constraint>
+    <constraint source="spec">NFR-03: orientation flip (stacked↔side-by-side) preserves drag-drop + selection state with no layout glitch.</constraint>
+    <constraint source="ADR-021">Assertions in the accessibility/orientation specs must check semantic/DOM state (axe violations, focus, bounding boxes, selection attributes) — not pixel-diff screenshot snapshots, which are brittle across Fluent token theme changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>tests/e2e/README.md</file>
+      <file>tests/e2e/config/playwright.config.ts</file>
+    </files>
+    <patterns>
+      <pattern name="playwright-performance-spec" location="tests/e2e/specs/spe-file-viewer/performance.spec.ts">Date.now()-bracketed timing + test.info().annotations.push(...) reporting pattern to replicate for the SmartTodo load-time check.</pattern>
+      <pattern name="base-pcf-page-object" location="tests/e2e/pages/BasePCFPage.ts">Locator + waitForControlInit/waitForUpdate pattern; adapt (do not literally extend, since SmartTodo is a Code Page webresource, not a PCF control) for a SmartTodoPage page object with an equivalent ready-state wait.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare 🔒 RIGOR LEVEL: FULL (test-modifying override) before starting. Load knowledge/files. Confirm tasks 024 and 025 are marked complete in TASK-INDEX.md and note the deployed SmartTodo URL/environment from task 025's notes.</step>
+    <step order="1">Read `tests/e2e/config/playwright.config.ts`, `tests/e2e/README.md`, and `tests/e2e/specs/spe-file-viewer/performance.spec.ts` to confirm the exact conventions (baseURL resolution, .env vars, reporter wiring, `@tag` naming like `@performance @e2e`) this task must match.</step>
+    <step order="2">Add `tests/e2e/pages/smart-todo/SmartTodoPage.ts`: a page object exposing locators for the top bar (Filter pill, New Task button, overflow menu), the filter pane, the kanban columns/cards, the selection checkboxes, and a `waitForReady()` helper analogous to `BasePCFPage.waitForControlInit` (wait for the kanban's DOM ready-state signal, not a PCF-specific selector).</step>
+    <step order="3">Add `tests/e2e/specs/smart-todo/performance.spec.ts`: navigate to the deployed SmartTodo Code Page URL, time from navigation start to the kanban ready-state signal, `expect(elapsed).toBeLessThan(3000)` (NFR-02), following the `Date.now()`/`test.info().annotations.push()` pattern from the spe-file-viewer precedent.</step>
+    <step order="4">Add `tests/e2e/specs/smart-todo/accessibility.spec.ts`: use `AxeBuilder` (`@axe-core/playwright`) scoped to WCAG 2.1 AA tags, run once under the page's light theme and once under dark theme (toggle however the app exposes theme, or via a `prefers-color-scheme` emulation) to specifically catch the NFR-01 dark-on-yellow contrast requirement; assert zero violations in both passes. Add a keyboard-navigation test that Tabs from the top bar through Filter pill → New Task → overflow menu and into the kanban, asserting each stop reaches visible focus (`:focus-visible` or an equivalent Playwright focus assertion) and that Enter/Space activate the focused control.</step>
+    <step order="5">Add `tests/e2e/specs/smart-todo/orientation.spec.ts`: select a kanban card (assert a "selected" visual/DOM state), trigger the orientation flip via the overflow "Layout" toggle (FR-05/FR-09), assert the selection state survives the flip, assert the kanban columns re-render without overlapping/zero-size bounding boxes (a layout-glitch sanity check via `boundingBox()` comparisons), then perform a drag-drop of a card between columns post-flip and assert the card's column membership changed — confirming drag-drop still functions after the flip.</step>
+    <step order="6">Run `npx playwright test smart-todo --config=tests/e2e/config/playwright.config.ts` (or `npm run test:e2e -- smart-todo`) against the environment from task 025. If no live environment is reachable in this execution context, do not claim the suite passed — follow the escalation trigger below instead.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: mark 041 ✅ (only once green against a real environment, or with the escalation explicitly logged if not).</step>
+    <step order="8">Document any deviations (e.g., theme-toggle mechanism used, actual ready-state selector chosen) in `projects/smart-todo-r5/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no live/reachable Power Apps environment is available to execute the suite in this session (auth or network unavailable in the execution sandbox), STOP short of marking the task complete with "suite runs green" — instead confirm the suite is syntactically valid, typechecks, and is wired into the existing `test:e2e` script, and escalate per CLAUDE.md §6 for a follow-up real-environment run before merge. This mirrors the spirit of spec FR-20/NFR-06 (real-DV verification, not mock-only confidence).</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Performance — page-load &lt; 3s (NFR-02)">
+      <steps>
+        <step>Navigate to the deployed SmartTodo Code Page URL with a cold-ish start (no prior navigation in the test)</step>
+        <step>Time from navigation start to the kanban ready-state DOM signal</step>
+      </steps>
+      <expected>Elapsed time is asserted &lt; 3000ms; timing is recorded via test.info().annotations for CI visibility</expected>
+    </test>
+    <test name="Accessibility — WCAG 2.1 AA via axe-core, light + dark (NFR-01, dark-on-yellow)">
+      <steps>
+        <step>Load the SmartTodo Code Page under the light theme; run AxeBuilder scoped to wcag2a/wcag2aa/wcag21aa tags</step>
+        <step>Switch to the dark theme; re-run the same AxeBuilder scan</step>
+      </steps>
+      <expected>Zero violations in both passes, including no dark-on-yellow contrast failures on urgency badges/pills</expected>
+    </test>
+    <test name="Accessibility — keyboard navigation of top bar/filter/kanban (NFR-01)">
+      <steps>
+        <step>From page load, Tab sequentially through Filter pill → New Task → overflow menu → into the kanban</step>
+        <step>At each stop, assert focus is visible and Enter/Space activates the focused control</step>
+      </steps>
+      <expected>Every interactive top-bar/filter/kanban control is keyboard-reachable with visible focus; no keyboard trap</expected>
+    </test>
+    <test name="Orientation flip preserves drag-drop + selection (NFR-03)">
+      <steps>
+        <step>Select a kanban card; assert its selected state</step>
+        <step>Trigger the orientation flip via overflow → Layout</step>
+        <step>Assert the selection persists and the kanban columns render without overlapping/zero-size bounding boxes</step>
+        <step>Drag a card between columns post-flip; assert its column membership changed</step>
+      </steps>
+      <expected>Selection state survives the flip; no layout glitch; drag-drop continues to function in the new orientation</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run the existing test:e2e script(s) against the new smart-todo spec directory</tool>
+    <tool name="terminal">Playwright CLI (npx playwright test / --ui / --debug) for local iteration</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">tests/e2e/pages/smart-todo/SmartTodoPage.ts</output>
+    <output type="test">tests/e2e/specs/smart-todo/performance.spec.ts</output>
+    <output type="test">tests/e2e/specs/smart-todo/accessibility.spec.ts</output>
+    <output type="test">tests/e2e/specs/smart-todo/orientation.spec.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the deployed SmartTodo Code Page, when `performance.spec.ts` runs, then elapsed load time to the kanban ready-state is asserted &lt; 3000ms (NFR-02).</criterion>
+    <criterion testable="true">Given the deployed SmartTodo Code Page in both light and dark theme, when `accessibility.spec.ts`'s AxeBuilder scan runs, then zero WCAG 2.1 AA violations are reported in either pass (NFR-01).</criterion>
+    <criterion testable="true">Given the top bar/filter/kanban, when the keyboard-navigation test Tabs through them, then every interactive control receives visible focus and is activatable via Enter/Space, with no keyboard trap (NFR-01).</criterion>
+    <criterion testable="true">Given a selected kanban card, when the orientation is flipped via overflow → Layout, then the selection persists, no layout glitch is detected (no overlapping/zero-size column bounding boxes), and a post-flip drag-drop between columns succeeds (NFR-03).</criterion>
+    <criterion testable="true">Negative: if no live environment is reachable, the task does not claim a green run — it stops at the escalation trigger and documents the gap instead of fabricating a pass.</criterion>
+    <criterion testable="true">All new spec files are wired into the existing `npm run test:e2e` script with zero new npm dependencies and zero new/competing Playwright config.</criterion>
+  </acceptance-criteria>
+
+  <notes>`@playwright/test` (^1.55.1) and `@axe-core/playwright` (^4.10.2) are already root devDependencies — confirmed via `package.json` grep before authoring this task. `tests/e2e/config/playwright.config.ts` defaults `baseURL` to `https://make.powerapps.com`; the SmartTodo spec files will need the deployed Code Page's actual URL/route from task 025 (likely via `.env` per the existing `tests/e2e/config/.env.example` convention, mirroring `BFF_API_URL`/`POWER_APPS_URL`).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

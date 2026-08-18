@@ -32,7 +32,9 @@
   },
   "devDependencies": {
     "@hello-pangea/dnd": "^17.0.0",
+    "@testing-library/dom": "^10.4.1",
     "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.0.0",
     "@types/jest": "^30.0.0",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",

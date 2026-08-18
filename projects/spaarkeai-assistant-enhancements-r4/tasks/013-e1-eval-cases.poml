@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>E1 eval cases — golden utterances for the task-agenda capability (FR-10)</title>
+    <phase>1 — E1 grounded-recommend tier</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <!-- COMPLETED 2026-08-16 (sonnet-tier work executed on Opus 4.8 session, FULL/TEST-MODIFYING). The task-001 R4 eval
+         family (assistant-r4-eval-cases.json, schema assistant-r4-eval@v1) had the AR4-001 template but NO harness .cs;
+         013 authored AssistantEnhancementsR4EvalTests.cs mirroring AssistantEnhancementsR1EvalTests (NOT a parallel harness —
+         escalation trigger did NOT fire). Mechanism = DETERMINISTIC structural grounding against the REAL catalog (the R1
+         precedent's approach — no live LLM; ADR-039 selection is deterministic). Cases: AR4-001 "what do I need to do today",
+         AR4-002 "what's on my plate today", AR4-003 "help me prioritize my tasks" (family task-agenda-advisory, floor 3 met).
+         6 harness assertions: (1) suite inventory + closed vocabularies; (2) family coverage floor; (3) consumerType grounded
+         per catalogStatus (mirrored → sprk_playbookconsumer row); (4) THE P1 DoD proof — list-tasks.action.json declares the
+         advisory grounded-recommend tier (outputDeterminism advisory, groundedToolAllowList=[grid_overview,daily_briefing_overview],
+         modelTier Reasoning, ADVISORY GROUNDING RULES prompt with cite/no-fabricate/no-identity-ask, acknowledgement maxLength>1000
+         — reverting to ack-only FAILS this); (5) list-tasks Binding declares surface_launch + risk None (Tasks-opened, read-only);
+         (6) the two grounded tool rows exist, Chat-context, descriptions mandate citing + forbid inventing + forbid identity-ask
+         (grounded+cited+no-fabrication+OBO). Joined to the Category=GoldenUtteranceEval merge gate via the trait (zero CI-YAML
+         change). NEGATIVE CHECK confirmed: temp-reverting outputDeterminism advisory→fact fails assertion (4). 6/6 R4 pass;
+         full GoldenUtteranceEval gate 154/154; build 0 err. TEST-ONLY (no BFF production change → no publish/CVE gate). Step 9.5
+         CLEAN (adr-check ADR-038 established-family + ADR-039 deterministic-grounding + §11 no-parallel-harness; code-review
+         KEEP-path contract test, maintain-class, deterministic, no banned antipattern). E2 (024) + E3 (033) extend this family. -->
+    <!-- ORIGINAL: <status>pending</status> -->
+
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING — adds eval/test coverage; CLAUDE.md §8 TEST-MODIFYING override forces code-review + adr-check unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified eval-case authoring against an established harness — literal execution against a closed set of golden utterances + assertions; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave1-E1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds new eval-case files only — no shared-spine edits; runs alongside other Wave1-E1 tasks once 012 lands the capability.</parallel-reason>
+    <deps>012</deps>
+    <tags>testing, eval, ai</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+  <prompt>Add golden-utterance eval cases that cover the P1 task-agenda behavior (per ADR-039 + the FR-10 eval-case obligation) so the suite FAILS if the capability regresses to a thin ack, fabricates data, or fails to cite. Add cases in the eval-harness location established by task 001 for utterances like "what do I need to do today", "what's on my plate", and prioritization phrasing. Assert: a grounded + cited summary, a recommendation, Tasks-opened, and no-fabrication. Wire the cases into the suite.</prompt>
+  <role>SPAARKE test/eval author. Follow ADR-038 (integration-heavy testing) + ADR-039 (golden-utterance eval-case obligation). Comfortable authoring golden-utterance eval cases and wiring them into the existing harness.</role>
+  <goal>The P1 behavior is covered by golden-utterance eval cases that fail if the task-agenda capability regresses to a thin ack, fabricates, or fails to cite.</goal>
+  <context>
+    <background>FR-10 — the eval-case guardrail. ADR-039 + the maker-guide obligation require every new/changed AI behavior to land with an eval case. This task covers the FR-01 task-agenda capability authored in task 012 (the advisory upgrade of `list-tasks`): "what do I need to do today" must yield a grounded, cited summary + a recommendation + Tasks-opened, with no thin ack and no fabricated data. Add golden-utterance cases in the eval-harness location established by task 001 (the project's harness-seeding task) and assert the P1 DoD so a regression breaks the suite. Depends on task 012 (the capability must exist to evaluate).</background>
+    <relevant-files>
+      <file>the eval-harness location established by task 001 (the project's harness-seeding task — add the E1 golden-utterance cases here)</file>
+      <file>infra/dataverse/actions/list-tasks.action.json (the advisory capability under test, authored by task 012)</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md (the golden-utterance eval-case obligation)</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (integration-heavy pyramid; eval-case obligation)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the eval cases">Assert the grounded + cited + no-fabrication invariants; a case MUST fail if a narrated fact is uncited or fabricated, or if the capability regresses to a thin ack. The suite MUST NOT assume a second decider exists.</constraint>
+    <constraint source="ADR-038" scope="the eval cases">Author as golden-utterance eval cases wired into the established suite; follow the integration-heavy testing strategy + the eval-case obligation.</constraint>
+    <constraint source="project" scope="harness location">Add the cases in the harness location established by task 001 — MUST NOT stand up a parallel harness (§11 reuse-first).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Locate the eval-harness location established by task 001 and the case shape it expects.</step>
+    <step order="2">Add golden-utterance eval cases for "what do I need to do today", "what's on my plate", and a prioritization phrasing.</step>
+    <step order="3">Assert per case: a grounded + cited summary, a recommendation, Tasks-opened, and no-fabrication (a narrated fact with no tool-result citation fails).</step>
+    <step order="4">Wire the cases into the suite and run it green.</step>
+    <step order="5">Confirm a deliberate regression (thin ack / fabrication / missing citation) makes the cases fail (negative check).</step>
+    <step order="6">Update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If task 001's eval harness does not yet exist or its case shape cannot express the grounded/cited/no-fabrication assertions, STOP and escalate rather than standing up a parallel harness.</trigger>
+  </escalation>
+  <justification>
+    <existing>Task 001 establishes the project's eval harness; the FR-01 capability (task 012) is the behavior under test.</existing>
+    <extension>Add E1 golden-utterance cases to the existing harness — no new harness.</extension>
+    <cost-of-doing-nothing>The P1 task-agenda behavior can silently regress to a thin ack / fabrication with no failing test (FR-10 obligation unmet).</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="test">E1 golden-utterance eval cases in the task-001 harness location (task-agenda capability)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">Eval cases for "what do I need to do today" / "what's on my plate" / prioritization phrasing are added and pass green.</criterion>
+    <criterion testable="true">Each case asserts a grounded + cited summary, a recommendation, and Tasks-opened.</criterion>
+    <criterion testable="true">A regression (thin ack / fabrication / missing citation) makes the cases fail (negative case).</criterion>
+    <criterion testable="true">The cases are wired into the established eval suite.</criterion>
+  </acceptance-criteria>
+  <notes>Depends on task 012 (the advisory capability must exist to evaluate) and task 001 (the eval harness). This is the FR-10 guardrail for the P1 DoD.</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

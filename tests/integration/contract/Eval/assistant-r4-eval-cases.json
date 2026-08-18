@@ -1,0 +1,62 @@
+{
+  "$comment": "spaarkeai-assistant-enhancements-r4 — the R4 golden-utterance eval family (FR-10). Seeded by task 001 (AR4-001 template, scaffold-only); task 013 (FR-10 E1) authored AssistantEnhancementsR4EvalTests.cs (mirroring AssistantEnhancementsR1EvalTests.cs) which loads THIS file, joins the Category=GoldenUtteranceEval merge gate, and structurally grounds the P1 task-agenda DoD against the REAL catalog (the advisory list-tasks Action mirror + the two grounded-tool rows + the list-tasks Binding), so a regression to the ack-only tier (empty groundedToolAllowList / non-advisory / thin-ack maxLength / dropped grounding rules) fails the suite. Cases are DATA; the harness is the mechanical assertion layer (no live LLM — the underlying dispatch selection is deterministic per ADR-039). E2 (task 024) + E3 (task 033) extend THIS family with their FR-04/06/09 cases. See tests/integration/contract/Eval/README.md + projects/spaarkeai-assistant-enhancements-r4/notes/behavior-gap-register.md 'Eval-case harness convention'.",
+  "schemaVersion": "assistant-r4-eval@v1",
+  "cases": [
+    {
+      "caseId": "AR4-001",
+      "family": "task-agenda-advisory",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "what do I need to do today",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 (R1) — list-tasks Binding mirrored in infra/dataverse/sprk_playbookconsumer-rows.json; R4 FR-01/FR-02/FR-03 (task 012) upgraded this Binding's Action to output_determinism:advisory + a per-Action bounded grounded-tool allow-list (spaarke.grid_overview + spaarke.daily_briefing_overview). The consumerType is unchanged — only the Action's determinism mode + tool grounding."
+      },
+      "notes": "P1 / FR-01 root case (behavior-gap register row P1 — 'thin ack, no summary'). DoD the harness anchors structurally: the advisory list-tasks Action declares output_determinism:advisory + a non-empty groundedToolAllowList (grid_overview My-Tasks + daily_briefing_overview) + the Reasoning tier + the ADVISORY GROUNDING RULES prompt (cite every count/name/date to a tool result, never fabricate, never ask the user's identity) + a rich acknowledgement outputSchema (maxLength widened from the ack-only 200), and the Binding still declares surface_launch (Tasks tab opens). A revert to the ack-only tier fails ListTasksAction_DeclaresAdvisoryGroundedRecommendTier_NotAckOnly."
+    },
+    {
+      "caseId": "AR4-002",
+      "family": "task-agenda-advisory",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "what's on my plate today",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 (R1) list-tasks Binding; R4 task 012 advisory upgrade — same Action as AR4-001, alternate task-agenda phrasing."
+      },
+      "notes": "FR-01 phrasing variant — a task-agenda ask that is NOT the literal 'today' utterance still routes to the advisory list-tasks capability (ADR-039: selection is by the one Text-path decider over the authored tool description, not a keyword classifier). Anchors the same grounded-summary + recommendation + Tasks-opened DoD as AR4-001."
+    },
+    {
+      "caseId": "AR4-003",
+      "family": "task-agenda-advisory",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "help me prioritize my tasks",
+      "expected": {
+        "outcomeClass": "dispatch",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "task 050 (R1) list-tasks Binding; R4 task 012 advisory upgrade — the prioritization phrasing (root register row P2, the 'Help me prioritize my tasks' follow-on that previously dead-ended asking for the user's id)."
+      },
+      "notes": "FR-01 prioritization case (behavior-gap register row P2). The advisory tier's RECOMMENDATION half is the point: the capability must prioritize over the grounded task/briefing data. The no-identity-ask half of the P2 defect is grounded structurally by the two tools' OBO-identity assertion (asserted in AdvisoryGroundedTools_ExistInCatalog_AndAssertGroundingAndObo) — the tools scope to the calling user automatically, so no flow needs to ask 'who are you'."
+    },
+    {
+      "caseId": "AR4-020",
+      "family": "preference-loop",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "always summarize my tasks",
+      "expected": {
+        "outcomeClass": "preference-bias",
+        "consumerType": "list-tasks",
+        "catalogStatus": "mirrored",
+        "seededBy": "R4 E3 loop (task 030 Preference fact type / task 031 feedback→memory capture / task 032 governed producer) — a confirmed standing directive persists as a User-scope Preference and biases the FR-01 list-tasks capability's DEFAULT on the next turn."
+      },
+      "notes": "P3-loop case (FR-08/09, behavior-gap register row P3 — the learning loop that never closed). The E3 loop: a confirmed 'always summarize my tasks' directive → PreferenceMemoryCapture writes a governed User-scope Preference, ConfirmedByUser=true (task 031) → PreferenceDirectiveProducer's CLOSED allow-list emits a server-authored pre-turn HINT biasing the list-tasks (FR-01) capability's default (task 032). Grounded structurally by PreferenceLoop_BiasesARealCataloguedCapability_ConfirmedOnly_OffAllowListInert: the bias targets a REAL mirror binding (list-tasks, never a phantom); confirmed-only (an unconfirmed inference is a task-031 dormant candidate that never steers); off-allow-list directives are inert; the hint never grants a capability or alters a fact (prompt-only — it never reaches AgentToolFilterContext, proven by the two structural-invariant tests) with the DATA-guard present. A boundary breach fails the suite."
+    }
+  ]
+}

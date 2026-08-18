@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="smart-todo-r5">
+  <metadata>
+    <title>5 dedicated per-entity "Create To Do" ribbon solutions (FR-19)</title>
+    <phase>6: Ribbon expansion</phase>
+    <gate>050 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New-surface task authoring 5 net-new Dataverse ribbon solutions (CustomAction + CommandDefinition + EnableRule/DisplayRule + LocLabels per entity — 5x repetition is well over 6 steps). RibbonDiffXml is XSD-sensitive and, per the ribbon-edit skill's Failure Modes table, an invalid CrmParameter value corrupts the entity's active ribbon irrecoverably (entity must be deleted and recreated) — a high-blast-radius Dataverse config surface. Triggers FULL per CLAUDE.md §8's decision tree (6+ steps plus high-blast-radius config change).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Cloning a proven, already-deployed pattern (Matter's CreateTodo button, verified working live in task 050) across 5 entities — mechanical repetition with per-entity substitution, not new architecture. CLAUDE.md §8.5 default tier applies; opus is reserved for genuinely novel design work.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Needs 050's verified icon-reference pattern (Image32by32/Image16by16/ModernImage attribute shape) confirmed working in a live environment before cloning it 5x; running before 050 risks propagating an unverified pattern to 5 solutions instead of 1.</parallel-reason>
+    <deps>050</deps>
+    <tags>ribbon, dataverse</tags>
+    <estimated-effort>3-4 hrs (5 solutions x ~30-45 min each incl. per-entity XSD risk)</estimated-effort>
+  </metadata>
+
+  <prompt>Create 5 NEW dedicated per-entity Dataverse ribbon solutions — ProjectRibbons (sprk_project), EventRibbons (sprk_event), InvoiceRibbons (sprk_invoice), WorkAssignmentRibbons (sprk_workassignment), CommunicationRibbons (sprk_communication) — each containing ONLY that entity plus a "Create To Do" command-bar button cloned from the Matter pattern verified in task 050, calling the already-deployed `Spaarke.Commands.Wizards.openCreateTodoWizard(primaryControl)` handler with the sprk_ToDoCheckmark icons, per FR-19 / design.md R-9 scope item 2.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse RibbonDiffXml authoring and dedicated-solution conventions. Follow the ribbon-edit skill strictly for every entity; treat each entity's RibbonDiffXml as an independent XSD-sensitive surface.</role>
+
+  <goal>5 new dedicated unmanaged solutions exist (ProjectRibbons, EventRibbons, InvoiceRibbons, WorkAssignmentRibbons, CommunicationRibbons), each containing only its target entity plus a RibbonDiffXml with one "Create To Do" CustomAction/CommandDefinition/EnableRule/DisplayRule/LocLabels set (Alt, Image16by16, Image32by32, ModernImage all referencing the shared sprk_ToDoCheckmark icons; CommandDefinition invoking Spaarke.Commands.Wizards.openCreateTodoWizard via $webresource:sprk_wizard_commands.js with CrmParameter Value="PrimaryControl"); none of the 5 solutions add to or modify spaarke_insights or SpaarkeCore.</goal>
+
+  <context>
+    <background>R4-118 shipped the shared handler plus icons; design.md R-9 explicitly calls for 5 NEW dedicated per-entity solutions (not additions to spaarke_insights/SpaarkeCore) per the ribbon-edit skill's "Solution Setup" convention (dedicated solution per entity, entity metadata only, no forms/views). Task 050 verified the icon-reference shape works live on Matter; this task replicates ONLY the CreateTodo button (not the full Matter wizard-button suite) onto 5 more entities.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml</file>
+      <file role="reference">src/client/webresources/js/sprk_wizard_commands.js</file>
+      <file role="reference">src/client/assets/icons/sprk_ToDoCheckmark32.svg</file>
+      <file role="reference">src/client/assets/icons/sprk_ToDoCheckmark16.svg</file>
+      <file role="new">src/solutions/ProjectRibbons/</file>
+      <file role="new">src/solutions/EventRibbons/</file>
+      <file role="new">src/solutions/InvoiceRibbons/</file>
+      <file role="new">src/solutions/WorkAssignmentRibbons/</file>
+      <file role="new">src/solutions/CommunicationRibbons/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Verified icon-reference attribute shape (Image32by32/Image16by16/ModernImage) confirmed working live on Matter — this task clones that shape.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ribbon-edit skill">Each dedicated solution MUST contain ONLY its target entity's metadata (Include table metadata only) — no forms, views, or other components; NEVER add the ribbon change to spaarke_insights or SpaarkeCore (per project convention re-stated in design.md R-9 scope item 2).</constraint>
+    <constraint source="ribbon-edit skill">Every Button element MUST carry the `Alt` attribute; every CustomAction Location MUST use the lowercase entity logical name (`sprk_project`, `sprk_event`, `sprk_invoice`, `sprk_workassignment`, `sprk_communication`).</constraint>
+    <constraint source="ribbon-edit skill">Form-button CommandDefinitions MUST pass `CrmParameter Value="PrimaryControl"` (never `SelectedControl` or `SelectedItemReferences`, which are grid-only and, if misused, corrupt the ribbon) — these are form command-bar buttons, not grid buttons.</constraint>
+    <constraint source="project">All 5 CommandDefinitions call the SAME shared `Spaarke.Commands.Wizards.openCreateTodoWizard` function in `$webresource:sprk_wizard_commands.js` — do not fork or duplicate the handler per entity.</constraint>
+    <constraint source="spec FR-19">Each button must open the wizard with the correct entity context (entityType + entityId) — this depends only on `getEntityContext(primaryControl)` already reading the bound entity off `PrimaryControl`, not on any per-entity JS change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ribbon customization</topic>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/design.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="dedicated-entity-ribbon-solution" location=".claude/skills/ribbon-edit/SKILL.md">One small unmanaged solution per entity, entity-metadata-only, Spaarke publisher — never merged into a shared/big solution.</pattern>
+      <pattern name="form-button-crmparameter" location=".claude/skills/ribbon-edit/SKILL.md">PrimaryControl CrmParameter + CustomRule/FormStateRule EnableRule shape for form command-bar buttons (as opposed to grid/subgrid buttons, which use SelectedControl).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor level (FULL) and reason per CLAUDE.md §8. Load knowledge files. Confirm task 050 is complete (gate: 050 complete) before proceeding.</step>
+    <step order="1">For each of the 5 entities (sprk_project, sprk_event, sprk_invoice, sprk_workassignment, sprk_communication), create a new dedicated unmanaged solution named {EntityName}Ribbons (ProjectRibbons, EventRibbons, InvoiceRibbons, WorkAssignmentRibbons, CommunicationRibbons), Publisher = Spaarke, containing ONLY that entity's metadata (per ribbon-edit skill "For Entity-Specific Ribbon" steps 1-3).</step>
+    <step order="2">For each solution, export it, extract customizations.xml, and author a RibbonDiffXml block cloned from the Matter CreateTodo button (this task's canonical-reference relevant-file), substituting: element Ids `sprk.Wizard.{Entity}.CreateTodo.*` (e.g. `sprk.Wizard.Project.CreateTodo.Button.CustomAction`), Location `Mscrm.Form.{entity}.MainTab.Actions.Controls._children` using the lowercase logical name, Image32by32/Image16by16/ModernImage referencing the sprk_ToDoCheckmark icons (per task 050's verified shape), CommandDefinition JavaScriptFunction FunctionName="Spaarke.Commands.Wizards.openCreateTodoWizard" Library="$webresource:sprk_wizard_commands.js" with CrmParameter Value="PrimaryControl", an EnableRule (FormStateRule State="Existing" Default="true") and DisplayRule (FormStateRule State="Existing") scoped to `sprk.Wizard.{Entity}.Form.*`, and the 4 required LocLabels (Alt, LabelText, ToolTipTitle, ToolTipDescription) with "Create To Do" text per the Matter LocLabels pattern.</step>
+    <step order="3">Save each entity's authored RibbonDiff.xml (and the customizations.xml it lives in) under src/solutions/{EntityName}Ribbons/, mirroring the spaarke_insights unpacked layout (Entities/{entity}/RibbonDiff.xml plus Other/Solution.xml plus Other/Customizations.xml) so the source is tracked in the repo.</step>
+    <step order="4">Validate each of the 5 RibbonDiffXml blocks is well-formed XML (xmllint --noout or equivalent) BEFORE any import — per the escalation trigger, do not import an unvalidated file.</step>
+    <step order="5">Repackage and import each of the 5 solutions with `pac solution import --publish-changes`, one entity at a time, confirming each import succeeds before moving to the next (do not batch all 5 imports without per-entity confirmation — an XSD/schema difference on one entity must not be masked by a batch failure on another).</step>
+    <step order="6">After all 5 import cleanly, spot-check (not the full smoke test — that is task 052) that each entity's form shows the new "Create To Do" button in the command bar.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: set 051's status to ✅.</step>
+    <step order="8">Document any per-entity deviation (e.g. a Location/CrmParameter difference that did not match the Matter template) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any entity's ribbon XSD structure or valid CustomAction Location differs from the Matter pattern (e.g. the entity's form does not expose `Mscrm.Form.{entity}.MainTab.Actions.Controls._children`, or import rejects the cloned block), STOP for that entity — do not guess an alternate Location or CrmParameter value (per the ribbon-edit skill's Failure Modes table, an invalid CrmParameter value corrupts the entity's ribbon unrecoverably). Reconcile the difference explicitly per entity before importing, and escalate per CLAUDE.md §6 if the reconciliation is not obvious from the Matter template.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pac">Solution create / export / import / publish</tool>
+    <tool name="terminal">XML validation (xmllint or equivalent), PowerShell for archive extract/repack</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/ProjectRibbons/</output>
+    <output type="code">src/solutions/EventRibbons/</output>
+    <output type="code">src/solutions/InvoiceRibbons/</output>
+    <output type="code">src/solutions/WorkAssignmentRibbons/</output>
+    <output type="code">src/solutions/CommunicationRibbons/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the 5 target entities, when their forms are inspected in Dataverse after import, then each shows exactly ONE new "Create To Do" command-bar button (no duplicate, no button on any entity NOT in the 5-entity list).</criterion>
+    <criterion testable="true">Given each of the 5 RibbonDiffXml blocks, when validated, then all pass XSD/well-formedness validation with zero errors.</criterion>
+    <criterion testable="true">Given each CommandDefinition, when inspected, then all 5 reference the SAME shared function `Spaarke.Commands.Wizards.openCreateTodoWizard` in `$webresource:sprk_wizard_commands.js` (no per-entity forked handler).</criterion>
+    <criterion testable="true">Given the 5 new solutions, when the spaarke_insights and SpaarkeCore solutions are inspected, then NEITHER contains any new component from this task (verifies the "dedicated small solution" convention, not a merge into an existing big solution).</criterion>
+    <criterion testable="true">Negative: if any entity's ribbon XSD structure differs from Matter's (a Location or CrmParameter mismatch), that entity's solution is NOT imported until reconciled — no entity ships with a guessed/unvalidated CrmParameter value.</criterion>
+  </acceptance-criteria>
+
+  <notes>design.md R-9 scope item 2 (the 5-solution list) and the ribbon-edit skill's "Why dedicated solutions?" rationale. Only the CreateTodo button is cloned — Matter's other 6 wizard buttons (CreateEvent, CreateProject, FindSimilar, PlaybookLibrary, SummarizeFiles, UploadDocuments) are NOT replicated onto these 5 entities; doing so would be scope creep beyond FR-19.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

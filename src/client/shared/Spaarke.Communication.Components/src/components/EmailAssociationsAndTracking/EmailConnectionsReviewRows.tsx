@@ -80,13 +80,7 @@ export function CandidateCard({
             </Text>
           </div>
           {!readOnly ? (
-            <Button
-              appearance="primary"
-              size="small"
-              icon={<Checkmark16Filled />}
-              disabled={busy}
-              onClick={onConfirm}
-            >
+            <Button appearance="primary" size="small" icon={<Checkmark16Filled />} disabled={busy} onClick={onConfirm}>
               Confirm
             </Button>
           ) : null}

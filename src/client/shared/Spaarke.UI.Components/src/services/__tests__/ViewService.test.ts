@@ -281,8 +281,18 @@ describe('ViewService', () => {
       const views = await service.getAllUserQueries();
 
       expect(views).toHaveLength(2);
-      expect(views[0]).toMatchObject({ id: 'uq-1', name: 'My Matters', entityLogicalName: 'sprk_matter', viewType: 'userquery' });
-      expect(views[1]).toMatchObject({ id: 'uq-2', name: 'My Documents', entityLogicalName: 'sprk_document', viewType: 'userquery' });
+      expect(views[0]).toMatchObject({
+        id: 'uq-1',
+        name: 'My Matters',
+        entityLogicalName: 'sprk_matter',
+        viewType: 'userquery',
+      });
+      expect(views[1]).toMatchObject({
+        id: 'uq-2',
+        name: 'My Documents',
+        entityLogicalName: 'sprk_document',
+        viewType: 'userquery',
+      });
 
       // No `returnedtypecode eq` clause — this is the cross-entity query.
       const [, query] = (mockXrm.WebApi.retrieveMultipleRecords as jest.Mock).mock.calls[0];

@@ -691,7 +691,9 @@ export interface ComposeDocumentRef {
  * consumed by FR-03 (task 040) and FR-07 client dedup (task 011); do NOT derive identity any
  * other way.
  */
-export function getComposeLogicalIdentity(ref: Pick<ComposeDocumentRef, 'sprkDocumentId' | 'speDriveItemId' | 'composeLogicalId'> | null | undefined): string | undefined {
+export function getComposeLogicalIdentity(
+  ref: Pick<ComposeDocumentRef, 'sprkDocumentId' | 'speDriveItemId' | 'composeLogicalId'> | null | undefined
+): string | undefined {
   if (!ref) return undefined;
   const nonEmpty = (v: string | undefined): string | undefined => (v && v.length > 0 ? v : undefined);
   return nonEmpty(ref.sprkDocumentId) ?? nonEmpty(ref.speDriveItemId) ?? nonEmpty(ref.composeLogicalId);

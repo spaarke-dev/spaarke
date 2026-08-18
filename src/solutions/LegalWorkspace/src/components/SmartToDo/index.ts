@@ -1,33 +1,18 @@
 /**
- * SmartToDo barrel export.
+ * SmartToDo barrel export — LegalWorkspace thin shim.
  *
- * Public API for the Smart To Do Kanban board (Block 4).
- * Import as: import { SmartToDo } from '../SmartToDo';
+ * R5 FR-01 / task 003 (thin-shim conversion). This folder used to contain the
+ * 13-file rich Kanban implementation; that implementation now lives
+ * host-agnostic in `@spaarke/smart-todo-components` (task 002). Only the two
+ * LW-specific shim components remain here, re-exported for the existing
+ * consumer import paths (`./components/SmartToDo/SmartToDo`,
+ * `../SmartToDo/SmartToDoDialog`).
+ *
+ * Zero duplicated component implementation remains in this directory.
  */
 
-export { SmartToDo } from './SmartToDo';
-export type { ISmartToDoProps } from './SmartToDo';
+export { SmartToDo } from "./SmartToDo";
+export type { ISmartToDoProps } from "./SmartToDo";
 
-export { KanbanCard } from './KanbanCard';
-export type { IKanbanCardProps } from './KanbanCard';
-
-export { KanbanHeader } from './KanbanHeader';
-export type { IKanbanHeaderProps } from './KanbanHeader';
-
-export { ThresholdSettingsPopover } from './ThresholdSettings';
-export type { IThresholdSettingsProps } from './ThresholdSettings';
-
-export { TodoDetailPane } from './TodoDetailPane';
-export type { ITodoDetailPaneProps } from './TodoDetailPane';
-
-export { TodoAISummaryDialog } from './TodoAISummaryDialog';
-export type { ITodoAISummaryDialogProps } from './TodoAISummaryDialog';
-
-export { PriorityScoreCard } from './PriorityScoreCard';
-export type { IPriorityScoreCardProps } from './PriorityScoreCard';
-
-export { EffortScoreCard } from './EffortScoreCard';
-export type { IEffortScoreCardProps } from './EffortScoreCard';
-
-export { SmartToDoDialog } from './SmartToDoDialog';
-export type { ISmartToDoDialogProps } from './SmartToDoDialog';
+export { SmartToDoDialog } from "./SmartToDoDialog";
+export type { ISmartToDoDialogProps } from "./SmartToDoDialog";

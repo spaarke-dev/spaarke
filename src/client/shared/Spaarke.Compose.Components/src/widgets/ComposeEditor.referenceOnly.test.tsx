@@ -165,12 +165,7 @@ describe('ComposeEditor — FR-06 PDF import parity (task 051): sourceFormat adm
   it('sourceFormat="pdf" still trusts the BYTES: a non-docx buffer under a PDF marker stays reference-only (never editable over non-docx)', async () => {
     // Defensive: sourceFormat==='pdf' skips the .pdf EXTENSION rejection but still requires real docx
     // magic bytes (isDocxBytes) — a raw PDF buffer (server contract violation) must NOT mount editable.
-    renderEditor(
-      bufferFrom(PDF_SIGNATURE),
-      { speDriveItemId: '', fileName: 'raw.pdf' },
-      EDITABLE_PROJECTION,
-      'pdf'
-    );
+    renderEditor(bufferFrom(PDF_SIGNATURE), { speDriveItemId: '', fileName: 'raw.pdf' }, EDITABLE_PROJECTION, 'pdf');
 
     const panel = await screen.findByTestId('compose-reference-only');
     expect(panel).toBeInTheDocument();

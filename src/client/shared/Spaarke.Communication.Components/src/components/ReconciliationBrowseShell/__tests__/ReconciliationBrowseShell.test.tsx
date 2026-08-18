@@ -112,9 +112,7 @@ describe('ReconciliationBrowseShell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Next record' }));
 
     expect(await screen.findByText('2 of 3')).toBeInTheDocument();
-    await waitFor(() =>
-      expect(screen.getAllByText('Engagement letter countersigned').length).toBeGreaterThan(0)
-    );
+    await waitFor(() => expect(screen.getAllByText('Engagement letter countersigned').length).toBeGreaterThan(0));
     expect(screen.getByTestId('tabs-marker')).toHaveTextContent('tabs for comm-2');
     expect(onIndexChange).toHaveBeenCalledWith(1, expect.objectContaining({ id: 'comm-2' }));
 

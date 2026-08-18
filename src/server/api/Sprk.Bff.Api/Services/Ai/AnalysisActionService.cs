@@ -41,7 +41,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // AnalysisAction record carries the canonical {SystemPrompt + OutputSchema + Temperature}
         // triple — consumed unconditionally by AiCompletionNodeExecutor; ignored by executors
         // that do not need a structured-output schema.
-        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson";
+        var url = $"sprk_analysisactions({actionId})?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_groundedtoolallowlist,sprk_outputschemajson";
         var response = await Http.GetAsync(url, cancellationToken);
 
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -87,6 +87,11 @@ public class AnalysisActionService : DataverseHttpServiceBase
             // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
             // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
             AllowsKnowledge = entity.AllowsKnowledge ?? false,
+            // R4 task 010 (FR-03): per-Action bounded grounded-tool allow-list opt-in — catalog DATA
+            // parsed to a bounded set (empty = ack-tier / opt-out). Mirrors the sprk_allowsknowledge
+            // opt-in above. Task 011 narrows the agent-path pre-filter to exactly this set; the list is
+            // NEVER a code-side tool-name gate (ADR-039 §3.2 — the allow-list lives on the row).
+            GroundedToolAllowList = ParseGroundedToolAllowList(entity.GroundedToolAllowList),
             // R7 task 002 / FR-12: structured-outputs JSON schema for prompt-driven executors.
             OutputSchemaJson = entity.OutputSchemaJson
         };
@@ -94,6 +99,50 @@ public class AnalysisActionService : DataverseHttpServiceBase
         Logger.LogInformation("Loaded action from Dataverse: {ActionName}", action.Name);
 
         return action;
+    }
+
+    /// <summary>
+    /// Parses the <c>sprk_groundedtoolallowlist</c> catalog value (a JSON array of grounded-tool
+    /// identifiers) into a bounded, de-duplicated, order-preserving allow-list. Null / whitespace /
+    /// malformed JSON / a non-array payload all resolve to an EMPTY list (opt-out → ack-tier) so a
+    /// mis-authored row can never widen the tool set (fail-closed). R4 task 010 / FR-03. The value is
+    /// catalog DATA — this method never consults a hardcoded tool-name list (ADR-039).
+    /// </summary>
+    internal static IReadOnlyList<string> ParseGroundedToolAllowList(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return [];
+        }
+
+        string[]? parsed;
+        try
+        {
+            parsed = JsonSerializer.Deserialize<string[]>(raw);
+        }
+        catch (JsonException)
+        {
+            // Fail-closed: a malformed allow-list must never widen the mounted tool set.
+            return [];
+        }
+
+        if (parsed is null)
+        {
+            return [];
+        }
+
+        // De-duplicate (ordinal) preserving first-seen order; drop blank entries.
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var result = new List<string>(parsed.Length);
+        foreach (var id in parsed)
+        {
+            if (!string.IsNullOrWhiteSpace(id) && seen.Add(id))
+            {
+                result.Add(id);
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -123,7 +172,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // OData filter (URL-encoded single quotes around the literal). Top=1 because
         // sprk_actioncode is unique by design even when not enforced as an alternate key.
         var encoded = Uri.EscapeDataString(actionCode);
-        var url = $"sprk_analysisactions?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson&$filter=sprk_actioncode eq '{encoded}'&$top=1";
+        var url = $"sprk_analysisactions?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_groundedtoolallowlist,sprk_outputschemajson&$filter=sprk_actioncode eq '{encoded}'&$top=1";
         var response = await Http.GetAsync(url, cancellationToken);
 
         await EnsureSuccessWithDiagnosticsAsync(response, $"GetActionByCodeAsync({actionCode})", cancellationToken);
@@ -151,6 +200,11 @@ public class AnalysisActionService : DataverseHttpServiceBase
             // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
             // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
             AllowsKnowledge = entity.AllowsKnowledge ?? false,
+            // R4 task 010 (FR-03): per-Action bounded grounded-tool allow-list opt-in — catalog DATA
+            // parsed to a bounded set (empty = ack-tier / opt-out). Mirrors the sprk_allowsknowledge
+            // opt-in above. Task 011 narrows the agent-path pre-filter to exactly this set; the list is
+            // NEVER a code-side tool-name gate (ADR-039 §3.2 — the allow-list lives on the row).
+            GroundedToolAllowList = ParseGroundedToolAllowList(entity.GroundedToolAllowList),
             OutputSchemaJson = entity.OutputSchemaJson
         };
 
@@ -183,7 +237,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
         // See GetActionAsync above for the full rationale and Wave 4 task 046 follow-up.
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_outputschemajson",
+            selectFields: "sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_modeltier,sprk_allowsknowledge,sprk_groundedtoolallowlist,sprk_outputschemajson",
             expandClause: null,
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -225,6 +279,11 @@ public class AnalysisActionService : DataverseHttpServiceBase
             // ai-advanced-capabilities-nda-r1 follow-up: knowledge-retrieval opt-in (sprk_allowsknowledge).
             // When true, ActionRunner retrieves grounding references (KNW-011 etc.) before the completion.
             AllowsKnowledge = entity.AllowsKnowledge ?? false,
+            // R4 task 010 (FR-03): per-Action bounded grounded-tool allow-list opt-in — catalog DATA
+            // parsed to a bounded set (empty = ack-tier / opt-out). Mirrors the sprk_allowsknowledge
+            // opt-in above. Task 011 narrows the agent-path pre-filter to exactly this set; the list is
+            // NEVER a code-side tool-name gate (ADR-039 §3.2 — the allow-list lives on the row).
+            GroundedToolAllowList = ParseGroundedToolAllowList(entity.GroundedToolAllowList),
             // R7 task 002 / FR-12: structured-outputs JSON schema for prompt-driven executors.
             OutputSchemaJson = entity.OutputSchemaJson
         }).ToArray();
@@ -505,6 +564,19 @@ public class AnalysisActionService : DataverseHttpServiceBase
         /// </summary>
         [JsonPropertyName("sprk_allowsknowledge")]
         public bool? AllowsKnowledge { get; set; }
+
+        /// <summary>
+        /// Bounded grounded-tool allow-list opt-in (<c>sprk_groundedtoolallowlist</c>, multiline text).
+        /// A JSON array of grounded-tool identifiers (e.g.
+        /// <c>["spaarke.grid_overview","spaarke.daily_briefing_overview"]</c>) that an advisory-mode
+        /// Action opts into mounting. Mirrors the <c>sprk_allowsknowledge</c> per-Action opt-in
+        /// precedent, but carries the bounded SET as catalog DATA rather than a bool. Null / empty →
+        /// the Action mounts zero grounded tools (ack-tier). The deterministic agent-path pre-filter
+        /// (R4 task 011) narrows the mounted handler tools to exactly this set; it is NEVER a code-side
+        /// tool-name gate (ADR-039 §3.2 — the allow-list lives on the row, not in code). R4 task 010 / FR-03.
+        /// </summary>
+        [JsonPropertyName("sprk_groundedtoolallowlist")]
+        public string? GroundedToolAllowList { get; set; }
     }
 
     #endregion

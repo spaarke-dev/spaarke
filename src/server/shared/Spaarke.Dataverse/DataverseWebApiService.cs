@@ -45,25 +45,45 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         _logger = logger;
 
         var dataverseUrl = configuration["Dataverse:ServiceUrl"];
-        var tenantId = configuration["TENANT_ID"];
-        var clientId = configuration["API_APP_ID"];
-        var clientSecret = configuration["Dataverse:ClientSecret"];
-
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
-        if (string.IsNullOrEmpty(tenantId))
-            throw new InvalidOperationException("TENANT_ID configuration is required");
-
-        if (string.IsNullOrEmpty(clientId))
-            throw new InvalidOperationException("API_APP_ID configuration is required");
-
-        if (string.IsNullOrEmpty(clientSecret))
-            throw new InvalidOperationException("Dataverse:ClientSecret configuration is required");
-
         _apiUrl = $"{dataverseUrl.TrimEnd('/')}/api/data/v9.2";
 
-        _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+        // ADR-028 §24 (#3b): prefer Managed Identity when enabled; ClientSecret is the local-dev fallback.
+        // The secret path is retained (do NOT remove Dataverse:ClientSecret) until MI attribution is proven live.
+        var useManagedIdentity = string.Equals(
+            configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
+
+        if (useManagedIdentity)
+        {
+            var miClientId = configuration["ManagedIdentity:ClientId"]
+                ?? configuration["Graph:ManagedIdentity:ClientId"];
+            var options = new DefaultAzureCredentialOptions();
+            if (!string.IsNullOrEmpty(miClientId))
+                options.ManagedIdentityClientId = miClientId;
+            _credential = new DefaultAzureCredential(options);
+            _logger.LogInformation(
+                "DataverseWebApiService using Managed Identity (ADR-028; clientId {ClientId}) for {ApiUrl}",
+                miClientId ?? "(system-assigned)", _apiUrl);
+        }
+        else
+        {
+            var tenantId = configuration["TENANT_ID"];
+            var clientId = configuration["API_APP_ID"];
+            var clientSecret = configuration["Dataverse:ClientSecret"];
+
+            if (string.IsNullOrEmpty(tenantId))
+                throw new InvalidOperationException("TENANT_ID configuration is required (Managed Identity disabled)");
+            if (string.IsNullOrEmpty(clientId))
+                throw new InvalidOperationException("API_APP_ID configuration is required (Managed Identity disabled)");
+            if (string.IsNullOrEmpty(clientSecret))
+                throw new InvalidOperationException("Dataverse:ClientSecret configuration is required (Managed Identity disabled)");
+
+            _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
+            _logger.LogInformation(
+                "DataverseWebApiService using ClientSecret credential (local-dev fallback) for {ApiUrl}", _apiUrl);
+        }
 
         // BaseAddress MUST end with a trailing slash: with a relative request URI (e.g.
         // "sprk_recordtype_refs?..."), .NET's RFC-3986 resolution drops the last path segment

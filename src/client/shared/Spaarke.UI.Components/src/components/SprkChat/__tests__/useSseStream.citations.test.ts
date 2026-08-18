@@ -563,7 +563,12 @@ describe('useSseStream - Event Ordering', () => {
       {
         type: 'suggestions',
         content: null,
-        data: { suggestions: ['Follow-up Q1', 'Follow-up Q2'] },
+        data: {
+          suggestions: [
+            { kind: 'question', label: 'Follow-up Q1', targetBindingId: null, actionId: null },
+            { kind: 'question', label: 'Follow-up Q2', targetBindingId: null, actionId: null },
+          ],
+        },
       },
       { type: 'done', content: null },
     ];
@@ -580,7 +585,10 @@ describe('useSseStream - Event Ordering', () => {
     expect(result.current.content).toBe('Part 1 Part 2 [1]');
     expect(result.current.citations).toHaveLength(1);
     expect(result.current.citations[0].source).toBe('Source A');
-    expect(result.current.suggestions).toEqual(['Follow-up Q1', 'Follow-up Q2']);
+    expect(result.current.suggestions).toEqual([
+      { kind: 'question', label: 'Follow-up Q1', targetBindingId: null, actionId: null },
+      { kind: 'question', label: 'Follow-up Q2', targetBindingId: null, actionId: null },
+    ]);
     expect(result.current.isDone).toBe(true);
     expect(result.current.isStreaming).toBe(false);
   });
@@ -614,7 +622,11 @@ describe('useSseStream - Event Ordering', () => {
         type: 'suggestions',
         content: null,
         data: {
-          suggestions: ['Explain section 3.1', 'What changed in the amendment?', 'Summarize key differences'],
+          suggestions: [
+            { kind: 'question', label: 'Explain section 3.1', targetBindingId: null, actionId: null },
+            { kind: 'question', label: 'What changed in the amendment?', targetBindingId: null, actionId: null },
+            { kind: 'question', label: 'Summarize key differences', targetBindingId: null, actionId: null },
+          ],
         },
       },
       { type: 'done', content: null },
@@ -639,7 +651,12 @@ describe('useSseStream - Event Ordering', () => {
       {
         type: 'suggestions',
         content: null,
-        data: { suggestions: ['Tell me more', 'What else?'] },
+        data: {
+          suggestions: [
+            { kind: 'question', label: 'Tell me more', targetBindingId: null, actionId: null },
+            { kind: 'question', label: 'What else?', targetBindingId: null, actionId: null },
+          ],
+        },
       },
       { type: 'done', content: null },
     ];
@@ -653,7 +670,10 @@ describe('useSseStream - Event Ordering', () => {
     });
 
     expect(result.current.citations).toEqual([]);
-    expect(result.current.suggestions).toEqual(['Tell me more', 'What else?']);
+    expect(result.current.suggestions).toEqual([
+      { kind: 'question', label: 'Tell me more', targetBindingId: null, actionId: null },
+      { kind: 'question', label: 'What else?', targetBindingId: null, actionId: null },
+    ]);
   });
 
   it('startStream_CitationsOnly_NoSuggestionsPresent', async () => {

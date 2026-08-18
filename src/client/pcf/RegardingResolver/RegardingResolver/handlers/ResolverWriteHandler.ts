@@ -29,13 +29,18 @@
  * @see projects/smart-todo-r4/notes/regarding-resolver-audit.md §4
  */
 
+// Deep (per-module) imports — NOT the root '@spaarke/ui-components' barrel
+// (dist/index re-exports SprkChat → pdfjs, which the PCF webpack build can't
+// transform). ADR-012 PCF Import Pattern.
 import {
   applyResolverFields,
-  TODO_REGARDING_CATALOG,
   type INavPropEntry,
   type IPolymorphicWebApi,
+} from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
+import {
+  TODO_REGARDING_CATALOG,
   type ITodoRegardingTargetCatalogEntry,
-} from '@spaarke/ui-components';
+} from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
 
 // ---------------------------------------------------------------------------
 // Types

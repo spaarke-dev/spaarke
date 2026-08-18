@@ -78,11 +78,7 @@ describe('ComposeEditor — Blank page mounts editable (FR-08 / R6 D8)', () => {
     render(
       <FluentProvider theme={webLightTheme}>
         <PaneEventBusProvider>
-          <ComposeEditor
-            docxBytes={bufferFrom(PDF_SIGNATURE)}
-            documentRef={documentRef}
-            sessionId="session-070-neg"
-          />
+          <ComposeEditor docxBytes={bufferFrom(PDF_SIGNATURE)} documentRef={documentRef} sessionId="session-070-neg" />
         </PaneEventBusProvider>
       </FluentProvider>
     );

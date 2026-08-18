@@ -51,7 +51,7 @@
 // percentage literals in this file.
 // ---------------------------------------------------------------------------
 
-import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
+import { OOB_MODAL_SIZES, type OobModalSize } from '../../utils/adapters/oobModalSizes';
 
 // ---------------------------------------------------------------------------
 // Internal: Xrm.Navigation feature detection (frame-walking)
@@ -371,28 +371,136 @@ export async function navigateToWebResourceSurfaceAsync(params: NavigateToParams
 }
 
 /**
- * Options for launching an OOB entity create form in a modal (design §3 /
+ * Options for launching an OOB entity record surface in a modal (design §3 /
  * MODAL-DECISION-CRITERIA — the To Do route).
+ *
+ * Consolidated by smart-todo-r5 task 031 (spec FR-11 — "one code path for
+ * create + open"): this is now the SOLE OOB `sprk_todo` main-form launcher,
+ * serving BOTH the CREATE surface (`entityId` absent, task 030) and the OPEN
+ * surface (`entityId` present, task 031). Only sizing/position/outcome-shape
+ * differ per branch — see `navigateToEntityRecordSurfaceAsync` below.
  */
 export interface EntityRecordSurfaceParams {
   /** Entity logical name (e.g. `sprk_todo`). */
   entityName: string;
-  /** Dialog title. */
-  title: string;
+  /**
+   * Existing record ID to OPEN (present = open at the `fullCover` OOB size,
+   * 100%×100%, centered — task 032 / FR-13, was `record` 85%×85% pre-032).
+   * Absent = CREATE a new record at the `fullCover` OOB size (100%×100% —
+   * task 032 / FR-13, was `createForm` 70%×80% pre-032). Braces are stripped
+   * internally (`{...}` registry-format GUIDs are accepted).
+   */
+  entityId?: string;
+  /**
+   * Dialog title. Optional — when omitted, no `title` navOption is sent
+   * (matches the pre-consolidation OPEN call sites, which never set a title;
+   * the CREATE call site always supplies one).
+   */
+  title?: string;
   /**
    * Default field values to pre-populate the create form (thinner OOB pre-seed —
    * OOB forms accept default-value params only, design §3). Attribute-logical-name
-   * keyed. Optional.
+   * keyed. Optional. Only meaningful on the CREATE branch (no current caller
+   * combines this with `entityId`).
    */
   defaultValues?: Record<string, unknown>;
+  /**
+   * Optional parent EntityReference to pre-associate the newly-created record
+   * to via Dataverse relationship attribute-mapping — the documented
+   * `navigateTo`/`openForm` "create from parent" seam (MS Learn: "Designates a
+   * record that provides default values based on mapped column values"). This
+   * is the same mechanism a subgrid "+ New" uses to auto-set the relationship
+   * lookup on the child. Set on the `pageInput` for the CREATE branch only
+   * (ignored when `entityId` is present). Braces are stripped from `id`.
+   *
+   * NOTE (per the 2026-08-17 researcher finding): `createFromEntity` is
+   * INDIRECT — it copies whatever attribute mappings exist on the parent→child
+   * relationship and cannot target a named field directly, so it silently
+   * pre-fills nothing when no mapping is configured. Callers that need a
+   * SPECIFIC named lookup pre-populated deterministically should ALSO pass that
+   * lookup via `defaultValues` using the flat three-key convention
+   * (`{field}` = id, `{field}name` = name, `{field}type` = target logical
+   * name). Passing both is safe and maximizes pre-fill reliability.
+   */
+  createFromEntity?: { entityType: string; id: string; name?: string };
+  /**
+   * Optional `navigateTo` `pageInput.formId` override — selects a specific
+   * System Form instance instead of the entity's default-ordered main form.
+   * Added by task 032 (FR-12, header-hide investigation) as the wiring seam
+   * for a header-hidden modal-variant `sprk_todo` form: MS Learn confirms
+   * `Xrm.Navigation.navigateTo` has NO `navigationOptions` property that
+   * suppresses the form's own header/command-bar chrome (verified 2026-08-16
+   * against the `ms.date: 2026-04-09` reference), so hiding it requires a
+   * FORM-LEVEL change (an OnLoad handler calling
+   * `formContext.ui.headerSection.setBodyVisible/setCommandBarVisible/
+   * setTabNavigatorVisible(false)`) scoped to a DEDICATED form via `formId`
+   * — NOT applied to the live "To Do main form" directly, because that form
+   * is also opened full-page from native parent-record "To Dos" subgrids,
+   * where the header must stay visible. See
+   * `projects/smart-todo-r5/notes/task-032-fullcover-header.md` for the full
+   * investigation + the exact form-clone recipe the orchestrator deploys.
+   * Currently UNUSED by any call site (no clone form exists yet) — passing
+   * it is a no-op until a real form GUID is supplied.
+   */
+  formId?: string;
+  /**
+   * Optional dialog size override (both branches). When omitted, defaults to
+   * `fullCover` (100%×100%) — the pre-existing behavior every current caller
+   * relied on (task 032). Pass a named size (e.g. `getOobModalSize('record')`,
+   * 85%×85%) to open smaller. smart-todo-r5 UAT 2026-08-18 (item: "next size
+   * down") uses `record` for the To Do surfaces, without changing the default
+   * for the other generic consumers (surfaceHandoff / Communication launchers).
+   */
+  size?: OobModalSize;
 }
 
 /**
- * Launch an OOB entity create form (`pageType:'entityrecord'`) in a modal and
- * RESOLVE with the saved-entity reference when a record is created (the OOB-form
- * return path — an OOB form has no custom code to write the sessionStorage
- * result, so its outcome rides the `navigateTo` resolve value). REUSES the same
- * frame-walking resolver + modal options as the wizard path.
+ * Launch an OOB entity record surface (`pageType:'entityrecord'`) in a modal —
+ * CREATE mode when `params.entityId` is absent, OPEN-EXISTING mode when
+ * present (`position: 1` centered on the OPEN branch only, unchanged since
+ * pre-031). REUSES the same frame-walking resolver + modal-option shape for
+ * both branches — the ONE `sprk_todo` OOB main-form launcher (task 031, spec
+ * FR-11).
+ *
+ * **Sizing (task 032, spec FR-13 / F-7)**: BOTH branches use the `fullCover`
+ * OOB size (100%×100%) instead of the generic `record` (85%×85%) /
+ * `createForm` (70%×80%) sizes every other consumer of those constants keeps.
+ * Rationale — this launcher can be invoked from WITHIN an already-modal
+ * SmartTodo Code Page (LegalWorkspace's zero-selection Open path opens the
+ * Code Page itself at a hardcoded 85%×85% in `todo.registration.ts`); at the
+ * pre-032 sizes, the inner dialog was SMALLER than that outer modal (a
+ * `record`-sized 85%×85% open roughly matches it, but the 70%×80% create was
+ * visibly inset), reading as "nested" rather than "replace". `fullCover`
+ * (100%×100%) always covers any possible outer frame regardless of dialog
+ * nesting depth — Dataverse dialogs render relative to the TOP browsing
+ * context's viewport (see `resolveXrmNavigation`'s frame-walking rationale
+ * above), not the calling iframe's bounds, so 100%×100% is the same absolute
+ * size whether this launcher fires from a bare embedded pane (single-modal
+ * case) or from inside the Code-Page-as-modal (modal-in-modal case) — full
+ * investigation + the single-modal/modal-in-modal reasoning in
+ * `projects/smart-todo-r5/notes/task-032-fullcover-header.md`. This is a
+ * scoped exception to the `record` "MUST NOT vary by entity" invariant
+ * (`.claude/patterns/ui/record-modal-selection.md`) — CLAUDE.md §6.5 Path A,
+ * cited in that notes file — limited to this ONE dedicated `sprk_todo`
+ * launcher; no other `record`/`createForm` consumer changes.
+ *
+ * Outcome-shape parity (task 031 step 2 research — Microsoft Learn
+ * `Xrm.Navigation.navigateTo` reference, "Return value" section, verified
+ * 2026-08-16): "An object is passed only if the `pageType` = `entityRecord`
+ * and you opened the form in CREATE mode." An existing-record OPEN always
+ * resolves with NO result object on dialog close, whether the user saved or
+ * cancelled — there is no `savedEntityReference` to inspect and no reliable
+ * way to distinguish save-vs-cancel from the resolve value alone. So the two
+ * branches populate `NavigateToOutcome` differently:
+ *   - CREATE: `savedEntityReference` present on save; `cancelled: true` when
+ *     the resolve carries no reference (unchanged from pre-031 behavior).
+ *   - OPEN: a successful resolve (dialog closed, no error) returns a plain
+ *     `{ launched: true }` — no `cancelled` flag, no `savedEntityReference`.
+ *     Callers that need a post-open refresh signal (task 033) MUST refresh
+ *     unconditionally on `launched: true` rather than gating on `cancelled`.
+ *   - Both branches: a rejected/erroring promise still returns
+ *     `{ launched: true, cancelled: true }` (dialog error, not a normal
+ *     save/cancel close).
  */
 export async function navigateToEntityRecordSurfaceAsync(
   params: EntityRecordSurfaceParams
@@ -401,29 +509,75 @@ export async function navigateToEntityRecordSurfaceAsync(
   if (nav === null) {
     return { launched: false };
   }
+  const isOpenExisting = typeof params.entityId === 'string' && params.entityId.length > 0;
   const pageInput: Record<string, unknown> = {
     pageType: 'entityrecord',
     entityName: params.entityName,
   };
-  // OOB pre-seed: `data` on an entityrecord create pageInput pre-populates form
-  // fields with default values (the documented createFromEntity/default-value seam).
+  if (isOpenExisting) {
+    // Strip braces per the pre-031 SmartTodoApp.tsx convention — registry
+    // format `{...}` GUIDs are accepted by callers, `entityId` wants bare.
+    pageInput.entityId = (params.entityId as string).replace(/[{}]/g, '');
+  }
+  // OOB pre-seed: `data` on an entityrecord pageInput is a FLAT
+  // attribute-name → default-value dictionary (same rules as `openForm`'s
+  // `formParameters` — MS Learn "Set column values using parameters passed to
+  // a form"). Lookups use the three-key convention `{field}` / `{field}name` /
+  // `{field}type`; the CALLER builds that shape (see SmartTodo newTaskLauncher).
   if (params.defaultValues && Object.keys(params.defaultValues).length > 0) {
     pageInput.data = params.defaultValues;
   }
+  // OOB pre-associate: `createFromEntity` is the relationship-attribute-mapping
+  // "create from parent" seam (sibling of `data` on the pageInput). CREATE
+  // branch only — pre-populating a parent lookup on an existing record is
+  // meaningless. See `EntityRecordSurfaceParams.createFromEntity` doc comment.
+  if (
+    !isOpenExisting &&
+    params.createFromEntity &&
+    typeof params.createFromEntity.id === 'string' &&
+    params.createFromEntity.id.length > 0 &&
+    typeof params.createFromEntity.entityType === 'string' &&
+    params.createFromEntity.entityType.length > 0
+  ) {
+    pageInput.createFromEntity = {
+      entityType: params.createFromEntity.entityType,
+      id: params.createFromEntity.id.replace(/[{}]/g, ''),
+      name: params.createFromEntity.name ?? '',
+    };
+  }
+  // Task 032 (FR-12) header-hide seam — see `EntityRecordSurfaceParams.formId`
+  // doc comment. No-op today (no caller passes it; no clone form exists yet).
+  if (params.formId) {
+    pageInput.formId = params.formId;
+  }
+  // Dialog size — `params.size` when the caller overrides (smart-todo-r5 UAT
+  // 2026-08-18: To Do surfaces pass `record` 85%×85%), else the `fullCover`
+  // (100%×100%) default every pre-existing caller relied on (task 032).
+  const modalSize = params.size ?? OOB_MODAL_SIZES.fullCover;
+  const navOptions: Record<string, unknown> = isOpenExisting
+    ? {
+        target: DEFAULT_TARGET,
+        position: 1,
+        width: modalSize.width,
+        height: modalSize.height,
+      }
+    : {
+        // OOB entity CREATE form (`pageType: 'entityrecord'`, no existing entityId).
+        target: DEFAULT_TARGET,
+        width: modalSize.width,
+        height: modalSize.height,
+      };
+  if (params.title !== undefined) {
+    navOptions.title = params.title;
+  }
   try {
-    // `createForm` OOB size (70% × 80%) — this launches an OOB entity CREATE
-    // form (`pageType: 'entityrecord'`, no existing entityId), the exact
-    // scenario `createForm` was named for (spec FR-11), NOT the `wizard`
-    // (60% × 70%) webresource size the rest of this module uses. Verified
-    // zero existing callers depend on the prior 60%×70% fallback (task 090
-    // repo-wide grep) — see notes/task-090-completion.md.
-    const result: any = await nav.navigateTo(pageInput, {
-      target: DEFAULT_TARGET,
-      width: OOB_MODAL_SIZES.createForm.width,
-      height: OOB_MODAL_SIZES.createForm.height,
-      title: params.title,
-    });
-    // entityrecord resolves with `{ savedEntityReference: [{ id, entityType, name }] }`
+    const result: any = await nav.navigateTo(pageInput, navOptions);
+    if (isOpenExisting) {
+      // See outcome-shape-parity note above — an existing-record open never
+      // carries savedEntityReference; a clean resolve just means "closed".
+      return { launched: true };
+    }
+    // entityrecord CREATE resolves with `{ savedEntityReference: [{ id, entityType, name }] }`
     // when the user saved; undefined/empty when they cancelled.
     const ref = Array.isArray(result?.savedEntityReference) ? result.savedEntityReference[0] : undefined;
     if (ref?.id) {

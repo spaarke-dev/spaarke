@@ -32,7 +32,7 @@ jest.mock('@spaarke/auth', () => ({
 
 /** Records every `conversation`-channel event so the test can assert the focus signal. */
 function ConversationRecorder({ sink }: { sink: Array<{ type: string; sessionId?: string }> }): null {
-  usePaneEvent('conversation', (event) => {
+  usePaneEvent('conversation', event => {
     sink.push({ type: event.type, sessionId: event.sessionId });
   });
   return null;
@@ -64,7 +64,7 @@ describe('ComposeEditor — Ctrl+Shift+Space focuses the Assistant chat (FR-05)'
 
     fireEvent.keyDown(editorDom, { ctrlKey: true, shiftKey: true, code: 'Space', key: ' ' });
 
-    const focusEvents = events.filter((e) => e.type === 'focus_chat_input');
+    const focusEvents = events.filter(e => e.type === 'focus_chat_input');
     expect(focusEvents).toHaveLength(1);
     expect(focusEvents[0].sessionId).toBe('session-061');
   });
@@ -86,7 +86,7 @@ describe('ComposeEditor — Ctrl+Shift+Space focuses the Assistant chat (FR-05)'
 
     fireEvent.keyDown(editorDom, { ctrlKey: true, code: 'Space', key: ' ' });
 
-    expect(events.filter((e) => e.type === 'focus_chat_input')).toHaveLength(0);
+    expect(events.filter(e => e.type === 'focus_chat_input')).toHaveLength(0);
   });
 
   it('does NOT emit focus_chat_input during an IME composition (isComposing guard)', async () => {
@@ -97,6 +97,6 @@ describe('ComposeEditor — Ctrl+Shift+Space focuses the Assistant chat (FR-05)'
 
     fireEvent.keyDown(editorDom, { ctrlKey: true, shiftKey: true, code: 'Space', key: ' ', isComposing: true });
 
-    expect(events.filter((e) => e.type === 'focus_chat_input')).toHaveLength(0);
+    expect(events.filter(e => e.type === 'focus_chat_input')).toHaveLength(0);
   });
 });

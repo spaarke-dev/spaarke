@@ -11,9 +11,13 @@
  *   10d      — due within 10 calendar days (8-10 days remaining)
  *   none     — more than 10 days away or no dueDate
  *
- * Day calculation uses ceiling so that a task due later today (positive
- * fractional day) counts as 0 days remaining and shows the "3d" badge.
- * A task overdue by any amount (negative result) returns 'overdue'.
+ * Label text (smart-todo-r5 UAT 2026-08-17, item #6): the badge shows a real
+ * calendar-day countdown ("Overdue" / "Today" / "{n}d"), NOT the colour-tier
+ * name — a task due today reads "Today", not a misleading "3d". The COLOUR
+ * tiers above are unchanged. Kept in lock-step with the shared-lib
+ * `@spaarke/smart-todo-components` `utils/todoScoring.ts::computeDueLabel`
+ * (which the Kanban cards use); this local copy feeds the List + Dismissed
+ * views only.
  */
 
 // ---------------------------------------------------------------------------
@@ -57,21 +61,28 @@ export function computeDueLabel(dueDate: Date | null | undefined): IDueLabel {
     return { label: '', urgency: 'none' };
   }
 
-  const now = new Date();
-  const diffMs = dueDate.getTime() - now.getTime();
-  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  // Calendar-day countdown (both dates normalized to local midnight) so the
+  // label is time-of-day independent — see module header + the shared-lib
+  // todoScoring.ts twin. Colour tiers unchanged.
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const startOfDue = new Date(dueDate.getFullYear(), dueDate.getMonth(), dueDate.getDate());
+  const diffDays = Math.round((startOfDue.getTime() - startOfToday.getTime()) / (1000 * 60 * 60 * 24));
 
   if (diffDays < 0) {
     return { label: 'Overdue', urgency: 'overdue' };
   }
+  if (diffDays === 0) {
+    return { label: 'Today', urgency: '3d' };
+  }
   if (diffDays <= 3) {
-    return { label: '3d', urgency: '3d' };
+    return { label: `${diffDays}d`, urgency: '3d' };
   }
   if (diffDays <= 7) {
-    return { label: '7d', urgency: '7d' };
+    return { label: `${diffDays}d`, urgency: '7d' };
   }
   if (diffDays <= 10) {
-    return { label: '10d', urgency: '10d' };
+    return { label: `${diffDays}d`, urgency: '10d' };
   }
 
   return { label: '', urgency: 'none' };
@@ -88,6 +99,15 @@ export function computeDueLabel(dueDate: Date | null | undefined): IDueLabel {
  */
 export function parseDueDate(isoString: string | undefined | null): Date | null {
   if (!isoString) return null;
+  // Date-only values (`YYYY-MM-DD`) are calendar dates: parse as LOCAL midnight
+  // so western timezones don't read them a day early. Full ISO timestamps are
+  // unaffected. (smart-todo-r5 UAT 2026-08-17, item #6 — mirrors the shared-lib
+  // todoScoring.ts twin.)
+  const dateOnly = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoString.trim());
+  if (dateOnly) {
+    const dt = new Date(Number(dateOnly[1]), Number(dateOnly[2]) - 1, Number(dateOnly[3]));
+    return isNaN(dt.getTime()) ? null : dt;
+  }
   const d = new Date(isoString);
   // Guard against invalid Date (e.g. malformed string)
   return isNaN(d.getTime()) ? null : d;
