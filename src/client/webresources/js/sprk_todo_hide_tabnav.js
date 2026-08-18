@@ -17,8 +17,11 @@
  *    `entity_name_span`. There is NO supported Client API for it
  *    (`setFormEntityName` targets the record-title PREFIX, not this span — it
  *    added a stray ": " colon and was reverted). So this uses an UNSUPPORTED,
- *    operator-approved DOM hide, SCOPED to the `navigateTo` modal dialog
- *    (`[aria-modal="true"]`) so it never affects a background full-page form.
+ *    operator-approved DOM hide. As of v1.5.0 the hide is UNSCOPED (every
+ *    `entity_name_span`): the earlier dialog-scoped guard skipped the span
+ *    because its ancestor chain does not expose `[aria-modal]`/`[role=dialog]`.
+ *    Safe because this handler runs ONLY on the sprk_todo form, which opens over
+ *    a code-page / widget host with no background entity form.
  *
  * Both MUST run from a FORM OnLoad handler so they also fire when the form is
  * opened as an `Xrm.Navigation.navigateTo` modal dialog (target:2).
@@ -39,6 +42,10 @@
  *
  * # Version
  *
+ * v1.5.0 — entity-name hide made UNSCOPED (dialog-scope skipped the span; the
+ *          entity_name_span ancestor chain does not carry [aria-modal]/[role=dialog]
+ *          where closest() looked). Safe: this OnLoad fires only on sprk_todo forms,
+ *          and To Do opens over a code-page/widget host (no background entity form). (2026-08-18)
  * v1.4.0 — entity-name hide made durable: closest()-scoped + MutationObserver re-hide (2026-08-18)
  * v1.3.0 — hide entity-name subtitle via scoped DOM hide (UAT #2, operator-approved) (2026-08-18)
  * v1.2.0 — revert setFormEntityName (caused a ": " colon; wrong element) (2026-08-18)
@@ -58,7 +65,7 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
 
 (function (ns) {
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.4.0";
+    ns.VERSION = "1.5.0";
 
     /**
      * Form OnLoad handler. Cleans up the form-header chrome via SUPPORTED
@@ -103,26 +110,28 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
         //    v1.4.0 rewrite: the v1.3.0 one-shot descendant-selector hide DID
         //    NOT stick — UCI renders/refreshes the header in PHASES (the form
         //    loads to "- Saved"), so a single early hide is undone by a later
-        //    re-render. This version:
-        //      • finds spans anywhere, hides ONLY those inside a dialog (via
-        //        `closest('[aria-modal],[role=dialog]')`) so a background
-        //        full-page form is never affected;
-        //      • installs a MutationObserver that RE-HIDES on every re-render;
-        //      • disconnects after 30s (safety) so no observer lingers.
+        //    re-render. The v1.4.0 fix installed a MutationObserver but SCOPED
+        //    the hide to spans inside a `closest('[aria-modal],[role=dialog]')`
+        //    ancestor — and that scope SKIPPED the span (UAT 2026-08-18: the
+        //    entity_name_span's ancestor chain does not expose those attributes
+        //    where closest() looked, so the guard never matched).
+        //
+        //    v1.5.0: drop the dialog scope — hide EVERY `entity_name_span`. This
+        //    is safe because this OnLoad handler is registered ONLY on the
+        //    sprk_todo main form, and a To Do opens over a code-page / widget
+        //    host (SmartTodo Code Page, SpaarkeAi workspace) that has NO
+        //    background entity form — so there is no other entity_name_span to
+        //    collateral-hide. Keeps the MutationObserver for durable re-hide.
         try {
-            var hideDialogEntityNames = function () {
+            var hideEntityNames = function () {
                 var spans = document.querySelectorAll('[data-id="entity_name_span"]');
                 for (var i = 0; i < spans.length; i++) {
-                    var span = spans[i];
-                    var inDialog = span.closest && span.closest('[aria-modal="true"], [role="dialog"]');
-                    if (inDialog) {
-                        span.style.display = "none";
-                    }
+                    spans[i].style.display = "none";
                 }
             };
-            hideDialogEntityNames(); // immediate pass
+            hideEntityNames(); // immediate pass
             if (typeof MutationObserver === "function") {
-                var mo = new MutationObserver(hideDialogEntityNames);
+                var mo = new MutationObserver(hideEntityNames);
                 mo.observe(document.body, { childList: true, subtree: true });
                 window.setTimeout(function () {
                     try { mo.disconnect(); } catch (e) { /* no-op */ }
@@ -132,7 +141,7 @@ Spaarke.SmartTodo.HideTabNav = Spaarke.SmartTodo.HideTabNav || {};
                 var attempts = 0;
                 var retry = function () {
                     attempts++;
-                    hideDialogEntityNames();
+                    hideEntityNames();
                     if (attempts < 30) { window.setTimeout(retry, 100); }
                 };
                 retry();
