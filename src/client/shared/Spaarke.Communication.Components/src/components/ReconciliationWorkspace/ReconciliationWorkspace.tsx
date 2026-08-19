@@ -35,7 +35,6 @@ import { Badge, Tab, TabList, Text, makeStyles, tokens } from '@fluentui/react-c
 import { CheckmarkCircle16Filled } from '@fluentui/react-icons';
 import { authenticatedFetch as defaultAuthenticatedFetch } from '@spaarke/auth';
 import {
-  DataGridViewSelector,
   type DataGridProps,
   type IDataverseClient,
   type MembershipResolver,
@@ -61,6 +60,14 @@ import type { EmailCitation } from '../../logic/citations';
 
 /** `sprk_communication` primary id — the browse-shell key + queue index anchor. */
 const PRIMARY_ID_FIELD = 'sprk_communicationid';
+
+/**
+ * Item 1 (owner UAT 2026-08-19) — page size for the Needs-Review grid. The reconciliation
+ * queue is a bounded working set (typically 10s–low 100s); loading it in ONE page shows the
+ * whole queue in the browse "N of M" navigator instead of capping at the framework default
+ * (25). Large enough to cover the queue without unbounded growth.
+ */
+const RECONCILIATION_PAGE_SIZE = 500;
 
 /** The reconciled entity — used for the UAT-Fix#3 targeted single-row re-fetch on confirm. */
 const COMMUNICATION_ENTITY = 'sprk_communication';
@@ -548,7 +555,9 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
   const handleConfirmed = React.useCallback(
     (record: Record<string, unknown>) => {
       onAssociationsChanged?.(record);
-      setSelectedTab('fields');
+      // Item 6 (owner UAT 2026-08-19): do NOT auto-switch to the Fields tab on confirm.
+      // The reviewer stays on Related-to (now showing the switchable confirmed state) and
+      // moves to Fields / Tasks themselves. Only the gate/scope is refreshed below.
       const id = str(record, PRIMARY_ID_FIELD);
       if (id) enrichRow(id);
       else forceRescope();
@@ -719,11 +728,6 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
 
   return (
     <div className={className ? `${s.root} ${className}` : s.root} data-testid="reconciliation-workspace">
-      {hasViews && views!.length > 1 && (
-        <div className={s.viewBar} data-testid="reconciliation-view-switcher">
-          <DataGridViewSelector views={views!} activeViewId={activeViewId} onViewChange={handleViewChange} />
-        </div>
-      )}
       <div className={s.grid}>
         <ReconciliationGrid
           configId={effectiveConfigId}
@@ -732,11 +736,16 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
           relatedTo={relatedTo}
           onRecordsLoaded={handleRecordsLoaded}
           onRecordOpen={handleRecordOpen}
-          // Item 1 (owner UAT 2026-08-19): when this workspace renders its OWN
-          // "Email Review views" selector above the grid, suppress the DataGrid's
-          // built-in saved-view picker so only ONE view selector shows. With no
-          // workspace-level views, the grid keeps its native picker (fallback).
-          showViewSelector={!(hasViews && views!.length > 1)}
+          // Item 2 (owner UAT 2026-08-19): the "Email Review views" selector renders
+          // INSIDE the grid's native toolbar (single picker, dataset-grid look) —
+          // selecting a view swaps the grid's configId. No separate bar above.
+          externalViews={
+            hasViews && views!.length > 1 ? { views: views!, activeViewId, onViewChange: handleViewChange } : undefined
+          }
+          // Item 1 (owner UAT 2026-08-19): load the whole Needs-Review queue rather
+          // than a single 25-row page (the framework's incremental infinite-scroll
+          // did not advance past page 1 in this host). Bounded working-queue set.
+          pageSize={RECONCILIATION_PAGE_SIZE}
         />
       </div>
 

@@ -169,6 +169,21 @@ export function candidateRecordNumber(candidate: ProvenanceCandidate): string | 
   return nameMatchOf(candidate)?.number;
 }
 
+/**
+ * Best-effort human display NAME for a candidate (owner UAT 2026-08-19, item 3). The flat
+ * provenance candidate carries only `targetId` (a GUID) — the resolved record/contact name
+ * lives inside a contributor's provenance string as a `name="…"` token (RecordNameMatch,
+ * ContactNameMatch, …). Return the first such name so cards show "{number} : {name}" instead
+ * of the raw GUID. Undefined when no contributor recorded a name.
+ */
+export function candidateDisplayName(candidate: ProvenanceCandidate): string | undefined {
+  for (const c of candidate.contributors ?? []) {
+    const m = /name="([^"]*)"/.exec(c.provenance ?? '');
+    if (m && m[1]) return m[1];
+  }
+  return undefined;
+}
+
 export function contributorPhrase(c: ProvenanceContributor): string {
   return RUNG_PHRASES[c.rung] ?? c.provenance;
 }
@@ -721,8 +736,11 @@ export function flattenPrimaryCandidates(doc: ProvenanceDoc): PrimaryCandidate[]
     const key = primaryKey(c.targetEntity, c.targetId);
     const cand: PrimaryCandidate = {
       entity: c.targetEntity,
+      // Item 3: prefer the flat targetName, else the name parsed from a contributor's
+      // `name="…"` token, else the GUID as a last resort (previously the GUID showed
+      // whenever the flat candidate carried no targetName — which is always, today).
+      targetName: c.targetName ?? candidateDisplayName(c) ?? c.targetId,
       targetId: c.targetId,
-      targetName: c.targetName ?? c.targetId,
       recordNumber: candidateRecordNumber(c),
       confidence: c.reinforcedConfidence,
       matchReason: candidateMatchReason(c),

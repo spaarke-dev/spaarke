@@ -246,6 +246,23 @@ export interface DataGridProps {
    */
   showViewSelector?: boolean;
 
+  /**
+   * OPTIONAL — replace the header's saved-view selector with a HOST-OWNED view list
+   * rendered in the SAME native toolbar position (header-left). When supplied, the
+   * built-in saved-query selector is bypassed and these views render instead —
+   * selecting one calls `onViewChange` (the host swaps the grid's `configId`). Use
+   * this when the host's views are separate grid CONFIGURATIONS rather than sibling
+   * saved queries (e.g. the reconciliation "Email Review views" — each a distinct
+   * `sprk_gridconfiguration`). Gives a native dataset-grid look with one selector,
+   * IN the toolbar (email-communication-intelligence-r2 item 2, owner UAT 2026-08-19).
+   * Ignored when `showViewSelector` is `false`.
+   */
+  externalViews?: {
+    views: ReadonlyArray<SavedView>;
+    activeViewId: string;
+    onViewChange: (viewId: string) => void;
+  };
+
   /** OPTIONAL — additional class merged AFTER component classes (per Spaarke convention). */
   className?: string;
 }
@@ -771,6 +788,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     theme = webLightTheme,
     onBack,
     showViewSelector = true,
+    externalViews,
     className,
   } = props;
 
@@ -1453,7 +1471,17 @@ export const DataGrid: React.FC<DataGridProps> = props => {
       <div className={mergeClasses(styles.root, className)} aria-label={contextValue.currentView}>
         <div className={styles.headerCard}>
           <div className={styles.headerLeft}>
-            {showViewSelector && selectorViews.length > 0 ? (
+            {showViewSelector && externalViews && externalViews.views.length > 0 ? (
+              // Host-owned views (e.g. reconciliation grid configs) rendered in the
+              // native toolbar position, bypassing the saved-query selector (item 2).
+              <ViewSelector
+                views={externalViews.views}
+                activeViewId={externalViews.activeViewId}
+                onViewChange={externalViews.onViewChange}
+                onBack={onBack}
+                theme={theme}
+              />
+            ) : showViewSelector && selectorViews.length > 0 ? (
               <ViewSelector
                 views={selectorViews}
                 activeViewId={currentViewId}

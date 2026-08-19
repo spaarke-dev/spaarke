@@ -261,7 +261,9 @@ describe('ReconciliationWorkspace', () => {
     expect(within(tabBody).queryByTestId('related-to-open-picker')).not.toBeInTheDocument();
   });
 
-  it('renders the view-switcher with the default view active when `views` is supplied (UAT Fix #5)', async () => {
+  // Item 2 (owner UAT 2026-08-19): the "Email Review views" now render INSIDE the grid's
+  // native toolbar selector (via DataGrid `externalViews`), not in a separate bar above.
+  it('passes the Email Review views into the grid toolbar selector with the default view active', async () => {
     renderWorkspace({
       views: [
         { id: 'view-needs-review', name: 'Needs Review', isDefault: true },
@@ -270,14 +272,15 @@ describe('ReconciliationWorkspace', () => {
       ],
     });
 
-    const switcher = await screen.findByTestId('reconciliation-view-switcher');
-    // The active (default) view name is shown in the selector.
-    expect(within(switcher).getByText('Needs Review')).toBeInTheDocument();
+    // The grid's native ViewSelector shows the active (default) reconciliation view.
+    expect(await screen.findByLabelText(/Select view \(currently Needs Review\)/)).toBeInTheDocument();
   });
 
-  it('renders NO view-switcher when `views` is omitted (UAT Fix #5)', async () => {
+  it('omitting `views` renders no Email-Review view selector in the toolbar', async () => {
     renderWorkspace();
     await screen.findByTestId('reconciliation-workspace');
-    expect(screen.queryByTestId('reconciliation-view-switcher')).not.toBeInTheDocument();
+    // The reconciliation view names only reach the toolbar via `externalViews`.
+    expect(screen.queryByText('Email Review All')).not.toBeInTheDocument();
+    expect(screen.queryByText('Email Review Completed')).not.toBeInTheDocument();
   });
 });

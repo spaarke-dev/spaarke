@@ -81,11 +81,16 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   const [selectedKey, setSelectedKey] = React.useState<string | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Item 5 (owner UAT 2026-08-19): records the reviewer picks via "Look up another record"
+  // are ADDED to the candidate list as confirmable cards (not auto-filed) — the reviewer
+  // clicks Confirm to file. Per-email; reset on selection change.
+  const [addedCandidates, setAddedCandidates] = React.useState<PrimaryCandidate[]>([]);
 
   // Session-local review state is per-selected-email — reset on selection change.
   React.useEffect(() => {
     setSelectedKey(undefined);
     setError(null);
+    setAddedCandidates([]);
   }, [communicationId]);
 
   // SAME data path as the engine (no client recompute; ADR-045).
@@ -115,11 +120,18 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   const greenKey = model.primary ? candidateKey(model.primary) : undefined;
   const confirmedKey = model.state === 'confirmed' && model.primary ? candidateKey(model.primary) : undefined;
   const activeSelectedKey = selectedKey ?? greenKey;
+  // Item 5: the rendered candidate list = engine candidates + reviewer-added lookups
+  // (deduped). An added record that later becomes the primary is already de-duplicated
+  // against the engine set by key.
+  const shownCandidates = React.useMemo(() => {
+    const seen = new Set(model.candidates.map(candidateKey));
+    return [...model.candidates, ...addedCandidates.filter(c => !seen.has(candidateKey(c)))];
+  }, [model.candidates, addedCandidates]);
   // Item 2f: in the reconcile variant the primary now renders as a green candidate
   // card carrying its OWN Undo button — so the filed-banner's Undo is redundant and
   // is only shown for a primary NOT represented among the cards (a denorm-only /
   // manual "Link another" record has no provenance candidate to render as a card).
-  const primaryInCards = !!greenKey && model.candidates.some(c => candidateKey(c) === greenKey);
+  const primaryInCards = !!greenKey && shownCandidates.some(c => candidateKey(c) === greenKey);
   // Confirmed → the primary is the header chip, so the cards row shows ONLY the
   // "Link another record" tile (owner UAT 2026-07-31).
   const isConfirmed = model.state === 'confirmed';
@@ -159,13 +171,6 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
       }
     },
     [writeContext, onAssociationsChanged]
-  );
-
-  const onLinkSelected = React.useCallback(
-    (entityType: string, recordId: string, recordName: string): void => {
-      void confirmCandidate({ entity: entityType, targetId: recordId, targetName: recordName, confidence: 1 });
-    },
-    [confirmCandidate]
   );
 
   // Reconcile variant — per-line UNDO of the confirmed primary (owner UAT 2026-08-14).
@@ -223,26 +228,33 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   // (`Xrm.Utility.lookupObjects`, reused via the shared picker's `getXrmForPicker`
   // bridge). In a non-MDA / dev host that bridge is absent, so the lookup no-ops
   // (expected). A picked record is filed via the same additive confirm path.
-  const handleLinkPick = React.useCallback(
-    async (entityType: string): Promise<void> => {
-      setError(null);
-      try {
-        const xrm = getXrmForPicker();
-        if (!xrm?.Utility?.lookupObjects) return; // dev/non-MDA host — no-op (expected)
-        const results = await xrm.Utility.lookupObjects({
-          entityTypes: [entityType],
-          defaultEntityType: entityType,
-          allowMultiSelect: false,
-        });
-        if (!results || results.length === 0) return; // user cancelled
-        const picked = results[0];
-        onLinkSelected(entityType, picked.id.replace(/[{}]/g, '').toLowerCase(), picked.name);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not open the record picker.');
-      }
-    },
-    [onLinkSelected]
-  );
+  const handleLinkPick = React.useCallback(async (entityType: string): Promise<void> => {
+    setError(null);
+    try {
+      const xrm = getXrmForPicker();
+      if (!xrm?.Utility?.lookupObjects) return; // dev/non-MDA host — no-op (expected)
+      const results = await xrm.Utility.lookupObjects({
+        entityTypes: [entityType],
+        defaultEntityType: entityType,
+        allowMultiSelect: false,
+      });
+      if (!results || results.length === 0) return; // user cancelled
+      const picked = results[0];
+      // Item 5: ADD the picked record to the candidate list (deduped) as a confirmable
+      // card + select it — the reviewer clicks Confirm to file it (no auto-write here).
+      const cand: PrimaryCandidate = {
+        entity: entityType,
+        targetId: picked.id.replace(/[{}]/g, '').toLowerCase(),
+        targetName: picked.name,
+        confidence: 1,
+      };
+      const key = candidateKey(cand);
+      setAddedCandidates(prev => (prev.some(c => candidateKey(c) === key) ? prev : [...prev, cand]));
+      setSelectedKey(key);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open the record picker.');
+    }
+  }, []);
 
   return (
     <div className={reconcile ? mergeClasses(s.root, s.reconcilePad) : s.root} data-testid="email-connections-review">
@@ -295,8 +307,8 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
             button. The default (email-form) variant keeps its confirmed-chip-in-header
             behavior (cards hidden once confirmed). */}
         {(reconcile || !isConfirmed) &&
-          (model.candidates.length > 0 ? (
-            model.candidates.map(c => {
+          (shownCandidates.length > 0 ? (
+            shownCandidates.map(c => {
               const k = candidateKey(c);
               const isGreen = k === greenKey;
               const isSelected = k === activeSelectedKey;
@@ -378,9 +390,8 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
           `handleLinkPick` path the default tile uses). */}
       {reconcile && !readOnly && (
         <div className={s.lookupField}>
-          <span className={s.lookupFieldLabel} id="reconcile-lookup-label">
-            Look up another record
-          </span>
+          {/* Item 4 (owner UAT 2026-08-19): no separate label — the prompt lives inside
+              the field as placeholder text ("Look up another record"). */}
           <Menu positioning="below-start">
             <MenuTrigger disableButtonEnhancement>
               <button
@@ -388,9 +399,9 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
                 className={s.lookupControl}
                 disabled={busy}
                 data-testid="link-another-record"
-                aria-labelledby="reconcile-lookup-label"
+                aria-label="Look up another record"
               >
-                <span className={s.lookupPlaceholder}>Matter / Project / Service Request…</span>
+                <span className={s.lookupPlaceholder}>Look up another record</span>
                 <Search20Regular className={s.lookupControlIcon} aria-hidden="true" />
               </button>
             </MenuTrigger>
