@@ -1,0 +1,28 @@
+Archived: 2026-08-19
+Final status: Completed
+Closing PR: none — merged directly to master via the worktree flow (git push origin HEAD:master @ 0eacacd43); no PR was opened.
+Closed Date: 2026-08-19
+
+Worktree: c:/code_files/spaarke-wt-spaarkeai-compose-r7 (PRESERVED — intentionally kept open per owner instruction 2026-08-19; clean up separately if/when desired)
+Remote branch: work/spaarkeai-compose-r7 (still on origin)
+
+Portfolio board (GitHub Project #2): compose-r7 was NEVER registered as a `[Project]` Issue, so there is no
+Project Issue to close. No board close-out performed. (If board tracking is wanted retroactively, run
+/devops-project-register --from-folder then re-archive; not done here — the project predates board registration.)
+
+Open follow-up Issues (deferred work — INTENTIONALLY OPEN, not part of r7 close):
+  - #776  [DEF-001] apply-template server-side If-Match/ETag concurrency hardening (FR-12 Item 2)
+  - #777  [DEF-002] Compose fidelity-wideners home — indentation/paragraph-style/section-break survival
+  - #781  [DEF-003] Compose save-identity prod-safety (self-heal dupes, retroactive dedup, key-health probe)
+
+Non-code follow-ups assigned OUT of r7 (do not block close):
+  - Owner real-env UAT pass of the deployed flows.
+  - UAT-10 Azure SignalR real-time delivery — env/ops fix; code owner spaarke-notification-spine-r1 if needed.
+    Assessment: docs/assessments/signalr-uat10-realtime-delivery-assessment-2026-08-19.md
+
+Successor work: spaarkeai-compose-r8 (render-on-save fidelity + durable session files) — worktree
+work/spaarkeai-compose-r8 created 2026-08-19.
+
+Closure summary: 20 tasks + follow-up rounds R-1..R-6 + session-4 (R-5 Cosmos ttl:null write-outage fix,
+banner unification, 1b best-effort-24h file re-attach) all ✅ Fixed or 📦 Deferred-to-r8. test-diet CLEAN
+(39 MAINTAIN / 0 scaffolding). Deployed to dev (BFF + sprk_spaarkeai together, current master) + merged to master.
