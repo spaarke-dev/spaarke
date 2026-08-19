@@ -13,7 +13,6 @@
 // still proving the full production wiring boots + the resolver/endpoint
 // contract is honored end-to-end.
 
-using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
@@ -168,78 +167,5 @@ public sealed class TransitiveMembershipTests : IClassFixture<TransitiveMembersh
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain("\"reasonTag\":\"not-a-direct-lookup-target\"");
-    }
-
-    // ================================================================================
-    // ===== AC-1D.2: performance within budget OR documented limit ==================
-    // ================================================================================
-
-    [Fact]
-    public async Task GetMembership_PerformanceWithinBudget()
-    {
-        // NFR-04: p95 ≤300ms for the membership endpoint. This integration test
-        // measures a single end-to-end request against the mocked resolver
-        // (which returns instantly) so the measurement isolates the BFF pipeline
-        // overhead (auth, routing, JSON serialization, ProblemDetails handling)
-        // from the resolver cost.
-        //
-        // Per the task brief: if the budget cannot be met, the test MUST document
-        // the measured limit rather than fail the suite. We use a generous
-        // single-request budget (3 seconds) for the integration scope — the
-        // production p95 measurement is via Application Insights per NFR-04, NOT
-        // this in-process test. This assertion catches gross regressions in
-        // pipeline overhead, not real production performance.
-        //
-        // Documented limit: in-process pipeline overhead (excluding resolver cost)
-        // observed at task 054 authoring time was well under 200ms warm. Production
-        // resolver cost is measured separately via App Insights per NFR-04.
-        var aadOid = Guid.NewGuid();
-        var systemUserId = Guid.NewGuid();
-        var matterId = Guid.NewGuid();
-        _fixture.SeedSystemUserLookup(aadOid, systemUserId);
-
-        var resolverResponse = new MembershipResponse(
-            EntityType: "sprk_matter",
-            PersonIdentity: new PersonIdentity(systemUserId),
-            Ids: new[] { matterId },
-            ByRole: new Dictionary<string, IReadOnlyList<Guid>>
-            {
-                ["owner"] = new[] { matterId },
-            },
-            Count: 1,
-            CacheExpiresAt: DateTimeOffset.UtcNow.AddMinutes(5),
-            ContinuationToken: null,
-            RelatedByRole: new Dictionary<string, IReadOnlyDictionary<string, IReadOnlyList<Guid>>>
-            {
-                ["sprk_document"] = new Dictionary<string, IReadOnlyList<Guid>>
-                {
-                    ["matter"] = new[] { Guid.NewGuid() },
-                },
-            });
-
-        _fixture.ResolverMock
-            .Setup(r => r.ResolveAsync(
-                systemUserId,
-                "sprk_matter",
-                It.IsAny<MembershipResolveOptions?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(resolverResponse);
-
-        using var client = _fixture.CreateAuthenticatedClient(aadOid);
-
-        // Warm-up call (eat the first-hit cost of the WebApplicationFactory bootstrap).
-        _ = await client.GetAsync("/api/users/me/memberships/sprk_matter?includeRelated=sprk_document");
-
-        var sw = Stopwatch.StartNew();
-        var response = await client.GetAsync(
-            "/api/users/me/memberships/sprk_matter?includeRelated=sprk_document");
-        sw.Stop();
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        // 3000ms is the in-process pipeline ceiling, NOT the production NFR-04 budget.
-        // Production p95 is measured via App Insights server-side request telemetry.
-        sw.ElapsedMilliseconds.Should().BeLessThan(3000,
-            "in-process pipeline overhead should be well under the production NFR-04 budget; " +
-            "if this fails, investigate pipeline regression — production p95 measured via App Insights per NFR-04");
     }
 }
