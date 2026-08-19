@@ -131,6 +131,28 @@ public sealed class ProvisioningRun
     public int AttemptCount { get; set; }
 
     /// <summary>
+    /// Per-handler §4C <c>RetryableWithCleanup</c> auto-retry counter, keyed
+    /// by HandlerId (task 107 / DS-2 §4-L1). Incremented by
+    /// <see cref="Reconciler.StateReconcilerService.ApplyHandlerOutcomeAsync"/>
+    /// immediately before a re-enqueue and persisted as part of the SAME
+    /// <see cref="Repositories.IProvisioningRunRepository.ReplaceRunAsync"/>
+    /// write that records the failure transition (no extra Cosmos round
+    /// trip). The value becomes the re-enqueued
+    /// <see cref="Enqueue.HandlerEnvelope.Attempt"/>, which participates in
+    /// <see cref="Enqueue.ServiceBusHandlerEnqueuer.ComputeMessageId"/> so
+    /// the retry's MessageId differs from the original dispatch's and
+    /// survives Service Bus level-1 duplicate detection. NOT read by the
+    /// normal tick-driven ready-set enqueue path — that path always
+    /// dispatches with Attempt=0 so tick-duplicate-suppression byte-
+    /// stability is unaffected by this dictionary's contents. Deliberately
+    /// distinct from <see cref="AttemptCount"/> (a whole-run I6
+    /// crash-recovery counter, not per-handler).
+    /// </summary>
+    [JsonPropertyName("handlerRetryAttempts")]
+    public IDictionary<string, int> HandlerRetryAttempts { get; set; }
+        = new Dictionary<string, int>(StringComparer.Ordinal);
+
+    /// <summary>
     /// UTC timestamp at which this run document was created. Named
     /// <c>createdOn</c> in JSON per this task's acceptance criterion + the
     /// composite-index shape in <c>cosmos-provisioning.bicep</c>.

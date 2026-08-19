@@ -4,7 +4,7 @@
     <title>Add attempt field to ReconcilerEnqueuePayload (L1 dedup vs §4C retry interaction fix)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>TEST-MODIFYING (unconditional FULL)</rigor>
     <rigor-reason>Small, precisely-scoped change but touches tests/** -- unconditional FULL per root CLAUDE.md §8 override table.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -82,7 +82,17 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- ReconcilerEnqueuePayload's byte-stability already exists and is deliberate (tick-duplicate suppression). Extension -- adding one field to the existing hash input is the minimal fix DS-2 itself recommends over any redesign. Cost-of-doing-nothing -- enabling SB duplicate-detection (task 108) WITHOUT this fix silently breaks the entire §4C auto-retry mechanism the moment it is needed, with no operator-visible signal that the retry never actually reached the queue.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- ReconcilerEnqueuePayload's byte-stability already exists and is deliberate (tick-duplicate suppression). Extension -- adding one field to the existing hash input is the minimal fix DS-2 itself recommends over any redesign. Cost-of-doing-nothing -- enabling SB duplicate-detection (task 108) WITHOUT this fix silently breaks the entire §4C auto-retry mechanism the moment it is needed, with no operator-visible signal that the retry never actually reached the queue.
+
+COMPLETION NOTES (2026-08-19): Implemented per spec. HandlerEnvelope gained an `Attempt` int (default 0, JsonIgnore-on-default so first-enqueue wire payload is unchanged -- byte-stability preserved). ServiceBusHandlerEnqueuer.ComputeMessageId now hashes SHA256(HandlerId|RunId|CustomerId|paramHash|attempt). StateReconcilerService.BuildEnvelope gained an `attempt = 0` optional parameter; the normal tick-driven ready-set path (AdvanceRunAsync) calls it with no argument (stays 0). ApplyHandlerOutcomeAsync's §4C RetryableWithCleanup re-enqueue path increments a NEW per-handler counter.
+
+ESCALATION-TRIGGER RESOLUTION: the POML's <escalation> trigger anticipated that no accessible per-phase retry-count field existed on ProvisioningRun (confirmed by grep -- AttemptCount is a whole-run I6 crash-recovery counter, not per-handler, and CompletedPhases/ErrorDetail cannot reliably derive a per-handler retry count). Per the trigger's own text ("determine whether a new tracked field is needed"), added `ProvisioningRun.HandlerRetryAttempts` (IDictionary&lt;string,int&gt; keyed by HandlerId, JSON `handlerRetryAttempts`). Incremented + persisted atomically inside the SAME ApplyHandlerOutcomeAsync ReplaceRunAsync write that already records the failure transition (zero extra Cosmos round trips). This is a minimal, additive, well-precedented pattern (mirrors the existing GateStates/CompletedPhases dictionary/list shape on the same document) -- not the disallowed unreliable-proxy path (no DateTime-based synthesis). Flagging this decision explicitly per CLAUDE.md §6 rather than treating it as silent scope expansion.
+
+Tests: new src/server/services/Sprk.Provisioning.ControlPlane.Tests/Enqueue/ReconcilerEnqueuePayloadAttemptTests.cs (14 tests) covering: wire-format omission/inclusion of `attempt`, ComputeMessageId hash sensitivity + determinism, BuildEnvelope default/explicit attempt, the full ApplyHandlerOutcomeAsync retry loop (single + repeated retries, monotonic attempt, distinct MessageIds), and byte-stability across two consecutive reconciler ticks. Full Sprk.Provisioning.ControlPlane.Tests suite: 706/706 pass (was 692 pre-task). dotnet build 0 errors/0 warnings across Core + Api + Tests projects.
+
+Also updated doc comments in Handlers/HandlerResult.cs + Rollback/RollbackTransitions.cs (RetryableWithCleanup XML docs) to clarify "same envelope" now means same HANDLER-level idempotency key (Level 3) even though the SB-level MessageId (Level 1) now differs across a retry -- avoids a reader inferring a contradiction with the new Attempt field.
+
+Callers audited: grep confirmed the only other `new HandlerEnvelope{...}` call sites are in Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs (7 operator-initiated REST endpoints: create/preflight/gate-advance/resume/cancel/clear-quarantine-adjacent enqueues). These are legitimate first-enqueue actions (not the §4C auto-retry path this task targets) and correctly default to Attempt=0 with no code change required -- consistent with the POML's own scope (`<relevant-files>` did not list RunsEndpoints.cs). BFF's separate (legacy, pre-L2) ServiceBusProvisioningEnqueuer/IProvisioningEnqueuer in Sprk.Bff.Api do not compile-depend on L2's HandlerEnvelope type (different project/namespace) -- out of scope, noted for awareness only.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

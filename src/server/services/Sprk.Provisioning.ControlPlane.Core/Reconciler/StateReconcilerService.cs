@@ -299,13 +299,24 @@ public sealed class StateReconcilerService : BackgroundService
 
     /// <summary>
     /// Builds the dispatch envelope for a reconciler-initiated handler
-    /// enqueue. The payload is deterministic: same run + same handler ID
-    /// produces identical ParametersJson bytes, so
-    /// <see cref="ServiceBusHandlerEnqueuer.ComputeMessageId"/> yields the
-    /// same MessageId across concurrent reconciler instances — Service Bus
-    /// dedup collapses them into one message (level-1 idempotency).
+    /// enqueue. The payload is deterministic: same run + same handler ID +
+    /// same <paramref name="attempt"/> produces identical ParametersJson
+    /// bytes, so <see cref="ServiceBusHandlerEnqueuer.ComputeMessageId"/>
+    /// yields the same MessageId across concurrent reconciler instances —
+    /// Service Bus dedup collapses them into one message (level-1
+    /// idempotency).
     /// </summary>
-    internal HandlerEnvelope BuildEnvelope(string handlerId, ProvisioningRun run)
+    /// <param name="handlerId">Handler to dispatch.</param>
+    /// <param name="run">Run supplying RunId/CustomerId for the envelope.</param>
+    /// <param name="attempt">
+    /// Task 107 / DS-2 §4-L1: 0 for the normal tick-driven ready-set enqueue
+    /// path (default — preserves existing byte-stability / tick-duplicate-
+    /// suppression). A value &gt; 0 ONLY on <see cref="ApplyHandlerOutcomeAsync"/>'s
+    /// §4C <c>RetryableWithCleanup</c> re-enqueue path, so the retry's
+    /// MessageId differs from the original dispatch's and survives Service
+    /// Bus level-1 duplicate detection.
+    /// </param>
+    internal HandlerEnvelope BuildEnvelope(string handlerId, ProvisioningRun run, int attempt = 0)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
         ArgumentNullException.ThrowIfNull(run);
@@ -325,6 +336,7 @@ public sealed class StateReconcilerService : BackgroundService
             CustomerId = run.CustomerId,
             ParametersJson = JsonSerializer.Serialize(payload, ParametersJsonOptions),
             EnqueuedAt = _timeProvider.GetUtcNow(),
+            Attempt = attempt,
         };
     }
 
@@ -399,6 +411,23 @@ public sealed class StateReconcilerService : BackgroundService
         var targetStatus = RollbackTransitions.MapToRunStatus(failureClass);
         var shouldReenqueue = RollbackTransitions.ShouldReEnqueue(failureClass);
 
+        // Task 107 / DS-2 §4-L1: on the auto-retry path (RetryableWithCleanup),
+        // increment the per-handler retry counter BEFORE the write below so it
+        // persists atomically with the failure transition (no extra Cosmos
+        // round trip). This attempt value becomes the re-enqueued envelope's
+        // HandlerEnvelope.Attempt, which participates in ComputeMessageId so
+        // the retry's MessageId differs from the original dispatch's and
+        // survives Service Bus level-1 duplicate detection (task 108). The
+        // normal tick-driven ready-set enqueue path never reads this
+        // dictionary — its byte-stability contract is unaffected.
+        var attempt = 0;
+        if (shouldReenqueue)
+        {
+            run.HandlerRetryAttempts.TryGetValue(handlerId, out var priorAttempts);
+            attempt = priorAttempts + 1;
+            run.HandlerRetryAttempts[handlerId] = attempt;
+        }
+
         // Mutate + persist. Quarantine metadata populated on QuarantineRequired
         // per design.md §4C Quarantined row.
         run.Status = targetStatus;
@@ -450,10 +479,13 @@ public sealed class StateReconcilerService : BackgroundService
             return new HandlerOutcomeApplied(targetStatus, Reenqueued: false, FailureClass: failureClass);
         }
 
-        // Auto-retry path (§4C RetryableWithCleanup) — re-fire the same
-        // envelope. Deterministic MessageId path re-fires; Service Bus wire
-        // dedup + Redis idempotency own retry-safety per ADR-036.
-        var envelope = BuildEnvelope(handlerId, run);
+        // Auto-retry path (§4C RetryableWithCleanup) — re-fire the envelope
+        // with the incremented Attempt (task 107) so the MessageId differs
+        // from the original dispatch's and is not silently dropped by
+        // Service Bus level-1 duplicate detection (task 108). Service Bus
+        // wire dedup + Redis idempotency continue to own retry-safety per
+        // ADR-036.
+        var envelope = BuildEnvelope(handlerId, run, attempt);
         try
         {
             await enqueuer.EnqueueAsync(envelope, cancellationToken).ConfigureAwait(false);

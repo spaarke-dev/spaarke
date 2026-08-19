@@ -29,13 +29,20 @@
 //
 // LEVEL-1 IDEMPOTENCY (Service Bus MessageId):
 //
-//   MessageId = SHA256_hex( "{HandlerId}|{RunId}|{CustomerId}|{paramHash}" )
+//   MessageId = SHA256_hex( "{HandlerId}|{RunId}|{CustomerId}|{paramHash}|{attempt}" )
 //   paramHash = SHA256_hex( ParametersJson )
 //
-//   Deterministic: two calls with the SAME envelope produce the SAME
-//   MessageId. Service Bus duplicate detection (queue-configured) will
-//   drop the duplicate within the dedup window. This is the FIRST level
-//   of the 3-level idempotency stack:
+//   Deterministic: two calls with the SAME envelope (including the same
+//   Attempt — task 107) produce the SAME MessageId. Service Bus duplicate
+//   detection (queue-configured) will drop the duplicate within the dedup
+//   window. This is the FIRST level of the 3-level idempotency stack:
+//
+//   ATTEMPT (task 107 / DS-2 §4-L1): Attempt participates in the hash so a
+//   §4C RetryableWithCleanup re-enqueue — which carries an incremented
+//   Attempt — produces a MessageId DISTINCT from the original dispatch's,
+//   surviving SB dedup. The normal tick-driven first-enqueue path always
+//   uses Attempt=0, so the tick-duplicate-suppression contract below is
+//   unaffected.
 //
 //     Level 1 (this class):     Service Bus MessageId dedup (wire-level).
 //     Level 2 (BFF-side):       Redis IdempotencyService (per-process lock).
@@ -182,12 +189,19 @@ public sealed class ServiceBusHandlerEnqueuer : IHandlerEnqueuer, IAsyncDisposab
     /// Computes the deterministic Service Bus MessageId for the envelope.
     /// Exposed for smoke-test verification of level-1 idempotency.
     /// </summary>
+    /// <remarks>
+    /// Task 107 / DS-2 §4-L1: <see cref="HandlerEnvelope.Attempt"/> is
+    /// included in the hash so a §4C RetryableWithCleanup re-enqueue
+    /// (incremented Attempt) produces a MessageId distinct from the
+    /// original dispatch's, per spec.md's MUST rule:
+    /// <c>MessageId = SHA256(HandlerId|RunId|CustomerId|paramHash|attempt)</c>.
+    /// </remarks>
     internal static string ComputeMessageId(HandlerEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);
 
         var paramHash = Sha256Hex(envelope.ParametersJson);
-        var composite = $"{envelope.HandlerId}|{envelope.RunId}|{envelope.CustomerId}|{paramHash}";
+        var composite = $"{envelope.HandlerId}|{envelope.RunId}|{envelope.CustomerId}|{paramHash}|{envelope.Attempt}";
         return Sha256Hex(composite);
     }
 

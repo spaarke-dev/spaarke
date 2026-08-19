@@ -75,7 +75,11 @@ public enum FailureClass
     /// <summary>
     /// Handler wrote some external state but the write is safe to re-execute
     /// (own idempotency handles partial write). Reconciler re-dispatches the
-    /// same handler with the same envelope.
+    /// same handler with the same handler-level parameters (same idempotency
+    /// key at Level 3) — but with an incremented <c>HandlerEnvelope.Attempt</c>
+    /// (task 107 / DS-2 §4-L1) so the Service Bus level-1 MessageId differs
+    /// from the original dispatch's and is not silently dropped by SB
+    /// duplicate detection.
     /// </summary>
     RetryableWithCleanup = 2,
 

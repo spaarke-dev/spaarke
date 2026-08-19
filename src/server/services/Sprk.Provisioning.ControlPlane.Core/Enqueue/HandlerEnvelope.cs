@@ -30,6 +30,13 @@
 //     - EnqueuedAt      — UTC timestamp of enqueue. Copied into
 //                         ApplicationProperties for BFF-side latency metrics
 //                         + reconciler crash-recovery ordering.
+//     - Attempt         — (task 107 / DS-2 §4-L1) int, defaults to 0 and is
+//                         OMITTED from the wire payload at 0 ("first
+//                         enqueue"). Participates in
+//                         ServiceBusHandlerEnqueuer.ComputeMessageId so a
+//                         §4C RetryableWithCleanup re-enqueue (which
+//                         increments Attempt) produces a MessageId distinct
+//                         from the original dispatch's — see DESIGN NOTES.
 //
 // WIRE FORMAT (System.Text.Json, camelCase policy — parity with CosmosModule):
 //
@@ -38,14 +45,30 @@
 //       "runId":         "01J7Q3ZP...",
 //       "customerId":    "acme-corp",
 //       "parametersJson": "{\"kvUri\":\"@Microsoft.KeyVault(SecretUri=...)\"}",
-//       "enqueuedAt":    "2026-08-17T14:00:00Z"
+//       "enqueuedAt":    "2026-08-17T14:00:00Z",
+//       "attempt":       1
 //     }
 //
 // DESIGN NOTES:
-//   - Deliberately does NOT carry an "Attempt" counter. Service Bus's own
-//     DeliveryCount + the BFF handler's own attempt semantics (per ADR-036)
-//     own retry accounting. Adding a client-side counter here would double-
-//     bookkeep.
+//   - Attempt (task 107): added specifically to fix an interaction defect
+//     between Service Bus level-1 duplicate-detection (task 108) and the
+//     §4C RetryableWithCleanup auto-retry path. StateReconcilerService's
+//     normal tick-driven ready-set enqueue ALWAYS passes attempt=0 (the
+//     field is then omitted from the wire body) so the existing
+//     tick-duplicate-suppression byte-stability contract (identical
+//     ParametersJson -> identical MessageId across concurrent reconciler
+//     instances) is UNCHANGED. Only StateReconcilerService's
+//     ApplyHandlerOutcomeAsync re-enqueue path (fired when a handler
+//     outcome classifies as FailureClass.RetryableWithCleanup) increments
+//     Attempt — otherwise the retry would carry the identical MessageId as
+//     the just-consumed original and Service Bus duplicate-detection would
+//     silently drop it within the dedup window (spec.md MUST rule:
+//     MessageId = SHA256(HandlerId|RunId|CustomerId|paramHash|attempt)).
+//     This is NOT the same bookkeeping as Service Bus's own DeliveryCount
+//     or the BFF handler's own attempt semantics (ADR-036) — those track
+//     wire-level/handler-level redelivery; this field exists solely to keep
+//     the deterministic MessageId hash distinguishable across an
+//     application-level retry.
 //   - Deliberately does NOT carry a CorrelationId. The Service Bus
 //     `CorrelationId` field is set by the enqueuer to the RunId so the
 //     receiver can log/trace by run without unwrapping the body.
@@ -104,4 +127,19 @@ public sealed record HandlerEnvelope
     /// </summary>
     [JsonPropertyName("enqueuedAt")]
     public required DateTimeOffset EnqueuedAt { get; init; }
+
+    /// <summary>
+    /// Re-enqueue counter (task 107 / DS-2 §4-L1). Defaults to 0 — the
+    /// normal tick-driven first-enqueue path — and is OMITTED from the wire
+    /// payload at 0 so first-enqueue byte-stability (the actual purpose of
+    /// Service Bus level-1 dedup) is unaffected. Only
+    /// <see cref="Reconciler.StateReconcilerService.ApplyHandlerOutcomeAsync"/>'s
+    /// §4C <c>RetryableWithCleanup</c> re-enqueue path increments this value.
+    /// Participates in <see cref="ServiceBusHandlerEnqueuer.ComputeMessageId"/>
+    /// per spec.md's MUST rule so a retry's MessageId differs from the
+    /// original dispatch's and survives the SB dedup window.
+    /// </summary>
+    [JsonPropertyName("attempt")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public int Attempt { get; init; }
 }

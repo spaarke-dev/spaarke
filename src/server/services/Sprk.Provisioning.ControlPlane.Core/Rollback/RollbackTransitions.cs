@@ -51,7 +51,7 @@ public static class RollbackTransitions
     /// <see cref="RunStatus"/> per design.md §4C row:
     /// <list type="bullet">
     ///   <item><see cref="FailureClass.Resumable"/>            -> <see cref="RunStatus.Failed"/>       (operator resolves external precondition; POST /api/runs/{id}/resume re-drives).</item>
-    ///   <item><see cref="FailureClass.RetryableWithCleanup"/> -> <see cref="RunStatus.Failed"/>       (handler is re-dispatched with same idempotency key; own idempotency handles partial write).</item>
+    ///   <item><see cref="FailureClass.RetryableWithCleanup"/> -> <see cref="RunStatus.Failed"/>       (handler is re-dispatched with same handler-level idempotency key; own idempotency handles partial write. Task 107: the Service Bus envelope's Attempt is incremented so its MessageId differs from the original.)</item>
     ///   <item><see cref="FailureClass.QuarantineRequired"/>   -> <see cref="RunStatus.Quarantined"/>  (blocks new runs against same customerId until clear-quarantine).</item>
     ///   <item><see cref="FailureClass.SuccessfulButDrifted"/> -> <see cref="RunStatus.Completed"/>    (H13 acceptance detected drift; operator re-runs affected phases via resumeFromPhase).</item>
     /// </list>

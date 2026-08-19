@@ -185,7 +185,7 @@ _L2 project split, dispatcher, keyed-DI, C4.5 serializer fix, queue recreate, Bi
 | 104 | 🔲 | Extract IHandlerOutcomeApplier from StateReconcilerService (C2.1 wiring hook) | FULL | sonnet / high | none | 100 |
 | 105 | 🔲 | Dispatcher decision + idempotency test suite (DispatchCoreAsync table-driven, DispatchIdempotencyService, envelope round-trip) | FULL | sonnet / high | none | 102 |
 | 106 | ✅ | Fix C4.5: dual Newtonsoft StringEnumConverter on RunStatus/GateState/QuarantineState + serializer-contract test + Cosmos seam test | TEST-MODIFYING (unconditional FULL) | sonnet / high | waveG1-parallel | none |
-| 107 | 🔲 | Add attempt field to ReconcilerEnqueuePayload (L1 dedup vs §4C retry interaction fix) | TEST-MODIFYING (unconditional FULL) | sonnet / high | none | 108 |
+| 107 | ✅ | Add attempt field to ReconcilerEnqueuePayload (L1 dedup vs §4C retry interaction fix) | TEST-MODIFYING (unconditional FULL) | sonnet / high | none | 108 |
 | 108 | 🟡 | Bicep: recreate sprk-provisioning-jobs queue with sessions + dedup (C5.4/C4.6) + drain-verify runbook — authoring complete, live delete/recreate deferred to operator (see notes/queue-recreate-runbook-2026-08.md) | FULL | sonnet / high | none | none |
 | 109 | 🔲 | Bicep: fix config-key/audience/secret-name source drift (C5.1-C5.3) | FULL | sonnet / high | none | none |
 | 110 | 🔲 | Bicep: SB Data Receiver (+Sender) RBAC role assignments for L2 UAMI(s) (C5.5) | FULL | sonnet / high | none | 100, 101 |
