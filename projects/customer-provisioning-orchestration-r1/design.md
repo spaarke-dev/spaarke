@@ -103,32 +103,35 @@ These are inputs, not proposals. The design conforms to them. D1-D11 from `disco
 
 ### 4A. Tooling stack (added v3, 2026-08-12)
 
-The provisioning pipeline is a **hybrid** stack. No single IaC/tool covers both Azure and Power Platform; the r1 design picks the right tool per layer rather than force one dialect across both.
+The provisioning pipeline is a **hybrid** stack. No single IaC/tool covers both Azure and Power Platform; the r1 design picks the right tool per layer rather than force one dialect across both. **v3.4**: under Option D (DS-1b), the *execution* vehicle for handler logic is .NET SDK/REST in-process in L2; the PowerShell scripts listed below survive as (a) parity references for the ports, (b) operator/dev tooling, and (c) the H14a sidecar payload. Only H14a executes PowerShell at provision time.
 
-| Layer | Tool | Why | Handlers using it |
+| Layer | Execution vehicle (v3.4) | Parity reference / retained script | Handlers |
 |---|---|---|---|
-| **Azure stamp** (per-customer resource stamp: RG, App Service Plan/App Service, KV, Storage, Service Bus, Redis, OpenAI, AI Search, Doc Intel, App Insights, **Cosmos DB**, optional SignalR) | **Bicep** (26 tuned modules + `platform.bicep` / `customer.bicep` / `model1-shared.bicep` / `model2-full.bicep`) | Deep Azure integration, existing production-hardened modules, matches ADR-020 model-pinning discipline. | H2a (infra) |
-| **Dataverse environment lifecycle** (create/hydrate env, application-user registration, tenant-scoped SP admin) | **Terraform Power Platform provider** (Microsoft first-party) | The only IaC that covers Dataverse env lifecycle. Fully closes v2 D14 semi-auto gap. TF plan/state model gives us drift-detection. | H5 (env creation), H10 (app user) |
-| **Managed solution import** (386 components across ~10 managed solutions) | **Package Deployer** (invoked from PS) + existing `Deploy-DataverseSolutions.ps1` | Package Deployer is the supported ALM tool for managed solution deploy with dependency ordering; existing script already handles ordering. | H6 |
-| **AI Search indexes** (7 indexes, 3072-dim vectors) | Existing `scripts/ai-search/Deploy-AllIndexes.ps1` (PowerShell + Azure SDK) | Bicep can't author AI Search index schema; PS + SDK is the shortest path; script already exists. | H2b (indexes, sub-step of H2) |
-| **Config-seed layer** (§9 of INVENTORY: type-lookups, actions, tools, playbooks, consumers, grid/field-mapping/workspace-layout configs, env-var values, AI model deployment records) | Existing PowerShell seeders (`Deploy-All-AI-SeedData.ps1`, `Seed-PlaybookConsumers.ps1`, `Deploy-SystemWorkspaceLayouts.ps1`, `Deploy-*ChartDefinitions.ps1`) invoked from a **declarative config-seed manifest** | Handles the drift between `scripts/seed-data/*.json` (2026-01 MVP) vs `infra/dataverse/**` (R7 current) via a single manifest that names the authoritative source per artifact. | H12a / H12b / H12c |
-| **Web-resource / code-page deploy** | Existing `Deploy-Release.ps1` (hardened per Gap 2 — remove hardcoded `spaarkedev1`) | Existing pipeline; needs `customerId` parameter added. | H9 sub-step |
-| **SPE container-type + container provisioning** | Existing `Create-NewContainerType.ps1`, `Register-*.ps1`, `New-BusinessUnitContainer.ps1` **switched to confidential-client (app-only) token** per SPE 403 fix | Delegated token now 403s ("public client not allowed"). Confidential-client + KV-stored cert is the current supported pattern. | H8 |
-| **Consent-capture landing** (D18) | New BFF endpoint (Model 2 self-service onboarding) | Only irreducible customer-tenant admin action; capturing it in the BFF lets us trigger pipeline immediately on consent. | H0.5 |
-| **L2 orchestration** | Custom .NET 8 control-plane service (see §4.2) that invokes the above per-handler | Small enough that we don't need Durable Functions / Temporal (rejected in §5.1); big enough that shell-script orchestration is too fragile. | All |
-| **L3 operator UX** | `/provision-environment` Claude Code skill | v2 D16 unchanged. Skill calls L2 REST API (see §4.2 for the auth model). | — |
+| **Azure stamp** (per-customer RG, App Service, KV, Storage, Service Bus, OpenAI, AI Search, Doc Intelligence, App Insights, Cosmos, optional SignalR) | `Azure.ResourceManager.Resources` ARM deployment of CI-pre-compiled `customer.bicep`→ARM-JSON (+ `WhatIfAtSubscriptionScopeAsync` for structured drift detection) | `Provision-Customer.ps1` steps 1–3 (~450 effective lines; steps 4–10 duplicate other handlers' jobs) + the 25 Bicep modules (unchanged — Bicep remains the IaC authoring language) | H2a |
+| **Dataverse environment lifecycle** | BAP admin REST (`api.bap.microsoft.com` … `/scopes/admin/environments`) via `HttpClient` + `DefaultAzureCredential` — the same REST sequence `Provision-Customer.ps1` STEP 5 already uses; TF Power Platform provider remains the deferred design target (M-10) | `pac admin create-environment` path retired from the runtime; H10 App User via Dataverse Web API (already in-process) | H5, H10 |
+| **Managed solution import** (8 solutions, dependency-ordered) | Dataverse Web API `ImportSolution` / `StageAndUpgrade` + `ImportJob` polling; solution ZIPs are **versioned build artifacts in the publish payload** (invariant under every runtime option) | `Deploy-DataverseSolutions.ps1` (parity acceptance tests against recorded outputs — heavy port, Wave D-2) | H6 |
+| **AI Search indexes** (7 canonical, 3072-dim) | `Azure.Search.Documents.Indexes.SearchIndexClient` with UAMI RBAC auth (deletes admin-key handling); index JSON schemas as content files | `scripts/ai-search/Deploy-AllIndexes.ps1` (script remains the catalog authority for the 7-index list) | H2b |
+| **Config-seed layer** | YamlDotNet manifest engine + Dataverse Web API upserts in-process (the pattern H12c already uses); declarative manifest still names the authoritative source per artifact | `Invoke-SeedManifest.ps1`, per-module seeders (parity references) | H12a / H12b / H12c |
+| **BFF deploy + web resources** | CI-published artifact fetch by `{buildId}` + Kudu/ARM zip-deploy + slot swap via `WebSiteSlotResource.SwapSlotAsync`; **no provision-time build** | `Deploy-Release.ps1` Phase 4 (hardened, `customerId`-driven) retained for the web-resource step | H9 |
+| **Entra app registration** (~14 grants) | `Microsoft.Graph` 6.x (`Applications`, `ServicePrincipals`, `Oauth2PermissionGrants`) + `SecretClient`; app-user step via Dataverse Web API (H10 idiom) | `Register-EntraAppRegistrations.ps1` (parity acceptance tests — heavy port, Wave D-2) | H3 |
+| **SPE container-type + container** | `Microsoft.Graph` `POST /storage/fileStorage/containerTypes` under `ClientCertificateCredential` (T6 cert from KV) | `Create-NewContainerType.ps1` family | H8 |
+| **KV secrets / identity patch / RBAC** | `SecretClient` + `Azure.ResourceManager.AppService` (`KeyVaultReferenceIdentity` patch, both slots) + `Azure.ResourceManager.Authorization` role assignments | `AzCli*` collaborators retired | H4 |
+| **Preflight quota probes** | `Azure.ResourceManager.CognitiveServices` / `.Compute` usage APIs + BAP REST + `SecretClient` | `Test-*.ps1` probe scripts | H0 |
+| **E2E acceptance probes** | C# `HttpClient` probes — converges with the C3.1/C3.2 obligation to write the 11 real trap/invariant probes (same work done once); naming-conformance as pure-C# port; cost via Cost Management REST | `Validate-DeployedEnvironment.ps1`, `naming-conformance-check.ps1` | H13 |
+| **Exchange ApplicationAccessPolicy (T4)** | **PowerShell — the sole residual**: `Set-ExchangeApplicationAccessPolicy.ps1` inside the EXO sidecar (§4.2a); no Graph API exists for AAP or its App-RBAC successor (verified 2026-08-18, DS-1b §0 — plan for the sidecar to live years; R22 migration is a sidecar-script change behind `IExchangePolicyApplier`) | — (the script IS the payload) | H14a |
+| **Consent-capture landing** (D18) | BFF endpoint (unchanged — the one BFF touch-point) | — | H0.5 |
+| **L2 orchestration** | Custom **.NET 10** control-plane service (§4.2) — REST + dispatcher + reconciler + crash recovery | — | All |
+| **L3 operator UX** | `/provision-environment` Claude Code skill → L2 REST | — | — |
 
-**Rejected alternatives**: (a) full-Terraform (no Azure module maturity match with our 26 Bicep modules; migration cost dwarfs benefit); (b) full-Bicep (no Power Platform provider); (c) Bicep + PS-only for Dataverse (v2 D14 semi-auto — inferior to TF Power Platform provider for env lifecycle).
+**Rejected alternatives**: (a) full-Terraform (no Azure module maturity match with our 26 Bicep modules; migration cost dwarfs benefit); (b) full-Bicep (no Power Platform provider); (c) Bicep + PS-only for Dataverse (v2 D14 semi-auto — inferior to TF Power Platform provider for env lifecycle); (d) fat tools container carrying pwsh+az+pac+EXO (~1.5–2 GB) — rejected as Option A per DS-1b §4/§7: az CLI's Python CVE stream, 25 stdout parsers preserving the T-trap silent-fail class, and two ambient auth sessions as permanent fleet infrastructure.
 
 ### 4.1 Layer 1 — Deterministic Handlers
 
-Provisioning steps implemented as idempotent handlers. Each handler is a self-contained, coarse-grained operation (deploy infrastructure, import solutions, deploy BFF) that fits the ADR-004 job contract individually.
-
-**Existing substrate**: 13 production `IJobHandler` implementations prove the pattern at scale across RAG indexing, invoice processing, email analysis, attachment classification, and spend snapshots. Three-level idempotency is proven: Service Bus `MessageId` deduplication, Redis-backed `IdempotencyService` check/lock, Dataverse alternate keys/upserts.
+Provisioning steps implemented as idempotent handlers. Each handler is a self-contained, coarse-grained operation implementing the **L2-local `IProvisioningHandler` contract** (`src/server/services/Sprk.Provisioning.ControlPlane/Handlers/IProvisioningHandler.cs`) — ADR-004-shaped (one message, one handler, one outcome) but never a compile-time reference to the BFF's `IJobHandler` (peer services). The BFF's 13 production `IJobHandler` implementations remain the *pattern exemplars* that prove the shape at scale; the L2 dispatcher mirrors `ServiceBusJobProcessor` with the §4.2b divergences.
 
 **Handler catalog (v3, 2026-08-12)** — derived from `Provision-Customer.ps1` 13 steps + locked decisions + INVENTORY §9 config-seed layer + PROJECT-UPDATE §6 gap analysis. Splits several handlers to reflect reality (H2 → H2a/b/c; H12 → H12a/b/c) and adds H0.5 for Model 2 consent-capture (D18).
 
-**Idempotency key `{schemaVer}` semantics (I3 resolved v3)**: version tokens are **deterministic content hashes / semantic versions of the artifact being deployed**, not run-attempt counters. `{bicepVer}` = git SHA of `infrastructure/bicep/`, `{solutionVer}` = solution version manifest hash, `{configVer}` = seed manifest hash, `{buildId}` = BFF CI build number. This makes re-running the same handler with unchanged inputs a no-op (three-level idempotency: Service Bus MessageId dedup + Redis `IdempotencyService` check/lock + Dataverse alternate-key upsert).
+**Idempotency key `{schemaVer}` semantics (I3 resolved v3)**: version tokens are **deterministic content hashes / semantic versions of the artifact being deployed**, not run-attempt counters. `{bicepVer}` = git SHA of `infrastructure/bicep/`, `{solutionVer}` = solution version manifest hash, `{configVer}` = seed manifest hash, `{buildId}` = BFF CI build number. This makes re-running the same handler with unchanged inputs a no-op. Three-level idempotency (v3.4 precise form): **L1** — Service Bus duplicate detection on `MessageId = SHA256(HandlerId|RunId|CustomerId|paramHash|attempt)` (queue property `requiresDuplicateDetection: true`; the `attempt` term keeps §4C retries deliverable, §4C); **L2** — Redis dispatch lock at the dispatcher dequeue path; **L3** — durable dedup via the Cosmos `completedPhases` scan in each handler body (+ Dataverse alternate-key upserts where applicable). Runtime classification per handler: **§4.1b**.
 
 | # | Handler | Source logic | Gate | Idempotency key |
 |---|---------|-------------|------|-----------------|
@@ -143,7 +146,7 @@ Provisioning steps implemented as idempotent handlers. Each handler is a self-co
 | H6 | Solution export/fix (managed) + Package Deployer import (~10 solutions, dependency-ordered) | Export (D1) + `Deploy-DataverseSolutions.ps1` + Package Deployer | — | `solimport-{customerId}-{solutionVer}` |
 | H7 | 7 Dataverse env-var values + BFF app-settings — **v3.2 (Phase H)**: token substitution pattern superseded by canonical secret-catalog manifest + KV federation reader (BFF startup reads from KV directly with SDK caching); `#{TOKEN}#` substitution retained during transition | Step 8 + template evolution per Phase H | — | `envvars-{customerId}-{configVer}` |
 | **H8 (v3, confidential-client · v3.3 SPE privilege footnote)** | SPE container type + root container | Existing scripts + **switch to confidential-client (app-only) token** — delegated token now 403s (`public client not allowed`). Cert bootstrapped from KV. **v3.3 SPE privilege footnote**: `FileStorageContainerType.Manage.All` no longer requires SPE-Admin / Global-Admin as of June 2026 per Q5 research spike ([notes/graph-spe-2026-08-standards-spike.md](notes/graph-spe-2026-08-standards-spike.md)) — owning-tenant bootstrap simpler; runbook detail, not a code change. | Container-type replication (up to 24h — **lead-time item, not in-pipeline wait**; §9 north star; H0 preflight checks cert-bootstrap done) | `spe-{customerId}` |
-| H9 | BFF deploy + app settings + **`Deploy-Release.ps1` Phase 4 hardened** (Gap 2 — `customerId`-driven, no `spaarkedev1` hardcode) | `Deploy-BffApi.ps1` + `auth-deployment-setup.md` + hardened Phase 4 | — | `bff-{customerId}-{buildId}` |
+| H9 | BFF deploy + app settings + **`Deploy-Release.ps1` Phase 4 hardened** (Gap 2 — `customerId`-driven, no `spaarkedev1` hardcode) | **v3.4 artifact-based**: fetch CI-published artifact by `{buildId}` + zip-deploy + slot-swap (no provision-time `dotnet publish` — forbidden per FR-12) + hardened `Deploy-Release.ps1` Phase 4 for web resources (Gap 2 — `customerId`-driven, no `spaarkedev1` hardcode). r3 gates run in CI against the artifact; H9 verifies artifact metadata. | — | `bff-{customerId}-{buildId}` |
 | **H10 (v3 design intent, v3.2 deferred exec · Graph-parity from code constant)** | Dataverse Application User (BFF app-reg + UAMI) + **Graph app-role parity from `GraphAppRoles.cs` constant** (T3 v3.2). Design target = TF `powerplatform_user`; implementation deferred with H5 to first-customer engagement per M-10. Interim: PPAC UI fallback + verification query. **Escalation gate**: 10/14 GUIDs in `GraphAppRoles.cs` are null — must be completed via `az` enumeration of the Graph resource SP BEFORE first production customer provisioning. | Interim: PPAC UI + Graph SDK for role sync; target: TF `powerplatform_user` | — | `appuser-{customerId}` |
 | H11 | User provisioning (identity preset) | r1 registration flow (D6) | **B2B consent** (B2BGuest only) | `users-{customerId}` |
 | **H12a (v3, PROMOTED from thin)** | **AI seed chain**: type-lookups → actions → tools → knowledge → skills → playbooks → output-types → **playbook consumers** (single AI routing surface, ADR-039) | Existing `scripts/seed-data/Deploy-All-AI-SeedData.ps1` + `Seed-PlaybookConsumers.ps1`; **authoritative source per artifact declared in seed manifest** (resolves the `scripts/seed-data` MVP vs `infra/dataverse` R7 drift per INVENTORY §9) | — | `aiseed-{customerId}-{seedVer}` |
@@ -170,6 +173,36 @@ H5 → H6 (solutions) → H7 → H10 (app-user, needs H6 solutions) → H11
 ```
 
 **Model 2 self-service branch**: `H0.5 (consent-capture) → H0 → …` — the pipeline starts on consent-callback rather than operator-initiated. **Re-consent (v3.2)**: H0.5 no-ops on active/completed runs; only restarts from H0 on failed/cancelled state.
+
+### 4.1b Handler runtime classification — Option D (added v3.4 per DS-1b)
+
+Locked 2026-08-18: the runtime is **Option D hybrid** — every collaborator with an SDK/REST equivalent executes as pure .NET in-process in L2; the single platform-forced residual executes in the EXO sidecar (§4.2a). Of ~29 shell-out collaborators audited across 13 handlers (DS-1b §1, per-collaborator file:line evidence there), **exactly one** has no .NET equivalent.
+
+| Class | Definition | Handlers | Count |
+|---|---|---|---|
+| **A — pure .NET** | Every collaborator has an SDK/REST equivalent | H0, H2a, H2b, H3, H4, H5, H6, H8, H9 (post-artifact-re-scope), H12a, H12b, H13 | 12 |
+| **C — mixed** | One residual PS collaborator among SDK-capable ones | H14 (H14a only; H14b/c already in-process REST) | 1 |
+| **in-process already** | Never shelled out | H0.5, H1, H7, H10, H11, H12c | 6 |
+
+Per-handler SDK surface (packages already largely in the BFF/L2 dependency set):
+
+| Handler | Primary .NET surface |
+|---|---|
+| H0 | `Azure.ResourceManager.CognitiveServices` + `.Compute` usage APIs; BAP admin REST; `Azure.Security.KeyVault.Secrets.SecretClient` |
+| H2a | `Azure.ResourceManager.Resources` (ARM deploy of CI-pre-compiled Bicep→JSON + `WhatIf` structured drift); `.AppService` (T1 identity read); `SecretClient` |
+| H2b | `Azure.Search.Documents.Indexes.SearchIndexClient` (UAMI RBAC — admin-key handling deleted) |
+| H3 | `Microsoft.Graph` 6.x (`Applications`/`ServicePrincipals`/`Oauth2PermissionGrants`); `SecretClient`; Dataverse Web API (`HttpClient`) |
+| H4 | `SecretClient`; `Azure.ResourceManager.AppService` (`KeyVaultReferenceIdentity` PATCH both slots); `.Authorization` (role assignments) |
+| H5 | BAP admin REST via `HttpClient` + `DefaultAzureCredential` (the `Provision-Customer.ps1` STEP 5 sequence ported) |
+| H6 | Dataverse Web API `ImportSolution`/`StageAndUpgrade` + `ImportJob` polling; solution ZIPs as versioned publish-payload artifacts |
+| H8 | `Microsoft.Graph` `fileStorageContainerTypes` under `ClientCertificateCredential` (T6); `SecretClient` |
+| H9 | Artifact fetch by `{buildId}` + Kudu zip-deploy / `Azure.ResourceManager.AppService`; `WebSiteSlotResource.SwapSlotAsync` |
+| H12a | YamlDotNet + Dataverse Web API (H12c's existing in-process pattern) |
+| H12b | Dataverse Web API upserts (~40-line mechanical ports); the two deferred seeders (field-mapping, chart-def) authored directly in C# |
+| H13 | `HttpClient` probe suite (converges with the 11 real T/I probes owed under C3.1/C3.2); pure-C# naming-conformance port; Cost Management REST |
+| H14 | H14b/c in-process REST (unchanged); **H14a → `ExchangePolicySidecarClient : IExchangePolicyApplier` → sidecar HTTP** (§4.2a) |
+
+**Wave sequencing** (DS-1b §7): **Wave D-1** — dispatcher (§4.2b) + sidecar + the 9 thin az-one-liner SDK swaps + H0/H2b/H5/H12a/H12b/H13 ports + H9 artifact re-scope (~10 of 13 shell-out handlers executable). **Wave D-2** — H3, H6, H2a heavy ports with parity acceptance tests against recorded script outputs. Bounded fallback if a hard commercial date lands mid-wave: run those scripts temporarily in the sidecar (it has pwsh; add nothing but the scripts) — a contained concession, never a main-site shell-out.
 
 ### 4.1a Model 1 vs Model 2 handler behavior differences (added v3.2)
 
@@ -207,6 +240,8 @@ Idempotency + resumability (D11) covers the happy path where a failed handler ca
 - `Failed` → `Running` (operator called `resume_run`)
 - `Quarantined` → `Cancelled` (operator explicitly abandons, may follow with decommission)
 - `Cancelled` → clears `sprk_currentrunid` on registry row; environment record marked `SetupStatus=Failed` (Dataverse choice)
+
+**Retry envelope (v3.4)**: re-dispatch after `Failed → Running` (resume) or reconciler-driven retry is a **fresh enqueue with `attempt` incremented**. `attempt` participates in the deterministic MessageId hash, so L1 duplicate detection (ON as of v3.4) never swallows a legitimate §4C retry issued inside the PT1H dedup window, while true duplicates (same attempt — racing reconciler instances) still collapse to one delivery. The dispatcher never uses SB Abandon as a retry mechanism (§4.2b) — §4C is the sole retry authority.
 
 **Cross-customer serialization on quarantine**: `sprk_currentrunid` stays set on the `sprk_dataverseenvironment` row while status is `Quarantined` — blocks new runs against the same customer until the operator explicitly clears (via new `POST /api/runs/{id}/clear-quarantine` endpoint). Cross-customer runs unaffected.
 
@@ -586,6 +621,8 @@ One execution of the pipeline against a target. Multiple runs per environment ov
 | completedAt | datetime | Run completion (success or final failure) |
 | errorDetail | string | Last error message |
 | ttl | integer | Auto-expire after 365 days (Cosmos TTL) |
+
+**Serialization contract (v3.4 — C4.5 / bug #19/#20 family)**: the Cosmos client uses the SDK **default (Newtonsoft) serializer** with camelCase policy; STJ attributes are ignored on the write path. Therefore, on the run-document POCO graph: (1) `RunStatus`, `GateState`, `QuarantineState` carry **dual converters** — STJ `JsonStringEnumConverter` AND `[Newtonsoft.Json.JsonConverter(typeof(Newtonsoft.Json.Converters.StringEnumConverter))]` — so `status` is written as a string and `CosmosActiveRunScanner`'s `WHERE c.status IN ('Running','WaitingOnGate')` matches (without this, the reconciler and I6 crash recovery scan zero rows forever — a working dispatcher looks hung); (2) `RunId` carries dual `id` attributes; (3) no `Ttl` property (Cosmos rejects `"ttl": null`; if TTL returns, it must be Newtonsoft-visible with `NullValueHandling.Ignore`). Guarded by the serializer-contract unit test + the repository→scanner integration seam test (`tests/integration/seam/**` — the test class that would have caught this). Misleading comments at `CosmosModule.cs:140` and `CosmosActiveRunScanner.cs:40–44` corrected to state the real mechanism.
 
 **Fleet visibility**: Future web app reads from Cosmos directly. No Dataverse sync needed in r1 — the `sprk_dataverseenvironment` entity provides fleet-level status via `Setup Status` field (already deployed) + `sprk_currentrunid` for in-flight runs.
 
@@ -1087,6 +1124,8 @@ r1 H3 provisions **ONE** Entra app registration per customer: the BFF API app-re
 
 **Interim state (until Phase C lands)**: H4 grants KV RBAC to BOTH slots' distinct System-Assigned MI principals; T5 verification query enumerates both. This works but is fragile — Phase C is scheduled for early implementation to close T5 structurally.
 
+**Do not conflate the two UAMIs**: this section's UAMI is the *customer-stamp* identity (per-customer, consumed by the customer's BFF). The *L2 control-plane* UAMI and its admin-env Dataverse App User are §9.6.
+
 **Environment variable bindings (5):**
 
 | Variable | Purpose |
@@ -1170,6 +1209,18 @@ H14 verification: `Get-ApplicationAccessPolicy` returns 2 entries and both `AppI
 
 Both secrets are 48-byte base64, generated during H4, fail-closed if missing.
 
+### 9.6 L2 Control-Plane Identity — Path X (added v3.4 per DS-8)
+
+**Decision (locked 2026-08-18)**: all L2 reads/writes to the ADMIN Dataverse environment — registry lookups (H0.5 re-consent, `environmentId` resolution), the `sprk_currentrunid` I5 guard, and H13's `sprk_setupstatus = Ready` PATCH — authenticate as the **L2 UAMI registered as a Dataverse Application User** on the admin env, holding the scoped custom security role **`Spaarke Provisioning Registry`** (org-level Read/Write/Create/Append on `sprk_dataverseenvironment` + minimum basics — deliberately NOT System Administrator), tokens via `DefaultAzureCredential(ManagedIdentityClientId)` with scope `{adminEnvUrl}/.default` — the same idiom H10's `DataverseWebApiAppUserCreator` and the H5 health probe already use in-process.
+
+**Why**: the only ADR-028-compliant option ("MUST use `DefaultAzureCredential` for all server outbound — NOT `ClientSecretCredential`"); first-party supported (PPAC accepts MI Application IDs for app users, Microsoft Learn ms.date 2026-04-03; `pac admin assign-user --application-user`); the repo already ships the exact registration code (H10) and the L2 code headers pre-declare this migration (`CustomerRunGuardOptions.cs` "FUTURE MIGRATION" block); gives L2 a **distinct, auditable Dataverse identity** with its own service-protection budget instead of impersonating the BFF's systemuser as SysAdmin; **zero rotation surface** (platform-managed credential). Path Y (BFF app-reg client secret) rejected: new documented ADR-028 violation, false audit attribution, permanent rotation runbook, widened blast radius of a BFF secret leak.
+
+**Mechanics**: one-time per-env idempotent `Grant-ControlPlaneIdentity.ps1` — role-ensure → app-user-ensure (find-by-`applicationid` → POST `/systemusers` → `systemuserroles_association/$ref`) → `WhoAmI` verify; the same script carries the L2 UAMI's Graph app-role grants (C5.8) — one identity script for the control plane. Data-plane operation, not ARM — no Bicep. No admin consent exists or is needed (Dataverse authorizes via security roles; creating the systemuser row IS the authorization act).
+
+**Deletions this decision drives**: L2 stamp Bicep `dataverseClientSecretName` param + KV-ref emission; `CustomerRunGuardOptions.ClientId/ClientSecret` fields + `Validate()` clauses; the dummy-secret bug #18 dies at source. **What does NOT get deleted**: the `Dataverse-ClientSecret` KV **secret** (the BFF shared-lib path consumes it until NG1 #3b — BINDING never-delete). H4's *customer-side* `Dataverse-ClientSecret` seeding also stays (the customer BFF is still secret-based until #3b — explicitly not r1's migration).
+
+**Failure modes**: UAMI disabled → loud `CredentialUnavailableException` with a ≤24 h cached-token tail (accepted; writes fail closed as `InfraFault`/Resumable); systemuser or role removed → loud 401/403, restored in seconds by re-running the grant script; H13's live-probe set includes "L2 systemuser exists + role assigned". **Cross-tenant**: MI tokens are home-tenant-only — an *enforcement* of registry-writes-are-admin-env-only, not a limitation. The sanctioned future cross-tenant path (customer-owned-tenant Model 2 writes; secretless NG1 #3b) is **MI-as-FIC on a multitenant app-reg (Path Z, GA)** — noted for r2+, not built in r1.
+
 ### 9A. Consolidated Identity + Configuration Surface (per-customer) — added v3.3
 
 **Purpose**: single-page reference for "what identity + config surface does one customer environment carry?" Distilled from §7.7 (KV secrets), §7.9 (naming), §9.1 (app-reg), §9.2 (MI), §9.3 (Dataverse security), §9.4 (Exchange policies), §9.5 (webhooks), §10.2 (parameters), §10.3 (env vars), §10.4 (BFF app settings). When those sections and this table disagree, **this table is the reconciled current-state view**; the individual sections carry the depth.
@@ -1190,6 +1241,7 @@ Both secrets are 48-byte base64, generated during H4, fail-closed if missing.
 | 12 | **SPE container-type + root container ID** | KV secret `customer-{customerId}-spe-container-id` + Dataverse env-var `sprk_SharePointEmbeddedContainerId` | H8 (confidential-client fix per T6) | Trap T6 verification (container GET via app-only token) | Never rotate; container = data | Per-customer isolated by both KV boundary + Dataverse env boundary; **Invariant 4 per §4D** |
 | 13 | **Customer `tid` (Entra tenant ID)** | Dataverse env-var `sprk_TenantId` + Cosmos ProvisioningRun.parameters.tenantId | H0.5 (consent-callback for Model 2) or H0 param (Model 1) | H13 sample query verifies BFF sees the right tenant | Never rotates for a given customer | Model 1: Spaarke tid · Model 2: customer tid |
 | 14 | **Per-tenant token budget** (`tokenBudgetMonthlyUSD`, D19) | Cosmos ProvisioningRun.parameters + APIM policy state | H0 param + D19 metering layer | H13 verifies budget enforcement (attempt over-budget → blocked) | Ops-driven (upgrade/downgrade) | Model 1: capped (trial); Model 2: unlimited |
+| 15 | **L2 control-plane UAMI + admin-env Dataverse App User** (`Spaarke Provisioning Registry` scoped role) | Spaarke platform sub (UAMI, Bicep-owned in L2 stamp) + admin Dataverse env (systemuser row) | `platform-controlplane.bicep` (UAMI) + one-time `Grant-ControlPlaneIdentity.ps1` (App User + role + Graph app-roles) | H13 control-plane self-probe (`systemusers` query + role check) + canary registry-write attribution | **None — platform-managed; no expiry cliff (the point of Path X)** | Identical in both models (registry lives only in the admin env) |
 
 **Rotation summary** (things that expire and must be rotated to keep the customer operational):
 - **BFF-API-ClientSecret**: 24-month expiry → alarm at expiry-30-days → rotate + push to KV + BFF picks up via KV reference (zero downtime if done right)
@@ -1387,6 +1439,8 @@ Most are **code-page SPAs deployed as web resources**, NOT as managed solutions.
 | `model1-shared.bicep` + `model1-customer.bicep` + `model2-full.bicep` | `infrastructure/bicep/stacks/` | **REUSE (all three first-class per §3A A1)** | `model2-full` = D3 default dedicated; `model1-shared` = trial tier. |
 | **NEW: L2 control-plane Bicep** | `infrastructure/bicep/platform-controlplane.bicep` *(new)* | **NEW** | App Service (B2) + Cosmos DB + platform KV for the L2 orchestrator. |
 | **DEFERRED: Terraform Power Platform provider** *(v3.2 deferred per M-10)* | `infrastructure/terraform/dataverse/` *(future)* | **DEFERRED to first-customer engagement** | v3 D14 hybrid tooling per §4A remains the design intent. Interim: H5 uses `pac admin` PS invocation; H10 uses PPAC UI + Graph SDK. TF migration lands as its own task chain once customer volume justifies the ops cost. |
+| **NEW: `sprk-provisioning-jobs` queue (IaC-declared)** | `platform-controlplane.bicep` (child resource on the existing SB namespace via `existing` reference — NOT `modules/service-bus.bicep`, whose uniform properties are the wrong shape) | **NEW (v3.4, C5.4/C4.6)** | `requiresSession: true` + `requiresDuplicateDetection: true` (`PT1H`) + `lockDuration PT5M` + `maxDeliveryCount 10` + DLQ-on-expiry. Both properties create-time-only → live queue delete + Bicep recreate (drain-verify; RBAC survives). SB Data Sender + Receiver role assignments for the L2 UAMI land in Bicep alongside (C5.5, membership-topic.bicep pattern). |
+| **NEW: EXO sidecar image + sitecontainer** | ACR repo + `platform-controlplane.bicep` sitecontainer config + CI workflow stage | **NEW (v3.4, §4.2a)** | pwsh 7.4 + pinned ExchangeOnlineManagement + one script + HTTP listener; ≤250 MB ceiling, Trivy-gated; monthly rebuild cadence. |
 
 ### 11.3 BFF Job Handler Ecosystem
 
@@ -1570,7 +1624,7 @@ r1's H2a/H6/H7/H9/H12a/b/c/H14 handlers all execute in **upgrade mode** when the
 | **H7** (env-var values) | 7 canonical values set | Values updated only if changed; H13 verifies clients pick up new values (localStorage cache invalidation: 60-min TTL — accept the window OR force cache-bust via a new value in `sprk_ClientCacheBustToken` env-var, added v3.3) |
 | **H12a/b/c** (config-seed) | Full seed of all rows | **Additive-only by default**: new AI action definitions / playbooks / grid configs / field mappings are added; existing rows are LEFT ALONE (customer may have edited them). Explicit `--overwrite-authored-content` flag needed to force-update — reserved for security-critical playbook fixes |
 | **H14** (integrations) | 2 Exchange policies + Graph webhook subscriptions created | Existing policies/subscriptions verified; missing ones created (per T4 action-and-verify semantics); no destructive re-create |
-| **H9** (BFF deploy) | BFF deployed to production slot | **Blue-green via staging slot**: deploy new build to staging → smoke-test → slot-swap; rollback = re-swap. Coordinate with r3 handoff §6 gates (analyzers-as-errors + god-class ratchet + ArchTests must all pass before slot-swap) |
+| **H9** (BFF deploy) | BFF deployed to production slot | **Blue-green via staging slot**: deploy new build to staging → smoke-test → slot-swap; rollback = re-swap. Coordinate with r3 handoff §6 gates (analyzers-as-errors + god-class ratchet + ArchTests must all pass before slot-swap). Artifact provenance (v3.4): upgrade-mode H9 resolves the artifact by target `{buildId}` from the version-compatibility matrix row; the deployed pair is recorded to `sprk_bffversion`/`sprk_solutionversion` (already §14A.3). |
 
 #### 14A.3 Version compatibility matrix
 
