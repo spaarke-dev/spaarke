@@ -236,6 +236,16 @@ export interface DataGridProps {
    */
   onBack?: () => void;
 
+  /**
+   * OPTIONAL — show the header's built-in saved-view selector. Defaults to `true`
+   * (every existing host keeps its view picker unchanged). Set `false` when the host
+   * owns its OWN view switcher above the grid and the built-in one would duplicate it
+   * (e.g. the reconciliation workspace's dedicated "Email Review views" selector —
+   * email-communication-intelligence-r2 item 1, owner UAT 2026-08-19). Suppresses only
+   * the header-left picker; the command bar, filters, and grid are unaffected.
+   */
+  showViewSelector?: boolean;
+
   /** OPTIONAL — additional class merged AFTER component classes (per Spaarke convention). */
   className?: string;
 }
@@ -760,6 +770,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     availableViewsAllowlist: availableViewsAllowlistOverride,
     theme = webLightTheme,
     onBack,
+    showViewSelector = true,
     className,
   } = props;
 
@@ -1442,7 +1453,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
       <div className={mergeClasses(styles.root, className)} aria-label={contextValue.currentView}>
         <div className={styles.headerCard}>
           <div className={styles.headerLeft}>
-            {selectorViews.length > 0 ? (
+            {showViewSelector && selectorViews.length > 0 ? (
               <ViewSelector
                 views={selectorViews}
                 activeViewId={currentViewId}

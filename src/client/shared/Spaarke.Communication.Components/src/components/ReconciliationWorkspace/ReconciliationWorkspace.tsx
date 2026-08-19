@@ -732,6 +732,11 @@ export const ReconciliationWorkspace: React.FC<ReconciliationWorkspaceProps> = (
           relatedTo={relatedTo}
           onRecordsLoaded={handleRecordsLoaded}
           onRecordOpen={handleRecordOpen}
+          // Item 1 (owner UAT 2026-08-19): when this workspace renders its OWN
+          // "Email Review views" selector above the grid, suppress the DataGrid's
+          // built-in saved-view picker so only ONE view selector shows. With no
+          // workspace-level views, the grid keeps its native picker (fallback).
+          showViewSelector={!(hasViews && views!.length > 1)}
         />
       </div>
 

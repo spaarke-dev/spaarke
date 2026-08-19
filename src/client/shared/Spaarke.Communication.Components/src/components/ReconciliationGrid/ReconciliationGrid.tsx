@@ -230,6 +230,13 @@ export interface ReconciliationGridProps {
   parentContext?: DataGridParentContext;
   /** OPTIONAL — turns the association column into an interactive "Related to" cell (task 052, FR-E3) that reuses `EmailConnectionsReview`. Left unset, that column keeps its static status badge. */
   relatedTo?: RelatedToGridBinding;
+  /**
+   * OPTIONAL — show the DataGrid's built-in saved-view selector. Defaults to `true`.
+   * The reconciliation workspace sets `false` when it renders its own "Email Review
+   * views" selector above the grid, so only ONE view picker shows (item 1, owner UAT
+   * 2026-08-19). Forwarded verbatim to `<DataGrid showViewSelector />`.
+   */
+  showViewSelector?: boolean;
   /** OPTIONAL — additional class merged after component classes. */
   className?: string;
 }
@@ -248,6 +255,7 @@ export const ReconciliationGrid: React.FC<ReconciliationGridProps> = ({
   membershipResolver,
   parentContext,
   relatedTo,
+  showViewSelector,
   className,
 }) => {
   const mergedColumnRenderers = React.useMemo<NonNullable<DataGridOverrides['columnRenderers']>>(() => {
@@ -284,6 +292,7 @@ export const ReconciliationGrid: React.FC<ReconciliationGridProps> = ({
       hostFilters={hostFilters}
       membershipResolver={membershipResolver}
       parentContext={parentContext}
+      showViewSelector={showViewSelector}
       className={className}
     />
   );

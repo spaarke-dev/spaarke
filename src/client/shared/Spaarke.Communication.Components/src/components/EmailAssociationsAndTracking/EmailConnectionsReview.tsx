@@ -39,6 +39,7 @@ import {
   MenuList,
   MenuItem,
   Button,
+  mergeClasses,
 } from '@fluentui/react-components';
 import { Search20Regular, DocumentAdd20Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
 import { getXrmForPicker } from '@spaarke/ui-components';
@@ -114,6 +115,11 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   const greenKey = model.primary ? candidateKey(model.primary) : undefined;
   const confirmedKey = model.state === 'confirmed' && model.primary ? candidateKey(model.primary) : undefined;
   const activeSelectedKey = selectedKey ?? greenKey;
+  // Item 2f: in the reconcile variant the primary now renders as a green candidate
+  // card carrying its OWN Undo button — so the filed-banner's Undo is redundant and
+  // is only shown for a primary NOT represented among the cards (a denorm-only /
+  // manual "Link another" record has no provenance candidate to render as a card).
+  const primaryInCards = !!greenKey && model.candidates.some(c => candidateKey(c) === greenKey);
   // Confirmed → the primary is the header chip, so the cards row shows ONLY the
   // "Link another record" tile (owner UAT 2026-07-31).
   const isConfirmed = model.state === 'confirmed';
@@ -239,7 +245,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   );
 
   return (
-    <div className={s.root} data-testid="email-connections-review">
+    <div className={reconcile ? mergeClasses(s.root, s.reconcilePad) : s.root} data-testid="email-connections-review">
       {error && (
         <MessageBar intent="error">
           <MessageBarBody>{error}</MessageBarBody>
@@ -253,9 +259,9 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
       {reconcile && isConfirmed && model.primary && (
         <MessageBar intent="success" data-testid="association-filed-banner">
           <MessageBarBody>
-            Filed to <strong>{filedLabel}</strong>. Move to Fields / Tasks to continue.
+            Filed to <strong>{filedLabel}</strong>. Switch below, or move to Fields / Tasks to continue.
           </MessageBarBody>
-          {!readOnly && (
+          {!readOnly && !primaryInCards && (
             <MessageBarActions>
               <Button
                 size="small"
@@ -282,7 +288,13 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
             • no matches → a single "No confident match" card.
           The "Link another record" tile renders in every non-read-only state. */}
       <div className={reconcile ? s.cardsStack : s.cards}>
-        {!isConfirmed &&
+        {/* Reconcile variant (owner UAT 2026-08-19, item 2f): candidate cards STAY
+            visible even after a match/confirm so the reviewer can SWITCH the
+            association — the current primary (🟡 auto-matched or 🟢 confirmed) card
+            shows an Undo button, every other candidate keeps a Confirm (switch)
+            button. The default (email-form) variant keeps its confirmed-chip-in-header
+            behavior (cards hidden once confirmed). */}
+        {(reconcile || !isConfirmed) &&
           (model.candidates.length > 0 ? (
             model.candidates.map(c => {
               const k = candidateKey(c);
@@ -300,6 +312,7 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
                   readOnly={readOnly}
                   onSelect={() => setSelectedKey(k)}
                   onConfirm={() => void confirmCandidate(c)}
+                  onUndo={() => void handleUndoPrimary()}
                   s={s}
                 />
               );
