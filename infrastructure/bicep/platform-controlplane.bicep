@@ -99,7 +99,7 @@
 //   az deployment sub create \
 //     --location westus2 \
 //     --template-file infrastructure/bicep/platform-controlplane.bicep \
-//     --parameters environmentName=dev serviceBusKeyVaultSecretName=servicebus-connection-string \
+//     --parameters environmentName=dev \
 //                  serviceBusNamespaceName=spaarke-servicebus-dev serviceBusResourceGroupName=SharePointEmbedded
 
 targetScope = 'subscription'
@@ -123,9 +123,6 @@ param appServicePlanSku string = 'P1v3'
 @minValue(30)
 @maxValue(730)
 param logRetentionDays int = 180
-
-@description('Name of the Key Vault secret holding the Service Bus connection string for the fleet-scoped SB namespace. DS-5 C5.1 fix: the .Api App Service (modules/controlplane-app-service.bicep) no longer consumes this -- it now wires MI-only ServiceBus__FullyQualifiedNamespace + ServiceBus__QueueName (ServiceBusModule.cs:53 documents the connection string is IGNORED). Still consumed by the .Worker App Service (modules/controlplane-worker-app-service.bicep, task 101) pending the same key-rename fix there (follow-on to this task -- DS-5 C5.1 scoped only the .Api module; the .Worker module was added by task 101 after DS-5 was authored and carries the identical drift).')
-param serviceBusKeyVaultSecretName string = 'servicebus-connection-string'
 
 @description('Name of the fleet-scoped Service Bus namespace that hosts the sprk-provisioning-jobs queue (task 108 / DS-5 C5.4). Empty defaults to spaarke-servicebus-{environmentName} (the legacy-but-canonical name per AZURE-RESOURCE-NAMING-CONVENTION.md; verified live value for dev is spaarke-servicebus-dev). This stack does NOT create the namespace - it only declares the queue as its child via an `existing` reference.')
 param serviceBusNamespaceName string = ''
@@ -354,8 +351,7 @@ module appService 'modules/controlplane-app-service.bicep' = {
     cosmosDatabaseName: cosmos.outputs.databaseName
     cosmosRunsContainerName: cosmos.outputs.containerName
     keyVaultName: keyVault.outputs.keyVaultName
-    // DS-5 C5.1: MI-only FQNS + queue name, NOT the KV-ref connection
-    // string (see serviceBusKeyVaultSecretName param description above).
+    // DS-5 C5.1: MI-only FQNS + queue name, NOT a KV-ref connection string.
     serviceBusNamespaceName: effectiveServiceBusNamespaceName
     serviceBusQueueName: 'sprk-provisioning-jobs'
     dataverseClientSecretName: dataverseClientSecretName
@@ -390,7 +386,13 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     cosmosRunsContainerName: cosmos.outputs.containerName
     keyVaultName: keyVault.outputs.keyVaultName
     keyVaultUri: keyVault.outputs.keyVaultUri
-    serviceBusKeyVaultSecretName: serviceBusKeyVaultSecretName
+    // DS-5 C5.1 follow-on fix (task 110): MI-only FQNS + queue name, NOT a
+    // KV-ref connection string -- same fix shape as .Api above, applied to
+    // .Worker (task 101 added this module after DS-5 was authored, carrying
+    // the identical drift; see modules/controlplane-worker-app-service.bicep
+    // header "DS-5 C5.1 FOLLOW-ON FIX" for the full rationale).
+    serviceBusNamespaceName: effectiveServiceBusNamespaceName
+    serviceBusQueueName: 'sprk-provisioning-jobs'
     dataverseClientSecretName: dataverseClientSecretName
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
@@ -480,6 +482,33 @@ module fleetServiceBusQueue 'modules/controlplane-sb-queue.bicep' = {
 }
 
 // ============================================================================
+// 8. FLEET SERVICE BUS RBAC - Data Sender + Data Receiver for the shared
+//    control-plane UAMI (task 110 / DS-5 C5.5)
+//
+//    Grants the SAME cross-RG BCP165 treatment as the queue module above
+//    (module invoked with an explicit `scope: resourceGroup(...)` pointing
+//    at the namespace's resource group, NOT this file's ambient `rg`).
+//
+//    Prior to this task, every live RBAC grant on the dev stamp was a
+//    manual `az role assignment create` (Sender only) - Receiver was
+//    granted nowhere, a hard blocker for task 102's dispatcher
+//    (ServiceBusSessionProcessor.StartProcessingAsync fails immediately
+//    without it). Both grants land on the ONE shared control-plane UAMI
+//    (DS-3 Section 3 v1 - .Api and .Worker share an identity; the
+//    two-UAMI least-privilege split is a documented future refinement,
+//    not required here).
+// ============================================================================
+
+module fleetServiceBusRbac 'modules/controlplane-sb-rbac.bicep' = {
+  scope: resourceGroup(serviceBusResourceGroupName)
+  name: 'controlplane-sb-rbac'
+  params: {
+    serviceBusNamespaceName: effectiveServiceBusNamespaceName
+    principalId: uami.outputs.principalId
+  }
+}
+
+// ============================================================================
 // OUTPUTS - Consumed by:
 //   - Phase D deploy scripts (L2 app service URL + resource IDs)
 //   - H4 handler (KV name + UAMI resourceId for keyVaultReferenceIdentity PATCH)
@@ -539,10 +568,16 @@ output appInsightsConnectionString string = monitoring.outputs.connectionString
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsId
 
 // Fleet Service Bus queue (task 108) - consumed by task 110's RBAC module
-// (namespace/queue scope for role assignments) + task 113's deploy script
+// (namespace scope for role assignments) + task 113's deploy script
 // (post-deploy property verification).
 output fleetServiceBusNamespaceId string = fleetServiceBusQueue.outputs.namespaceId
 output fleetServiceBusNamespaceName string = fleetServiceBusQueue.outputs.namespaceName
 output fleetServiceBusResourceGroupName string = serviceBusResourceGroupName
 output provisioningJobsQueueId string = fleetServiceBusQueue.outputs.queueId
 output provisioningJobsQueueName string = fleetServiceBusQueue.outputs.queueName
+
+// Fleet Service Bus RBAC (task 110 / DS-5 C5.5) - Data Sender + Data
+// Receiver both granted to the shared control-plane UAMI at namespace
+// scope. Consumed by task 113's deploy script (post-deploy `az role
+// assignment list` verification).
+output fleetServiceBusRbacNamespaceId string = fleetServiceBusRbac.outputs.namespaceId

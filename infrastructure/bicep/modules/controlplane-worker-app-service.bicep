@@ -44,9 +44,10 @@
 //
 // OUT OF SCOPE FOR THIS MODULE
 //   - RBAC role assignments (Cosmos, Service Bus Receiver/Sender, AI
-//     Search, ARM Reader, Graph app-roles): task 110 (SB RBAC) +
-//     Grant-ControlPlaneIdentity.ps1 (task 111, landed) grant the FULL
-//     scope onto the shared control-plane UAMI this module binds to.
+//     Search, ARM Reader, Graph app-roles): task 110 (SB RBAC,
+//     modules/controlplane-sb-rbac.bicep) + Grant-ControlPlaneIdentity.ps1
+//     (task 111, landed) grant the FULL scope onto the shared control-plane
+//     UAMI this module binds to.
 //   - Path X Dataverse App User registration: task 111's script / H10
 //     handler, not a Bicep concern.
 //   - keyVaultReferenceIdentity PATCH: applied post-deploy by the H4
@@ -57,6 +58,25 @@
 //     public placeholder (see param description + the POML's own
 //     escalation-trigger guidance) so this module's shape can be authored
 //     and validated independently of the CI pipeline landing first.
+//
+// DS-5 C5.1 FOLLOW-ON FIX (task 110, applied here)
+//   DS-5's C5.1 finding scoped ONLY modules/controlplane-app-service.bicep
+//   (task 109 fixed it there) because this .Worker module did not exist yet
+//   when DS-5 was authored — task 101 added it afterward carrying the
+//   IDENTICAL key-shape bugs: `Cosmos__Endpoint`/`__Database`/
+//   `__RunsContainer` (code reads `Cosmos:AccountEndpoint`/`:DatabaseName`/
+//   `:ContainerName` per Sprk.Provisioning.ControlPlane.Core's
+//   CosmosModule.cs:98,109-110 — SHARED by both .Api and .Worker) and a
+//   KV-referenced `ServiceBus__ConnectionString` app setting that
+//   ServiceBusModule.cs:53 documents is IGNORED (the code always resolves
+//   `ServiceBus:FullyQualifiedNamespace` via the bound UAMI's token
+//   credential per ADR-028 MI-outbound). Fixed below mirroring task 109's
+//   exact fix shape: renamed Cosmos__* keys, ServiceBus__ConnectionString
+//   replaced with ServiceBus__FullyQualifiedNamespace + ServiceBus__QueueName,
+//   and ManagedIdentity__ClientId added (CosmosModule.cs:125,
+//   ServiceBusModule.cs:157 read this app-owned config key to pin
+//   DefaultAzureCredential to the bound UAMI — AZURE_CLIENT_ID alone is the
+//   Azure-native convention but belt-and-braces per task 109 precedent).
 
 @description('Name of the L2 control-plane Worker App Service (typically spaarke-provisioning-controlplane-worker-{env}).')
 param appServiceName string
@@ -88,8 +108,11 @@ param keyVaultName string
 @description('Key Vault URI (https://{name}.vault.azure.net/) -- passed to the sitecontainer as PLATFORM_KV_URI so the sidecar can fetch the Exchange cert via App Service MSI at call time (DS-1b Section 3).')
 param keyVaultUri string
 
-@description('Name of the KV secret holding the Service Bus connection string (ADR-036 reuse -- no new SB created here).')
-param serviceBusKeyVaultSecretName string
+@description('Name of the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4) used to construct the fully-qualified-namespace app-setting the code reads (DS-5 C5.1 key-rename fix, applied here by task 110 -- MI-only send/receive, no connection string per ServiceBusModule.cs:53). SAME value passed to the .Api module.')
+param serviceBusNamespaceName string
+
+@description('Name of the fleet-scoped Service Bus queue this App Service enqueues onto / receives from (DS-5 C5.1). Defaults to the canonical queue declared by task 108.')
+param serviceBusQueueName string = 'sprk-provisioning-jobs'
 
 @description('Name of the KV secret holding the Dataverse S2S ClientSecret. Handlers H5/H6/H7/H10 (registry + solution-import + env-var writes) run in the WORKER post-split (task 100) -- this setting moved here from .Api, which no longer needs it (the .Api host has no handler DI; task 100 Program.cs header).')
 param dataverseClientSecretName string
@@ -148,23 +171,32 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
 
         // ---------------------------------------------------------------
-        // Cosmos (task 024 wiring -- endpoint only; MI resolves credentials)
+        // Cosmos (task 024 wiring -- endpoint only; MI resolves credentials).
+        // Keys renamed per DS-5 C5.1 (task 110 follow-on fix -- see file
+        // header) to match CosmosModule.cs:98-110 (Cosmos:AccountEndpoint /
+        // :DatabaseName / :ContainerName) -- SHARED by .Api and .Worker via
+        // Sprk.Provisioning.ControlPlane.Core. The OLD keys
+        // (Cosmos__Endpoint/__Database/__RunsContainer) were never read by
+        // the code.
         // ---------------------------------------------------------------
-        { name: 'Cosmos__Endpoint', value: cosmosAccountEndpoint }
-        { name: 'Cosmos__Database', value: cosmosDatabaseName }
-        { name: 'Cosmos__RunsContainer', value: cosmosRunsContainerName }
+        { name: 'Cosmos__AccountEndpoint', value: cosmosAccountEndpoint }
+        { name: 'Cosmos__DatabaseName', value: cosmosDatabaseName }
+        { name: 'Cosmos__ContainerName', value: cosmosRunsContainerName }
 
         // ---------------------------------------------------------------
-        // Service Bus (ADR-036 reuse -- KV reference; NS not created here).
-        // The Worker's dispatcher (task 102) drains this queue with
-        // Receive rights; .Api only Sends. Both resolve the SAME connection
-        // string setting -- least-privilege is enforced via RBAC scope on
-        // the shared UAMI (task 110), not via distinct connection strings.
+        // Service Bus (DS-5 C5.1 fix, task 110 follow-on): MI-only FQNS +
+        // queue name, NOT a connection string. ServiceBusModule.cs:53
+        // documents that any connection-string setting is IGNORED -- the
+        // code always resolves ServiceBus:FullyQualifiedNamespace + uses
+        // the bound UAMI's token credential (ADR-028). The Worker's
+        // dispatcher (task 102) drains this queue with Receive rights;
+        // .Api only Sends. Least-privilege is enforced via RBAC role
+        // (Sender vs Receiver) on the shared UAMI (task 110 RBAC module),
+        // not via distinct connection strings -- both hosts resolve the
+        // SAME FQNS/queue app settings.
         // ---------------------------------------------------------------
-        {
-          name: 'ServiceBus__ConnectionString'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${serviceBusKeyVaultSecretName})'
-        }
+        { name: 'ServiceBus__FullyQualifiedNamespace', value: '${serviceBusNamespaceName}.servicebus.windows.net' }
+        { name: 'ServiceBus__QueueName', value: serviceBusQueueName }
 
         // ---------------------------------------------------------------
         // Dataverse S2S (H5/H6/H7/H10 registry + env-var writes -- these
@@ -176,9 +208,18 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         }
 
         // ---------------------------------------------------------------
-        // Managed-identity discovery (pin DefaultAzureCredential to bound UAMI)
+        // Managed-identity discovery (pin DefaultAzureCredential to bound
+        // UAMI). AZURE_CLIENT_ID is the Azure-native env var
+        // DefaultAzureCredential honors natively; ManagedIdentity__ClientId
+        // is ADDED per DS-5 C5.1 (task 110 follow-on, mirroring task 109's
+        // .Api fix) because CosmosModule.cs:125 and ServiceBusModule.cs:157
+        // read the app's own ManagedIdentity:ClientId config key (not the
+        // Azure env-var convention) to pin their per-module TokenCredential
+        // to the bound UAMI. Both kept (belt-and-braces; harmless
+        // duplication).
         // ---------------------------------------------------------------
         { name: 'AZURE_CLIENT_ID', value: uamiClientId }
+        { name: 'ManagedIdentity__ClientId', value: uamiClientId }
 
         // ---------------------------------------------------------------
         // App Insights (connection string is not a secret per Azure guidance)

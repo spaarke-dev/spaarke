@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "952664173337325676"
+      "templateHash": "8805606892491239826"
     }
   },
   "parameters": {
@@ -46,13 +46,6 @@
       "maxValue": 730,
       "metadata": {
         "description": "Log Analytics retention (days). 180 default matches BFF platform (rg-spaarke-platform-{env}). NFR-11 requires auditable operator action; 180 days covers audit retention window."
-      }
-    },
-    "serviceBusKeyVaultSecretName": {
-      "type": "string",
-      "defaultValue": "servicebus-connection-string",
-      "metadata": {
-        "description": "Name of the Key Vault secret holding the Service Bus connection string for the fleet-scoped SB namespace. DS-5 C5.1 fix: the .Api App Service (modules/controlplane-app-service.bicep) no longer consumes this -- it now wires MI-only ServiceBus__FullyQualifiedNamespace + ServiceBus__QueueName (ServiceBusModule.cs:53 documents the connection string is IGNORED). Still consumed by the .Worker App Service (modules/controlplane-worker-app-service.bicep, task 101) pending the same key-rename fix there (follow-on to this task -- DS-5 C5.1 scoped only the .Api module; the .Worker module was added by task 101 after DS-5 was authored and carries the identical drift)."
       }
     },
     "serviceBusNamespaceName": {
@@ -1435,8 +1428,11 @@
           "keyVaultUri": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultUri.value]"
           },
-          "serviceBusKeyVaultSecretName": {
-            "value": "[parameters('serviceBusKeyVaultSecretName')]"
+          "serviceBusNamespaceName": {
+            "value": "[variables('effectiveServiceBusNamespaceName')]"
+          },
+          "serviceBusQueueName": {
+            "value": "sprk-provisioning-jobs"
           },
           "dataverseClientSecretName": {
             "value": "[parameters('dataverseClientSecretName')]"
@@ -1455,7 +1451,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "364096112967241423"
+              "templateHash": "13584949913729113223"
             }
           },
           "parameters": {
@@ -1520,10 +1516,17 @@
                 "description": "Key Vault URI (https://{name}.vault.azure.net/) -- passed to the sitecontainer as PLATFORM_KV_URI so the sidecar can fetch the Exchange cert via App Service MSI at call time (DS-1b Section 3)."
               }
             },
-            "serviceBusKeyVaultSecretName": {
+            "serviceBusNamespaceName": {
               "type": "string",
               "metadata": {
-                "description": "Name of the KV secret holding the Service Bus connection string (ADR-036 reuse -- no new SB created here)."
+                "description": "Name of the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4) used to construct the fully-qualified-namespace app-setting the code reads (DS-5 C5.1 key-rename fix, applied here by task 110 -- MI-only send/receive, no connection string per ServiceBusModule.cs:53). SAME value passed to the .Api module."
+              }
+            },
+            "serviceBusQueueName": {
+              "type": "string",
+              "defaultValue": "sprk-provisioning-jobs",
+              "metadata": {
+                "description": "Name of the fleet-scoped Service Bus queue this App Service enqueues onto / receives from (DS-5 C5.1). Defaults to the canonical queue declared by task 108."
               }
             },
             "dataverseClientSecretName": {
@@ -1608,20 +1611,24 @@
                   "healthCheckPath": "/healthz",
                   "appSettings": [
                     {
-                      "name": "Cosmos__Endpoint",
+                      "name": "Cosmos__AccountEndpoint",
                       "value": "[parameters('cosmosAccountEndpoint')]"
                     },
                     {
-                      "name": "Cosmos__Database",
+                      "name": "Cosmos__DatabaseName",
                       "value": "[parameters('cosmosDatabaseName')]"
                     },
                     {
-                      "name": "Cosmos__RunsContainer",
+                      "name": "Cosmos__ContainerName",
                       "value": "[parameters('cosmosRunsContainerName')]"
                     },
                     {
-                      "name": "ServiceBus__ConnectionString",
-                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('serviceBusKeyVaultSecretName'))]"
+                      "name": "ServiceBus__FullyQualifiedNamespace",
+                      "value": "[format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))]"
+                    },
+                    {
+                      "name": "ServiceBus__QueueName",
+                      "value": "[parameters('serviceBusQueueName')]"
                     },
                     {
                       "name": "Dataverse__ClientSecret",
@@ -1629,6 +1636,10 @@
                     },
                     {
                       "name": "AZURE_CLIENT_ID",
+                      "value": "[parameters('uamiClientId')]"
+                    },
+                    {
+                      "name": "ManagedIdentity__ClientId",
                       "value": "[parameters('uamiClientId')]"
                     },
                     {
@@ -1787,6 +1798,97 @@
           }
         }
       }
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "controlplane-sb-rbac",
+      "resourceGroup": "[parameters('serviceBusResourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "serviceBusNamespaceName": {
+            "value": "[variables('effectiveServiceBusNamespaceName')]"
+          },
+          "principalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "6450316545720310038"
+            }
+          },
+          "parameters": {
+            "serviceBusNamespaceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the existing fleet-scoped Service Bus namespace to grant RBAC on. Not created by this module (ADR-036 reuse — matches modules/controlplane-sb-queue.bicep)."
+              }
+            },
+            "principalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the control-plane UAMI (shared by .Api and .Worker per DS-3 §3 v1). Pass empty to skip both grants."
+              }
+            }
+          },
+          "variables": {
+            "serviceBusDataSenderRoleId": "69a216fc-b8fb-44d8-bc22-1f3c2cd27a39",
+            "serviceBusDataReceiverRoleId": "4f6d3b9b-027b-4f4c-9142-0e5a2a2247e0"
+          },
+          "resources": [
+            {
+              "condition": "[not(empty(parameters('principalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName')), parameters('principalId'), variables('serviceBusDataSenderRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataSenderRoleId'))]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "L2 control-plane UAMI enqueues HandlerEnvelope messages onto sprk-provisioning-jobs (task 110 / DS-5 C5.5)"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('principalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName'))]",
+              "name": "[guid(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName')), parameters('principalId'), variables('serviceBusDataReceiverRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('serviceBusDataReceiverRoleId'))]",
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "L2 control-plane UAMI (task 102 dispatcher, ServiceBusSessionProcessor) drains sprk-provisioning-jobs (task 110 / DS-5 C5.5)"
+              }
+            }
+          ],
+          "outputs": {
+            "namespaceId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusNamespaceName'))]"
+            },
+            "namespaceName": {
+              "type": "string",
+              "value": "[parameters('serviceBusNamespaceName')]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
+      ]
     }
   ],
   "outputs": {
@@ -1941,6 +2043,10 @@
     "provisioningJobsQueueName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('serviceBusResourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-sb-queue'), '2025-04-01').outputs.queueName.value]"
+    },
+    "fleetServiceBusRbacNamespaceId": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, parameters('serviceBusResourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-sb-rbac'), '2025-04-01').outputs.namespaceId.value]"
     }
   }
 }
