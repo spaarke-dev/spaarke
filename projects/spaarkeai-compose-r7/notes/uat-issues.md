@@ -345,6 +345,8 @@ Owner UAT on the redeployed build. R-5 confirmed holding; two new UX items shipp
 ### UAT-10 (Azure SignalR real-time delivery) — ASSIGNMENT (2026-08-19)
 **NOT compose-r8** (wrong domain — r8 is render-on-save fidelity + durable files). UAT-10 is **env/ops**: the BFF serverless-SignalR topology is correct; the Azure SignalR **service** rejects the locally-minted client token — a **connection-string / resource / Serverless-mode mismatch in the UAT env** (not a code defect). **Assigned as an ops/env action** on the UAT Azure SignalR resource (whoever provisions that environment); **code owner IF any change is needed = `spaarke-notification-spine-r1`** (owns `src/server/api/Sprk.Bff.Api/Services/Notifications/SignalRDeliveryService.cs`), NOT Compose. R7 carries it only as a pointer; the work does not belong to R7 or r8.
 
+**Shareable handoff assessment** (self-contained — symptom, confirmed root cause, rule-outs, ops remediation in priority order, verification, code/config inventory): [`docs/assessments/signalr-uat10-realtime-delivery-assessment-2026-08-19.md`](../../../docs/assessments/signalr-uat10-realtime-delivery-assessment-2026-08-19.md). Hand to the notification-spine / UAT-env owner.
+
 ### R7 close status (2026-08-19)
 - **All 27 tasks ✅**; all **UAT-01..26** rows ✅ Fixed / ✅ Verified / 📦 Deferred-to-r8; follow-up rounds **R-1..R-6 + S4 ✅**.
 - **Only open items for formal close**: (1) owner **real-env UAT pass** of the deployed flows; (2) **UAT-10 SignalR env/ops fix** (assigned above → notification-spine / UAT-env owner).
