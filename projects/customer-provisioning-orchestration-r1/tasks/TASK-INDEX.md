@@ -182,7 +182,7 @@ _L2 project split, dispatcher, keyed-DI, C4.5 serializer fix, queue recreate, Bi
 | 101 | ✅ | Author .Worker App Service Bicep module + wire into platform-controlplane.bicep | STANDARD | sonnet / high | waveG1-parallel | 100 |
 | 102 | 🔲 | Implement ProvisioningHandlerDispatcher BackgroundService (ServiceBusSessionProcessor) in .Worker | FULL | opus / xhigh | none | 100, 101 |
 | 103 | ✅ | HandlerIds catalog + keyed DI registration for 20 dispatchable handlers (C1.2) | FULL | sonnet / high | none | 100 |
-| 104 | 🔲 | Extract IHandlerOutcomeApplier from StateReconcilerService (C2.1 wiring hook) | FULL | sonnet / high | none | 100 |
+| 104 | ✅ | Extract IHandlerOutcomeApplier from StateReconcilerService (C2.1 wiring hook) | FULL | sonnet / high | none | 100 |
 | 105 | 🔲 | Dispatcher decision + idempotency test suite (DispatchCoreAsync table-driven, DispatchIdempotencyService, envelope round-trip) | FULL | sonnet / high | none | 102 |
 | 106 | ✅ | Fix C4.5: dual Newtonsoft StringEnumConverter on RunStatus/GateState/QuarantineState + serializer-contract test + Cosmos seam test | TEST-MODIFYING (unconditional FULL) | sonnet / high | waveG1-parallel | none |
 | 107 | ✅ | Add attempt field to ReconcilerEnqueuePayload (L1 dedup vs §4C retry interaction fix) | TEST-MODIFYING (unconditional FULL) | sonnet / high | none | 108 |

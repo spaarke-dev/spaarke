@@ -72,14 +72,10 @@
 //   graceful shutdown.
 // -----------------------------------------------------------------------------
 
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Models;
-using Sprk.Provisioning.ControlPlane.Repositories;
-using Sprk.Provisioning.ControlPlane.Rollback;
 
 namespace Sprk.Provisioning.ControlPlane.Reconciler;
 
@@ -98,19 +94,6 @@ public sealed class StateReconcilerService : BackgroundService
     /// enqueues from endpoint-layer enqueues.
     /// </summary>
     public const string DispatchedEventName = "ReconcilerDispatched";
-
-    /// <summary>
-    /// Serializer for the enqueue payload. camelCase parity with
-    /// <see cref="ServiceBusHandlerEnqueuer"/> + Cosmos wire — required so the
-    /// deterministic ParametersJson (an ingredient of the MessageId hash) is
-    /// stable across L2 instances.
-    /// </summary>
-    private static readonly JsonSerializerOptions ParametersJsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        WriteIndented = false,
-    };
 
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ReconcilerOptions _options;
@@ -317,59 +300,23 @@ public sealed class StateReconcilerService : BackgroundService
     /// Bus level-1 duplicate detection.
     /// </param>
     internal HandlerEnvelope BuildEnvelope(string handlerId, ProvisioningRun run, int attempt = 0)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
-        ArgumentNullException.ThrowIfNull(run);
-
-        var payload = new ReconcilerEnqueuePayload
-        {
-            CustomerId = run.CustomerId,
-            RunId = run.RunId,
-            Action = "reconciler-advance",
-            HandlerId = handlerId,
-        };
-
-        return new HandlerEnvelope
-        {
-            HandlerId = handlerId,
-            RunId = run.RunId,
-            CustomerId = run.CustomerId,
-            ParametersJson = JsonSerializer.Serialize(payload, ParametersJsonOptions),
-            EnqueuedAt = _timeProvider.GetUtcNow(),
-            Attempt = attempt,
-        };
-    }
+        => ReconcilerEnvelopeBuilder.Build(handlerId, run, _timeProvider, attempt);
 
     /// <summary>
-    /// Task 061: Applies a handler outcome (Success | Failure) to the
-    /// ProvisioningRun's Cosmos state per the §4C rollback taxonomy.
-    ///
-    /// Resolves <see cref="IFailureClassifier"/> from the per-tick DI scope +
-    /// consults <see cref="RollbackTransitions"/> (pure static, exhaustive
-    /// switch) for the target <see cref="RunStatus"/> + re-enqueue decision.
-    /// On a re-enqueue-worthy outcome (§4C RetryableWithCleanup), the same
-    /// handler envelope is re-dispatched with a fresh EnqueuedAt so the
-    /// deterministic MessageId path re-fires (Service Bus wire dedup + Redis
-    /// idempotency owns retry-safety).
-    ///
-    /// EXHAUSTIVE-SWITCH GUARD: routes through <see cref="RollbackTransitions"/>
-    /// exclusively — a new FailureClass value added to the enum WITHOUT a
-    /// corresponding branch in RollbackTransitions fails the build at CS8524
-    /// (warning-as-error via TreatWarningsAsErrors inherited from
-    /// Directory.Build.props). See RollbackTransitions.cs file header for the
-    /// full rationale.
-    ///
-    /// USAGE:
-    /// Exposed as an <c>internal</c> method so tests can drive it directly.
-    /// The production dispatch path (Service Bus consumer -> handler ->
-    /// outcome -> reconciler) is out-of-process (handlers execute in the BFF's
-    /// IJobHandler infrastructure per ADR-036); the wiring hook lives here so
-    /// the classifier + transition table are the SINGLE source of truth for
-    /// any future consumer (in-process test dispatcher, sidecar reconciler
-    /// worker, etc.).
+    /// Task 061; extracted to <see cref="HandlerOutcomeApplier"/> by task 104
+    /// (Phase C'' Wave G-1, DS-2 §5 gap C2.1 closure). Thin delegating shim:
+    /// resolves a FRESH per-call DI scope (matching the pre-extraction
+    /// per-tick Scoped-collaborator resolution semantics exactly) and
+    /// forwards to <see cref="IHandlerOutcomeApplier.ApplyHandlerOutcomeAsync"/>,
+    /// which now owns the full §4C taxonomy + quarantine + auto-re-enqueue +
+    /// guard-release logic as the SINGLE source of truth for every consumer —
+    /// this reconciler, its own existing tests (unmodified call shape), and
+    /// task 102's <c>ProvisioningHandlerDispatcher</c> (which resolves
+    /// <see cref="IHandlerOutcomeApplier"/> directly from its own per-message
+    /// scope instead of round-tripping through the reconciler).
     /// </summary>
-    /// <param name="run">Run to update. The document's ETag must be current for the persisted <see cref="IProvisioningRunRepository.ReplaceRunAsync"/> call.</param>
-    /// <param name="ifMatchEtag">The ETag returned by the most recent <see cref="IProvisioningRunRepository.ReadRunAsync"/>.</param>
+    /// <param name="run">Run to update. The document's ETag must be current for the persisted write.</param>
+    /// <param name="ifMatchEtag">The ETag returned by the most recent read.</param>
     /// <param name="outcome">Handler outcome to translate into a Cosmos state transition.</param>
     /// <param name="handlerId">Handler identifier for provenance + re-enqueue envelope construction.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
@@ -381,161 +328,10 @@ public sealed class StateReconcilerService : BackgroundService
         string handlerId,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(run);
-        ArgumentException.ThrowIfNullOrWhiteSpace(ifMatchEtag);
-        ArgumentNullException.ThrowIfNull(outcome);
-        ArgumentException.ThrowIfNullOrWhiteSpace(handlerId);
-
         using var scope = _scopeFactory.CreateScope();
-        var classifier = scope.ServiceProvider.GetRequiredService<IFailureClassifier>();
-        var repository = scope.ServiceProvider.GetRequiredService<IProvisioningRunRepository>();
-        var enqueuer = scope.ServiceProvider.GetRequiredService<IHandlerEnqueuer>();
-
-        // Success path — handlers own the CompletedPhases append + Cosmos
-        // write. The reconciler does NOT double-write on Success (parity with
-        // the existing "reconciler DOES NOT write to Cosmos" invariant in the
-        // file header; the write here fires ONLY on the Failure path where
-        // Status transitions per §4C).
-        if (outcome is HandlerResult.Success)
-        {
-            return new HandlerOutcomeApplied(
-                TargetStatus: run.Status,
-                Reenqueued: false,
-                FailureClass: null);
-        }
-
-        var failure = (HandlerResult.Failure)outcome;
-        var failureClass = classifier.Classify(failure);
-
-        // §4C exhaustive-switch state mapping — see RollbackTransitions.cs.
-        var targetStatus = RollbackTransitions.MapToRunStatus(failureClass);
-        var shouldReenqueue = RollbackTransitions.ShouldReEnqueue(failureClass);
-
-        // Task 107 / DS-2 §4-L1: on the auto-retry path (RetryableWithCleanup),
-        // increment the per-handler retry counter BEFORE the write below so it
-        // persists atomically with the failure transition (no extra Cosmos
-        // round trip). This attempt value becomes the re-enqueued envelope's
-        // HandlerEnvelope.Attempt, which participates in ComputeMessageId so
-        // the retry's MessageId differs from the original dispatch's and
-        // survives Service Bus level-1 duplicate detection (task 108). The
-        // normal tick-driven ready-set enqueue path never reads this
-        // dictionary — its byte-stability contract is unaffected.
-        var attempt = 0;
-        if (shouldReenqueue)
-        {
-            run.HandlerRetryAttempts.TryGetValue(handlerId, out var priorAttempts);
-            attempt = priorAttempts + 1;
-            run.HandlerRetryAttempts[handlerId] = attempt;
-        }
-
-        // Mutate + persist. Quarantine metadata populated on QuarantineRequired
-        // per design.md §4C Quarantined row.
-        run.Status = targetStatus;
-        run.CurrentPhase = handlerId;
-        run.ErrorDetail = $"[{failure.RejectionCode}] {failure.Diagnostic}";
-        var now = _timeProvider.GetUtcNow();
-
-        if (failureClass == FailureClass.QuarantineRequired)
-        {
-            run.Quarantine = new QuarantineInfo
-            {
-                State = QuarantineState.Quarantined,
-                Reason = failure.Diagnostic,
-                QuarantinedByHandler = handlerId,
-                QuarantinedAt = now,
-            };
-        }
-
-        // Terminal-transition timestamp for auditability.
-        if (targetStatus is RunStatus.Completed
-            or RunStatus.Failed
-            or RunStatus.Cancelled
-            or RunStatus.Quarantined)
-        {
-            run.CompletedOn = now;
-        }
-
-        var replace = await repository
-            .ReplaceRunAsync(run, ifMatchEtag, cancellationToken)
+        var applier = scope.ServiceProvider.GetRequiredService<IHandlerOutcomeApplier>();
+        return await applier
+            .ApplyHandlerOutcomeAsync(run, ifMatchEtag, outcome, handlerId, cancellationToken)
             .ConfigureAwait(false);
-
-        _logger.LogInformation(
-            "ReconcilerOutcomeApplied: HandlerId={HandlerId} RunId={RunId} CustomerId={CustomerId} " +
-            "FailureClass={FailureClass} TargetStatus={TargetStatus} RejectionCode={RejectionCode}",
-            handlerId, run.RunId, run.CustomerId,
-            failureClass, targetStatus, failure.RejectionCode);
-
-        if (replace is ReplaceRunResult.Conflict)
-        {
-            // Concurrent writer landed the same/similar transition — the
-            // reconciler is idempotent by design; a next tick picks up the
-            // freshly-written state. Do NOT re-enqueue on Conflict — the
-            // sibling writer may already have.
-            return new HandlerOutcomeApplied(targetStatus, Reenqueued: false, FailureClass: failureClass);
-        }
-
-        if (!shouldReenqueue)
-        {
-            return new HandlerOutcomeApplied(targetStatus, Reenqueued: false, FailureClass: failureClass);
-        }
-
-        // Auto-retry path (§4C RetryableWithCleanup) — re-fire the envelope
-        // with the incremented Attempt (task 107) so the MessageId differs
-        // from the original dispatch's and is not silently dropped by
-        // Service Bus level-1 duplicate detection (task 108). Service Bus
-        // wire dedup + Redis idempotency continue to own retry-safety per
-        // ADR-036.
-        var envelope = BuildEnvelope(handlerId, run, attempt);
-        try
-        {
-            await enqueuer.EnqueueAsync(envelope, cancellationToken).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(
-                ex,
-                "ReconcilerOutcomeReenqueueFailed: HandlerId={HandlerId} RunId={RunId} CustomerId={CustomerId} " +
-                "— transition landed but re-enqueue failed; next reconciler tick will retry from state.",
-                handlerId, run.RunId, run.CustomerId);
-            return new HandlerOutcomeApplied(targetStatus, Reenqueued: false, FailureClass: failureClass);
-        }
-
-        return new HandlerOutcomeApplied(targetStatus, Reenqueued: true, FailureClass: failureClass);
-    }
-
-    /// <summary>
-    /// Result record for <see cref="ApplyHandlerOutcomeAsync"/> — captures what
-    /// the reconciler decided per the §4C rollback taxonomy so tests + Kusto
-    /// pivots can assert on it. <see cref="FailureClass"/> is null on the
-    /// Success path (no classification fired).
-    /// </summary>
-    internal sealed record HandlerOutcomeApplied(
-        RunStatus TargetStatus,
-        bool Reenqueued,
-        FailureClass? FailureClass);
-
-    /// <summary>
-    /// Deterministic envelope payload for reconciler-initiated dispatches.
-    /// Handlers read run parameters from Cosmos via <see cref="Repositories.IProvisioningRunRepository"/>
-    /// (not from the envelope) — this payload is only routing/observability
-    /// metadata. Byte-stable so the derived MessageId is stable.
-    /// </summary>
-    internal sealed record ReconcilerEnqueuePayload
-    {
-        [JsonPropertyName("customerId")]
-        public string CustomerId { get; init; } = string.Empty;
-
-        [JsonPropertyName("runId")]
-        public string RunId { get; init; } = string.Empty;
-
-        [JsonPropertyName("action")]
-        public string Action { get; init; } = string.Empty;
-
-        [JsonPropertyName("handlerId")]
-        public string HandlerId { get; init; } = string.Empty;
     }
 }

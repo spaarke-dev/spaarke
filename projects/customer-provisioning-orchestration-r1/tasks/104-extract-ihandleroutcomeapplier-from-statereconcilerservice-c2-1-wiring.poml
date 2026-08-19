@@ -3,8 +3,8 @@
   <metadata>
     <title>Extract IHandlerOutcomeApplier from StateReconcilerService (C2.1 wiring hook)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Refactors the reconciler's most safety-critical method (§4C taxonomy + quarantine + auto-re-enqueue) into a new seam consumed by both the reconciler and the dispatcher; a mistake here silently breaks either caller's outcome handling.</rigor-reason>
     <model-tier>sonnet</model-tier>

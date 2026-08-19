@@ -22,18 +22,26 @@
 //        stability contract preserved).
 //   AC2  ComputeMessageId(envelope) with attempt=1 produces a DIFFERENT hash
 //        than the same envelope with attempt=0, all other fields equal.
-//   AC3  A simulated §4C RetryableWithCleanup retry re-enqueue (driven via
-//        StateReconcilerService.ApplyHandlerOutcomeAsync) produces a
-//        MessageId distinct from the original failed dispatch's.
+//   AC3  A simulated §4C RetryableWithCleanup retry re-enqueue produces a
+//        MessageId distinct from the original failed dispatch's. MOVED to
+//        HandlerOutcomeApplierTests.cs by task 104 (Phase C'' Wave G-1):
+//        ApplyHandlerOutcomeAsync's full §4C logic was extracted out of
+//        StateReconcilerService into HandlerOutcomeApplier, so this
+//        behavior is now exercised by constructing HandlerOutcomeApplier
+//        directly rather than driving it through StateReconcilerService's
+//        thin delegating shim.
 //   AC4  Two consecutive reconciler ticks against an unchanged ready-set
 //        produce IDENTICAL MessageIds (byte-stability preserved for the
 //        tick-duplicate-suppression purpose -- the normal enqueue path never
 //        reads ProvisioningRun.HandlerRetryAttempts).
 //
 // SEAM STRATEGY (docs/standards/TEST-ARCHITECTURE.md §5):
-//   Hand-rolled in-memory test doubles for IFailureClassifier,
-//   IProvisioningRunRepository, IHandlerEnqueuer, IActiveRunScanner --
-//   mirrors the existing StateReconcilerServiceTests.cs convention (no Moq).
+//   Hand-rolled in-memory test doubles for IHandlerEnqueuer, IActiveRunScanner
+//   -- mirrors the existing StateReconcilerServiceTests.cs convention (no
+//   Moq). Task 104 moved the IFailureClassifier / IProvisioningRunRepository
+//   doubles out to HandlerOutcomeApplierTests.cs alongside the tests that
+//   need them (this file's remaining tests never exercise
+//   ApplyHandlerOutcomeAsync).
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -41,11 +49,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
-using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Reconciler;
-using Sprk.Provisioning.ControlPlane.Repositories;
-using Sprk.Provisioning.ControlPlane.Rollback;
 using System.Text.Json;
 using Xunit;
 
@@ -143,78 +148,12 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
     }
 
     // -----------------------------------------------------------------------
-    // AC3 -- §4C RetryableWithCleanup re-enqueue produces a distinct MessageId
-    //         from the original dispatch's.
+    // AC3 -- MOVED to HandlerOutcomeApplierTests.cs by task 104 (Phase C''
+    //         Wave G-1): the §4C RetryableWithCleanup re-enqueue behavior
+    //         previously driven via StateReconcilerService.ApplyHandlerOutcomeAsync
+    //         is now exercised directly against the extracted HandlerOutcomeApplier.
+    //         See HandlerOutcomeApplierTests.RetryableWithCleanup_*.
     // -----------------------------------------------------------------------
-
-    [Fact]
-    public async Task ApplyHandlerOutcomeAsync_RetryableWithCleanup_ReenqueuesWithIncrementedAttempt_DistinctFromOriginalMessageId()
-    {
-        // Arrange
-        var sut = BuildSut(out var enqueuer,
-            classifier: new StubFailureClassifier(FailureClass.RetryableWithCleanup),
-            repository: new EchoingRunRepository());
-        var run = MakeRun(RunStatus.Running, "H0");
-
-        // The "just-consumed original" dispatch -- what the reconciler sent
-        // BEFORE this handler failed (attempt=0, the normal enqueue path).
-        var originalEnvelope = sut.BuildEnvelope("H1", run);
-        var originalMessageId = ServiceBusHandlerEnqueuer.ComputeMessageId(originalEnvelope);
-
-        var failure = new HandlerResult.Failure(
-            FailureClass.RetryableWithCleanup,
-            RejectionCode: "transient-http-503",
-            Diagnostic: "Downstream call returned 503; safe to retry.");
-
-        // Act -- the reconciler classifies the failure + re-enqueues per §4C.
-        var applied = await sut.ApplyHandlerOutcomeAsync(
-            run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H1", CancellationToken.None);
-
-        // Assert
-        applied.Reenqueued.Should().BeTrue("RetryableWithCleanup MUST auto-retry per §4C.");
-        enqueuer.Envelopes.Should().ContainSingle();
-
-        var retryEnvelope = enqueuer.Envelopes[0];
-        retryEnvelope.Attempt.Should().Be(1, "the FIRST auto-retry increments attempt from 0 -> 1.");
-
-        var retryMessageId = ServiceBusHandlerEnqueuer.ComputeMessageId(retryEnvelope);
-        retryMessageId.Should().NotBe(originalMessageId,
-            "task 107 / DS-2 §4-L1: without the attempt-field fix, this retry would carry the IDENTICAL " +
-            "MessageId as the original dispatch and Service Bus level-1 dedup would silently drop it.");
-
-        run.HandlerRetryAttempts.Should().ContainKey("H1").WhoseValue.Should().Be(1,
-            "the per-handler retry counter is persisted on the run doc alongside the failure transition.");
-    }
-
-    [Fact]
-    public async Task ApplyHandlerOutcomeAsync_RetryableWithCleanup_CalledTwiceForSameHandler_MonotonicallyIncrementsAttempt_EachRetryDistinct()
-    {
-        var sut = BuildSut(out var enqueuer,
-            classifier: new StubFailureClassifier(FailureClass.RetryableWithCleanup),
-            repository: new EchoingRunRepository());
-        var run = MakeRun(RunStatus.Running, "H0");
-
-        var failure = new HandlerResult.Failure(
-            FailureClass.RetryableWithCleanup, "transient-http-503", "Retry #1 diagnostic.");
-
-        // First failure -> first retry (attempt 0 -> 1).
-        await sut.ApplyHandlerOutcomeAsync(run, "etag-1", failure, "H1", CancellationToken.None);
-
-        // Second failure of the SAME handler (the retry itself failed again)
-        // -> second retry (attempt 1 -> 2).
-        await sut.ApplyHandlerOutcomeAsync(run, "etag-2", failure, "H1", CancellationToken.None);
-
-        enqueuer.Envelopes.Should().HaveCount(2);
-        enqueuer.Envelopes[0].Attempt.Should().Be(1);
-        enqueuer.Envelopes[1].Attempt.Should().Be(2);
-
-        var messageId1 = ServiceBusHandlerEnqueuer.ComputeMessageId(enqueuer.Envelopes[0]);
-        var messageId2 = ServiceBusHandlerEnqueuer.ComputeMessageId(enqueuer.Envelopes[1]);
-        messageId1.Should().NotBe(messageId2,
-            "each successive §4C retry MUST produce a fresh MessageId so it is never absorbed by the prior retry's dedup window.");
-
-        run.HandlerRetryAttempts["H1"].Should().Be(2);
-    }
 
     // -----------------------------------------------------------------------
     // AC4 -- normal tick-driven first-enqueue path is byte-stable across
@@ -284,8 +223,6 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
 
     private static StateReconcilerService BuildSut(
         out RecordingEnqueuer enqueuer,
-        IFailureClassifier? classifier = null,
-        IProvisioningRunRepository? repository = null,
         IActiveRunScanner? scanner = null,
         RecordingEnqueuer? sharedEnqueuer = null)
     {
@@ -295,8 +232,6 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
         services.AddSingleton<IActiveRunScanner>(scanner ?? new StubActiveRunScanner(Array.Empty<ProvisioningRun>()));
         services.AddSingleton<IHandlerEnqueuer>(enqueuer);
         services.AddSingleton<IDagAdvancer, DagAdvancer>();
-        services.AddSingleton(classifier ?? new StubFailureClassifier(FailureClass.RetryableWithCleanup));
-        services.AddSingleton(repository ?? (IProvisioningRunRepository)new EchoingRunRepository());
         var scopeFactory = services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
 
         return new StateReconcilerService(
@@ -325,26 +260,5 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
             _envelopes.Add(envelope);
             return Task.CompletedTask;
         }
-    }
-
-    private sealed class StubFailureClassifier : IFailureClassifier
-    {
-        private readonly FailureClass _class;
-        public StubFailureClassifier(FailureClass @class) => _class = @class;
-        public FailureClass Classify(HandlerResult.Failure failure) => _class;
-        public FailureClass ClassifyException(Exception exception) => _class;
-    }
-
-    /// <summary>Always succeeds, echoing back the (already-mutated) run with a fresh synthetic ETag -- mirrors real Cosmos replace-success shape without a live/emulated account.</summary>
-    private sealed class EchoingRunRepository : IProvisioningRunRepository
-    {
-        public Task<ProvisioningRunReadResult?> ReadRunAsync(string customerId, string runId, CancellationToken ct)
-            => Task.FromResult<ProvisioningRunReadResult?>(null);
-
-        public Task<ProvisioningRunReadResult> CreateRunAsync(ProvisioningRun run, CancellationToken ct)
-            => Task.FromResult(new ProvisioningRunReadResult(run, "etag-created"));
-
-        public Task<ReplaceRunResult> ReplaceRunAsync(ProvisioningRun run, string ifMatchEtag, CancellationToken ct)
-            => Task.FromResult<ReplaceRunResult>(new ReplaceRunResult.Success(run, $"etag-{Guid.NewGuid()}"));
     }
 }

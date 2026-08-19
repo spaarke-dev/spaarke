@@ -470,6 +470,13 @@ builder.Services.AddH13E2EAcceptanceGateHandler(builder.Configuration);
 //   - TimeProvider.System (once, via TryAddSingleton — production clock)
 //   - IDagAdvancer -> DagAdvancer (Singleton, pure function)
 //   - IActiveRunScanner -> CosmosActiveRunScanner (Scoped)
+//   - IHandlerOutcomeApplier -> HandlerOutcomeApplier (Scoped — task 104,
+//     Phase C'' Wave G-1: extracted from StateReconcilerService's own
+//     ApplyHandlerOutcomeAsync per DS-2 §5 / gap C2.1. This is the SAME
+//     registration task 102's ProvisioningHandlerDispatcher resolves
+//     IHandlerOutcomeApplier from — no separate Worker-level DI line needed;
+//     AddReconcilerModule below is this composition root's single source for
+//     the seam per ADR-010 DI minimalism.)
 //   - StateReconcilerService (HostedService)
 //
 // ADR-004 (Path A at L2 scope per spec.md ADR Tensions row 1): the state-

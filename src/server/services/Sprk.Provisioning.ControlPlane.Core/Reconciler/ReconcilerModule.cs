@@ -15,6 +15,13 @@
 //   - IActiveRunScanner -> CosmosActiveRunScanner (Scoped — mirrors
 //     CosmosProvisioningRunRepository's lifetime; scanner is stateless over
 //     the singleton CosmosClient, but Scoped is the DI-minimalism default).
+//   - IHandlerOutcomeApplier -> HandlerOutcomeApplier (Scoped — task 104,
+//     Phase C'' Wave G-1: extracted from StateReconcilerService's own
+//     internal ApplyHandlerOutcomeAsync per DS-2 §5. Resolved per-tick by
+//     StateReconcilerService's thin delegating shim AND, from task 102
+//     onward, per-message by ProvisioningHandlerDispatcher's own scope in
+//     the SAME Worker composition root — this single registration serves
+//     both consumers).
 //   - StateReconcilerService (HostedService).
 //
 // PLACEMENT (CLAUDE.md §10 / §11): L2-only. Consumes NO AI-internal types
@@ -74,6 +81,15 @@ public static class ReconcilerModule
             var logger = sp.GetRequiredService<ILogger<CosmosActiveRunScanner>>();
             return new CosmosActiveRunScanner(cosmosClient, databaseName, containerName, logger);
         });
+
+        // Task 104 (Phase C'' Wave G-1, DS-2 §5 gap C2.1 closure): the
+        // extracted handler-outcome-application seam. Scoped — mirrors
+        // IActiveRunScanner's lifetime; consumes Scoped IFailureClassifier +
+        // IProvisioningRunRepository + IHandlerEnqueuer (registered by
+        // RollbackModule / CosmosModule / ServiceBusModule respectively) +
+        // Singleton ICustomerRunGuard (CustomerRunGuardModule) + the
+        // TimeProvider.System registered immediately above.
+        services.AddScoped<IHandlerOutcomeApplier, HandlerOutcomeApplier>();
 
         // BackgroundService — one instance per L2 process (per App Service
         // instance under scale-out). Concurrent-safe: Service Bus MessageId
