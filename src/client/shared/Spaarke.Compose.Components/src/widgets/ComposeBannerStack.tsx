@@ -49,6 +49,7 @@ import type {
   ComposeReviewFindingsDegraded,
 } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
+import type { PendingRedlineError } from './hooks/usePendingRedline';
 
 export interface ComposeBannerStackProps {
   errorMessage: string | null;
@@ -136,6 +137,27 @@ export interface ComposeBannerStackProps {
    * a clean restore (the normal case).
    */
   reviewFindingsDegraded?: ComposeReviewFindingsDegraded | null;
+  /**
+   * Banner consolidation (2026-08-19): the pending-redline anchor-failure notice, HOISTED out of
+   * ComposeEditor (where it was a hand-rolled bar BELOW the toolbar) into this single rail so all
+   * passive Compose notices share one location + Fluent MessageBar styling. Surfaced by the editor via
+   * `onRedlineErrorChange`; `null` (every target placed) renders nothing. The interactive
+   * "N suggested edits pending / Accept all" bar stays by the editor — only this passive NOTICE moved.
+   */
+  pendingRedlineError?: PendingRedlineError | null;
+  /** Banner consolidation (2026-08-19): dismiss {@link pendingRedlineError} — routes to the editor handle's clearRedlineError. */
+  onClearRedlineError?: () => void;
+  /**
+   * Banner consolidation (2026-08-19): soft-failure notice for AI-draft materialization (FR-04,
+   * task 016) — folded in from a stray MessageBar the host rendered in its own div. Null renders nothing.
+   */
+  composeDraftError?: string | null;
+  /**
+   * Banner consolidation (2026-08-19): "Create Summary Memo" negative-path notice (FR-14, task 051) —
+   * the honest "no memo yet / generate failed" message, folded in from a stray host MessageBar. Null
+   * renders nothing. No dismiss affordance (cleared by the parent at the next Generate/Email attempt).
+   */
+  memoActionMessage?: string | null;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -371,6 +393,10 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     annotationReadFailed = false,
     unsavedDocumentNotice = null,
     reviewFindingsDegraded = null,
+    pendingRedlineError = null,
+    onClearRedlineError,
+    composeDraftError = null,
+    memoActionMessage = null,
   } = props;
 
   // Task 041 (FR-06, PDF intake): per-mount dismissal only — DELIBERATELY not sessionStorage-keyed
@@ -504,6 +530,9 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     showAssociationWarningBanner ||
     showAnnotationReadFailedBanner ||
     showUnsavedDocumentNotice ||
+    !!pendingRedlineError ||
+    !!composeDraftError ||
+    !!memoActionMessage ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -798,6 +827,58 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
               />
             }
           />
+        </MessageBar>
+      ) : null}
+
+      {/* Banner consolidation (2026-08-19): the pending-redline anchor-failure NOTICE, hoisted here
+          from a hand-rolled bar BELOW the toolbar inside ComposeEditor. Now a Fluent MessageBar in the
+          single rail (above the toolbar), matching every other notice's font/icon/chrome. Copy is
+          verbatim from the former in-editor bar. */}
+      {pendingRedlineError ? (
+        <MessageBar intent="warning" data-testid="compose-redline-error" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Suggested edit couldn&apos;t be placed</MessageBarTitle>
+            {pendingRedlineError.kind === 'ambiguous'
+              ? `This suggested edit matches ${pendingRedlineError.matchCount} places in the document. Select the exact passage and try again.`
+              : (pendingRedlineError.failedCount ?? 0) > 1
+                ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
+                : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
+          </MessageBarBody>
+          {onClearRedlineError ? (
+            <MessageBarActions
+              containerAction={
+                <Button
+                  appearance="transparent"
+                  aria-label="Dismiss"
+                  icon={<Dismiss16Regular />}
+                  data-testid="compose-redline-error-dismiss"
+                  onClick={onClearRedlineError}
+                />
+              }
+            />
+          ) : null}
+        </MessageBar>
+      ) : null}
+
+      {/* Banner consolidation (2026-08-19): FR-04 (task 016) AI-draft materialization soft failure,
+          folded in from a stray host MessageBar so it shares this rail's location + styling. */}
+      {composeDraftError ? (
+        <MessageBar intent="warning" data-testid="compose-workspace-draft-error" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Could not insert AI draft</MessageBarTitle>
+            {composeDraftError}
+          </MessageBarBody>
+        </MessageBar>
+      ) : null}
+
+      {/* Banner consolidation (2026-08-19): FR-14 (task 051) "Create Summary Memo" negative-path notice,
+          folded in from a stray host MessageBar. Cleared by the parent at the next Generate/Email attempt. */}
+      {memoActionMessage ? (
+        <MessageBar intent="warning" data-testid="compose-workspace-memo-action-message" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Create Summary Memo</MessageBarTitle>
+            {memoActionMessage}
+          </MessageBarBody>
         </MessageBar>
       ) : null}
 

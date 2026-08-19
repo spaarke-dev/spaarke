@@ -1156,13 +1156,36 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { ComposeEditor } = require('../ComposeEditor');
 
-  function renderEditor() {
-    const ref = React.createRef<import('../ComposeEditor').ComposeEditorHandle>();
-    render(
+  // Banner consolidation (2026-08-19): the redline anchor-failure NOTICE moved out of ComposeEditor
+  // into the host's ComposeBannerStack rail (surfaced via onRedlineErrorChange). This harness plays the
+  // host — it captures the callback and renders the notice with the SAME testid + copy the stack uses —
+  // so the "surfaces the unresolved-target banner" intent is still exercised end-to-end.
+  function EditorHostHarness({
+    editorRef,
+  }: {
+    editorRef: React.Ref<import('../ComposeEditor').ComposeEditorHandle>;
+  }): React.JSX.Element {
+    const [redlineError, setRedlineError] =
+      React.useState<import('./usePendingRedline').PendingRedlineError | null>(null);
+    return (
       <FluentProvider theme={webDarkTheme}>
-        <ComposeEditor ref={ref} docxBytes={null} />
+        <ComposeEditor ref={editorRef} docxBytes={null} onRedlineErrorChange={setRedlineError} />
+        {redlineError ? (
+          <div data-testid="compose-redline-error">
+            {redlineError.kind === 'ambiguous'
+              ? `This suggested edit matches ${redlineError.matchCount} places in the document. Select the exact passage and try again.`
+              : (redlineError.failedCount ?? 0) > 1
+                ? `${redlineError.failedCount} of ${redlineError.totalCount} suggested edits couldn't be placed automatically — their wording differs slightly from this document. You can still review, edit, and save.`
+                : `A suggested edit couldn't be placed automatically — its wording differs slightly from this document. You can still edit and save.`}
+          </div>
+        ) : null}
       </FluentProvider>
     );
+  }
+
+  function renderEditor() {
+    const ref = React.createRef<import('../ComposeEditor').ComposeEditorHandle>();
+    render(<EditorHostHarness editorRef={ref} />);
     return ref;
   }
 

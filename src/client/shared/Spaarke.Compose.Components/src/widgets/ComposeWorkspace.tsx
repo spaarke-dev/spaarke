@@ -962,6 +962,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const [lastMaterializedKey, setLastMaterializedKey] = React.useState<string | null>(null);
   const [composeDraftError, setComposeDraftError] = React.useState<string | null>(null);
 
+  // Banner consolidation (2026-08-19): the pending-redline anchor-failure notice, lifted OUT of
+  // ComposeEditor so it renders in the single ComposeBannerStack rail (above the toolbar) instead of a
+  // hand-rolled bar below the toolbar. The editor pushes changes via onRedlineErrorChange; dismissal
+  // routes back through editorRef.current.clearRedlineError().
+  const [pendingRedlineError, setPendingRedlineError] =
+    React.useState<import('./hooks/usePendingRedline').PendingRedlineError | null>(null);
+
   // FR-01/FR-03 (task 020): Auto Save state, surfaced as the Save-dropdown toggle. ON by default per
   // spec (draft-safe autosave). Task 020 wires the CONTROL to this state; the actual draft-safe autosave
   // behavior (client-only local draft, beforeunload guard, recovery) is Phase 4 (tasks 040/041), which
@@ -4288,6 +4295,13 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // Task 032 (FR-16 128KB budget, Leg B) — an honest notice when a prior review's findings
             // could not be fully restored on reopen (never silent absence).
             reviewFindingsDegraded={reviewFindingsDegraded}
+            // Banner consolidation (2026-08-19): the pending-redline anchor-failure notice (hoisted out
+            // of ComposeEditor's below-toolbar bar) + the two former stray host MessageBars
+            // (draft-error, memo-message) now render in THIS single rail with consistent styling.
+            pendingRedlineError={pendingRedlineError}
+            onClearRedlineError={() => editorRef.current?.clearRedlineError()}
+            composeDraftError={composeDraftError}
+            memoActionMessage={memoActionMessage}
           />
 
           {/* ai-advanced-capabilities-nda-r1 UAT round-5 #1 — the Review Summary panel MOVED from here
@@ -4297,42 +4311,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               editor renders the panel, derives each finding's location from the live doc, and wires
               navigation to its own cited-span primitive. */}
 
-          {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}
-          {composeDraftError ? (
-            <div
-              className={styles.bannerStack}
-              role="status"
-              aria-live="polite"
-              data-testid="compose-workspace-draft-error"
-            >
-              <MessageBar intent="warning">
-                <MessageBarBody>
-                  <MessageBarTitle>Could not insert AI draft</MessageBarTitle>
-                  {composeDraftError}
-                </MessageBarBody>
-              </MessageBar>
-            </div>
-          ) : null}
-
-          {/* FR-14 (task 051) — "Create Summary Memo" negative-path / failure surface. Covers BOTH the
-              honest "no memo yet" 404 (never a silent empty export) and a transient generate/email
-              network failure. Cleared at the start of the next Generate/Email attempt (mirrors the
-              `composeDraftError` banner above — no separate dismiss affordance). */}
-          {memoActionMessage ? (
-            <div
-              className={styles.bannerStack}
-              role="status"
-              aria-live="polite"
-              data-testid="compose-workspace-memo-action-message"
-            >
-              <MessageBar intent="warning">
-                <MessageBarBody>
-                  <MessageBarTitle>Create Summary Memo</MessageBarTitle>
-                  {memoActionMessage}
-                </MessageBarBody>
-              </MessageBar>
-            </div>
-          ) : null}
+          {/* Banner consolidation (2026-08-19): the FR-04 draft-error and FR-14 "Create Summary Memo"
+              notices moved INTO ComposeBannerStack above (passed as composeDraftError / memoActionMessage)
+              so every passive Compose notice shares one rail + Fluent MessageBar styling. */}
 
           <div className={styles.editorSlot}>
             <ComposeEditor
@@ -4359,6 +4340,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               // activeWorkType prop; ComposeEditor defaults to '*' when omitted.
               activeWorkType={activeWorkType}
               onDirtyChange={handleDirtyChange}
+              onRedlineErrorChange={setPendingRedlineError}
               onImportWarnings={handleImportWarnings}
               enqueueComposeAction={enqueueComposeAction}
               // FIX #5 (UAT): Word + Save actions folded into the consolidated toolbar.
