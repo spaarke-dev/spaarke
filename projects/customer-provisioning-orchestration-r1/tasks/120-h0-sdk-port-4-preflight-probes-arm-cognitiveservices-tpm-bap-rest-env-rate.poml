@@ -4,7 +4,7 @@
     <title>H0: SDK-port 4 preflight probes (ARM.CognitiveServices TPM, BAP-REST env-rate, ARM.Compute vCPU, KV cert-bootstrap)</title>
     <phase>C'' Wave G-2 -- Entry + resources</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a production handler's 4 collaborators end-to-end; H0 is the entry handler blocking everything downstream. FULL per l2-controlplane + handler-modification default.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -103,4 +103,33 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+Completed 2026-08-19. All 4 PowerShellPreflightProbe shell-out callers ported to pure .NET SDK/REST
+implementations: ArmCognitiveServicesTpmProbe (Azure.ResourceManager.CognitiveServices), ArmComputeVCpuProbe
+(Azure.ResourceManager.Compute), KeyVaultCertBootstrapProbe (Azure.Security.KeyVault.Secrets), BapRestEnvironmentRateProbe
+(raw HttpClient + DefaultAzureCredential against the BAP admin REST environments-list endpoint). PowerShellPreflightProbe.cs
+deleted (zero remaining callers, grep-verified); IPreflightQuotaProbe.cs doc comments updated to remove dangling crefs.
+
+Test design deviated from the POML's initially-suggested "module-boundary reader seam" toward reusing task 121's
+(ArmSubscriptionReadinessProbe) established fake-ArmClient-transport pattern instead (ArmSdkTestFakes,
+FakeArmHttpMessageHandler) -- a hand-rolled HttpMessageHandler wrapped in a REAL ArmClient/SecretClient/HttpClient so the
+SDK's own request marshaling + STJ deserialization run unmodified against a canned HTTP response. This is stronger
+coverage than a bespoke reader interface (catches real URL/wire-shape bugs) and reuses a same-wave sibling's helper per
+CLAUDE.md §11 rather than inventing a parallel test philosophy. 33 new tests across 4 files (8+7+8+10), all passing.
+
+LIVE-VERIFICATION-PENDING flag (owner sign-off needed): BapRestEnvironmentRateProbe's response-shape assumption
+(`properties.createdTime` on the BAP admin environments-list endpoint) could not be verified against a live BAP call in
+this sandboxed execution (no live Azure/BAP credentials available). The assumption is grounded in the documented,
+long-stable BAP admin REST schema (same one Microsoft.PowerApps.Administration.PowerShell's internal REST layer uses),
+with a defensive multi-field fallback mirroring the source PS script's own defensive lookup. Flagged for the Wave G-1/G-2
+live-ceremony backlog per current-task.md convention -- verify against a live tenant before H0 gates a production
+customer run.
+
+Quality gates (Step 9.5): code-review + adr-check both clean -- zero Critical/Warning findings, zero ADR violations
+(ADR-010 seam justified at 4 real implementations, no new single-impl interfaces; ADR-028 MI-outbound credential pattern
+throughout, zero hardcoded secrets; ADR-038 zero Mock&lt;HttpMessageHandler&gt; usage). No CLAUDE.md §6.5 escalation
+needed. Full L2 suite: 831/831 passing (787 baseline + 33 from this task + ~11 from concurrent sibling tasks
+121/122 landing in the same window).
+  </notes>
 </task>

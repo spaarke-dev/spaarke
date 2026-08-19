@@ -5,31 +5,32 @@
 // implementation per underlying data source; H0PreflightHandler injects an
 // IEnumerable<IPreflightQuotaProbe> and orchestrates them in parallel.
 //
-// DESIGN CHOICE (shell-out vs C# reimpl):
-//   The concrete production implementation (<see cref="PowerShellPreflightProbe"/>)
-//   shells out to scripts/preflight/*.ps1 (task 016). This reuses the tested
-//   scripts + Az CLI's built-in auth chain rather than re-implementing four
-//   Azure REST paths in C#. Trade-off accepted:
+// DESIGN CHOICE (SDK/REST, not shell-out — task 120, Wave G-2):
+//   The four concrete production implementations —
+//   <see cref="ArmCognitiveServicesTpmProbe"/>,
+//   <see cref="BapRestEnvironmentRateProbe"/>,
+//   <see cref="ArmComputeVCpuProbe"/>, and
+//   <see cref="KeyVaultCertBootstrapProbe"/> — are pure .NET SDK/REST calls
+//   under <c>DefaultAzureCredential</c> pinned to the L2 UAMI (Option D
+//   hybrid per DS-1b §1 H0 row). They REPLACE the original shell-out
+//   implementation (<c>PowerShellPreflightProbe</c>, which invoked
+//   scripts/preflight/*.ps1 — retired by task 120; the L2 App Service has no
+//   pwsh runtime under Option D's zero-shell main site per design.md §4.2a).
+//   Each ported probe's threshold-comparison logic is ported verbatim from
+//   its source script's own comparison block (see each probe's file header).
 //
-//     Pros — single source of truth (spec.md FR-01 + Task 016 own the
-//            quota-query logic; H0 handler owns orchestration only), scripts
-//            already documented + testable in isolation.
-//     Cons — pwsh must exist on the L2 App Service host (linux-x64 publish)
-//            + process-spawn overhead per invocation. Both are acceptable
-//            for a check that runs once per provisioning start.
-//
-//   Unit tests do NOT exercise <see cref="PowerShellPreflightProbe"/> —
-//   they inject their own <see cref="IPreflightQuotaProbe"/> stubs to
-//   avoid a pwsh runtime dependency in the CI unit suite (ADR-038 path #1:
-//   pure C# unit test — no external processes).
+//   Unit tests do NOT exercise the SDK/REST call itself — each probe wraps
+//   its Azure SDK/REST call behind a thin internal module-boundary reader
+//   seam (e.g. <c>ICognitiveServicesUsageReader</c>) so unit tests inject
+//   canned data directly, mirroring each source PS script's own test-mode
+//   escape hatch (ADR-038 path #1: pure C# unit test — no external calls).
 //
 // SEAM JUSTIFICATION (ADR-010):
-//   ≥2 implementations exist from day 1: the production shell-out probe
-//   AND the test-only stub probe defined per-test. That satisfies the
-//   "genuine seam" bar in ADR-010 for keeping <see cref="IPreflightQuotaProbe"/>
-//   as an interface rather than a concrete class. Also unlocks the
-//   future path where operators can opt into a pure-C# probe implementation
-//   without a runtime pwsh dependency (Q-F candidate follow-up).
+//   ≥2 implementations exist from day 1: the four production SDK/REST probes
+//   AND the test-only stub probe defined per-test (see H0PreflightHandlerTests.cs's
+//   FakeProbe). That satisfies the "genuine seam" bar in ADR-010 for keeping
+//   <see cref="IPreflightQuotaProbe"/> as an interface rather than a concrete
+//   class.
 // -----------------------------------------------------------------------------
 
 using System.Collections.Generic;

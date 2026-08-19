@@ -9,8 +9,7 @@
 //       BFF. This module is the L2 handler DI surface.
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-01 + NFR-12:
 //       H0 preflight owns four quota / readiness checks; each is a distinct
-//       IPreflightQuotaProbe registration bound to a script under
-//       scripts/preflight/*.ps1 (task 016).
+//       IPreflightQuotaProbe registration.
 //   - ADR-010: Feature-module extension method keeps Program.cs at ~15
 //              non-framework DI lines (NFR-07 god-class ratchet). One
 //              AddProvisioningHandlers() call replaces N per-handler /
@@ -23,11 +22,26 @@
 //              itself.
 //
 // SCOPE (task 041):
-//   - Bind Preflight:{PwshExecutable, ScriptsDirectory, Timeout} options.
-//   - Register the four IPreflightQuotaProbe instances (one per PS script).
+//   - Register the four IPreflightQuotaProbe instances.
 //   - Register H0PreflightHandler as IProvisioningHandler (Scoped).
 //   - Do NOT register any downstream handler (H0.5, H1, ...) — those tasks
 //     own their own registrations.
+//
+// TASK 120 UPDATE (Wave G-2, Option D hybrid per DS-1b §1 H0 row):
+//   The four probes are now pure .NET SDK/REST implementations
+//   (ArmCognitiveServicesTpmProbe, BapRestEnvironmentRateProbe,
+//   ArmComputeVCpuProbe, KeyVaultCertBootstrapProbe) — the shell-out
+//   PowerShellPreflightProbe + its Preflight:{PwshExecutable,
+//   ScriptsDirectory, Timeout} options binding are RETIRED (grep-verified
+//   zero remaining callers). The TPM + vCPU probes share ONE platform
+//   ArmClient singleton (built here from the CosmosModule TokenCredential,
+//   TryAddSingleton so task 121's ArmSubscriptionReadinessProbe can reuse
+//   the same instance rather than constructing a second one — CLAUDE.md
+//   §11); the KV probe reuses the TokenCredential directly (SecretClient is
+//   constructed per-call since the vault name is a per-run parameter); the
+//   BAP REST probe is a typed HttpClient (AddHttpClient<IPreflightQuotaProbe,
+//   BapRestEnvironmentRateProbe>) since it scopes DefaultAzureCredential
+//   per-tenant internally (§4D I5).
 //
 // WAVE C5 UPDATE (task 103):
 //   H0's keyed + concrete registrations now live alongside the other 18
@@ -41,8 +55,10 @@
 //   registration (DS-2 §3.2).
 // -----------------------------------------------------------------------------
 
+using Azure.Core;
+using Azure.ResourceManager;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 
@@ -55,9 +71,6 @@ namespace Sprk.Provisioning.ControlPlane.Modules;
 /// </summary>
 public static class HandlersModule
 {
-    /// <summary>Configuration section for preflight-probe options.</summary>
-    public const string PreflightConfigSection = "Preflight";
-
     /// <summary>
     /// Registers <see cref="H0PreflightHandler"/> + its four
     /// <see cref="IPreflightQuotaProbe"/> dependencies with the DI container.
@@ -72,34 +85,32 @@ public static class HandlersModule
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        // Bind Preflight:{PwshExecutable, ScriptsDirectory, Timeout} options.
-        // Defaults inside PreflightModuleOptions cover the operator running
-        // from a workstation with pwsh on PATH + scripts/preflight/ under
-        // AppContext.BaseDirectory. Production deployments override via
-        // App Service settings.
-        services.Configure<PreflightModuleOptions>(configuration.GetSection(PreflightConfigSection));
+        // Shared platform ArmClient singleton (task 120) — built from the
+        // CosmosModule TokenCredential (UAMI-pinned, ADR-028). TryAdd so a
+        // sibling module (e.g. task 121's SubscriptionReadiness registration)
+        // reuses this same instance instead of constructing a second one
+        // (CLAUDE.md §11 — one ArmClient, not N).
+        services.TryAddSingleton(sp => new ArmClient(sp.GetRequiredService<TokenCredential>()));
 
-        // Four probe registrations — one per script under scripts/preflight/.
-        // Order does not matter; H0 orchestrates all four in parallel.
-        // Kept as an explicit list (rather than reflection / attribute-
-        // scanning) so the compile-time diff is visible: a new preflight
-        // check is a new line here + a new PreflightCheckNames const.
-        RegisterPreflightProbe(
-            services,
-            checkName: PreflightCheckNames.AzureOpenAiTpmHeadroom,
-            scriptFileName: "Test-AzureOpenAiTpmHeadroom.ps1");
-        RegisterPreflightProbe(
-            services,
-            checkName: PreflightCheckNames.DataverseEnvCreationRate,
-            scriptFileName: "Test-DataverseEnvCreationRate.ps1");
-        RegisterPreflightProbe(
-            services,
-            checkName: PreflightCheckNames.SubscriptionVCpuQuota,
-            scriptFileName: "Test-SubscriptionVCpuQuota.ps1");
-        RegisterPreflightProbe(
-            services,
-            checkName: PreflightCheckNames.SpeCertBootstrap,
-            scriptFileName: "Test-SpeCertBootstrap.ps1");
+        // Typed HttpClient for the BAP REST probe (task 120) — matches the
+        // GraphRestB2BConsentVerifier / GraphRestSubscriptionCreator
+        // AddHttpClient<TInterface, TImplementation>() convention. Additive:
+        // IPreflightQuotaProbe already has 3 other registrations below: all 4
+        // resolve via the IEnumerable<IPreflightQuotaProbe> H0 injects.
+        services.AddHttpClient<IPreflightQuotaProbe, BapRestEnvironmentRateProbe>();
+
+        // Remaining three probe registrations (task 120 — SDK ports; Option D
+        // hybrid per DS-1b §1 H0 row). Order does not matter; H0 orchestrates
+        // all four in parallel.
+        services.AddScoped<IPreflightQuotaProbe>(sp => new ArmCognitiveServicesTpmProbe(
+            sp.GetRequiredService<ArmClient>(),
+            sp.GetRequiredService<ILogger<ArmCognitiveServicesTpmProbe>>()));
+        services.AddScoped<IPreflightQuotaProbe>(sp => new ArmComputeVCpuProbe(
+            sp.GetRequiredService<ArmClient>(),
+            sp.GetRequiredService<ILogger<ArmComputeVCpuProbe>>()));
+        services.AddScoped<IPreflightQuotaProbe>(sp => new KeyVaultCertBootstrapProbe(
+            sp.GetRequiredService<TokenCredential>(),
+            sp.GetRequiredService<ILogger<KeyVaultCertBootstrapProbe>>()));
 
         // H0 handler — Scoped per IProvisioningHandler contract + parity
         // with IHandlerEnqueuer's Scoped registration. Concrete-only: the
@@ -116,17 +127,5 @@ public static class HandlersModule
         services.AddProvisioningHandlerKeyedRegistrations();
 
         return services;
-    }
-
-    private static void RegisterPreflightProbe(
-        IServiceCollection services,
-        string checkName,
-        string scriptFileName)
-    {
-        services.AddScoped<IPreflightQuotaProbe>(sp => new PowerShellPreflightProbe(
-            checkName: checkName,
-            scriptFileName: scriptFileName,
-            options: sp.GetRequiredService<IOptions<PreflightModuleOptions>>(),
-            logger: sp.GetRequiredService<ILogger<PowerShellPreflightProbe>>()));
     }
 }
