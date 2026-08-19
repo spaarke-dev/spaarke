@@ -120,12 +120,31 @@
     <!-- WebApplicationFactory<Program> — required to bring the real L2
          Program.cs composition up in-process for scenarios 1 and 2. Pinned
          to net10 framework version. Program is exposed as `public partial
-         class Program` at the bottom of Program.cs (task 057). -->
+         class Program` at the bottom of Sprk.Provisioning.ControlPlane.Api/
+         Program.cs (was Sprk.Provisioning.ControlPlane/Program.cs pre-task-100
+         split). -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
   </ItemGroup>
 
+  <!--
+    ProjectReferences ADDED by task 100 (DS-3 Option 2 L2 project split, 2026-08-19):
+      This csproj shipped WITHOUT ProjectReferences at e1959426b (task 062) —
+      the LoadTest scenarios (EnqueueLatencyScenario, LongHandlerScenario,
+      ReconcilerConcurrencyScenario) use L2 types (Concurrency/, Enqueue/,
+      Models/, Reconciler/) directly + WebApplicationFactory<Program>. Task 100
+      adds the two references the harness needs:
+        - Sprk.Provisioning.ControlPlane.Core: Concurrency/, Enqueue/, Models/,
+          Reconciler/ types (all in Core namespace-preserved paths).
+        - Sprk.Provisioning.ControlPlane.Api: WebApplicationFactory<Program>
+          resolves to the .Api host's composition root (401/403/202 REST
+          scenarios need the full JWT + endpoint pipeline).
+    Without these the sln build breaks on this project post-split. The pre-split
+    LoadTests compiled via the (now-removed) monolithic
+    Sprk.Provisioning.ControlPlane project.
+  -->
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane\Sprk.Provisioning.ControlPlane.csproj" />
+    <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
+    <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane.Api\Sprk.Provisioning.ControlPlane.Api.csproj" />
   </ItemGroup>
 
 </Project>

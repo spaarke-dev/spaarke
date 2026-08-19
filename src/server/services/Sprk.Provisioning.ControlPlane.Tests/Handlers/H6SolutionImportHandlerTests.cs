@@ -799,11 +799,17 @@ EventsPage               Events Page              1.0.0.0           77777777-888
 
     private static string LocateImporterSource()
     {
+        // Path updated by task 100 (DS-3 Option 2 L2 project split, 2026-08-19):
+        // pre-split the handler source lived under Sprk.Provisioning.ControlPlane/
+        // Handlers/SolutionImport/; post-split it lives under
+        // Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/ (Handlers
+        // moved into the Core class library so both .Api and .Worker consume the
+        // same handler types). Namespace preserved.
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         while (dir is not null)
         {
             var candidate = Path.Combine(dir.FullName,
-                "src", "server", "services", "Sprk.Provisioning.ControlPlane",
+                "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core",
                 "Handlers", "SolutionImport", "DeployDataverseSolutionsScriptImporter.cs");
             if (File.Exists(candidate))
             {
@@ -813,7 +819,8 @@ EventsPage               Events Page              1.0.0.0           77777777-888
         }
         throw new FileNotFoundException(
             "Could not locate DeployDataverseSolutionsScriptImporter.cs by walking up from " +
-            $"{AppContext.BaseDirectory}.");
+            $"{AppContext.BaseDirectory}. Post-task-100 path: src/server/services/" +
+            "Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/.");
     }
 
     // ---------- fakes ----------

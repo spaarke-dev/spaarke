@@ -88,7 +88,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\server\api\Sprk.Bff.Api\Sprk.Bff.Api.csproj" />
-    <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane\Sprk.Provisioning.ControlPlane.csproj" />
+    <!--
+      Reference updated by task 100 (DS-3 Option 2 L2 project split, 2026-08-19):
+        Pre-split this project referenced the monolithic
+        Sprk.Provisioning.ControlPlane.csproj. Post-split, L2GraphAppRolesRegistry
+        (used by GraphAppRoleParityTest.L2GraphAppRolesRegistry_MirrorsBffGraphAppRolesConstant)
+        lives under Sprk.Provisioning.ControlPlane.Core (namespace preserved:
+        Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity).
+    -->
+    <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
   </ItemGroup>
 
 </Project>

@@ -4,7 +4,38 @@
     <title>Split L2 project into .Core / .Api / .Worker (DS-3 Option 2)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-notes>
+      Completed 2026-08-19 (branch work/customer-provisioning-orchestration-r1). Structural split landed as specified:
+      - .Core class library (Microsoft.NET.Sdk) hosts Handlers/**, Reconciler/**, Concurrency/, Enqueue/, Models/, Registry/, Repositories/, Rollback/, Infrastructure/Startup/, and Modules/{Cosmos,ServiceBus,Telemetry,Handlers}Module.cs. FrameworkReference Microsoft.AspNetCore.App + explicit `<Using>` items mirror Microsoft.NET.Sdk.Web's implicit-usings set so ~60 handler/module files compile unchanged (namespaces preserved). InternalsVisibleTo Sprk.Provisioning.ControlPlane + .Worker + .Tests restores pre-split same-assembly access for CrashRecoveryOptions.Validate() and ServiceBusHandlerEnqueuer.ComputeMessageId.
+      - .Api (existing App Service target, AssemblyName preserved as Sprk.Provisioning.ControlPlane so platform-controlplane.bicep target unchanged) — Program.cs shrunk from 1,178 to 156 lines. Keeps Auth + Swagger + Cosmos + ServiceBus + Telemetry modules + all 3 endpoint mappings (MapRunsEndpoints + MapRunLogsEndpoints + MapHealthEndpoints). Also registers dual-hosted AddCustomerRunGuard + AddRollbackModule (consumed by CreateRun/CancelRun/clear-quarantine endpoints per RunsEndpoints.cs).
+      - .Worker (NEW, Microsoft.NET.Sdk.Web, AssemblyName Sprk.Provisioning.ControlPlane.Worker) — 528-line Program.cs (~90% comment budget preserved verbatim from pre-split for CLAUDE.md §6.5 ADR-tension evidence trail). Registers all 20 handler DI blocks + AddReconcilerModule + AddCustomerRunGuard + AddRollbackModule + AddHostedService<CrashRecoveryStartupService>. Endpoints: only anonymous MapGet /healthz + /ping (inline, no Map*Endpoints call per POML constraint).
+      - Sprk.Provisioning.ControlPlane.Tests re-pointed to both .Core AND .Api (per POML literal wording: 41-file suite to .Core, single WebApplicationFactory consumer Api/RunsEndpointsTests.cs follows .Api).
+      - Sprk.Provisioning.ControlPlane.NightlyTests + LoadTests: pre-existing broken state fixed as side-effect (both had missing/incomplete ProjectReferences despite using L2 types); added .Core + .Api refs per usage.
+      - Sln updated: 3 new projects added, stale pre-split reference removed.
+      - H6SolutionImportHandlerTests.LocateImporterSource updated to the .Core path (only in-source hardcoded path referring to old L2 location).
+
+      ACCEPTANCE (all 5 criteria PASSED):
+        1. dotnet build .Core = 0/0. ✅
+        2. dotnet build .Api = 0/0; MapRunsEndpoints/MapRunLogsEndpoints/MapHealthEndpoints all present. ✅
+        3. dotnet build .Worker = 0/0; only /healthz + /ping mapped (no Map*Endpoints). ✅
+        4. dotnet test = 670 passed / 0 failed (matches pre-split count). ✅
+        5. No cross-contamination between .Api and .Worker using-directives (verified via grep). ✅
+
+      QUALITY GATES (Step 9.5, unconditional per FULL rigor):
+        - code-review: 0 Critical, 1 Warning (Worker/Program.cs > 500 lines; downgraded — composition-root inflated by required ADR-tension comment blocks per §6.5, not business logic).
+        - adr-check: 0 violations, 0 warnings across ADR-001 / 004 / 010 / 013 / 028 / 032 / 036 / 038.
+
+      COORDINATION: sibling task 106 (serializer fix in Models/) shared the Tests.csproj change window; peer-messaged coordination sequenced the ProjectReference additions cleanly (task 106 committed at 382478f63 with only their 6 files, leaving the 229-file rename for this commit). Sibling independently diagnosed the same Microsoft.NET.Sdk missing-implicit-usings issue and confirmed my Using-Include fix worked.
+
+      DEVIATION (Path C — pivot to comply, per CLAUDE.md §6.5): POML step 3 said Worker "maps ONLY /healthz + /ping (no MapHealthEndpoints call)" but pre-split HealthEndpoints.MapHealthEndpoints only exposed /ping (not /healthz). Rather than adding /healthz to the shared HealthEndpoints extension (which would leak Worker-specific semantics into Api-shared code), I inlined the two anonymous MapGet calls in Worker/Program.cs itself. This satisfies both the POML constraint AND keeps Worker free of any dependency on .Api-side extension methods.
+
+      FOLLOW-ONS FOR DOWNSTREAM WAVE-G TASKS:
+        - Task 101 (Worker Bicep): AssemblyName is Sprk.Provisioning.ControlPlane.Worker (the Worker App Service target); .Api's AssemblyName preserved as Sprk.Provisioning.ControlPlane so its own App Service target unchanged.
+        - Task 102 (dispatcher): register in Worker's Program.cs; the AddReconcilerModule / AddCustomerRunGuard / AddRollbackModule call sites are the correct anchor points.
+        - Task 103 (keyed DI for 20 handlers): edits Worker/Program.cs' per-handler DI blocks; the existing blocks preserved all ADR-tension citations that Task 103 must keep intact.
+        - Task 110 (SB RBAC): .Api's UAMI needs Sender-only; .Worker's UAMI needs Receiver+Sender+full-grant per DS-3 §3 (identity scope) — see Bicep concern for task 101.
+    </completion-notes>
     <rigor>FULL</rigor>
     <rigor-reason>Structural refactor of the whole L2 project (folder moves + two thin hosts) that every downstream Wave G task builds on; touches Program.cs composition root and the 41-file test project's ProjectReference. High blast radius if mis-sequenced.</rigor-reason>
     <model-tier>opus</model-tier>

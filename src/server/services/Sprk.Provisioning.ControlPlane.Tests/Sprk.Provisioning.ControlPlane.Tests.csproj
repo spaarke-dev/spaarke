@@ -65,12 +65,30 @@
          403 wrong-role / 202 Operator) + partition-key + audit-log paths
          end-to-end against the real Program.cs composition. Pinned to net10
          framework version. Program is exposed via `public partial class Program`
-         at the bottom of Sprk.Provisioning.ControlPlane/Program.cs. -->
+         at the bottom of Sprk.Provisioning.ControlPlane.Api/Program.cs (task
+         100 split — was Sprk.Provisioning.ControlPlane/Program.cs pre-split). -->
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
   </ItemGroup>
 
+  <!--
+    ProjectReferences updated by task 100 (DS-3 Option 2 split, 2026-08-19):
+      - Sprk.Provisioning.ControlPlane.Core: primary reference — handler /
+        reconciler / concurrency / enqueue / rollback / models / registry /
+        repositories / infrastructure / modules types all live here. Consumed
+        by Handlers/**, Reconciler/**, Rollback/**, Concurrency/**,
+        CosmosSmokeTests.cs, ServiceBusSmokeTests.cs,
+        AuditLogMiddlewareTests.cs and the majority of the 41-file test suite.
+      - Sprk.Provisioning.ControlPlane.Api: WebApplicationFactory consumer
+        Api/RunsEndpointsTests.cs uses `public partial class Program` from
+        the .Api project's composition root. Also brings AuditLogMiddleware
+        (Api-side) into scope for AuditLogMiddlewareTests.cs.
+    The .Api project transitively references .Core, so referencing both here
+    is explicit intent (per POML: ".Core for the 41-file test project, .Api
+    for the single WebApplicationFactory consumer").
+  -->
   <ItemGroup>
-    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane\Sprk.Provisioning.ControlPlane.csproj" />
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Api\Sprk.Provisioning.ControlPlane.Api.csproj" />
   </ItemGroup>
 
 </Project>

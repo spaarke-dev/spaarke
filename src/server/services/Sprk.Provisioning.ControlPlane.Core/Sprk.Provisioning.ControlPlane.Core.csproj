@@ -1,0 +1,153 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Sprk.Provisioning.ControlPlane.Core — shared class library for the L2
+    control plane. Contains:
+      - Handlers/**              — 20 IProvisioningHandler implementations
+                                   (H0-H14 catalog per design.md § 4.1) + their
+                                   options + collaborator seams.
+      - Reconciler/**            — StateReconcilerService, DagAdvancer,
+                                   CrashRecoveryStartupService, ReconcilerModule.
+                                   TYPES only; HOST REGISTRATION lives in
+                                   Sprk.Provisioning.ControlPlane.Worker.
+      - Concurrency/**           — CustomerRunGuard (I5 same-customer
+                                   serialization) + options.
+      - Enqueue/**               — ServiceBusHandlerEnqueuer +
+                                   IHandlerEnqueuer contract. Referenced by
+                                   both .Api (endpoint enqueue) and .Worker
+                                   (reconciler re-enqueue).
+      - Models/**                — ProvisioningRun + GateState + supporting
+                                   value types.
+      - Registry/**              — IDataverseEnvironmentRegistryClient +
+                                   NullDataverseEnvironmentRegistryClient
+                                   scaffold.
+      - Repositories/**          — IProvisioningRunRepository (Cosmos abstraction).
+      - Rollback/**              — FailureClassifier, RollbackTransitions,
+                                   QuarantineClearService, RollbackModule.
+      - Modules/{Cosmos,ServiceBus,Telemetry,Handlers}Module.cs — DI
+                                   extension methods each host layer calls
+                                   into during composition.
+      - Infrastructure/Startup/  — AzureMonitorGuard (fail-fast NFR-05 check
+                                   consumed by TelemetryModule).
+
+    HOST LAYERS (both consume this project):
+      - Sprk.Provisioning.ControlPlane.Api    — HTTP intake surface (App
+                                                Service, keeps staging slot +
+                                                JWT bearer + Swagger + audit
+                                                middleware). NO BackgroundService
+                                                that touches handler execution.
+      - Sprk.Provisioning.ControlPlane.Worker — dispatcher (task 102) +
+                                                StateReconcilerService +
+                                                CrashRecoveryStartupService +
+                                                CustomerRunGuard + Rollback +
+                                                20-handler fleet. Slotless
+                                                App Service on the same P1v3
+                                                plan.
+
+    RATIONALE (DS-3 § 3 Option 2 owner-lock):
+      Splitting Core out of the monolithic Sprk.Provisioning.ControlPlane
+      project eliminates the always-on staging-slot shadow-worker defect
+      DS-3 § 1.3 identified as disqualifying: once the dispatcher (task 102)
+      exists, deploying to the .Api staging slot MUST NOT boot a competing
+      consumer against production Cosmos + Service Bus. Split at project-
+      layer boundary is the only way to make that structurally impossible;
+      code-based feature flags leave the door open and require permanent
+      operational mitigations of exactly the silent-fail class r1 exists to
+      eliminate. See notes/design-study-ds3-api-worker-split.md for the full
+      analysis.
+
+    PROJECT SHAPE:
+      - Microsoft.NET.Sdk (class library — no Kestrel, no Program.cs).
+      - net10.0 (inherited from Directory.Build.props).
+      - RootNamespace kept as Sprk.Provisioning.ControlPlane so folder-move
+        namespaces (Sprk.Provisioning.ControlPlane.Handlers.*, .Reconciler,
+        etc.) do NOT churn.
+      - Same Azure SDK version pins as the pre-split project (Cosmos 3.62.1,
+        ServiceBus 7.20.2, Identity 1.21.0, Newtonsoft.Json 13.0.3, Azure.Monitor
+        OTel 1.6.0) — no version drift on the split.
+      - InternalsVisibleTo the L2 unit test project so
+        ServiceBusHandlerEnqueuer.ComputeMessageId (level-1 idempotency
+        contract) stays test-visible without leaking as public API.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Sprk.Provisioning.ControlPlane.Core</AssemblyName>
+    <RootNamespace>Sprk.Provisioning.ControlPlane</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Implicit usings — mirrored from Microsoft.NET.Sdk.Web's implicit set.
+    The pre-split monolithic Sprk.Provisioning.ControlPlane project was
+    Microsoft.NET.Sdk.Web (ASP.NET Core meta-SDK) which auto-includes:
+      Microsoft.AspNetCore.Builder, Microsoft.AspNetCore.Hosting,
+      Microsoft.AspNetCore.Http, Microsoft.AspNetCore.Routing,
+      Microsoft.Extensions.Configuration, Microsoft.Extensions.DependencyInjection,
+      Microsoft.Extensions.Hosting, Microsoft.Extensions.Logging.
+    Core is now Microsoft.NET.Sdk (class library) which does NOT auto-include
+    the Microsoft.Extensions.* set. Rather than churn ~60 handler + module
+    files to add explicit `using` directives (folder-move-only task), declare
+    the required namespaces as implicit usings so the source moves compile
+    unchanged. All are provided by the Microsoft.AspNetCore.App framework
+    reference below.
+  -->
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+    <Using Include="Microsoft.AspNetCore.Builder" />
+    <Using Include="Microsoft.AspNetCore.Hosting" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.AspNetCore.Routing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ASP.NET Core hosting abstractions used by BackgroundService types
+         (StateReconcilerService, CrashRecoveryStartupService) that live in
+         this Core library. Framework reference — pulled in by any consumer
+         that hosts these types (both .Api and .Worker are Sdk.Web). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+
+    <!-- Azure Identity — DefaultAzureCredential for MI-outbound (Cosmos, KV,
+         Service Bus, Graph, Dataverse) per ADR-028 MI-outbound MUST rule.
+         Same 1.21.0 as pre-split. -->
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+
+    <!-- Azure Cosmos DB SDK — L2 state store (spaarke-provisioning/runs). -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
+
+    <!-- Azure Service Bus SDK — L2 handler-enqueue path + (task 102)
+         session-processor dispatcher. -->
+    <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />
+
+    <!-- Newtonsoft.Json — required BY the Cosmos SDK's build target
+         (Microsoft.Azure.Cosmos.targets line 72 checks the graph for an
+         explicit reference >= 10.0.2). 13.0.3 matches BFF resolved version. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+
+    <!-- Telemetry — OpenTelemetry -> Azure Monitor exporter used by
+         TelemetryModule.AddTelemetryModule. Both .Api and .Worker call
+         AddTelemetryModule during composition, so the reference lives here. -->
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.6.0" />
+  </ItemGroup>
+
+  <!-- Expose internal seams to the L2 test project (parity with the pre-split
+       csproj) and to the .Api + .Worker host projects. Post-split, the
+       composition-root Program.cs files in .Api and .Worker call internal
+       members of Core types that pre-split were resolved within-assembly
+       (e.g. CrashRecoveryOptions.Validate() via PostConfigure<T>). Adding
+       both hosts here restores the pre-split composition without churning
+       the type surface (POML: namespaces + type visibility unchanged, folder-
+       move-only).
+
+       Test-project usage: ServiceBusHandlerEnqueuer.ComputeMessageId is the
+       FR-22 level-1 idempotency contract; stays test-visible without
+       promoting it to public API. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane" />
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Worker" />
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
+  </ItemGroup>
+
+</Project>

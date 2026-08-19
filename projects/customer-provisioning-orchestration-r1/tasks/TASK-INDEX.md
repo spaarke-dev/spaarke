@@ -178,7 +178,7 @@ _L2 project split, dispatcher, keyed-DI, C4.5 serializer fix, queue recreate, Bi
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
-| 100 | 🔲 | Split L2 project into .Core / .Api / .Worker (DS-3 Option 2) | FULL | opus / high | none | none |
+| 100 | ✅ | Split L2 project into .Core / .Api / .Worker (DS-3 Option 2) | FULL | opus / high | none | none |
 | 101 | 🔲 | Author .Worker App Service Bicep module + wire into platform-controlplane.bicep | STANDARD | sonnet / high | waveG1-parallel | 100 |
 | 102 | 🔲 | Implement ProvisioningHandlerDispatcher BackgroundService (ServiceBusSessionProcessor) in .Worker | FULL | opus / xhigh | none | 100, 101 |
 | 103 | 🔲 | HandlerIds catalog + keyed DI registration for 20 dispatchable handlers (C1.2) | FULL | sonnet / high | none | 100 |
