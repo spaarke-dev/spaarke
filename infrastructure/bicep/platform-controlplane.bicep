@@ -41,6 +41,16 @@
 //                       declared as a child of an `existing`, cross-resource-
 //                       group reference to the fleet Service Bus namespace.
 //                       See "DELIBERATELY OUT OF SCOPE > Service Bus" below.
+//   8. .Worker App Service + Exchange sidecar (task 101 / DS-3 §3 Option 2):
+//                       spaarke-provisioning-controlplane-worker-{env}
+//                       (via modules/controlplane-worker-app-service.bicep).
+//                       Slotless (deploy = stop -> zip-deploy -> start; no
+//                       staging-slot shadow-worker per DS-3 §1.3), SAME
+//                       plan as .Api ($0 marginal cost), SAME shared UAMI
+//                       (v1 - two-UAMI least-privilege split is the DS-3
+//                       target shape, not required at v1). Hosts the
+//                       DS-1b Exchange ApplicationAccessPolicy sidecar as a
+//                       Microsoft.Web/sites/sitecontainers child resource.
 //
 // DELIBERATELY OUT OF SCOPE
 //   - Service Bus:      Per ADR-036 (background-job infrastructure) the L2
@@ -166,6 +176,12 @@ var appServicePlanName = 'spaarke-controlplane-${environmentName}-plan'
 // (api://spaarke-provisioning-controlplane-{env}) reduces operator cognitive
 // load + makes tenant-config sanity checks trivial.
 var appServiceName = 'spaarke-provisioning-controlplane-${environmentName}'
+
+// .Worker App Service NAME (task 101 / DS-3 Section 3 Option 2). No audience
+// implication - the Worker has no auth surface (only /healthz + /ping) - so
+// the name just needs to be deterministic + collision-free alongside the
+// .Api site on the SAME plan.
+var workerAppServiceName = 'spaarke-provisioning-controlplane-worker-${environmentName}'
 
 // FR-20 acceptance: audience MUST be api://spaarke-provisioning-controlplane-{env}.
 // The `api://` scheme is Azure AD's canonical audience URI form.
@@ -338,6 +354,39 @@ module appService 'modules/controlplane-app-service.bicep' = {
 }
 
 // ============================================================================
+// 6a. .WORKER APP SERVICE + EXCHANGE SIDECAR (task 101 / DS-3 Section 3
+//    Option 2, task 100's .Api/.Worker split) -- slotless, SAME P1v3 plan as
+//    .Api ($0 marginal cost), SAME shared control-plane UAMI (v1 -- the
+//    two-UAMI least-privilege split from DS-3 Section 3 is the target shape,
+//    not required at v1). Hosts the task 102 session-serialized dispatcher +
+//    state-reconciler + crash-recovery + the 20-handler fleet, plus the
+//    DS-1b Exchange ApplicationAccessPolicy sidecar as a sitecontainer child
+//    resource (moves the Exchange-admin-capable container off the
+//    internet-facing .Api site -- DS-3 Section 5).
+// ============================================================================
+
+module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
+  scope: rg
+  name: 'controlplane-worker-app-service'
+  params: {
+    appServiceName: workerAppServiceName
+    appServicePlanId: appServicePlan.outputs.planId
+    location: location
+    userAssignedIdentityResourceId: uami.outputs.id
+    uamiClientId: uami.outputs.clientId
+    cosmosAccountEndpoint: cosmos.outputs.accountEndpoint
+    cosmosDatabaseName: cosmos.outputs.databaseName
+    cosmosRunsContainerName: cosmos.outputs.containerName
+    keyVaultName: keyVault.outputs.keyVaultName
+    keyVaultUri: keyVault.outputs.keyVaultUri
+    serviceBusKeyVaultSecretName: serviceBusKeyVaultSecretName
+    dataverseClientSecretName: dataverseClientSecretName
+    appInsightsConnectionString: monitoring.outputs.connectionString
+    tags: tags
+  }
+}
+
+// ============================================================================
 // 7. FLEET SERVICE BUS QUEUE - sprk-provisioning-jobs (task 108 / DS-5 C5.4/C4.6)
 //
 //    Does NOT create the namespace (per file-header "DELIBERATELY OUT OF
@@ -447,6 +496,15 @@ output appServiceStagingSlotName string = appService.outputs.stagingSlotName
 output appServiceStagingSlotHostName string = appService.outputs.stagingSlotDefaultHostName
 output appServiceStagingSlotUrl string = appService.outputs.stagingSlotUrl
 output appServicePlanId string = appServicePlan.outputs.planId
+
+// .Worker App Service (task 101 / DS-3 Section 3) - consumed by task 102's
+// dispatcher deploy target, task 110's SB Receiver RBAC, task 113's deploy
+// script, and H4's post-deploy keyVaultReferenceIdentity PATCH.
+output workerAppServiceName string = workerAppService.outputs.appServiceName
+output workerAppServiceId string = workerAppService.outputs.appServiceId
+output workerAppServiceDefaultHostName string = workerAppService.outputs.appServiceDefaultHostName
+output workerAppServiceUrl string = workerAppService.outputs.appServiceUrl
+output workerExchangeSidecarName string = workerAppService.outputs.sidecarName
 
 // L2 REST API bearer audience (FR-20 acceptance)
 output jwtAudience string = jwtAudience
