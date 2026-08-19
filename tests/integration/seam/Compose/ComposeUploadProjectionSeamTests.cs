@@ -69,9 +69,10 @@ public sealed class ComposeUploadProjectionSeamTests : IClassFixture<ComposeFide
 
         var original = BuildDocx(
             new Paragraph(new ParagraphProperties(new Justification { Val = JustificationValues.Center }),
-                new Run(new Text("Amended and Restated Agreement"))) { ParagraphId = new HexBinaryValue("AAAA0001") },
+                new Run(new Text("Amended and Restated Agreement")))
+            { ParagraphId = new HexBinaryValue("AAAA0001") },
             new Paragraph(new Run(new Text("This is the body of the uploaded document.")))
-                { ParagraphId = new HexBinaryValue("AAAA0002") });
+            { ParagraphId = new HexBinaryValue("AAAA0002") });
 
         var sessionId = $"session-{Guid.NewGuid():N}";
         var documentId = $"doc-{Guid.NewGuid():N}";

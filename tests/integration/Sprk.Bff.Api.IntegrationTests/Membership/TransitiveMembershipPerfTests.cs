@@ -40,10 +40,16 @@
 //     is recorded in the POML completion-notes and spec.md AC-1D.2.
 //
 // Coordination with sibling tests:
-//   - tests/integration/Sprk.Bff.Api.IntegrationTests/Membership/
+//   - This file is now the SOLE owner of the NFR-04 / AC-1D.2 timing gate.
+//     The former single-request check —
 //     TransitiveMembershipTests.cs::GetMembership_PerformanceWithinBudget
-//     (task 054) is a single-request gross-regression check; this test
-//     adds the 100-iteration distributional measurement at scale.
+//     (task 054) — was REMOVED 2026-08-19: a one-sample Stopwatch assertion
+//     against the same 3000ms ceiling flaked on shared CI runners (observed
+//     4615ms on an otherwise-green run) and used a forbidden API per
+//     docs/standards/TEST-ARCHITECTURE.md §4 ("Stopwatch for assertions").
+//     Its coverage is fully subsumed here: same 3000ms ceiling, but measured
+//     as p95 over 100 samples after 10 warmups, which is why this gate is
+//     stable where the single sample was not.
 //
 // Reference: projects/spaarke-platform-foundations-r3/spec.md NFR-04,
 //            AC-1D.2, AC-1A.5; design.md Part 1 § Endpoint contract;

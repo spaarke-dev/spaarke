@@ -45,17 +45,17 @@ public sealed class EnvelopeSerializationTests
     private static CommunicationEnvelope NewCommunicationEnvelope(
         NotificationKind kind = NotificationKind.CommunicationArrived,
         string? snippet = "Quick preview of the thread.") => new()
-    {
-        Kind = kind,
-        CommunicationId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
-        ThreadId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-        Channel = "email",
-        Direction = "inbound",
-        RegardingRecordId = "33333333-3333-3333-3333-333333333333",
-        SenderDisplay = "Alice Attorney",
-        Snippet = snippet,
-        BadgeDelta = 1,
-    };
+        {
+            Kind = kind,
+            CommunicationId = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            ThreadId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            Channel = "email",
+            Direction = "inbound",
+            RegardingRecordId = "33333333-3333-3333-3333-333333333333",
+            SenderDisplay = "Alice Attorney",
+            Snippet = snippet,
+            BadgeDelta = 1,
+        };
 
     private static SuggestionEnvelope NewSuggestionEnvelope(string? snippet = "Consider opening a matter for this.") => new()
     {

@@ -171,7 +171,7 @@ Reference this table for common constraints. The source of truth is:
 | ADR-022 | PCF Platform Libraries | PCF uses React 16/17 (platform); Code Pages use React 19 (bundled) | `createRoot` in PCF; `useId()` in PCF |
 | ADR-026 | Code Page Build Standard | Vite + `vite-plugin-singlefile` + React 19 | Webpack/CRA for new Code Pages; no `viteSingleFile` |
 | ADR-027 | Subscription Isolation | Managed solutions for prod; env-separated subs | Unmanaged in prod; ad-hoc resource groups |
-| ADR-028 | Spaarke Auth Architecture (v2) | `useAuth()` + `authenticatedFetch`; MI for outbound; HMAC webhooks; tenant-specific authority | Raw `fetch(... Authorization: Bearer ...)`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, 6-strategy cascade, `ClientSecretCredential` for Graph when MI available, `/common` or `/organizations` authority |
+| ADR-028 | Spaarke Auth Architecture (v2) | `useAuth()` + `authenticatedFetch`; MI (UAMI) for **app-only** outbound; **MI-FIC client assertion or KV certificate for confidential clients / OBO (A4)**; HMAC webhooks; tenant-specific authority | Raw `fetch(... Authorization: Bearer ...)`, `tokenBridge`, `window.__SPAARKE_BFF_TOKEN__`, 6-strategy cascade, `ClientSecretCredential` for app-only when MI available, **`.WithClientSecret(...)` on BFF-identity clients (A4; transitional sites covered by E-3)**, per-request CCA construction, `/common` or `/organizations` authority |
 
 ---
 

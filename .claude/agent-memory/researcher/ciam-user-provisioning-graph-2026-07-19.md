@@ -47,7 +47,7 @@ POST https://graph.microsoft.com/v1.0/users
 ## 5. Cross-tenant app model
 - Graph app permissions are granted to a service principal IN the resource (CIAM) tenant. A single-tenant workforce app has no SP there → **you need an app identity in the CIAM tenant**: either a dedicated app registration in the CIAM tenant, or a multitenant app whose SP is provisioned + admin-consented (Graph app roles) in the CIAM tenant.
 - **A workforce managed identity cannot be granted Graph app perms directly on the separate CIAM tenant.** Classic path: CIAM-tenant app registration + client secret/cert (client-credentials).
-- **Preview escape hatch:** *Managed Identities as Federated Identity Credentials* lets the workforce MI federate as the CIAM-tenant (multitenant) app with NO secret/cert. Still requires the app registration in the CIAM tenant; removes secret lifecycle. Recommend this if it's GA/acceptable-preview at build time; else cert in Key Vault.
+- **Secret-free credential (GA):** *Managed Identities as Federated Identity Credentials* lets the workforce MI federate as the CIAM-tenant (multitenant) app with NO secret/cert. **GA since 2025-05-08** (corrected 2026-08-17 — this entry previously said "preview"). Constraints: **user-assigned MI only**; the **UAMI and the app registration must be in the same tenant** (cross-tenant *resource* access works via a multitenant app consented into the other tenant; cross-cloud unsupported); audience `api://AzureADTokenExchange`; **max 20 FICs** per app reg and per UAMI; new FICs can return `AADSTS70021` for a few minutes (retry). Removes secret lifecycle entirely. Microsoft now ranks it **above** certificates, and ranks client secrets "development and testing only". Prefer it; cert in Key Vault is the fallback. See `projects/spaarke-auth-v4-dataverse-MI/notes/RESEARCH-FINDINGS.md`.
 
 ## Sources (most authoritative first)
 - https://learn.microsoft.com/en-us/graph/api/user-post-users — Example 3 create customer account in external tenant; permissions table. Updated 2026-07-04.
@@ -55,10 +55,11 @@ POST https://graph.microsoft.com/v1.0/users
 - https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-enable-password-reset-customers — SSPR (Email OTP + SMS) for external tenants.
 - https://learn.microsoft.com/en-us/entra/external-id/one-time-passcode — email OTP passwordless.
 - https://learn.microsoft.com/en-us/entra/identity-platform/id-token-claims-reference — oid/sub/tid semantics (sub is pairwise).
-- https://devblogs.microsoft.com/identity/access-cloud-resources-across-tenants-without-secrets/ — MI-as-FIC cross-tenant (preview).
+- https://devblogs.microsoft.com/identity/access-cloud-resources-across-tenants-without-secrets-ga/ — MI-as-FIC cross-tenant **GA** (2025-05-08).
+- https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-config-app-trust-managed-identity — how-to + constraints.
 - MS Q&A: no auto set-password email on Graph create; native-auth OTP won't work with portal/Graph-created user.
 
 ## Open questions
 - Can a Graph-provisioned account use hosted-user-flow Email OTP sign-in (not native auth)? Native-auth path explicitly can't; hosted flow unconfirmed — 30-min spike.
-- Is MI-as-FIC GA yet (was preview as of early 2026)? Confirm at build time.
+- ~~Is MI-as-FIC GA yet?~~ **RESOLVED 2026-08-17: GA since 2025-05-08.** Verified live: the Spaarke BFF app registration already carries a working FIC (GitHub Actions OIDC) and the BFF App Service runs user-assigned MI only — both MI-FIC prerequisites already satisfied in-tenant.
 - Whether `email` claim needs explicit user-flow claim mapping for the BFF (several reports it's absent by default) — verify against the actual token.

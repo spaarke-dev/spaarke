@@ -346,12 +346,12 @@ public class AssistantEnhancementsR1EvalTests
 
     private static BindingCapabilityTool BuildCapabilityTool(string consumerType, string surface) =>
         new(new Binding
-            {
-                BindingId = Guid.NewGuid(),
-                ConsumerType = consumerType,
-                ToolDescription = $"{consumerType} capability (R1 eval fixture).",
-                Surfaces = new[] { surface },
-            },
+        {
+            BindingId = Guid.NewGuid(),
+            ConsumerType = consumerType,
+            ToolDescription = $"{consumerType} capability (R1 eval fixture).",
+            Surfaces = new[] { surface },
+        },
             new ServiceCollection().BuildServiceProvider(),
             "tenant-eval", "session-eval",
             NullLogger.Instance);

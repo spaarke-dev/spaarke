@@ -543,7 +543,8 @@ public sealed class ComposeTemplatePartMergeEngineTests
                 var tNumbering = t.MainDocumentPart!.NumberingDefinitionsPart!.Numbering!;
                 tNumbering.InsertBefore(
                     new NumberingPictureBullet(
-                        new PictureBulletBase()) { NumberingPictureBulletId = 0 },
+                        new PictureBulletBase())
+                    { NumberingPictureBulletId = 0 },
                     tNumbering.FirstChild!);
                 tNumbering.AppendChild(new NumberingIdMacAtCleanup { Val = 1 });
             }

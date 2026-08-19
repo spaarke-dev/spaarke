@@ -128,10 +128,10 @@ public class AgreementClassifyEvalTests
         registryKeys.Should().NotBeEmpty("the sprk_agreementtype registry mirror must carry rows (task 001)");
 
         foreach (var c in suite.Cases)
-        foreach (var key in c.Expected.CandidateKeys.Union(c.Expected.AcceptableKeys))
-            registryKeys.Should().Contain(key,
-                $"case {c.CaseId}: expected subDomainKey '{key}' MUST be a real registry key — an eval must never " +
-                "reference a key the classifier cannot emit (registry-grounded, no invented types)");
+            foreach (var key in c.Expected.CandidateKeys.Union(c.Expected.AcceptableKeys))
+                registryKeys.Should().Contain(key,
+                    $"case {c.CaseId}: expected subDomainKey '{key}' MUST be a real registry key — an eval must never " +
+                    "reference a key the classifier cannot emit (registry-grounded, no invented types)");
     }
 
     [Fact]
@@ -144,9 +144,9 @@ public class AgreementClassifyEvalTests
         var block = new AgreementTypeRegistryPromptAssembler().BuildRegistryBlock(LoadRegistryRows());
 
         foreach (var c in suite.Cases)
-        foreach (var key in c.Expected.CandidateKeys.Union(c.Expected.AcceptableKeys))
-            block.Should().Contain($"\"{key}\"",
-                $"case {c.CaseId}: the classifier prompt block MUST offer the key '{key}' the case expects it to emit");
+            foreach (var key in c.Expected.CandidateKeys.Union(c.Expected.AcceptableKeys))
+                block.Should().Contain($"\"{key}\"",
+                    $"case {c.CaseId}: the classifier prompt block MUST offer the key '{key}' the case expects it to emit");
 
         _output.WriteLine("agreement-classify eval: all expected keys are registry-grounded + injected into the prompt block.");
     }

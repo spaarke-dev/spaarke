@@ -871,7 +871,8 @@ public class TextExtractorService : ITextExtractor
                 .ToList();
 
             return TextExtractionResult.Succeeded(text, TextExtractionMethod.DocumentIntelligence)
-                with { Pages = pages };
+                with
+            { Pages = pages };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
