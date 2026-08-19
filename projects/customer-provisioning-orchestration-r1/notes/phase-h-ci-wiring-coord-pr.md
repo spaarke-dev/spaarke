@@ -1,5 +1,7 @@
 # Coord-PR Spec — Phase H CI-Workflows Wiring (naming-conformance + tenant-isolation + Graph parity)
 
+> **APPLIED 2026-08-19** — `ci-cd-unit-test-remediation-r1`'s 28-day coordination window closed 2026-07-23 and that worktree has been dormant since 2026-06-28. Owner declared the window expired 2026-08-19 and `customer-provisioning-orchestration-r1` took direct ownership of `.github/workflows/**` for Phase C'' scope. §1.3.a applied to `sdap-ci.yml`'s `code-quality` job (naming-conformance step), §2.3.a applied as a new `sdap-ci.yml` `tenant-isolation` top-level job (+ `summary` job `needs:`/row update), §3 applied to `nightly-health.yml` per `graph-app-role-parity-coord-pr.md` §3.a (+ `report` job `needs:`/env/body update). See `projects/customer-provisioning-orchestration-r1/CLAUDE.md` Coordination section for the ownership-shift record.
+>
 > **Author**: customer-provisioning-orchestration-r1 task 088 (Wave 4 Batch 4E — serial after 067)
 > **Date**: 2026-08-18
 > **Target worktree**: `ci-cd-unit-test-remediation-r1` (28-day owner of `.github/workflows/**`)

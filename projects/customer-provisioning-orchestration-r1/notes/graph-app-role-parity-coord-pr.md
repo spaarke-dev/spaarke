@@ -1,5 +1,7 @@
 # Coord-PR Spec — Nightly Graph App-Role Parity CI Wiring
 
+> **APPLIED 2026-08-19** — see `phase-h-ci-wiring-coord-pr.md`'s APPLIED banner for the ownership-shift rationale. §3.a's job diff applied to `.github/workflows/nightly-health.yml` (new `graph-app-role-parity` job, advisory `continue-on-error: true`) + `report` job wired with `needs:`/`GRAPH_PARITY_RESULT` env/body section per §3.5 of the umbrella spec.
+>
 > **Status (2026-08-18)**: **PRESERVED AS DETAIL SOURCE** for §3 of the umbrella coord PR at [`phase-h-ci-wiring-coord-pr.md`](./phase-h-ci-wiring-coord-pr.md) (r1 task 088). This file is the canonical source for the nightly-Graph-parity YAML + secrets contract + failure modes + rollback. The umbrella spec bundles this §3 with §1 (naming-conformance) + §2 (I1–I5 ArchTests) into a single coord PR to `ci-cd-unit-test-remediation-r1`. Ci-cd-r1 reviewers should read the umbrella FIRST for the overall context, then this file for §3 detail.
 >
 > **Author**: customer-provisioning-orchestration-r1 task 067 (Wave C6 Batch 4E)

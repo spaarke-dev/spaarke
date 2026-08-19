@@ -1,5 +1,7 @@
 # Coord-PR Spec — Provisioning Sidecar Build/Push/Trivy Workflow
 
+> **APPLIED 2026-08-19** — the § 0 escalation this note raised was resolved by the owner the same day: `ci-cd-unit-test-remediation-r1`'s window is confirmed closed + the worktree dormant, and `customer-provisioning-orchestration-r1` took direct ownership of `.github/workflows/**` for Phase C'' scope. The § 2 drafted YAML was committed verbatim (header comment updated to reflect direct-commit status) to `.github/workflows/build-provisioning-sidecar.yml`. § 4 open items #1/#2 (ACR resource + `SIDEcar_ACR_LOGIN_SERVER` var + RBAC) remain outstanding — pending task 101 — and do not block landing the workflow file itself (it will simply not push successfully until the ACR + var exist). § 4 open item #4 (real `actionlint`) remains outstanding — still unavailable in this environment; `python -c "import yaml"` re-validated clean at apply time.
+>
 > **Author**: customer-provisioning-orchestration-r1 task 115 (Phase C'' Wave G-1)
 > **Date**: 2026-08-19
 > **Target file**: `.github/workflows/build-provisioning-sidecar.yml` (NEW — content fully drafted below, NOT committed by this task)

@@ -499,6 +499,21 @@ jobs:
           path: ./TestResults/adr-results.trx
           if-no-files-found: warn
 
+      # -----------------------------------------------------------------------
+      # customer-provisioning-orchestration-r1 task 088 (r3 task 063 gate wiring)
+      # — Naming-conformance gate (FR-35 + NFR-08). Static regex scan for KV-
+      # secret / Azure-resource naming drift. Read-only. ~1 s runtime.
+      #
+      # Advisory (continue-on-error: true) during r1's Phase G/H remediation
+      # window — flip to blocking once r1 wires the follow-on flip signal
+      # (see projects/customer-provisioning-orchestration-r1/notes/phase-h-ci-wiring-coord-pr.md §1.4).
+      # -----------------------------------------------------------------------
+      - name: Naming-conformance gate (FR-35, advisory until r1 remediation lands)
+        id: naming-conformance
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/naming-conformance-check.ps1
+
       - name: Plugin size validation
         shell: pwsh
         run: |
@@ -548,6 +563,59 @@ jobs:
               Write-Output "Vulnerable packages detected, but all match accepted-risk list (ADR-029)."
             }
           }
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # customer-provisioning-orchestration-r1 task 088 (r1 task 064 gate wiring)
+  # — Tenant-isolation invariants I1..I5 (FR-28..FR-32 + design.md §4D).
+  # BLOCKING from day 1 (r1 task 065 audit sweep = 0 findings baseline).
+  #
+  # Deliberately a SEPARATE self-contained job (same rationale as eval-gate
+  # + compose-fidelity-gate in this file): existing jobs carry
+  # continue-on-error: true (2026-06-24 informational posture) which would
+  # swallow a tenant-isolation red. This gate must NEVER be advisory —
+  # cross-tenant leak is a security incident, not a warning.
+  # ──────────────────────────────────────────────────────────────────────────
+  tenant-isolation:
+    name: Tenant Isolation (I1–I5 invariants)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Tenant-isolation invariants (I1..I5 — merge-blocking)
+        # Filter by namespace: all 5 files live in
+        # Spaarke.ArchTests.TenantIsolation.* — this catches I1..I5 as a
+        # cohesive set + auto-picks-up any new I{N}_* tests r1 adds in the
+        # future without a workflow edit.
+        shell: pwsh
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj `
+            -c Release `
+            --filter "FullyQualifiedName~Spaarke.ArchTests.TenantIsolation" `
+            --logger "trx;LogFileName=tenant-isolation-results.trx" `
+            --results-directory ./TestResults
+
+      - name: Upload tenant-isolation TRX
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tenant-isolation-results
+          path: ./TestResults/tenant-isolation-results.trx
+          if-no-files-found: warn
 
   integration-readiness:
     name: Integration Readiness
@@ -707,7 +775,7 @@ jobs:
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [security-scan, build-test, code-quality, client-quality, integration-readiness]
+    needs: [security-scan, build-test, code-quality, client-quality, integration-readiness, tenant-isolation]
     if: always()
 
     steps:
@@ -721,6 +789,7 @@ jobs:
           echo "| Code Quality | ${{ needs.code-quality.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Client Quality | ${{ needs.client-quality.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Integration Readiness | ${{ needs.integration-readiness.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tenant Isolation | ${{ needs.tenant-isolation.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
           echo "- [ ] Configure deployment environments" >> $GITHUB_STEP_SUMMARY
