@@ -93,28 +93,28 @@ public static class CitationResolver
         switch (parsed.Shape)
         {
             case CitationShape.Range:
-            {
-                var matches = targets
-                    .Where(t => IsCitable(t) && t.ListPath.Count >= 1
-                                && t.ListPath[0] >= parsed.RangeLow && t.ListPath[0] <= parsed.RangeHigh)
-                    .OrderBy(t => t.Index)
-                    .ToArray();
-                return new CitationResolution(query, CitationShape.Range, matches);
-            }
+                {
+                    var matches = targets
+                        .Where(t => IsCitable(t) && t.ListPath.Count >= 1
+                                    && t.ListPath[0] >= parsed.RangeLow && t.ListPath[0] <= parsed.RangeHigh)
+                        .OrderBy(t => t.Index)
+                        .ToArray();
+                    return new CitationResolution(query, CitationShape.Range, matches);
+                }
 
             case CitationShape.Single:
             case CitationShape.SubItem:
-            {
-                // A citation parses to one or more CANDIDATE ordinal paths (a single ambiguous sub-item
-                // token such as "(i)" yields both a letter and a roman candidate — see CitationParser).
-                // A paragraph matches when its raw ListPath equals ANY candidate path exactly.
-                var matches = targets
-                    .Where(t => IsCitable(t)
-                                && parsed.Paths.Any(path => PathEquals(t.ListPath, path)))
-                    .OrderBy(t => t.Index)
-                    .ToArray();
-                return new CitationResolution(query, parsed.Shape, matches);
-            }
+                {
+                    // A citation parses to one or more CANDIDATE ordinal paths (a single ambiguous sub-item
+                    // token such as "(i)" yields both a letter and a roman candidate — see CitationParser).
+                    // A paragraph matches when its raw ListPath equals ANY candidate path exactly.
+                    var matches = targets
+                        .Where(t => IsCitable(t)
+                                    && parsed.Paths.Any(path => PathEquals(t.ListPath, path)))
+                        .OrderBy(t => t.Index)
+                        .ToArray();
+                    return new CitationResolution(query, parsed.Shape, matches);
+                }
 
             default:
                 return CitationResolution.NotFound(query, CitationShape.Unrecognized);

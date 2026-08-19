@@ -80,7 +80,7 @@ public sealed class ComposeServiceUploadFidelityTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     /// <summary>The pristine ORIGINAL bytes — as if retained from the 010/012 mount path,
