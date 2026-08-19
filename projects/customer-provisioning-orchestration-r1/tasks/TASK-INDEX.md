@@ -179,7 +179,7 @@ _L2 project split, dispatcher, keyed-DI, C4.5 serializer fix, queue recreate, Bi
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
 |---|---|---|---|---|---|---|
 | 100 | ✅ | Split L2 project into .Core / .Api / .Worker (DS-3 Option 2) | FULL | opus / high | none | none |
-| 101 | 🔲 | Author .Worker App Service Bicep module + wire into platform-controlplane.bicep | STANDARD | sonnet / high | waveG1-parallel | 100 |
+| 101 | ✅ | Author .Worker App Service Bicep module + wire into platform-controlplane.bicep | STANDARD | sonnet / high | waveG1-parallel | 100 |
 | 102 | 🔲 | Implement ProvisioningHandlerDispatcher BackgroundService (ServiceBusSessionProcessor) in .Worker | FULL | opus / xhigh | none | 100, 101 |
 | 103 | 🔲 | HandlerIds catalog + keyed DI registration for 20 dispatchable handlers (C1.2) | FULL | sonnet / high | none | 100 |
 | 104 | 🔲 | Extract IHandlerOutcomeApplier from StateReconcilerService (C2.1 wiring hook) | FULL | sonnet / high | none | 100 |
@@ -193,7 +193,7 @@ _L2 project split, dispatcher, keyed-DI, C4.5 serializer fix, queue recreate, Bi
 | 112 | ✅ | Implement C1.4 L2 Dataverse registry client (MI-native, DefaultAzureCredential) | FULL | opus / high | none | 111 |
 | 113 | 🔲 | Author Deploy-ControlPlane.ps1 (L2 repeatable deploy script, C5.9/C1.7) | STANDARD | sonnet / high | none | 100, 101, 108, 109 |
 | 114 | ✅ | Build Exchange sidecar image (Dockerfile + pwsh HTTP listener + Set-ExchangeApplicationAccessPolicy.ps1 port) | FULL | opus / high | waveG1-parallel | none |
-| 115 | 🔲 | GitHub Actions workflow for sidecar build/push (ACR + Trivy gate) -- coordinated with ci-cd-r1 | STANDARD | sonnet / high | waveG1-parallel | 114 |
+| 115 | ✅ | GitHub Actions workflow for sidecar build/push (ACR + Trivy gate) -- coordinated with ci-cd-r1; drafted YAML + escalation (closed coord window, stale worktree) in notes/sidecar-ci-workflow-coord-pr.md; NOT committed to .github/workflows/** | STANDARD | sonnet / high | waveG1-parallel | 114 |
 | 116 | 🔲 | CI coordination PR: BFF artifact publish workflow extension for H9 (blob store + latest.json manifest) | STANDARD | sonnet / high | waveG1-parallel | none |
 | 117 | 🔲 | CI coordination: Bicep->ARM-JSON pre-compile step for H2a | STANDARD | sonnet / high | waveG1-parallel | none |
 | 118 | 🔲 | Integration seam test: dispatch spine (message -> handler -> Cosmos transition -> DAG advance) | TEST-MODIFYING (unconditional FULL) | sonnet / high | none | 102, 104, 106, 108 |
@@ -408,6 +408,7 @@ Per plan.md § 8 Risk Register — items requiring extra vigilance during execut
 Per `projects/INDEX.md` hot-path overlap analysis + discovery report §11:
 
 - **`ci-cd-unit-test-remediation-r1`** (owns `.github/workflows/**` for 28-day window) — Phase H task 088 is coordinated PR. **Missing artifact**: `task-042-063-ci-gate-wiring-deferral.md` referenced but does not exist — task 088 must reconstitute OR coordinate via `ci-cd-unit-test-remediation-r1/CLAUDE.md`.
+- **⚠️ Coordination window has closed (found by task 115, 2026-08-19)**: `ci-cd-unit-test-remediation-r1` started 2026-06-25; its 28-day window closed ~2026-07-23. The worktree (`C:/code_files/spaarke-wt-ci-cd-unit-test-remediation-r1`) still exists but its HEAD commit is dated 2026-06-28 — **no activity in ~52 days**. **Three r1 coord-notes are now queued and unapplied against this dormant worktree**: task 067 (`notes/graph-app-role-parity-coord-pr.md`), task 088 (`notes/phase-h-ci-wiring-coord-pr.md`), task 115 (`notes/sidecar-ci-workflow-coord-pr.md`). Recommend an owner decision on `.github/workflows/**` ownership before any further r1 task queues a 4th coord-note against the same target (see task 115 note § 0 for full analysis + options).
 - **`code-quality-and-assurance-r3`** (actively decomposing BFF) — Phase E tasks 080/081/082 may bump into r3 dead-code-removal PRs; `/conflict-check` before Phase E PR.
 - **`spaarke-ai-architecture-redesign-r1/r2`** (broadest BFF AI touch) — H0.5 endpoint (task 042) unlikely to touch `Services/Ai/**` per current scope; verify at execution time.
 - **`spaarke-devops-project-tracking-r1` (PR #453)** — modifies `project-pipeline` SKILL.md itself; our execution uses local copy, no runtime dependency.
