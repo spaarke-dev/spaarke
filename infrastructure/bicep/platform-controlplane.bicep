@@ -37,6 +37,10 @@
 //   6. Cosmos:          Invokes task 024's modules/cosmos-provisioning.bicep
 //                       (spaarke-provisioning DB + runs container, /customerId
 //                       partition, RBAC-only, Continuous7Days backup, TTL 365d).
+//   7. Fleet SB queue:  sprk-provisioning-jobs (task 108 / DS-5 C5.4/C4.6) -
+//                       declared as a child of an `existing`, cross-resource-
+//                       group reference to the fleet Service Bus namespace.
+//                       See "DELIBERATELY OUT OF SCOPE > Service Bus" below.
 //
 // DELIBERATELY OUT OF SCOPE
 //   - Service Bus:      Per ADR-036 (background-job infrastructure) the L2
@@ -45,6 +49,16 @@
 //                       Service Bus KV-secret NAME as a parameter and wires an
 //                       @Microsoft.KeyVault reference into App Service settings;
 //                       it never creates a new Service Bus namespace.
+//                       Task 108 (DS-5 C5.4/C4.6) ADDS a Bicep-managed CHILD
+//                       QUEUE resource (`sprk-provisioning-jobs`) as an
+//                       `existing`-scoped reference to that fleet namespace
+//                       -- still not a namespace create. The namespace lives
+//                       in a DIFFERENT resource group (`SharePointEmbedded`
+//                       on dev -- a legacy pre-per-env-model artifact, not the
+//                       canonical `rg-spaarke-{env}` shape; see
+//                       docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md
+//                       "Dev Environment (DO NOT RENAME)"), so the queue
+//                       resource below carries an explicit cross-RG `scope:`.
 //   - Per-customer AI:  OpenAI / AI Search / Doc Intelligence / per-customer
 //                       Cosmos live in customer.bicep per D3/D12. This stack
 //                       MUST NOT declare any of them.
@@ -74,7 +88,8 @@
 //   az deployment sub create \
 //     --location westus2 \
 //     --template-file infrastructure/bicep/platform-controlplane.bicep \
-//     --parameters environmentName=dev serviceBusKeyVaultSecretName=servicebus-connection-string
+//     --parameters environmentName=dev serviceBusKeyVaultSecretName=servicebus-connection-string \
+//                  serviceBusNamespaceName=spaarke-servicebus-dev serviceBusResourceGroupName=SharePointEmbedded
 
 targetScope = 'subscription'
 
@@ -100,6 +115,12 @@ param logRetentionDays int = 180
 
 @description('Name of the Key Vault secret holding the Service Bus connection string for the fleet-scoped SB namespace (per ADR-036 reuse - no new SB is created here). The App Service resolves this via @Microsoft.KeyVault reference at runtime.')
 param serviceBusKeyVaultSecretName string = 'servicebus-connection-string'
+
+@description('Name of the fleet-scoped Service Bus namespace that hosts the sprk-provisioning-jobs queue (task 108 / DS-5 C5.4). Empty defaults to spaarke-servicebus-{environmentName} (the legacy-but-canonical name per AZURE-RESOURCE-NAMING-CONVENTION.md; verified live value for dev is spaarke-servicebus-dev). This stack does NOT create the namespace - it only declares the queue as its child via an `existing` reference.')
+param serviceBusNamespaceName string = ''
+
+@description('Name of the resource group that hosts the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4). Defaults to SharePointEmbedded - the verified live dev value; this is a legacy pre-per-env-model resource group name, NOT the canonical rg-spaarke-{env} shape, so staging/prod deploys MUST override this parameter once the shared Service Bus resource group name for those environments is known.')
+param serviceBusResourceGroupName string = 'SharePointEmbedded'
 
 @description('Name of the Key Vault secret holding the Dataverse App User (Spaarke S2S) client secret used by handlers H5/H6/H10 to write registry rows. Resolved via @Microsoft.KeyVault reference in appSettings.')
 param dataverseClientSecretName string = 'Dataverse-ClientSecret'
@@ -167,6 +188,12 @@ var logAnalyticsName = 'sprk-controlplane-${environmentName}-logs'
 // Effective JWT tenant - default to subscription tenant if not overridden.
 // Single-issuer per spec.md §4.2 (control plane is Spaarke-internal).
 var effectiveJwtTenantId = empty(jwtTenantId) ? subscription().tenantId : jwtTenantId
+
+// Effective fleet Service Bus namespace name - default to the
+// spaarke-servicebus-{env} legacy-but-canonical shape if not overridden
+// (task 108 / DS-5 C5.4; verified live value for dev is spaarke-servicebus-dev
+// via `az resource list --name spaarke-servicebus-dev`).
+var effectiveServiceBusNamespaceName = empty(serviceBusNamespaceName) ? 'spaarke-servicebus-${environmentName}' : serviceBusNamespaceName
 
 // ============================================================================
 // RESOURCE GROUP
@@ -311,6 +338,88 @@ module appService 'modules/controlplane-app-service.bicep' = {
 }
 
 // ============================================================================
+// 7. FLEET SERVICE BUS QUEUE - sprk-provisioning-jobs (task 108 / DS-5 C5.4/C4.6)
+//
+//    Does NOT create the namespace (per file-header "DELIBERATELY OUT OF
+//    SCOPE" - the fleet-scoped Service Bus namespace is env infra, reused
+//    per ADR-036). Declares the queue as a Bicep-managed CHILD resource of
+//    an `existing` cross-resource-group reference to that namespace.
+//
+//    requiresDuplicateDetection + requiresSession are CREATE-TIME-ONLY
+//    properties in Azure Service Bus - they cannot be applied to the live
+//    queue (created via bare `az servicebus queue create` defaults: both
+//    OFF) by an in-place `az deployment`. Landing this Bicep declaration is
+//    necessary but NOT sufficient - the live queue must be deleted and
+//    recreated once, per the runbook at
+//    projects/customer-provisioning-orchestration-r1/notes/queue-recreate-runbook-2026-08.md.
+//    That live delete+recreate is a separate, human-run ceremony - this
+//    Bicep file only declares the desired end state.
+//
+//    requiresSession: true              - DS-2/DS-2b session-serialized
+//                                          per-customer dispatch decision
+//                                          (task 102's ServiceBusSessionProcessor;
+//                                          SessionId = CustomerId already set
+//                                          on every enqueue per
+//                                          ServiceBusHandlerEnqueuer.cs header).
+//    requiresDuplicateDetection: true   - FR-22 Level-1 idempotency (wire-level
+//                                          MessageId dedup; level 1 of 3 -
+//                                          see ServiceBusHandlerEnqueuer.cs).
+//    duplicateDetectionHistoryTimeWindow: PT1H - must exceed the longest
+//                                          reconciler retry re-enqueue window
+//                                          for the same paramHash; handlers
+//                                          run <=30-60 min per DS-2b §1.2, so
+//                                          PT1H is the documented safe floor.
+//                                          NOTE: task 107 (attempt field in
+//                                          HandlerEnvelope) MUST land before
+//                                          or alongside this queue's live
+//                                          recreation, or every §4C
+//                                          RetryableWithCleanup auto-retry
+//                                          within the PT1H window is SILENTLY
+//                                          dropped by SB dedup (identical
+//                                          MessageId as the original attempt).
+//                                          See the runbook's "PT1H dedup
+//                                          window vs §4C retry" section.
+//    lockDuration: PT5M                 - matches service-bus.bicep's
+//                                          existing queues (sdap-jobs,
+//                                          document-indexing) +
+//                                          membership-topic.bicep's
+//                                          subscription; handler dispatch is
+//                                          typically well under 5 min.
+//    maxDeliveryCount: 10               - matches the repo-wide convention
+//                                          (service-bus.bicep, membership-topic.bicep).
+//    deadLetteringOnMessageExpiration: true - move expired/exhausted messages
+//                                          to DLQ for operator inspection
+//                                          rather than silent loss.
+//
+//    DEVIATION FROM POML STEP 1 (documented per CLAUDE.md §6.5 path C -
+//    pivot to comply): the POML/DS-5 prose describes this as a direct
+//    `resource sbNamespace ... existing = {...}` + child `queues` resource
+//    declared inline in this file. `az bicep build` rejects that shape with
+//    BCP165 ("A resource's computed scope must match that of the Bicep
+//    file... You must use modules to deploy resources to a different
+//    scope.") because this file's ambient scope is the L2 stamp's own
+//    resource group (via the `rg` resource + module `scope: rg` pattern
+//    used everywhere else in this file), not the fleet namespace's resource
+//    group. The queue declaration is therefore a MODULE
+//    (modules/controlplane-sb-queue.bicep) invoked with an explicit
+//    `scope: resourceGroup(serviceBusResourceGroupName)` - functionally
+//    identical to the POML's intent (Bicep-managed, deterministic, not a
+//    runbook `az` command), just via the mechanism Bicep actually requires
+//    for cross-resource-group declarations. Task 110 (SB RBAC) hits the
+//    same BCP165 constraint for the same reason - see its POML's own
+//    cross-RG module guidance.
+// ============================================================================
+
+module fleetServiceBusQueue 'modules/controlplane-sb-queue.bicep' = {
+  scope: resourceGroup(serviceBusResourceGroupName)
+  name: 'controlplane-sb-queue'
+  params: {
+    serviceBusNamespaceName: effectiveServiceBusNamespaceName
+    queueName: 'sprk-provisioning-jobs'
+  }
+}
+
+// ============================================================================
 // OUTPUTS - Consumed by:
 //   - Phase D deploy scripts (L2 app service URL + resource IDs)
 //   - H4 handler (KV name + UAMI resourceId for keyVaultReferenceIdentity PATCH)
@@ -359,3 +468,12 @@ output cosmosRunsContainerName string = cosmos.outputs.containerName
 output appInsightsName string = monitoring.outputs.appInsightsName
 output appInsightsConnectionString string = monitoring.outputs.connectionString
 output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsId
+
+// Fleet Service Bus queue (task 108) - consumed by task 110's RBAC module
+// (namespace/queue scope for role assignments) + task 113's deploy script
+// (post-deploy property verification).
+output fleetServiceBusNamespaceId string = fleetServiceBusQueue.outputs.namespaceId
+output fleetServiceBusNamespaceName string = fleetServiceBusQueue.outputs.namespaceName
+output fleetServiceBusResourceGroupName string = serviceBusResourceGroupName
+output provisioningJobsQueueId string = fleetServiceBusQueue.outputs.queueId
+output provisioningJobsQueueName string = fleetServiceBusQueue.outputs.queueName

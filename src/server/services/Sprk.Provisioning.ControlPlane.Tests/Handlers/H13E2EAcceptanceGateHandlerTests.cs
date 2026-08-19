@@ -676,6 +676,14 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     {
         public Task<DataverseEnvironmentRegistrySnapshot?> LookupByTenantIdAsync(string tenantId, CancellationToken ct)
             => Task.FromResult<DataverseEnvironmentRegistrySnapshot?>(null);
+
+        // Task 112 extended the interface with the WRITE path. H13 currently
+        // routes its Ready-writer through the separate IRegistrySetupStatusUpdater
+        // seam (task 184 will swap that seam onto UpdateSetupStatusAsync), so
+        // this fake never observes a call — return Success for the compile.
+        public Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(
+            RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
+            => Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
     }
 
     private sealed class FakeValidator : IE2EValidationRunner

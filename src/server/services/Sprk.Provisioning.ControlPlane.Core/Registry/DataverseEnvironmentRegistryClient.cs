@@ -1,0 +1,420 @@
+// -----------------------------------------------------------------------------
+// DataverseEnvironmentRegistryClient.cs
+//
+// L2 CONTROL-PLANE real (production) IDataverseEnvironmentRegistryClient impl
+// (task 112 — Wave G-1 C1.4). Path X MI-native: acquires tokens via
+// `DefaultAzureCredential(ManagedIdentityClientId)` pinned to the L2 UAMI
+// (registered as a Dataverse Application User on the admin env by task 111's
+// Grant-ControlPlaneIdentity.ps1), scoped to `{adminEnvUrl}/.default`. NO
+// ClientSecret — Path X is the whole point (DS-8).
+//
+// SPEC / DESIGN / ADR references:
+//   - spec.md FR-38:                Path X credential model for L2 admin-env
+//                                   Dataverse writes; MUST NOT provision new
+//                                   client-secret for L2.
+//   - spec.md FR-02:                H0.5 re-consent semantics reads via this
+//                                   client (LookupByTenantIdAsync).
+//   - spec.md FR-18 + §15 north-star: H13 Ready-writer PATCH lands via this
+//                                   client (task 184 IRegistrySetupStatusUpdater
+//                                   delegates to UpdateSetupStatusAsync).
+//   - design.md §9.6:               Path X mechanics — L2 UAMI as App User on
+//                                   ADMIN env only, scoped "Spaarke Provisioning
+//                                   Registry" role (NOT SysAdmin).
+//   - DS-8 §6 rollout step 3:       Build C1.4 MI-native from day one.
+//   - ADR-028:                      MI-outbound MUST rule; never account-key
+//                                   or client-secret when MI is available.
+//   - ADR-010:                      Feature-module registration (single
+//                                   AddDataverseEnvironmentRegistry extension).
+//   - ADR-032:                      NullDataverseEnvironmentRegistryClient
+//                                   stays as the Null-Object kill-switch
+//                                   fallback (P2 quiet no-op with WARN log) —
+//                                   this task ADDS the real impl, does not
+//                                   delete the Null-Object.
+//
+// PATTERN PARITY (shape mirrors, purpose distinct):
+//   - Token acquisition:  DataverseWebApiHealthProbe.cs (H5 WhoAmI probe)
+//                         — but pinned via ManagedIdentityClientId (Path X)
+//                         NOT via TenantId (Path X targets the admin env in
+//                         the SPAARKE tenant, not a customer's tenant).
+//   - Web API URI shape:  DataverseWebApiAppUserCreator.cs (H10 App User
+//                         creator) + DataverseRegistryConcurrencyStore.cs
+//                         (I5 concurrency store).
+//   - Options + module:   CustomerRunGuardOptions.cs + CustomerRunGuardModule.cs
+//                         (also targets admin env) + CosmosModule.cs
+//                         (also uses DefaultAzureCredential + ManagedIdentity:ClientId
+//                         fallback).
+//
+// DATAVERSE WEB API SHAPES:
+//   READ (LookupByTenantIdAsync):
+//     GET /api/data/v9.2/{entitySet}
+//       ?$filter=sprk_tenantid eq '{tenantId-escaped}'
+//       &$select=sprk_dataverseenvironmentid,sprk_customerid,sprk_tenantid,sprk_setupstatus,sprk_currentrunid
+//       &$top=1
+//
+//   WRITE (UpdateSetupStatusAsync):
+//     PATCH /api/data/v9.2/{entitySet}({environmentId})
+//       Body:
+//         { "sprk_setupstatus": "Ready", "sprk_currentrunid": null }
+//         — the sprk_currentrunid property is INCLUDED-AS-NULL only when
+//           `ClearCurrentRunId=true` (H13 green-path). Otherwise omitted.
+//       Prefer: return=minimal
+//
+// NULL-COLUMN PROJECTION (parity with DataverseRegistryConcurrencyStore):
+//   Dataverse OData REST ships a projected null column back as ABSENT from
+//   the response payload (not present as `"sprk_currentrunid": null`).
+//   `LookupByTenantIdAsync` handles this by defaulting to null when the
+//   property is missing from the row.
+//
+// SECURITY (defense-in-depth):
+//   - tenantId escapes single quotes (Dataverse doubles them) + URL-encodes
+//     the value. tenantIds are machine-produced GUIDs in practice, but the
+//     escape is cheap insurance against a future free-text customer identifier.
+//   - environmentId MUST parse as a well-formed GUID; the impl rejects
+//     non-GUID input BEFORE building the OData URI (parity with H10's
+//     DataverseWebApiAppUserCreator applicationId guard).
+//
+// NOT under test in the CI unit suite (real HTTP + real MI token). Unit tests
+// cover the shape logic where it can be exercised as pure functions; the
+// live-invocation seam test (env-guarded, parity with CosmosSmokeTests +
+// ServiceBusSmokeTests) lives at DataverseEnvironmentRegistryClientTests.cs
+// and requires the L2 UAMI to be registered as an admin-env App User (task
+// 111's grant script must have run successfully) plus operator-set env vars
+// per that test file's header.
+//
+// ADR-038 KEEP category: `tests/integration/seam/**` — vertical-slice-seam
+// tests exercising the real credential + real HTTP path against a canary row.
+// -----------------------------------------------------------------------------
+
+using System.Net;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using Azure.Core;
+using Azure.Identity;
+using Microsoft.Extensions.Options;
+
+namespace Sprk.Provisioning.ControlPlane.Registry;
+
+/// <summary>
+/// Real (production) <see cref="IDataverseEnvironmentRegistryClient"/> — Path X
+/// MI-native impl targeting the admin Dataverse env's
+/// <c>sprk_dataverseenvironment</c> entity set. See file header for the full
+/// pattern-parity ledger and DS-8 rollout note.
+/// </summary>
+public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRegistryClient
+{
+    /// <summary>Named HttpClient for this client's outbound Dataverse calls.</summary>
+    public const string HttpClientName = "DataverseEnvironmentRegistryClient";
+
+    private const string ODataVersion = "4.0";
+    private const string EnvironmentRowIdColumn = "sprk_dataverseenvironmentid";
+    private const string CustomerIdColumn = "sprk_customerid";
+    private const string TenantIdColumn = "sprk_tenantid";
+    private const string SetupStatusColumn = "sprk_setupstatus";
+    private const string CurrentRunIdColumn = "sprk_currentrunid";
+
+    private readonly IHttpClientFactory _httpClientFactory;
+    private readonly DataverseEnvironmentRegistryOptions _options;
+    private readonly ILogger<DataverseEnvironmentRegistryClient> _logger;
+
+    /// <summary>Constructs the client bound to the named HttpClient + configured options.</summary>
+    public DataverseEnvironmentRegistryClient(
+        IHttpClientFactory httpClientFactory,
+        IOptions<DataverseEnvironmentRegistryOptions> options,
+        ILogger<DataverseEnvironmentRegistryClient> logger)
+    {
+        ArgumentNullException.ThrowIfNull(httpClientFactory);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(logger);
+        _httpClientFactory = httpClientFactory;
+        _options = options.Value;
+        _logger = logger;
+    }
+
+    /// <inheritdoc/>
+    public async Task<DataverseEnvironmentRegistrySnapshot?> LookupByTenantIdAsync(
+        string tenantId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+
+        var envUri = BuildEnvUri();
+        var token = await AcquireTokenAsync(envUri, cancellationToken).ConfigureAwait(false);
+
+        // Escape single quotes (Dataverse doubles them in string literals) and
+        // then URL-encode. tenantId is a GUID in every observed case, but the
+        // escape is cheap defense-in-depth against a future non-GUID column.
+        var filterValue = tenantId.Replace("'", "''", StringComparison.Ordinal);
+        var relative =
+            $"/api/data/v9.2/{_options.EntitySetName}?" +
+            $"$filter={TenantIdColumn} eq '{Uri.EscapeDataString(filterValue)}'" +
+            $"&$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
+            $"{SetupStatusColumn},{CurrentRunIdColumn}" +
+            "&$top=1";
+        var requestUri = new Uri(envUri, relative);
+
+        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        httpClient.Timeout = _options.RequestTimeout;
+
+        HttpResponseMessage response;
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Get, requestUri, token.Token);
+            response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient lookup infrastructure fault for tenantIdHash={TenantIdHash}",
+                HashForLog(tenantId));
+            throw new InvalidOperationException(
+                $"Registry lookup infrastructure error: {ex.GetType().Name}: {ex.Message}", ex);
+        }
+
+        try
+        {
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException(
+                    $"Registry lookup returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 400)}");
+            }
+
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(payload) ? "{}" : payload);
+            if (!doc.RootElement.TryGetProperty("value", out var arr)
+                || arr.ValueKind != JsonValueKind.Array
+                || arr.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            return ParseSnapshot(arr[0]);
+        }
+        finally
+        {
+            response.Dispose();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(
+        RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        ArgumentException.ThrowIfNullOrWhiteSpace(update.EnvironmentId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(update.SetupStatus);
+
+        // Guard: environmentId MUST parse as a GUID. Interpolated into an
+        // OData URI (segment, not filter literal) — parity with H10's
+        // applicationId guard on DataverseWebApiAppUserCreator.
+        if (!Guid.TryParse(update.EnvironmentId, out var envRowId))
+        {
+            return new RegistryUpdateOutcome.Failure(
+                $"EnvironmentId '{update.EnvironmentId}' is not a valid GUID — refusing to build an OData URI from it.");
+        }
+
+        var envUri = BuildEnvUri();
+
+        AccessToken token;
+        try
+        {
+            token = await AcquireTokenAsync(envUri, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient token acquisition failed for env={EnvUrl}",
+                envUri);
+            return new RegistryUpdateOutcome.Failure(
+                $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        var relative = $"/api/data/v9.2/{_options.EntitySetName}({envRowId})";
+        var requestUri = new Uri(envUri, relative);
+        var bodyJson = BuildPatchBody(update.SetupStatus, update.ClearCurrentRunId);
+
+        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        httpClient.Timeout = _options.RequestTimeout;
+
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Patch, requestUri, token.Token);
+            request.Headers.Add("Prefer", "return=minimal");
+            request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+
+            using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "DataverseEnvironmentRegistryClient PATCH ok: environmentId={EnvironmentId} setupStatus={SetupStatus} " +
+                    "clearCurrentRunId={ClearCurrentRunId} customerId={CustomerId} runId={RunId}",
+                    envRowId, update.SetupStatus, update.ClearCurrentRunId,
+                    update.CustomerIdForLog, update.RunIdForLog);
+                return new RegistryUpdateOutcome.Success();
+            }
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                return new RegistryUpdateOutcome.NotFound(
+                    $"PATCH {relative} returned 404 NotFound. Body: {Truncate(body, 400)}");
+            }
+
+            var errBody = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH {relative} returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(errBody, 400)}");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient PATCH infrastructure fault for environmentId={EnvironmentId}",
+                envRowId);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH infrastructure error: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Internals
+    // -------------------------------------------------------------------------
+
+    private Uri BuildEnvUri()
+    {
+        var raw = _options.AdminEnvironmentUrl;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            // Options.Validate() is called at boot; reaching this is only
+            // possible when a test bypasses IOptions binding.
+            throw new InvalidOperationException(
+                $"'{DataverseEnvironmentRegistryOptions.SectionName}:AdminEnvironmentUrl' is not configured.");
+        }
+        if (!Uri.TryCreate(raw, UriKind.Absolute, out var parsed))
+        {
+            throw new InvalidOperationException(
+                $"'{DataverseEnvironmentRegistryOptions.SectionName}:AdminEnvironmentUrl' " +
+                $"'{raw}' is not a valid absolute URI.");
+        }
+        return parsed;
+    }
+
+    // Path X token acquisition: DefaultAzureCredential pinned via
+    // ManagedIdentityClientId (the L2 UAMI). NO TenantId set — the L2 UAMI
+    // and the admin Dataverse env both live in the SPAARKE platform tenant,
+    // so token issuance targets the UAMI's own tenant intrinsically.
+    private async Task<AccessToken> AcquireTokenAsync(Uri envUri, CancellationToken cancellationToken)
+    {
+        var scopeBase = new Uri(envUri, "/").ToString().TrimEnd('/');
+        var scope = $"{scopeBase}/.default";
+        var credOptions = new DefaultAzureCredentialOptions();
+        if (!string.IsNullOrWhiteSpace(_options.ManagedIdentityClientId))
+        {
+            credOptions.ManagedIdentityClientId = _options.ManagedIdentityClientId;
+        }
+        var credential = new DefaultAzureCredential(credOptions);
+        return await credential.GetTokenAsync(
+            new TokenRequestContext(new[] { scope }), cancellationToken).ConfigureAwait(false);
+    }
+
+    // Public for test coverage of the request-shape builder as a pure function
+    // (ADR-038 KEEP: pure-function tests avoid HttpMessageHandler mocks).
+    internal static string BuildPatchBody(string setupStatus, bool clearCurrentRunId)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString(SetupStatusColumn, setupStatus);
+            if (clearCurrentRunId)
+            {
+                writer.WriteNull(CurrentRunIdColumn);
+            }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    // Extracts a snapshot from a row JsonElement. Null-column projection
+    // convention: missing property == null value.
+    internal static DataverseEnvironmentRegistrySnapshot ParseSnapshot(JsonElement row)
+    {
+        var environmentId = ReadRequiredString(row, EnvironmentRowIdColumn);
+        var customerId = ReadRequiredString(row, CustomerIdColumn);
+        var tenantId = ReadRequiredString(row, TenantIdColumn);
+        var setupStatus = ReadOptionalString(row, SetupStatusColumn) ?? string.Empty;
+        var currentRunId = ReadOptionalString(row, CurrentRunIdColumn);
+        return new DataverseEnvironmentRegistrySnapshot(
+            environmentId, customerId, tenantId, setupStatus, currentRunId);
+    }
+
+    private static string ReadRequiredString(JsonElement row, string column)
+    {
+        if (!row.TryGetProperty(column, out var prop) || prop.ValueKind != JsonValueKind.String)
+        {
+            throw new InvalidOperationException(
+                $"Registry row payload missing required string property '{column}'.");
+        }
+        var value = prop.GetString();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            throw new InvalidOperationException(
+                $"Registry row payload carried an empty '{column}'.");
+        }
+        return value;
+    }
+
+    private static string? ReadOptionalString(JsonElement row, string column)
+    {
+        if (!row.TryGetProperty(column, out var prop) || prop.ValueKind != JsonValueKind.String)
+        {
+            return null;
+        }
+        var value = prop.GetString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    private static HttpRequestMessage BuildRequest(HttpMethod method, Uri uri, string bearerToken)
+    {
+        var request = new HttpRequestMessage(method, uri);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.Add("OData-Version", ODataVersion);
+        request.Headers.Add("OData-MaxVersion", ODataVersion);
+        return request;
+    }
+
+    private static async Task<string> SafeReadBodyAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch
+        {
+            return "(body unavailable)";
+        }
+    }
+
+    private static string Truncate(string s, int max)
+        => string.IsNullOrEmpty(s) || s.Length <= max ? s : s[..max] + "...[truncated]";
+
+    // First 8 hex chars of SHA256(value) — parity with DataverseWebApiHealthProbe's
+    // hash-for-log helper so log lines correlate without exposing tenantId.
+    private static string HashForLog(string value)
+    {
+        var bytes = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(value ?? string.Empty));
+        return Convert.ToHexString(bytes).AsSpan(0, 8).ToString();
+    }
+}

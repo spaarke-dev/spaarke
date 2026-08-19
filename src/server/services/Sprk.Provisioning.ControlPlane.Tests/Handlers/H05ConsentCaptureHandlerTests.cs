@@ -316,6 +316,12 @@ public sealed class H05ConsentCaptureHandlerTests
         {
             return Task.FromResult(_snapshot);
         }
+
+        // Task 112 extended the interface with the WRITE path. H0.5 tests do
+        // not exercise it — return Success unconditionally.
+        public Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(
+            RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
+            => Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
     }
 
     private sealed class ThrowingRegistry : IDataverseEnvironmentRegistryClient
@@ -325,6 +331,14 @@ public sealed class H05ConsentCaptureHandlerTests
 
         public Task<DataverseEnvironmentRegistrySnapshot?> LookupByTenantIdAsync(
             string tenantId, CancellationToken cancellationToken)
+        {
+            throw _toThrow;
+        }
+
+        // Task 112 extended the interface with the WRITE path. H0.5 tests do
+        // not exercise it — throw the same fault for symmetry.
+        public Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(
+            RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
         {
             throw _toThrow;
         }

@@ -4,7 +4,7 @@
     <title>Bicep: recreate sprk-provisioning-jobs queue with sessions + dedup (C5.4/C4.6) + drain-verify runbook</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>authoring-complete-live-recreate-pending</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live queue delete+recreate is a destructive Azure operation with an irreversible in-flight-message-loss window; touches Bicep AND live Azure state per the parent task's Wave G-1 description. FULL + prescriptive steps.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -89,7 +89,9 @@
     <criterion testable="true">The runbook note documents the exact delete/recreate command sequence + the pre-check message count observed, for repeatability on prod/other stamps.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- the queue exists live today with wrong (default) properties; service-bus.bicep's uniform-queue-properties shape does not fit this queue (different dedup/session requirements than sdap-jobs/document-indexing). Extension -- cannot extend service-bus.bicep's shared queue list without forcing this queue's properties onto unrelated queues, or vice versa; a dedicated resource block in platform-controlplane.bicep (the L2 stamp's own file) is correct. Cost-of-doing-nothing -- task 102's session processor throws immediately at StartProcessingAsync against a non-session queue; L1 SB dedup stays permanently inert, leaving task 107's attempt-field fix with nothing to protect against.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- the queue exists live today with wrong (default) properties; service-bus.bicep's uniform-queue-properties shape does not fit this queue (different dedup/session requirements than sdap-jobs/document-indexing). Extension -- cannot extend service-bus.bicep's shared queue list without forcing this queue's properties onto unrelated queues, or vice versa; a dedicated resource block in platform-controlplane.bicep (the L2 stamp's own file) is correct. Cost-of-doing-nothing -- task 102's session processor throws immediately at StartProcessingAsync against a non-session queue; L1 SB dedup stays permanently inert, leaving task 107's attempt-field fix with nothing to protect against.
+
+Completion note (2026-08-19): Steps 0-2 executed (Bicep authored + az bicep build 0 errors). Step 3 (what-if) executed in a narrower, resource-group-scoped form directly against the new module -- empirically confirms Azure evaluates requiresSession/requiresDuplicateDetection as a Modify (not Create) against the live queue, proving the create-time-only constraint behaviorally. Steps 4-8 (live pre-check/delete/deploy/verify/RBAC-check) NOT executed per explicit dispatch-level instruction ("this task is AUTHORING the Bicep + runbook; live execution is a separate ceremony run by the operator") -- fully documented as a runbook instead: projects/customer-provisioning-orchestration-r1/notes/queue-recreate-runbook-2026-08.md. Shipped as a module (infrastructure/bicep/modules/controlplane-sb-queue.bicep) rather than an inline resource per Path C deviation (BCP165 cross-resource-group constraint) -- see notes/task-108-deviations.md. Acceptance criteria 1, 2, 5 MET; criteria 3-4 (live post-recreate verification) deferred to the separate live-ceremony run. Runbook's §5 documents the PT1H-dedup-vs-§4C-retry interaction (task 107 dependency) and recommends sequencing live execution after task 107 ships.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

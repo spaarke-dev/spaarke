@@ -4,7 +4,7 @@
     <title>Build Exchange sidecar image (Dockerfile + pwsh HTTP listener + Set-ExchangeApplicationAccessPolicy.ps1 port)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New container image carrying Exchange-admin capability (the sole PowerShell-only residual, verified 2026-08-18 to have no Graph equivalent) -- security-sensitive per root CLAUDE.md §6, high-blast-radius per parent task instructions (sidecar image explicitly named).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -89,7 +89,35 @@
     <criterion testable="true">grep 'CertificateThumbprint' in the amended script inside the image returns 0 matches for the primary connect path (replaced by -Certificate); the original get-before-set idempotency structure (Get-ApplicationAccessPolicy -&gt; conditional New- -&gt; re-verify) is unchanged (diff against the original script confirms only the connect-block amendment).</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- no Exchange-capable execution environment exists in L2's target runtime (the main site is deliberately shell-free per Option D). Extension -- cannot extend the shell-free main site to run this one script; DS-1b's verified finding (§0) is that NO SDK/REST equivalent exists for either AAP or its successor. Cost-of-doing-nothing -- H14a (T4, the app-only mail-access hardening handler) has no execution environment at all without this sidecar; T4's silent-fail trap (per §4B) stays permanently un-verifiable.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- no Exchange-capable execution environment exists in L2's target runtime (the main site is deliberately shell-free per Option D). Extension -- cannot extend the shell-free main site to run this one script; DS-1b's verified finding (§0) is that NO SDK/REST equivalent exists for either AAP or its successor. Cost-of-doing-nothing -- H14a (T4, the app-only mail-access hardening handler) has no execution environment at all without this sidecar; T4's silent-fail trap (per §4B) stays permanently un-verifiable.
+
+COMPLETION NOTES (2026-08-19):
+
+Files delivered (3 new; all under src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/):
+  - Dockerfile             — pwsh 7.4 on Mariner 2.0 base + pinned ExchangeOnlineManagement 3.5.1 (Save-Module to /opt/microsoft/powershell/7/Modules) + copied amended script + Listener.ps1 as ENTRYPOINT. EXPOSE 8091 (informational; sitecontainer network namespace).
+  - Set-ExchangeApplicationAccessPolicy.ps1 — amended copy of repo-root scripts/Set-ExchangeApplicationAccessPolicy.ps1. Diff = ~15-line CmdletBinding parameter-set expansion + connect-block dispatch: new -Certificate (X509Certificate2) mode as sidecar path, retained -CertificateThumbprint as Windows dev-loop fallback. Get-before-set body (Get-ApplicationAccessPolicy -> conditional New- -> re-verify), the T4 verify-only branch, Write-ResultJson envelope, and exit-code convention are BYTE-IDENTICAL to the original (verified via diff over lines 167-232 range).
+  - Listener.ps1           — 331-line HttpListener bound to 127.0.0.1:8091 serving GET /healthz (unauth; sitecontainer-private) + POST /apply-policy (X-Sidecar-Auth constant-time compare vs KV-sourced $env:SIDECAR_SHARED_SECRET). Per-call KV cert fetch via App Service MSI ($env:IDENTITY_ENDPOINT + $env:IDENTITY_HEADER) -> X509Certificate2 with X509KeyStorageFlags.EphemeralKeySet -> passed to script via -Certificate. Structured JSON logging (one line per request; correlationId = RunId per DS-1b §3 observability requirement). Startup fail-fast on missing required env vars.
+
+Envelope mapping decision (reviewer sign-off requested — deviation from stated design.md §4.2a wire enum):
+  The C# IExchangePolicyApplier seam (from task 073) exposes a 4-state discriminated union: Applied(created>0) / Applied(created=0) / Drift / Failure. design.md §4.2a's stated 3-value wire contract (Success|Failure|AlreadyCompliant) would collapse the T4-critical Drift state into Failure, losing the C# seam's semantic fidelity. Same design.md paragraph also states "mirrors the script's existing Write-ResultJson envelope" (which is a 3-value enum Applied|Drift|Failure) — the two statements in the design paragraph are internally contradictory.
+  Resolution implemented: 4-value wire enum Success | AlreadyCompliant | Drift | Failure with the mapping (script Applied + createdCount>0 -> Success; script Applied + createdCount=0 -> AlreadyCompliant; script Drift -> Drift; script Failure -> Failure). This preserves T4 semantic fidelity end-to-end and lets task 161's ExchangePolicySidecarClient round-trip cleanly to the C# discriminated union without string-matching the diagnostic field. Cited in Listener.ps1 header (.DESCRIPTION section) for task 161's reader.
+  This is NOT an ADR violation (design.md is not an ADR); it is a coordinated design-clarification. If reviewer prefers the 3-value collapse, only Listener.ps1's outcome-mapping switch needs a one-line edit — the wire contract still carries createdCount + observedAppIds so no information is lost, only the semantic label differs.
+
+Verification (Step 9):
+  1. docker build succeeds locally against the authored Dockerfile — DEFERRED to task 115 CI per task POML explicit scope ("Do NOT invoke Docker build against local Docker"). Dockerfile syntax valid by inspection (pinned base, valid RUN/COPY/EXPOSE/ENTRYPOINT).
+  2. Compressed image size falls in 200-230 MB range — DEFERRED to task 115 CI. Estimated by construction: base (~110-130 MB) + EXO 3.5.1 (~70-90 MB) + 2 pwsh scripts (<10 KB) = ~180-230 MB compressed. On-target. Ceiling 250 MB.
+  3. grep 'az |pac |dotnet ' in Dockerfile RUN lines returns 0 matches — VERIFIED (bash grep run 2026-08-19; only mentions are in comment sections stating what is deliberately NOT installed).
+  4. Local docker run + synthetic POST returns structured JSON — DEFERRED to task 115 CI + task 162 live-verify. Listener parse-verified via System.Management.Automation.Language.Parser (PARSE OK, 1964 tokens); PSScriptAnalyzer 0 non-BOM issues; response envelope well-formed by construction.
+  5. grep 'CertificateThumbprint' returns 0 matches in the primary connect path — VERIFIED. Primary path uses -Certificate $Certificate (line 215 of amended script). -CertificateThumbprint appears only in the Windows dev-loop fallback branch (line 223), parameter declaration (line 151), the ParameterSet validation (lines 193-194), and documentation (lines 10, 22, 25, 35, 89-90, 92, 119). Get-before-set body is byte-identical to original.
+
+Escalation trigger status: NOT FIRED. The Connect-ExchangeOnline -Certificate parameter accepting X509Certificate2 is confirmed present in ExchangeOnlineManagement v3.x (well-documented on Microsoft Learn since v3.0 release, 2022-05). No fallback to -CertificateFilePath needed. If CI (task 115) or live-verify (task 162) surfaces a module-version-pin issue against this parameter, the escalation trigger fires there.
+
+Coordination notes:
+  - Sibling task 108 owns infrastructure/bicep/** (queue recreate) — zero overlap; my files are all under src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/**.
+  - Sibling task 112 owns Sprk.Provisioning.ControlPlane.Core/Registry/** — zero overlap.
+  - Task 115 owns .github/workflows/build-exchange-sidecar.yml (not created here per task POML explicit scope).
+  - Task 161 will author ExchangePolicySidecarClient : IExchangePolicyApplier consuming the wire contract documented in Listener.ps1's header.
+  - Task 162 will do live verification against the deployed sitecontainer.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
