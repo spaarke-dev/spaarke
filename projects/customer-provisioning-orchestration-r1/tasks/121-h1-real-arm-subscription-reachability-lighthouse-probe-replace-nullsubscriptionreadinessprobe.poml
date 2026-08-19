@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="121" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H1: real ARM subscription-reachability + Lighthouse probe (replace NullSubscriptionReadinessProbe)</title>
+    <phase>C'' Wave G-2 -- Entry + resources</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Replaces a PLACEHOLDER that currently returns Passed unconditionally with no ARM call -- correctness-critical per DS-4's classification (❌ PLACEHOLDER, FR-03 verification fictional today).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two well-specified ARM calls (subscription GET + registrationAssignments list) mapping to two reserved rejection codes -- ~150-250 LOC per DS-4, Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG2-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace NullSubscriptionReadinessProbe (which returns Passed unconditionally with a LogWarning -- NullSubscriptionReadinessProbe.cs:71,94; H1's ONLY functional collaborator, making FR-03 verification currently fictional per DS-4) with a real ARM-backed implementation: ArmClient.GetSubscriptionResource(...).GetAsync() for reachability, and GET /subscriptions/{id}/providers/Microsoft.ManagedServices/registrationAssignments for Lighthouse delegation (CustomerOwned tenancy branch only). Map outcomes to the two rejection codes SubscriptionReadinessRejectionCodes.cs:84 already reserves for the real implementation.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure.ResourceManager subscription-resource reachability checks and the Microsoft.ManagedServices registrationAssignments Lighthouse delegation API.</role>
+
+  <goal>H1's subscription-readiness probe is a real ARM-backed implementation replacing NullSubscriptionReadinessProbe. Given the target subscriptionId is reachable via ARM under the L2 UAMI's credential, it returns Passed. Given Lighthouse delegation is MISSING for a CustomerOwned-tenancy run, it returns the reserved LighthouseDelegationMissing rejection code (SubscriptionReadinessRejectionCodes.cs:84) -- these are the EXACT acceptance criteria the existing POML task 043 claimed were delivered but were only satisfied against injected test fakes per DS-4 §3's overstatement finding.</goal>
+
+  <context>
+    <background>DS-4 §3 (H1 deep-dive) states plainly: 'POML 043 acceptance criteria required real ARM behavior... Delivered: NullSubscriptionReadinessProbe returns Passed unconditionally with a LogWarning. Criteria were satisfied only via injected test fakes -- the POML materially overstates delivery.' This task closes that gap for real. DS-4 §2 classifies H1 as PLACEHOLDER (not merely shell-out-real) -- the highest-priority correctness fix in Wave G-2 alongside H4 (task 125/126).</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/H1SubscriptionReadinessHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/ArmSubscriptionReadinessProbe.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/NullSubscriptionReadinessProbe.cs (retire or keep as ADR-032-style test-only fallback)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/SubscriptionReadinessRejectionCodes.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing: dispatchable end-to-end only once the dispatcher exists</dependency>
+      <dependency task="103" status="pending">H1 keyed registration</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="DS-4 §3 H1 deep-dive">The Lighthouse check applies ONLY on the CustomerOwned tenancy branch (per design.md's Model 2 customer-owned-tenant path); Model 1 shared-tier and Spaarke-hosted Model 2 runs MUST NOT be gated on a delegation check that does not apply to them -- verify the tenancy-model branch condition before wiring the registrationAssignments call.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H1 real ARM subscription-readiness probe</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-4 §3 H1 row + SubscriptionReadinessRejectionCodes.cs in full.</step>
+    <step order="1" name="Reachability probe">Author ArmSubscriptionReadinessProbe.CheckReachabilityAsync using ArmClient.GetSubscriptionResource(subscriptionId).GetAsync() under DefaultAzureCredential pinned to the L2 UAMI.</step>
+    <step order="2" name="Lighthouse probe">Author the delegation check via GET /subscriptions/{id}/providers/Microsoft.ManagedServices/registrationAssignments?api-version=... (or the ARM SDK's Lighthouse-specific resource type if available) -- gated on the CustomerOwned tenancy branch only.</step>
+    <step order="3" name="Rejection-code mapping">Map: subscription unreachable -&gt; the existing reserved reachability rejection code; Lighthouse missing on CustomerOwned -&gt; LighthouseDelegationMissing (SubscriptionReadinessRejectionCodes.cs:84); both pass -&gt; Passed.</step>
+    <step order="4" name="Wire up">DI-swap the real probe in place of NullSubscriptionReadinessProbe in H1's owning module.</step>
+    <step order="5" name="Tests">Reachable/unreachable/delegation-missing table-driven tests, matching task 043's ORIGINAL acceptance criteria (now genuinely satisfied, not fake-satisfied).</step>
+    <step order="6" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a live ARM call under the L2 UAMI's DefaultAzureCredential returns an authorization error for the subscription-reachability check (the UAMI may not yet hold Reader at the target subscription scope for arbitrary customer subscriptions), STOP and escalate — this is an auth-grant gap, not a code defect, and belongs in the Grant-ControlPlaneIdentity.ps1 (task 111) scope or a per-customer subscription-onboarding step, not a workaround in this handler.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/ArmSubscriptionReadinessProbe.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/SubscriptionReadiness/ArmSubscriptionReadinessProbeTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a reachable subscriptionId, the probe returns Passed via a REAL ARM call (verified by a test asserting the ARM client method was invoked, not a hard-coded Passed).</criterion>
+    <criterion testable="true">Given Lighthouse delegation is missing on a CustomerOwned-tenancy run, the probe returns SubscriptionReadinessRejectionCodes' reserved LighthouseDelegationMissing code.</criterion>
+    <criterion testable="true">Given a Model-1/Spaarke-hosted-Model-2 run (non-CustomerOwned), the Lighthouse check is SKIPPED (not evaluated), confirmed by a test asserting the registrationAssignments call is never made for that tenancy branch.</criterion>
+    <criterion testable="true">grep 'NullSubscriptionReadinessProbe' in H1's owning module's active DI registration returns 0 matches (real probe registered instead).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- NullSubscriptionReadinessProbe is a placeholder that unconditionally passes; it exists ONLY to satisfy the interface contract, not to perform verification. Extension -- N/A, this is a genuine-implementation-required gap, not an extension opportunity. Cost-of-doing-nothing -- FR-03 subscription-readiness verification stays PERMANENTLY FICTIONAL; a customer provision could proceed against an unreachable subscription or missing Lighthouse delegation with H1 reporting false confidence, discovered only much later at H2a's actual deployment failure.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

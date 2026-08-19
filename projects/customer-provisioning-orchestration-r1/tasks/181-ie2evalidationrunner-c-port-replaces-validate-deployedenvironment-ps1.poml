@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="181" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>IE2EValidationRunner C# port (replaces Validate-DeployedEnvironment.ps1)</title>
+    <phase>C'' Wave G-7 -- Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Terminal validation runner feeding H13's final Pass/Fail/InfraFault aggregation -- correctness-critical, converges with the 11 probe families (same effect probes done once).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified port converging with already-authored probe logic (tasks 170-180) -- Sonnet @ high, effort discounted per DS-1b's overlap note.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>132, 141, 142, 173</deps>
+    <tags>l2-controlplane, job-handler, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port ValidateDeployedEnvironmentScriptRunner (Validate-DeployedEnvironment.ps1, 532 lines: az rest x2, az login, pac auth create, Invoke-RestMethod x3 -- probe-style GETs) to C# HttpClient effect probes: BFF /health, sample analysis, doc upload+index, layout render, wizard field-map. Per DS-4 §5/DS-1b §1 (collaborator #25)'s explicit convergence bonus: 'the script port and the placeholder replacement are the SAME WORK DONE ONCE' -- this task should REUSE any HttpClient probe infrastructure already built for tasks 170-180's I2/I4 probes rather than authoring a parallel HTTP-probing helper.</prompt>
+
+  <role>SPAARKE platform developer. Expert in C# effect-probe authoring against a live BFF (health, analysis, document upload/index, layout render, field-mapping wizard) and converging duplicate probe infrastructure.</role>
+
+  <goal>IE2EValidationRunner exists as a pure C# implementation of the 5 effect probes Validate-DeployedEnvironment.ps1 performs: BFF /health check, a sample AI analysis call, a sample document upload+index round-trip, a workspace-layout render check, and a wizard field-mapping check. It reuses (not duplicates) any HttpClient probe helper infrastructure from tasks 170-180 where applicable (e.g., I4's BFF diagnostic-endpoint call pattern).</goal>
+
+  <context>
+    <background>DS-4 §6's placeholder table lists IE2EValidationRunner's current state as 'pwsh Validate-DeployedEnvironment.ps1 (real script, unrunnable in L2)' -- the script itself is correct, it simply cannot execute under Option D's zero-shell main site. DS-1b §1 (collaborator #25) explicitly frames this as a convergence bonus with the trap/invariant probe work: 'C3.1/C3.2 already oblige writing 11 real trap/invariant probes in C# (T1 ARM read, T2/T3 Dataverse+Graph, T5 role-assignment read, T6 app-only SPE GET...) -- the script port and the placeholder replacement are the same work done once.'</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs</file>
+      <file role="canonical-reference">scripts/Validate-DeployedEnvironment.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="132" status="pending">H9 must have deployed a reachable BFF for the health/analysis/upload/layout/wizard probes to target</dependency>
+      <dependency task="141" status="pending">H6 must have imported the solutions the sample-analysis/upload probes exercise</dependency>
+      <dependency task="142" status="pending">H7's env-var values must be functional for the BFF's own runtime config to work correctly during these probes</dependency>
+      <dependency task="173" status="pending">I2's tenant-filter probe infrastructure this task may reuse for the doc-upload+index effect probe's search-side assertion</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-4 §5 / DS-1b §1">REUSE any HttpClient probe infrastructure already built for the I2/I4/T1 probes (tasks 170-180) -- do not author a second, parallel HTTP-probing helper class for the SAME kind of BFF call.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>IE2EValidationRunner C# port</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read Validate-DeployedEnvironment.ps1 in full.</step>
+    <step order="1" name="Health probe">Port the /health check.</step>
+    <step order="2" name="Sample analysis probe">Port the sample AI analysis call.</step>
+    <step order="3" name="Doc upload+index probe">Port the document upload+index round-trip check.</step>
+    <step order="4" name="Layout render probe">Port the workspace-layout render check.</step>
+    <step order="5" name="Wizard field-map probe">Port the field-mapping wizard check.</step>
+    <step order="6" name="Converge with existing probes">Refactor any duplicated HTTP-probing logic against tasks 170-180's already-built probe infrastructure into a single shared helper.</step>
+    <step order="7" name="Wire up">Replace ValidateDeployedEnvironmentScriptRunner in H13's owning module.</step>
+    <step order="8" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'ProcessStartInfo\|pac auth' in the new file returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the sample-analysis or doc-upload+index probes require test/sample data that does not exist on a fresh customer stamp (the script may have relied on manually-seeded sample content), STOP and escalate to determine whether H12a/H12b's seed data (Wave G-5) needs to include sample content for this probe, or whether the probe itself must generate/clean up its own throwaway sample data.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EValidationRunner.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'ProcessStartInfo\|pac auth create' in E2EValidationRunner.cs returns 0 matches.</criterion>
+    <criterion testable="true">All 5 effect probes (health, sample analysis, doc upload+index, layout render, wizard field-map) are implemented and independently testable against fakes.</criterion>
+    <criterion testable="true">grep confirms no duplicate HTTP-probing helper exists alongside the one already built for tasks 170-180's probes (single shared helper, or explicit justification if a second is genuinely needed).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- Validate-DeployedEnvironment.ps1's 5 effect-probe checks are already correct; DS-1b explicitly frames this as the SAME probe-authoring work as tasks 170-180, done once. Extension -- converging this port with the already-built probe infrastructure (rather than a parallel implementation) is the direct application of CLAUDE.md §11's reuse-over-new-component principle. Cost-of-doing-nothing -- this validation runner cannot execute under Option D's zero-shell main site; H13's acceptance gate loses its 5 effect-probe checks entirely.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

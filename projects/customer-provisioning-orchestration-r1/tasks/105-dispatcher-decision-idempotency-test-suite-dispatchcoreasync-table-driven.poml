@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="105" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Dispatcher decision + idempotency test suite (DispatchCoreAsync table-driven, DispatchIdempotencyService, envelope round-trip)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING task per root CLAUDE.md §8 override table -- unconditional FULL (code-review + adr-check at Step 9.5) regardless of default STANDARD for new-file-only tasks.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Table-driven unit test authoring against an already-designed decision function -- mechanical relative to the dispatcher class itself; Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102</deps>
+    <tags>l2-controlplane, dispatcher, testing, integration-test</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the full DS-2 §6.1 unit test suite against task 102's dispatcher: DispatchCoreDecisionTests (table-driven over every DispatchCoreAsync branch), DispatchIdempotencyService.cs + tests (Level-2 Redis lock, mirror of BFF IdempotencyService coverage incl. fail-open branches, lock TTL = MaxHandlerDuration not the BFF's 5-min default), HandlerEnvelopeRoundTripTests (enqueuer BodySerializerOptions serialize -&gt; dispatcher deserialize -&gt; identical envelope), and ReconcilerEnqueuePayloadAttemptTests (task 107's fix -- retry-path MessageId differs from original; first-enqueue MessageId stable across ticks).</prompt>
+
+  <role>SPAARKE platform developer. Expert in table-driven xUnit/NUnit test authoring, fake ServiceBus/Cosmos/Redis test doubles, and ADR-038 KEEP-path test architecture.</role>
+
+  <goal>DispatchCoreDecisionTests covers all 11 branches from DS-2 §6.1's table (bad JSON, unknown id, processed-marker hit, lock-held, orphan run, terminal-status run, Success, Failure, handler-throws, applier-throws-below-max, applier-throws-at-max) using fakes for the keyed handler, IProvisioningRunRepository, and IHandlerOutcomeApplier. DispatchIdempotencyService exists (Core/Dispatch/) mirroring IdempotencyService.cs's shape against IDistributedCache, with the 30-min-scale TTL divergence documented. All tests pass.</goal>
+
+  <context>
+    <background>DS-2 §6.1 enumerates the exact test matrix this task authors; DS-2 §4-L2 specifies DispatchIdempotencyService as a ~100-line intentional copy of the BFF's IdempotencyService.cs (L2 cannot reference the BFF assembly -- the same isolation rule as IProvisioningHandler.cs:8-13), keyed provisioning:idempotency:processed:{messageId} (24h TTL) and provisioning:idempotency:lock:{messageId} (TTL = DispatcherOptions.MaxHandlerDuration, since IDistributedCache offers no mid-flight lock renewal for a 30-60 min handler).</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatchIdempotencyService.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/IDispatchIdempotencyService.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/DispatchCoreDecisionTests.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/DispatchIdempotencyServiceTests.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/HandlerEnvelopeRoundTripTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">DispatchCoreAsync must exist as the function under test</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Tests follow the 7 KEEP-path categories; no Mock&lt;HttpMessageHandler&gt;, no DI-registration-only tests, no ctor-null-check tests. DispatchCoreDecisionTests is a table-driven KEEP-path test over a pure decision function -- exactly the shape ADR-038 endorses.</constraint>
+    <constraint source="DS-2 §4-L2">DispatchIdempotencyService lock TTL MUST equal DispatcherOptions.MaxHandlerDuration (NOT the BFF's 5-min default) since a 30-60 min handler holds the lock for its whole runtime with no mid-flight renewal on IDistributedCache. Fail-open on Redis outage, mirroring IdempotencyService.cs:43,96 -- L1 (SB dedup) + L3 (CompletedPhases scan) backstop it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dispatcher test suite</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2-dispatcher-design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Table-driven decision test" location="design-study-ds2-dispatcher-design.md §6.1">11-row table over DispatchCoreAsync branches; fakes for keyed handler, repository, applier -- no live SB/Cosmos/Redis required for this layer.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL, TEST-MODIFYING unconditional override). Read DS-2 §6.1 + §4-L2 in full.</step>
+    <step order="1" name="DispatchIdempotencyService">Author the class + interface mirroring IdempotencyService.cs's IsEventProcessedAsync/MarkEventAsProcessedAsync/TryAcquireProcessingLockAsync/ReleaseProcessingLockAsync shape, with the provisioning:-prefixed keys and MaxHandlerDuration-scoped lock TTL.</step>
+    <step order="2" name="DispatchCoreDecisionTests">Author all 11 table rows per DS-2 §6.1 against fakes (keyed fake handler, in-memory IProvisioningRunRepository, recording IHandlerOutcomeApplier).</step>
+    <step order="3" name="DispatchIdempotencyServiceTests">Mirror BFF's IdempotencyService test coverage against in-memory IDistributedCache incl. fail-open branches.</step>
+    <step order="4" name="HandlerEnvelopeRoundTripTests">Serialize via the enqueuer's BodySerializerOptions, deserialize via the dispatcher's deserialization path, assert byte-identical envelope (guards the camelCase contract both sides depend on).</step>
+    <step order="5" name="Attempt-field tests">Author ReconcilerEnqueuePayloadAttemptTests (depends on task 107 landing the attempt field) asserting retry-path MessageId differs from the original enqueue's MessageId, and first-enqueue MessageId stays stable across reconciler ticks (no attempt field present).</step>
+    <step order="6" name="Run">dotnet test -- all new tests green; zero regressions in existing suite.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a DispatchCoreAsync branch from the DS-2 §6.1 table cannot be exercised without a live Service Bus/Cosmos connection (i.e., the pure-function boundary DS-2 §2.2 promised does not actually hold), STOP and escalate to task 102's owner rather than downgrading the test to an integration-only test -- the pure-function property is load-bearing for fast CI feedback on this class.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatchIdempotencyService.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/DispatchCoreDecisionTests.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/DispatchIdempotencyServiceTests.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/HandlerEnvelopeRoundTripTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">DispatchCoreDecisionTests contains &gt;=11 test cases matching the DS-2 §6.1 table rows; all pass.</criterion>
+    <criterion testable="true">DispatchIdempotencyServiceTests verifies lock TTL is sourced from DispatcherOptions.MaxHandlerDuration (not a hard-coded 5-min value) via a config-override test.</criterion>
+    <criterion testable="true">HandlerEnvelopeRoundTripTests: enqueuer-serialized envelope deserializes to an object equal (by value) to the pre-serialization envelope.</criterion>
+    <criterion testable="true">dotnet test exits 0 for the full Dispatch/ test namespace.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- BFF's IdempotencyService is BFF-scoped and cannot be referenced from L2 (isolation rule per IProvisioningHandler.cs:8-13). Extension -- the ~100-line intentional copy is the documented pattern already used for the enqueuer/handler-contract (DS-2 §4-L2). Cost-of-doing-nothing -- without Level-2 idempotency, a redelivered message during lock-renewal failure re-invokes a 30-60 min handler with no distributed guard, relying solely on L1 (inert until task 108/C4.6 lands) and L3 (per-handler, not dispatcher-level).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

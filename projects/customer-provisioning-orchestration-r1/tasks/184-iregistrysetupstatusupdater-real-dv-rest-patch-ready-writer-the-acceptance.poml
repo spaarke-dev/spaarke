@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="184" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>IRegistrySetupStatusUpdater real DV-REST PATCH (Ready writer) -- the acceptance-target transition itself</title>
+    <phase>C'' Wave G-7 -- Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>THE acceptance-target transition itself per DS-4 -- currently a logged no-op, meaning sprk_setupstatus=Ready is NEVER actually written today regardless of every other handler's correctness. Highest-symbolic-priority task in Wave G-7.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified PATCH using the already-built C1.4 registry client -- Sonnet @ high, not architecturally novel (task 112 already built the client).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>112, 181, 182, 183</deps>
+    <tags>l2-controlplane, job-handler, path-x</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace DataverseRegistrySetupStatusUpdater's logged no-op (DataverseRegistrySetupStatusUpdater.cs:49, LogWarning -- 'the Ready transition is a no-op') with a REAL DV-REST PATCH to sprk_setupstatus (+ clear sprk_currentrunid) via task 112's C1.4 Path X registry client. This is, per DS-4's own framing, THE acceptance-target transition -- 'sprk_dataverseenvironment.SetupStatus transitions to Ready' is spec.md's own acceptance criterion, and it has NEVER ACTUALLY HAPPENED via code, only been claimed.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the C1.4 registry client's PATCH contract and the semantics of clearing sprk_currentrunid alongside a status transition.</role>
+
+  <goal>IRegistrySetupStatusUpdater's real implementation performs a genuine DV-REST PATCH to sprk_setupstatus=Ready AND clears sprk_currentrunid, via task 112's IDataverseEnvironmentRegistryClient. A test confirms a run reaching this point produces an OBSERVABLE registry state change (not merely a log line) -- this is the single test DS-4's audit identifies as the one that would prove the acceptance-target claim is finally true.</goal>
+
+  <context>
+    <background>DS-4 §6's placeholder table is unambiguous: 'DataverseRegistrySetupStatusUpdater.cs:49 -- LOGGED NO-OP -- Ready never written.' DS-4 §3 calls H13 'the strongest overstatement in the WBS -- the acceptance target itself is a logged no-op' and notes the original POML's own escape hatch ('swap to real per-trap live-probe impl in Phase F task 089') pointed at a task that never did it. This task closes that gap for real, finally.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/DataverseRegistrySetupStatusUpdater.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Registry/DataverseEnvironmentRegistryClient.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="112" status="pending">The C1.4 registry client this task's PATCH implementation calls</dependency>
+      <dependency task="181" status="pending">IE2EValidationRunner must be real -- the Ready transition should only fire after ALL acceptance checks genuinely pass</dependency>
+      <dependency task="182" status="pending">INamingConformanceChecker must be real for the same reason</dependency>
+      <dependency task="183" status="pending">ICostEnvelopeChecker must be real for the same reason</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-38">L2's admin-env Dataverse credential model is Path X: L2 UAMI registered as a Dataverse Application User via DefaultAzureCredential pinned to the UAMI (DS-8). MUST NOT provision a new client-secret for L2. The Dataverse-ClientSecret KV secret itself MUST NOT be deleted (BFF still consumes it) -- only L2's dependency on it is removed.</constraint>
+    <constraint source="DS-4 §6 IRegistrySetupStatusUpdater row">The PATCH MUST fire ONLY after every other T1-T6/I1-I5 probe AND the 3 runner ports (IE2EValidationRunner, INamingConformanceChecker, ICostEnvelopeChecker) have genuinely passed -- this task's implementation trusts H13's aggregation logic (task 185) as its gate, it does not independently re-verify every check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>IRegistrySetupStatusUpdater real Ready writer</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DataverseRegistrySetupStatusUpdater.cs:49's no-op in full, plus IDataverseEnvironmentRegistryClient's PATCH contract.</step>
+    <step order="1" name="Real PATCH">Implement the PATCH: sprk_setupstatus=Ready, sprk_currentrunid cleared, via the C1.4 client.</step>
+    <step order="2" name="Wire up">Replace the no-op logger call site in H13's owning module with the real implementation.</step>
+    <step order="3" name="Test">Author a test confirming a Cosmos-side H13-Completed outcome produces an OBSERVABLE Dataverse registry state change (real write, not a log-only assertion).</step>
+    <step order="4" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If this task lands and a live-dev smoke test shows the PATCH succeeding but sprk_currentrunid failing to clear (a partial-success outcome), STOP and escalate rather than shipping a partial fix — a stuck sprk_currentrunid would block the I5 concurrency guard's next run for that customer, a correctness regression in an already-shipped mechanism (task 059).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/DataverseRegistrySetupStatusUpdater.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'LogWarning.*no-op\|LogWarning.*Ready' in the updated DataverseRegistrySetupStatusUpdater.cs (the old no-op pattern) returns 0 matches.</criterion>
+    <criterion testable="true">A test confirms a Completed H13 outcome produces a REAL PATCH call to the C1.4 registry client with sprk_setupstatus=Ready.</criterion>
+    <criterion testable="true">A test confirms sprk_currentrunid is cleared in the SAME transition (not a separate, potentially-missed step).</criterion>
+    <criterion testable="true">An integration seam test (post task 112's live client) against a dev canary registry row confirms the PATCH actually lands and is readable back as Ready.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the C1.4 registry client (task 112) already implements the PATCH capability this task needs; nothing new to build at the client layer. Extension -- wiring H13's Ready-transition call site onto the already-built client is the direct, minimal fix. Cost-of-doing-nothing -- DS-4 calls this THE strongest overstatement in the entire Phase G'' backlog: without this fix, EVERY OTHER TASK in this entire wave decomposition could land perfectly and sprk_setupstatus would STILL never reach Ready via code -- the project's own stated goal (FR-18/SC#5) would remain provably unmet.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

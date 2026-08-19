@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="124" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H2b: SearchIndexClient port + REAL AI Search tenant-filter template provisioner (replace Stub)</title>
+    <phase>C'' Wave G-2 -- Entry + resources</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Replaces StubAiSearchTenantFilterTemplateProvisioner (logs+Success, no real work -- I2 provisioning half not real per DS-4) -- a tenant-isolation-relevant gap (I2 per spec.md FR-29). FULL rigor.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified SDK port (SearchIndexClient with RBAC auth deleting admin-key handling) plus one new real provisioner -- ~400-600 LOC per DS-4, Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG2-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103, 123</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port H2bAiSearchIndexHandler.cs's provisioner collaborator (DeployAllIndexesScriptProvisioner -&gt; ai-search/Deploy-AllIndexes.ps1, 637 lines: az search admin-key show x2, az keyvault secret x1, az webapp config x1; index bodies pushed via REST inside the script) to Azure.Search.Documents.Indexes.SearchIndexClient with UAMI RBAC auth -- DELETES the admin-key handling entirely (a security improvement, not just a mechanical swap). Index JSON definitions become embedded resources/content files (the script's inline REST bodies). CRITICAL: also build the REAL AI Search tenant-filter template provisioner, replacing StubAiSearchTenantFilterTemplateProvisioner (which currently just logs and returns Success with zero actual template provisioning -- DS-4 flags this as 'I2 provisioning half not real', the corresponding VERIFIER is already real per DS-4, only the provisioner side is stubbed).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure.Search.Documents.Indexes.SearchIndexClient with RBAC (not admin-key) authentication, and authoring tenant-filter index templates enforcing unconditional tenantId eq predicates.</role>
+
+  <goal>H2bAiSearchIndexHandler.cs's provisioner is a pure .NET SearchIndexClient implementation under UAMI RBAC (zero admin-key handling anywhere in the collaborator). The 7 canonical index definitions (per Deploy-AllIndexes.ps1's catalog authority, this project's CLAUDE.md canonical-implementations table) are embedded content files, create/verified via SDK calls. A real AiSearchTenantFilterTemplateProvisioner exists, replacing the Stub, actually provisioning the tenant-scoped filter template (not just logging success).</goal>
+
+  <context>
+    <background>DS-4 §2 (H2b row) classifies this as PARTIAL: 'provisioner = pwsh Deploy-AllIndexes.ps1; verifier = real REST; StubAiSearchTenantFilterTemplateProvisioner logs+Success (C3.7 -- I2 provisioning half not real).' DS-1b §1 (H2b row, collaborator #8) confirms the SDK mapping and the security improvement ('UAMI RBAC auth -- deletes the admin-key handling entirely'). This project's own CLAUDE.md names scripts/ai-search/Deploy-AllIndexes.ps1 as 'the H2b canonical exemplar -- script IS the catalog authority' for the 7-index set.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/H2bAiSearchIndexHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/SearchIndexClientProvisioner.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/AiSearchTenantFilterTemplateProvisioner.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/StubAiSearchTenantFilterTemplateProvisioner.cs (retire)</file>
+      <file role="canonical-reference">scripts/ai-search/Deploy-AllIndexes.ps1</file>
+      <file role="canonical-reference">docs/architecture/AI-SEARCH-INDEX-CATALOG.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing</dependency>
+      <dependency task="103" status="pending">H2b keyed registration</dependency>
+      <dependency task="123" status="pending">H2a must have provisioned the AI Search service resource for H2b's indexes to attach to</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="spec.md FR-29 / §4D I2">Every AI Search query/index-template MUST include an unconditional tenantId eq filter predicate -- the real tenant-filter template provisioner this task builds is the I2-provisioning half of that invariant; the ArchTest (already shipped, Wave C6) is the STATIC-scan half, this task is the RUNTIME-provisioning half.</constraint>
+    <constraint source="DS-4 §2 H2b row">The verifier side is ALREADY real (per DS-4) -- do not re-implement verification logic, only replace the Stub provisioner.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H2b SearchIndexClient port + real tenant-filter provisioner</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read Deploy-AllIndexes.ps1 in full plus the AI Search index catalog doc.</step>
+    <step order="1" name="Index definitions as content">Move the 7 canonical index JSON bodies (currently inline in the script's REST payloads) into embedded resource/content files consumed by the new provisioner.</step>
+    <step order="2" name="SearchIndexClientProvisioner">Author the collaborator using SearchIndexClient under UAMI RBAC (Azure.Search.Documents.Indexes), create-or-update each of the 7 indexes, no admin-key anywhere.</step>
+    <step order="3" name="Real tenant-filter provisioner">Author AiSearchTenantFilterTemplateProvisioner performing the ACTUAL template provisioning (not a log+Success stub) -- provision the tenant-scoped filter template artifact the existing real verifier checks against.</step>
+    <step order="4" name="Wire up">Replace DeployAllIndexesScriptProvisioner and StubAiSearchTenantFilterTemplateProvisioner in H2b's owning module with the two new real implementations.</step>
+    <step order="5" name="Tests">7-index create/verify tests + template idempotency tests (re-run produces no-op) per DS-4 §7's test-effort note.</step>
+    <step order="6" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'admin-key\|adminKey' in the new provisioner returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If provisioning the real tenant-filter template requires a template SCHEMA the existing (already-real) verifier does not document anywhere in code (i.e., the verifier checks for an artifact shape this task must reverse-engineer), STOP and read the verifier's assertion logic FIRST as the authoritative schema source before authoring the provisioner — do not invent a template shape independently of what the verifier actually checks.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/SearchIndexClientProvisioner.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/AiSearchTenantFilterTemplateProvisioner.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'admin-key\|AdminKey\|adminKey' in the new SearchIndexClientProvisioner.cs returns 0 matches -- RBAC auth only.</criterion>
+    <criterion testable="true">All 7 canonical indexes (per Deploy-AllIndexes.ps1's catalog) are created/verified via SDK calls in a test against a fake/emulated Search service.</criterion>
+    <criterion testable="true">AiSearchTenantFilterTemplateProvisioner actually provisions a template artifact (test asserts a create/write call occurred, not merely a logged success message).</criterion>
+    <criterion testable="true">Given the template already exists, re-running the provisioner is a no-op (idempotency test).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- Deploy-AllIndexes.ps1 is the canonical 7-index catalog authority (this project's own CLAUDE.md names it so); the real verifier already exists. Extension -- porting the provisioner side to SDK while KEEPING the verifier unchanged is the correct minimal extension. Cost-of-doing-nothing -- H2b cannot execute under Option D's zero-shell main site; separately, the I2 tenant-isolation invariant's RUNTIME-provisioning half stays permanently unenforced (only the ArchTest's static-scan half exists today), meaning a live AI Search tenant-filter template could silently be absent even though the code that WOULD check for it exists.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

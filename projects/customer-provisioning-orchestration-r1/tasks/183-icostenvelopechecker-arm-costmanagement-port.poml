@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="183" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>ICostEnvelopeChecker ARM.CostManagement port</title>
+    <phase>C'' Wave G-7 -- Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Feeds H13's cost-envelope acceptance criterion (cost drift &gt; 20% fails the run per this project's risk register) -- correctness-relevant for the final gate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified single-call REST/SDK port -- Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG7-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>123</deps>
+    <tags>l2-controlplane, job-handler, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port AzCliCostEnvelopeChecker (az costmanagement query --type ActualCost --timeframe MonthToDate, AzCliCostEnvelopeChecker.cs:65-74) to POST /subscriptions/{id}/providers/Microsoft.CostManagement/query?api-version=2023-11-01 (or the Azure.ResourceManager.CostManagement SDK equivalent if it covers this exact query shape).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure Cost Management REST/SDK queries and cost-envelope threshold classification.</role>
+
+  <goal>ICostEnvelopeChecker's implementation queries actual month-to-date cost for the customer's subscription via REST or the CostManagement SDK, classifying drift against the pricing model's envelope (§15 #14 per this project's plan.md) -- Fail if drift exceeds the documented threshold (per this project's risk register: cost drift &gt; 20% fails the run).</goal>
+
+  <context>
+    <background>DS-4 §6 lists this as a straightforward REST/SDK port with no placeholder-replacement subtlety beyond the mechanical swap. This project's plan.md §8 risk register names cost-envelope verification an explicit Phase F acceptance criterion.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ArmCostEnvelopeChecker.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/AzCliCostEnvelopeChecker.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="123" status="pending">H2a must have deployed the resources whose cost this checker queries</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="this project's plan.md §8 risk register">Cost drift &gt; 20% against the pricing model's envelope (§15 #14) fails the run -- confirm the exact threshold value against the current spec/plan before hard-coding it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ICostEnvelopeChecker ARM.CostManagement port</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read AzCliCostEnvelopeChecker.cs's existing threshold logic + the CostManagement query's exact parameters.</step>
+    <step order="1" name="Port query">Author the REST or SDK-based ActualCost/MonthToDate query under DefaultAzureCredential.</step>
+    <step order="2" name="Threshold logic">Port the existing drift-classification threshold logic unchanged.</step>
+    <step order="3" name="Wire up">Replace AzCliCostEnvelopeChecker in H13's owning module.</step>
+    <step order="4" name="Tests">under/at/over-threshold table-driven tests.</step>
+    <step order="5" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ArmCostEnvelopeChecker.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'ProcessStartInfo\|az costmanagement' in the new file returns 0 matches.</criterion>
+    <criterion testable="true">A test confirms cost drift under the documented threshold returns Pass; over threshold returns Fail.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the threshold-classification logic already exists and is correct in AzCliCostEnvelopeChecker.cs; only the collaborator call needs porting. Extension -- direct mechanical port behind the same interface. Cost-of-doing-nothing -- H13's cost-envelope acceptance criterion cannot execute under Option D's zero-shell main site.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

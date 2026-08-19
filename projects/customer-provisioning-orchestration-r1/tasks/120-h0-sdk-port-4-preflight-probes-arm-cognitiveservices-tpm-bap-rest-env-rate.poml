@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="120" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H0: SDK-port 4 preflight probes (ARM.CognitiveServices TPM, BAP-REST env-rate, ARM.Compute vCPU, KV cert-bootstrap)</title>
+    <phase>C'' Wave G-2 -- Entry + resources</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a production handler's 4 collaborators end-to-end; H0 is the entry handler blocking everything downstream. FULL per l2-controlplane + handler-modification default.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>4 well-specified, independent SDK/REST port swaps behind existing interfaces (IPreflightQuotaProbe) -- each is a one-day-class swap per DS-1b §5 effort table; Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG2-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace H0PreflightHandler.cs's 4 PowerShellPreflightProbe collaborator instances (each shelling to `pwsh scripts/preflight/*.ps1`, PowerShellPreflightProbe.cs:125) with real SDK/REST probes behind the SAME IPreflightQuotaProbe interface: (1) Test-AzureOpenAiTpmHeadroom.ps1's `az cognitiveservices usage list` x9 -&gt; Azure.ResourceManager.CognitiveServices SubscriptionResource.GetUsagesAsync(location) or CognitiveServicesAccountResource.GetUsages(); (2) Test-DataverseEnvCreationRate.ps1's `pac admin list` x7 -&gt; BAP admin API GET https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2021-04-01 (token audience https://service.powerapps.com/); (3) Test-SubscriptionVCpuQuota.ps1's `az vm list-usage` x12 -&gt; Azure.ResourceManager.Compute SubscriptionResource.GetUsagesAsync(location); (4) Test-SpeCertBootstrap.ps1's `az keyvault secret` x8 -&gt; Azure.Security.KeyVault.Secrets.SecretClient (already a BFF dependency). Threshold-comparison logic ports from each script's own comparison block -- no placeholders, this is a mechanical swap per DS-4's classification of H0 as 'no placeholders' work.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure.ResourceManager.CognitiveServices, Azure.ResourceManager.Compute, raw BAP admin REST, and Azure.Security.KeyVault.Secrets, all under DefaultAzureCredential pinned to the L2 UAMI.</role>
+
+  <goal>H0PreflightHandler.cs's 4 collaborators are pure .NET SDK/REST implementations of IPreflightQuotaProbe, with zero ProcessStartInfo/pwsh shell-out remaining. Each probe's threshold-comparison logic matches its source script's semantics (ported, not reinvented). The existing 4 probe fakes (used by H0's current tests) are joined by per-probe threshold unit tests against the new SDK/REST call shapes (mocked at the SDK client boundary, not HttpMessageHandler, per ADR-038).</goal>
+
+  <context>
+    <background>DS-1b §1 (H0 row) classifies all 4 collaborators as Class A (pure .NET) with a mature SDK or documented REST equivalent for each -- 4-6 person-days total per DS-1b §5. DS-4 §2 confirms H0's core handler logic is already real ('SHELL-OUT REAL -- core real'); only the 4 probe collaborators need porting, and DS-4 explicitly notes 'No placeholders' for this handler -- it is a clean mechanical swap, unlike H1/H13 which have placeholder logic to also replace.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/H0PreflightHandler.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/PowerShellPreflightProbe.cs (delete or retire once all 4 callers are ported)</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/ArmCognitiveServicesTpmProbe.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/BapRestEnvironmentRateProbe.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/ArmComputeVCpuProbe.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/KeyVaultCertBootstrapProbe.cs</file>
+      <file role="canonical-reference">scripts/preflight/Test-AzureOpenAiTpmHeadroom.ps1</file>
+      <file role="canonical-reference">scripts/preflight/Test-DataverseEnvCreationRate.ps1</file>
+      <file role="canonical-reference">scripts/preflight/Test-SubscriptionVCpuQuota.ps1</file>
+      <file role="canonical-reference">scripts/preflight/Test-SpeCertBootstrap.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">H0 is the entry handler -- must be keyed-dispatchable to be exercised end-to-end, though this task's unit-level work can proceed in parallel</dependency>
+      <dependency task="103" status="pending">H0's keyed registration already exists per DS-2 §3.1 (H0 is the one handler already interface-registered) -- listed for wave-sequencing completeness</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="DS-1b §1 H0 row">Threshold-comparison logic MUST be ported from each script's own comparison block (not reinvented) -- the acceptance criteria for 'correct thresholds' is parity with the existing pwsh script's logic, verified by the per-probe unit tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H0 preflight probe SDK ports</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+    <patterns>
+      <pattern name="IPreflightQuotaProbe seam" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/">Existing interface H0PreflightHandler.cs consumes; this task swaps the 4 concrete implementations behind it, handler orchestration logic (HandlersModule.cs:80-84's documented probe-list rationale) is UNCHANGED.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read all 4 source scripts + H0PreflightHandler.cs + PowerShellPreflightProbe.cs in full.</step>
+    <step order="1" name="TPM probe">Author ArmCognitiveServicesTpmProbe : IPreflightQuotaProbe using Azure.ResourceManager.CognitiveServices; port Test-AzureOpenAiTpmHeadroom.ps1's threshold comparison.</step>
+    <step order="2" name="Dataverse rate probe">Author BapRestEnvironmentRateProbe : IPreflightQuotaProbe using HttpClient + DefaultAzureCredential against the BAP admin REST endpoint, token audience https://service.powerapps.com/; port Test-DataverseEnvCreationRate.ps1's threshold logic.</step>
+    <step order="3" name="vCPU probe">Author ArmComputeVCpuProbe : IPreflightQuotaProbe using Azure.ResourceManager.Compute; port Test-SubscriptionVCpuQuota.ps1's threshold logic.</step>
+    <step order="4" name="Cert-bootstrap probe">Author KeyVaultCertBootstrapProbe : IPreflightQuotaProbe using Azure.Security.KeyVault.Secrets.SecretClient; port Test-SpeCertBootstrap.ps1's logic.</step>
+    <step order="5" name="Wire up">Replace the 4 PowerShellPreflightProbe DI registrations in H0's owning module with the 4 new probes; retire PowerShellPreflightProbe.cs if it has no remaining callers (grep-verify).</step>
+    <step order="6" name="Tests">Author per-probe threshold unit tests mocking at the SDK client boundary (Azure.ResourceManager fakes / a fake HttpClient handler is permitted here per ADR-038's ban applying to production HttpMessageHandler mocking, not test-double SDK client shims -- confirm the exact ADR-038 boundary before choosing the mock shape).</step>
+    <step order="7" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'ProcessStartInfo\|pwsh ' in the 4 new probe files returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the BAP admin REST endpoint's response shape for environment-rate data does not match what Test-DataverseEnvCreationRate.ps1's parsed output implies (script parses pac CLI's own formatted output, which may differ from the raw REST response schema), STOP and escalate rather than guessing the threshold field mapping — verify against a live BAP REST call during authoring.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/ArmCognitiveServicesTpmProbe.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/BapRestEnvironmentRateProbe.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/ArmComputeVCpuProbe.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/KeyVaultCertBootstrapProbe.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/Preflight/*ProbeTests.cs (4 files)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'ProcessStartInfo' src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/*.cs returns 0 matches (excluding the retired PowerShellPreflightProbe.cs if kept for reference).</criterion>
+    <criterion testable="true">Each of the 4 new probe classes implements IPreflightQuotaProbe and is DI-registered in place of its PowerShellPreflightProbe predecessor.</criterion>
+    <criterion testable="true">Per-probe unit tests verify the threshold-comparison OUTCOME (pass/fail/warn) matches the source script's documented threshold logic for at least 3 boundary cases each (under/at/over threshold).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0 for the Preflight/ test namespace.</criterion>
+    <criterion testable="true">H0's existing end-to-end handler tests (pre-existing, task 041) still pass unmodified against the new probe implementations (behavior-preserving swap).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- IPreflightQuotaProbe interface + H0's orchestration logic already exist and are correct; only the 4 concrete implementations are shell-out placeholders relative to Option D's target state. Extension -- swapping the concrete implementations behind the existing interface is the exact extension DS-1b prescribes, zero interface/orchestration redesign. Cost-of-doing-nothing -- the L2 App Service has no pwsh runtime under Option D's zero-shell main site (design.md §4.2a); H0 (the entry handler blocking everything downstream) cannot execute AT ALL without this port.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

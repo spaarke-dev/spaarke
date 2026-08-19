@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="118" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Integration seam test: dispatch spine (message -&gt; handler -&gt; Cosmos transition -&gt; DAG advance)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>TEST-MODIFYING (unconditional FULL)</rigor>
+    <rigor-reason>Touches tests/integration/seam/** and is tagged testing/integration-test -- unconditional FULL per root CLAUDE.md §8 override table.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified seam test following DS-2 §6.2's exact design -- Sonnet @ high, not architecturally novel (the architecture is already locked, this proves it).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 104, 106, 108</deps>
+    <tags>l2-controlplane, dispatcher, testing, integration-test</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the ADR-038 tests/integration/seam/** dispatch-spine DoD category (per this project's CLAUDE.md ADR-038 pointer: 'the tests/integration/seam/** vertical-slice-seam category added 2026-07-09 by E-40 -- DoD for dispatch-spine changes'): real DI container + real JSON + real Cosmos (emulator or test container, pattern-matching the L2 test project's existing Cosmos smoke tests) -- enqueue-shape message -&gt; DispatchCoreAsync -&gt; a real fake-scripted keyed test handler that writes CompletedPhases -&gt; the REAL HandlerOutcomeApplier (task 104) -&gt; assert the Cosmos transition landed correctly (task 106's serializer fix makes this readable) -&gt; then drive one real StateReconcilerService.RunTickAsync and assert the NEXT handler's envelope reaches a recording enqueuer. This proves the full 'message in -&gt; handler executed -&gt; Cosmos transitioned -&gt; DAG advanced' loop with only the AMQP wire faked (per DS-2 §6.2's exact design).</prompt>
+
+  <role>SPAARKE platform developer. Expert in ADR-038 integration-seam test authoring, Cosmos emulator/test-container patterns, and full-loop assertion design across dispatcher + reconciler boundaries.</role>
+
+  <goal>A new test file under tests/integration/seam/ProvisioningDispatchSpineTests.cs exists, exercising the full loop described above against a real (emulator/test-container) Cosmos instance with only the Service Bus wire faked. The test proves: (1) a dispatched message correctly invokes the resolved handler, (2) the handler's outcome is correctly applied via the REAL HandlerOutcomeApplier producing a readable (string-status, per task 106) Cosmos transition, (3) a subsequent reconciler tick correctly advances the DAG and enqueues the next handler's envelope. This is the primary regression net for the C4.5 defect class (task 106) -- DS-5 explicitly notes 'the seam test is the one that would have caught this.'</goal>
+
+  <context>
+    <background>DS-2 §6.2 designs this exact test: 'Primary seam (no live SB): real DI container + real JSON + real Cosmos emulator/test container... enqueue-shape message -&gt; DispatchCoreAsync -&gt; real fake-scripted handler... -&gt; real HandlerOutcomeApplier -&gt; assert Cosmos transition; then drive one real StateReconcilerService.RunTickAsync and assert the NEXT handler's envelope reaches a recording enqueuer -- the full loop with only the AMQP wire faked.' This project's own CLAUDE.md names the tests/integration/seam/** category as the binding DoD for dispatch-spine changes (ADR-038 pointer table), making this task's existence itself a project-level requirement, not merely a nice-to-have regression net.</background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/ProvisioningDispatchSpineTests.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Dispatch/ProvisioningHandlerDispatcher.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/HandlerOutcomeApplier.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/StateReconcilerService.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/CosmosActiveRunScanner.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">DispatchCoreAsync must exist as the entry point under test</dependency>
+      <dependency task="104" status="pending">The real HandlerOutcomeApplier must exist (not the internal-only pre-extraction version)</dependency>
+      <dependency task="106" status="pending">The serializer fix must be in place so the Cosmos transition assertion is even readable</dependency>
+      <dependency task="108" status="pending">The queue-property change is not required for THIS seam test (SB wire is faked) but its absence should not block authoring -- listed for wave-sequencing awareness only</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="docs/adr/ADR-038-testing-strategy.md">This test belongs in the tests/integration/seam/** KEEP-path category per the project CLAUDE.md's explicit ADR-038 pointer -- author it there, not as a unit test under Dispatch/ (which is task 105's scope) and not as a live-SB E2E test (task 102's escalation-worthy live verification is separate, deferred to Phase F / task 186).</constraint>
+    <constraint source="DS-2 §6.2">The Service Bus wire is the ONLY faked component -- Cosmos MUST be real (emulator or test container), the DI container MUST be the real composition (not hand-wired fakes for the applier/reconciler), and the test handler MUST be a real keyed-registered IProvisioningHandler implementation (scripted to write CompletedPhases), not a mock.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dispatch-spine integration seam test</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2-dispatcher-design.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Vertical-slice seam test" location="tests/integration/seam/ (existing E-40 category)">Real DI + real datastore + faked wire boundary -- the established shape for proving a dispatch-spine change end-to-end without live Azure dependencies.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (TEST-MODIFYING, unconditional FULL). Read DS-2 §6.2 in full plus the existing tests/integration/seam/** category's other test files for the established harness pattern.</step>
+    <step order="1" name="Harness">Stand up a real DI container via the .Worker + .Core module extensions, a Cosmos emulator/test container connection (pattern-match the L2 test project's existing Cosmos smoke tests), and a recording fake for the Service Bus enqueue call (the ONE faked boundary).</step>
+    <step order="2" name="Test handler">Author (or reuse if one already exists in the test project) a minimal real IProvisioningHandler implementation, keyed-registered under a test-only HandlerId, scripted to write a CompletedPhases entry and return Success.</step>
+    <step order="3" name="Assert dispatch">Feed a synthetic envelope to DispatchCoreAsync; assert the test handler was invoked and the applier produced a Cosmos transition readable back with the CORRECT string-typed status (proving task 106's fix end-to-end).</step>
+    <step order="4" name="Assert DAG advance">Drive one real StateReconcilerService.RunTickAsync against the same Cosmos state; assert the recording enqueuer received the NEXT handler's envelope with the correct HandlerId per DagAdvancer's ready-set computation.</step>
+    <step order="5" name="Negative case">Add a second scenario: a run in a terminal status (Completed/Cancelled/Quarantined) -- assert the reconciler tick produces NO enqueue.</step>
+    <step order="6" name="Run + verify">dotnet test against the Cosmos emulator/test container -- green, documented run instructions (emulator startup) in the test file's header comment.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Cosmos emulator does not support a feature this test needs (e.g., a query pattern CosmosActiveRunScanner relies on) — DS-2 §6.2 itself flags this class of risk for duplicate-detection specifically — STOP and fall back to a live-dev Cosmos test container instead of silently skipping the assertion; document which path was taken and why in the test file's header.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">test</tool>
+    <tool name="docker">Cosmos emulator/test container if that is the chosen harness</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ProvisioningDispatchSpineTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">tests/integration/seam/ProvisioningDispatchSpineTests.cs exists and dotnet test targeting it passes against a real Cosmos emulator/test container.</criterion>
+    <criterion testable="true">The test asserts the FULL loop: dispatched message -&gt; handler invoked -&gt; HandlerOutcomeApplier writes a Cosmos transition with a STRING-typed status field -&gt; reconciler tick reads that transition and enqueues the correctly-computed next handler.</criterion>
+    <criterion testable="true">A negative-case assertion confirms a terminal-status run produces zero enqueue on a reconciler tick.</criterion>
+    <criterion testable="true">The test uses the REAL HandlerOutcomeApplier and StateReconcilerService (not hand-wired fakes for either) -- grep confirms no mock/fake substitution for these two classes in the test file.</criterion>
+    <criterion testable="true">Only the Service Bus wire is faked -- grep confirms a real CosmosClient (emulator/test-container connection string) is used, not an in-memory Cosmos fake.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- this project's own CLAUDE.md already names tests/integration/seam/** as the BINDING DoD category for dispatch-spine changes (ADR-038 pointer table); this task is not inventing a new test category, it is fulfilling an already-declared obligation. Extension -- N/A, this IS the extension of the existing ADR-038 seam-test category to this specific dispatch spine. Cost-of-doing-nothing -- without this test, the C4.5 defect class (task 106) has no regression net at the level DS-5 itself says would have caught it originally ('the seam test is the one that would have caught this'), and the dispatcher+reconciler integration is unproven below the level of a full live-SB E2E run.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

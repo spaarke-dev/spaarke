@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="185" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H13 gate aggregation wiring -- assemble all 11 probes + 3 runners + Ready writer into final acceptance logic</title>
+    <phase>C'' Wave G-7 -- Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Terminal assembly of every Wave G-2..G-6 correctness fix into ONE gate decision -- the highest-aggregation-risk task in the whole Phase G'' build; a wiring mistake here silently masks any one probe's real failure.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius per its role as the terminal aggregation point for the entire handler-build backlog -- Opus tier for the judgment-heavy aggregation-logic review.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184</deps>
+    <tags>l2-controlplane, job-handler, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Assemble ALL 11 real trap/invariant probes (tasks 170-180), the 3 real runner ports (tasks 181-183), and the real Ready writer (task 184) into H13E2EAcceptanceGateHandler.cs's FINAL aggregation logic: the gate advances to Completed (and the Ready writer fires) if and ONLY IF every T1-T6 trap, every I1-I5 invariant, the naming-conformance check, and the cost-envelope check ALL genuinely pass -- per this project's spec.md acceptance criteria ('ANY trap OR invariant OR cost fail fails the run', per the existing risk register entry for H13). This task's job is the AGGREGATION LOGIC ITSELF, not any individual probe (those are tasks 170-184) -- verify the existing aggregation-decision code (if any exists as scaffolding) correctly composes the now-real results instead of the previously-uniform InfraFault placeholders.</prompt>
+
+  <role>SPAARKE platform developer. Expert in multi-check gate-aggregation logic, ensuring a composite Pass requires EVERY constituent check to genuinely pass, with no silent short-circuit or masking.</role>
+
+  <goal>H13E2EAcceptanceGateHandler.cs's aggregation logic correctly composes all 11 probes + 3 runners + the Ready writer: a Completed/Ready outcome requires EVERY constituent check to Pass; ANY single Fail (from any of the 15 checks) produces a non-Ready outcome with a clear, itemized report of WHICH check(s) failed (not merely an aggregate Fail with no detail). A comprehensive test suite exercises every combination of one-check-fails-rest-pass, confirming the aggregation never silently masks a single failure.</goal>
+
+  <context>
+    <background>This is the terminal assembly point DS-4 §6 frames as buildable-pipelined-but-assembled-once: 'the correct shape is: author probes pipelined alongside their subject handlers (G-3..G-6), assemble + live-verify in G-7.' This project's own risk register (plan.md §8, task 055's row) states the acceptance bar explicitly: 'Final gate — ANY trap OR invariant OR cost fail fails the run.' Given the sheer number of constituent checks (11+3+1=15), this task's own review scrutiny is the last line of defense against a subtle aggregation bug (e.g., an off-by-one in an AND/OR composition) that would silently produce false Ready transitions across every future customer provision.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EAcceptanceModule.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="170" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="171" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="172" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="173" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="174" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="175" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="176" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="177" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="178" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="179" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="180" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="181" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="182" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="183" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+      <dependency task="184" status="pending">One of the 11 real probes / 3 runners / Ready writer this task assembles</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="this project's plan.md §8 risk register (task 055 row)">ANY trap OR invariant OR cost fail MUST fail the run -- the aggregation MUST be a strict AND across all 15 constituent checks, with zero exceptions/overrides baked into this task's logic.</constraint>
+    <constraint source="spec.md acceptance criteria">sprk_dataverseenvironment.SetupStatus transitions to Ready ONLY on a genuine composite Pass -- verify against spec.md's FR-18 acceptance language directly, not a paraphrase.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H13 gate aggregation assembly</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read the existing H13E2EAcceptanceGateHandler.cs aggregation scaffolding (if any) plus spec.md's FR-18 acceptance language in full.</step>
+    <step order="1" name="Inventory checks">Enumerate all 15 constituent checks (11 probes + 3 runners + Ready-writer trigger condition) and confirm each is wired to the REAL implementation from tasks 170-184, not a leftover Placeholder reference.</step>
+    <step order="2" name="Aggregation logic">Implement (or fix) the strict-AND composite decision: Completed/Ready fires only if all 15 checks Pass; any Fail produces a non-Ready outcome with itemized per-check results in the run's ErrorDetail / logs.</step>
+    <step order="3" name="Itemized reporting">Ensure the aggregation's failure output names WHICH check(s) failed (operator-actionable), not a bare aggregate Fail.</step>
+    <step order="4" name="Comprehensive tests">Author a test matrix: all-pass -&gt; Ready; each single-check-fails-rest-pass permutation -&gt; non-Ready with that check correctly identified; multiple-simultaneous-fails -&gt; non-Ready with all failing checks identified.</step>
+    <step order="5" name="Placeholder sweep">grep the ENTIRE E2EAcceptanceModule.cs + H13 handler for any remaining Placeholder*/Null*/Stub* registration -- confirm ZERO remain.</step>
+    <step order="6" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the placeholder sweep (step 5) finds ANY remaining Placeholder/Null/Stub registration in H13's dependency graph that this wave's tasks (100-184) did not account for, STOP and escalate — do not silently leave a residual placeholder wired into the terminal acceptance gate; either author the missing real implementation as a follow-on task or explicitly document why that specific seam is intentionally out of scope for THIS acceptance gate.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'Placeholder\|Null.*Verifier\|Stub' across E2EAcceptanceModule.cs and H13's handler code returns 0 matches -- every seam is real.</criterion>
+    <criterion testable="true">A test confirms an all-15-checks-pass scenario produces Completed/Ready.</criterion>
+    <criterion testable="true">A test matrix confirms EACH single-check-fails-rest-pass permutation (at least a representative sample across traps, invariants, and runners) produces a non-Ready outcome with that specific check correctly identified in the failure report.</criterion>
+    <criterion testable="true">A test confirms a multiple-simultaneous-failure scenario reports ALL failing checks, not just the first one encountered.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the individual probe/runner/writer implementations (tasks 170-184) already exist by the time this task runs; this task's job is purely the composition logic binding them together correctly. Extension -- N/A, this IS the extension point the whole wave has been building toward. Cost-of-doing-nothing -- without correct aggregation, even a suite of 15 individually-correct checks could still produce a false Ready (a masking bug) or an unnecessarily-blocked Fail (a false negative) -- either failure mode defeats the entire purpose of Wave G-7's investment in real probes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

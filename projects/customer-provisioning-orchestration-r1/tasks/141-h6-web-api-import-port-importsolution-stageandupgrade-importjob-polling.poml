@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="141" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H6: Web-API import port (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging</title>
+    <phase>C'' Wave G-4 -- Dataverse chain</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Named explicitly in the parent task instructions' xhigh-effort exception list: 'complex-but-fully-specified... H6 heavy port'. Longest-running handler per DS-2b (30-60 min) -- dispatcher lock-renewal sizing case.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex-but-fully-specified per DS-1b/DS-4's precise API surface (ImportSolution/StageAndUpgrade actions + ImportJob polling) with a well-defined 8-solution dependency order already shipped -- Sonnet @ xhigh.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103, 140</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port, dataverse</tags>
+    <estimated-effort>14-20 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port H6SolutionImportHandler.cs's 2 collaborators: (1) DeployDataverseSolutionsScriptImporter (Deploy-DataverseSolutions.ps1, 847 lines: pac solution import x3, pac solution list x2, pack/delete/auth) -&gt; Dataverse Web API ImportSolution / StageAndUpgrade actions with ImportJob polling -- the dependency-ordered 8-solution sequence (SpaarkeCore + webresources + 6 Tier-3 features, per this project's spec.md §11.1a authoritative count) ports as C# control flow, NOT a re-derivation of the ordering (the ordering is ALREADY correct and shipped in the pwsh script -- copy it); (2) PacCliSolutionVerifier (pac solution list --environment, PacCliSolutionVerifier.cs:113-116) -&gt; trivial Dataverse Web API GET /solutions?$select=uniquename,version. HARD PREREQUISITE (owed under every architecture option, not Option-D-specific): the 8 solution ZIPs must become VERSIONED PUBLISH/CONTENT ARTIFACTS the handler downloads/references, not files assumed present on a local shell's filesystem. Credential: the customer-env auth model per DS-4 (BFF app-reg secret sourced from H4-populated KV, per task 142's credential-config work -- NOT a new S2S secret).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse Web API ImportSolution/StageAndUpgrade async actions, ImportJob status polling, and packaging build artifacts for a code-based (non-shell) App Service runtime.</role>
+
+  <goal>H6SolutionImportHandler.cs's import collaborator performs the SAME 8-solution dependency-ordered sequence Deploy-DataverseSolutions.ps1 already implements, via Dataverse Web API ImportSolution/StageAndUpgrade + ImportJob polling instead of pac CLI. The verifier is a trivial Web API GET. The 8 solution ZIPs are packaged as versioned content/publish artifacts consumable by the code-based Worker site (no filesystem-shell dependency). order/retry/partial-failure outcomes are correctly classified; a parity test suite compares outcomes against recorded pac-based imports (DS-1b §6's heavy-port risk mitigation).</goal>
+
+  <context>
+    <background>DS-4 §2 (H6 row) confirms the credential gap explicitly: 'SolutionImport:ClientSecret KV wiring deferred (Program.cs:440-443) -- cannot authenticate even in-process (C3.10).' DS-1b §1 (H6 row) sizes this at 6-8 person-days and flags the SAME invariant as H2a's ARM-JSON dependency: 'Invariant under EVERY option: solution ZIPs must become versioned build artifacts in the runtime payload -- the fat container has this exact same problem.' DS-2b §1.2 corroborates H6 is the single LONGEST-RUNNING handler in the fleet (30-60 min), making it the dispatcher's lock-renewal sizing case (DispatcherOptions.MaxHandlerDuration=01:05:00 per task 102 is sized partly for H6).</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/H6SolutionImportHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/DataverseWebApiSolutionImporter.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/DataverseWebApiSolutionVerifier.cs</file>
+      <file role="canonical-reference">scripts/Deploy-DataverseSolutions.ps1</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md (§11.1a — 8 shipped solutions authoritative list)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing</dependency>
+      <dependency task="103" status="pending">H6 keyed registration</dependency>
+      <dependency task="140" status="pending">H5 must have created the Dataverse environment this handler imports solutions into</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="spec.md §11.1a">The 8-solution dependency order is ALREADY AUTHORITATIVE per Deploy-DataverseSolutions.ps1's $SolutionImportOrder -- port the ORDER verbatim, do not re-derive dependency ordering from solution metadata inspection.</constraint>
+    <constraint source="DS-1b §1 H6 row">Solution ZIPs MUST become versioned publish/content artifacts -- this is owed under every architecture option, not merely Option D. Coordinate the packaging mechanism with task 116's blob-artifact pattern if a shared approach is more consistent than a separate one.</constraint>
+    <constraint source="DS-2b §1.2">This is the fleet's longest-running handler (30-60 min) -- ensure any retry/timeout logic respects the dispatcher's MaxHandlerDuration=01:05:00 sizing (task 102) rather than introducing an independent, shorter timeout that would fight the dispatcher's lock renewal.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H6 Web-API solution import port</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2b-concurrency-safety-deep-dive.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL, xhigh effort). Read Deploy-DataverseSolutions.ps1 in FULL (847 lines) including its exact $SolutionImportOrder + retry semantics.</step>
+    <step order="1" name="Artifact packaging">Package the 8 solution ZIPs as versioned publish/content artifacts consumable by the code-based Worker site -- decide + document the mechanism (embedded content vs blob-fetched, consistent with task 116/117's precedent where reasonable).</step>
+    <step order="2" name="Importer">Author DataverseWebApiSolutionImporter: for each solution in the SAME dependency order, call ImportSolution or StageAndUpgrade as appropriate, poll ImportJob status to completion, apply the SAME retry/partial-failure semantics the script implements.</step>
+    <step order="3" name="Verifier">Author DataverseWebApiSolutionVerifier: trivial GET /solutions?$select=uniquename,version.</step>
+    <step order="4" name="Credential wiring">Wire the customer-env auth model per task 142's credential-config output (BFF app-reg secret from H4-populated KV) -- do NOT introduce a new S2S secret (this project's MUST NOT rule).</step>
+    <step order="5" name="Wire up">Replace the 2 collaborators in H6's owning module with the new implementations.</step>
+    <step order="6" name="Parity tests">order/retry/partial-failure tests + a parity comparison against recorded pac-based import outcomes (DS-1b §6's heavy-port mitigation for H3/H6).</step>
+    <step order="7" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'pac solution\|ProcessStartInfo' in the new files returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ImportJob polling under a live dev import shows a materially different completion-time distribution than the script's own timeout assumptions (e.g., StageAndUpgrade taking meaningfully longer via REST than pac's reported wall-clock), STOP and escalate to re-validate the DispatcherOptions.MaxHandlerDuration sizing (task 102) — a wrong assumption here risks the dispatcher's lock expiring mid-import, which is a correctness issue, not merely a performance one.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/DataverseWebApiSolutionImporter.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/DataverseWebApiSolutionVerifier.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'pac solution\|ProcessStartInfo' in the new H6 collaborator files returns 0 matches.</criterion>
+    <criterion testable="true">A test confirms the 8-solution import order EXACTLY matches Deploy-DataverseSolutions.ps1's $SolutionImportOrder (same sequence, same 8 solutions).</criterion>
+    <criterion testable="true">A test confirms ImportJob polling correctly detects success, failure, and a configurable partial-failure/retry condition.</criterion>
+    <criterion testable="true">A test confirms the 8 solution ZIPs are resolved from a versioned artifact source, not a local filesystem path assumed to exist on a shell.</criterion>
+    <criterion testable="true">The credential resolution path traces to H4-populated KV (task 142), with zero new S2S secret introduced (grep confirms no new client-secret app-registration reference).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- Deploy-DataverseSolutions.ps1 already implements the correct, shipped 8-solution dependency order and retry semantics; nothing to re-derive. Extension -- porting the proven ordering/retry logic to Web API calls, with artifact packaging (owed under every option per DS-1b) as the one genuinely new piece, is the minimal correct move. Cost-of-doing-nothing -- H6 cannot execute under Option D's zero-shell main site, AND its credential is currently unprovisioned (Program.cs:440-443's deferred wiring) meaning it cannot authenticate even where it could otherwise run -- the entire Dataverse solution layer (H7/H10/H11/H12x depend on these solutions existing) stays permanently unreachable.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

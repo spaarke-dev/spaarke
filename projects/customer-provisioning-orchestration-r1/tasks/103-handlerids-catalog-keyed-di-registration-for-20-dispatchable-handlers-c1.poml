@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="103" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>HandlerIds catalog + keyed DI registration for 20 dispatchable handlers (C1.2)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies registration for all 19 top-level handler classes across their owning modules; a missed registration silently breaks dispatch for that handler (NoHandler dead-letter). FULL per l2-controlplane default.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical one-line-per-handler registration pattern with a centralized enforcement test -- not itself high-blast-radius (each line is independently reviewable), Sonnet @ high per default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100</deps>
+    <tags>l2-controlplane, dispatcher, job-handler, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs (the single canonical HandlerId string-constant catalog + the Dispatchable readonly list of the 19 top-level ids, explicitly EXCLUDING H14a/b/c which are H14 in-process sub-steps never independently enqueued). Add ONE services.AddKeyedScoped&lt;IProvisioningHandler&gt;(HandlerIds.HX, (sp,_) =&gt; sp.GetRequiredService&lt;HXHandler&gt;()) line per handler beside its existing concrete registration (which stays -- H14's sub-handler injection and existing tests resolve concretes). Author HandlerRegistrationCompletenessTests: build the real DI container, assert every HandlerIds.Dispatchable id resolves via GetKeyedService&lt;IProvisioningHandler&gt;, the resolved instance's HandlerId property equals its key, and H14a/b/c are NOT keyed-registered.</prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 10 keyed dependency injection (AddKeyedScoped, GetKeyedService&lt;T&gt;(key)) and DI-container completeness testing.</role>
+
+  <goal>HandlerIds.cs exists with 19 dispatchable HandlerId constants (H0, H0.5, H1, H2a, H2b, H3, H4, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14) matching design.md §4.1's literal values, plus a Dispatchable readonly list. Each handler's owning module gains a factory-forwarding AddKeyedScoped line (guaranteeing the keyed and concrete resolutions return the same scoped instance -- no double construction). HandlerRegistrationCompletenessTests makes the NoHandler dead-letter reason unreachable by build-time assertion.</goal>
+
+  <context>
+    <background>DS-2 §3.1 grep-verified that all 22 handler classes already implement IProvisioningHandler with a HandlerId =&gt; HandlerIdentifier property, but only H0 is registered against the interface today (HandlersModule.cs:103) -- the other 18 top-level + 3 H14 sub-handlers are concrete-type-only. DS-2 §3.2 rejected the BFF's enumerate-and-match GetServices&lt;IProvisioningHandler&gt;().FirstOrDefault() pattern because it constructs all ~20 handler dependency graphs on every message and a single broken graph poisons dispatch of every other handler -- keyed resolution constructs exactly one graph and isolates faults per handler.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Modules/HandlersModule.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/**/*Module.cs (per-handler owning modules, 18 files)</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/HandlerRegistrationCompletenessTests.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/DagAdvancer.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">Handler classes must live in .Core before their registrations can be re-pointed</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-2 §3.2">An enum was rejected for HandlerId ('H0.5' and 'H2a' are not valid enum identifiers without attribute mapping, the wire format is already string, and DagAdvancer's map is string-keyed) -- HandlerIds MUST remain string constants consolidated in one static class that DagAdvancer's HandlerH* consts and each handler's HandlerIdentifier const re-point to (mechanical refactor, no behavior change).</constraint>
+    <constraint source="DS-2 §3.2">H14a/H14b/H14c MUST NOT be keyed-registered -- they are orchestrated in-process by the H14 parent handler (H14IntegrationWiringHandler.cs:45, 'ONE ReplaceRunAsync call') and never independently enqueued. HandlerRegistrationCompletenessTests MUST assert their absence, not just the presence of the 19.</constraint>
+    <constraint source="design.md §4.2b">The dispatcher owns dequeue + handler invocation + outcome-apply wiring; it MUST NOT compute DAG ready-sets itself. StateReconcilerService/DagAdvancer remain the single source of truth for ready-set computation (DS-2 Sec.5) -- the dispatcher calls IHandlerOutcomeApplier.ApplyHandlerOutcomeAsync and nothing else.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Keyed-DI handler resolution catalog</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2-dispatcher-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Factory-forwarding keyed registration" location="design-study-ds2-dispatcher-design.md §3.2">services.AddKeyedScoped&lt;IProvisioningHandler&gt;(key, (sp,_) =&gt; sp.GetRequiredService&lt;ConcreteHandler&gt;()) guarantees keyed and concrete resolution share one scoped instance.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-2 §3 in full plus DagAdvancer.cs's existing HandlerH* consts.</step>
+    <step order="1" name="HandlerIds.cs">Author the static class with 19 string constants matching design.md §4.1 literal values verbatim, plus Dispatchable as an IReadOnlyList&lt;string&gt;.</step>
+    <step order="2" name="Re-point consts">Refactor DagAdvancer's HandlerH* consts and each handler's own HandlerIdentifier const to reference HandlerIds.* (mechanical, zero behavior change).</step>
+    <step order="3" name="Keyed registrations">Add one AddKeyedScoped line per dispatchable handler beside its existing concrete registration, across the owning module files. Replace H0's existing non-keyed AddScoped&lt;IProvisioningHandler, H0PreflightHandler&gt;() with its keyed equivalent (grep-verified nothing else consumes the non-keyed interface registration).</step>
+    <step order="4" name="Completeness test">Author HandlerRegistrationCompletenessTests building the real DI container via the module extension methods (or WebApplicationFactory for .Worker): for each HandlerIds.Dispatchable id, GetKeyedService&lt;IProvisioningHandler&gt;(id) is non-null and its .HandlerId == id; for H14a/H14b/H14c ids, GetKeyedService returns null.</step>
+    <step order="5" name="Build + verify">dotnet build 0 errors; dotnet test (new completeness test) green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any handler's concrete class is NOT resolvable via DI at all (constructor dependency missing from Program.cs), STOP and escalate rather than silently registering a broken keyed factory -- this is the exact HandlerResolutionFailed dead-letter class task 102 exists to isolate per-handler.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/HandlerRegistrationCompletenessTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">HandlerIds.Dispatchable.Count == 19.</criterion>
+    <criterion testable="true">HandlerRegistrationCompletenessTests: for each of the 19 ids, GetKeyedService&lt;IProvisioningHandler&gt;(id) resolves and .HandlerId equals the key -- 19/19 assertions pass.</criterion>
+    <criterion testable="true">HandlerRegistrationCompletenessTests: GetKeyedService&lt;IProvisioningHandler&gt;('H14a') (and H14b/H14c) returns null -- 3/3 negative assertions pass.</criterion>
+    <criterion testable="true">grep -c 'AddKeyedScoped&lt;IProvisioningHandler&gt;' across Handlers/**/*Module.cs returns exactly 19.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- only H0 has an interface registration today (HandlersModule.cs:103); zero AddKeyedScoped usage exists repo-wide. Extension -- cannot extend the enumerate-and-match pattern the BFF uses without constructing all 20 handler graphs per message (DS-2 §3.2 rejection). Cost-of-doing-nothing -- the dispatcher (task 102) cannot resolve ANY handler by envelope HandlerId without this catalog; every dispatch would dead-letter as NoHandler.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

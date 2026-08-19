@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="140" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H5: BAP-REST env-create + async-operation-polling port</title>
+    <phase>C'' Wave G-4 -- Dataverse chain</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>H5 gates the entire Dataverse chain (H6-&gt;H7-&gt;H10-&gt;H11-&gt;H12x) per DS-4 -- a mistake blocks the widest downstream surface remaining in the build. FULL rigor.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Port of an already-precedented REST sequence (the repo's OWN Provision-Customer.ps1 STEP 5 already abandoned pac for this exact REST call) -- Sonnet @ high per DS-1b's 3-4 person-day estimate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103, 123</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port, dataverse</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port H5DataverseEnvCreationHandler.cs's collaborator PacAdminDataverseEnvCreator (pac admin create-environment --name/--region/--type/--tenant/--domain --json, PacAdminDataverseEnvCreator.cs:120-132) to raw HttpClient + DefaultAzureCredential against the Power Platform Admin (BAP) API: PUT/POST .../scopes/admin/environments + async operation polling. CRITICAL PRECEDENT: this project's OWN scripts/Provision-Customer.ps1 STEP 5 (line 589) is LITERALLY TITLED 'Creating Dataverse environment via Power Platform Admin API' -- the script itself has ALREADY abandoned pac for this REST sequence; PORT THAT EXACT SEQUENCE, do not design a new one. PRESERVE the existing (already real) health probe collaborator unchanged.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Power Platform BAP admin REST API for environment creation + async LRO polling, ported from an in-repo PowerShell precedent that already made the same SDK-vs-CLI decision.</role>
+
+  <goal>H5DataverseEnvCreationHandler.cs's environment-creation collaborator is a pure HttpClient + DefaultAzureCredential implementation, following Provision-Customer.ps1's STEP 5 REST sequence exactly (same endpoint, same async-operation polling pattern, same request-body shape). The existing (already-real) health probe is UNCHANGED. create/poll/timeout/duplicate-domain outcomes are all correctly classified.</goal>
+
+  <context>
+    <background>DS-1b §1 (H5 row, collaborator #13) is unusually confident about this port precisely because of the in-repo precedent: 'In-house precedent already exists: Provision-Customer.ps1 STEP 5 (line 589) is literally titled Creating Dataverse environment via Power Platform Admin API -- the script itself abandoned pac for REST; port that REST sequence to HttpClient.' DS-4 §4 places H5 at the head of Wave G-4's Dataverse chain because it gates everything after it (H6-&gt;H7-&gt;H10-&gt;H11-&gt;H12x).</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseEnvCreation/H5DataverseEnvCreationHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseEnvCreation/BapRestEnvironmentCreator.cs</file>
+      <file role="canonical-reference">scripts/Provision-Customer.ps1 (STEP 5, around line 589)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing</dependency>
+      <dependency task="103" status="pending">H5 keyed registration</dependency>
+      <dependency task="123" status="pending">H2a must have completed the subscription-level resource deploy this environment attaches to, per DAG ordering</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="DS-1b §1 H5 row">Port Provision-Customer.ps1 STEP 5's REST sequence EXACTLY (endpoint, request-body shape, async-operation polling pattern) -- do not design a new sequence when a working in-repo precedent already exists.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H5 BAP-REST environment creation port</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+    <patterns>
+      <pattern name="In-repo REST precedent" location="scripts/Provision-Customer.ps1 STEP 5 (~line 589)">The script ALREADY made this exact SDK-vs-CLI decision for env creation -- port its REST sequence verbatim rather than re-deriving the BAP API contract from documentation alone.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read Provision-Customer.ps1's STEP 5 block in full (including its async-polling loop) plus PacAdminDataverseEnvCreator.cs's existing request-shape mapping.</step>
+    <step order="1" name="BapRestEnvironmentCreator">Author the collaborator: HttpClient + DefaultAzureCredential targeting the BAP admin API's environments endpoint, request body matching STEP 5's shape.</step>
+    <step order="2" name="Async polling">Port the async-operation-status polling loop from STEP 5 exactly (interval, timeout, terminal-status detection).</step>
+    <step order="3" name="Wire up">Replace PacAdminDataverseEnvCreator in H5's owning module; keep the existing health-probe collaborator untouched.</step>
+    <step order="4" name="Tests">create/poll/timeout/duplicate-domain table-driven tests per DS-4 §7's test-effort note.</step>
+    <step order="5" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'pac admin\|ProcessStartInfo' in the new file returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a live BAP REST call under the L2 UAMI's DefaultAzureCredential is rejected with an authorization error the pac CLI's ambient session never surfaced (e.g., pac's session carried broader delegated rights than the UAMI's app-only token), STOP and escalate — this is exactly the class of auth-surface difference DS-1b §4 flags as a genuine (if smaller-than-expected) risk of the Option D migration.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseEnvCreation/BapRestEnvironmentCreator.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'pac admin\|ProcessStartInfo' in BapRestEnvironmentCreator.cs returns 0 matches.</criterion>
+    <criterion testable="true">The request body shape matches Provision-Customer.ps1 STEP 5's documented fields (name/region/type/tenant/domain equivalents) -- verified by a test asserting the constructed request payload.</criterion>
+    <criterion testable="true">A test confirms the async-operation-polling loop correctly detects Succeeded, Failed, and a configurable Timeout condition.</criterion>
+    <criterion testable="true">A test confirms a duplicate-domain response is classified distinctly from a generic failure.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- Provision-Customer.ps1's STEP 5 already implements the exact REST sequence this task needs, in-repo, proven. Extension -- porting a proven in-repo REST sequence to a typed HttpClient collaborator behind the existing handler interface is the minimal-risk correct move. Cost-of-doing-nothing -- H5 gates the ENTIRE Dataverse chain (H6-&gt;H7-&gt;H10-&gt;H11-&gt;H12x per DS-4 §4); without it, nothing in Wave G-4/G-5 can be exercised end-to-end.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

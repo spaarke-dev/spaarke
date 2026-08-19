@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="107" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Add attempt field to ReconcilerEnqueuePayload (L1 dedup vs §4C retry interaction fix)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>TEST-MODIFYING (unconditional FULL)</rigor>
+    <rigor-reason>Small, precisely-scoped change but touches tests/** -- unconditional FULL per root CLAUDE.md §8 override table.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified field addition with a clear before/after test contract; Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>108</deps>
+    <tags>l2-controlplane, dispatcher, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Fix the interaction defect DS-2 §4-L1 surfaces: once SB duplicate-detection is enabled (task 108), the §4C RetryableWithCleanup auto-retry path breaks, because StateReconcilerService.ApplyHandlerOutcomeAsync re-enqueues via BuildEnvelope, whose ReconcilerEnqueuePayload is deliberately byte-stable (EnqueuedAt is NOT in the hash) -- the retry message carries the IDENTICAL MessageId as the just-consumed original and SB dedup silently drops it within the 1h window. Add an attempt field to ReconcilerEnqueuePayload / HandlerEnvelope, populated ONLY on the re-enqueue path (first-enqueue stays attempt-absent so the reconciler-tick duplicate-suppression this byte-stability exists for is preserved). MessageId becomes SHA256(HandlerId|RunId|CustomerId|paramHash|attempt).</prompt>
+
+  <role>SPAARKE platform developer. Expert in deterministic message-id hashing schemes and Service Bus duplicate-detection interaction with application-level retry.</role>
+
+  <goal>HandlerEnvelope carries an attempt field (int, default/absent = first enqueue). ComputeMessageId incorporates attempt into its hash per spec.md's MUST rule: SHA256(HandlerId|RunId|CustomerId|paramHash|attempt). The reconciler's re-enqueue path (§4C RetryableWithCleanup) populates attempt with an incrementing value; the reconciler's normal tick-driven first-enqueue path leaves it absent/zero so duplicate-suppression across ticks is unaffected. ReconcilerEnqueuePayloadAttemptTests (from task 105, or authored here if 105 has not landed yet) verify: retry-path MessageId != original MessageId; first-enqueue MessageId stable across repeated ticks with no state change.</goal>
+
+  <context>
+    <background>DS-2 §4-L1 (owner-flagged as an interaction defect this design surfaces, NEW) traces the exact failure: with dedup ON and paramHash-based MessageId unchanged across retry, a legitimate §4C-triggered retry is silently absorbed by SB's own duplicate-detection window -- the operator sees a run stuck at the failed phase with no visible re-enqueue, because the message never actually reaches the queue as a new delivery. DS-2 §7 lists this as owner sign-off item 2, explicitly recommending the attempt-field fix ship in the SAME wave as the queue recreation (task 108) that turns dedup on in the first place.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Enqueue/HandlerEnvelope.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Enqueue/ServiceBusHandlerEnqueuer.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/StateReconcilerService.cs (BuildEnvelope / ReconcilerEnqueuePayload)</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Enqueue/ReconcilerEnqueuePayloadAttemptTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="108" status="pending">The attempt field is meaningless without dedup being enabled; sequence together but this task's code change is independently authorable -- test acceptance can run against a local in-memory dedup simulation if the live queue property change has not yet been verified</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md MUST rules (post-line-254 block)">Every Service Bus enqueue MUST carry the HandlerEnvelope `attempt` field; MessageId = SHA256(HandlerId|RunId|CustomerId|paramHash|attempt) so a reconciler-driven re-enqueue after a Sec.4C RetryableWithCleanup transition produces a fresh MessageId (not silently dropped by SB duplicate-detection).</constraint>
+    <constraint source="DS-2 §4-L1">First-enqueue MUST stay attempt-absent (or attempt=0) so the reconciler-tick duplicate-suppression mechanism -- the actual purpose of L1 dedup -- is preserved; only the re-enqueue path increments attempt.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ReconcilerEnqueuePayload attempt field</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2-dispatcher-design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (TEST-MODIFYING, unconditional FULL). Read DS-2 §4-L1 in full plus ServiceBusHandlerEnqueuer.cs's existing MessageId computation (:185-192).</step>
+    <step order="1" name="HandlerEnvelope field">Add int Attempt (default 0) to HandlerEnvelope, camelCase-serialized to match the existing BodySerializerOptions contract.</step>
+    <step order="2" name="MessageId hash">Update ComputeMessageId to SHA256(HandlerId|RunId|CustomerId|paramHash|attempt) per spec.md's MUST rule.</step>
+    <step order="3" name="Re-enqueue path">In StateReconcilerService's BuildEnvelope / re-enqueue call site, increment attempt from the run's tracked retry count for the phase being retried; leave the normal ready-set enqueue path at attempt=0 (unchanged byte-stability).</step>
+    <step order="4" name="Tests">Author or extend ReconcilerEnqueuePayloadAttemptTests: retry-path MessageId != original enqueue MessageId (different attempt -&gt; different hash); first-enqueue MessageId is IDENTICAL across repeated reconciler ticks with no run-state change (attempt stays 0, byte-stability preserved).</step>
+    <step order="5" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the run's tracked retry count for a phase does not exist as an accessible field the reconciler can read at re-enqueue time (only inferred from CompletedPhases/ErrorDetail), STOP and escalate to determine whether a new tracked field is needed on ProvisioningRun -- do not synthesize an attempt value from an unreliable proxy (e.g., DateTime-based) that could produce hash collisions or non-monotonic attempt numbers.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Enqueue/HandlerEnvelope.cs (modified)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Enqueue/ReconcilerEnqueuePayloadAttemptTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">HandlerEnvelope serializes an 'attempt' field (camelCase) in its JSON payload.</criterion>
+    <criterion testable="true">ComputeMessageId(envelope) with attempt=1 produces a DIFFERENT hash than the same envelope with attempt=0, all other fields equal.</criterion>
+    <criterion testable="true">ReconcilerEnqueuePayloadAttemptTests: a simulated §4C retry re-enqueue produces a MessageId distinct from the original failed dispatch's MessageId.</criterion>
+    <criterion testable="true">ReconcilerEnqueuePayloadAttemptTests: two consecutive reconciler ticks against an unchanged ready-set produce IDENTICAL MessageIds (byte-stability preserved for the tick-duplicate-suppression purpose).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- ReconcilerEnqueuePayload's byte-stability already exists and is deliberate (tick-duplicate suppression). Extension -- adding one field to the existing hash input is the minimal fix DS-2 itself recommends over any redesign. Cost-of-doing-nothing -- enabling SB duplicate-detection (task 108) WITHOUT this fix silently breaks the entire §4C auto-retry mechanism the moment it is needed, with no operator-visible signal that the retry never actually reached the queue.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

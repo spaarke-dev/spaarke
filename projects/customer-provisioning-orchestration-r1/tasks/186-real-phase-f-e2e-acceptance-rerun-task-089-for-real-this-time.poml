@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="186" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Real Phase F E2E acceptance rerun (task 089 for real this time)</title>
+    <phase>C'' Wave G-7 -- Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Full E2E acceptance run against a real customer stamp -- irreversible-adjacent (live Azure/Dataverse/SPE/Exchange resources provisioned for a real trial customer), the project's terminal deliverable.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Named explicitly in the parent task instructions' xhigh-effort exception list: 'brownfield/root-cause or complex-but-fully-specified' -- Sonnet @ xhigh given the operator-facing coordination + multi-day calendar span (24h SPE gate).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>185, 113, 162</deps>
+    <tags>l2-controlplane, deploy, testing, integration-test</tags>
+    <estimated-effort>16-24 hours (spans a 24h+ calendar window for the SPE replication gate)</estimated-effort>
+  </metadata>
+
+  <prompt>Execute a REAL end-to-end customer provisioning run against a dev Model-2-Spaarke-hosted stamp using the NOW-FUNCTIONAL pipeline (every handler real per Waves G-1..G-7, dispatcher live, H13's real aggregation gate wired per task 185): invoke the run via the `/provision-environment` skill (this project's Phase D deliverable, already ✅) or a direct L2 REST call; poll the run to completion across the 24h SPE replication gate + any consent-latency gates; verify sprk_dataverseenvironment.SetupStatus REACHES Ready (task 184's real writer, gated by task 185's real aggregation) -- for the FIRST TIME via actual code execution, not a claimed/simulated pass. This supersedes the original task 089 (Phase F, currently SPLIT MODE per TASK-INDEX.md — scaffolding landed, owner invocation pending) by actually exercising the pipeline this whole Phase C'' build exists to make real.</prompt>
+
+  <role>SPAARKE platform developer / provisioning operator. Expert in coordinating a full multi-day E2E acceptance run, monitoring dispatcher/reconciler health across a live run, and escalating per this project's Human Escalation Triggers if any gate misbehaves.</role>
+
+  <goal>A real customer provisioning run reaches sprk_dataverseenvironment.SetupStatus = Ready via the fully-real pipeline. All 6 T1-T6 traps and all 5 I1-I5 invariants are confirmed Pass by task 185's real aggregation (not fakes). The naming-conformance and cost-envelope checks Pass. A comprehensive acceptance report is filed superseding the prior scaffolding-only Phase F report, documenting: total wall-clock (compared against DS-2b's ~26-28h estimate), any manual-gate latencies observed (H0.5 admin consent, H8's 24h SPE gate, H11's B2B consent if applicable), and confirmation that this is the FIRST TIME the project's stated goal (FR-18/SC#5: E2E customer provisioning) has been demonstrated by actual code execution.</goal>
+
+  <context>
+    <background>This project's TASK-INDEX.md records the ORIGINAL task 089 as 'SPLIT MODE... Scaffolding half (harness + report skeleton + operator runbook) landed by subagent; owner interactive invocation of /provision-environment pending' -- meaning the acceptance run itself never actually happened against a working pipeline (because, per the r1-gap-analysis this whole Phase C'' build responds to, the pipeline was NOT actually working: the dispatcher didn't exist, 11 of 19 handlers shelled out to unavailable tools, and several 'shipped' handlers were placeholder-backed). This task is the payoff: with Waves G-1 through G-7 complete, the pipeline is genuinely capable of E2E execution for the first time, and this task proves it.</background>
+    <relevant-files>
+      <file role="canonical-reference">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/tasks/089-phase-f-e2e-acceptance.poml</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/phase-c-double-prime-e2e-acceptance-real-run.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="185" status="pending">H13's real gate aggregation must be complete -- the acceptance-target transition this run proves</dependency>
+      <dependency task="113" status="pending">Deploy-ControlPlane.ps1 must be able to deploy the fully-built L2 pipeline to the target environment for this run</dependency>
+      <dependency task="162" status="pending">The sidecar must be live-verified for H14a's live functionality during this run</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="this project's plan.md §8 risk register (task 089 row)">E2E acceptance on a trial stamp carries cost overruns + regional TPM headroom risk -- H0 preflight (task 120) catches upstream issues; escalate on ANY trap/invariant/cost fail per the existing escalation-trigger convention.</constraint>
+    <constraint source="Human Escalation Triggers (root CLAUDE.md §6 + this project's CLAUDE.md)">Any Model 2 customer commitment trigger, any live-dev KV drift encountered, any GraphAppRoles.cs unexpected role-ID enumeration, and any tenant-isolation invariant failure outside expected ArchTest work are all binding escalation triggers during this run — do not silently work around any of them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Real Phase F E2E acceptance rerun</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2b-concurrency-safety-deep-dive.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL, xhigh effort). Read the ORIGINAL task 089's scaffolding + report skeleton + operator runbook in full; confirm Waves G-1..G-7 are ALL complete before starting (this task's &lt;deps&gt; alone do not guarantee every intermediate task landed -- verify against TASK-INDEX.md).</step>
+    <step order="1" name="Invoke">Invoke the run via /provision-environment (or a direct L2 REST call) against a fresh dev Model-2-Spaarke-hosted stamp per the owner's 2026-08-18 Path A exception (Model 2 primary; Model 1 discretionary, per the original task 089's amendment).</step>
+    <step order="2" name="Monitor">Poll GET /api/runs/{id} at the skill's established interval; monitor the dispatcher/reconciler's health throughout (App Insights, logs endpoint) across the full run including the 24h SPE gate wait.</step>
+    <step order="3" name="Manual gates">Handle H0.5 admin-consent, H8's 24h SPE gate, and any H11 B2B consent gate per the skill's established manual-gate handling (never auto-advance without re-verification via L2, per this project's skill design).</step>
+    <step order="4" name="Verify Ready">Confirm sprk_dataverseenvironment.SetupStatus reaches Ready, written by task 184's real PATCH, gated by task 185's real aggregation of all 15 checks.</step>
+    <step order="5" name="Sample verification">Verify /health succeeds; sample analysis + sample doc upload+index + workspace-layout render + wizard field-map all succeed (per plan.md §7's Phase F acceptance criteria, now via IE2EValidationRunner's real checks, task 181).</step>
+    <step order="6" name="Report">File a comprehensive acceptance report at notes/phase-c-double-prime-e2e-acceptance-real-run.md, superseding the prior scaffolding-only report, documenting wall-clock, gate latencies, and explicit confirmation this is the first genuine E2E demonstration.</step>
+    <step order="7" name="Update task 089's record">Cross-reference this task's report from the ORIGINAL task 089's POML/notes, clarifying that 089's SPLIT-MODE scaffolding is now superseded by a real run under this Phase C'' task.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY of the 6 T1-T6 traps, 5 I1-I5 invariants, naming-conformance, or cost-envelope checks FAILS during this run, STOP and escalate per this project's Human Escalation Triggers — do NOT mark the run as accepted with a documented exception; a Wave G-7 acceptance-gate failure on the FIRST real run is exactly the signal the entire Phase C'' build exists to surface honestly, and papering over it here would recreate the original overstatement problem DS-4's audit found.</trigger>
+    <trigger>If the run's wall-clock materially exceeds DS-2b's ~26-28h estimate (excluding the known 24h SPE gate) by a wide margin, STOP and escalate to determine whether a specific handler is pathologically slow (a correctness-adjacent regression, not merely a performance curiosity) rather than silently absorbing the delay.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp-usage">registry verification</tool>
+    <tool name="az account">operator identity for L2 REST calls</tool>
+    <tool name="terminal">monitoring + log inspection</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/customer-provisioning-orchestration-r1/notes/phase-c-double-prime-e2e-acceptance-real-run.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">sprk_dataverseenvironment.SetupStatus reaches Ready for the run's target customer, verified by an independent Dataverse read (not merely the run's own self-report).</criterion>
+    <criterion testable="true">All 6 T1-T6 traps report Pass (verified via the run's logs/report, sourced from task 185's real aggregation, not a fake).</criterion>
+    <criterion testable="true">All 5 I1-I5 invariants report Pass.</criterion>
+    <criterion testable="true">naming-conformance and cost-envelope checks report Pass.</criterion>
+    <criterion testable="true">/health succeeds; sample analysis + sample doc upload+index + workspace-layout render + wizard field-map all succeed per IE2EValidationRunner's real checks (task 181).</criterion>
+    <criterion testable="true">A comprehensive acceptance report exists documenting wall-clock, gate latencies, and any deviations, explicitly confirming this is the first genuine (non-scaffolding) E2E demonstration of FR-18/SC#5.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the ORIGINAL task 089 scaffolding (harness + report skeleton + operator runbook) already exists and is reused, not rebuilt. Extension -- this task is the genuine EXECUTION the scaffolding was always meant to support, now that the pipeline underneath it is real. Cost-of-doing-nothing -- without this task, the project's stated goal (E2E customer provisioning per FR-18/SC#5) remains UNDEMONSTRATED even after every Wave G-1..G-7 fix lands individually — this is the task that actually closes the loop the r1-gap-analysis opened.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

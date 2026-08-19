@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Bicep: SB Data Receiver (+Sender) RBAC role assignments for L2 UAMI(s) (C5.5)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>RBAC grant is a hard mechanical prerequisite for any deployed-dispatcher smoke test; missing it produces a loud but blocking failure at first live receive. FULL per l2-controlplane default + azure-deployment.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copies an existing verified Bicep RBAC pattern (membership-topic.bicep) onto a new scope -- mechanical, Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100, 101</deps>
+    <tags>l2-controlplane, dispatcher, auth, azure-deployment</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add two Microsoft.Authorization/roleAssignments resources on the sprk-provisioning-jobs namespace/queue scope for the controlplane Worker UAMI principal: Azure Service Bus Data Sender (69a216fc-..., currently live-manual only per DS-5) and Azure Service Bus Data Receiver (4f6d3b9b-..., GRANTED NOWHERE TODAY -- a hard prerequisite for task 102's dispatcher to receive ANY message). Copy the exact deterministic-GUID-name pattern from modules/membership-topic.bicep:120-131 (bffSenderOnTopic / bffReceiverOnSubscription). Because the Service Bus namespace lives in a different resource group than the L2 stamp, use a module deployed at the namespace's RG scope (preferred) OR document an `az role assignment create` step in the task 113 deploy script as an explicit, documented fallback if cross-RG module plumbing proves disproportionate.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure RBAC role-assignment Bicep authoring, cross-resource-group module scoping, and deterministic role-assignment GUID naming.</role>
+
+  <goal>The Worker UAMI (and, if the two-UAMI split from task 100/101 is already live, the Api UAMI for Sender-only) holds Azure Service Bus Data Receiver + Data Sender at the sprk-provisioning-jobs namespace or queue scope, granted via Bicep (deterministic, idempotent), NOT a manual runbook az command as the primary path. az role assignment list confirms both grants live on dev.</goal>
+
+  <context>
+    <background>DS-5's Category-5 finding: platform-controlplane.bicep contains ZERO Microsoft.Authorization/roleAssignments resources (grep-confirmed; only a comment at line 134 describing intended grants) -- every live RBAC grant on the dev stamp today is manual, undocumented-in-source drift. C5.5 specifically flags Data Receiver as 'granted nowhere' -- without it, task 102's ServiceBusSessionProcessor.StartProcessingAsync fails immediately and loudly (the correct NFR-05 posture, but a blocking one) on first deploy.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/platform-controlplane.bicep</file>
+      <file role="new">infrastructure/bicep/modules/controlplane-sb-rbac.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/membership-topic.bicep</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">Two-UAMI split (Api vs Worker) determines whether this grants one principal or two</dependency>
+      <dependency task="101" status="pending">Worker App Service resource (and its UAMI) must exist as the grant target</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-5 §C5.5">Land in Bicep (deterministic GUID names, idempotent), NOT as runbook `az role assignment create` -- the stamp owns its identity's grants. The cross-RG fallback (az step in the deploy script) is acceptable ONLY if a cross-RG module proves disproportionate; document the choice either way in this task's notes.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Service Bus RBAC for L2 UAMI(s)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+    </files>
+    <patterns>
+      <pattern name="Deterministic role-assignment naming" location="infrastructure/bicep/modules/membership-topic.bicep:120-131">bffSenderOnTopic/bffReceiverOnSubscription pattern -- guid()-derived resource names for idempotent roleAssignments.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read membership-topic.bicep:100-140 in full as the copy source.</step>
+    <step order="1" name="Decide scope shape">Confirm whether task 100/101's UAMI split is single-shared or two-UAMI at this point in the wave; grant Sender+Receiver to whichever principal(s) the Worker resolves to (Receiver is Worker-only if split; Sender may also apply to Api for enqueue).</step>
+    <step order="2" name="Author RBAC module">controlplane-sb-rbac.bicep: two roleAssignment resources (Sender GUID 69a216fc-..., Receiver GUID 4f6d3b9b-...) at namespace scope, deterministic names via guid(namespaceId, principalId, roleId).</step>
+    <step order="3" name="Cross-RG wiring">If the namespace RG differs from the stamp RG, deploy this module at the namespace RG scope (targetScope + explicit resourceGroup() reference); else keep it in the main template.</step>
+    <step order="4" name="Wire in">Invoke the module from platform-controlplane.bicep, passing the resolved principal id(s).</step>
+    <step order="5" name="Validate">az bicep build -- 0 errors; az deployment (resource-group scoped to the namespace RG) what-if confirms the two roleAssignments as Create with no other diff.</step>
+    <step order="6" name="Live grant + verify">Deploy; az role assignment list --scope &lt;namespace-id&gt; --assignee &lt;uami-principal-id&gt; confirms both role definitions present.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If cross-RG module deployment via Bicep proves genuinely disproportionate (e.g., the namespace RG's deployment permissions are not available to the same principal running this deploy), STOP and use the documented az-step fallback in task 113's deploy script instead, citing this escalation in the PR description per the ADR Conflict Resolution Protocol path C (pivot to the simpler-but-still-correct approach) — do not silently abandon the Bicep-first requirement without noting why.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az bicep">build</tool>
+    <tool name="az deployment">group what-if/create</tool>
+    <tool name="az role assignment">list verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">infrastructure/bicep/modules/controlplane-sb-rbac.bicep</output>
+    <output type="infra">infrastructure/bicep/platform-controlplane.bicep (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az bicep build exits 0 for the new module + platform-controlplane.bicep.</criterion>
+    <criterion testable="true">az deployment what-if shows exactly 2 new Microsoft.Authorization/roleAssignments resources (Sender + Receiver) at the SB namespace scope.</criterion>
+    <criterion testable="true">Post-deploy: az role assignment list --scope &lt;namespace-resource-id&gt; shows Azure Service Bus Data Receiver AND Azure Service Bus Data Sender both present for the Worker UAMI's principal id.</criterion>
+    <criterion testable="true">grep 'roleAssignments' platform-controlplane.bicep (or the new module) shows Bicep-managed resources, not a comment describing an intended manual grant.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- membership-topic.bicep already has the exact deterministic-naming RBAC pattern this task needs; nothing new to invent. Extension -- copying the proven pattern onto a new scope (SB namespace instead of topic/subscription) is the correct move, not a novel mechanism. Cost-of-doing-nothing -- task 102's dispatcher fails at boot (StartProcessingAsync) with zero Data Receiver grant; this is DS-5's explicit 'mechanically absolute for live receive' prerequisite.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

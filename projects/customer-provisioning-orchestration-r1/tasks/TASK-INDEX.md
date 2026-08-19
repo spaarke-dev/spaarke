@@ -1,8 +1,8 @@
 # TASK-INDEX — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-16 (by `/project-pipeline` Step 3)
-> **Status**: Ready for `task-execute` (Phase A first)
-> **Task count**: 78 POMLs (across 10 phases)
+> **Last Updated**: 2026-08-18 (Phase C'' Wave G-1..G-7 task decomposition appended — 58 new POMLs per DS-4/DS-1b/DS-2/DS-2b/DS-3/DS-5/DS-8)
+> **Status**: Ready for `task-execute` (Phase A first); Phase C'' (100-186) is the execution-engine build phase delivering FR-18/SC#5 E2E provisioning
+> **Task count**: 136 POMLs (78 original across 10 phases + 58 Phase C'' across 7 waves)
 > **Spec**: [`../spec.md`](../spec.md) · **Plan**: [`../plan.md`](../plan.md) · **Design**: [`../design.md`](../design.md) v3.3
 > **Legend**: 🔲 not-started · 🟡 in-progress · ✅ completed · 🔄 needs-retry · ⏸ blocked · ⏭️ deferred
 
@@ -168,6 +168,119 @@ Two additional corrections independently caught by task-gen subagents:
 | 087 | ✅ | Implement `/config.json` runtime endpoint for external-spa + code-pages (parallel-safe:false — external-spa surface overlap) | FULL | sonnet / xhigh | none | 086 |
 | 088 | ✅ | Coordinate `.github/workflows/**` gate wiring via PR to `ci-cd-unit-test-remediation-r1` (umbrella spec notes/phase-h-ci-wiring-coord-pr.md: naming-conformance + I1-I5 ArchTests + nightly Graph parity; consolidates 067's partial as §3 detail source) — parallel-safe:false | STANDARD | sonnet / medium | none (dep 064-067 + 084-087) | 064, 065, 066, 067, 084, 085, 086, 087 |
 
+## Phase C'' — Execution-Engine Build (Waves G-1..G-7, 58 tasks)
+
+> Authored by task decomposition of DS-4 (handler audit) / DS-1b (Option D hybrid) / DS-2 + DS-2b (dispatcher design) / DS-3 (API/Worker split) / DS-5 (Cat 4/5/6 remediation) / DS-8 (Path X UAMI-Dataverse-App-User). Delivers the r1 stated goal: E2E customer provisioning per FR-18 / SC #5. All new tasks start at status not-started (🔲).
+
+### Phase C'' Wave G-1 -- Foundation (19 tasks)
+
+_L2 project split, dispatcher, keyed-DI, C4.5 serializer fix, queue recreate, Bicep config fixes, Path X grant script, C1.4 registry client, deploy script, sidecar image, CI coordination_
+
+| ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
+|---|---|---|---|---|---|---|
+| 100 | 🔲 | Split L2 project into .Core / .Api / .Worker (DS-3 Option 2) | FULL | opus / high | none | none |
+| 101 | 🔲 | Author .Worker App Service Bicep module + wire into platform-controlplane.bicep | STANDARD | sonnet / high | waveG1-parallel | 100 |
+| 102 | 🔲 | Implement ProvisioningHandlerDispatcher BackgroundService (ServiceBusSessionProcessor) in .Worker | FULL | opus / xhigh | none | 100, 101 |
+| 103 | 🔲 | HandlerIds catalog + keyed DI registration for 20 dispatchable handlers (C1.2) | FULL | sonnet / high | none | 100 |
+| 104 | 🔲 | Extract IHandlerOutcomeApplier from StateReconcilerService (C2.1 wiring hook) | FULL | sonnet / high | none | 100 |
+| 105 | 🔲 | Dispatcher decision + idempotency test suite (DispatchCoreAsync table-driven, DispatchIdempotencyService, envelope round-trip) | FULL | sonnet / high | none | 102 |
+| 106 | 🔲 | Fix C4.5: dual Newtonsoft StringEnumConverter on RunStatus/GateState/QuarantineState + serializer-contract test + Cosmos seam test | TEST-MODIFYING (unconditional FULL) | sonnet / high | waveG1-parallel | none |
+| 107 | 🔲 | Add attempt field to ReconcilerEnqueuePayload (L1 dedup vs §4C retry interaction fix) | TEST-MODIFYING (unconditional FULL) | sonnet / high | none | 108 |
+| 108 | 🔲 | Bicep: recreate sprk-provisioning-jobs queue with sessions + dedup (C5.4/C4.6) + drain-verify runbook | FULL | sonnet / high | none | none |
+| 109 | 🔲 | Bicep: fix config-key/audience/secret-name source drift (C5.1-C5.3) | FULL | sonnet / high | none | none |
+| 110 | 🔲 | Bicep: SB Data Receiver (+Sender) RBAC role assignments for L2 UAMI(s) (C5.5) | FULL | sonnet / high | none | 100, 101 |
+| 111 | 🔲 | Author Grant-ControlPlaneIdentity.ps1 (Path X Dataverse App User + scoped custom role + C5.8 Graph app-role grants) | FULL | opus / high | waveG1-parallel | none |
+| 112 | 🔲 | Implement C1.4 L2 Dataverse registry client (MI-native, DefaultAzureCredential) | FULL | opus / high | none | 111 |
+| 113 | 🔲 | Author Deploy-ControlPlane.ps1 (L2 repeatable deploy script, C5.9/C1.7) | STANDARD | sonnet / high | none | 100, 101, 108, 109 |
+| 114 | 🔲 | Build Exchange sidecar image (Dockerfile + pwsh HTTP listener + Set-ExchangeApplicationAccessPolicy.ps1 port) | FULL | opus / high | waveG1-parallel | none |
+| 115 | 🔲 | GitHub Actions workflow for sidecar build/push (ACR + Trivy gate) -- coordinated with ci-cd-r1 | STANDARD | sonnet / high | waveG1-parallel | 114 |
+| 116 | 🔲 | CI coordination PR: BFF artifact publish workflow extension for H9 (blob store + latest.json manifest) | STANDARD | sonnet / high | waveG1-parallel | none |
+| 117 | 🔲 | CI coordination: Bicep->ARM-JSON pre-compile step for H2a | STANDARD | sonnet / high | waveG1-parallel | none |
+| 118 | 🔲 | Integration seam test: dispatch spine (message -> handler -> Cosmos transition -> DAG advance) | TEST-MODIFYING (unconditional FULL) | sonnet / high | none | 102, 104, 106, 108 |
+
+### Phase C'' Wave G-2 -- Entry + resources (7 tasks)
+
+_H0/H1/H0.5/H2a/H2b/H4 SDK ports incl. H4 real-value-sourcing correctness gate_
+
+| ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
+|---|---|---|---|---|---|---|
+| 120 | 🔲 | H0: SDK-port 4 preflight probes (ARM.CognitiveServices TPM, BAP-REST env-rate, ARM.Compute vCPU, KV cert-bootstrap) | FULL | sonnet / high | waveG2-parallel | 102, 103 |
+| 121 | 🔲 | H1: real ARM subscription-reachability + Lighthouse probe (replace NullSubscriptionReadinessProbe) | FULL | sonnet / high | waveG2-parallel | 102, 103 |
+| 122 | 🔲 | H0.5: DI-swap onto C1.4 registry client (remove NullDataverseEnvironmentRegistryClient) | FULL | sonnet / high | none | 112 |
+| 123 | 🔲 | H2a: ARM.Resources deployment port (ArmDeployment.CreateOrUpdateAsync + WhatIfAtSubscriptionScopeAsync) + T1 KV-ref probe port | FULL | sonnet / xhigh | waveG2-parallel | 102, 103, 117 |
+| 124 | 🔲 | H2b: SearchIndexClient port + REAL AI Search tenant-filter template provisioner (replace Stub) | FULL | sonnet / high | waveG2-parallel | 102, 103, 123 |
+| 125 | 🔲 | H4: SecretClient family port + ARM.AppService KeyVaultReferenceIdentity PATCH (T1) both slots + ARM.Authorization role assignment (T5) | FULL | sonnet / high | none | 102, 103, 123 |
+| 126 | 🔲 | H4: real value-sourcing per KvSecretValueSource (generate/copy/reference) + task-084 canonical manifest DI-swap (C2.2) | FULL | sonnet / xhigh | none | 125 |
+
+### Phase C'' Wave G-3 -- Identity + deploy (3 tasks)
+
+_H3 Graph app-reg + real consent verifier, H8 confidential-client, H9 artifact-based rebuild_
+
+| ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
+|---|---|---|---|---|---|---|
+| 130 | 🔲 | H3: Graph app-reg port (Applications/ServicePrincipals/AppRoleAssignedTo/Oauth2PermissionGrants) + real consent verifier + KV writes + H10-idiom app-user assign | FULL | sonnet / xhigh | none | 102, 103, 125, 126 |
+| 131 | 🔲 | H8: Graph containerTypes port (ClientCertificateCredential, T6 cert from KV) | FULL | sonnet / high | none | 102, 103, 125, 126 |
+| 132 | 🔲 | H9: artifact-based rebuild -- handler side (manifest verify + blob download + Kudu zip-deploy + SwapSlotAsync + rollback re-swap) | FULL | sonnet / high | none | 102, 103, 116 |
+
+### Phase C'' Wave G-4 -- Dataverse chain (5 tasks)
+
+_H5/H6/H7 SDK ports + credential config, H10/H11 live verification_
+
+| ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
+|---|---|---|---|---|---|---|
+| 140 | 🔲 | H5: BAP-REST env-create + async-operation-polling port | FULL | sonnet / high | waveG4-parallel | 102, 103, 123 |
+| 141 | 🔲 | H6: Web-API import port (ImportSolution/StageAndUpgrade + ImportJob polling) + ZIP artifact packaging | FULL | sonnet / xhigh | none | 102, 103, 140 |
+| 142 | 🔲 | H7: credential provisioning (EnvVarValues:ClientSecret KV ref) + NFR-05 validation | STANDARD | sonnet / high | waveG4-parallel | 126 |
+| 143 | 🔲 | H10: live verification post C5.8 grants (5 REST/Graph seams, code already real) | FULL | sonnet / high | none | 111, 140 |
+| 144 | 🔲 | H11: live verification post C5.8 grants (Graph REST + B2B invitation + consent verifier, code already real) | FULL | sonnet / high | none | 111, 143 |
+
+### Phase C'' Wave G-5 -- Seed (4 tasks)
+
+_H12a YamlDotNet engine, H12b DV-REST ports + 2 greenfield seeders (completes FR-16), H12c config_
+
+| ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
+|---|---|---|---|---|---|---|
+| 150 | 🔲 | H12a: YamlDotNet manifest engine + DV-REST seed writes | FULL | sonnet / high | waveG5-parallel | 141 |
+| 151 | 🔲 | H12b: 2 near-mechanical DV-REST ports (DataGrid + workspace-layout seeders) | STANDARD | sonnet / high | waveG5-parallel | 141 |
+| 152 | 🔲 | H12b: 2 greenfield seeders (field-mapping + chart-def) -- completes FR-16 | FULL | sonnet / high | none | 151 |
+| 153 | 🔲 | H12c: credential config only (no code delta) | STANDARD | sonnet / high | waveG5-parallel | 123, 150, 151, 152 |
+
+### Phase C'' Wave G-6 -- Integration wiring (3 tasks)
+
+_H14 KV-reader swap, H14a sidecar client wiring, sidecar live verification_
+
+| ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
+|---|---|---|---|---|---|---|
+| 160 | 🔲 | H14: KV-reader swap (AzCliKvSecretReader -> SecretClient) | FULL | sonnet / high | waveG6-parallel | 125, 153 |
+| 161 | 🔲 | H14a: sidecar client wiring (ExchangePolicySidecarClient : IExchangePolicyApplier) + envelope round-trip contract test | FULL | opus / high | none | 114, 160 |
+| 162 | 🔲 | Sidecar live verification against dev L2 Worker App Service (localhost sitecontainer binding + per-boot shared-secret header) | FULL | opus / high | none | 101, 113, 114, 161 |
+
+### Phase C'' Wave G-7 -- Acceptance (17 tasks)
+
+_11 real T1-T6/I1-I5 probes, 3 runner ports, real Ready writer, gate aggregation, real E2E rerun_
+
+| ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
+|---|---|---|---|---|---|---|
+| 170 | 🔲 | I1: naming/tenant-literal invariant probe (pure C#, no live deps -- easiest first) | FULL | sonnet / high | waveG7-parallel | none |
+| 171 | 🔲 | T1: keyVaultReferenceIdentity trap probe (pipelined with H2a/H4) | FULL | sonnet / high | waveG7-parallel | 123, 125 |
+| 172 | 🔲 | T5: slot-MI KV RBAC role-assignment probe (pipelined with H4) | FULL | sonnet / high | waveG7-parallel | 125 |
+| 173 | 🔲 | I2: AI Search tenant filter probe (pipelined with H2b) | FULL | sonnet / high | waveG7-parallel | 124 |
+| 174 | 🔲 | I3: Cosmos partition-key probe (pipelined with H2a) | FULL | sonnet / high | waveG7-parallel | 123 |
+| 175 | 🔲 | T6: SPE confidential-client trap probe (pipelined with H8) | FULL | sonnet / high | waveG7-parallel | 131 |
+| 176 | 🔲 | I4: SPE container resolver probe (pipelined with H9) | FULL | sonnet / high | waveG7-parallel | 132 |
+| 177 | 🔲 | T2: Dataverse App User pair probe (pipelined with H10) | FULL | sonnet / high | waveG7-parallel | 143, 111 |
+| 178 | 🔲 | T3: Graph app-role parity (14) probe (pipelined with H10) | FULL | sonnet / high | waveG7-parallel | 143 |
+| 179 | 🔲 | I5: Graph token tenant scope probe (pipelined with C5.8 grants) | FULL | sonnet / high | waveG7-parallel | 111 |
+| 180 | 🔲 | T4: Exchange policy count probe (sidecar read-route, pipelined with H14a) | FULL | sonnet / high | waveG7-parallel | 114, 161, 162 |
+| 181 | 🔲 | IE2EValidationRunner C# port (replaces Validate-DeployedEnvironment.ps1) | FULL | sonnet / high | none | 132, 141, 142, 173 |
+| 182 | 🔲 | INamingConformanceChecker pure-C# port | STANDARD | sonnet / high | waveG7-parallel | none |
+| 183 | 🔲 | ICostEnvelopeChecker ARM.CostManagement port | FULL | sonnet / high | waveG7-parallel | 123 |
+| 184 | 🔲 | IRegistrySetupStatusUpdater real DV-REST PATCH (Ready writer) -- the acceptance-target transition itself | FULL | sonnet / high | none | 112, 181, 182, 183 |
+| 185 | 🔲 | H13 gate aggregation wiring -- assemble all 11 probes + 3 runners + Ready writer into final acceptance logic | FULL | opus / high | none | 170, 171, 172, 173, 174, 175, 176, 177, 178, 179, 180, 181, 182, 183, 184 |
+| 186 | 🔲 | Real Phase F E2E acceptance rerun (task 089 for real this time) | FULL | sonnet / xhigh | none | 185, 113, 162 |
+
+**Note on task 089 vs task 186**: The original task 089 (below) is recorded SPLIT MODE — its scaffolding (harness + report skeleton + operator runbook) landed, but the actual E2E acceptance run against a genuinely-functional pipeline never happened, because the pipeline was not genuinely functional (per the r1-gap-analysis this Phase C'' build responds to: no dispatcher existed, 11 of 19 handlers shelled out to unavailable tools, several handlers were placeholder-backed). Task 186 is the REAL rerun once Waves G-1..G-7 land; it supersedes 089 as the project's actual acceptance evidence. Do not close out this project on 089 alone.
+
 ### Phase F — E2E Acceptance (1 task)
 
 | ID | Status | Title | Rigor | Model / Effort | Parallel Group | Deps |
@@ -319,10 +432,11 @@ Per `notes/resource-discovery-2026-08-16.md`:
 
 | Metric | Value |
 |---|---|
-| **Total tasks** | 78 |
-| **not-started** 🔲 | 11 |
+| **Total tasks** | 136 (78 original + 58 Phase C'' Wave G-1..G-7, added 2026-08-18) |
+| **not-started** 🔲 | 69 (11 original + 58 Phase C'') |
 | **in-progress** 🟡 | 0 |
 | **completed** ✅ | 67 (Wave 0: 18; Wave 1: 9; Wave 2: 7; Wave 3: 19; Wave 4A: 081+084; Wave 4B: 052+057+064+077; Wave 4C: 058+065+066+085; Wave 4D: 059+060+061+086) |
+| **Phase C'' task decomposition (2026-08-18)** | 58 new POMLs (100-186) authored per DS-4/DS-1b/DS-2/DS-2b/DS-3/DS-5/DS-8 across Waves G-1..G-7 — the execution-engine build phase delivering FR-18/SC#5 E2E provisioning. See dedicated Phase C'' section above. All status not-started; NOT yet executed. |
 | **Wave 4 Batch 4D COMPLETE (2026-08-18)** | 4 POML tasks + 3 drift fixes + 1 Path A drift wrap-up landed clean · 059 `3964bba4c` (I5 concurrency guard — 18 new tests, Quarantined reason-code fully wired) · 060 `869b650ab` (I6 crash recovery — 24 new tests, MessageId byte-identity to reconciler) · 061 `22ad121a8` (§4C rollback — Rollback module with 4-class taxonomy + QuarantineClearService) · 086 `fa121e534` (5 Bicep files + platform.json regen, 0 orphans to delete, publish 43.64 MB Δ −1.32 MB) · Drift 1 `ed4cdee42`+`cf6de1d3b` (MI factory TenantId + I5 broadened to Infrastructure/Auth/**) · Drift 2 `55997daf3` (2 prod PS scripts, source only) · Drift 3 `1d204667e` (RecordMatchServiceTests compile fix unblocked BFF verification) · Drift 4 `a70c4bf54` (ArchTest Path A for CustomerRunGuardOptions.ClientSecret) |
 | **Wave 4 Batch 4C COMPLETE (2026-08-17)** | 4 parallel subagents landed clean · 058 commit `1b0297c7b` (state-reconciler BackgroundService — 524/524 L2 tests, N=5 dedup verified) · 066 commit `e54cfb6e5` (verify 1834b77bc + regression seed test) · 085 commits `4ab4fbeda`+`06db97468` (AI Search alias collapse — 2 dev KV aliases deleted, health 200 after each step, soft-delete recovery until 2026-11-16) · 065 commit `f66a6add7` (12 baseline violations fixed + 47-site audit report; all 5 §4D ArchTests PASS 22/22 with neg-controls) |
 | **Wave 4 Batch 4B COMPLETE (2026-08-17)** | 057 `b8dcdfaeb` · 052 `67e8830ba` · 077 `111773ffc` · 064 `40b09f837` |

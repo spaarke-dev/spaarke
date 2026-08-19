@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Split L2 project into .Core / .Api / .Worker (DS-3 Option 2)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Structural refactor of the whole L2 project (folder moves + two thin hosts) that every downstream Wave G task builds on; touches Program.cs composition root and the 41-file test project's ProjectReference. High blast radius if mis-sequenced.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius structural project split named explicitly in task instructions (project split) -- Opus tier per root CLAUDE.md §8.5 escalation list.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, azure-deployment, option-d</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Split the existing single-process Sprk.Provisioning.ControlPlane project into three projects per DS-3 Option 2 (owner-locked): Sprk.Provisioning.ControlPlane.Core (class library: Handlers/**, Reconciler/** types, Repositories/, Enqueue/, Models/, Rollback/, Concurrency/, Registry/, Modules/{Cosmos,ServiceBus,Telemetry} + options types), Sprk.Provisioning.ControlPlane.Api (existing App Service target, thinned to Api/, Endpoints/, Middleware/, Modules/{Auth,Swagger}, ~150-line Program.cs, keeps staging slot + JWT bearer), and Sprk.Provisioning.ControlPlane.Worker (NEW, minimal WebApplication host with ONLY /healthz + /ping, no auth surface, to host the dispatcher/reconciler/crash-recovery in task 102+). This is folder-move-heavy, not dependency-untangling: the existing csproj has zero ProjectReferences (DS-3 §1.1/§3, grep-verified).</prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET solution/project restructuring, minimal-API composition roots, and multi-project DI extension-method patterns (AddXModule(services, config)).</role>
+
+  <goal>Three projects exist and build: Sprk.Provisioning.ControlPlane.Core.csproj (class lib, no Program.cs), Sprk.Provisioning.ControlPlane.Api.csproj (existing App Service target, thinned Program.cs referencing .Core), Sprk.Provisioning.ControlPlane.Worker.csproj (new, minimal host referencing .Core, /healthz + /ping only). The existing unit test project re-points its single ProjectReference to .Core (or .Api for the one WebApplicationFactory consumer, RunsEndpointsTests.cs, which follows .Api). dotnet build succeeds for all three + the test project. Zero behavior change -- this is a pure structural move.</goal>
+
+  <context>
+    <background>DS-3 (owner-locked) found Program.cs at 1,178 lines composing four workload classes (REST API, background services, 19-handler fleet, shared infra) into one process, and identified a disqualifying defect: the App Service staging slot inherits all app settings including Cosmos/SB access and Always On, so the moment the dispatcher (task 102) exists, deploying to staging boots a SHADOW WORKER that silently executes real provisioning handlers against production Cosmos/SB before any swap. DS-3 §7 shows the split is at its cheapest right now -- before the dispatcher is written, before any deploy script exists, before Phase F E2E evidence is collected on a topology that would otherwise need to be discarded. Sequence this as literally the first task of the Wave G-1 foundation so the dispatcher is born into its correct host.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Sprk.Provisioning.ControlPlane.csproj</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Sprk.Provisioning.ControlPlane.Core.csproj</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Api/Sprk.Provisioning.ControlPlane.Api.csproj</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Sprk.Provisioning.ControlPlane.Worker.csproj</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.2a">Runtime topology: the main site(s) (Sprk.Provisioning.ControlPlane.Api / .Worker) are stock DOTNETCORE|10.0 code-based App Service deploys -- zero custom container image, zero shells. The Exchange sidecar (H14a only) is the one designed exception, isolated to its own sitecontainer (DS-1b Sec.3).</constraint>
+    <constraint source="design.md §4.2b">The .Worker project is the ONLY project that will host the dispatcher (task 102), StateReconcilerService, and CrashRecoveryStartupService. .Api MUST keep the 8 REST endpoints + JWT bearer + staging slot; it MUST NOT host any BackgroundService that touches handler execution.</constraint>
+    <constraint source="DS-3 §3 Option 2">Auth split target (may ship on shared UAMI as interim per DS-3 -- do not block this task on the two-UAMI split, that is task 101's Bicep concern): .Api UAMI scoped to Cosmos + SB-Send only; .Worker UAMI gets the full grant set. This task only needs the CODE split; identity scoping is Bicep (task 101).</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 project split into Core/Api/Worker</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds3-api-worker-split.md</file>
+    </files>
+    <patterns>
+      <pattern name="Web-Queue-Worker split" location="src/server/api/Sprk.Bff.Api/">BFF is a single-process precedent this project deliberately does NOT repeat for L2 -- DS-3 §8 cites BFF's own ServiceBusJobProcessor coupling as the thing L2 should avoid inheriting.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load design-study-ds3-api-worker-split.md in full.</step>
+    <step order="1" name="Create Core project">dotnet new classlib -n Sprk.Provisioning.ControlPlane.Core; move Handlers/**, Reconciler/** (types only, not host registration), Repositories/, Enqueue/, Models/, Rollback/, Concurrency/, Registry/, Modules/{Cosmos,ServiceBus,Telemetry}, plus options types into it. Add the Azure SDK package references (Cosmos, ServiceBus, Identity, OTel) it needs.</step>
+    <step order="2" name="Thin .Api project">Rename/repoint the existing Sprk.Provisioning.ControlPlane project to Sprk.Provisioning.ControlPlane.Api. Keep Api/, Endpoints/, Middleware/, Modules/{Auth,Swagger}. Program.cs shrinks to ~150 lines: builds host, adds .Core modules, maps endpoints, no BackgroundService registrations.</step>
+    <step order="3" name="Create Worker project">dotnet new web (or webapi minimal) -n Sprk.Provisioning.ControlPlane.Worker. Reference .Core. Program.cs maps ONLY /healthz + /ping; no JWT/auth middleware, no Swagger. This is the future home for task 102 (dispatcher), the existing StateReconcilerService, and CrashRecoveryStartupService -- move their HOST REGISTRATIONS here now even though the dispatcher itself doesn't exist yet, so the split is complete in one pass.</step>
+    <step order="4" name="Re-point test project">Update the 41-file unit test project's ProjectReference to .Core. The single WebApplicationFactory consumer (Api/RunsEndpointsTests.cs) re-points to .Api instead.</step>
+    <step order="5" name="Solution file">Add both new projects + verify .Core to the .sln (or the solution filter the L2 build uses).</step>
+    <step order="6" name="Build + test">dotnet build across all three + test project = 0 errors. dotnet test = same green count as before the split (pure move, zero behavior change).</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: task 100 -&gt; in-progress pending code-review, or leave as the orchestrator's Step 11 handles per protocol.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the move surfaces a hidden circular dependency between what was assumed to be Core-only code and Api-only code (e.g., an endpoint file directly manipulating a Handler internal), STOP and escalate per CLAUDE.md §6 rather than collapsing the split back to one project -- the shadow-worker defect this split exists to close is otherwise still live.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">new/build/test/sln across the three projects</tool>
+    <tool name="terminal">file moves</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/**</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Api/**</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Worker/**</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/ exits 0.</criterion>
+    <criterion testable="true">dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Api/ exits 0 and the built Api host still maps all 8 existing REST endpoints (grep MapRunsEndpoints/MapRunLogsEndpoints/MapHealthEndpoints in the thinned Program.cs).</criterion>
+    <criterion testable="true">dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Worker/ exits 0 and its Program.cs maps only /healthz and /ping (grep confirms no Map*Endpoints call).</criterion>
+    <criterion testable="true">dotnet test against the re-pointed test project produces the SAME pass count as pre-split (grep test output totals before/after).</criterion>
+    <criterion testable="true">grep -r 'Sprk.Provisioning.ControlPlane\.' across both new Program.cs files shows .Api referencing only Endpoints/Middleware/Auth/Swagger namespaces and .Worker referencing only the future Dispatch/Reconciler namespaces -- no cross-contamination.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- no split exists today, Program.cs is 1,178 lines composing 4 workload classes. Extension -- cannot extend the single process without inheriting the always-on-staging-slot shadow-worker defect DS-3 §1.3 identifies as disqualifying. Cost-of-doing-nothing -- once the dispatcher (task 102) lands in the combined process, EVERY staging-slot deploy silently executes real provisioning handlers against production Cosmos/SB before swap; this is precisely the T-trap silent-fail class r1 exists to eliminate. Sequencing: this MUST land before task 102 (dispatcher) so the dispatcher is written once, host-native, in .Worker.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

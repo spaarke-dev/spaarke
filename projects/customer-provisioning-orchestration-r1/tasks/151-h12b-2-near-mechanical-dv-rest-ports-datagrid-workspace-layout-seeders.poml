@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H12b: 2 near-mechanical DV-REST ports (DataGrid + workspace-layout seeders)</title>
+    <phase>C'' Wave G-5 -- Seed</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Near-mechanical ~40-line-script ports with no complex logic, no BFF touch -- STANDARD per root CLAUDE.md §8, but touches L2 handler code so tagged accordingly.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two small, near-mechanical DV-REST ports per DS-1b's characterization ('~40-line az-token + Invoke-RestMethod scripts') -- Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG5-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>141</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port H12bAppConfigSeedHandler.cs's 2 REAL (not stubbed) collaborators: (1) PowerShellAppConfigSeeder(DataGrid) -&gt; seed-reconciliation-gridconfig.ps1 (az account get-access-token + Invoke-RestMethod GET/PATCH/POST on sprk_gridconfigurations); (2) PowerShellAppConfigSeeder(WorkspaceLayout) -&gt; Deploy-SystemWorkspaceLayouts.ps1 (424 lines, 2 az/REST call sites) -- BOTH follow the SAME near-mechanical az-token + Invoke-RestMethod pattern DS-1b characterizes as '~40 lines of Dataverse Web API upsert; near-mechanical port'. Port BOTH to HttpClient + DefaultAzureCredential Web API upserts. This task does NOT touch the 2 DeferredAppConfigSeeder no-op placeholders (field-mapping + chart-def) -- those are task 152's scope (greenfield, not a port).</prompt>
+
+  <role>SPAARKE platform developer. Expert in near-mechanical Dataverse Web API GET/PATCH/POST porting from short PowerShell scripts.</role>
+
+  <goal>H12bAppConfigSeedHandler.cs's DataGrid and WorkspaceLayout seeder collaborators are pure HttpClient + DefaultAzureCredential Dataverse Web API implementations, replacing their PowerShellAppConfigSeeder script-shells. per-scope seed/verify semantics match the source scripts exactly.</goal>
+
+  <context>
+    <background>DS-1b §1 (H12b row, collaborators #23/#24) classifies both as near-mechanical: 'same pattern, ~40 lines of Dataverse Web API upsert; near-mechanical port' for the DataGrid scope, and the identical characterization for WorkspaceLayout. DS-4 §2 (H12b row) classifies H12b overall as PARTIAL -- 'DataGrid + workspace-layout scopes = real pwsh seeders; field-mapping + chart-def scopes = DeferredAppConfigSeeder no-op' -- THIS task addresses only the 2 REAL scopes; task 152 addresses the 2 greenfield gaps.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/H12bAppConfigSeedHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiDataGridSeeder.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiWorkspaceLayoutSeeder.cs</file>
+      <file role="canonical-reference">scripts/seed-reconciliation-gridconfig.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-SystemWorkspaceLayouts.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="141" status="pending">H6 must have imported the sprk_gridconfigurations table + workspace-layout schema H12b seeds into</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H12b DataGrid + WorkspaceLayout seeder ports</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD). Read both source scripts in full.</step>
+    <step order="1" name="DataGrid seeder">Port seed-reconciliation-gridconfig.ps1's GET/PATCH/POST sequence on sprk_gridconfigurations to HttpClient + DefaultAzureCredential.</step>
+    <step order="2" name="WorkspaceLayout seeder">Port Deploy-SystemWorkspaceLayouts.ps1's 2 az/REST call sites to the same idiom.</step>
+    <step order="3" name="Wire up">Replace both PowerShellAppConfigSeeder instances in H12b's owning module.</step>
+    <step order="4" name="Tests">per-scope seed/verify tests per DS-4 §7's test-effort note.</step>
+    <step order="5" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'ProcessStartInfo' in the 2 new files returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiDataGridSeeder.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiWorkspaceLayoutSeeder.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'ProcessStartInfo' in the 2 new seeder files returns 0 matches.</criterion>
+    <criterion testable="true">A test confirms the DataGrid seeder's GET/PATCH/POST sequence matches the script's documented flow for a not-yet-existing vs already-existing config row.</criterion>
+    <criterion testable="true">A test confirms the WorkspaceLayout seeder correctly seeds the system layout rows per the script's documented shape.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- both source scripts are real, correct, and small; nothing to redesign. Extension -- a direct near-mechanical port is the correct minimal move DS-1b itself characterizes this way. Cost-of-doing-nothing -- these 2 seed scopes cannot execute under Option D's zero-shell main site, leaving DataGrid + workspace-layout configuration unseeded for every new customer.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

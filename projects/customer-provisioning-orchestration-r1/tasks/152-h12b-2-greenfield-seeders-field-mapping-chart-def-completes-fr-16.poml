@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="152" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H12b: 2 greenfield seeders (field-mapping + chart-def) -- completes FR-16</title>
+    <phase>C'' Wave G-5 -- Seed</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Greenfield seeders never authored anywhere in the repo before -- completes a half-delivered FR (DS-4: 'Half of FR-16 is undelivered -- second-strongest overstatement after H1/H13'). FULL rigor, new-component-justification-heavy.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Greenfield but well-scoped (2 seeders following the SAME idiom task 151 just proved) -- Sonnet @ high, not xhigh (the pattern is proven, only the content is new).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>151</deps>
+    <tags>l2-controlplane, job-handler, sdk-port</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the 2 GENUINELY GREENFIELD seeders replacing DeferredAppConfigSeeder's no-op placeholders for the field-mapping and chart-def scopes of H12bAppConfigSeedHandler.cs -- per DS-4 §2/§3: 'field-mapping + chart-def scopes = DeferredAppConfigSeeder no-op (C3.8 -- FR-16 half-delivered)... Half of FR-16 is undelivered -- second-strongest overstatement after H1/H13.' These have NEVER BEEN AUTHORED ANYWHERE in the repo (not even as a pwsh script to port) -- author them DIRECTLY as C# seeders using the SAME Dataverse Web API HttpClient idiom task 150/151 already established, per DS-1b's explicit framing: 'Must be authored from scratch anyway under every option; author directly as C# seeders, zero double-work.' Reference this project's Field Mapping Framework architecture doc for the field-mapping scope's data shape (sprk_fieldmapping records) and the chart-def scope's equivalent Dataverse table.</prompt>
+
+  <role>SPAARKE platform developer. Expert in authoring new Dataverse Web API seeders from a documented data-model reference (not a script to port), following an established in-process idiom.</role>
+
+  <goal>Two new seeder classes exist: a field-mapping seeder writing the default/system sprk_fieldmapping seed rows (per docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md's schema), and a chart-def seeder writing the default chart-definition seed rows -- both via HttpClient + DefaultAzureCredential Dataverse Web API upserts, matching the idiom H12c/task 150/task 151 already prove. FR-16's full 4-scope delivery (DataGrid + workspace-layout + field-mapping + chart-def) is complete.</goal>
+
+  <context>
+    <background>DS-4 §3 (H12b deep-dive) is explicit this is the SECOND-STRONGEST overstatement in the whole existing WBS after H1/H13: 'POML 071 claimed FR-16's 4 scopes; 2 of 4 are DeferredAppConfigSeeder no-ops whose mirrors were never authored in Wave C5.' DS-1b §1 (H12b row) frames the cost-benefit precisely: since these seeders must be authored from scratch under EVERY architecture option (they were never PowerShell scripts to begin with), building them directly as C# under Option D is zero-double-work, not an Option-D-specific tax.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/H12bAppConfigSeedHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiFieldMappingSeeder.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiChartDefSeeder.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DeferredAppConfigSeeder.cs (retire the 2 no-op call sites this task replaces)</file>
+      <file role="canonical-reference">docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="151" status="pending">The proven Dataverse Web API seeder idiom this task's 2 greenfield seeders follow</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+    <constraint source="docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md">The field-mapping seeder's data shape MUST match this doc's schema exactly (sprk_fieldmapping table, the 4 mapping types Copy/Default/Concat/Template, the sprk_expression extensibility seam) -- this is the authoritative reference cited by this project's root CLAUDE.md §17 pointer table.</constraint>
+    <constraint source="DS-1b §1 H12b row">Author DIRECTLY as C# seeders following task 150/151's proven idiom -- do NOT author a pwsh script first and then port it; that would be pure double-work for a scope that was never a script.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H12b field-mapping + chart-def greenfield seeders</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="Proven Dataverse Web API seeder idiom" location="task 150/151's output">Follow the SAME HttpClient + DefaultAzureCredential upsert pattern, just applied to net-new default-row content.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md IN FULL for the field-mapping schema; identify the chart-def table's schema from the Dataverse data-model docs or a live schema query.</step>
+    <step order="1" name="Default content">Determine the default/system field-mapping rows and chart-definition rows every new customer needs (consult the framework doc + any existing manual seeding notes/tribal knowledge captured in this project's discovery report).</step>
+    <step order="2" name="Field-mapping seeder">Author DataverseWebApiFieldMappingSeeder writing the default sprk_fieldmapping rows via the proven upsert idiom.</step>
+    <step order="3" name="Chart-def seeder">Author DataverseWebApiChartDefSeeder writing the default chart-definition rows via the same idiom.</step>
+    <step order="4" name="Wire up">Replace the 2 DeferredAppConfigSeeder no-op call sites in H12b's owning module with the new real seeders; retire DeferredAppConfigSeeder if it has no remaining callers.</step>
+    <step order="5" name="Tests">seed/verify tests for both new seeders + an idempotency test (re-run = no-op / update-in-place, not duplicate rows).</step>
+    <step order="6" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'DeferredAppConfigSeeder' in H12b's active DI registration returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the default content for field-mapping or chart-def rows is NOT clearly specified anywhere (framework doc, existing manual runbook, or a Dataverse admin's documented expectation), STOP and escalate to the project owner per CLAUDE.md §6 (ambiguous requirement) rather than inventing default seed content that could be wrong for every future customer — this is exactly the kind of silent-assumption defect the project's whole silent-fail-trap catalog exists to prevent.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiFieldMappingSeeder.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/DataverseWebApiChartDefSeeder.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'DeferredAppConfigSeeder' in H12b's active DI registration for the field-mapping and chart-def scopes returns 0 matches.</criterion>
+    <criterion testable="true">A test confirms the field-mapping seeder writes rows matching docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md's documented schema (table name, mapping-type enum values).</criterion>
+    <criterion testable="true">A test confirms the chart-def seeder writes the expected default chart-definition rows.</criterion>
+    <criterion testable="true">Both seeders are idempotent (re-run against already-seeded data produces no duplicate rows).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- NOTHING exists for these 2 scopes anywhere in the repo (not even a script) -- this is genuinely greenfield, confirmed by DS-4's audit. Extension -- N/A for the content; the EXECUTION PATTERN extends the already-proven Dataverse Web API seeder idiom from task 150/151, avoiding a third parallel pattern. Cost-of-doing-nothing -- FR-16 stays permanently half-delivered; every new customer provisioned would have zero field-mapping and zero chart-definition seed data, silently, since H12b currently reports Success for these scopes despite doing nothing (DeferredAppConfigSeeder's no-op).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

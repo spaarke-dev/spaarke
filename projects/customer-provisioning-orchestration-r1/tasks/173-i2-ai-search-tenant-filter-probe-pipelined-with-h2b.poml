@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="173" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>I2: AI Search tenant filter probe (pipelined with H2b)</title>
+    <phase>C'' Wave G-7 -- Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>H13 acceptance-gate probe -- the terminal correctness check per handler; a wrong probe (false Pass) is a silent-fail-trap class defect at the acceptance layer itself. FULL rigor.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified single-purpose probe replacing a Placeholder that unconditionally returns InfraFault -- Sonnet @ high unless flagged otherwise.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG7-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>124</deps>
+    <tags>l2-controlplane, job-handler, testing</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace PlaceholderInvariantVerifier's I2 branch with a real sample query against the customer's Search endpoint asserting an UNCONDITIONAL tenantId eq filter is enforced (not merely present in the template, but actually applied server-side to a live query).</prompt>
+
+  <role>SPAARKE platform developer. Expert in H13's IE2ETrapVerifier/IE2EInvariantVerifier seam contracts and typed Azure SDK/REST post-condition verification.</role>
+
+  <goal>I2's real verifier issues a sample query against the customer's Search endpoint and confirms results are correctly tenant-scoped, returning Fail if the tenant filter is absent or bypassable.</goal>
+
+  <context>
+    <background>DS-4 §6: 'I2 AI Search tenant filter... Sample query against customer Search endpoint asserting unconditional tenantId eq filter... Blocked by: H2b real (incl. filter template).'</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EAcceptanceModule.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="124" status="pending">Subject handler for this probe -- H2b (task 124) must have provisioned the real tenant-filter template</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-4 §6 H13 placeholder deep-dive">This probe replaces a Placeholder verifier that currently returns InfraFault UNCONDITIONALLY for every subject -- the fix is a REAL check, not a different flavor of always-pass. A live sample query against the customer Search endpoint, verifying the tenant-filter TEMPLATE task 124 provisions is actually enforced at query time, not merely present as an artifact.</constraint>
+    <constraint source="DS-4 §6 pipelining note">H13 probes are buildable pipelined alongside their subject handler's wave, not serialized to the end -- this task can be authored as soon as its subject handler (cited in &lt;deps&gt;) lands, even though it is NUMBERED in the G-7 acceptance range for readability.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H13 probe: I2: AI Search tenant filter probe (pipelined with H2b)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-4 §6's row for this probe plus the existing Placeholder verifier's interface contract.</step>
+    <step order="1" name="Real probe">Author the real verifier implementation per this task's &lt;prompt&gt;.</step>
+    <step order="2" name="Wire up">Register the real verifier in E2EAcceptanceModule.cs in place of the Placeholder, for this SPECIFIC trap/invariant id only (other still-placeholder ids are unaffected until their own tasks land).</step>
+    <step order="3" name="Tests">Pass/Fail/InfraFault outcome tests for this specific probe (per DS-4 §7's per-probe test-effort note).</step>
+    <step order="4" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If this probe's real check would require a live call this task's sequencing cannot yet exercise (subject handler not yet live-deployed), author + unit-test the probe against FAKES now (per DS-4 §6's 'buildable earlier against fakes' note) and flag the LIVE-verification gap explicitly for Wave G-7's assembly task (185) / Phase F rerun (186) rather than blocking this task indefinitely.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ (real probe for I2: AI Search tenant filter probe (pipelined with H2b))</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Placeholder verifier for this specific trap/invariant id is replaced with a real implementation.</criterion>
+    <criterion testable="true">A test confirms a FAILING real-world condition (subject not correctly configured) produces a Fail outcome, not InfraFault or a false Pass.</criterion>
+    <criterion testable="true">A test confirms a PASSING real-world condition produces Pass.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the IE2ETrapVerifier/IE2EInvariantVerifier interface + E2EAcceptanceModule registration pattern already exist; only this ONE id's implementation is a placeholder. Extension -- replacing one Placeholder registration with a real one, following the SAME interface contract, is the exact minimal move. Cost-of-doing-nothing -- H13's acceptance gate cannot go green as coded (DS-4's own words) without this probe; the acceptance-target transition (task 184/185/186) is blocked on EVERY probe individually landing.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

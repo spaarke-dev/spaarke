@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="171" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>T1: keyVaultReferenceIdentity trap probe (pipelined with H2a/H4)</title>
+    <phase>C'' Wave G-7 -- Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>H13 acceptance-gate probe -- the terminal correctness check per handler; a wrong probe (false Pass) is a silent-fail-trap class defect at the acceptance layer itself. FULL rigor.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified single-purpose probe replacing a Placeholder that unconditionally returns InfraFault -- Sonnet @ high unless flagged otherwise.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG7-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>123, 125</deps>
+    <tags>l2-controlplane, job-handler, testing</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Replace PlaceholderTrapVerifier's T1 branch with a real Azure.ResourceManager.AppService read of Data.KeyVaultReferenceIdentity on BOTH the production site AND staging slot, comparing the value to the UAMI resource id. This REUSES the exact read pattern task 123's T1 KV-ref probe port and task 125's post-PATCH verify already implement -- do not reimplement, wire H13's T1 branch to call the SAME underlying read logic.</prompt>
+
+  <role>SPAARKE platform developer. Expert in H13's IE2ETrapVerifier/IE2EInvariantVerifier seam contracts and typed Azure SDK/REST post-condition verification.</role>
+
+  <goal>T1's real verifier reads Data.KeyVaultReferenceIdentity on both slots via the ARM SDK and compares to the UAMI resource id, returning Fail if either slot's identity does not match, Pass if both do.</goal>
+
+  <context>
+    <background>DS-4 §6: 'T1 keyVaultReferenceIdentity both slots... ARM.AppService read Data.KeyVaultReferenceIdentity on site + slot; compare to UAMI resource id... Blocked by: H2a/H4 real (T1 owner).' T1's underlying read logic is ALREADY BUILT by tasks 123 (H2a's probe) and 125 (H4's post-PATCH verify) -- this task wires H13's independent RE-VERIFICATION to the same check, since H13's whole purpose is INDEPENDENT verification, not trusting the handler's own self-report.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EAcceptanceModule.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="123" status="pending">Subject handler for this probe -- H2a (task 123) and H4 (task 125) must be real before this probe has anything meaningful to verify</dependency>
+      <dependency task="125" status="pending">Subject handler for this probe -- H2a (task 123) and H4 (task 125) must be real before this probe has anything meaningful to verify</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-4 §6 H13 placeholder deep-dive">This probe replaces a Placeholder verifier that currently returns InfraFault UNCONDITIONALLY for every subject -- the fix is a REAL check, not a different flavor of always-pass. Reuse the ARM.AppService KeyVaultReferenceIdentity read pattern from tasks 123/125; H13's probe performs an INDEPENDENT re-verification (not a trust of the handler's own reported success), which is the entire point of a terminal acceptance gate.</constraint>
+    <constraint source="DS-4 §6 pipelining note">H13 probes are buildable pipelined alongside their subject handler's wave, not serialized to the end -- this task can be authored as soon as its subject handler (cited in &lt;deps&gt;) lands, even though it is NUMBERED in the G-7 acceptance range for readability.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H13 probe: T1: keyVaultReferenceIdentity trap probe (pipelined with H2a/H4)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-4 §6's row for this probe plus the existing Placeholder verifier's interface contract.</step>
+    <step order="1" name="Real probe">Author the real verifier implementation per this task's &lt;prompt&gt;.</step>
+    <step order="2" name="Wire up">Register the real verifier in E2EAcceptanceModule.cs in place of the Placeholder, for this SPECIFIC trap/invariant id only (other still-placeholder ids are unaffected until their own tasks land).</step>
+    <step order="3" name="Tests">Pass/Fail/InfraFault outcome tests for this specific probe (per DS-4 §7's per-probe test-effort note).</step>
+    <step order="4" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If this probe's real check would require a live call this task's sequencing cannot yet exercise (subject handler not yet live-deployed), author + unit-test the probe against FAKES now (per DS-4 §6's 'buildable earlier against fakes' note) and flag the LIVE-verification gap explicitly for Wave G-7's assembly task (185) / Phase F rerun (186) rather than blocking this task indefinitely.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ (real probe for T1: keyVaultReferenceIdentity trap probe (pipelined with H2a/H4))</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Placeholder verifier for this specific trap/invariant id is replaced with a real implementation.</criterion>
+    <criterion testable="true">A test confirms a FAILING real-world condition (subject not correctly configured) produces a Fail outcome, not InfraFault or a false Pass.</criterion>
+    <criterion testable="true">A test confirms a PASSING real-world condition produces Pass.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the IE2ETrapVerifier/IE2EInvariantVerifier interface + E2EAcceptanceModule registration pattern already exist; only this ONE id's implementation is a placeholder. Extension -- replacing one Placeholder registration with a real one, following the SAME interface contract, is the exact minimal move. Cost-of-doing-nothing -- H13's acceptance gate cannot go green as coded (DS-4's own words) without this probe; the acceptance-target transition (task 184/185/186) is blocked on EVERY probe individually landing.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

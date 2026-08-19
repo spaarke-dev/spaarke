@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author .Worker App Service Bicep module + wire into platform-controlplane.bicep</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Pure Bicep authoring (new module + platform-controlplane.bicep wiring), no existing-file .cs modification beyond app-setting additions; STANDARD per root CLAUDE.md §8 table.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical Bicep module authoring following the existing controlplane-app-service.bicep pattern minus slot/JWT surface -- Sonnet @ high per default.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG1-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100</deps>
+    <tags>l2-controlplane, azure-deployment, option-d, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author a new Bicep module (modules/controlplane-worker-app-service.bicep, derived from modules/controlplane-app-service.bicep) for the .Worker project: slotless Linux App Service, DOTNETCORE|10.0, on the SAME P1v3 plan as .Api ($0 marginal cost per DS-3 §3), full-grant UAMI (ARM, Graph, KV, AI Search, SB Receiver -- broader than .Api's Cosmos+SB-Send-only scope), the DS-8 Dataverse App User grant target, and a sitecontainer child resource for the DS-1b Exchange sidecar (built in task 114). Wire the new module into platform-controlplane.bicep alongside the existing .Api site.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Bicep module authoring, Azure App Service sitecontainers (Microsoft.Web/sites/sitecontainers), and shared-plan multi-app topology.</role>
+
+  <goal>modules/controlplane-worker-app-service.bicep exists: Linux App Service (slotless, no staging slot), DOTNETCORE|10.0 code-based, alwaysOn:true, healthCheckPath:/healthz, on the existing P1v3 plan resource id (parameter, not new plan), UAMI-only identity, and a sitecontainer child resource block (image reference parameterized, filled by task 114/115's ACR image tag). platform-controlplane.bicep invokes it alongside the existing .Api module. az bicep build succeeds with zero new errors.</goal>
+
+  <context>
+    <background>DS-3 §3 Option 2 (owner-locked) specifies the Worker as a NEW slotless App Service on the SAME P1v3 plan ($0 marginal spend), hosting the sitecontainer sidecar (moving it off the public-facing .Api site is a stated security improvement -- DS-3 §6). DS-3 §3 also specifies deploy semantics: no slot, deploy = stop -&gt; zip-deploy -&gt; start (the honest drain story; crash-recovery machinery already exists to make this safe -- I6 + SB redelivery + L3 dedup + §4C).</background>
+    <relevant-files>
+      <file role="new">infrastructure/bicep/modules/controlplane-worker-app-service.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/controlplane-app-service.bicep</file>
+      <file role="modify">infrastructure/bicep/platform-controlplane.bicep</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">Worker project must exist as a deployable target before its Bicep hosting resource is authored</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.2a">Runtime topology: the main site(s) (Sprk.Provisioning.ControlPlane.Api / .Worker) are stock DOTNETCORE|10.0 code-based App Service deploys -- zero custom container image, zero shells. The Exchange sidecar (H14a only) is the one designed exception, isolated to its own sitecontainer (DS-1b Sec.3).</constraint>
+    <constraint source="DS-3 §3 Option 2">Worker gets NO staging slot -- deploy = stop -&gt; zip-deploy -&gt; start, documented as the honest drain story for 10-60 min handler bodies (a slot cannot gracefully drain a 60-min operation any better than a stop can).</constraint>
+    <constraint source="DS-3 §5">Sitecontainer for the DS-1b Exchange sidecar attaches to THIS site (Worker), not .Api -- moves the Exchange-admin-capable container off the internet-facing surface.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>.Worker App Service Bicep authoring</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds3-api-worker-split.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+    <patterns>
+      <pattern name="App Service sitecontainer" location="https://learn.microsoft.com/en-us/azure/app-service/configure-sidecar">Microsoft.Web/sites/sitecontainers ARM resource; localhost-only network namespace shared with main app; GA Nov 2024.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD). Read modules/controlplane-app-service.bicep in full as the base to derive from.</step>
+    <step order="1" name="Derive module">Copy controlplane-app-service.bicep to controlplane-worker-app-service.bicep; remove staging-slot resource block, remove JWT-audience-related app settings (Worker has no auth surface -- only /healthz+/ping), keep UAMI param + appSettings array shape.</step>
+    <step order="2" name="Sitecontainer block">Add a Microsoft.Web/sites/sitecontainers child resource, name 'exchange-policy-sidecar', image reference as a parameter (acrImageTag, default placeholder until task 114/115 land), targetPort 8091 (per DS-1b §3 message contract), auth against ACR via the site's UAMI.</step>
+    <step order="3" name="Plan reference">Parameterize appServicePlanId so the Worker resource references the SAME plan resource id .Api uses -- verify $0 marginal cost claim by confirming no new Microsoft.Web/serverfarms resource is declared.</step>
+    <step order="4" name="Wire into platform-controlplane.bicep">Add a module invocation for controlplane-worker-app-service.bicep alongside the existing .Api module invocation, sharing the plan output.</step>
+    <step order="5" name="Validate">az bicep build infrastructure/bicep/platform-controlplane.bicep -- zero new errors (pre-existing warnings from other modules are out of scope).</step>
+    <step order="6" name="What-if">az deployment sub what-if against the dev subscription (read-only) to confirm the new Worker site + sitecontainer resource appear as Create with no unintended changes to existing .Api resources.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the sitecontainer ARM resource shape rejects a placeholder image reference (task 114's real image doesn't exist yet), STOP and use a documented placeholder (e.g., mcr.microsoft.com/appsvc/staticsite:latest) with a TODO app-setting flag, rather than blocking this Bicep task on the sidecar image build -- record the interim in &lt;notes&gt; and escalate to the sidecar-build task owner.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az bicep">build + what-if validation</tool>
+    <tool name="terminal">file diff review</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">infrastructure/bicep/modules/controlplane-worker-app-service.bicep</output>
+    <output type="infra">infrastructure/bicep/platform-controlplane.bicep (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az bicep build infrastructure/bicep/platform-controlplane.bicep exits 0.</criterion>
+    <criterion testable="true">grep 'sitecontainers' infrastructure/bicep/modules/controlplane-worker-app-service.bicep returns &gt;=1 match.</criterion>
+    <criterion testable="true">grep -c 'Microsoft.Web/serverfarms' infrastructure/bicep/modules/controlplane-worker-app-service.bicep returns 0 (no new plan -- reuses .Api's plan id parameter).</criterion>
+    <criterion testable="true">az deployment sub what-if (dev subscription) shows the Worker site as a net-new Create with zero unintended diffs to the existing .Api site or plan.</criterion>
+    <criterion testable="true">grep 'stagingSlot\|deploymentSlot' infrastructure/bicep/modules/controlplane-worker-app-service.bicep returns 0 matches (Worker is deliberately slotless per DS-3 §3).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- controlplane-app-service.bicep hosts .Api only, has a staging slot and JWT audience settings the Worker must not inherit. Extension -- cannot extend it directly (would re-open the shadow-worker defect task 100 exists to close). Cost-of-doing-nothing -- without a Worker hosting resource, task 102's dispatcher has nowhere to deploy, and the sidecar (task 114) has no attachment point off the public .Api surface.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
