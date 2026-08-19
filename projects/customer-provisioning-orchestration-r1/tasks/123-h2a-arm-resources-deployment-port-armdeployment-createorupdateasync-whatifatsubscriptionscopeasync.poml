@@ -4,7 +4,7 @@
     <title>H2a: ARM.Resources deployment port (ArmDeployment.CreateOrUpdateAsync + WhatIfAtSubscriptionScopeAsync) + T1 KV-ref probe port</title>
     <phase>C'' Wave G-2 -- Entry + resources</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H2a gates the entire resource fan-out (H2b, H4-chain, H5-chain) per DS-4; a mistake here blocks the widest downstream surface in Wave G-2/G-3/G-4. Effective ~450-800 LOC port. FULL rigor.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -91,7 +91,16 @@
     <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
   </acceptance-criteria>
 
-  <notes>Justification (CLAUDE.md §11): Existing -- Provision-Customer.ps1 already implements the full 13-step sequence, but 10 of those 13 steps ALREADY have dedicated handler homes (H4/H5/H6/H7/H8); H2a's job is exactly the 3 steps that don't. Extension -- this task extends the ALREADY-CORRECT step-1-3 scope to a pure-.NET implementation; it deliberately does NOT extend into the other handlers' territory. Cost-of-doing-nothing -- H2a gates the entire post-deploy resource fan-out (H2b, H4-chain, H5-chain per DS-4 §4); without a working H2a, nothing past it in the DAG can even be attempted, live or in test.</notes>
+  <notes>Justification (CLAUDE.md §11): Existing -- Provision-Customer.ps1 already implements the full 13-step sequence, but 10 of those 13 steps ALREADY have dedicated handler homes (H4/H5/H6/H7/H8); H2a's job is exactly the 3 steps that don't. Extension -- this task extends the ALREADY-CORRECT step-1-3 scope to a pure-.NET implementation; it deliberately does NOT extend into the other handlers' territory. Cost-of-doing-nothing -- H2a gates the entire post-deploy resource fan-out (H2b, H4-chain, H5-chain per DS-4 §4); without a working H2a, nothing past it in the DAG can even be attempted, live or in test.
+
+COMPLETION NOTES (2026-08-19, commit 225fb4192):
+- Delivered ArmDeploymentRunner.cs, ArmKeyVaultRefProbe.cs, ArmWhatIfDriftDetector.cs exactly as scoped. Retired (not deleted) ProvisionCustomerScriptBicepDeployRunner.cs / AzCliArmKeyVaultRefProbe.cs / AzCliUpgradeDriftDetector.cs -- no test referenced them by concrete type, and deleting risked breaking ~10 unrelated `<see cref>` doc-comment mentions under TreatWarningsAsErrors.
+- ARM JSON consumption: blob-download-at-runtime (BicepInfraDeployOptions.ProvisioningArtifactsContainerUri -> manifest `provisioning-arm-latest.json` -> tenancy-model-keyed template blob), matching task 117's actual CI artifact shape exactly.
+- Ground-truthed via a throwaway reflection/spike console app (not guessed): (1) the public what-if surface is ArmDeploymentResource.WhatIfAsync -- there is no standalone "WhatIfAtSubscriptionScopeAsync" public method in Azure.ResourceManager.Resources 1.11.2 (that REST op name is an INTERNAL DeploymentsRestOperations member); (2) WhatIfOperationResult.Changes only deserializes when the fake response wraps `changes` under `properties` -- the flat shape a naive REST-doc read suggests silently yields zero changes.
+- Deviation (documented, not silent): the POML <prompt> mentions "SecretClient for the 3 az keyvault secret call sites" as in-scope; code inspection found all 3 real call sites (grep `az keyvault` in the retired PS1 script) fall within the SAME POML's <constraints>-forbidden lines 501-1150 (H4 territory). Followed the binding <constraints> over the imprecise <prompt> text -- zero KV writes added.
+- BLOCKING DISCOVERY for a follow-on Bicep task (flagged per the escalation trigger's spirit, not a hard stop): infrastructure/bicep/customer.bicep -- the template actually selected for Model2Dedicated (the only branch exercised in production) -- does NOT deploy a UAMI, App Service, Azure OpenAI, or Azure AI Search resource. It only deploys KeyVault/Storage/ServiceBus/Cosmos/membership-topic/optional-ACS/optional-SignalR. `userAssignedIdentityResourceId` is a pass-through parameter only (customer.bicep line 67-68's own comment: "no resource in THIS module binds to it yet"). BicepDeployOutputs therefore cannot be populated for UserAssignedIdentityObjectId/ClientId, AppServiceName, AppServiceStagingSlotName, OpenAiEndpoint, or AiSearchEndpoint from a REAL deploy today -- ArmDeploymentRunner honestly leaves those fields blank (triggering the handler's existing BicepDeployOutputsIncomplete failure) rather than fabricating values. This gap PRE-DATES this task (the retired runner's own header comment already flagged the pre-Phase-B script as unable to produce a matching outputs block). A follow-on Bicep-authoring task must add the missing UAMI/App Service/OpenAI/AI Search modules to customer.bicep (or wire modules/uami.bicep + app-service.bicep in) before H2a can report Success against a live subscription.
+- Quality gates: code-review (self-applied per Step 9.5) found + fixed one AI-code-smell (catch-log-rethrow in ArmKeyVaultRefProbe/ArmWhatIfDriftDetector, redundant with the handler's own richer-context logging). adr-check found zero violations against ADR-004/010/028/032/038.
+- 867/867 L2 tests pass (16 new from this task).</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
