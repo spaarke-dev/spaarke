@@ -325,9 +325,7 @@ function summarizeSaveDegradation(warnings: ReadonlyArray<{ code: string; count:
       formattingLabels.length === 1
         ? formattingLabels[0]
         : `${formattingLabels.slice(0, -1).join(', ')} and ${formattingLabels[formattingLabels.length - 1]}`;
-    parts.push(
-      `Some formatting (${list}) was simplified to fit Compose's editor. Your text and content are intact.`
-    );
+    parts.push(`Some formatting (${list}) was simplified to fit Compose's editor. Your text and content are intact.`);
   }
   if (otherSentences.length > 0) parts.push(otherSentences.join(' '));
   return parts.join(' ');
