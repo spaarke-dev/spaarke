@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="128" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>customer.bicep: wire Azure OpenAI + AI Search modules -- closes task 123's Gap 1 (part 2/2)</title>
+    <phase>Phase C'' Wave G-2.5 -- customer.bicep completion (Path 1 owner decision, post-Wave-G-2 discovery)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Owner-directed FULL (explicit dispatch instruction). Also independently justified: customer.bicep is the LIVE production ARM template task 123's ArmDeploymentRunner deploys via the real Azure SDK -- H2b (task 124, already shipped) has zero AI Search service to provision indexes against until this lands, and Wave G-7's E2E acceptance (task 186) is blocked without it.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wiring of two ALREADY-BUILT, ALREADY-CORRECT modules (openai.bicep, ai-search.bicep -- both already in production use via stacks/model2-full.bicep's wiring pattern) into customer.bicep. No new Bicep design. Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG2point5-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103, 123, 124</deps>
+    <tags>bicep-authoring, azure-deployment, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>ArmDeploymentRunner.cs's file-header "BLOCKING DISCOVERY" note (task 123, 2026-08-19) documents that customer.bicep deploys NO Azure OpenAI and NO Azure AI Search resource, so BicepDeployOutputs.OpenAiEndpoint and BicepDeployOutputs.AiSearchEndpoint always map to empty string on a real deploy. H2b's real SearchIndexClient-based tenant-filter provisioner (task 124, completed 2026-08-19) has no AI Search SERVICE to provision the 7 canonical indexes against on a fresh customer. Grep-verified: modules/openai.bicep and modules/ai-search.bicep already exist, are correct (both already carry a `userAssignedIdentityPrincipalId` param wired for task-030-style Cognitive Services User RBAC), and are proven-working via stacks/model2-full.bicep's wiring (stale/CI-uncompiled per task 117, but the wiring pattern is correct). Wire these two EXISTING modules into customer.bicep. Do NOT author new files (`modules/customer-openai.bicep` / `modules/customer-aisearch.bicep`) -- that duplicates working, already-deployed-elsewhere code (CLAUDE.md §11).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Bicep module composition, ADR-020 model-version pinning, and design.md §7 resource-naming/deployment-order conformance.</role>
+
+  <goal>customer.bicep provisions a per-customer Azure OpenAI account (with the 4 model deployments spec.md's NFR-12 TPM budget already assumes) and a per-customer Azure AI Search service, both granted Cognitive Services User RBAC on the per-customer UAMI (from task 127's uami module), with outputs `openAiEndpoint` / `aiSearchEndpoint` under EXACTLY those names so ArmDeploymentRunner.MapOutputs (task 123, unmodified by this task) stops mapping them to empty string on a real deploy.</goal>
+
+  <context>
+    <background>Same task-123 discovery as task 127 (see that task's background for full context). This task is the OpenAI + AI Search half of Gap 1; task 127 is the UAMI + App Service half. Both are dispatched in the same wave, parallel-safe against each other by design (each owns a disjoint insertion zone in customer.bicep), but task 128's OpenAI/AI Search RBAC grants depend on task 127's `uami` module output (`principalId`) existing in the SAME file -- if executed truly concurrently by two agents, the later-landing PR must rebase to pick up the other's `uami` symbol before its RBAC-grant param references will resolve.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/customer.bicep</file>
+      <file role="modify">infrastructure/bicep/customer.json (regenerate via az bicep build --outfile)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/openai.bicep (DO NOT MODIFY, invoke as-is; already has default `deployments` array + `userAssignedIdentityPrincipalId` param)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/ai-search.bicep (DO NOT MODIFY, invoke as-is; already has `userAssignedIdentityPrincipalId` param)</file>
+      <file role="canonical-reference">infrastructure/bicep/stacks/model2-full.bicep lines 327-376 (proven openAi/aiSearch wiring pattern; stack itself stale/uncompiled per task 117, wiring shape is correct)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs (header comment + MapOutputs -- output-name contract; do NOT modify, Bicep-only task)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/BicepDeployOutputs.cs (required output names)</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/ (task 124's H2b completion notes -- confirm no AI Search infra shape beyond endpoint + admin key is required by the tenant-filter provisioner before finalizing SKU/replica/partition values)</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md §7.1 (naming), §7.2 rows 9-10, §7.4 (model deployments table), §7.6 (deployment order steps 10-11)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing</dependency>
+      <dependency task="103" status="pending">DI plumbing context (informational -- this task is Bicep-only, no C#)</dependency>
+      <dependency task="123" status="pending">H2a's ArmDeploymentRunner is the consumer whose MapOutputs contract this task must satisfy</dependency>
+      <dependency task="124" status="pending">H2b's real SearchIndexClient tenant-filter provisioner is the eventual consumer of the AI Search service this task creates -- confirms the required infra shape</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11 (Component Justification -- Default to Reuse)">modules/openai.bicep and modules/ai-search.bicep already exist, are correct, and are already proven via stacks/model2-full.bicep's wiring. MUST invoke these EXISTING modules unmodified. MUST NOT author new `modules/customer-openai.bicep` / `modules/customer-aisearch.bicep` files.</constraint>
+    <constraint source="design.md §7.1 (authoritative naming table, v3.2)">OpenAI name MUST be `sprk-{customerId}-{environmentName}-openai`; AI Search name MUST be `sprk-{customerId}-{environmentName}-search`.</constraint>
+    <constraint source="design.md §7.4 + spec.md FR-01 / NFR-12 (verified consistent -- do not re-derive)">The regional TPM budget spec.md's H0 preflight checks against is the literal sum 150+200+30+350 (FR-01, NFR-12) -- this is EXACTLY openai.bicep's own default `deployments` array (gpt-4o:150, gpt-4o-mini:200, spaarke-gpt4o-mini:30, text-embedding-3-large:350; also design.md §7.4's table, byte-for-byte). Do NOT pass a custom `deployments` param override -- the module default already satisfies spec + ADR-020 version pinning. Passing no override IS the correct, verified choice, not an oversight.</constraint>
+    <constraint source="task 030 precedent / openai.bicep + ai-search.bicep's existing RBAC params">Both modules already have a `userAssignedIdentityPrincipalId` param that grants Cognitive Services User (role `a97b65f3-24c7-4388-baec-2e87135dc908`) when non-empty -- per design.md §7.6 steps 10-11, this grant IS Bicep's job (unlike the KV T5 grant, which is H4's runtime job -- see task 127's constraints for that distinction). Pass `uami.outputs.principalId` (task 127's uami module) into BOTH module invocations. Note ai-search.bicep's own header comment flags this specific role as functionally dormant on Microsoft.Search (a documented, pre-existing caveat from task 030 -- not something to fix in this task; honor the literal spec/design instruction as the two modules already do).</constraint>
+    <constraint source="parallel-safety with task 127 (both amend customer.bicep concurrently)">This task OWNS a NEW section inserted immediately after the existing Cosmos DB section and before the existing Membership Topic section (both currently present in customer.bicep). This task MUST NOT touch the top-of-file (RG/Key Vault) area or the App Service area near the bottom -- those are task 127's insertion zones. If task 127 has already landed when this task executes, its `uami` module symbol will already exist in the file; reference it directly rather than re-declaring.</constraint>
+    <constraint source="AI Search infra shape (verify before finalizing SKU/replica/partition)">Task 124's real tenant-filter provisioner needs, at minimum, the search service endpoint + admin key (already surfaced via ai-search.bicep's existing outputs). Read task 124's completion notes before finalizing `sku`/`replicaCount`/`partitionCount` -- if no additional infra requirement is documented, use ai-search.bicep's own module defaults (do not invent capacity numbers).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>customer.bicep OpenAI + AI Search wiring (Gap 1, part 2/2)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>.claude/adr/ADR-020-versioning.md</file>
+    </files>
+    <patterns>
+      <pattern name="Proven wiring reference" location="infrastructure/bicep/stacks/model2-full.bicep lines 327-376">openAi / aiSearch module invocation sequence -- port the SHAPE (module names, param passing, output plumbing, RBAC grant wiring), not the file itself.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read customer.bicep in full (or its current state if task 127 already landed), openai.bicep, ai-search.bicep, design.md §7.1/§7.2/§7.4/§7.6, and task 124's completion notes for the AI Search infra-shape check.</step>
+    <step order="1" name="Azure OpenAI">Add a new section (immediately after the existing Cosmos DB section, before Membership Topic) invoking `modules/openai.bicep` with `openAiName: 'sprk-${customerId}-${environmentName}-openai'`, `location`, `sku: 'S0'`, NO `deployments` override (module default is spec-verified correct per constraints), `userAssignedIdentityPrincipalId: uami.outputs.principalId`, `tags`.</step>
+    <step order="2" name="AI Search">In the same new section, invoke `modules/ai-search.bicep` with `searchServiceName: 'sprk-${customerId}-${environmentName}-search'`, `location`, SKU/replica/partition per the task-124 infra-shape check (module defaults if undocumented), `userAssignedIdentityPrincipalId: uami.outputs.principalId`, `tags`.</step>
+    <step order="3" name="Outputs">Add, under EXACTLY these names: `output openAiEndpoint string = openAi.outputs.openAiEndpoint`, `output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint` (adjust to your actual module symbol names). Do NOT echo `openAiKey` / `searchServiceAdminKey` as top-level outputs -- those flow through task 129's kv-secrets wiring, not raw ARM outputs (avoid a redundant secret-exposure surface).</step>
+    <step order="4" name="Validate">`az bicep build --file infrastructure/bicep/customer.bicep --outfile infrastructure/bicep/customer.json` -- 0 errors, 0 warnings. Commit the regenerated customer.json.</step>
+    <step order="5" name="What-if (or documented deferral)">If live Azure reachability is available, run `az deployment sub what-if` and confirm the 2 new resources show as Create. If not reachable, document as deferred to a live ceremony (precedent: tasks 108/123/125).</step>
+  </steps>
+
+  <escalation>
+    <trigger>spec.md FR-04 / design.md §7.2 rows 11-12 additionally require Document Intelligence + App Insights/Log Analytics wired into customer.bicep -- OUTSIDE this task's declared scope (same finding task 127 flags; do not duplicate-fix here, cross-reference task 127's escalation trigger in this task's completion notes and confirm consistency).</trigger>
+    <trigger>If task 124's completion notes document an AI Search infra requirement (SKU/replica/partition/network) that conflicts with ai-search.bicep's module defaults, STOP and use the documented requirement rather than guessing -- cite the specific note.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az bicep">build</tool>
+    <tool name="az deployment">sub what-if (if reachable)</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">infrastructure/bicep/customer.bicep (modified)</output>
+    <output type="infra">infrastructure/bicep/customer.json (regenerated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az bicep build infrastructure/bicep/customer.bicep exits 0 with 0 warnings.</criterion>
+    <criterion testable="true">grep 'modules/openai.bicep' and 'modules/ai-search.bicep' both show a module invocation in customer.bicep.</criterion>
+    <criterion testable="true">No `deployments` param override is passed to the openai.bicep invocation (module default used) -- OR, if overridden, the values exactly match design.md §7.4's 4-row table (capacities 150/200/30/350).</criterion>
+    <criterion testable="true">Both the openai.bicep and ai-search.bicep invocations pass `userAssignedIdentityPrincipalId: uami.outputs.principalId`.</criterion>
+    <criterion testable="true">customer.bicep's output block contains, under exactly these names: openAiEndpoint, aiSearchEndpoint.</criterion>
+    <criterion testable="true">customer.bicep's output block does NOT contain a raw `openAiKey` or `searchServiceAdminKey` top-level output introduced by this task.</criterion>
+    <criterion testable="true">infrastructure/bicep/customer.json is regenerated and committed alongside customer.bicep.</criterion>
+    <criterion testable="false">az deployment sub what-if (when reachable) shows the 2 new resources as Create -- OR explicitly documented as deferred to a live ceremony.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- modules/openai.bicep + modules/ai-search.bicep already exist, are correct, already carry the RBAC-grant plumbing this task needs, and are proven via stacks/model2-full.bicep. Extension -- wiring two already-built modules is the minimal correct move. Cost-of-doing-nothing -- H2a's ArmDeploymentRunner cannot populate OpenAiEndpoint/AiSearchEndpoint on any real deploy; H2b (task 124, already shipped) has no AI Search service to provision the 7 canonical indexes against on a fresh customer; H0's own NFR-12 TPM preflight check becomes meaningless if no OpenAI account with matching deployments is ever actually created.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

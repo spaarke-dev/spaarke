@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="127" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>customer.bicep: wire UAMI + BFF App Service (plan + prod/staging slots) -- closes task 123's Gap 1 (part 1/2)</title>
+    <phase>Phase C'' Wave G-2.5 -- customer.bicep completion (Path 1 owner decision, post-Wave-G-2 discovery)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Owner-directed FULL (explicit dispatch instruction). Also independently justified: customer.bicep is the LIVE production ARM template task 123's ArmDeploymentRunner deploys via the real Azure SDK (not a scaffold) -- a mistake here is deploy-blast-radius, and this task is a hard prerequisite for Wave G-7's real E2E acceptance (task 186). Matches the project's own FULL criteria for "deploy"-tagged / high-blast-radius Bicep work despite the STANDARD default for ordinary Bicep-module authoring.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wiring of two ALREADY-BUILT, ALREADY-CORRECT modules (uami.bicep task 028, app-service.bicep/app-service-slot.bicep/app-service-plan.bicep task 029) into an existing composition -- no new Bicep design, just correct invocation + output plumbing. Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG2point5-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103, 123</deps>
+    <tags>bicep-authoring, azure-deployment, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>ArmDeploymentRunner.cs's file-header "BLOCKING DISCOVERY" note (task 123, 2026-08-19) documents that infrastructure/bicep/customer.bicep -- the ONLY Bicep template exercised in production today (Model2Dedicated branch) -- deploys Key Vault + Storage + Service Bus + Cosmos + membership-topic + optional ACS + optional SignalR, but declares NO User-Assigned Managed Identity and NO App Service resource. `userAssignedIdentityResourceId` is a dead pass-through parameter (task 027) that no resource binds to. BicepDeployOutputs.cs's REQUIRED string properties UserAssignedIdentityObjectId/UserAssignedIdentityClientId/AppServiceName/AppServiceStagingSlotName therefore always map to empty string on a real deploy, which H2aBicepInfraDeployHandler.AreOutputsComplete() correctly (honestly) reports as BicepDeployOutputsIncomplete. Grep-verified: modules/uami.bicep (task 028) and modules/app-service.bicep + modules/app-service-slot.bicep + modules/app-service-plan.bicep (task 029) already exist, are purpose-built for exactly this per-customer stamp (their own header comments name customer.bicep as the intended caller), and are currently ORPHANED -- zero live consumers (only platform-controlplane.bicep uses uami.bicep + app-service-plan.bicep, for the L2 control-plane's OWN App Service, a different deployment; only the stale, CI-uncompiled stacks/model2-full.bicep uses app-service.bicep). Wire these four EXISTING modules into customer.bicep. Do NOT author new files (`modules/customer-uami.bicep` / `modules/customer-appservice.bicep`) -- that would violate CLAUDE.md §11's reuse mandate against code that already exists, is correct, and is purpose-built for this exact call site.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Bicep module composition, ADR-028 UAMI-only identity binding, and design.md §7 resource-naming/deployment-order conformance.</role>
+
+  <goal>customer.bicep creates ONE per-customer UAMI (via the existing modules/uami.bicep) and binds it -- via modules/app-service-plan.bicep + modules/app-service.bicep + modules/app-service-slot.bicep, all pre-existing and unmodified -- to a BFF App Service with BOTH a production slot and a staging slot, matching design.md §7.1's canonical naming and §7.6's deployment order. customer.bicep's outputs expose userAssignedIdentityResourceId/userAssignedIdentityObjectId/userAssignedIdentityClientId/appServiceName/appServiceStagingSlotName under EXACTLY those names so ArmDeploymentRunner.MapOutputs (task 123, unmodified by this task) stops mapping them to empty string on a real ARM deploy.</goal>
+
+  <context>
+    <background>Task 123 (H2a ARM.Resources deployment SDK port, completed 2026-08-19) surfaced this gap while porting the real ArmDeployment.CreateOrUpdateAsync call -- it did NOT attempt to fix customer.bicep itself (declared out of that task's SDK-port scope) but left a detailed, evidence-cited header comment in ArmDeploymentRunner.cs documenting exactly which BicepDeployOutputs fields cannot be populated and why. The project owner reviewed this + task 126's parallel discovery (see task 129) and chose Path 1: author dedicated Bicep-completion tasks (127/128/129) BEFORE dispatching Wave G-3's H3/H8/H9 handler ports, since H3 (task 130) needs a real per-customer App Service to exist before its Entra app-reg / consent work is meaningfully testable end-to-end.</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/customer.bicep</file>
+      <file role="modify">infrastructure/bicep/customer.json (regenerate via az bicep build --outfile)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/uami.bicep (task 028 -- DO NOT MODIFY, invoke as-is)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/app-service.bicep (task 029 -- DO NOT MODIFY, invoke as-is)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/app-service-slot.bicep (task 029 -- DO NOT MODIFY, invoke as-is)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/app-service-plan.bicep (DO NOT MODIFY, invoke as-is)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/key-vault.bicep (has an EXISTING unused `userAssignedIdentityPrincipalId` param at line 55-56 -- this task wires it, does not add new RBAC logic)</file>
+      <file role="canonical-reference">infrastructure/bicep/stacks/model2-full.bicep (lines 145-254 -- demonstrates the EXACT uami/appServicePlan/appService wiring pattern this task ports into customer.bicep; this stack itself is stale/uncompiled by CI per task 117's completion note, but its wiring code is a proven, correct reference)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs (header comment -- the discovery source; MapOutputs -- the exact output-name contract this task must satisfy; do NOT modify this C# file, Bicep-only task)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/BicepDeployOutputs.cs (the required-output-name contract)</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md §7.1 (Resource Naming Convention), §7.2 (Resource Catalog rows 2/3/7/8), §7.6 (Deployment Order steps 2-4, 9, 14)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing</dependency>
+      <dependency task="103" status="pending">DI plumbing context (informational -- this task itself is Bicep-only, no C#)</dependency>
+      <dependency task="123" status="pending">H2a's ArmDeploymentRunner is the consumer whose MapOutputs contract this task must satisfy; also the source of the discovery this task closes</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §11 (Component Justification -- Default to Reuse)">modules/uami.bicep, modules/app-service.bicep, modules/app-service-slot.bicep, modules/app-service-plan.bicep already exist, are correct (task 028/029, unmodified since), and are purpose-built for exactly this per-customer stamp (grep their header comments -- they name customer.bicep as the intended caller). MUST invoke these EXISTING modules unmodified. MUST NOT author new `modules/customer-uami.bicep` / `modules/customer-appservice.bicep` files -- that duplicates working code and fails the Existing-question test.</constraint>
+    <constraint source="design.md §7.1 (authoritative naming table, v3.2)">UAMI name MUST be `mi-spaarke-{customerId}-{environmentName}` -- NOT the `sprk-{env}-{customerId}-uami` pattern suggested in uami.bicep's own inline header comment (that comment predates design.md's v3.2 naming-table finalization and is stale aspirational text, not the canonical source). App Service Plan name MUST be `sprk-{customerId}-{environmentName}-plan`; App Service name MUST be `sprk-{customerId}-{environmentName}-api`. Per root CLAUDE.md §2, code wins over stale doc-comments, but design.md's naming table is the CURRENT, actively-maintained design source (loaded every task per this project's CLAUDE.md) and takes precedence over a task-028-era inline comment that nothing has kept in sync.</constraint>
+    <constraint source="design.md §7.6 (Deployment Order)">UAMI (step 2) MUST be declared before Key Vault (step 4) in the resource-declaration sequence for readability/order-of-intent, even though Bicep's dependency graph does not strictly require textual ordering. App Service Plan (step 9) + App Service (step 14) belong near the end of the resource section, after the AI/data services.</constraint>
+    <constraint source="ADR-028 MUST rules / app-service.bicep's own header note">MUST NOT co-emit SystemAssigned alongside UserAssigned (`type: 'SystemAssigned, UserAssigned'`) -- app-service.bicep already enforces UAMI-only by construction; do not add a SystemAssigned block anywhere in this task's changes.</constraint>
+    <constraint source="spec.md MUST rules / task 125 (H4, already shipped)">The `keyVaultReferenceIdentity` PATCH on both slots (T1) is H4's post-deploy job (ArmAppServiceIdentityPatcher, task 125, already shipped) -- Bicep's job here is ONLY to bind the UAMI to both slots' `identity.userAssignedIdentities` block (which app-service.bicep/app-service-slot.bicep already do by construction once a UAMI resource id is passed in). Do NOT attempt a keyVaultReferenceIdentity PATCH in Bicep.</constraint>
+    <constraint source="key-vault.bicep line 55-56 (existing unused param)">key-vault.bicep ALREADY has a `userAssignedIdentityPrincipalId` param that grants Key Vault Secrets User when non-empty. This task MUST pass `uami.outputs.principalId` into the EXISTING `keyVault` module invocation in customer.bicep (a one-line addition to an existing module call) rather than hand-rolling a new role-assignment resource or reusing `modules/role-assignment-keyvault.bicep` redundantly.</constraint>
+    <constraint source="task 027 cleanup (this task supersedes it)">The existing `userAssignedIdentityResourceId` INPUT parameter (customer.bicep, default empty, "no resource in THIS module binds to it yet") and its dead output echo become vestigial once this task lands a REAL UAMI creation. Remove the input parameter and its docstring; replace the output with the real `uami.outputs.id` value under the SAME output name (`userAssignedIdentityResourceId`) so downstream consumers see no name-level breaking change, only a real value where there was previously always empty.</constraint>
+    <constraint source="parallel-safety with task 128 (both amend customer.bicep concurrently)">This task OWNS: (a) the top-of-file insertion between the Resource Group block and the Key Vault module block (new UAMI module + the key-vault module's added param), and (b) a NEW section inserted after the existing SignalR section and before OUTPUTS (App Service Plan + App Service + App Service Slot modules + their new params). This task MUST NOT touch the Cosmos DB / Membership Topic / ACS section of the file -- that is task 128's insertion zone (a new AI-services section between Cosmos DB and Membership Topic). If task 128 has already landed when this task executes, rebase around its section rather than reordering it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>customer.bicep UAMI + App Service wiring (Gap 1, part 1/2)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Proven wiring reference" location="infrastructure/bicep/stacks/model2-full.bicep lines 145-254">bffUami / appServicePlan / bffApi module invocation sequence + the kvRbacAppService pattern -- port the SHAPE of this wiring (module names, param passing, output plumbing), not the file itself (that stack is stale / not CI-compiled per task 117).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read customer.bicep in full (350 lines), uami.bicep, app-service.bicep, app-service-slot.bicep, app-service-plan.bicep, key-vault.bicep (params only), and design.md §7.1/§7.2/§7.6.</step>
+    <step order="1" name="UAMI">Add `module uami 'modules/uami.bicep'` invoked with `scope: rg`, name `mi-spaarke-${customerId}-${environmentName}` per design.md §7.1, `location`, `tags`. Insert between the Resource Group block and the Key Vault module block.</step>
+    <step order="2" name="Key Vault RBAC wiring">Add `userAssignedIdentityPrincipalId: uami.outputs.principalId` to the EXISTING `keyVault` module invocation's params block (one-line addition; do not touch any other keyVault param).</step>
+    <step order="3" name="App Service Plan + App Service + Slot">Add a new section (after the existing SignalR section, before OUTPUTS) invoking modules/app-service-plan.bicep (`sprk-${customerId}-${environmentName}-plan`, new `appServiceSku` param default `'S1'` matching design.md §7.2's default SKU), modules/app-service.bicep (`sprk-${customerId}-${environmentName}-api`, `userAssignedIdentityResourceId: uami.outputs.id`, minimal/empty `appSettings` -- do NOT invent Dataverse/Communication/AI app-settings that require params customer.bicep does not declare; H5/H6/H7 own writing those at runtime per the discovery note this task closes), and modules/app-service-slot.bicep (`slotName: 'staging'`, the SAME `uami.outputs.id`).</step>
+    <step order="4" name="Remove vestigial pass-through param">Delete the `userAssignedIdentityResourceId` INPUT parameter (task 027, default empty, dead) and its docstring. Replace the existing `output userAssignedIdentityResourceId string = userAssignedIdentityResourceId` echo with `output userAssignedIdentityResourceId string = uami.outputs.id`.</step>
+    <step order="5" name="New outputs">Add, under EXACTLY these names (matching BicepDeployOutputs.cs / ArmDeploymentRunner.MapOutputs): `output userAssignedIdentityObjectId string = uami.outputs.principalId`, `output userAssignedIdentityClientId string = uami.outputs.clientId`, `output appServiceName string = bffApi.outputs.appServiceName`, `output appServiceStagingSlotName string = bffApiSlot.outputs.slotName` (name your module symbols `bffApi` / `bffApiSlot` or update these references to match your actual symbol names).</step>
+    <step order="6" name="Validate">`az bicep build --file infrastructure/bicep/customer.bicep --outfile infrastructure/bicep/customer.json` -- 0 errors, 0 warnings. Commit the regenerated customer.json alongside customer.bicep.</step>
+    <step order="7" name="What-if (or documented deferral)">If live Azure reachability is available in this execution context, run `az deployment sub what-if` against a representative parameter set and confirm the 4 new resources (UAMI, plan, App Service, slot) show as Create with no unexpected changes to the 6 existing resources. If not reachable (sandbox), document this as a deferred live-ceremony step in the task's completion notes, per the precedent set by tasks 108/123/125.</step>
+  </steps>
+
+  <escalation>
+    <trigger>spec.md FR-04 ("Six new module invocations vs current Provision-Customer.ps1 step 3: Cosmos DB + OpenAI + AI Search + Document Intelligence + App Insights/Log Analytics + optional SignalR") and design.md §7.2 rows 11-12 additionally require Document Intelligence + App Insights/Log Analytics modules wired into customer.bicep. This is a REAL gap the owner's Gap-1 description (UAMI + App Service only) does not cover, and it is OUTSIDE this task's declared scope. Do NOT silently expand this task to add those two resources. STOP and flag to the project owner in this task's completion notes whether a follow-on task should be authored (a natural "task 127b" or folded into a future wave) -- see task 129's notes for the downstream consequence (2 of kv-secrets.generated.bicep's ~15 FromBicepOutput entries cannot resolve without these resources).</trigger>
+    <trigger>If design.md §7.1's UAMI naming pattern (`mi-spaarke-{customerId}-{env}`) would collide with, or orphan, a LIVE UAMI or System-Assigned-MI-based App Service already deployed for an existing customer under the pre-Phase-C interim scheme (design.md §7.2 row 2's "interim state" caveat), STOP and escalate before applying -- do not silently rename or duplicate a live identity.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az bicep">build</tool>
+    <tool name="az deployment">sub what-if (if reachable)</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">infrastructure/bicep/customer.bicep (modified)</output>
+    <output type="infra">infrastructure/bicep/customer.json (regenerated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az bicep build infrastructure/bicep/customer.bicep exits 0 with 0 warnings.</criterion>
+    <criterion testable="true">grep 'modules/uami.bicep' infrastructure/bicep/customer.bicep shows a module invocation (not a comment reference).</criterion>
+    <criterion testable="true">grep 'modules/app-service.bicep', 'modules/app-service-slot.bicep', and 'modules/app-service-plan.bicep' each show a module invocation in customer.bicep.</criterion>
+    <criterion testable="true">grep 'mi-spaarke-' infrastructure/bicep/customer.bicep confirms the UAMI name follows design.md §7.1's exact pattern.</criterion>
+    <criterion testable="true">grep 'SystemAssigned' infrastructure/bicep/customer.bicep (new lines only) returns 0 matches -- no SA-MI co-emission introduced.</criterion>
+    <criterion testable="true">customer.bicep's output block contains, under exactly these names: userAssignedIdentityResourceId, userAssignedIdentityObjectId, userAssignedIdentityClientId, appServiceName, appServiceStagingSlotName.</criterion>
+    <criterion testable="true">The `keyVault` module invocation in customer.bicep passes `userAssignedIdentityPrincipalId: uami.outputs.principalId`.</criterion>
+    <criterion testable="true">The App Service Plan, App Service, and App Service Slot module invocations all reference the SAME `uami.outputs.id` value for their identity binding (no divergent UAMI resource ids).</criterion>
+    <criterion testable="true">The old `userAssignedIdentityResourceId` INPUT parameter (task 027 pass-through) is removed from the parameter block.</criterion>
+    <criterion testable="true">infrastructure/bicep/customer.json is regenerated (git diff shows a non-trivial change reflecting the 4 new resources) and committed alongside customer.bicep.</criterion>
+    <criterion testable="false">az deployment sub what-if (when reachable) shows the 4 new resources as Create with zero unexpected changes to the 6 pre-existing resources -- OR this is explicitly documented as deferred to a live ceremony in the task's completion notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- modules/uami.bicep + modules/app-service.bicep + modules/app-service-slot.bicep + modules/app-service-plan.bicep already exist, are correct, and are purpose-built for this exact call site (their own header comments name customer.bicep as the intended caller); key-vault.bicep already has an unused RBAC-wiring param waiting for exactly this UAMI. Extension -- wiring four already-built, already-tested modules into an existing composition is the minimal, correct move; authoring new files would duplicate working code. Cost-of-doing-nothing -- H2a's ArmDeploymentRunner cannot populate 4 of its 9 required BicepDeployOutputs fields on any real customer deploy (honest empty-string per the file-header discovery note), and H3/H8/H9/H10 (Wave G-3/G-4, all downstream of a real App Service + UAMI existing) cannot be meaningfully live-verified until this lands -- this is why the owner chose Path 1 (fix Bicep before dispatching Wave G-3).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
