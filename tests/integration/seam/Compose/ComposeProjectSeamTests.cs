@@ -63,9 +63,10 @@ public sealed class ComposeProjectSeamTests : IClassFixture<ComposeFidelitySeamF
 
         var original = BuildDocx(
             new Paragraph(new ParagraphProperties(new Justification { Val = JustificationValues.Center }),
-                new Run(new Text("Mutual Non-Disclosure Agreement"))) { ParagraphId = new HexBinaryValue("BBBB0001") },
+                new Run(new Text("Mutual Non-Disclosure Agreement")))
+            { ParagraphId = new HexBinaryValue("BBBB0001") },
             new Paragraph(new Run(new Text("This is the body of a Browse-local document.")))
-                { ParagraphId = new HexBinaryValue("BBBB0002") });
+            { ParagraphId = new HexBinaryValue("BBBB0002") });
 
         using var client = _fixture.CreateAuthenticatedClient();
 

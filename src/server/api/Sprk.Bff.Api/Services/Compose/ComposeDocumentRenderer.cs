@@ -1970,56 +1970,56 @@ public sealed partial class ComposeDocumentRenderer
         {
             return ScanCarrierBytes(carrierBytes, doc =>
             {
-            var main = doc.MainDocumentPart;
-            if (main is null)
-            {
-                return 0;
-            }
-
-            var max = 0;
-            void Scan(OpenXmlElement? root)
-            {
-                if (root is null) return;
-                foreach (var element in root.Descendants())
+                var main = doc.MainDocumentPart;
+                if (main is null)
                 {
-                    var id = element switch
+                    return 0;
+                }
+
+                var max = 0;
+                void Scan(OpenXmlElement? root)
+                {
+                    if (root is null) return;
+                    foreach (var element in root.Descendants())
                     {
-                        InsertedRun ins => ins.Id?.Value,
-                        DeletedRun del => del.Id?.Value,
-                        MoveFromRun mf => mf.Id?.Value,
-                        MoveToRun mt => mt.Id?.Value,
-                        Inserted i => i.Id?.Value,
-                        Deleted d => d.Id?.Value,
-                        RunPropertiesChange rc => rc.Id?.Value,
-                        ParagraphPropertiesChange pc => pc.Id?.Value,
-                        CellInsertion ci => ci.Id?.Value,
-                        CellDeletion cd => cd.Id?.Value,
-                        // Step-9.5 F8: the remaining *Change family preserved parts can carry.
-                        SectionPropertiesChange sc => sc.Id?.Value,
-                        TablePropertiesChange tpc => tpc.Id?.Value,
-                        TableRowPropertiesChange trc => trc.Id?.Value,
-                        TableCellPropertiesChange tcc => tcc.Id?.Value,
-                        TableGridChange tgc => tgc.Id?.Value,
-                        _ => null,
-                    };
-                    if (id is not null
-                        && int.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
-                        && value > max)
-                    {
-                        max = value;
+                        var id = element switch
+                        {
+                            InsertedRun ins => ins.Id?.Value,
+                            DeletedRun del => del.Id?.Value,
+                            MoveFromRun mf => mf.Id?.Value,
+                            MoveToRun mt => mt.Id?.Value,
+                            Inserted i => i.Id?.Value,
+                            Deleted d => d.Id?.Value,
+                            RunPropertiesChange rc => rc.Id?.Value,
+                            ParagraphPropertiesChange pc => pc.Id?.Value,
+                            CellInsertion ci => ci.Id?.Value,
+                            CellDeletion cd => cd.Id?.Value,
+                            // Step-9.5 F8: the remaining *Change family preserved parts can carry.
+                            SectionPropertiesChange sc => sc.Id?.Value,
+                            TablePropertiesChange tpc => tpc.Id?.Value,
+                            TableRowPropertiesChange trc => trc.Id?.Value,
+                            TableCellPropertiesChange tcc => tcc.Id?.Value,
+                            TableGridChange tgc => tgc.Id?.Value,
+                            _ => null,
+                        };
+                        if (id is not null
+                            && int.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+                            && value > max)
+                        {
+                            max = value;
+                        }
                     }
                 }
-            }
 
-            Scan(main.Document);
-            foreach (var header in main.HeaderParts) Scan(header.Header);
-            foreach (var footer in main.FooterParts) Scan(footer.Footer);
-            Scan(main.FootnotesPart?.Footnotes);
-            Scan(main.EndnotesPart?.Endnotes);
-            // Step-9.5 F8: comment TEXT can itself carry tracked changes; the part is preserved
-            // byte-identically (task 024), so its ids join the collision base too.
-            Scan(main.WordprocessingCommentsPart?.Comments);
-            return max;
+                Scan(main.Document);
+                foreach (var header in main.HeaderParts) Scan(header.Header);
+                foreach (var footer in main.FooterParts) Scan(footer.Footer);
+                Scan(main.FootnotesPart?.Footnotes);
+                Scan(main.EndnotesPart?.Endnotes);
+                // Step-9.5 F8: comment TEXT can itself carry tracked changes; the part is preserved
+                // byte-identically (task 024), so its ids join the collision base too.
+                Scan(main.WordprocessingCommentsPart?.Comments);
+                return max;
             });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -2241,22 +2241,22 @@ public sealed partial class ComposeDocumentRenderer
         {
             return ScanCarrierBytes(carrierBytes, doc =>
             {
-            var scan = new CarrierNumberingScan();
-            var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
-            if (numbering is null)
-            {
-                return scan;
-            }
+                var scan = new CarrierNumberingScan();
+                var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+                if (numbering is null)
+                {
+                    return scan;
+                }
 
-            foreach (var abstractNum in numbering.Elements<AbstractNum>())
-            {
-                scan.RecordAbstract(abstractNum);
-            }
-            foreach (var instance in numbering.Elements<NumberingInstance>())
-            {
-                scan.RecordInstance(instance);
-            }
-            return scan;
+                foreach (var abstractNum in numbering.Elements<AbstractNum>())
+                {
+                    scan.RecordAbstract(abstractNum);
+                }
+                foreach (var instance in numbering.Elements<NumberingInstance>())
+                {
+                    scan.RecordInstance(instance);
+                }
+                return scan;
             });
         }
         catch (Exception ex) when (ex is not ComposePatchException and not OutOfMemoryException)

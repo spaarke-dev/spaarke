@@ -64,7 +64,7 @@ public sealed class ComposeServiceBornInEditorSaveTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private static FileHandleDto CreatedDriveItem() => new(
