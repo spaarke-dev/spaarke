@@ -17,12 +17,21 @@ audit proved the fidelity loss is systemic to the write model, not a set of spec
 - **R7** = HONEST + SAFE (surface every loss, never silently drop or mis-place). In flight.
 - **R8 (this)** = FAITHFUL (preserve the content through save). Investigation first, then spec, then build.
 
+## Scope tracks
+
+1. **Render-on-save fidelity** (the primary mandate) — preserve Word formatting/structure through save.
+2. **Durable session files** (added 2026-08-19 by operator during R7 UAT) — make Assistant chat-session
+   uploads usable for the **full 90-day History window** (today content is evicted after ~24h). See
+   [`notes/durable-session-files.md`](notes/durable-session-files.md). Parallel track / fast-follow.
+
 ## Start here
 
 - [`notes/fidelity-architecture-investigation.md`](notes/fidelity-architecture-investigation.md) — the findings,
   the architectural root cause, candidate fix directions, and the research questions R8 must answer.
+- [`notes/durable-session-files.md`](notes/durable-session-files.md) — the durable-files scope add: 90-day
+  file availability (aligns to History), grounded code inventory, candidate designs, open questions.
 - Evidence base: [`../spaarkeai-compose-r7/notes/uat-issues.md`](../spaarkeai-compose-r7/notes/uat-issues.md)
-  (UAT-07a, UAT-15..20, UAT-24/25).
+  (UAT-07a, UAT-15..20, UAT-24/25, and R7 UAT round point 1b for durable files).
 
 ## First job (the mandate)
 
