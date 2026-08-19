@@ -3,8 +3,8 @@
   <metadata>
     <title>H1: real ARM subscription-reachability + Lighthouse probe (replace NullSubscriptionReadinessProbe)</title>
     <phase>C'' Wave G-2 -- Entry + resources</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
+    <gate>open</gate>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Replaces a PLACEHOLDER that currently returns Passed unconditionally with no ARM call -- correctness-critical per DS-4's classification (❌ PLACEHOLDER, FR-03 verification fictional today).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -90,4 +90,56 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETED 2026-08-19. NullSubscriptionReadinessProbe.cs deleted (retired, not
+    kept as test-only fallback — nothing referenced it as such; existing tests
+    already used their own FakeProbe). New ArmSubscriptionReadinessProbe.cs
+    (src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/)
+    implements ISubscriptionReadinessProbe with two real ARM calls:
+    ArmClient.GetSubscriptionResource(id).GetAsync() for reachability, and
+    ArmClient.GetManagedServicesRegistrationAssignments(scope).GetAllAsync()
+    for Lighthouse delegation (Azure.ResourceManager 1.14.0 +
+    Azure.ResourceManager.ManagedServices 1.1.2, new PackageReferences on
+    Sprk.Provisioning.ControlPlane.Core.csproj). Credential reuse: probe is
+    constructed via a factory lambda in Worker/Program.cs wrapping the
+    UAMI-pinned TokenCredential singleton already registered by
+    CosmosModule.AddCosmosModule — no second credential chain, no shared
+    ArmClient DI registration (kept self-contained against sibling Wave-G-2
+    handler ports touching the same Program.cs).
+
+    BONUS CATCH (found during Step 9.5 self-review): the reachability probe
+    accepted tenantId but never validated the ARM-returned subscription
+    actually belongs to that tenant — a subscription reachable via an
+    unrelated cross-tenant grant could have passed under the WRONG declared
+    tenantId. Added a Guid-compare guard (data.TenantId vs the caller-supplied
+    tenantId) that fails Passed=false with a "belongs to tenant X, not Y"
+    diagnostic on mismatch, strengthening §4D I1. Covered by a dedicated test.
+
+    Tests: ArmSubscriptionReadinessProbeTests.cs (8 tests) placed at
+    Tests/Handlers/ (flat, matching this project's established convention —
+    NOT the nested Handlers/SubscriptionReadiness/ path the POML output
+    suggested; no other handler test file uses a nested folder). Test approach:
+    ArmClient built against a fake HttpClientTransport (ArmSdkTestFakes helper,
+    internal, shared with H1SubscriptionReadinessHandlerTests) — the REAL ARM
+    SDK request/response marshaling runs unmodified, only the HTTP boundary is
+    faked, directly proving genuine ARM SDK invocation per AC-1's "not a
+    hard-coded Passed" requirement. Also added 2 end-to-end tests inside the
+    existing H1SubscriptionReadinessHandlerTests.cs composing the REAL probe
+    through the full H1 handler flow, proving SubscriptionReadinessRejectionCodes.LighthouseDelegationMissing
+    is genuinely reached (not just asserted at the probe level).
+
+    Quality gates (Step 9.5): code-review + adr-check both clean — 0 critical,
+    0 ADR violations. No new HIGH CVE (`dotnet list package --vulnerable`
+    clean). No BFF touch (L2 control-plane only), CLAUDE.md §10 N/A. §11
+    Component Justification satisfied by this POML's <notes> (already present).
+    L2 suite: 798/798 passing (787 baseline + 9 new probe/tenant-guard tests +
+    2 new handler-integration tests, plus +1 net from concurrent sibling
+    Wave-G-2 work landing in the same window).
+
+    Git-index-race note (per current-task.md § Quality patterns #2): Core.csproj
+    and Worker/Program.cs were concurrently edited by task 120 (H0 SDK ports) —
+    committed as-is per the established Wave-G-1 coordination pattern; commit
+    message cites the overlap explicitly.
+  </notes>
 </task>

@@ -2,10 +2,11 @@
 // ISubscriptionReadinessProbe.cs
 //
 // Abstraction over the two ARM-side checks H1 performs against the target
-// customer subscription. One probe implementation ships this wave (the
-// NullSubscriptionReadinessProbe placeholder); Wave C5 replaces it with a
-// real ARM-backed impl (Azure.ResourceManager SDK) once the L2 App Service
-// UAMI has the necessary Reader RBAC on each customer subscription.
+// customer subscription. Wave C4 shipped the NullSubscriptionReadinessProbe
+// placeholder (retired); task 121 (Wave G-2) replaced it with
+// ArmSubscriptionReadinessProbe — a real Azure.ResourceManager SDK-backed
+// impl — once the L2 App Service UAMI has the necessary Reader RBAC on each
+// customer subscription.
 //
 // DESIGN REF:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-03
@@ -60,8 +61,8 @@ public interface ISubscriptionReadinessProbe
     /// <summary>
     /// Verifies the target subscription is reachable via ARM (equivalent to
     /// <c>az account show --subscription {subscriptionId}</c>). MUST use
-    /// <c>DefaultAzureCredential</c> (Wave C5 real impl) — no account-key
-    /// credentials per ADR-028 MI-outbound rule.
+    /// <c>DefaultAzureCredential</c> (see <see cref="ArmSubscriptionReadinessProbe"/>)
+    /// — no account-key credentials per ADR-028 MI-outbound rule.
     /// </summary>
     /// <param name="subscriptionId">
     /// Target Azure subscription id (GUID). Never a default-fallback value —
@@ -84,9 +85,9 @@ public interface ISubscriptionReadinessProbe
     /// (<paramref name="tenantId"/>) to Spaarke's managing tenant AND the
     /// delegated resource-group scope is accessible. Only invoked by the
     /// handler when <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.TenancyModel"/>
-    /// denotes CustomerOwned (Model 2). Wave C5 real impl queries ARM for
-    /// <c>Microsoft.ManagedServices/registrationAssignments</c> under the
-    /// customer subscription.
+    /// denotes CustomerOwned (Model 2). <see cref="ArmSubscriptionReadinessProbe"/>
+    /// queries ARM for <c>Microsoft.ManagedServices/registrationAssignments</c>
+    /// under the customer subscription.
     /// </summary>
     /// <param name="subscriptionId">Target customer subscription id (GUID).</param>
     /// <param name="tenantId">Customer Entra tenant id (delegation source).</param>

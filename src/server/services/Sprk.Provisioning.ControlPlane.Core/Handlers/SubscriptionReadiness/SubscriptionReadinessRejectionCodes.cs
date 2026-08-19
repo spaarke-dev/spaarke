@@ -78,10 +78,12 @@ public static class SubscriptionReadinessRejectionCodes
     public const string LighthouseDelegationMissing = "subready-lighthouse-delegation-missing";
 
     /// <summary>
-    /// The subscription-readiness probe itself threw an infrastructure
-    /// exception (Wave C5 real impl may throw on transient ARM SDK faults).
-    /// Currently NOT emitted by the Wave-C4 <see cref="NullSubscriptionReadinessProbe"/>
-    /// placeholder, reserved for the Wave-C5 real ARM-backed impl.
+    /// The subscription-readiness probe itself threw an unanticipated
+    /// exception. <c>ArmSubscriptionReadinessProbe</c> (task 121) catches
+    /// <c>RequestFailedException</c> internally and returns a domain failure
+    /// (<see cref="SubscriptionUnreachable"/> / <see cref="LighthouseDelegationMissing"/>)
+    /// instead of throwing, so this code is reserved for a genuine bug in the
+    /// probe implementation, not an ARM-side rejection.
     /// </summary>
     public const string ProbeInfrastructureError = "subready-probe-infrastructure-error";
 

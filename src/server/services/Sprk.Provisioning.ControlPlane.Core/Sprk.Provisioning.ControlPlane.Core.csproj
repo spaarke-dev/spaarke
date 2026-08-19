@@ -114,6 +114,38 @@
          Same 1.21.0 as pre-split. -->
     <PackageReference Include="Azure.Identity" Version="1.21.0" />
 
+    <!-- Azure.ResourceManager.CognitiveServices + .Compute — task 120 (Wave
+         G-2, Option D hybrid per DS-1b) SDK ports of two of H0's four
+         preflight probes (ArmCognitiveServicesTpmProbe, ArmComputeVCpuProbe),
+         replacing `az cognitiveservices usage list` / `az vm list-usage`
+         shell-outs. DefaultAzureCredential pinned to the L2 UAMI per
+         ADR-028 MI-outbound. -->
+    <PackageReference Include="Azure.ResourceManager.CognitiveServices" Version="1.5.2" />
+    <PackageReference Include="Azure.ResourceManager.Compute" Version="1.16.0" />
+
+    <!-- Azure.Security.KeyVault.Secrets — task 120 SDK port of H0's
+         cert-bootstrap probe (KeyVaultCertBootstrapProbe), replacing
+         `az keyvault secret show`. Same 4.11.0 pin as Sprk.Bff.Api for
+         cross-service version parity. -->
+    <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.11.0" />
+
+    <!-- Azure.ResourceManager (core) + Azure.ResourceManager.ManagedServices —
+         task 121 (Wave G-2) real ARM-backed H1 subscription-readiness probe
+         (ArmSubscriptionReadinessProbe), replacing NullSubscriptionReadinessProbe.
+         Core gives ArmClient.GetSubscriptionResource(...).GetAsync() for
+         subscription reachability; ManagedServices gives
+         GetManagedServicesRegistrationAssignments(...) for the Lighthouse
+         delegation check (Microsoft.ManagedServices/registrationAssignments,
+         CustomerOwned tenancy branch only). Version 1.14.0 matches the
+         Azure.ResourceManager version already pulled in transitively by
+         Azure.ResourceManager.Compute 1.16.0 (task 120) — pinned explicitly
+         here because this project's code references ArmClient/SubscriptionResource
+         types directly. DefaultAzureCredential pinned to the L2 UAMI per
+         ADR-028 MI-outbound (reuses the TokenCredential singleton registered
+         by CosmosModule — no second credential built). -->
+    <PackageReference Include="Azure.ResourceManager" Version="1.14.0" />
+    <PackageReference Include="Azure.ResourceManager.ManagedServices" Version="1.1.2" />
+
     <!-- Azure Cosmos DB SDK — L2 state store (spaarke-provisioning/runs). -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
 

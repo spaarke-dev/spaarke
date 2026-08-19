@@ -131,7 +131,7 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// </summary>
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
     /// <param name="enqueuer">Service Bus enqueuer used to dispatch H2a on success (wave-C4 temporary bridge — see file header).</param>
-    /// <param name="probe">The ARM readiness probe (Wave C4 = <see cref="NullSubscriptionReadinessProbe"/>; Wave C5 swaps for real ARM-backed impl).</param>
+    /// <param name="probe">The ARM readiness probe — <see cref="ArmSubscriptionReadinessProbe"/> in production (task 121, Wave G-2; real Azure.ResourceManager SDK calls).</param>
     /// <param name="logger">Structured logger.</param>
     public H1SubscriptionReadinessHandler(
         IProvisioningRunRepository repository,
@@ -271,9 +271,12 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            // Wave-C5 real ARM impl may throw on transient SDK faults —
-            // classify as Resumable so operator can resume after the upstream
-            // fault clears. Placeholder impl never throws.
+            // ArmSubscriptionReadinessProbe (task 121) catches RequestFailedException
+            // internally and returns Passed=false (a DOMAIN failure — subscription
+            // unreachable) rather than throwing, so this branch is reserved for a
+            // genuinely unanticipated exception (bug in the probe, not an ARM-side
+            // rejection). Classified Resumable so operator can resume after
+            // resolving whatever the unexpected fault was.
             _logger.LogError(
                 ex,
                 "H1 subscription-readiness probe (reachability) threw unexpected exception: " +

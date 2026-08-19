@@ -407,6 +407,73 @@ public sealed class H1SubscriptionReadinessHandlerTests
         handler.HandlerId.Should().Be("H1", "value MUST match design.md §4.1 handler-catalog verbatim.");
     }
 
+    // ---------- Task 121: end-to-end with the REAL ArmSubscriptionReadinessProbe ----------
+    //
+    // These two tests replace FakeProbe with the production
+    // ArmSubscriptionReadinessProbe (task 121, Wave G-2), wired against a fake
+    // HttpClientTransport (ArmSdkTestFakes, defined in
+    // ArmSubscriptionReadinessProbeTests.cs). They prove the FULL H1 flow —
+    // not just the probe in isolation — genuinely reaches the reserved
+    // rejection codes via a real ARM SDK call, closing the exact gap DS-4 §3
+    // flagged: "POML 043 acceptance criteria required real ARM behavior...
+    // Criteria were satisfied only via injected test fakes."
+
+    [Fact]
+    public async Task RealArmProbe_Reachable_ReturnsSuccess_ViaGenuineArmCall()
+    {
+        var armHandler = ArmSdkTestFakes.NewHandler(_ =>
+            ArmSdkTestFakes.JsonResponse(
+                System.Net.HttpStatusCode.OK,
+                ArmSdkTestFakes.SubscriptionGetBody(SubscriptionId, TenantId, "Enabled")));
+        var probe = new ArmSubscriptionReadinessProbe(
+            ArmSdkTestFakes.NewArmClient(armHandler), NullLogger<ArmSubscriptionReadinessProbe>.Instance);
+
+        var run = BuildRun(tenancy: "SpaarkeOwned");
+        var repo = new FakeRepository(run, etag: "etag-1");
+        var enqueuer = new FakeEnqueuer();
+        var handler = NewHandler(repo, enqueuer, probe);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        armHandler.RequestedUris.Should().ContainSingle(
+            uri => uri.AbsolutePath == $"/subscriptions/{SubscriptionId}",
+            "the real ARM SDK call must have actually fired — not a hard-coded Passed");
+    }
+
+    [Fact]
+    public async Task RealArmProbe_CustomerOwned_LighthouseMissing_ReturnsLighthouseDelegationMissingRejectionCode()
+    {
+        var armHandler = ArmSdkTestFakes.NewHandler(request =>
+        {
+            if (request.RequestUri!.AbsolutePath.Contains("registrationAssignments"))
+            {
+                return ArmSdkTestFakes.JsonResponse(
+                    System.Net.HttpStatusCode.OK,
+                    ArmSdkTestFakes.RegistrationAssignmentsBody(SubscriptionId, count: 0));
+            }
+
+            return ArmSdkTestFakes.JsonResponse(
+                System.Net.HttpStatusCode.OK,
+                ArmSdkTestFakes.SubscriptionGetBody(SubscriptionId, TenantId, "Enabled"));
+        });
+        var probe = new ArmSubscriptionReadinessProbe(
+            ArmSdkTestFakes.NewArmClient(armHandler), NullLogger<ArmSubscriptionReadinessProbe>.Instance);
+
+        var run = BuildRun(tenancy: "CustomerOwned");
+        var repo = new FakeRepository(run, etag: "etag-1");
+        var enqueuer = new FakeEnqueuer();
+        var handler = NewHandler(repo, enqueuer, probe);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>()
+            .Which.RejectionCode.Should().Be(SubscriptionReadinessRejectionCodes.LighthouseDelegationMissing);
+        armHandler.RequestedUris.Should().Contain(
+            uri => uri.AbsolutePath.Contains("registrationAssignments"),
+            "the real ARM SDK Lighthouse-list call must have actually fired");
+    }
+
     // -------------------------------------------------------------------------
     // Helpers + fakes
     // -------------------------------------------------------------------------
