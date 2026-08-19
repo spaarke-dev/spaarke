@@ -1,12 +1,29 @@
 // -----------------------------------------------------------------------------
 // HealthEndpoints.cs
 //
-// L2 CONTROL-PLANE HEALTH endpoint (originally Wave C3 scaffold, task 036).
+// L2 CONTROL-PLANE HEALTH endpoints (originally Wave C3 scaffold, task 036).
 //
 // SCOPE:
-//   - GET  /ping — anonymous, returns 200 "ok". Smoke-tests routing +
-//                  hosting; not a full /healthz (a real Cosmos + Service Bus
-//                  health probe surface can layer on in a future task).
+//   - GET  /ping    — anonymous, returns 200 "ok". Smoke-tests routing +
+//                     hosting.
+//   - GET  /healthz — anonymous, returns 200 "ok" (added by task 113,
+//                     2026-08-19). Not a real Cosmos + Service Bus health
+//                     probe surface (a future task can layer that in) — this
+//                     is deliberately as trivial as /ping. It exists because
+//                     TWO independent consumers already assumed it existed
+//                     and were silently broken without it: (1)
+//                     modules/controlplane-app-service.bicep's
+//                     `healthCheckPath: '/healthz'` (task 033) — the Azure
+//                     App Service PLATFORM-level instance health probe, which
+//                     was 404ing against this host since the App Service was
+//                     first deployed; (2) scripts/Deploy-ControlPlane.ps1
+//                     (task 113) needs a uniform /healthz probe across BOTH
+//                     the .Api and .Worker hosts (the Worker already ships
+//                     /healthz — task 100 Program.cs) to avoid a per-target
+//                     special case in its post-deploy verification. Fixed at
+//                     discovery per the project's "fix drift at time of
+//                     discovery" operating principle rather than deferred or
+//                     special-cased around.
 //
 // HISTORY (task 057 — Wave C5, 2026-08-17):
 //   The original scaffold also mapped a POST /api/runs PLACEHOLDER that
@@ -24,13 +41,13 @@
 namespace Sprk.Provisioning.ControlPlane.Endpoints;
 
 /// <summary>
-/// L2 health-surface endpoint (currently just /ping — anonymous smoke test).
-/// The real POST /api/runs handler moved to <see cref="Api.RunsEndpoints"/>
-/// in Wave C5 (task 057).
+/// L2 health-surface endpoints (/ping + /healthz — both anonymous smoke
+/// tests). The real POST /api/runs handler moved to
+/// <see cref="Api.RunsEndpoints"/> in Wave C5 (task 057).
 /// </summary>
 public static class HealthEndpoints
 {
-    /// <summary>Maps the /ping smoke-test endpoint onto the application.</summary>
+    /// <summary>Maps the /ping and /healthz smoke-test endpoints onto the application.</summary>
     public static WebApplication MapHealthEndpoints(this WebApplication app)
     {
         ArgumentNullException.ThrowIfNull(app);
@@ -42,6 +59,14 @@ public static class HealthEndpoints
         app.MapGet("/ping", () => Results.Text("ok", contentType: "text/plain"))
             .AllowAnonymous()
             .WithName("Ping")
+            .WithTags("Health");
+
+        // Platform + deploy-tooling health probe (task 113). Same
+        // intentionally-trivial shape as /ping — see file header for why
+        // this exists as its own route rather than an alias.
+        app.MapGet("/healthz", () => Results.Text("ok", contentType: "text/plain"))
+            .AllowAnonymous()
+            .WithName("Healthz")
             .WithTags("Health");
 
         return app;

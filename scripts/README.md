@@ -542,6 +542,65 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 ---
 
+## L2 Control-Plane Provisioning Scripts (`scripts/provisioning/`)
+
+Operator scripts for the customer-provisioning-orchestration-r1 L2 control
+plane (`Sprk.Provisioning.ControlPlane.Api` + `.Worker`) — distinct from the
+customer-lifecycle scripts above (`Decommission-Customer.ps1` etc.), which
+operate on a CUSTOMER's environment, not the control plane's own hosting.
+
+### `provisioning/Deploy-ControlPlane.ps1`
+**Purpose:** Repeatable deploy for the L2 control plane. Publishes + zip-deploys BOTH App Service targets (`.Api` -> staging slot with optional `-Swap`; `.Worker` -> slotless stop/deploy/start per DS-3 §3 Option 2), then runs post-deploy verification: `/healthz` on every deployed site, fleet Service Bus queue property check (`requiresSession`/`requiresDuplicateDetection`, task 108), and NFR-05 fail-fast config-key presence check. Sibling pattern to `Deploy-BffApi.ps1`, extended for L2's two-site topology.
+**Usage:** 🟢 Active - Every L2 code deploy (dispatcher, handlers, config changes)
+**Lifecycle:** ✅ Maintained (added 2026-08-19 by customer-provisioning-orchestration-r1 task 113)
+**Dependencies:** Azure CLI (`az login` with Contributor on `rg-spaarke-platform-{env}`), .NET 10 SDK, live Service Bus queue already recreated with sessions+dedup ON (task 108's runbook), `Grant-ControlPlaneIdentity.ps1` already run for the target environment
+**Owner:** Platform Team (customer-provisioning-orchestration-r1)
+**Last Used:** 2026-08-19 (author-time `-WhatIf` dry-run verification only; not yet run against live Azure)
+
+**When to Use:**
+- Deploying any L2 code change (handlers, dispatcher, config) to dev/staging/prod
+- Promoting a verified `.Api` staging-slot build to production (`-Swap`)
+- Post-deploy sanity check of the fleet queue + NFR-05 config surface without a full redeploy (`-SkipBuild`)
+
+**Command:**
+```powershell
+# Dev: publish + deploy BOTH targets; .Api lands on staging slot only
+.\scripts\provisioning\Deploy-ControlPlane.ps1
+
+# Dev: deploy + swap .Api to production once staging is verified healthy
+.\scripts\provisioning\Deploy-ControlPlane.ps1 -Target Api -Swap
+
+# Preview a full run without touching Azure
+.\scripts\provisioning\Deploy-ControlPlane.ps1 -WhatIf
+```
+
+**Parameters:** `-Environment` (dev/staging/production) · `-Target` (Api/Worker/Both) · `-Swap` (promote `.Api` staging -> production) · `-SkipBuild` · `-SkipQueueVerification` / `-SkipConfigVerification` · `-DryRun` (alias for `-WhatIf`) · full reference in the script's comment-based help (`Get-Help .\scripts\provisioning\Deploy-ControlPlane.ps1 -Full`).
+
+**Known gap (documented in the script's own `.DESCRIPTION`, not hidden):** the `.Worker` App Service's Bicep-declared config-key shape still diverges from `.Api`'s canonical NFR-05 shape (task 109 fixed `.Api` only; the Worker follow-on was filed but has no owning task number as of this writing). The script's config-key check uses the Worker's ACTUAL current key shape so the check reflects reality instead of always failing.
+
+### `provisioning/Grant-ControlPlaneIdentity.ps1`
+**Purpose:** Idempotently registers the L2 control-plane UAMI as a Dataverse Application User on the admin registry environment (Path X, scoped custom role — NOT System Administrator) and grants the C5.8 Microsoft Graph app-role set on the same UAMI service principal.
+**Usage:** 🟡 Occasional - Once per environment (re-run is idempotent / safe)
+**Lifecycle:** ✅ Maintained (added 2026-08-18 by customer-provisioning-orchestration-r1 task 111)
+**Dependencies:** Azure CLI (`az login`) with Dataverse System Administrator on the admin env + Graph `AppRoleAssignment.ReadWrite.All`, `scripts/Grant-GraphAppRoles.ps1`
+**Owner:** Platform Team (customer-provisioning-orchestration-r1)
+**Last Used:** 2026-08-18
+
+**When to Use:**
+- Bootstrapping a new environment's L2 control plane before its first registry write
+- Re-verifying grants after a UAMI rotation or admin-env solution re-import
+
+**Command:**
+```powershell
+.\scripts\provisioning\Grant-ControlPlaneIdentity.ps1 `
+    -TenantId "<tenant-guid>" `
+    -AdminEnvironmentUrl "https://spaarkedev1.crm.dynamics.com" `
+    -UamiClientId "<uami-appid>" `
+    -UamiPrincipalId "<uami-spid>"
+```
+
+---
+
 ### `Build-AllClientComponents.ps1`
 **Purpose:** Build all client-side components in correct dependency order — shared libraries first, then Vite solutions, webpack code pages, PCF controls, and external SPA. Ensures downstream components always build against fresh shared library output.
 **Usage:** 🟢 Active - Before any release deployment or when rebuilding client components

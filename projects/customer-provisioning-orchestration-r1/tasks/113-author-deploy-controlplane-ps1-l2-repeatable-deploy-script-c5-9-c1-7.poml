@@ -3,10 +3,10 @@
   <metadata>
     <title>Author Deploy-ControlPlane.ps1 (L2 repeatable deploy script, C5.9/C1.7)</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
-    <gate>blocked</gate>
-    <status>not-started</status>
-    <rigor>STANDARD</rigor>
-    <rigor-reason>New script authoring parity with the existing Deploy-BffApi.ps1 pattern, no existing-file .cs modification. STANDARD per root CLAUDE.md §8 table.</rigor-reason>
+    <gate>authoring-complete-live-verification-deferred</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>OVERRIDDEN UP from the authored STANDARD to FULL per root CLAUDE.md §8 Step 0.5: author-time discovery required a real .cs modification (Sprk.Provisioning.ControlPlane.Api/Endpoints/HealthEndpoints.cs -- added a missing GET /healthz route the App Service platform health probe has silently 404'd against since task 033). code-review + adr-check ran unconditionally at Step 9.5 as a result. Original STANDARD reasoning (script authoring parity, no .cs touch) preserved above for audit trail.</rigor-reason>
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Mechanical script authoring following an established sibling pattern (Deploy-BffApi.ps1) -- Sonnet @ high.</model-tier-reason>
     <effort>high</effort>
@@ -96,4 +96,73 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    COMPLETION SUMMARY (2026-08-19): Authored scripts/provisioning/Deploy-ControlPlane.ps1
+    (path deviation from the POML's flat scripts/Deploy-ControlPlane.ps1 -- placed alongside
+    task 111's Grant-ControlPlaneIdentity.ps1 per the dispatching orchestrator's explicit
+    instruction; see notes/task-113-deviations.md Deviation 1). Supports -Target
+    Api|Worker|Both, -Environment dev|staging|production, -Swap (Api staging-slot promotion
+    with automatic rollback-on-failure), -WhatIf/-Confirm (native SupportsShouldProcess) +
+    -DryRun (alias). PSScriptAnalyzer: 0 findings against the repo's
+    PSScriptAnalyzerSettings.psd1. Full <knowledge> load performed (spec.md, design.md,
+    project CLAUDE.md, DS-4/DS-3/DS-5 notes) plus direct reads of
+    platform-controlplane.bicep + both App Service Bicep modules + both .csproj files +
+    both Program.cs files to ground every resource name / config key / health-endpoint
+    assumption in the actual current Bicep + code, not just the POML prose.
+
+    TWO discovered-at-authoring-time gaps, both documented per CLAUDE.md §6.5 (see
+    notes/task-113-deviations.md for full detail):
+      1. FIXED: .Api had NO /healthz route (only /ping) despite the App Service platform
+         health probe expecting one since task 033 -- added GET /healthz to
+         HealthEndpoints.cs mirroring the Worker's existing pattern. Rigor overridden UP to
+         FULL as a result; code-review + adr-check both ran clean (0 findings / 0
+         violations). dotnet build 0/0; L2 unit suite 736/736 pass (no regression).
+      2. DOCUMENTED, NOT FIXED (out of this task's Bicep-touching scope per the dispatching
+         orchestrator's "assume all Bicep is now correct" framing): the .Worker Bicep
+         module's config-key shape still diverges from .Api's DS-5 C5.1 canonical shape --
+         task 109 fixed .Api only and explicitly filed the Worker gap as a follow-on with no
+         owning task number. The script's config-key verification uses two distinct
+         per-target required-key lists reflecting each site's ACTUAL current Bicep-declared
+         keys (not the assumed-uniform NFR-05 shape), documented prominently in the script's
+         own .DESCRIPTION/.NOTES so the gap stays visible.
+
+    Also fixed a real PowerShell pipeline defect discovered during -WhatIf testing:
+    `az ... | Select-Object -First 1` can leave $LASTEXITCODE stale/$null (early
+    pipeline-stop), causing a false "Azure CLI not found" pre-flight failure even when az is
+    present and healthy -- reproduced directly in this environment, fixed by capturing
+    native output to a variable before piping. The IDENTICAL pattern exists unfixed in
+    task 111's Grant-ControlPlaneIdentity.ps1 (flagged, not touched -- out of this task's
+    file scope).
+
+    VERIFICATION PERFORMED (no live Azure deploy, per explicit dispatch instruction):
+      - PSScriptAnalyzer clean.
+      - dotnet build (.Api): 0 warnings / 0 errors.
+      - dotnet test (Sprk.Provisioning.ControlPlane.Tests): 736/736 pass.
+      - Live -WhatIf dry-run, -Target Api: real dotnet publish + Compress-Archive (10.01 MB
+        zip) succeeded; az webapp deploy call correctly skipped under -WhatIf; exit 0.
+      - Live -WhatIf dry-run, -Target Worker: pre-flight passed; dotnet publish correctly
+        FAILED (exit 1, clear diagnostic) due to an untracked, mid-edit file
+        (Worker/Dispatch/ProvisioningHandlerDispatcher.cs) belonging to the CONCURRENTLY
+        RUNNING sibling task 102 dispatcher agent in this same shared worktree -- not a
+        defect in this script; incidentally proves the build-failure path surfaces a clear
+        non-zero-exit diagnostic rather than failing silently.
+      - -Target Bogus correctly rejected by ValidateSet before any work begins.
+      - Get-Help -Full renders; -WhatIf/-Confirm appear in the auto-generated syntax
+        (proof SupportsShouldProcess is wired).
+
+    ACCEPTANCE CRITERIA STATUS: 3 of 5 fully met (script exists + supports -Target;
+    grep 'healthz' shows both-sites verification; grep 'requiresSession|requiresDuplicate
+    Detection' shows the queue check). 2 of 5 are LIVE-ONLY criteria (full -Target Both run
+    against real dev sites reaching exit 0; manual smoke test with a deliberately-broken
+    app-setting) -- explicitly deferred per the dispatching task's "Do NOT execute the
+    script against live Azure" instruction, same posture as sibling task 108's 🟡 status.
+    Marked authoring-complete / live-verification-deferred rather than fully ✅, consistent
+    with task 108's precedent.
+
+    Files touched: scripts/provisioning/Deploy-ControlPlane.ps1 (new),
+    src/server/services/Sprk.Provisioning.ControlPlane.Api/Endpoints/HealthEndpoints.cs
+    (fix), scripts/README.md (registry entries for both provisioning/ scripts),
+    notes/task-113-deviations.md (new).
+  </notes>
 </task>
