@@ -1,2 +1,23 @@
+# Binary / LFS
 *.docx filter=lfs diff=lfs merge=lfs -text
 *.pbix filter=lfs diff=lfs merge=lfs -text
+
+# Line endings for .NET source (added 2026-08-19)
+#
+# .editorconfig scopes `end_of_line = crlf` to [*.{cs,csx,vb,vbx}]. Without a
+# matching checkout rule the two platforms disagree:
+#   - Windows (core.autocrlf=true) checks out CRLF  -> `dotnet format` passes locally
+#   - Linux CI checks out the stored bytes (LF)     -> `dotnet format` errors on EVERY
+#     line break ("Replace 13 characters with '\r\n...'"), so the Format check was
+#     permanently red while nothing looked wrong on a developer machine.
+#
+# These rules force CRLF in the working tree on ALL platforms so local and CI agree
+# with .editorconfig. Storage in the repo remains normalized to LF, so this adds no
+# content churn and no diff for existing Windows worktrees.
+#
+# Scope deliberately matches .editorconfig — do NOT broaden to `* text=auto`, which
+# would also rewrite shell scripts that must stay LF.
+*.cs   text eol=crlf
+*.csx  text eol=crlf
+*.vb   text eol=crlf
+*.vbx  text eol=crlf
