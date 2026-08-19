@@ -102,14 +102,25 @@ app_registrations:
     service_principal_id: d93c832e-9b1d-4ccc-a2a8-9419fbf3fc18
     audience: api://1e40baad-e065-4aea-a8d4-4b7ab273458c
     scope_uri: api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation
-    sign_in_audience: AzureADMyOrg
-    purpose: BFF API authentication + GitHub Actions OIDC deployment
+    sign_in_audience: AzureADMultipleOrgs # Corrected 2026-08-19 (was AzureADMyOrg — stale); verified live via `az ad app show`
+    purpose: BFF API authentication + GitHub Actions OIDC deployment + MI-FIC confidential credential (ADR-028 A4)
     federated_credentials:
       - name: github-actions-deploy-staging
         id: 4c6439fa-e1f2-4139-93fd-9cd4a5914b62
         issuer: https://token.actions.githubusercontent.com
         subject: repo:spaarke-dev/spaarke:environment:staging
         audiences: [api://AzureADTokenExchange]
+      - name: mi-bff-api-dev-assertion
+        id: 66bac39a-71f4-40d2-b3fe-abd7f6b0f7d1
+        issuer: https://login.microsoftonline.com/a221a95e-6abc-4434-aecc-e48338a1b2f2/v2.0
+        subject: 9fd47efb-7962-492b-ac44-e5ccd0268ebb # principalId (object ID) of UAMI mi-bff-api-dev — NOT its clientId
+        audiences: [api://AzureADTokenExchange]
+        purpose: MI-as-FIC — lets the BFF authenticate as a confidential client without a secret (spaarke-auth-v4 Phase 0, created 2026-08-19)
+    password_credentials:
+      # Sole client secret on this app registration. Target of spaarke-auth-v4 (ADR-028 A4 / exception E-3).
+      - name: Dataverse-Checkout-20251218
+        expires: 2027-12-19T03:56:35Z
+        note: KV alias `BFF-API-ClientSecret` (+ duplicate lowercase `bff-api-client-secret` used by the Office add-in deploy)
 
   msal_client:
     client_id: 5175798e-f23e-41c3-b09b-7a90b9218189

@@ -4,6 +4,8 @@
 > **Epic**: Auth / Code Quality (#427) · **Risk**: HIGH (OBO = all delegated user auth)
 > **Origin**: `code-quality-and-assurance-r3` task 011 / #3b (app-only Dataverse → MI, live on dev)
 > **Evidence base**: [`notes/RESEARCH-FINDINGS.md`](notes/RESEARCH-FINDINGS.md) · [`notes/CREDENTIAL-INVENTORY.md`](notes/CREDENTIAL-INVENTORY.md) · [`notes/ASSESSMENT.md`](notes/ASSESSMENT.md) (origin seed)
+> **Live state + Phase 0 prerequisites**: [`notes/PHASE-0-LIVE-VERIFICATION.md`](notes/PHASE-0-LIVE-VERIFICATION.md) (2026-08-19 — **prerequisites resolved; dev MI-FIC created**)
+> **Cross-project**: [`notes/PROVISIONING-CHANGE-REQUEST.md`](notes/PROVISIONING-CHANGE-REQUEST.md) · [`notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md`](notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md)
 
 ---
 
@@ -41,6 +43,26 @@ Strictly read, **the OBO secret is currently an undocumented exception to ADR-02
 no zero-cost "do nothing" option: every outcome requires ADR text work. This is a §6.5 ADR-conflict case and is
 surfaced formally in §7.
 
+### 1.2 Why prior auth projects left this latent — the root cause was a premise, not a coverage gap
+
+This has been addressed before and kept resurfacing, so the failure mode itself is in scope.
+
+The predecessor audit **did not miss the code**. [`bff-auth-surface-map.md`](../code-quality-and-assurance-r3/notes/bff-auth-surface-map.md)
+mapped all nine secret consumers at `file:line`, traced the five config keys, and caught the
+`auth-azure-resources.md` app-registration contradiction. Its inventory was excellent. It then concluded, at
+`:199`: **"Verdict: NEVER-REMOVE."**
+
+The stop was a **false premise treated as a platform constraint** — one sentence at
+`.claude/constraints/auth.md:108`: *"OBO flow (OAuth spec requires confidential client + secret)."* That clause
+converted a complete inventory into a closed question, then propagated: into ADR-028's silence (no exception was
+registered, because there was assumed to be nothing to except), into `Sprk.Bff.Api/CLAUDE.md:110,221`, into six
+deployment guides, and into an `adr-check` rule that flagged every OBO site with **no sanctioned alternative to
+move to** — so each auth-touching task re-litigated the same finding and moved on.
+
+**Consequence for this project's design**: the text was corrected on 2026-08-17 (§7.1), but text alone is what
+failed last time. Recurrence is prevented by **forcing functions in code and CI (§5.5)**, not by another audit.
+That is Goal 7, and it is a graduation criterion (§12).
+
 ## 2. Goals / non-goals
 
 **Goals**
@@ -53,13 +75,25 @@ surfaced formally in §7.
 4. Leave `customer-provisioning-orchestration-r1` with a credential model that works for **both** Model 1 and
    Model 2, including the customer-owned-subscription case.
 5. Keep local development working (`dotnet run`), including local OBO.
+6. **Eliminate the Azure-first-party API keys that have a Managed Identity alternative** (§5.3.1, "Group 2"). These
+   are the same latent-defect class as the OBO secret — a credential retained because a prior pass concluded it was
+   required — and two of them already have a working MI path in-repo that simply isn't selected.
+7. **Leave forcing functions behind** (§5.5) so a ninth secret-bearing confidential client cannot be introduced
+   silently. This is the graduation criterion that distinguishes auth-v4 from its predecessors (§1.2).
 
 **Non-goals**
 - The **external / collaboration / module-host planes** (ADR-028 A1–A3). They are broker-only by design and
   exchange no downstream token. Amendment text must not weaken their "no OBO" invariants.
 - The **inbound** side of auth (JWT validation, `AddMicrosoftIdentityWebApi`, webhook HMAC, API-key schemes).
 - **Per-customer SpeAdmin secrets** (ADR-028 E-1) — those authenticate *other* applications, not the BFF identity.
-- Eliminating non-Entra API keys (Bing, LlamaParse, Document Intelligence, AI Search). Inventoried, deferred.
+- **Genuinely third-party API keys** — Bing Search, LlamaParse ("Group 1", §5.3.1). A key is the only mechanism
+  these vendors offer. Scope is limited to one hygiene fix: `BingSearch:ApiKey` is read straight from config
+  (`WebSearchHandler.cs:283`) rather than resolved from Key Vault by name the way LlamaParse already is.
+- **Inbound HMAC / clientState / webhook signing keys** ("Group 3", §5.3.1) — `Communication:WebhookSigningKey`,
+  `Communication:WebhookClientState`, `EmailProcessing:WebhookSigningKey`, and the tracking-footer signing key.
+  These validate what *arrives*; they are not outbound credentials and have no MI equivalent. The tracking-footer
+  signer is already correctly designed (KV-by-name, never bound into config). **Explicitly closed, not deferred** —
+  stated here so the next audit does not re-open them.
 - The **plaintext secrets in Dataverse columns** used by `BaseProxyPlugin`. Filed as a separate issue (§10).
 
 ## 3. Evidence summary
@@ -71,7 +105,8 @@ Full detail in [`notes/RESEARCH-FINDINGS.md`](notes/RESEARCH-FINDINGS.md). The l
 | E1 | MI-as-FIC is **GA since 2025-05-08** (not preview) | Entra GA blog + how-to, no preview banner |
 | E2 | **OBO works with a FIC-authenticated client** — the assertion is a standard `client_assertion`; Microsoft documents the OBO+FIC+MI wire protocol | Entra Agent ID OBO doc (updated 2026-08-10) |
 | E3 | Microsoft ranks credentials: **certificateless (MI-FIC) = Highest**, certificate = fallback, **secret = "Development and testing only"**; *"Don't use password credentials."* | Identity.Web credentials overview (2026-04-19); Entra app-security best practices |
-| E4 | Adoption is **declarative** — `ClientCredentials: [{SourceType: "SignedAssertionFromManagedIdentity"}]` with **ordered fallback** (solves local dev) | Microsoft.Identity.Web docs |
+| E4 | ~~Adoption is **declarative** — `ClientCredentials: [{SourceType: "SignedAssertionFromManagedIdentity"}]` with ordered fallback~~ **CORRECTED 2026-08-19 — see E4′** | Microsoft.Identity.Web docs |
+| **E4′** | **The declarative path is unavailable in this codebase.** Zero occurrences of `EnableTokenAcquisition` / `ITokenAcquisition` / `IDownstreamApi` / `ClientCredentials` in any `.cs` file — all 8 confidential clients hand-roll `ConfidentialClientApplicationBuilder`, and `AddMicrosoftIdentityWebApi` (`AuthorizationModule.cs:36`) is **inbound validation only**. `Spaarke.Dataverse.csproj:17` references only `Microsoft.Identity.Client` — no Identity.Web at all — so two sites cannot bind config even in principle. **The mechanism is `.WithClientAssertion(Func<AssertionRequestOptions,Task<string>>)` + `ManagedIdentityClientAssertion` (`Microsoft.Identity.Web.Certificateless`, not currently referenced).** Ordered fallback must be **built** into the provider seam, not inherited | Repo grep, 2026-08-19 |
 | E5 | **The BFF app registration already has a working FIC** (`github-actions-deploy-staging`, audience `api://AzureADTokenExchange`); 1 of 20 used | Live `az` verification, this session |
 | E6 | **The App Service runs user-assigned MI only** (`mi-bff-api-dev`) — MI-FIC's hard prerequisite, already satisfied | Live `az` verification |
 | E7 | **No downstream service constrains the credential type** — Dataverse, Graph/SPE, Power BI, Azure OpenAI all validate only the resulting token. SPE's historical cert-only pocket is gone (registration moved to Graph v1.0) | Learn docs, 2026-07/08 |
@@ -152,7 +187,58 @@ applications*, not the BFF identity (ADR-028 E-1). `CiamGraphClientFactory` alre
 Config validators to relax: `DataverseOptions.cs:32` (`[Required]` + ValidateOnStart — the startup-crash
 dependency), `GraphOptionsValidator.cs:20-23`, `AgentTokenOptions.cs:38`.
 
-Estimated ~350–550 LOC across ~15 files.
+**Design constraints on the provider** (both are silent-failure generators; each needs a test):
+
+- **Never conflate the UAMI clientId with the app-registration clientId.** MI-FIC requires holding both
+  simultaneously — the UAMI's to mint the assertion, the app-reg's to build the CCA.
+  `GraphClientFactory.cs:54` already resolves `_clientId = AZURE_CLIENT_ID ?? API_APP_ID`, and in Azure
+  `AZURE_CLIENT_ID` is deliberately set to the **UAMI's** clientId. The dev subscription holds **five** UAMIs, one
+  named `spaarke-bff-identity` that is *not* the BFF's. Resolve identities by resource ID, never by name.
+- **`AddMicrosoftIdentityWebApi` binds the same `AzureAd` section** that carries `AzureAd:ClientSecret`
+  (`DataverseUserClient.cs:85`). Inbound validation and outbound OBO share one config section. Almost certainly
+  benign — but "almost certainly" is how the premise in §1.2 got established, so **inbound validation is verified
+  after every config change** (§6.1), not assumed.
+
+Estimated ~350–550 LOC across ~15 files — **understated**; that figure assumed the declarative adoption ruled out
+by E4′. Re-estimate at spec time to include the ordered-credential selector, the assertion cache, and the
+injection path into a shared library with no Identity.Web dependency.
+
+### 5.3.1 Non-Entra credential groups
+
+Twelve non-Entra credentials exist. They split three ways, and only Group 2 is in scope:
+
+| Group | Credentials | Disposition |
+|---|---|---|
+| **1 — third-party** | `BingSearch:ApiKey` (`WebSearchHandler.cs:283`) · LlamaParse (`LlamaParseClient.cs:117-126`) | **Out.** A key is the only mechanism. One hygiene fix: Bing reads config directly; make it KV-by-name like LlamaParse already is |
+| **2 — Azure first-party running on a key while MI is available** | `AiSearch:ReferencesApiKey` (`InternalIndexProvider.cs:80`) · `AiSearch:ApiKeySecretName` (`AiSearchOptions.cs:6`) · `AzureOpenAI:ApiKey` (`AiModule.cs:115,122`, ADR-028 **E-2**) · `AiSafety:ContentSafety:ApiKey` (`ContentSafetyAuthHandler.cs:41,72`) · DocIntel ×3 (`DocumentIntelligenceOptions.cs:42,152,303`) · ServiceBus SAS (`ServiceBusOptions.cs:15`) · `Analysis:PromptFlowKey` (`appsettings.json:118`, verify) | **In.** Same latent-defect class as the OBO secret. **Two already have a working MI path in-repo that isn't selected** — `ContentSafetyTokenProvider.cs:55` and `MembershipJunctionUpdaterHost.cs:120` (namespace + MI). E-2 may be a one-config-change fix: check `spaarke-openai-dev` for a **custom subdomain**, the documented root cause of the MI-401 |
+| **3 — inbound HMAC / clientState** | `Communication:WebhookSigningKey` + `WebhookClientState` (`CommunicationOptions.cs:47,65`) · `EmailProcessing:WebhookSigningKey` (`:192`) · tracking-footer key (`TrackingTokenSigner.cs:122-176`) | **Explicitly closed.** Inbound validation, no MI equivalent, correctly designed today |
+
+### 5.4b Operational estate (larger than the code surface)
+
+**11 PowerShell scripts** reference `ClientSecret`, not the 2 the inventory cites: `Configure-ProductionAppSettings.ps1`,
+`Register-EntraAppRegistrations.ps1`, `Rotate-Secrets.ps1`, `Seed-ProductionKeyVault.ps1`, `Provision-Customer.ps1`,
+`Reconcile-DemoEnvironment.ps1`, `Deploy-Release.ps1`, `Deploy-DataverseSolutions.ps1`, `Test-EntraAppRegistrations.ps1`,
+`Test-SharePointToken.ps1`, `naming-conformance-check.ps1` — plus ~25 documents. **Phase 5 gates on reconciling
+these**, not on deleting a Key Vault secret. Three of them (`Register-EntraAppRegistrations.ps1`,
+`Rotate-Secrets.ps1`, `Seed-ProductionKeyVault.ps1`) are where FIC automation belongs, and they are already
+idempotent and tenant-aware — so the automation is a swap, not greenfield.
+
+### 5.5 Forcing functions (the anti-recurrence requirement)
+
+The predecessor audit did **not** miss the code — [`bff-auth-surface-map.md:199`](../code-quality-and-assurance-r3/notes/bff-auth-surface-map.md)
+inventoried all nine consumers correctly and then concluded **"Verdict: NEVER-REMOVE"** on a false premise (§1.2).
+More auditing does not prevent recurrence; a build that fails does. Three mechanisms, all cheap:
+
+1. **ArchTest ban** — no `src/server/**` type may call `.WithClientSecret(` or construct `ClientSecretCredential`
+   outside a named allowlist (ADR-028 **E-1** SpeAdmin per-customer apps; **E-3** until Phase 5). New site → red
+   build, not a review comment. Same pattern as the existing `GodClassGuardTests`.
+2. **Credential census test** — assert the count of confidential-client construction sites equals a checked-in
+   number with a per-site reason. Adding a ninth fails until the census is updated. *This is what would have caught
+   `SpeAdminTokenProvider` and `SpeAdminGraphService`, both absent from the origin seed.*
+3. **Startup assertion** — outside Development, fail fast if any BFF-identity credential resolves to a secret after
+   Phase 5, rather than silently degrading.
+
+Per ADR-038 these are `tests/integration/seam/**` + ArchTest, not DI-registration tests.
 
 ### 5.4 Test strategy
 
@@ -168,7 +254,7 @@ be created.
 
 | Phase | Content | Gate |
 |---|---|---|
-| **0. Spike** | Prototype MI-FIC OBO end-to-end on a dev slot: SPA token → BFF → Graph/SPE **and** → Dataverse `user_impersonation`, plus long-running OBO. Test the ordered local-dev fallback. Test the **Model 2 cross-tenant resource** shape ([`TENANCY-AND-CREDENTIALS.md`](notes/TENANCY-AND-CREDENTIALS.md) §8.2) | Empirical proof, or pivot to Option B. **Decision recorded here** |
+| **0. Spike** | ⚙️ **Prerequisites RESOLVED 2026-08-19** — [`notes/PHASE-0-LIVE-VERIFICATION.md`](notes/PHASE-0-LIVE-VERIFICATION.md). The dev MI-FIC exists (`mi-bff-api-dev-assertion`); app-reg/UAMI same-tenant, UAMI-only identity and P1v3 all verified live. **Remaining**: create a dev slot, deploy the assertion spike, prove OBO → Graph/SPE and → Dataverse `user_impersonation`, long-running OBO, the built ordered fallback (per E4′), Power BI, and the **Model 2 cross-tenant resource** shape | Empirical proof, or pivot to Option B. **Decision recorded here.** **Not a scheduling gate** — no external admin dependency remains |
 | **1. ADR** | ✅ **DONE 2026-08-17** — ADR-028 **A4** + exception **E-3**, `.claude/constraints/auth.md` corrected, `adr-check`/`adr-aware`/`patterns` enforcement fixed (§7.1) | Owner-directed; applied |
 | **2. Prereqs** | DI lifetime fixes + MI-flag gating fix (§5.2) | Tests green; no behavior change |
 | **3. Provider** | Build the credential provider; migrate call sites **with the secret still present** as the ordered fallback | Both credentials work; fallback proven |
@@ -247,10 +333,14 @@ not worked around per task.
   logged MI-FIC as risk **R23** with the 20-FIC cap. **Minimum ask**: keep the "configure BFF confidential
   credential" step pluggable, and contribute Model-1/Model-2 constraints as first-class Phase 0 input. Auth-v4's
   outcome will land as a change request against shipped handlers.
-- **`dataverse-access-unification-r1` (RED-4 C)** — let it land first where possible: it **deletes**
-  `DataverseWebApiService` + `DataverseWebApiClient` (a secret consumer) for free and collapses stacks auth-v4
-  would otherwise touch twice. It does not touch `GraphClientFactory`. If it stalls, proceed independently but
-  serialize PRs and run `/conflict-check` on each.
+- **`dataverse-access-unification-r1` (RED-4 C)** — **not a prerequisite; expect parallel execution.** The earlier
+  "let it land first" framing is **retracted** (rationale in [`notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md`](notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md) §2).
+  It does not touch `GraphClientFactory`, and the two files it deletes (`DataverseWebApiService`,
+  `DataverseWebApiClient`) are **app-only** — none of auth-v4's OBO risk depends on it. The overlap is **four
+  files** with an explicit contract (§4 of that note); `DataverseServiceClientImpl.cs` is the only one needing real
+  sequencing, since their decomposition relocates the credential block we edit in place. Merging the projects is
+  considered and rejected in §3 of that note — it would couple a fail-closed credential migration to a ~5,600-LOC
+  security-semantics refactor under one rollback boundary.
 - **Open PR #293** (`Azure.Identity` 1.17.1→1.21.0) is directly relevant — newer `ClientAssertionCredential` /
   `ManagedIdentityCredential` behavior. Coordinate rather than conflict.
 - **`speadmin-decomposition-r1`** decomposes `SpeAdminGraphService` — out of auth-v4's scope but adjacent; confirm
@@ -293,11 +383,17 @@ part of the Identity.Web family already referenced). Baseline to report against:
 
 ## 11. Open questions for `/design-to-spec`
 
-1. **Scope boundary** — BFF-identity credentials only (recommended), or also Power BI (§5.3 includes it) and the
-   non-Entra API keys (deferred)? The recommendation is: include Power BI, defer the API keys.
-2. **Phase 0 owner and environment** — a dev slot is available (E9) but must be created. Who provisions the FIC
-   (Azure AD admin) and on what timeline?
-3. **Provisioning coordination mechanism** — change request against PR #779, or a follow-on task in that project?
+1. ~~**Scope boundary**~~ — **CLOSED 2026-08-19 (owner).** Power BI is **in**. Non-Entra keys split three ways per
+   §5.3.1: **Group 2 in** (Azure first-party with an MI alternative), Group 1 out (genuine third-party; one Bing
+   hygiene fix), Group 3 explicitly closed (inbound HMAC).
+2. ~~**Phase 0 owner and environment**~~ — **CLOSED 2026-08-19.** Owner runs the project; AAD admin authenticated
+   in-session. The dev MI-FIC was created 2026-08-19, removing the external-admin dependency permanently. A dev
+   slot must still be created — routine, and needed for Phase 4 regardless. Detail:
+   [`notes/PHASE-0-LIVE-VERIFICATION.md`](notes/PHASE-0-LIVE-VERIFICATION.md).
+3. ~~**Provisioning coordination mechanism**~~ — **CLOSED 2026-08-19.** Standalone change-request document:
+   [`notes/PROVISIONING-CHANGE-REQUEST.md`](notes/PROVISIONING-CHANGE-REQUEST.md). Sibling coordination note for
+   the parallel Dataverse project: [`notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md`](notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md)
+   (which also **retracts** the earlier "let it land first" framing — it is not a prerequisite; §2 of that note).
 4. **Tenancy + credential per deployment shape** — **SETTLED**, documented in
    [`notes/TENANCY-AND-CREDENTIALS.md`](notes/TENANCY-AND-CREDENTIALS.md): **every deployment shape is intra-tenant,
    so MI-FIC covers all of them**; the Spaarke-owned-app-reg-with-customer-tenant-compute shape is explicitly ruled
@@ -319,5 +415,10 @@ part of the Identity.Web family already referenced). Baseline to report against:
       or an explicit documented decision to retain it.
 - [ ] `DataverseOptions.ClientSecret` `[Required]` and the two other validators relaxed consistently.
 - [ ] Local `dotnet run` works, including OBO, with the documented fallback.
+- [ ] **Group 2 non-Entra credentials (§5.3.1) migrated to MI** — or, per credential, a documented reason not to.
+- [ ] **The three forcing functions (§5.5) are merged and failing correctly** on a deliberately-introduced ninth
+      secret-bearing confidential client. *This is the criterion that distinguishes auth-v4 from its predecessors.*
+- [ ] **Operational estate reconciled (§5.4b)** — 11 scripts + the docs, including the lowercase KV alias.
+- [ ] Inbound token validation verified unaffected after every config change (§6.1).
 - [ ] Provisioning coordination closed: its credential step matches the chosen model for Model 1 **and** Model 2.
-- [ ] `/test-diet` run at wrap-up; publish size reported against the 44.96 MB baseline.
+- [ ] `/test-diet` run at wrap-up; publish size reported against the 44.96 MB baseline (note: `Microsoft.Identity.Web.Certificateless` is a new reference).

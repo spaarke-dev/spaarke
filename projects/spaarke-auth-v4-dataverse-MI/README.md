@@ -64,6 +64,19 @@ work. Formal §6.5 escalation is in [`design.md` §7](design.md).
 
 ## Next step
 
-Run **`/design-to-spec`** against [`design.md`](design.md), then `/project-pipeline`. Five open questions are
-listed in [`design.md` §11](design.md) — the scope boundary (include Power BI? defer API keys?) and the Model-2
-identity topology are the two that most change the work.
+Run **`/design-to-spec`** against [`design.md`](design.md), then `/project-pipeline`.
+
+**All five §11 open questions are now closed** (2026-08-19). Scope is settled (Power BI in; Group 2 non-Entra keys
+in; Group 1 out; Group 3 explicitly closed), Phase 0's external-admin dependency is gone, and both cross-project
+coordination documents are drafted.
+
+Read alongside `design.md`:
+
+- **[`notes/PHASE-0-LIVE-VERIFICATION.md`](notes/PHASE-0-LIVE-VERIFICATION.md)** — live tenant state; the dev
+  MI-FIC was created 2026-08-19; the E4′ correction (the declarative `ClientCredentials` path does **not** exist in
+  this codebase — the mechanism is `.WithClientAssertion`).
+- **[`notes/PROVISIONING-CHANGE-REQUEST.md`](notes/PROVISIONING-CHANGE-REQUEST.md)** — hand to
+  `customer-provisioning-orchestration-r1`. One decision needed from them (§5.1), one doc fix (§5.2), one
+  pluggability contract (§5.3). Answers their risk R23.
+- **[`notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md`](notes/COORDINATION-DATAVERSE-ACCESS-UNIFICATION.md)** —
+  hand to `dataverse-access-unification-r1`. Four-file interlock; not a prerequisite in either direction.
